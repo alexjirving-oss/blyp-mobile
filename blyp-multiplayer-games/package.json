@@ -1,0 +1,38 @@
+{
+  "name": "blyp-multiplayer-games",
+  "version": "1.0.0",
+  "description": "A collection of multiplayer games for the Blyp social media app.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "react-native start",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "test": "jest",
+    "build": "expo build"
+  },
+  "dependencies": {
+    "react": "17.0.2",
+    "react-native": "0.64.2",
+    "expo": "~44.0.0",
+    "firebase": "^9.6.1",
+    "react-navigation": "^4.4.4",
+    "react-native-gesture-handler": "^1.10.3",
+    "react-native-reanimated": "^2.2.0",
+    "react-native-svg": "^12.1.0"
+  },
+  "devDependencies": {
+    "jest": "^27.0.6",
+    "babel-jest": "^27.0.6",
+    "eslint": "^7.32.0",
+    "eslint-plugin-react": "^7.27.1"
+  },
+  "keywords": [
+    "multiplayer",
+    "games",
+    "social",
+    "react-native",
+    "expo"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
