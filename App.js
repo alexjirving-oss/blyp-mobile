@@ -149,7 +149,7 @@ function AppStack() {
       <Stack.Screen name="Review" component={ReviewScreen} />
       <Stack.Screen name="MediaViewer" component={MediaViewerScreen} />
       <Stack.Screen name="VoiceMemo" component={VoiceMemoScreen} />
-      <Stack.Screen name="LiveStream" component={LiveStreamScreen} />
+      <Stack.Screen name="LiveStreamScreen" component={LiveStreamScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="PostPreview" component={PostPreviewScreen} />
       <Stack.Screen name="SearchResults" component={SearchResultsScreen} />

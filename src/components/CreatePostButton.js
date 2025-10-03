@@ -21,7 +21,7 @@ const CreatePostButton = ({ accessibilityState }) => {
         setShowPostOptions(true);
         break;
       case 'live':
-        navigation.navigate('LiveStreamScreen');
+        navigation.navigate('LiveStreamScreen', { isCreator: true });
         break;
     }
   };

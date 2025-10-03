@@ -2,8 +2,10 @@ import { Platform } from 'react-native';
 import RtcEngine from 'react-native-agora';
 import { requestCameraAndAudioPermission } from '../utils/permissions';
 
+import { AGORA_APP_ID } from '../config/agora';
+
 // Your Agora App ID (replace this with your actual App ID)
-const AGORA_APP_ID = 'YOUR_AGORA_APP_ID'; // ⚠️ Replace with your App ID
+// const AGORA_APP_ID = 'YOUR_AGORA_APP_ID'; // ⚠️ Replace with your App ID
 
 class AgoraService {
   constructor() {
@@ -19,23 +21,32 @@ class AgoraService {
    */
   async init() {
     try {
+      console.log('🔧 Agora: Starting initialization with App ID:', AGORA_APP_ID.substring(0, 8) + '...');
+      
       // Request permissions on Android
       if (Platform.OS === 'android') {
+        console.log('📱 Agora: Requesting camera and audio permissions...');
         await requestCameraAndAudioPermission();
+        console.log('✅ Agora: Permissions granted');
       }
       
       // Create RTC engine instance
+      console.log('🎬 Agora: Creating RTC engine instance...');
       this.engine = await RtcEngine.create(AGORA_APP_ID);
+      console.log('✅ Agora: RTC engine created');
       
       // Enable video & audio modules
+      console.log('🎥 Agora: Enabling video and audio...');
       await this.engine.enableVideo();
       await this.engine.enableAudio();
       
       // Set default configurations
+      console.log('⚙️ Agora: Setting channel profile and client role...');
       await this.engine.setChannelProfile(1); // LiveBroadcasting
       await this.engine.setClientRole(1); // Broadcaster by default
       
       // Set video encoding config for better quality
+      console.log('📹 Agora: Configuring video encoding...');
       await this.engine.setVideoEncoderConfiguration({
         dimensions: {
           width: 640,
@@ -54,6 +65,7 @@ class AgoraService {
       return this.engine;
     } catch (error) {
       console.error('❌ Error initializing Agora RTC Engine:', error);
+      console.error('❌ Error details:', error.message, error.code);
       throw error;
     }
   }

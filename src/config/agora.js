@@ -3,7 +3,7 @@
  */
 
 // Your Agora App ID - replace with your actual credentials
-export const AGORA_APP_ID = 'YOUR_AGORA_APP_ID';
+export const AGORA_APP_ID = 'c1d9c1e3bbfa45b7811d5a5895d31ff0';
 
 // Agora SDK configuration
 export const AGORA_CONFIG = {

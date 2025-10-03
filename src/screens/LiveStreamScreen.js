@@ -32,7 +32,7 @@ import ScreenContainer from '../components/ScreenContainer';
 const LiveStreamScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { streamId, isCreator } = route.params || {};
+  const { streamId, isCreator = !streamId } = route.params || {}; // Default to creator if no streamId
   const user = auth.currentUser;
   
   // State
@@ -64,13 +64,18 @@ const LiveStreamScreen = () => {
     
     const initStream = async () => {
       try {
+        console.log('🚀 LiveStream: Initializing stream...', { isCreator, streamId });
+        
         // If we're the creator and there's no streamId, we're setting up a new stream
         if (isCreator && !streamId) {
+          console.log('📝 LiveStream: Setting up new stream configuration');
           setIsConfiguring(true);
           
           // Initialize Agora for preview
+          console.log('🎥 LiveStream: Initializing Agora for preview...');
           await AgoraService.init();
           await AgoraService.startPreview();
+          console.log('✅ LiveStream: Agora preview started successfully');
           
           return;
         }
