@@ -2,12 +2,15 @@
   "expo": {
     "name": "Blyp",
     "slug": "blyp-mobile",
-    "version": "1.0.0",
+    "scheme": "blyp",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "backgroundColor": "#0f172a"
+      "backgroundColor": "#0f172a",
+      "image": "./assets/splash.png",
+      "resizeMode": "contain"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -21,29 +24,31 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to photo library to save and select media"
       }
     },
-    "android": {
+  "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
       },
       "package": "com.blyp.mobile",
+      "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.ACCESS_MEDIA_LOCATION",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.WAKE_LOCK"
       ],
-      "versionCode": 1
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
     "plugins": [
+      "sentry-expo",
+      "@react-native-firebase/app",
       [
         "expo-camera",
         {
@@ -64,12 +69,24 @@
         {
           "microphonePermission": "Allow Blyp to access your microphone to record voice memos."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {
         "projectId": "5a294a13-3ebd-417a-860f-3229f97f4faf"
-      }
+      },
+      "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyB_keeUJQhLwK8fUlnDRDoZDuO4rreneqY"
+    },
+    "androidNavigationBar": {
+      "visible": "immersive"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#0f172a",
+      "translucent": true
+    },
+    "developmentClient": {
+      "silentLaunch": false
     },
     "owner": "alexjirving"
   }

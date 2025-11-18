@@ -1,0 +1,113 @@
+// Single source of truth for Expo config.
+// This replaces app.json to avoid duplication and Expo Doctor warnings.
+
+module.exports = () => {
+  // If app.json exists, read it and use its values to satisfy Expo Doctor.
+  let base = {};
+  try {
+    base = require('./app.json');
+  } catch (_) {
+    base = {};
+  }
+  const fromJson = base.expo || {};
+
+  const extra = {
+    ...(fromJson.extra || {}),
+    eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
+    EXPO_PUBLIC_GEMINI_API_KEY: 'AIzaSyB_keeUJQhLwK8fUlnDRDoZDuO4rreneqY',
+  };
+  if (process.env.EXPO_PUBLIC_GIT_SHA) extra.gitSha = process.env.EXPO_PUBLIC_GIT_SHA;
+
+  // If app.json exists, prefer returning its values to satisfy Expo Doctor
+  if (Object.keys(fromJson).length) {
+    return { ...fromJson, extra };
+  }
+
+  const resolved = {
+    name: 'Blyp',
+    slug: 'blyp-mobile',
+    scheme: 'blyp',
+    version: '1.0.1',
+    orientation: 'portrait',
+    icon: './assets/icon.png',
+    userInterfaceStyle: 'dark',
+    splash: {
+      backgroundColor: '#0f172a',
+      image: './assets/splash.png',
+      resizeMode: 'contain',
+    },
+    assetBundlePatterns: ['**/*'],
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: 'com.blyp.mobile',
+      infoPlist: {
+        NSCameraUsageDescription: 'This app needs access to camera to take photos and videos',
+        NSMicrophoneUsageDescription: 'This app needs access to microphone to record audio',
+        NSPhotoLibraryUsageDescription: 'This app needs access to photo library to save and select media',
+      },
+    },
+    android: {
+      adaptiveIcon: {
+        foregroundImage: './assets/adaptive-icon.png',
+        backgroundColor: '#0f172a',
+      },
+      package: 'com.blyp.mobile',
+      softwareKeyboardLayoutMode: 'pan',
+      permissions: [
+        'android.permission.CAMERA',
+        'android.permission.RECORD_AUDIO',
+        'android.permission.INTERNET',
+        'android.permission.ACCESS_NETWORK_STATE',
+        'android.permission.MODIFY_AUDIO_SETTINGS',
+        'android.permission.WAKE_LOCK',
+      ],
+      versionCode: 2,
+    },
+    web: {
+      favicon: './assets/favicon.png',
+      bundler: 'metro',
+    },
+    plugins: [
+      'sentry-expo',
+      // Native Firebase config plugin (adds google-services gradle integration)
+      '@react-native-firebase/app',
+      [
+        'expo-camera',
+        {
+          cameraPermission: 'Allow Blyp to access your camera to take photos and videos.',
+          microphonePermission: 'Allow Blyp to access your microphone to record audio.',
+        },
+      ],
+      [
+        'expo-media-library',
+        {
+          photosPermission: 'Allow Blyp to access your photos to save and share your memories.',
+          savePhotosPermission: 'Allow Blyp to save photos to your device.',
+          isAccessMediaLocationEnabled: true,
+        },
+      ],
+      [
+        'expo-av',
+        {
+          microphonePermission: 'Allow Blyp to access your microphone to record voice memos.',
+        },
+      ],
+      'expo-font',
+    ],
+    extra,
+    androidNavigationBar: {
+      visible: 'immersive',
+    },
+    androidStatusBar: {
+      backgroundColor: '#0f172a',
+      translucent: true,
+    },
+    developmentClient: {
+      silentLaunch: false,
+    },
+    owner: 'alexjirving',
+  };
+
+  // Fallback: return our static config when app.json is missing
+  return { ...resolved };
+};
