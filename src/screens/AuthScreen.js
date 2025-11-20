@@ -317,8 +317,10 @@ const AuthScreen = () => {
         style={styles.content}
       >
         <View style={styles.logoContainer}>
-          <BlypLogo useGradientBackground={true} />
           <Text style={styles.welcomeText}>Welcome to</Text>
+          <View style={styles.logoWrapper}>
+            <BlypLogo useGradientBackground={true} />
+          </View>
         </View>
 
         <View style={styles.formContainer}>
@@ -599,22 +601,24 @@ const AuthScreen = () => {
           )}
         </View>
       </KeyboardAvoidingView>
-      {/* Debug footer to verify pool/region and show last error */}
-      <View style={{ padding: 8 }}>
-        <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center' }}>
-          Pool: {awsconfig.aws_user_pools_id} · Region: {awsconfig.aws_cognito_region}
-        </Text>
-        {!!lastError && (
-          <Text style={{ color: '#fca5a5', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-            {lastError}
+      {/* Debug footer (dev only) */}
+      {__DEV__ && (
+        <View style={{ padding: 8 }}>
+          <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center' }}>
+            Pool: {awsconfig.aws_user_pools_id} · Region: {awsconfig.aws_cognito_region}
           </Text>
-        )}
-        {showRawError && rawErrorObj && (
-          <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
-            Code: {rawErrorObj.code || rawErrorObj.name} | Message: {rawErrorObj.message}
-          </Text>
-        )}
-      </View>
+          {!!lastError && (
+            <Text style={{ color: '#fca5a5', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+              {lastError}
+            </Text>
+          )}
+          {showRawError && rawErrorObj && (
+            <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
+              Code: {rawErrorObj.code || rawErrorObj.name} | Message: {rawErrorObj.message}
+            </Text>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -631,7 +635,7 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 56,
   },
   logoText: {
     fontSize: 48,
@@ -645,13 +649,18 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 20,
     color: '#9ca3af',
-    marginTop: 8,
+    marginBottom: 20,
     textAlign: 'center',
+  },
+  logoWrapper: {
+    transform: [{ scale: 1.8 }],
   },
   formContainer: {
     backgroundColor: '#1e293b',
     borderRadius: 16,
     padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.25)',
   },
   formTitle: {
     fontSize: 24,
