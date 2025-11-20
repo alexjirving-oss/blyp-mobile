@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   ScrollView,
@@ -10,8 +11,6 @@ import {
   Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const PhotoGallery = ({ photos, style }) => {
@@ -147,11 +146,11 @@ const PhotoGallery = ({ photos, style }) => {
             colors={['rgba(0,0,0,0.6)', 'rgba(0,0,0,0.8)']}
             style={styles.playPauseBackground}
           >
-            <Ionicons 
+            <Icon  
               name={isPlaying ? 'pause' : 'play'} 
               size={20} 
               color="#fff" 
-            />
+             />
           </LinearGradient>
         </TouchableOpacity>
       )}

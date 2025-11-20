@@ -6,7 +6,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyA4R_MFqBxRPfyaUM6z0jw6YXdJBWnWluY",
   authDomain: "blyp-master.firebaseapp.com",
   projectId: "blyp-master",
-  storageBucket: "blyp-master.firebasestorage.app",
+  storageBucket: "blyp-master.appspot.com",
   messagingSenderId: "1026853029824",
   appId: "1:1026853029824:web:0e785a11caa04cac3b4f9c",
   measurementId: "G-PK4S8YKSTQ"

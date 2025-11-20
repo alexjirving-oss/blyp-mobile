@@ -20,15 +20,16 @@ import {
 import { getStorage } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Allow disabling Firebase during auth testing or when not needed in a given build
-const DISABLE_FIREBASE = (() => {
-  try {
-    const v = String(process.env?.EXPO_PUBLIC_DISABLE_FIREBASE ?? '').toLowerCase();
-    return v === '1' || v === 'true';
-  } catch {
-    return false;
-  }
-})();
+// Env flags:
+// EXPO_PUBLIC_DISABLE_FIREBASE=1           -> full stub mode (no network calls)
+// EXPO_PUBLIC_FORCE_WEB_FIREBASE=1         -> always use Web SDK even if native modules present
+// EXPO_PUBLIC_USE_NATIVE_FIREBASE=1        -> force native path (fail safe to web if modules incomplete)
+const readBool = (name) => {
+  try { return ['1','true','yes'].includes(String(process.env?.[name] ?? '').toLowerCase()); } catch { return false; }
+};
+const DISABLE_FIREBASE = readBool('EXPO_PUBLIC_DISABLE_FIREBASE');
+const FORCE_WEB = readBool('EXPO_PUBLIC_FORCE_WEB_FIREBASE');
+const FORCE_NATIVE = readBool('EXPO_PUBLIC_USE_NATIVE_FIREBASE');
 
 // Firebase configuration (env → optional JSON → optional local file → defaults)
 let firebaseConfig = {
@@ -91,23 +92,32 @@ let nativeFirestore = null;
 let nativeStorage = null;
 let nativeCrashlytics = null;
 let nativePerf = null;
-try {
-  // Lazy require so bundler doesn't fail if modules missing.
-  const nfApp = require('@react-native-firebase/app').default;
-  // If no default export, skip.
-  if (nfApp) {
-    nativeFirebaseApp = nfApp;
-    nativeAuth = require('@react-native-firebase/auth').default;
-    nativeFirestore = require('@react-native-firebase/firestore').default;
-    nativeStorage = require('@react-native-firebase/storage').default;
-    // Optional modules
-    try { nativeCrashlytics = require('@react-native-firebase/crashlytics').default; } catch {}
-    try { nativePerf = require('@react-native-firebase/perf').default; } catch {}
-    USING_NATIVE = true;
-    console.log('🔥 Using native Firebase SDK');
+if (!DISABLE_FIREBASE && !FORCE_WEB) {
+  try {
+    // Lazy require so bundler doesn't fail if modules missing.
+    const nfApp = require('@react-native-firebase/app')?.default;
+    if (nfApp) {
+      // Probe required native modules; any failure → fallback to web.
+      const authMod = (() => { try { return require('@react-native-firebase/auth').default; } catch { return null; } })();
+      const fsMod = (() => { try { return require('@react-native-firebase/firestore').default; } catch { return null; } })();
+      const stMod = (() => { try { return require('@react-native-firebase/storage').default; } catch { return null; } })();
+      if (authMod && fsMod && stMod && (FORCE_NATIVE || !FORCE_WEB)) {
+        nativeFirebaseApp = nfApp;
+        nativeAuth = authMod;
+        nativeFirestore = fsMod;
+        nativeStorage = stMod;
+        try { nativeCrashlytics = require('@react-native-firebase/crashlytics').default; } catch {}
+        try { nativePerf = require('@react-native-firebase/perf').default; } catch {}
+        USING_NATIVE = true;
+        console.log('[firebase] Using native Firebase SDK');
+      } else if (FORCE_NATIVE) {
+        console.warn('[firebase] FORCE_NATIVE requested but native modules incomplete; falling back to web SDK');
+      }
+    }
+  } catch (e) {
+    // Native modules not installed or failed; continue with Web SDK.
+    console.warn('[firebase] Native detection failed:', e?.message);
   }
-} catch {
-  // Native modules not installed; continue with Web SDK.
 }
 
 // Helpers for stubbed Firestore when EFFECTIVE_DISABLE is true
@@ -177,7 +187,15 @@ if (!EFFECTIVE_DISABLE && !USING_NATIVE) {
 // Create a compatibility wrapper for the old Firestore API
 // Build compat wrapper abstracting Web vs Native
 const buildCompat = (isDisabled, isNative) => {
+  // Disabled stub: provide chainable orderBy/limit with empty snapshots to avoid runtime errors
   if (isDisabled) {
+    const makeDisabledQueryBuilder = () => ({
+      orderBy: () => makeDisabledQueryBuilder(),
+      limit: () => makeDisabledQueryBuilder(),
+      where: () => makeDisabledQueryBuilder(),
+      onSnapshot: (cb) => __callOnSnapshot__(cb, __EMPTY_COLLECTION_SNAPSHOT__),
+      get: async () => ({ docs: [] })
+    });
     return {
       collection: () => ({
         doc: () => ({
@@ -190,13 +208,23 @@ const buildCompat = (isDisabled, isNative) => {
         }),
         add: async () => null,
         get: async () => ({ docs: [] }),
-        where: () => ({ get: async () => ({ docs: [] }) }),
+        where: () => makeDisabledQueryBuilder(),
+        orderBy: () => makeDisabledQueryBuilder(),
+        limit: () => makeDisabledQueryBuilder(),
         onSnapshot: (cb) => __callOnSnapshot__(cb, __EMPTY_COLLECTION_SNAPSHOT__)
       })
     };
   }
+  // Native compat path (wraps @react-native-firebase/* which already supports orderBy/limit)
   if (isNative) {
     const fs = firestore;
+    const makeNativeQueryBuilder = (baseRef, chainFn) => ({
+      orderBy: (field, dir='asc') => makeNativeQueryBuilder(baseRef.orderBy(field, dir), chainFn),
+      limit: (n) => makeNativeQueryBuilder(baseRef.limit(n), chainFn),
+      where: (...args) => makeNativeQueryBuilder(baseRef.where(...args), chainFn),
+      onSnapshot: (cb) => baseRef.onSnapshot(cb),
+      get: () => baseRef.get()
+    });
     return {
       collection: (path) => ({
         doc: (id) => ({
@@ -209,170 +237,51 @@ const buildCompat = (isDisabled, isNative) => {
         }),
         add: (data) => fs.collection(path).add(data),
         get: () => fs.collection(path).get(),
-        where: (...args) => ({
-          get: () => fs.collection(path).where(...args).get(),
-          onSnapshot: (cb) => fs.collection(path).where(...args).onSnapshot(cb)
-        }),
+        where: (...args) => makeNativeQueryBuilder(fs.collection(path).where(...args)),
+        orderBy: (field, dir='asc') => makeNativeQueryBuilder(fs.collection(path).orderBy(field, dir)),
+        limit: (n) => makeNativeQueryBuilder(fs.collection(path).limit(n)),
         onSnapshot: (cb) => fs.collection(path).onSnapshot(cb)
       })
     };
   }
-  // Web SDK path (existing implementation)
+  // Web SDK compat path with chain builder
   return {
-    collection: (collectionPath) => ({
-      doc: (docId) => ({
-        get: () => getDoc(firestoreDoc(firestore, collectionPath, docId)),
-        set: (data, options) => setDoc(firestoreDoc(firestore, collectionPath, docId), data, options || {}),
-        update: (data) => updateDoc(firestoreDoc(firestore, collectionPath, docId), data),
-        delete: () => deleteDoc(firestoreDoc(firestore, collectionPath, docId)),
-        onSnapshot: (callback) => onSnapshot(firestoreDoc(firestore, collectionPath, docId), callback),
-        collection: (subCollectionPath) => db.collection(`${collectionPath}/${docId}/${subCollectionPath}`)
-      }),
-      add: (data) => addDoc(firestoreCollection(firestore, collectionPath), data),
-      get: () => getDocs(firestoreCollection(firestore, collectionPath)),
-      where: (...args) => ({
-        get: async () => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args));
-          return getDocs(q);
-        },
+    collection: (collectionPath) => {
+      const collRef = firestoreCollection(firestore, collectionPath);
+      const makeWebQueryBuilder = (constraints = []) => ({
+        orderBy: (field, dir='asc') => makeWebQueryBuilder([...constraints, firestoreOrderBy(field, dir)]),
+        limit: (n) => makeWebQueryBuilder([...constraints, firestoreLimit(n)]),
+        where: (field, op, value) => makeWebQueryBuilder([...constraints, firestoreWhere(field, op, value)]),
         onSnapshot: (callback) => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args));
+          const q = query(collRef, ...constraints);
           return onSnapshot(q, callback);
+        },
+        get: async () => {
+          const q = query(collRef, ...constraints);
+            return getDocs(q);
         }
-      }),
-      onSnapshot: (callback) => onSnapshot(firestoreCollection(firestore, collectionPath), callback)
-    })
+      });
+      return {
+        doc: (docId) => ({
+          get: () => getDoc(firestoreDoc(firestore, collectionPath, docId)),
+          set: (data, options) => setDoc(firestoreDoc(firestore, collectionPath, docId), data, options || {}),
+          update: (data) => updateDoc(firestoreDoc(firestore, collectionPath, docId), data),
+          delete: () => deleteDoc(firestoreDoc(firestore, collectionPath, docId)),
+          onSnapshot: (callback) => onSnapshot(firestoreDoc(firestore, collectionPath, docId), callback),
+          collection: (subCollectionPath) => db.collection(`${collectionPath}/${docId}/${subCollectionPath}`)
+        }),
+        add: (data) => addDoc(collRef, data),
+        get: () => getDocs(collRef),
+        where: (field, op, value) => makeWebQueryBuilder([firestoreWhere(field, op, value)]),
+        orderBy: (field, dir='asc') => makeWebQueryBuilder([firestoreOrderBy(field, dir)]),
+        limit: (n) => makeWebQueryBuilder([firestoreLimit(n)]),
+        onSnapshot: (callback) => onSnapshot(collRef, callback)
+      };
+    }
   };
 };
 
 export const db = buildCompat(EFFECTIVE_DISABLE, USING_NATIVE);
-  // Stubbed Firestore that proactively invokes callbacks with empty snapshots
-  collection: (/* collectionPath */) => ({
-    doc: (docId) => ({
-      get: async () => null,
-      set: async () => undefined,
-      update: async () => undefined,
-      delete: async () => undefined,
-      onSnapshot: (callback) => __callOnSnapshot__(callback, __DOC_SNAPSHOT__(docId)),
-      collection: () => ({})
-    }),
-    add: async () => null,
-    get: async () => ({ docs: [] }),
-    where: () => ({
-      get: async () => ({ docs: [] }),
-      orderBy: () => ({
-        get: async () => ({ docs: [] }),
-        limit: () => ({
-          get: async () => ({ docs: [] }),
-          onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-        }),
-        onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-      }),
-      limit: () => ({
-        get: async () => ({ docs: [] }),
-        onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-      }),
-      onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-    }),
-    orderBy: () => ({
-      get: async () => ({ docs: [] }),
-      limit: () => ({
-        get: async () => ({ docs: [] }),
-        onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-      }),
-      onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-    }),
-    limit: () => ({
-      get: async () => ({ docs: [] }),
-      onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-    }),
-    onSnapshot: (callback) => __callOnSnapshot__(callback, __EMPTY_COLLECTION_SNAPSHOT__),
-  })
-} : {
-  collection: (collectionPath) => ({
-    doc: (docId) => ({
-      get: () => getDoc(firestoreDoc(firestore, collectionPath, docId)),
-      set: (data, options) => setDoc(firestoreDoc(firestore, collectionPath, docId), data, options || {}),
-      update: (data) => updateDoc(firestoreDoc(firestore, collectionPath, docId), data),
-      delete: () => deleteDoc(firestoreDoc(firestore, collectionPath, docId)),
-      onSnapshot: (callback) => onSnapshot(firestoreDoc(firestore, collectionPath, docId), callback),
-      collection: (subCollectionPath) => db.collection(`${collectionPath}/${docId}/${subCollectionPath}`)
-    }),
-    add: (data) => addDoc(firestoreCollection(firestore, collectionPath), data),
-    get: () => getDocs(firestoreCollection(firestore, collectionPath)),
-    where: (...args) => ({
-      get: async () => {
-        const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args));
-        return getDocs(q);
-      },
-      orderBy: (...orderArgs) => ({
-        get: async () => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args), firestoreOrderBy(...orderArgs));
-          return getDocs(q);
-        },
-        limit: (limitNum) => ({
-          get: async () => {
-            const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args), firestoreOrderBy(...orderArgs), firestoreLimit(limitNum));
-            return getDocs(q);
-          },
-          onSnapshot: (callback) => {
-            const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args), firestoreOrderBy(...orderArgs), firestoreLimit(limitNum));
-            return onSnapshot(q, callback);
-          }
-        }),
-        onSnapshot: (callback) => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args), firestoreOrderBy(...orderArgs));
-          return onSnapshot(q, callback);
-        }
-      }),
-      limit: (limitNum) => ({
-        get: async () => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args), firestoreLimit(limitNum));
-          return getDocs(q);
-        },
-        onSnapshot: (callback) => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args), firestoreLimit(limitNum));
-          return onSnapshot(q, callback);
-        }
-      }),
-      onSnapshot: (callback) => {
-        const q = query(firestoreCollection(firestore, collectionPath), firestoreWhere(...args));
-        return onSnapshot(q, callback);
-      }
-    }),
-    orderBy: (...args) => ({
-      get: async () => {
-        const q = query(firestoreCollection(firestore, collectionPath), firestoreOrderBy(...args));
-        return getDocs(q);
-      },
-      limit: (limitNum) => ({
-        get: async () => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreOrderBy(...args), firestoreLimit(limitNum));
-          return getDocs(q);
-        },
-        onSnapshot: (callback) => {
-          const q = query(firestoreCollection(firestore, collectionPath), firestoreOrderBy(...args), firestoreLimit(limitNum));
-          return onSnapshot(q, callback);
-        }
-      }),
-      onSnapshot: (callback) => {
-        const q = query(firestoreCollection(firestore, collectionPath), firestoreOrderBy(...args));
-        return onSnapshot(q, callback);
-      }
-    }),
-    limit: (limitNum) => ({
-      get: async () => {
-        const q = query(firestoreCollection(firestore, collectionPath), firestoreLimit(limitNum));
-        return getDocs(q);
-      },
-      onSnapshot: (callback) => {
-        const q = query(firestoreCollection(firestore, collectionPath), firestoreLimit(limitNum));
-        return onSnapshot(q, callback);
-      }
-    }),
-    onSnapshot: (callback) => onSnapshot(firestoreCollection(firestore, collectionPath), callback)
-  })
-};
 
 // Initialize Firebase services
 export { auth };

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -10,9 +11,8 @@ import {
   Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 
 const { width } = Dimensions.get('window');
@@ -146,7 +146,7 @@ const DailyRewards = () => {
             colors={['#fbbf24', '#f59e0b', '#d97706']}
             style={styles.buttonGradient}
           >
-            <Ionicons name="gift" size={20} color="#fff" />
+            <Icon  name="gift" size={20} color="#fff"  />
             <Text style={styles.buttonText}>Daily Reward</Text>
             <View style={styles.notificationDot} />
           </LinearGradient>
@@ -171,7 +171,7 @@ const DailyRewards = () => {
                   style={styles.closeButton}
                   onPress={() => setShowModal(false)}
                 >
-                  <Ionicons name="close" size={24} color="#fff" />
+                  <Icon  name="close" size={24} color="#fff"  />
                 </TouchableOpacity>
                 <Text style={styles.modalTitle}>Daily Reward</Text>
                 <View style={styles.placeholder} />

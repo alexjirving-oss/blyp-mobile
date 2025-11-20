@@ -1,0 +1,227 @@
+diff --git a/node_modules/react-native-safe-area-context/android/build.gradle b/node_modules/react-native-safe-area-context/android/build.gradle
+index f324b9a..5dcf8e0 100644
+--- a/node_modules/react-native-safe-area-context/android/build.gradle
++++ b/node_modules/react-native-safe-area-context/android/build.gradle
+@@ -89,9 +89,8 @@ android {
+                     "${project.buildDir}/generated/source/codegen/java"
+                 ]
+             } else {
+-                srcDirs += [
+-                    "src/paper/java"
+-                ]
++                // Do not include Paper (codegen) sources when New Architecture is disabled
++                // This avoids compile errors against missing BaseViewManagerInterface in RN 0.81
+             }
+         }
+     }
+diff --git a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaContextModule.kt b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaContextModule.kt
+index 40526b6..1650106 100644
+--- a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaContextModule.kt
++++ b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaContextModule.kt
+@@ -3,17 +3,19 @@ package com.th3rdwave.safeareacontext
+ import android.view.View
+ import android.view.ViewGroup
+ import com.facebook.react.bridge.ReactApplicationContext
++import com.facebook.react.bridge.ReactContextBaseJavaModule
+ import com.facebook.react.module.annotations.ReactModule
+ 
+ @ReactModule(name = SafeAreaContextModule.NAME)
+-class SafeAreaContextModule(reactContext: ReactApplicationContext?) :
+-    NativeSafeAreaContextSpec(reactContext) {
+-  override fun getName(): String {
+-    return NAME
+-  }
++class SafeAreaContextModule(reactContext: ReactApplicationContext) :
++    ReactContextBaseJavaModule(reactContext) {
++  override fun getName(): String = NAME
+ 
+-  public override fun getTypedExportedConstants(): Map<String, Any?> {
+-    return mapOf("initialWindowMetrics" to getInitialWindowMetrics())
++  override fun getConstants(): MutableMap<String, Any> {
++    val constants: MutableMap<String, Any> = mutableMapOf()
++    val initial = getInitialWindowMetrics()
++    if (initial != null) constants["initialWindowMetrics"] = initial
++    return constants
+   }
+ 
+   private fun getInitialWindowMetrics(): Map<String, Any>? {
+diff --git a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaProviderManager.kt b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaProviderManager.kt
+index de6f685..fb75da6 100644
+--- a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaProviderManager.kt
++++ b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaProviderManager.kt
+@@ -1,41 +1,19 @@
+ package com.th3rdwave.safeareacontext
+ 
+-import com.facebook.react.bridge.ReactContext
+ import com.facebook.react.module.annotations.ReactModule
+ import com.facebook.react.uimanager.ThemedReactContext
+-import com.facebook.react.uimanager.UIManagerHelper
+ import com.facebook.react.uimanager.ViewGroupManager
+-import com.facebook.react.viewmanagers.RNCSafeAreaProviderManagerDelegate
+-import com.facebook.react.viewmanagers.RNCSafeAreaProviderManagerInterface
+ 
+ @ReactModule(name = SafeAreaProviderManager.REACT_CLASS)
+-class SafeAreaProviderManager :
+-    ViewGroupManager<SafeAreaProvider>(), RNCSafeAreaProviderManagerInterface<SafeAreaProvider> {
+-  private val mDelegate = RNCSafeAreaProviderManagerDelegate(this)
+-
+-  override fun getDelegate() = mDelegate
++class SafeAreaProviderManager : ViewGroupManager<SafeAreaProvider>() {
+ 
+   override fun getName() = REACT_CLASS
+ 
+   public override fun createViewInstance(context: ThemedReactContext) = SafeAreaProvider(context)
+ 
+-  override fun getExportedCustomDirectEventTypeConstants() =
+-      mutableMapOf(
+-          InsetsChangeEvent.EVENT_NAME to mutableMapOf("registrationName" to "onInsetsChange"))
+-
+-  override fun addEventEmitters(reactContext: ThemedReactContext, view: SafeAreaProvider) {
+-    super.addEventEmitters(reactContext, view)
+-    view.setOnInsetsChangeHandler(::handleOnInsetsChange)
+-  }
++  override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any>? = mutableMapOf()
+ 
+   companion object {
+     const val REACT_CLASS = "RNCSafeAreaProvider"
+   }
+ }
+-
+-private fun handleOnInsetsChange(view: SafeAreaProvider, insets: EdgeInsets, frame: Rect) {
+-  val reactContext = view.context as ReactContext
+-  val reactTag = view.id
+-  UIManagerHelper.getEventDispatcherForReactTag(reactContext, reactTag)
+-      ?.dispatchEvent(InsetsChangeEvent(getSurfaceId(reactContext), reactTag, insets, frame))
+-}
+diff --git a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaView.kt b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaView.kt
+index b29e787..7b48749 100644
+--- a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaView.kt
++++ b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaView.kt
+@@ -45,59 +45,14 @@ class SafeAreaView(context: Context?) :
+         map.putMap("insets", edgeInsetsToJsMap(insets))
+         stateWrapper.updateState(map)
+       } else {
+-        val localData = SafeAreaViewLocalData(insets = insets, mode = mMode, edges = edges)
+-        val reactContext = getReactContext(this)
+-        val uiManager = reactContext.getNativeModule(UIManagerModule::class.java)
+-        if (uiManager != null) {
+-          uiManager.setViewLocalData(id, localData)
+-          // Sadly there doesn't seem to be a way to properly dirty a yoga node from java, so if we
+-          // are in
+-          // the middle of a layout, we need to recompute it. There is also no way to know whether
+-          // we
+-          // are in the middle of a layout so always do it.
+-          reactContext.runOnNativeModulesQueueThread {
+-            uiManager.uiImplementation.dispatchViewUpdates(-1)
+-          }
+-          waitForReactLayout()
+-        }
++        // No state wrapper available; skip legacy UIManager updates to avoid deprecated APIs
+       }
+     }
+   }
+ 
+   private fun waitForReactLayout() {
+-    // Block the main thread until the native module thread is finished with
+-    // its current tasks. To do this we use the done boolean as a lock and enqueue
+-    // a task on the native modules thread. When the task runs we can unblock the
+-    // main thread. This should be safe as long as the native modules thread
+-    // does not block waiting on the main thread.
+-    var done = false
+-    val lock = ReentrantLock()
+-    val condition = lock.newCondition()
+-    val startTime = System.nanoTime()
+-    var waitTime = 0L
+-    getReactContext(this).runOnNativeModulesQueueThread {
+-      lock.withLock {
+-        if (!done) {
+-          done = true
+-          condition.signal()
+-        }
+-      }
+-    }
+-    lock.withLock {
+-      while (!done && waitTime < MAX_WAIT_TIME_NANO) {
+-        try {
+-          condition.awaitNanos(MAX_WAIT_TIME_NANO)
+-        } catch (ex: InterruptedException) {
+-          // In case of an interrupt just give up waiting.
+-          done = true
+-        }
+-        waitTime += System.nanoTime() - startTime
+-      }
+-    }
+-    // Timed out waiting.
+-    if (waitTime >= MAX_WAIT_TIME_NANO) {
+-      Log.w("SafeAreaView", "Timed out waiting for layout.")
+-    }
++    // No-op to avoid deprecated UIManager and React context threading dependencies
++    return
+   }
+ 
+   fun setMode(mode: SafeAreaViewMode) {
+diff --git a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaViewManager.kt b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaViewManager.kt
+index e45f210..5c38b6a 100644
+--- a/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaViewManager.kt
++++ b/node_modules/react-native-safe-area-context/android/src/main/java/com/th3rdwave/safeareacontext/SafeAreaViewManager.kt
+@@ -7,16 +7,14 @@ import com.facebook.react.uimanager.StateWrapper
+ import com.facebook.react.uimanager.ThemedReactContext
+ import com.facebook.react.uimanager.ViewManagerDelegate
+ import com.facebook.react.uimanager.annotations.ReactProp
+-import com.facebook.react.viewmanagers.RNCSafeAreaViewManagerInterface
+ import com.facebook.react.views.view.ReactViewGroup
+ import com.facebook.react.views.view.ReactViewManager
+ 
+ @ReactModule(name = SafeAreaViewManager.REACT_CLASS)
+-class SafeAreaViewManager : ReactViewManager(), RNCSafeAreaViewManagerInterface<SafeAreaView> {
++class SafeAreaViewManager : ReactViewManager() {
+   override fun getName() = REACT_CLASS
+ 
+-  // Make sure we're not using delegates for now since ReactViewGroupManager doesn't use one. If it
+-  // does in the future we will need a way to compose delegates together.
++  // No delegate usage to avoid codegen interfaces
+   override fun getDelegate(): ViewManagerDelegate<ReactViewGroup>? = null
+ 
+   override fun createViewInstance(context: ThemedReactContext) = SafeAreaView(context)
+@@ -26,34 +24,25 @@ class SafeAreaViewManager : ReactViewManager(), RNCSafeAreaViewManagerInterface<
+   override fun getShadowNodeClass() = SafeAreaViewShadowNode::class.java
+ 
+   @ReactProp(name = "mode")
+-  override fun setMode(view: SafeAreaView, mode: String?) {
++  fun setMode(view: SafeAreaView, mode: String?) {
+     when (mode) {
+-      "padding" -> {
+-        view.setMode(SafeAreaViewMode.PADDING)
+-      }
+-      "margin" -> {
+-        view.setMode(SafeAreaViewMode.MARGIN)
+-      }
++      "padding" -> view.setMode(SafeAreaViewMode.PADDING)
++      "margin" -> view.setMode(SafeAreaViewMode.MARGIN)
+     }
+   }
+ 
+   @ReactProp(name = "edges")
+-  override fun setEdges(view: SafeAreaView, propList: ReadableMap?) {
++  fun setEdges(view: SafeAreaView, propList: ReadableMap?) {
+     if (propList != null) {
+       view.setEdges(
+           SafeAreaViewEdges(
+               top = propList.getString("top")?.let { SafeAreaViewEdgeModes.valueOf(it.uppercase()) }
+                       ?: SafeAreaViewEdgeModes.OFF,
+-              right =
+-                  propList.getString("right")?.let { SafeAreaViewEdgeModes.valueOf(it.uppercase()) }
++              right = propList.getString("right")?.let { SafeAreaViewEdgeModes.valueOf(it.uppercase()) }
+                       ?: SafeAreaViewEdgeModes.OFF,
+-              bottom =
+-                  propList.getString("bottom")?.let {
+-                    SafeAreaViewEdgeModes.valueOf(it.uppercase())
+-                  }
++              bottom = propList.getString("bottom")?.let { SafeAreaViewEdgeModes.valueOf(it.uppercase()) }
+                       ?: SafeAreaViewEdgeModes.OFF,
+-              left =
+-                  propList.getString("left")?.let { SafeAreaViewEdgeModes.valueOf(it.uppercase()) }
++              left = propList.getString("left")?.let { SafeAreaViewEdgeModes.valueOf(it.uppercase()) }
+                       ?: SafeAreaViewEdgeModes.OFF))
+     }
+   }

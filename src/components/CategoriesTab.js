@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -11,7 +12,6 @@ import {
   PixelRatio,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { smartListGenerator } from '../utils/smartListGenerator';
 import { responsiveFont } from '../utils/scaleUtils';
 
@@ -111,11 +111,11 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.categoryHeader}>
-          <Ionicons 
+          <Icon  
             name={category.icon || 'apps'} 
             size={responsiveSize(20)} 
             color="#fff" 
-          />
+           />
           <Text style={styles.categoryTitle} numberOfLines={1} adjustsFontSizeToFit={true} minimumFontScale={0.6}>
             {category.name}
           </Text>
@@ -129,7 +129,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
           <Text style={styles.categoryStats}>
             {Math.floor(Math.random() * 500 + 100)} posts
           </Text>
-          <Ionicons name="chevron-forward" size={16} color="#ffffff90" />
+          <Icon  name="chevron-forward" size={16} color="#ffffff90"  />
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -145,7 +145,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
       {/* Search Input */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={16} color="#666" style={styles.searchIcon} />
+          <Icon  name="search" size={16} color="#666" style={styles.searchIcon}  />
           <TextInput
             style={styles.searchInput}
             placeholder="Search categories..."
@@ -160,7 +160,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
               onPress={() => setSearchQuery('')}
               style={styles.clearSearchButton}
             >
-              <Ionicons name="close-circle" size={16} color="#666" />
+              <Icon  name="close-circle" size={16} color="#666"  />
             </TouchableOpacity>
           )}
         </View>
@@ -174,7 +174,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
             setFilteredPosts([]);
           }}
         >
-          <Ionicons name="close-circle" size={20} color="#ec4899" />
+          <Icon  name="close-circle" size={20} color="#ec4899"  />
           <Text style={styles.clearButtonText}>Clear Filter</Text>
         </TouchableOpacity>
       )}
@@ -184,7 +184,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Ionicons name="folder-open" size={48} color="#8b5cf6" />
+        <Icon  name="folder-open" size={48} color="#8b5cf6"  />
         <Text style={styles.loadingText}>Generating smart categories...</Text>
       </View>
     );

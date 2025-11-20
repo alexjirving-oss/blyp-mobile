@@ -2,26 +2,26 @@
 // This replaces app.json to avoid duplication and Expo Doctor warnings.
 
 module.exports = () => {
-  // If app.json exists, read it and use its values to satisfy Expo Doctor.
-  let base = {};
-  try {
-    base = require('./app.json');
-  } catch (_) {
-    base = {};
-  }
-  const fromJson = base.expo || {};
+  // Prefer dynamic config only (avoid static app.json conflicts)
+  const fromJson = {};
 
+  // Gemini key must NEVER be hard-coded. It is sourced from env/EAS secrets.
+  // If absent, downstream Gemini features must degrade safely (disabled mode).
+  const resolvedGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || (fromJson.extra && fromJson.extra.EXPO_PUBLIC_GEMINI_API_KEY) || '';
+  if (!resolvedGeminiKey) {
+    // eslint-disable-next-line no-console
+    console.warn('[BLYP][SECURITY] Gemini key not provided via env. Gemini features will be disabled.');
+  }
   const extra = {
     ...(fromJson.extra || {}),
     eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
-    EXPO_PUBLIC_GEMINI_API_KEY: 'AIzaSyB_keeUJQhLwK8fUlnDRDoZDuO4rreneqY',
+    // Key value is injected at build/runtime from env; blank string in code ensures no committed secret.
+    EXPO_PUBLIC_GEMINI_API_KEY: resolvedGeminiKey,
+    features: {
+      manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
+    },
   };
   if (process.env.EXPO_PUBLIC_GIT_SHA) extra.gitSha = process.env.EXPO_PUBLIC_GIT_SHA;
-
-  // If app.json exists, prefer returning its values to satisfy Expo Doctor
-  if (Object.keys(fromJson).length) {
-    return { ...fromJson, extra };
-  }
 
   const resolved = {
     name: 'Blyp',
@@ -61,7 +61,6 @@ module.exports = () => {
         'android.permission.MODIFY_AUDIO_SETTINGS',
         'android.permission.WAKE_LOCK',
       ],
-      versionCode: 2,
     },
     web: {
       favicon: './assets/favicon.png',
@@ -69,8 +68,6 @@ module.exports = () => {
     },
     plugins: [
       'sentry-expo',
-      // Native Firebase config plugin (adds google-services gradle integration)
-      '@react-native-firebase/app',
       [
         'expo-camera',
         {
@@ -101,9 +98,6 @@ module.exports = () => {
     androidStatusBar: {
       backgroundColor: '#0f172a',
       translucent: true,
-    },
-    developmentClient: {
-      silentLaunch: false,
     },
     owner: 'alexjirving',
   };

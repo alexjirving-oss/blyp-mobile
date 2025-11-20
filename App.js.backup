@@ -1,0 +1,274 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createStackNavigator } from '@react-navigation/stack';
+import { StatusBar } from 'expo-status-bar';
+import { StyleSheet, View, Text, ActivityIndicator, LogBox, Platform, TouchableOpacity } from 'react-native';
+import { enableScreens } from 'react-native-screens';
+import * as SplashScreen from 'expo-splash-screen';
+import TestRender from './src/components/TestRender';
+
+// Enable native screens optimization
+enableScreens();
+
+// Disable specific warnings to improve performance
+LogBox.ignoreLogs([
+  'VirtualizedLists should never be nested', // Ignore FlatList nesting warning
+  'Warning: Cannot update a component', // Ignore state updates after unmounting
+  'Setting a timer', // Ignore timer warnings
+  'Non-serializable values were found in the navigation state', // Ignore navigation state warnings
+]);
+
+import Toast from 'react-native-toast-message';
+import BlypLogo from './src/components/BlypLogo';
+
+// Import screens
+import HomeScreen from './src/screens/HomeScreen';
+import ChatListScreen from './src/screens/ChatListScreen';
+import ChatConversationScreen from './src/screens/ChatConversationScreen';
+import MessengerScreen from './src/screens/MessengerScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
+import EditProfileScreen from './src/screens/EditProfileScreen';
+import AuthScreen from './src/screens/AuthScreen';
+import CameraScreen from './src/screens/CameraScreen';
+import ReviewScreen from './src/screens/ReviewScreen';
+import VoiceMemoScreen from './src/screens/VoiceMemoScreen';
+import PostPreviewScreen from './src/screens/PostPreviewScreen';
+import MediaViewerScreen from './src/screens/MediaViewerScreen';
+import LiveStreamScreen from './src/screens/LiveStreamScreen';
+import SearchScreen from './src/screens/SearchScreen';
+import SearchResultsScreen from './src/screens/SearchResultsScreen';
+import CommentsScreen from './src/screens/CommentsScreen';
+import UserProfileScreen from './src/screens/UserProfileScreen';
+import FollowersScreen from './src/screens/FollowersScreen';
+import FindPeopleScreen from './src/screens/FindPeopleScreen';
+// Gaming screens
+import GamesScreen from './src/screens/GamesScreen';
+import GameRoomScreen from './src/screens/GameRoomScreen';
+// Chat rooms screens
+import ChatRoomsScreen from './src/screens/ChatRoomsScreen';
+import ChatRoomScreen from './src/screens/ChatRoomScreen';
+// Blypcoin screens
+import CoinStoreScreen from './src/screens/CoinStoreScreen';
+
+// Import components and utilities
+import TabBarIcon from './src/components/TabBarIcon';
+import CreatePostButton from './src/components/CreatePostButton';
+import { useAuth } from './src/hooks/useCommon';
+import { useUnreadCount } from './src/hooks/useUnreadCount';
+import { scalingConfig } from './src/utils/scaleUtils';
+const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator();
+
+function MainTabs() {
+  const unreadCount = useUnreadCount();
+  
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#1e293b',
+          borderTopColor: '#334155',
+          paddingTop: 8,
+          paddingBottom: 24,
+          height: 88,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          marginTop: 4,
+        },
+        tabBarActiveTintColor: '#ec4899',
+        tabBarInactiveTintColor: '#9ca3af',
+      }}
+    >
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <TabBarIcon name="home" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Chat"
+        component={ChatListScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <TabBarIcon name="game-controller" color={color} size={size} />
+          ),
+          tabBarLabel: 'Chat/Games',
+        }}
+      />
+      <Tab.Screen
+        name="CreatePost"
+        component={View}
+        options={{
+          tabBarButton: (props) => <CreatePostButton {...props} />,
+          tabBarLabel: '',
+        }}
+      />
+      <Tab.Screen
+        name="Messenger"
+        component={MessengerScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <TabBarIcon name="paper-plane" color={color} size={size} badge={unreadCount > 0 ? unreadCount : null} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <TabBarIcon name="person" color={color} size={size} />
+          ),
+        }}
+      />
+    </Tab.Navigator>
+  );
+}
+
+function AppStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        gestureEnabled: true,
+        cardStyleInterpolator: ({ current, layouts }) => {
+          return {
+            cardStyle: {
+              transform: [
+                {
+                  translateX: current.progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [layouts.screen.width, 0],
+                  }),
+                },
+              ],
+            },
+          };
+        },
+      }}
+    >
+      <Stack.Screen name="MainTabs" component={MainTabs} />
+      <Stack.Screen name="Search" component={SearchScreen} />
+      <Stack.Screen name="Comments" component={CommentsScreen} />
+      <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+      <Stack.Screen name="Followers" component={FollowersScreen} />
+      <Stack.Screen name="ChatConversation" component={ChatConversationScreen} />
+      <Stack.Screen name="FindPeople" component={FindPeopleScreen} />
+      <Stack.Screen name="Camera" component={CameraScreen} />
+      <Stack.Screen name="Review" component={ReviewScreen} />
+      <Stack.Screen name="MediaViewer" component={MediaViewerScreen} />
+      <Stack.Screen name="VoiceMemo" component={VoiceMemoScreen} />
+      <Stack.Screen name="LiveStreamScreen" component={LiveStreamScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="PostPreview" component={PostPreviewScreen} />
+      <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
+      <Stack.Screen name="Games" component={GamesScreen} />
+      <Stack.Screen name="GameRoom" component={GameRoomScreen} />
+      <Stack.Screen name="ChatRooms" component={ChatRoomsScreen} />
+      <Stack.Screen name="ChatRoom" component={ChatRoomScreen} />
+      <Stack.Screen name="CoinStore" component={CoinStoreScreen} />
+    </Stack.Navigator>
+  );
+}
+
+export default function App() {
+  const [appError, setAppError] = useState(null);
+  const { user, loading, error: authError } = useAuth();
+  
+  // Global error handler for uncaught exceptions
+  useEffect(() => {
+    const errorHandler = (error) => {
+      console.error('Unhandled error:', error);
+      setAppError(error.message || 'An unexpected error occurred');
+    };
+    
+    // Add global error handler
+    if (Platform.OS === 'web') {
+      window.addEventListener('error', errorHandler);
+      return () => window.removeEventListener('error', errorHandler);
+    }
+    
+    return () => {};
+  }, []);
+
+  // Show error screen if authentication fails
+  useEffect(() => {
+    if (authError) {
+      console.error('Auth error:', authError);
+      setAppError(authError);
+    }
+  }, [authError]);
+  
+  // Display error screen if needed
+  if (appError) {
+    // Use our TestRender component as a fallback
+    return (
+      <TestRender 
+        message={`Error: ${appError}`}
+        onPress={() => { setAppError(null); }}
+      />
+    );
+  }
+
+  // Display loading screen
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <BlypLogo useGradientBackground={true} textStyle={{ fontSize: 48 }} />
+        <ActivityIndicator 
+          size="large" 
+          color="#a855f7" 
+          style={{ marginTop: 20 }} 
+        />
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer>
+      <StatusBar style="light" backgroundColor="#0f172a" />
+      {user ? <AppStack /> : <AuthScreen />}
+      <Toast />
+    </NavigationContainer>
+  );
+}
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+  },
+  errorText: {
+    color: '#ec4899',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginTop: 20,
+  },
+  errorMessage: {
+    color: '#f1f5f9',
+    fontSize: 16,
+    textAlign: 'center',
+    marginHorizontal: 40,
+    marginTop: 10,
+  },
+  retryButton: {
+    backgroundColor: '#a855f7',
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginTop: 20,
+  },
+  retryText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});

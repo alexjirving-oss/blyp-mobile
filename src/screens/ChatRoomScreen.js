@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -13,7 +14,6 @@ import {
   Platform,
   Modal
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
@@ -57,7 +57,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
             style={styles.headerButton}
             onPress={() => setShowParticipants(true)}
           >
-            <Ionicons name="people" size={24} color="#fff" />
+            <Icon  name="people" size={24} color="#fff"  />
             <Text style={styles.participantCount}>{roomData.participantCount}</Text>
           </TouchableOpacity>
         ),
@@ -219,7 +219,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
             <Text style={styles.sectionTitle}>Members</Text>
             <View style={styles.participantItem}>
               <View style={styles.participantAvatar}>
-                <Ionicons name="person" size={20} color="#fff" />
+                <Icon  name="person" size={20} color="#fff"  />
               </View>
               <View style={styles.participantInfo}>
                 <Text style={styles.participantName}>
@@ -249,7 +249,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Ionicons name="chatbubbles-outline" size={64} color="#374151" />
+        <Icon  name="chatbubbles-outline" size={64} color="#374151"  />
         <Text style={styles.loadingText}>Loading room...</Text>
       </View>
     );
@@ -265,7 +265,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Icon  name="arrow-back" size={24} color="#fff"  />
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
@@ -279,7 +279,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
           style={styles.participantsButton}
           onPress={() => setShowParticipants(true)}
         >
-          <Ionicons name="people" size={24} color="#fff" />
+          <Icon  name="people" size={24} color="#fff"  />
         </TouchableOpacity>
       </View>
 
@@ -299,7 +299,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
         }}
         ListEmptyComponent={
           <View style={styles.emptyMessages}>
-            <Ionicons name="chatbubbles-outline" size={64} color="#374151" />
+            <Icon  name="chatbubbles-outline" size={64} color="#374151"  />
             <Text style={styles.emptyTitle}>Start the conversation</Text>
             <Text style={styles.emptyText}>
               Be the first to send a message in this room
@@ -315,7 +315,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
       >
         <View style={styles.inputRow}>
           <TouchableOpacity style={styles.attachButton}>
-            <Ionicons name="add" size={24} color="#6b7280" />
+            <Icon  name="add" size={24} color="#6b7280"  />
           </TouchableOpacity>
           
           <TextInput
@@ -345,11 +345,11 @@ const ChatRoomScreen = ({ route, navigation }) => {
               }
               style={styles.sendButtonGradient}
             >
-              <Ionicons 
+              <Icon  
                 name={sending ? "hourglass-outline" : "send"} 
                 size={20} 
                 color="#fff" 
-              />
+               />
             </LinearGradient>
           </TouchableOpacity>
         </View>

@@ -1,5 +1,5 @@
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 /**
  * Add test posts with multiple photos to Firebase
@@ -43,7 +43,7 @@ export const addTestPostsWithMultiplePhotos = async () => {
       thumbnail: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=600&fit=crop',
       user: {
         username: 'Test User',
-        avatar: null
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face'
       },
       likes: 12,
       comments: 3,
@@ -58,7 +58,7 @@ export const addTestPostsWithMultiplePhotos = async () => {
     const testPost2 = {
       userId: 'test-user-2',
       username: 'Photo Explorer',
-      userPhotoURL: null,
+      userPhotoURL: 'https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=100&h=100&fit=crop&crop=face',
       title: 'City Life Collection',
       transcript: 'Exploring the vibrant energy of urban landscapes - from towering skyscrapers reflecting golden light to intimate street corners where life happens. Each frame captures the pulse of the city and the stories that unfold in concrete jungles. 🏙️🚶‍♀️',
       description: 'A dynamic street photography series showcasing the contrast between architectural grandeur and human moments in the urban environment.',
@@ -98,7 +98,7 @@ export const addTestPostsWithMultiplePhotos = async () => {
       thumbnail: 'https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=400&h=600&fit=crop',
       user: {
         username: 'Photo Explorer', 
-        avatar: null
+        avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=100&h=100&fit=crop&crop=face'
       },
       likes: 25,
       comments: 8,

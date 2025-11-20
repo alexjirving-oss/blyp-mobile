@@ -1,6 +1,6 @@
 // Internal utility to add followers from within the app (use in developer mode)
 import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 export const addTestFollowersInternal = async (userId) => {
   const testFollowers = [

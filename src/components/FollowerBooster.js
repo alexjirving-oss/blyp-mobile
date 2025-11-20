@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
+import Icon from './Icon';
 import { View, Text, TouchableOpacity, TextInput, Alert, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { addFakeFollowers, getCurrentFollowerCount, removeFakeFollowers } from '../utils/boostFollowers';
 
 /**
@@ -86,7 +86,7 @@ const FollowerBooster = ({ visible = false, onClose }) => {
           <Text style={styles.title}>🚀 Follower Booster</Text>
           {onClose && (
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Ionicons name="close" size={24} color="#fff" />
+              <Icon  name="close" size={24} color="#fff"  />
             </TouchableOpacity>
           )}
         </View>

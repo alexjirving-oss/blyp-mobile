@@ -1,21 +1,27 @@
 {
+  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "allowSyntheticDefaultImports": true,
-    "jsx": "react-native",
-    "lib": [
-      "dom",
-      "esnext"
-    ],
-    "moduleResolution": "node",
-    "noEmit": true,
+    "strict": true,
+    "jsx": "react-jsx",
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "strict": false,
-    "target": "esnext",
-    "esModuleInterop": true
+    "noEmit": true,
+    "moduleResolution": "bundler",
+    "types": [
+      "react",
+      "react-native"
+    ]
   },
   "exclude": [
-    "node_modules"
-  ],
-  "extends": "expo/tsconfig.base"
+    "node_modules",
+    "android",
+    "ios",
+    "#1",
+    "backup",
+    "blyp-gaming-features",
+    "functions",
+    "_reports",
+    "_reports/**",
+    "scripts/**",
+    "**/*.d.ts"
+  ]
 }

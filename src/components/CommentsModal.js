@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -14,8 +15,6 @@ import {
   Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const CommentsModal = ({ visible, onClose, postId, postData }) => {
@@ -101,11 +100,11 @@ const CommentsModal = ({ visible, onClose, postId, postData }) => {
               style={styles.commentAction}
               onPress={() => handleLikeComment(item.id)}
             >
-              <Ionicons 
+              <Icon  
                 name={isLiked ? "heart" : "heart-outline"} 
                 size={16} 
                 color={isLiked ? "#ff1744" : "#666"} 
-              />
+               />
               <Text style={[styles.commentActionText, isLiked && { color: '#ff1744' }]}>
                 {item.likes}
               </Text>
@@ -141,7 +140,7 @@ const CommentsModal = ({ visible, onClose, postId, postData }) => {
             {/* Header */}
             <View style={styles.header}>
               <TouchableOpacity onPress={onClose}>
-                <Ionicons name="close" size={28} color="#fff" />
+                <Icon  name="close" size={28} color="#fff"  />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Comments</Text>
               <View style={{ width: 28 }} />
@@ -194,7 +193,7 @@ const CommentsModal = ({ visible, onClose, postId, postData }) => {
                     colors={newComment.trim() ? ['#ec4899', '#be185d'] : ['#374151', '#374151']}
                     style={styles.sendGradient}
                   >
-                    <Ionicons name="send" size={18} color="#fff" />
+                    <Icon  name="send" size={18} color="#fff"  />
                   </LinearGradient>
                 </TouchableOpacity>
               </View>

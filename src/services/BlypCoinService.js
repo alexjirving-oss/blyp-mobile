@@ -15,7 +15,7 @@ import {
   onSnapshot,
   runTransaction
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 class BlypCoinService {
   // Get user's current Blypcoin balance

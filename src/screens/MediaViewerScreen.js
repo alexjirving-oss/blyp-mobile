@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -13,13 +14,12 @@ import {
   PanGesturer,
 } from 'react-native';
 import { Video } from 'expo-av';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
-import { updateDoc, doc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { db, auth } from '../config/firebase';
+import { db, firestore, auth, firebaseEnabled } from '../config/firebase';
 import PhotoGallery from '../components/PhotoGallery';
 import HeartAnimation from '../components/HeartAnimation';
+import { fixStorageUrl } from '../utils/urlUtils';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -99,8 +99,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
     triggerLikeAnimation();
 
+    if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
+      console.log('⚠️ MediaViewer: Firebase disabled or db unavailable, skipping like write');
+      return;
+    }
     try {
-      const postRef = doc(db, 'posts', actualPost.id);
+      const postRef = db.collection('posts').doc(actualPost.id);
       const wasLiked = isLiked;
       
       // Optimistic update
@@ -108,14 +112,14 @@ const MediaViewerScreen = ({ route, navigation }) => {
       setLikeCount(prev => wasLiked ? prev - 1 : prev + 1);
 
       if (wasLiked) {
-        await updateDoc(postRef, {
-          likedBy: arrayRemove(currentUser.uid),
-          likeCount: likeCount - 1
+        await postRef.update({
+          likedBy: firestore.FieldValue.arrayRemove(currentUser.uid),
+          likeCount: firestore.FieldValue.increment(-1)
         });
       } else {
-        await updateDoc(postRef, {
-          likedBy: arrayUnion(currentUser.uid),
-          likeCount: likeCount + 1
+        await postRef.update({
+          likedBy: firestore.FieldValue.arrayUnion(currentUser.uid),
+          likeCount: firestore.FieldValue.increment(1)
         });
         
         // Trigger new heart animation for like
@@ -199,10 +203,11 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
     // Handle video content
     if (post.videoUrl) {
-      console.log('📹 Rendering video from videoUrl:', post.videoUrl);
+      const fixedUrl = fixStorageUrl(post.videoUrl);
+      console.log('📹 Rendering video from videoUrl:', fixedUrl);
       return (
         <Video
-          source={{ uri: post.videoUrl }}
+          source={{ uri: fixedUrl }}
           style={styles.media}
           useNativeControls={true}
           resizeMode="cover"
@@ -251,10 +256,11 @@ const MediaViewerScreen = ({ route, navigation }) => {
       // If there's a video, show it
       if (videos.length > 0) {
         const firstVideo = videos[0];
-        console.log('📹 Rendering video from media array:', firstVideo);
+        const fixedUrl = fixStorageUrl(firstVideo.url || firstVideo.uri);
+        console.log('📹 Rendering video from media array:', { original: firstVideo, fixedUrl });
         return (
           <Video
-            source={{ uri: firstVideo.url || firstVideo.uri }}
+            source={{ uri: fixedUrl }}
             style={styles.media}
             useNativeControls={true}
             resizeMode="cover"
@@ -376,7 +382,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
         ]}
         pointerEvents="none"
       >
-        <Ionicons name="heart" size={80} color="#ff1744" />
+        <Icon  name="heart" size={80} color="#ff1744"  />
       </Animated.View>
 
       {/* Multiple Hearts Animation */}
@@ -392,7 +398,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
           style={styles.backButton} 
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={28} color="#fff" />
+          <Icon  name="arrow-back" size={28} color="#fff"  />
         </TouchableOpacity>
       </Animated.View>
 
@@ -411,7 +417,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
                 colors={['#667eea', '#764ba2']}
                 style={styles.defaultAvatar}
               >
-                <Ionicons name="person" size={24} color="#fff" />
+                <Icon  name="person" size={24} color="#fff"  />
               </LinearGradient>
             )}
           </TouchableOpacity>
@@ -425,7 +431,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
                 colors={['#ec4899', '#8b5cf6']}
                 style={styles.followGradient}
               >
-                <Ionicons name="add" size={20} color="#fff" />
+                <Icon  name="add" size={20} color="#fff"  />
               </LinearGradient>
             </TouchableOpacity>
           )}
@@ -437,11 +443,11 @@ const MediaViewerScreen = ({ route, navigation }) => {
             style={styles.sidebarButton}
             onPress={handleLike}
           >
-            <Ionicons 
+            <Icon  
               name={isLiked ? "heart" : "heart-outline"} 
               size={36} 
               color={isLiked ? "#ff1744" : "#fff"} 
-            />
+             />
             <Text style={styles.sidebarText}>
               {likeCount > 0 ? (likeCount > 999 ? `${(likeCount/1000).toFixed(1)}K` : likeCount) : ''}
             </Text>
@@ -450,7 +456,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
         {/* Comment Button */}
         <TouchableOpacity style={styles.sidebarButton}>
-          <Ionicons name="chatbubble-outline" size={32} color="#fff" />
+          <Icon  name="chatbubble-outline" size={32} color="#fff"  />
           <Text style={styles.sidebarText}>
             {actualPost.commentCount || actualPost.comments || ''}
           </Text>
@@ -458,12 +464,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
         {/* Share Button */}
         <TouchableOpacity style={styles.sidebarButton} onPress={handleShare}>
-          <Ionicons name="share-outline" size={32} color="#fff" />
+          <Icon  name="share-outline" size={32} color="#fff"  />
         </TouchableOpacity>
 
         {/* More Options */}
         <TouchableOpacity style={styles.sidebarButton}>
-          <Ionicons name="ellipsis-horizontal" size={32} color="#fff" />
+          <Icon  name="ellipsis-horizontal" size={32} color="#fff"  />
         </TouchableOpacity>
       </Animated.View>
 
@@ -486,7 +492,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
         {/* Music/Sound Info */}
         <View style={styles.musicInfo}>
-          <Ionicons name="musical-note" size={16} color="#fff" style={styles.musicIcon} />
+          <Icon  name="musical-note" size={16} color="#fff" style={styles.musicIcon}  />
           <Text style={styles.musicText} numberOfLines={1}>
             Original Sound - {actualPost.username || actualPost.user?.username || 'user'}
           </Text>

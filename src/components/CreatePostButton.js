@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { TouchableOpacity, StyleSheet, Dimensions, Modal, View, Text } from 'react-native';
+import Icon from './Icon';
+import { TouchableOpacity, StyleSheet, Dimensions, Modal, View, Text, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 const CreatePostButton = ({ accessibilityState }) => {
@@ -21,7 +21,7 @@ const CreatePostButton = ({ accessibilityState }) => {
         setShowPostOptions(true);
         break;
       case 'live':
-        navigation.navigate('LiveStreamScreen', { isCreator: true });
+        navigation.navigate('LiveStreamScreen', { mode: 'host' });
         break;
     }
   };
@@ -58,7 +58,7 @@ const CreatePostButton = ({ accessibilityState }) => {
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
-            <Ionicons name="add" size={28} color="white" />
+            <Icon  name="add" size={28} color="white"  />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -102,7 +102,7 @@ const CreatePostButton = ({ accessibilityState }) => {
                 end={{ x: 1, y: 1 }}
               >
                 <View style={styles.liveButtonContent}>
-                  <Ionicons name="radio-outline" size={20} color="#ffffff" />
+                  <Icon  name="radio-outline" size={20} color="#ffffff"  />
                   <Text style={styles.menuItemTextLive}>Go Live</Text>
                 </View>
               </LinearGradient>
@@ -134,7 +134,7 @@ const CreatePostButton = ({ accessibilityState }) => {
                 onPress={() => handlePostOption('takePhoto')}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Ionicons name="camera" size={28} color="#a855f7" />
+                  <Icon  name="camera" size={28} color="#a855f7"  />
                 </View>
                 <Text style={styles.postOptionText}>Take Photo</Text>
               </TouchableOpacity>
@@ -144,7 +144,7 @@ const CreatePostButton = ({ accessibilityState }) => {
                 onPress={() => handlePostOption('takeVideo')}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Ionicons name="videocam" size={28} color="#d946ef" />
+                  <Icon  name="videocam" size={28} color="#d946ef"  />
                 </View>
                 <Text style={styles.postOptionText}>Take Video</Text>
               </TouchableOpacity>
@@ -154,7 +154,7 @@ const CreatePostButton = ({ accessibilityState }) => {
                 onPress={() => handlePostOption('voiceNote')}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Ionicons name="mic" size={28} color="#ec4899" />
+                  <Icon  name="mic" size={28} color="#ec4899"  />
                 </View>
                 <Text style={styles.postOptionText}>Voice Note</Text>
               </TouchableOpacity>
@@ -164,7 +164,7 @@ const CreatePostButton = ({ accessibilityState }) => {
                 onPress={() => handlePostOption('myMedia')}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Ionicons name="images" size={28} color="#8b5cf6" />
+                  <Icon  name="images" size={28} color="#8b5cf6"  />
                 </View>
                 <Text style={styles.postOptionText}>My Media</Text>
               </TouchableOpacity>

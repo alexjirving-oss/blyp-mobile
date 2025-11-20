@@ -16,13 +16,14 @@ if (fs.existsSync(target)) {
 }
 
 const b64 = process.env.GOOGLE_SERVICES_JSON_BASE64;
-if (!b64) {
-  console.warn('[inject-google-services] Missing google-services.json and GOOGLE_SERVICES_JSON_BASE64 env var.');
-  console.warn('Add file to repo OR set an EAS env var with base64 contents of google-services.json');
+const plain = process.env.GOOGLE_SERVICES_JSON;
+if (!b64 && !plain) {
+  console.warn('[inject-google-services] Missing google-services.json and GOOGLE_SERVICES_JSON_BASE64 / GOOGLE_SERVICES_JSON env vars.');
+  console.warn('Add file to repo OR set an EAS env var with base64 contents (GOOGLE_SERVICES_JSON_BASE64) or raw JSON (GOOGLE_SERVICES_JSON).');
   process.exit(0); // allow subsequent plugin to surface error
 }
 try {
-  const decoded = Buffer.from(b64, 'base64').toString('utf8');
+  const decoded = plain ? plain : Buffer.from(b64, 'base64').toString('utf8');
   // Basic validation: must parse JSON and contain project_info or client.
   const json = JSON.parse(decoded);
   if (!json.project_info && !json.client) {

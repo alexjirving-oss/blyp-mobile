@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -8,7 +9,6 @@ import {
   FlatList,
   ScrollView
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import GameService from '../services/GameService';
 import { auth } from '../config/firebase';
@@ -104,7 +104,7 @@ const GameRoomScreen = ({ navigation, route }) => {
     if (gameData.status === 'waiting') {
       return (
         <View style={styles.waitingContainer}>
-          <Ionicons name="hourglass-outline" size={64} color="#a855f7" />
+          <Icon  name="hourglass-outline" size={64} color="#a855f7"  />
           <Text style={styles.waitingTitle}>Waiting for Players</Text>
           <Text style={styles.waitingText}>
             {gameData.players.length}/{gameData.maxPlayers} players joined
@@ -113,7 +113,7 @@ const GameRoomScreen = ({ navigation, route }) => {
           {gameData.hostId === currentUser.uid && gameData.players.length >= 2 && (
             <TouchableOpacity style={styles.startButton} onPress={handleStartGame}>
               <LinearGradient colors={['#10b981', '#059669']} style={styles.startButtonGradient}>
-                <Ionicons name="play" size={20} color="#fff" />
+                <Icon  name="play" size={20} color="#fff"  />
                 <Text style={styles.startButtonText}>Start Game</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -142,7 +142,7 @@ const GameRoomScreen = ({ navigation, route }) => {
       // Fallback for other games not yet implemented
       return (
         <View style={styles.comingSoonContainer}>
-          <Ionicons name="construct-outline" size={64} color="#374151" />
+          <Icon  name="construct-outline" size={64} color="#374151"  />
           <Text style={styles.comingSoonTitle}>Game Coming Soon!</Text>
           <Text style={styles.comingSoonText}>
             {GameService.getGameDisplayName(gameType)} gameplay is still being developed. 
@@ -175,11 +175,11 @@ const GameRoomScreen = ({ navigation, route }) => {
       
       return (
         <View style={styles.finishedContainer}>
-          <Ionicons 
+          <Icon  
             name={winner ? "trophy" : "handshake"} 
             size={64} 
             color={winner ? "#fbbf24" : "#a855f7"} 
-          />
+           />
           <Text style={styles.finishedTitle}>Game Over!</Text>
           <Text style={styles.finishedResult}>
             {winner ? 
@@ -193,7 +193,7 @@ const GameRoomScreen = ({ navigation, route }) => {
             onPress={() => navigation.navigate('GamesList')}
           >
             <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.playAgainGradient}>
-              <Ionicons name="refresh" size={20} color="#fff" />
+              <Icon  name="refresh" size={20} color="#fff"  />
               <Text style={styles.playAgainText}>Play Again</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -217,7 +217,7 @@ const GameRoomScreen = ({ navigation, route }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
+          <Icon  name="chevron-back" size={24} color="#fff"  />
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
@@ -231,7 +231,7 @@ const GameRoomScreen = ({ navigation, route }) => {
         </View>
 
         <TouchableOpacity onPress={handleLeaveGame} style={styles.leaveButton}>
-          <Ionicons name="exit-outline" size={24} color="#ef4444" />
+          <Icon  name="exit-outline" size={24} color="#ef4444"  />
         </TouchableOpacity>
       </View>
 

@@ -8,7 +8,6 @@ import {
   Animated,
   Dimensions
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import GameService from '../services/GameService';
 

@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -11,7 +12,6 @@ import {
   ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { Video } from 'expo-av';
 import BlypLogo from '../components/BlypLogo';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -82,7 +82,7 @@ const PostPreviewScreen = () => {
           >
             {!videoStatus.isPlaying && videoStatus.isLoaded && (
               <View style={styles.playButton}>
-                <Ionicons name="play" size={32} color="white" />
+                <Icon  name="play" size={32} color="white"  />
               </View>
             )}
           </TouchableOpacity>
@@ -105,26 +105,26 @@ const PostPreviewScreen = () => {
         style={styles.actionButton}
         onPress={handleLike}
       >
-        <Ionicons 
+        <Icon  
           name={liked ? "heart" : "heart-outline"} 
           size={28} 
           color={liked ? "#ff1744" : "white"} 
-        />
+         />
         <Text style={styles.actionText}>{(post.likeCount || 0) + (liked ? 1 : 0)}</Text>
       </TouchableOpacity>
       
       <TouchableOpacity style={styles.actionButton}>
-        <Ionicons name="chatbubble-outline" size={24} color="white" />
+        <Icon  name="chatbubble-outline" size={24} color="white"  />
         <Text style={styles.actionText}>{post.commentCount || 0}</Text>
       </TouchableOpacity>
       
       <TouchableOpacity style={styles.actionButton}>
-        <Ionicons name="share-outline" size={24} color="white" />
+        <Icon  name="share-outline" size={24} color="white"  />
         <Text style={styles.actionText}>Share</Text>
       </TouchableOpacity>
       
       <TouchableOpacity style={styles.actionButton}>
-        <Ionicons name="bookmark-outline" size={24} color="white" />
+        <Icon  name="bookmark-outline" size={24} color="white"  />
       </TouchableOpacity>
     </View>
   );
@@ -139,11 +139,11 @@ const PostPreviewScreen = () => {
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="white" />
+          <Icon  name="arrow-back" size={24} color="white"  />
         </TouchableOpacity>
         <BlypLogo useGradientBackground={false} textStyle={{ fontSize: 24 }} />
         <TouchableOpacity style={styles.moreButton}>
-          <Ionicons name="ellipsis-horizontal" size={24} color="white" />
+          <Icon  name="ellipsis-horizontal" size={24} color="white"  />
         </TouchableOpacity>
       </View>
 

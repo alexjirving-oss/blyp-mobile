@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -12,12 +13,11 @@ import {
   StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { updateProfile } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, storage, db } from '../config/firebase';
+import { auth, storage, firestore as db } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
 
 const EditProfileScreen = ({ navigation }) => {
@@ -182,7 +182,7 @@ const EditProfileScreen = ({ navigation }) => {
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#ffffff" />
+          <Icon  name="arrow-back" size={24} color="#ffffff"  />
         </TouchableOpacity>
         <BlypLogo useGradientBackground={false} textStyle={{ fontSize: 24 }} />
         <TouchableOpacity 
@@ -211,7 +211,7 @@ const EditProfileScreen = ({ navigation }) => {
               style={styles.profileImage}
             />
             <View style={styles.imageOverlay}>
-              <Ionicons name="camera" size={24} color="#ffffff" />
+              <Icon  name="camera" size={24} color="#ffffff"  />
             </View>
           </TouchableOpacity>
           {isUploading && (
@@ -264,21 +264,21 @@ const EditProfileScreen = ({ navigation }) => {
         {/* Additional Options */}
         <View style={styles.optionsSection}>
           <TouchableOpacity style={styles.optionItem}>
-            <Ionicons name="notifications-outline" size={24} color="#d1d5db" />
+            <Icon  name="notifications-outline" size={24} color="#d1d5db"  />
             <Text style={styles.optionText}>Notification Settings</Text>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Icon  name="chevron-forward" size={20} color="#9ca3af"  />
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.optionItem}>
-            <Ionicons name="shield-outline" size={24} color="#d1d5db" />
+            <Icon  name="shield-outline" size={24} color="#d1d5db"  />
             <Text style={styles.optionText}>Privacy & Security</Text>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Icon  name="chevron-forward" size={20} color="#9ca3af"  />
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.optionItem}>
-            <Ionicons name="help-circle-outline" size={24} color="#d1d5db" />
+            <Icon  name="help-circle-outline" size={24} color="#d1d5db"  />
             <Text style={styles.optionText}>Help & Support</Text>
-            <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+            <Icon  name="chevron-forward" size={20} color="#9ca3af"  />
           </TouchableOpacity>
         </View>
       </ScrollView>

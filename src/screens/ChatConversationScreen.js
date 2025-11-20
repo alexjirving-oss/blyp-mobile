@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -13,13 +14,12 @@ import {
   StatusBar,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, where, getDocs, setDoc, getDoc } from 'firebase/firestore';
 import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../utils/scaleUtils';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
 
 const ChatScreen = ({ route, navigation }) => {
@@ -338,18 +338,18 @@ const ChatScreen = ({ route, navigation }) => {
             {isMe && (
               <View style={styles.messageStatus}>
                 {item.status === 'sent' && (
-                  <Ionicons name="checkmark" size={16} color="#8E9297" />
+                  <Icon  name="checkmark" size={16} color="#8E9297"  />
                 )}
                 {item.status === 'delivered' && (
                   <View style={styles.doubleCheck}>
-                    <Ionicons name="checkmark" size={16} color="#8E9297" style={styles.check1} />
-                    <Ionicons name="checkmark" size={16} color="#8E9297" style={styles.check2} />
+                    <Icon  name="checkmark" size={16} color="#8E9297" style={styles.check1}  />
+                    <Icon  name="checkmark" size={16} color="#8E9297" style={styles.check2}  />
                   </View>
                 )}
                 {item.status === 'read' && (
                   <View style={styles.doubleCheck}>
-                    <Ionicons name="checkmark" size={16} color="#00D4AA" style={styles.check1} />
-                    <Ionicons name="checkmark" size={16} color="#00D4AA" style={styles.check2} />
+                    <Icon  name="checkmark" size={16} color="#00D4AA" style={styles.check1}  />
+                    <Icon  name="checkmark" size={16} color="#00D4AA" style={styles.check2}  />
                   </View>
                 )}
               </View>
@@ -364,15 +364,15 @@ const ChatScreen = ({ route, navigation }) => {
     <View style={styles.blypHeader}>
       <View style={styles.headerTop}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#d1d5db" />
+          <Icon  name="arrow-back" size={24} color="#d1d5db"  />
         </TouchableOpacity>
         <BlypLogo useGradientBackground={true} />
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerActionButton}>
-            <Ionicons name="videocam" size={24} color="#d1d5db" />
+            <Icon  name="videocam" size={24} color="#d1d5db"  />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionButton}>
-            <Ionicons name="call" size={24} color="#d1d5db" />
+            <Icon  name="call" size={24} color="#d1d5db"  />
           </TouchableOpacity>
         </View>
       </View>
@@ -417,7 +417,7 @@ const ChatScreen = ({ route, navigation }) => {
           <View style={styles.inputContainer}>
             <View style={styles.inputWrapper}>
               <TouchableOpacity style={styles.attachButton}>
-                <Ionicons name="add" size={24} color="#8E9297" />
+                <Icon  name="add" size={24} color="#8E9297"  />
               </TouchableOpacity>
               
               <TextInput
@@ -432,11 +432,11 @@ const ChatScreen = ({ route, navigation }) => {
               />
               
               <TouchableOpacity style={styles.emojiButton}>
-                <Ionicons name="happy-outline" size={24} color="#8E9297" />
+                <Icon  name="happy-outline" size={24} color="#8E9297"  />
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.cameraButton}>
-                <Ionicons name="camera" size={24} color="#8E9297" />
+                <Icon  name="camera" size={24} color="#8E9297"  />
               </TouchableOpacity>
             </View>
             
@@ -449,11 +449,11 @@ const ChatScreen = ({ route, navigation }) => {
                 colors={message.trim() ? ['#a855f7', '#d946ef', '#ec4899'] : ['#64748b', '#475569']}
                 style={styles.sendButtonGradient}
               >
-                <Ionicons 
+                <Icon  
                   name={message.trim() ? "send" : "mic"} 
                   size={20} 
                   color="#fff" 
-                />
+                 />
               </LinearGradient>
             </TouchableOpacity>
           </View>

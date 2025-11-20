@@ -1,0 +1,5 @@
+# WebSocket early-import patches
+
+- Created src/runtime/waitForRuntime.ts (runtime readiness guard)
+- Scanned for offenders: none found in main src/; no patches applied to existing files.
+- Note: socket.io-client usage found only in blyp-gaming-features/ sandbox (not part of main app bundle).

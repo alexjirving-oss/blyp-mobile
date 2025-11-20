@@ -90,6 +90,7 @@ import FindPeopleScreen from './src/screens/FindPeopleScreen';
 // Gaming screens (lazy)
 const GamesScreen = React.lazy(() => import('./src/screens/GamesScreen'));
 const GameRoomScreen = React.lazy(() => import('./src/screens/GameRoomScreen'));
+const ModerationQueueScreen = React.lazy(() => import('./src/screens/ModerationQueueScreen'));
 // Chat rooms screens
 import ChatRoomsScreen from './src/screens/ChatRoomsScreen';
 import ChatRoomScreen from './src/screens/ChatRoomScreen';
@@ -242,6 +243,11 @@ function AppStack() {
       <Stack.Screen name="ChatRooms" component={ChatRoomsScreen} />
       <Stack.Screen name="ChatRoom" component={ChatRoomScreen} />
       <Stack.Screen name="CoinStore" component={CoinStoreScreen} />
+      <Stack.Screen name="ModerationQueue" children={() => (
+        <Suspense fallback={null}>
+          <ModerationQueueScreen />
+        </Suspense>
+      )} />
     </Stack.Navigator>
   );
 }
@@ -259,6 +265,12 @@ function AppInner() {
     }
   }, [user]);
   const effectiveUser = user || (hadUser && Date.now() < authStickyUntilRef.current ? {} : null);
+  // Development-only auth bypass (does NOT grant real identity). Keeps Security priority by requiring explicit env flag.
+  const devForceNoAuth = (process.env?.EXPO_PUBLIC_DEV_FORCE_NO_AUTH === '1');
+  if (devForceNoAuth && !effectiveUser) {
+    // eslint-disable-next-line no-console
+    console.warn('[BLYP][AUTH] DEV_FORCE_NO_AUTH active – rendering app without authenticated user');
+  }
   
   // Global error handler for uncaught exceptions
   useEffect(() => {
@@ -328,11 +340,17 @@ function AppInner() {
     );
   }
 
+  const showApp = devForceNoAuth || effectiveUser;
   return (
     <PerformanceProvider>
       <NavigationContainer>
         <StatusBar style="light" backgroundColor="#0f172a" />
-        {effectiveUser ? <AppStack /> : <AuthScreen />}
+        {showApp ? <AppStack /> : <AuthScreen />}
+        {devForceNoAuth && !effectiveUser && (
+          <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: '#be185d', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
+            <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>DEV AUTH BYPASS</Text>
+          </View>
+        )}
         <Toast />
       </NavigationContainer>
     </PerformanceProvider>
@@ -344,6 +362,7 @@ function AppInner() {
 // WebSocket polyfills or Metro connectivity are not yet established.
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [loadingNote, setLoadingNote] = useState('Initializing runtime…');
 
   // Run LogBox ignores after component mount
   useEffect(() => {
@@ -359,6 +378,23 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    // Secondary timeout to surface prolonged bootstrap waits
+    const warnTimeout = setTimeout(() => {
+      if (!cancelled && !ready) {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] still-waiting (>8s)');
+        setLoadingNote('Still preparing environment…');
+      }
+    }, 8000);
+    // Absolute fallback to avoid indefinite spinner if a dynamic import stalls
+    const hardFallbackTimeout = setTimeout(() => {
+      if (!cancelled && !ready) {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] hard-fallback firing (>15s) forcing ready=true');
+        setReady(true);
+        setLoadingNote('Continuing with partial initialization');
+      }
+    }, 15000);
     (async () => {
       // Hard delay to let RN polyfills and Dev Client settle
       await new Promise((res) => setTimeout(res, 3000));
@@ -367,12 +403,20 @@ export default function App() {
 
       // Defer non-essential startup side-effects to avoid early network calls
       try {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step preAuthCleanup start');
         // Proactively clean malformed Cognito tokens before Amplify/Cognito usage
         await import('./src/config/preAuthCleanup');
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step preAuthCleanup done');
       } catch {}
       try {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step amplify start');
         // Initialize AWS Amplify if configured (no secrets committed)
         await import('./src/config/amplify');
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step amplify done');
       } catch {}
       try {
         if (firebaseNative && crashlytics) {
@@ -380,19 +424,31 @@ export default function App() {
         }
       } catch {}
       try {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step sentry start');
         // Initialize observability (no-op if DSN not provided)
         await import('./src/monitoring/sentry');
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step sentry done');
       } catch {}
       try {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step streamingFlag start');
         // Prime remote streaming flag (non-blocking; enables kill-switch overrides)
         const { primeStreamingFlag } = await import('./src/config/StreamingFeatureFlag');
         primeStreamingFlag();
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] step streamingFlag done');
       } catch {}
 
       if (!cancelled) setReady(true);
+      if (!cancelled) {
+        // eslint-disable-next-line no-console
+        console.warn('[BLYP][BOOTSTRAP] ready=true (deferred init complete)');
+      }
     })();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(warnTimeout); clearTimeout(hardFallbackTimeout); };
   }, []);
 
   if (!ready) {
@@ -404,6 +460,7 @@ export default function App() {
           color="#a855f7" 
           style={{ marginTop: 20 }} 
         />
+        <Text style={{ marginTop: 12, color: '#64748b', fontSize: 14 }}>{loadingNote}</Text>
       </View>
     );
   }

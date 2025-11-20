@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -10,7 +11,6 @@ import {
   Dimensions,
   Animated
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import searchService from '../services/searchService';
 
@@ -89,13 +89,13 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       style={styles.suggestionItem}
       onPress={() => handleSuggestionPress(item)}
     >
-      <Ionicons 
+      <Icon  
         name={section === 'trending' ? 'trending-up' : 'time-outline'} 
         size={16} 
         color={section === 'trending' ? '#ec4899' : '#666'} 
-      />
+       />
       <Text style={styles.suggestionText}>{item}</Text>
-      <Ionicons name="arrow-up-outline" size={16} color="#666" style={styles.suggestionArrow} />
+      <Icon  name="arrow-up-outline" size={16} color="#666" style={styles.suggestionArrow}  />
     </TouchableOpacity>
   );
 
@@ -126,7 +126,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
               colors={[action.color, action.color + '80']}
               style={styles.quickActionIcon}
             >
-              <Ionicons name={action.icon} size={24} color="#fff" />
+              <Icon  name={action.icon} size={24} color="#fff"  />
             </LinearGradient>
             <Text style={styles.quickActionLabel}>{action.label}</Text>
           </TouchableOpacity>
@@ -150,7 +150,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       {suggestions?.trending && suggestions.trending.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Ionicons name="flame" size={20} color="#ec4899" />
+            <Icon  name="flame" size={20} color="#ec4899"  />
             <Text style={styles.sectionTitle}>Trending Now</Text>
           </View>
           <FlatList
@@ -167,7 +167,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
   return (
     <>
       <TouchableOpacity style={styles.searchBar} onPress={openSearchModal}>
-        <Ionicons name="search" size={20} color="#666" />
+        <Icon  name="search" size={20} color="#666"  />
         <Text style={styles.searchPlaceholder}>{placeholder}</Text>
       </TouchableOpacity>
 
@@ -188,7 +188,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
               {/* Modal Header */}
               <View style={styles.modalHeader}>
                 <View style={styles.searchInputContainer}>
-                  <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+                  <Icon  name="search" size={20} color="#666" style={styles.searchIcon}  />
                   <TextInput
                     style={styles.searchInput}
                     placeholder={placeholder}
@@ -203,7 +203,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
                   />
                   {searchQuery.length > 0 && (
                     <TouchableOpacity onPress={() => setSearchQuery('')}>
-                      <Ionicons name="close-circle" size={20} color="#666" />
+                      <Icon  name="close-circle" size={20} color="#666"  />
                     </TouchableOpacity>
                   )}
                 </View>

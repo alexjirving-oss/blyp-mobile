@@ -1,0 +1,103 @@
+{
+  "feed": {
+    "endless_vertical_autoplay": true,
+    "mute_toggle_and_volume_memory": true,
+    "double_tap_like_with_heart_burst": true,
+    "like/comment/share/save": true,
+    "follow_from_feed": true,
+    "caption_hashtags_mentions_links": true,
+    "music_chip_tap_to_sound_page": true,
+    "creator_avatar_cta_follow": true,
+    "report/not_interested/long_press_actions": true,
+    "playlist/series_grouping": true,
+    "hd_playback_adaptive_buffering": true,
+    "prefetch_next_video": true
+  },
+  "creation": {
+    "record_camera_front_back_flip": true,
+    "upload_from_gallery": true,
+    "trim_split_merge": true,
+    "speed_control_05x_to_3x": true,
+    "countdown_timer_handsfree": true,
+    "beauty_filters_ar_effects": true,
+    "green_screen": true,
+    "voiceover_noise_reduction": true,
+    "text_stickers_animated": true,
+    "captions_auto_asr_and_edit": true,
+    "music_library_select_clip": true,
+    "drafts_save_restore": true,
+    "privacy_per_post_public_friends_private": true
+  },
+  "sound_library": {
+    "search_sounds": true,
+    "attach_sound_to_post": true,
+    "sound_detail_page_with_reuse": true
+  },
+  "discovery": {
+    "for_you_ranked": true,
+    "following_feed": true,
+    "search_top_users_videos_sounds_hashtags": true,
+    "trending_hashtags_challenges": true
+  },
+  "social_graph": {
+    "follow_unfollow": true,
+    "followers_following_lists": true,
+    "block_restrict_report": true
+  },
+  "engagement": {
+    "comments_threads_pins_replies": true,
+    "duet_side_by_side": true,
+    "stitch_clip_5s_from_other": true,
+    "qna": true,
+    "share_deeplinks": true
+  },
+  "live": {
+    "go_live": true,
+    "viewer_count_realtime": true,
+    "live_chat": true,
+    "moderation_tools": true,
+    "gifting_virtual_items": true,
+    "guest_boxes_cohost": true,
+    "pk_battles": true,
+    "pin_comments": true,
+    "live_events_scheduling": true
+  },
+  "monetization": {
+    "coins_purchase_store": true,
+    "send_gifts_on_live_and_vods": true,
+    "creator_diamonds_conversion": true,
+    "payouts_kyc_thresholds": true,
+    "transaction_ledger_idempotent": true,
+    "limits_daily_anti_fraud": true
+  },
+  "profile": {
+    "bio_links": true,
+    "grid_videos_and_likes_tab": true,
+    "playlists_series": true,
+    "drafts_visible_to_owner": true,
+    "private_videos": true
+  },
+  "messaging": {
+    "dm_threads": true,
+    "read_receipts_optional": true,
+    "media_shares": true,
+    "message_requests": true
+  },
+  "safety_privacy": {
+    "age_gating": true,
+    "content_filters": true,
+    "restricted_mode": true,
+    "comment_filters_keywords": true,
+    "privacy_settings_per_post_and_account": true
+  },
+  "infra_app": {
+    "auth": ["Cognito", "FirebaseAuth"],
+    "db": ["Firestore"],
+    "storage": ["CloudStorage", "HLSSegments"],
+    "realtime_ws": true,
+    "analytics_events": true,
+    "feature_flags_remote": true,
+    "crash_reporting": true,
+    "perf_logging": true
+  }
+}

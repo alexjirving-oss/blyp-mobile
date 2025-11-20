@@ -1,0 +1,3 @@
+any annotations: 16
+@ts-ignore: 2
+eslint-disable: 4

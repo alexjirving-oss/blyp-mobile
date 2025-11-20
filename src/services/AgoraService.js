@@ -1,265 +1,502 @@
-import { Platform } from 'react-native';
-import RtcEngine from 'react-native-agora';
-import { requestCameraAndAudioPermission } from '../utils/permissions';
-
-import { AGORA_APP_ID } from '../config/agora';
-
-// Your Agora App ID (replace this with your actual App ID)
-// const AGORA_APP_ID = 'YOUR_AGORA_APP_ID'; // ⚠️ Replace with your App ID
+import { db, auth } from '../config/firebase';
 
 class AgoraService {
   constructor() {
-    this.engine = null;
-    this.localUid = null;
+    this.localStream = null;
+    this.remoteStreams = new Map();
+    this.peerConnections = new Map();
+    this.isInitialized = false;
     this.channelId = null;
-    this.eventListeners = [];
+  this.userId = (auth().currentUser || auth.currentUser)?.uid || null;
+    this.signalCollection = 'webrtc_signals';
+    this.streamsCollection = 'streams';
+    this.unsubscribeSignal = null;
+    this.lastConnectionAttempt = null;
+    this._webrtc = null; // Lazy-loaded react-native-webrtc module
+    
+    // Event listeners
+    this.eventListeners = {
+      onRemoteStream: null,
+      onUserLeft: null
+    };
   }
 
-  /**
-   * Initialize the Agora RTC Engine
-   * @returns {Promise<RtcEngine>} - Initialized RTC Engine instance
-   */
+  // Lazy import react-native-webrtc only when needed to avoid static dep and missing dep warnings
+  async ensureWebRTC() {
+    if (this._webrtc) return this._webrtc;
+    try {
+      // Dynamic import so that Expo projects without Dev Client don't fail static analysis
+      const pkg = 'react-native-' + 'webrtc';
+      const mod = await import(pkg);
+      this._webrtc = mod;
+      return this._webrtc;
+    } catch (e) {
+      console.warn('react-native-webrtc not available in this runtime:', e?.message || e);
+      this._webrtc = null;
+      return null;
+    }
+  }
+
   async init() {
     try {
-      console.log('🔧 Agora: Starting initialization with App ID:', AGORA_APP_ID.substring(0, 8) + '...');
+      console.log("🔄 WebRTC initialized");
+      this.isInitialized = true;
+      return true;
+    } catch (error) {
+      console.error("❌ WebRTC initialization error:", error);
+      return false;
+    }
+  }
+
+  async getLocalStream() {
+    try {
+      const rtc = await this.ensureWebRTC();
+      if (!rtc || !rtc.mediaDevices) throw new Error('WebRTC mediaDevices unavailable');
+      const stream = await rtc.mediaDevices.getUserMedia({
+        video: { width: 1280, height: 720 },
+        audio: true
+      });
+      this.localStream = stream;
+      return stream;
+    } catch (error) {
+      console.error("❌ Error getting local stream:", error);
+      return null;
+    }
+  }
+
+  async joinChannelAsBroadcaster(channelId) {
+    try {
+      this.channelId = channelId;
       
-      // Request permissions on Android
-      if (Platform.OS === 'android') {
-        console.log('📱 Agora: Requesting camera and audio permissions...');
-        await requestCameraAndAudioPermission();
-        console.log('✅ Agora: Permissions granted');
+      // Get local media stream
+      const stream = await this.getLocalStream();
+      if (!stream) {
+        console.error(" Failed to get local stream");
+        return false;
       }
       
-      // Create RTC engine instance
-      console.log('🎬 Agora: Creating RTC engine instance...');
-      this.engine = await RtcEngine.create(AGORA_APP_ID);
-      console.log('✅ Agora: RTC engine created');
+      // Set up signaling
+      await this.setupSignaling();
       
-      // Enable video & audio modules
-      console.log('🎥 Agora: Enabling video and audio...');
-      await this.engine.enableVideo();
-      await this.engine.enableAudio();
+      // Add broadcaster to the channel
+      await this.addUserToChannel('broadcaster');
       
-      // Set default configurations
-      console.log('⚙️ Agora: Setting channel profile and client role...');
-      await this.engine.setChannelProfile(1); // LiveBroadcasting
-      await this.engine.setClientRole(1); // Broadcaster by default
-      
-      // Set video encoding config for better quality
-      console.log('📹 Agora: Configuring video encoding...');
-      await this.engine.setVideoEncoderConfiguration({
-        dimensions: {
-          width: 640,
-          height: 360
-        },
-        frameRate: 24,
-        bitrate: 1000,
-        orientationMode: 0, // Adaptive
-        degradationPreference: 2, // BalancedMode
-      });
-      
-      // Enable dual-stream mode for better bandwidth adaptation
-      await this.engine.enableDualStreamMode(true);
-      
-      console.log('✅ Agora RTC Engine initialized successfully');
-      return this.engine;
+      console.log(" Joined as broadcaster:", channelId);
+      return true;
     } catch (error) {
-      console.error('❌ Error initializing Agora RTC Engine:', error);
-      console.error('❌ Error details:', error.message, error.code);
-      throw error;
+      console.error(" Error joining as broadcaster:", error);
+      return false;
     }
   }
-  
-  /**
-   * Start local video preview
-   * @param {number} viewId - Local view component ID
-   */
-  async startPreview() {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
-    }
-    
-    try {
-      await this.engine.startPreview();
-      console.log('📹 Local video preview started');
-    } catch (error) {
-      console.error('❌ Error starting preview:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Join a channel as broadcaster (streamer)
-   * @param {string} channelId - Channel ID to join
-   * @param {string} token - Authentication token (null if App ID Authentication)
-   * @returns {Promise<void>}
-   */
-  async joinChannelAsBroadcaster(channelId, token = null) {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
-    }
-    
+
+  async joinChannelAsAudience(channelId) {
     try {
       this.channelId = channelId;
       
-      // Set client role to broadcaster
-      await this.engine.setClientRole(1); // 1 = Broadcaster
+      // Set up signaling
+      await this.setupSignaling();
       
-      // Join the channel
-      await this.engine.joinChannel(token, channelId, null, 0);
-      console.log(`🚀 Joined channel ${channelId} as broadcaster`);
+      // Add audience member to the channel
+      await this.addUserToChannel('audience');
+      
+      // Find broadcaster and connect
+      const channelDoc = await db.collection(this.streamsCollection).doc(channelId).get();
+      if (channelDoc.exists) {
+        const channelData = channelDoc.data();
+        if (channelData.broadcaster) {
+          console.log(" Connecting to broadcaster:", channelData.broadcaster);
+          await this.createPeerConnection(channelData.broadcaster);
+          await this.createOffer(channelData.broadcaster);
+        }
+      }
+      
+      console.log(" Joined as viewer:", channelId);
+      return true;
     } catch (error) {
-      console.error(`❌ Error joining channel ${channelId}:`, error);
-      throw error;
+      console.error(" Error joining as audience:", error);
+      return false;
     }
   }
-  
-  /**
-   * Join a channel as audience (viewer)
-   * @param {string} channelId - Channel ID to join
-   * @param {string} token - Authentication token (null if App ID Authentication)
-   * @returns {Promise<void>}
-   */
-  async joinChannelAsAudience(channelId, token = null) {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
-    }
-    
-    try {
-      this.channelId = channelId;
-      
-      // Set client role to audience
-      await this.engine.setClientRole(2); // 2 = Audience
-      
-      // Join the channel
-      await this.engine.joinChannel(token, channelId, null, 0);
-      console.log(`👀 Joined channel ${channelId} as audience`);
-    } catch (error) {
-      console.error(`❌ Error joining channel ${channelId}:`, error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Leave the current channel
-   * @returns {Promise<void>}
-   */
+
   async leaveChannel() {
-    if (!this.engine) {
-      return;
-    }
-    
     try {
-      await this.engine.leaveChannel();
-      console.log(`👋 Left channel ${this.channelId}`);
+      // Stop local stream
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(track => track.stop());
+        this.localStream = null;
+      }
+      
+      // Close peer connections
+      this.peerConnections.forEach((pc) => pc.close());
+      this.peerConnections.clear();
+      this.remoteStreams.clear();
+      
+      // Clean up signaling
+      if (this.unsubscribeSignal) {
+        this.unsubscribeSignal();
+        this.unsubscribeSignal = null;
+      }
+      
+      // Remove user from channel
+      if (this.channelId && this.userId) {
+        try {
+          await deleteDoc(doc(db, this.streamsCollection, this.channelId, 'participants', this.userId));
+        } catch (e) {
+          console.warn(" Failed to remove participant from channel", e);
+        }
+      }
+      
       this.channelId = null;
+      
+      console.log(" Left channel successfully");
+      return true;
     } catch (error) {
-      console.error('❌ Error leaving channel:', error);
-      throw error;
+      console.error(" Error leaving channel:", error);
+      return false;
     }
+  }
+
+  getLocalVideoStream() {
+    return this.localStream;
   }
   
   /**
-   * Switch camera between front and back
-   * @returns {Promise<void>}
+   * Set up WebRTC signaling
    */
-  async switchCamera() {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
+  async setupSignaling() {
+    if (this.unsubscribeSignal) {
+      this.unsubscribeSignal();
     }
     
-    try {
-      await this.engine.switchCamera();
-      console.log('🔄 Camera switched');
-    } catch (error) {
-      console.error('❌ Error switching camera:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Toggle local audio (mute/unmute)
-   * @param {boolean} muted - Whether audio should be muted
-   * @returns {Promise<void>}
-   */
-  async muteLocalAudio(muted) {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
-    }
-    
-    try {
-      await this.engine.muteLocalAudioStream(muted);
-      console.log(`🎤 Local audio ${muted ? 'muted' : 'unmuted'}`);
-    } catch (error) {
-      console.error('❌ Error toggling local audio:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Toggle local video (enable/disable)
-   * @param {boolean} disabled - Whether video should be disabled
-   * @returns {Promise<void>}
-   */
-  async disableLocalVideo(disabled) {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
-    }
-    
-    try {
-      await this.engine.muteLocalVideoStream(disabled);
-      console.log(`📹 Local video ${disabled ? 'disabled' : 'enabled'}`);
-    } catch (error) {
-      console.error('❌ Error toggling local video:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Add event listener for Agora events
-   * @param {string} event - Event name
-   * @param {Function} callback - Callback function
-   */
-  addListener(event, callback) {
-    if (!this.engine) {
-      throw new Error('Agora RTC Engine not initialized');
-    }
-    
-    const listener = this.engine.addListener(event, callback);
-    this.eventListeners.push(listener);
-    return listener;
-  }
-  
-  /**
-   * Clean up resources
-   */
-  async destroy() {
-    if (!this.engine) {
+    if (!this.userId || !this.channelId) {
+      console.error(" Missing userId or channelId for signaling");
       return;
     }
     
-    try {
-      // Remove all event listeners
-      this.eventListeners.forEach(listener => {
-        if (listener && typeof listener.remove === 'function') {
-          listener.remove();
+    console.log(" Setting up WebRTC signaling...");
+    
+    // Listen for signaling messages
+    const q = db.collection(this.signalCollection)
+      .where('targetId', '==', this.userId)
+      .where('channelId', '==', this.channelId);
+    
+    this.unsubscribeSignal = q.onSnapshot((snapshot) => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          console.log(` Received ${data.type} signal from ${data.fromId}`);
+          
+          // Process the signaling message
+          await this.handleSignal(data);
+          
+          // Delete the processed signal
+          try {
+            await change.doc.ref.delete();
+          } catch (e) {
+            console.warn(' Failed to delete processed signal', e);
+          }
         }
       });
-      this.eventListeners = [];
+    });
+  }
+  
+  /**
+   * Add user to channel participants
+   */
+  async addUserToChannel(role) {
+    if (!this.userId || !this.channelId) return;
+    
+    const userRef = db.collection(this.streamsCollection).doc(this.channelId).collection('participants').doc(this.userId);
+    
+    await userRef.set({
+      userId: this.userId,
+      role,
+      joinedAt: new Date().toISOString()
+    });
+    
+    // If broadcaster, update the stream document
+    if (role === 'broadcaster') {
+      await db.collection(this.streamsCollection).doc(this.channelId).update({
+        broadcaster: this.userId
+      });
+    }
+  }
+  
+  /**
+   * Create a peer connection to another user
+   */
+  async createPeerConnection(remoteUserId) {
+    if (this.peerConnections.has(remoteUserId)) {
+      console.log(` Peer connection to ${remoteUserId} already exists`);
+      return this.peerConnections.get(remoteUserId);
+    }
+    
+    try {
+      // Create new peer connection
+      const rtc = await this.ensureWebRTC();
+      if (!rtc || !rtc.RTCPeerConnection) throw new Error('WebRTC RTCPeerConnection unavailable');
+      const pc = new rtc.RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
       
-      // Leave channel if in one
-      if (this.channelId) {
-        await this.leaveChannel();
+      // Add local stream to connection if available
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(track => {
+          pc.addTrack(track, this.localStream);
+        });
       }
       
-      // Destroy the engine
-      await this.engine.destroy();
-      this.engine = null;
-      console.log('🗑️ Agora RTC Engine destroyed');
+      // Handle ICE candidates
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate) {
+          this.sendSignal(remoteUserId, 'ice-candidate', { candidate });
+        }
+      };
+      
+      // Handle connection state changes
+      pc.onconnectionstatechange = () => {
+        console.log(` Connection state: ${pc.connectionState} with ${remoteUserId}`);
+        
+        // Handle connection state changes
+        this.handleConnectionStateChange(pc, remoteUserId);
+      };
+      
+      // Handle remote stream
+      pc.ontrack = (event) => {
+        console.log(` Received remote track from ${remoteUserId}`);
+        if (event.streams && event.streams[0]) {
+          this.remoteStreams.set(remoteUserId, event.streams[0]);
+          
+          // Notify listeners about the new remote stream
+          if (this.eventListeners.onRemoteStream) {
+            this.eventListeners.onRemoteStream(remoteUserId, event.streams[0]);
+          }
+        }
+      };
+      
+      this.peerConnections.set(remoteUserId, pc);
+      return pc;
     } catch (error) {
-      console.error('❌ Error destroying Agora RTC Engine:', error);
+      console.error(' Error creating peer connection:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Create and send offer to remote peer
+   */
+  async createOffer(remoteUserId) {
+    try {
+      let pc = this.peerConnections.get(remoteUserId);
+      if (!pc) {
+        pc = await this.createPeerConnection(remoteUserId);
+      }
+      
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      this.sendSignal(remoteUserId, 'offer', {
+        sdp: pc.localDescription
+      });
+    } catch (error) {
+      console.error(' Error creating offer:', error);
+    }
+  }
+  
+  /**
+   * Send a signaling message to another user
+   */
+  async sendSignal(targetId, type, payload) {
+    try {
+      await db.collection(this.signalCollection).add({
+        channelId: this.channelId,
+        fromId: this.userId,
+        targetId,
+        type,
+        payload,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error(' Error sending signal:', error);
+    }
+  }
+  
+  /**
+   * Handle incoming signal
+   */
+  async handleSignal(data) {
+    const { fromId, type, payload } = data;
+    
+    switch (type) {
+      case 'offer':
+        await this.handleOffer(fromId, payload.sdp);
+        break;
+      case 'answer':
+        await this.handleAnswer(fromId, payload.sdp);
+        break;
+      case 'ice-candidate':
+        await this.handleIceCandidate(fromId, payload.candidate);
+        break;
+      default:
+        console.warn(` Unknown signal type: ${type}`);
+    }
+  }
+  
+  /**
+   * Handle an offer from a remote peer
+   */
+  async handleOffer(fromId, sdp) {
+    try {
+      let pc = this.peerConnections.get(fromId);
+      if (!pc) {
+        pc = await this.createPeerConnection(fromId);
+      }
+      
+      const rtc = await this.ensureWebRTC();
+      if (!rtc || !rtc.RTCSessionDescription) throw new Error('WebRTC RTCSessionDescription unavailable');
+      await pc.setRemoteDescription(new rtc.RTCSessionDescription(sdp));
+      
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      this.sendSignal(fromId, 'answer', {
+        sdp: pc.localDescription
+      });
+    } catch (error) {
+      console.error(' Error handling offer:', error);
+    }
+  }
+  
+  /**
+   * Handle an answer from a remote peer
+   */
+  async handleAnswer(fromId, sdp) {
+    try {
+      const pc = this.peerConnections.get(fromId);
+      if (pc) {
+        const rtc = await this.ensureWebRTC();
+        if (!rtc || !rtc.RTCSessionDescription) throw new Error('WebRTC RTCSessionDescription unavailable');
+        await pc.setRemoteDescription(new rtc.RTCSessionDescription(sdp));
+      }
+    } catch (error) {
+      console.error(' Error handling answer:', error);
+    }
+  }
+  
+  /**
+   * Handle an ICE candidate from a remote peer
+   */
+  async handleIceCandidate(fromId, candidate) {
+    try {
+      const pc = this.peerConnections.get(fromId);
+      if (pc) {
+        const rtc = await this.ensureWebRTC();
+        if (!rtc || !rtc.RTCIceCandidate) throw new Error('WebRTC RTCIceCandidate unavailable');
+        await pc.addIceCandidate(new rtc.RTCIceCandidate(candidate));
+      }
+    } catch (error) {
+      console.error(' Error handling ICE candidate:', error);
+    }
+  }
+  
+  /**
+   * Handle connection state changes and attempt reconnection if needed
+   */
+  async handleConnectionStateChange(pc, remoteUserId) {
+    if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      console.log(` Connection to ${remoteUserId} is ${pc.connectionState}, attempting reconnection...`);
+      
+      // Close the old connection
+      pc.close();
+      this.peerConnections.delete(remoteUserId);
+      this.remoteStreams.delete(remoteUserId);
+      
+      // Notify about user leaving
+      if (this.eventListeners.onUserLeft) {
+        this.eventListeners.onUserLeft(remoteUserId);
+      }
+      
+      // Prevent too frequent reconnection attempts
+      const now = Date.now();
+      if (!this.lastConnectionAttempt || (now - this.lastConnectionAttempt > 5000)) {
+        this.lastConnectionAttempt = now;
+        
+        // Only attempt to reconnect if we have a channel ID and we're not the broadcaster
+        if (this.channelId) {
+          setTimeout(async () => {
+            try {
+              const channelDoc = await db.collection(this.streamsCollection).doc(this.channelId).get();
+              if (channelDoc.exists) {
+                const channelData = channelDoc.data();
+                if (channelData.broadcaster) {
+                  console.log(` Attempting to reconnect to broadcaster: ${channelData.broadcaster}`);
+                  await this.createPeerConnection(channelData.broadcaster);
+                  await this.createOffer(channelData.broadcaster);
+                }
+              }
+            } catch (error) {
+              console.error(' Reconnection attempt failed:', error);
+            }
+          }, 3000); // Wait 3 seconds before trying to reconnect
+        }
+      }
+    }
+  }
+  
+  /**
+   * Set event listeners for WebRTC events
+   */
+  setEventListeners(listeners) {
+    this.eventListeners = { ...this.eventListeners, ...listeners };
+    console.log('📡 WebRTC event listeners updated');
+  }
+  
+  /**
+   * Get a specific remote stream by user ID
+   */
+  getRemoteStream(userId) {
+    return this.remoteStreams.get(userId);
+  }
+  
+  /**
+   * Get all remote streams
+   */
+  getAllRemoteStreams() {
+    return Array.from(this.remoteStreams.values());
+  }
+  
+  /**
+   * Get all peer connections
+   */
+  getPeerConnections() {
+    return this.peerConnections;
+  }
+  
+  /**
+   * Switch between front and back camera
+   */
+  switchCamera() {
+    try {
+      if (this.localStream) {
+        const videoTrack = this.localStream.getVideoTracks()[0];
+        if (videoTrack && videoTrack._switchCamera) {
+          videoTrack._switchCamera();
+          console.log('📸 Camera switched');
+          return true;
+        }
+      }
+      console.warn('⚠️ Cannot switch camera - no local stream or video track');
+      return false;
+    } catch (error) {
+      console.error('❌ Error switching camera:', error);
+      return false;
     }
   }
 }
 
+// Export a lightweight placeholder to avoid import-time failures in environments without react-native-webrtc
+export const RTCView = () => null;
 export default new AgoraService();

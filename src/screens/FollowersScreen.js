@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -11,9 +12,8 @@ import {
   RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import { 
   collection, 
   query, 
@@ -242,7 +242,7 @@ const FollowersScreen = () => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Icon  name="arrow-back" size={24} color="#fff"  />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
             {type === 'followers' ? 'Followers' : 'Following'}
@@ -258,11 +258,11 @@ const FollowersScreen = () => {
           </View>
         ) : users.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <Ionicons 
+            <Icon  
               name={type === 'followers' ? 'people-outline' : 'person-add-outline'} 
               size={64} 
               color="#666" 
-            />
+             />
             <Text style={styles.emptyText}>
               {type === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
             </Text>

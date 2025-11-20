@@ -4,7 +4,7 @@ import {
   setDoc, 
   getDocs 
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 /**
  * Add fake followers to boost a user's follower count

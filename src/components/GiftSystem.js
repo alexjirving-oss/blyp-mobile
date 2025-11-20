@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -12,7 +13,6 @@ import {
   Easing,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { auth } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 
@@ -375,7 +375,7 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
         
         {userBalance < gift.cost && (
           <View style={styles.insufficientOverlay}>
-            <Ionicons name="lock-closed" size={16} color="#fff" />
+            <Icon  name="lock-closed" size={16} color="#fff"  />
           </View>
         )}
       </LinearGradient>
@@ -393,7 +393,7 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
           colors={['#f59e0b', '#fbbf24']}
           style={styles.giftButtonGradient}
         >
-          <Ionicons name="gift" size={16} color="#fff" />
+          <Icon  name="gift" size={16} color="#fff"  />
           <Text style={styles.giftButtonText}>Gift</Text>
         </LinearGradient>
       </TouchableOpacity>
@@ -494,7 +494,7 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
                 style={styles.closeButton}
                 onPress={() => setShowGiftModal(false)}
               >
-                <Ionicons name="close" size={24} color="#fff" />
+                <Icon  name="close" size={24} color="#fff"  />
               </TouchableOpacity>
               <Text style={styles.modalTitle}>Send Gift</Text>
               <View style={styles.balanceContainer}>

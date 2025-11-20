@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -11,7 +12,6 @@ import {
   Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { auth } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
@@ -306,7 +306,7 @@ const CoinStoreScreen = ({ navigation }) => {
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Icon  name="arrow-back" size={24} color="#fff"  />
         </TouchableOpacity>
         
         <Text style={styles.headerTitle}>Currency Store</Text>

@@ -1,0 +1,8 @@
+PKG=npm
+Node=v22.20.0
+NPM=10.9.3
+Yarn=none
+PNPM=none
+OS=win32 x64
+Java=
+Gradle=none

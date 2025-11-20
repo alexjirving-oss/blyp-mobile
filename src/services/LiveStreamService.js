@@ -1,22 +1,4 @@
-import { 
-  collection, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  getDoc, 
-  getDocs, 
-  query, 
-  where, 
-  orderBy, 
-  limit, 
-  serverTimestamp, 
-  increment,
-  onSnapshot,
-  runTransaction
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../config/firebase';
+import { db, auth, storage } from '../config/firebase';
 import { trackActivity } from '../utils/activityTracker';
 
 /**
@@ -39,24 +21,24 @@ class LiveStreamService {
       
       // Upload thumbnail if provided
       let thumbnailUrl = null;
-      if (thumbnailFile) {
-        const storageRef = ref(storage, `users/${user.uid}/thumbnails/stream-${Date.now()}`);
-        await uploadBytes(storageRef, thumbnailFile);
-        thumbnailUrl = await getDownloadURL(storageRef);
+      if (thumbnailFile && typeof thumbnailFile === 'string') {
+        const storageRef = storage().ref(`users/${user.uid}/thumbnails/stream-${Date.now()}`);
+        await storageRef.putFile(thumbnailFile);
+        thumbnailUrl = await storageRef.getDownloadURL();
       }
       
       // Create stream document
-      const streamRef = collection(db, 'liveStreams');
-      const streamDoc = await addDoc(streamRef, {
+      const streamRef = db.collection('liveStreams');
+      const streamDoc = await streamRef.add({
         userId: user.uid,
         title: title || 'Untitled Stream',
         description: description || '',
         thumbnailUrl,
-        startedAt: serverTimestamp(),
+        startedAt: firestore.FieldValue.serverTimestamp(),
         status: 'live',
-        viewCount: 0,
+        viewCount: 1, // Start with 1 viewer (the creator)
         likeCount: 0,
-        peakViewerCount: 0,
+        peakViewerCount: 1,
         settings: {
           privacy: settings.privacy || 'public',
           allowComments: settings.allowComments !== false,
@@ -68,14 +50,13 @@ class LiveStreamService {
       });
       
       // Update user profile to indicate they are live
-      const userRef = doc(db, 'userProfiles', user.uid);
-      await updateDoc(userRef, {
+      const userRef = db.collection('userProfiles').doc(user.uid);
+      await userRef.set({
         isLive: true,
         currentStreamId: streamDoc.id,
-      });
+      }, { merge: true });
       
-      // Track activity
-      trackActivity(user.uid, 'stream_started', { streamId: streamDoc.id });
+      // Note: Not tracking stream_started as self-activity (would be filtered out anyway)
       
       console.log(`🔴 Started livestream: ${streamDoc.id}`);
       return streamDoc.id;
@@ -94,10 +75,10 @@ class LiveStreamService {
       const user = auth.currentUser;
       if (!user) throw new Error('User must be logged in to end a stream');
       
-      const streamRef = doc(db, 'liveStreams', streamId);
-      const streamDoc = await getDoc(streamRef);
+      const streamRef = db.collection('liveStreams').doc(streamId);
+      const streamDoc = await streamRef.get();
       
-      if (!streamDoc.exists()) {
+      if (!streamDoc.exists) {
         throw new Error('Stream not found');
       }
       
@@ -105,18 +86,19 @@ class LiveStreamService {
         throw new Error('Only the stream creator can end the stream');
       }
       
-      // Update stream status
-      await updateDoc(streamRef, {
+      // Update stream status and reset viewer count
+      await streamRef.update({
         status: 'ended',
-        endedAt: serverTimestamp(),
+        endedAt: firestore.FieldValue.serverTimestamp(),
+        viewCount: 0, // Reset viewer count when stream ends
       });
       
       // Update user profile
-      const userRef = doc(db, 'userProfiles', user.uid);
-      await updateDoc(userRef, {
+      const userRef = db.collection('userProfiles').doc(user.uid);
+      await userRef.set({
         isLive: false,
         currentStreamId: null,
-      });
+      }, { merge: true });
       
       // Calculate stream duration for analytics
       const streamData = streamDoc.data();
@@ -126,19 +108,13 @@ class LiveStreamService {
       const duration = (Date.now() - startTime) / 1000; // in seconds
       
       // Save stream stats
-      const statsRef = doc(db, `users/${user.uid}/liveStreamStats/${streamId}`);
-      await updateDoc(statsRef, {
-        endedAt: serverTimestamp(),
+      const statsRef = db.collection('users').doc(user.uid).collection('liveStreamStats').doc(streamId);
+      await statsRef.update({
+        endedAt: firestore.FieldValue.serverTimestamp(),
         duration,
       });
       
-      // Track activity
-      trackActivity(user.uid, 'stream_ended', { 
-        streamId,
-        duration,
-        viewCount: streamData.viewCount || 0,
-        peakViewerCount: streamData.peakViewerCount || 0,
-      });
+      // Note: Not tracking stream_ended as self-activity (would be filtered out anyway)
       
       console.log(`⏹️ Ended livestream: ${streamId}`);
       return true;
@@ -155,17 +131,15 @@ class LiveStreamService {
    */
   async getActiveStreams(maxResults = 20) {
     try {
-      const streamsQuery = query(
-        collection(db, 'liveStreams'),
-        where('status', '==', 'live'),
-        orderBy('startedAt', 'desc'),
-        limit(maxResults)
-      );
-      
-      const snapshot = await getDocs(streamsQuery);
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+      const snapshot = await db
+        .collection('liveStreams')
+        .where('status', '==', 'live')
+        .orderBy('startedAt', 'desc')
+        .limit(maxResults)
+        .get();
+      return snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
       }));
     } catch (error) {
       console.error('❌ Error getting active streams:', error);
@@ -180,13 +154,13 @@ class LiveStreamService {
    * @returns {Function} - Unsubscribe function
    */
   subscribeToStream(streamId, callback) {
-    const streamRef = doc(db, 'liveStreams', streamId);
+    const streamRef = db.collection('liveStreams').doc(streamId);
     
-    return onSnapshot(streamRef, (doc) => {
-      if (doc.exists()) {
+    return streamRef.onSnapshot((docSnap) => {
+      if (docSnap.exists) {
         callback({
-          id: doc.id,
-          ...doc.data()
+          id: docSnap.id,
+          ...docSnap.data()
         });
       } else {
         callback(null);
@@ -203,17 +177,17 @@ class LiveStreamService {
    * @returns {Function} - Unsubscribe function
    */
   subscribeToComments(streamId, callback) {
-    const commentsQuery = query(
-      collection(db, 'streamComments'),
-      where('streamId', '==', streamId),
-      orderBy('createdAt', 'desc'),
-      limit(50)
-    );
+    const commentsQuery = db
+      .collection('liveStreams')
+      .doc(streamId)
+      .collection('comments')
+      .orderBy('createdAt', 'desc')
+      .limit(50);
     
-    return onSnapshot(commentsQuery, (snapshot) => {
-      const comments = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+    return commentsQuery.onSnapshot((snapshot) => {
+      const comments = snapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
       }));
       
       callback(comments);
@@ -233,14 +207,13 @@ class LiveStreamService {
       const user = auth.currentUser;
       if (!user) throw new Error('User must be logged in to comment');
       
-      const commentRef = collection(db, 'streamComments');
-      const commentDoc = await addDoc(commentRef, {
-        streamId,
+      const commentRef = db.collection('liveStreams').doc(streamId).collection('comments');
+      const commentDoc = await commentRef.add({
         userId: user.uid,
         displayName: user.displayName,
         photoURL: user.photoURL,
         content,
-        createdAt: serverTimestamp(),
+        createdAt: firestore.FieldValue.serverTimestamp(),
         isBlocked: false,
       });
       
@@ -258,31 +231,37 @@ class LiveStreamService {
    * @returns {Promise<number>} - New view count
    */
   async updateViewCount(streamId, isJoining) {
-    const streamRef = doc(db, 'liveStreams', streamId);
+  const streamRef = db.collection('liveStreams').doc(streamId);
     
     try {
-      return await runTransaction(db, async (transaction) => {
-        const streamDoc = await transaction.get(streamRef);
+      // Use Firestore increment for atomic operations
+      const incrementValue = isJoining ? 1 : -1;
+      
+      await streamRef.update({
+        viewCount: firestore.FieldValue.increment(incrementValue)
+      });
+      
+      // Get the updated document to return the new count and update peak if needed
+      const updatedDoc = await streamRef.get();
+      if (updatedDoc.exists) {
+        const data = updatedDoc.data();
+        const newCount = Math.max(0, data.viewCount || 0); // Ensure never negative
         
-        if (!streamDoc.exists()) {
-          throw new Error("Stream does not exist!");
-        }
-        
-        const currentCount = streamDoc.data().viewCount || 0;
-        const newCount = isJoining ? currentCount + 1 : Math.max(0, currentCount - 1);
-        
-        transaction.update(streamRef, { viewCount: newCount });
-        
-        // If this is a new peak, update that too
-        if (isJoining && newCount > (streamDoc.data().peakViewerCount || 0)) {
-          transaction.update(streamRef, { peakViewerCount: newCount });
+        // Update peak viewer count if this is a new high
+        if (isJoining && newCount > (data.peakViewerCount || 0)) {
+          await streamRef.update({
+            peakViewerCount: newCount
+          });
         }
         
         return newCount;
-      });
+      }
+      
+      return 0;
     } catch (error) {
       console.error(`❌ Error updating view count for stream ${streamId}:`, error);
-      throw error;
+      // Don't throw error - just log it to avoid breaking the stream
+      return 0;
     }
   }
   
@@ -297,12 +276,12 @@ class LiveStreamService {
       const user = auth.currentUser;
       if (!user) throw new Error('User must be logged in to like a stream');
       
-      const streamRef = doc(db, 'liveStreams', streamId);
-      const likeRef = doc(db, `liveStreams/${streamId}/likes/${user.uid}`);
+  const streamRef = db.collection('liveStreams').doc(streamId);
+  const likeRef = streamRef.collection('likes').doc(user.uid);
       
       // Check if user already liked
-      const likeDoc = await getDoc(likeRef);
-      const hasLiked = likeDoc.exists();
+  const likeDoc = await likeRef.get();
+  const hasLiked = likeDoc.exists;
       
       // If action matches current state, do nothing
       if ((isLiking && hasLiked) || (!isLiking && !hasLiked)) {
@@ -311,22 +290,22 @@ class LiveStreamService {
       
       // Update like status
       if (isLiking) {
-        await updateDoc(streamRef, {
-          likeCount: increment(1)
+        await streamRef.update({
+          likeCount: firestore.FieldValue.increment(1)
         });
         
-        await updateDoc(likeRef, {
+        await likeRef.set({
           userId: user.uid,
-          timestamp: serverTimestamp()
+          timestamp: firestore.FieldValue.serverTimestamp()
         });
         
-        trackActivity(user.uid, 'stream_like', { streamId });
+        // Note: Not tracking self-likes (would be filtered out anyway)
       } else {
-        await updateDoc(streamRef, {
-          likeCount: increment(-1)
+        await streamRef.update({
+          likeCount: firestore.FieldValue.increment(-1)
         });
         
-        await deleteDoc(likeRef);
+        await likeRef.delete();
       }
       
       // Get updated count

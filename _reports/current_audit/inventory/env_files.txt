@@ -1,0 +1,6 @@
+﻿
+FullName                            
+--------                            
+C:\Users\Alex\369369369\.env.example
+
+

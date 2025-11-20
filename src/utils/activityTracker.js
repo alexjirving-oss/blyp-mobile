@@ -1,5 +1,4 @@
-import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, onSnapshot, writeBatch, doc, setDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db as firestore } from '../config/firebase';
 
 // Activity types
 export const ACTIVITY_TYPES = {
@@ -30,14 +29,14 @@ export const trackActivity = async (activityType, actorId, targetUserId, metadat
       type: activityType,
       actorId,
       targetUserId,
-      timestamp: serverTimestamp(),
+      timestamp: firestore.FieldValue.serverTimestamp(),
       read: false,
       metadata: {
         ...metadata
       }
     };
 
-    const docRef = await addDoc(collection(db, 'activities'), activityData);
+    await db.collection('activities').add(activityData);
     console.log('✅ Activity tracked:', activityType, 'for', targetUserId);
   } catch (error) {
     console.error('❌ Error tracking activity:', error);
@@ -52,14 +51,12 @@ export const trackActivity = async (activityType, actorId, targetUserId, metadat
  */
 export const getUserActivities = (userId, limitCount = 50, callback) => {
   try {
-    const q = query(
-      collection(db, 'activities'),
-      where('targetUserId', '==', userId),
-      orderBy('timestamp', 'desc'),
-      limit(limitCount)
-    );
-
-    return onSnapshot(q, (snapshot) => {
+    return db
+      .collection('activities')
+      .where('targetUserId', '==', userId)
+      .orderBy('timestamp', 'desc')
+      .limit(limitCount)
+      .onSnapshot((snapshot) => {
       // Optional: Log activity count for debugging
       if (snapshot.docs.length === 0) {
         console.log('No activities found for user');
@@ -81,10 +78,10 @@ export const getUserActivities = (userId, limitCount = 50, callback) => {
  */
 export const markActivitiesAsRead = async (activityIds) => {
   try {
-    const batch = writeBatch(db);
+    const batch = db.batch();
     
     activityIds.forEach(activityId => {
-      const activityRef = doc(db, 'activities', activityId);
+      const activityRef = db.collection('activities').doc(activityId);
       batch.update(activityRef, { read: true });
     });
 
@@ -102,15 +99,13 @@ export const markActivitiesAsRead = async (activityIds) => {
  */
 export const getUnreadActivityCount = (userId, callback) => {
   try {
-    const q = query(
-      collection(db, 'activities'),
-      where('targetUserId', '==', userId),
-      where('read', '==', false)
-    );
-
-    return onSnapshot(q, (snapshot) => {
-      callback(snapshot.docs.length);
-    });
+    return db
+      .collection('activities')
+      .where('targetUserId', '==', userId)
+      .where('read', '==', false)
+      .onSnapshot((snapshot) => {
+        callback(snapshot.docs.length);
+      });
   } catch (error) {
     console.error('❌ Error getting unread activity count:', error);
     return null;

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Icon from './Icon';
 import { 
   View, 
   Text, 
@@ -8,11 +9,10 @@ import {
   StyleSheet
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import BlypCoinService from '../services/BlypCoinService';
 import { auth } from '../config/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 /**
  * Developer component to add Blypcoins to any user's balance
@@ -167,7 +167,7 @@ const BlypCoinBooster = ({ visible = false, onClose }) => {
           <Text style={styles.title}>💰 Blypcoin Booster</Text>
           {onClose && (
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Ionicons name="close" size={24} color="#fff" />
+              <Icon  name="close" size={24} color="#fff"  />
             </TouchableOpacity>
           )}
         </View>

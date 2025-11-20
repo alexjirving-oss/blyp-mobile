@@ -1,16 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { View, Image, ActivityIndicator, StyleSheet } from 'react-native';
 import { Video } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
-/*
-  EnhancedVideo
-  - Caches remote video to device file system (simple hash via encodeURIComponent)
-  - Shows poster/thumbnail until ready
-  - Only loads when shouldLoad is true (parent controls visibility)
-  - Auto plays/pauses based on shouldPlay
-  - STREAM-FIRST: Immediately streams original URI for instant playback, then swaps to cached file when downloaded
-*/
 function EnhancedVideo({
   uri,
   poster,
@@ -26,17 +18,15 @@ function EnhancedVideo({
   const videoRef = useRef(null);
   const [cachedUri, setCachedUri] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [ready, setReady] = useState(false);
   const [error, setError] = useState(null);
   const [buffering, setBuffering] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const loadStartRef = useRef(Date.now());
   const loggedRef = useRef(false);
 
-  // Background cache while streaming original uri immediately for instant start
   useEffect(() => {
-    if (!shouldLoad || !uri || cachedUri) return; // Skip if already cached
-    
+    if (!shouldLoad || !uri || cachedUri) return;
+
     let cancelled = false;
     async function cacheInBackground() {
       try {
@@ -44,7 +34,7 @@ function EnhancedVideo({
         const fileUri = `${FileSystem.cacheDirectory}vid-${fileName}`;
         const info = await FileSystem.getInfoAsync(fileUri);
         if (cancelled) return;
-        
+
         if (!info.exists) {
           setLoading(true);
           const download = await FileSystem.downloadAsync(uri, fileUri);
@@ -63,10 +53,11 @@ function EnhancedVideo({
       }
     }
     cacheInBackground();
-    return () => { cancelled = true; };
-  }, [uri, shouldLoad, cachedUri]);
+    return () => {
+      cancelled = true;
+    };
+  }, [uri, shouldLoad, cachedUri, onError]);
 
-  // Memoized play control to reduce effect runs
   const handlePlayControl = useCallback(async () => {
     if (!videoRef.current) return;
     try {
@@ -75,8 +66,8 @@ function EnhancedVideo({
       } else {
         await videoRef.current.pauseAsync();
       }
-    } catch (e) {
-      // Ignore playback control errors
+    } catch {
+      // ignore
     }
   }, [shouldPlay]);
 
@@ -84,42 +75,32 @@ function EnhancedVideo({
     handlePlayControl();
   }, [handlePlayControl]);
 
-  // Always stream original uri first; swap to cached file silently once available
   const source = { uri: cachedUri || uri };
 
   return (
-    <View style={[style, { overflow: 'hidden', position: 'relative' }]}>
-      {/* Always show poster first, hide only when video is truly ready and loaded */}
-      {poster && (!videoLoaded) && (
-        <Image 
-          source={{ uri: poster }} 
-          style={[StyleSheet.absoluteFill, styles.poster]} 
-          resizeMode="contain" 
+    <View style={[style, { overflow: 'hidden', position: 'relative' }]}> 
+      {poster && !videoLoaded && (
+        <Image
+          source={{ uri: poster }}
+          style={[StyleSheet.absoluteFill, styles.poster]}
+          resizeMode="contain"
         />
       )}
-      
+
       {(loading || buffering) && (
         <View style={[StyleSheet.absoluteFill, styles.loader]}>
           <ActivityIndicator color="#ec4899" />
         </View>
       )}
-      
+
       {error && (
-        <View style={[StyleSheet.absoluteFill, styles.error]}>
-          <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-        </View>
+        <View style={[StyleSheet.absoluteFill, styles.error]} />
       )}
-      
+
       <Video
         ref={videoRef}
         source={source}
-        style={[
-          StyleSheet.absoluteFill, 
-          { 
-            backgroundColor: 'transparent',
-            opacity: videoLoaded ? 1 : 0,
-          }
-        ]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', opacity: videoLoaded ? 1 : 0 }]}
         shouldPlay={shouldPlay && videoLoaded}
         isLooping={isLooping}
         isMuted={isMuted}
@@ -127,30 +108,35 @@ function EnhancedVideo({
         useNativeControls={false}
         progressUpdateIntervalMillis={500}
         onLoad={(status) => {
-          // Video metadata loaded, but don't show yet
-          console.log('[VideoLoad] Video loaded, metadata ready');
+          console.log('[EnhancedVideo] onLoad', {
+            uri: uri?.slice(0, 80),
+            cached: !!cachedUri,
+            durationMillis: status?.durationMillis,
+          });
         }}
         onReadyForDisplay={() => {
           if (!loggedRef.current) {
             const ms = Date.now() - loadStartRef.current;
             if (ms > 1000) {
-              console.log('[VideoPerf] slow readyForDisplay', { uri: uri?.slice(0,60), ms });
+              console.log('[VideoPerf] slow readyForDisplay', { uri: uri?.slice(0, 60), ms });
             }
             loggedRef.current = true;
           }
-          
-          // Delay showing video to prevent zoom-in effect
+          console.log('[EnhancedVideo] onReadyForDisplay', { uri: uri?.slice(0, 80) });
           setTimeout(() => {
             setVideoLoaded(true);
-            setReady(true);
             onReady && onReady();
           }, 300);
         }}
         onError={(e) => {
+          console.log('[EnhancedVideo] onError', { uri: uri?.slice(0, 80), error: e });
           setError(e);
           onError && onError(e);
         }}
         onPlaybackStatusUpdate={(status) => {
+          if (status?.error) {
+            console.log('[EnhancedVideo] playbackStatus error', { uri: uri?.slice(0, 80), error: status.error });
+          }
           if (status.isBuffering !== undefined && status.isBuffering !== buffering) {
             setBuffering(status.isBuffering);
           }
@@ -161,17 +147,17 @@ function EnhancedVideo({
 }
 
 const styles = StyleSheet.create({
-  poster: { 
-    width: '100%', 
-    height: '100%'
+  poster: {
+    width: '100%',
+    height: '100%',
   },
-  loader: { 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    backgroundColor: 'rgba(0,0,0,0.2)' 
+  loader: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
-  error: { 
-    backgroundColor: '#111827' 
+  error: {
+    backgroundColor: '#111827',
   },
 });
 

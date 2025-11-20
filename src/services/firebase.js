@@ -1,31 +1,17 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, getReactNativePersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { firebaseConfig } from '../config/firebase';
+// This file should contain only JavaScript code for Firebase service initialization.
+// Move Firestore security rules to a separate file, e.g., firestore.rules.
 
-// Validate Firebase config
-if (!firebaseConfig || !firebaseConfig.apiKey) {
-  throw new Error('Firebase configuration is missing or invalid. Please check src/config/firebase.js');
-}
+// Example Firebase service initialization:
+import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
-// Initialize Firebase
+const firebaseConfig = {
+  // your Firebase config here
+};
+
 const app = initializeApp(firebaseConfig);
-
-// Initialize Auth with AsyncStorage persistence
-let auth;
-try {
-  auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage)
-  });
-} catch (error) {
-  // If already initialized, get the existing instance
-  auth = getAuth(app);
-}
-
-// Initialize Firestore and Storage
 const db = getFirestore(app);
-const storage = getStorage(app);
+const auth = getAuth(app);
 
-export { auth, db, storage };
+export { db, auth };

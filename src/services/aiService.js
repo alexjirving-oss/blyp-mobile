@@ -106,8 +106,9 @@ class AIService {
    * @returns {Promise<Object>} Generated content with title, description, hashtags
    */
   async generateSmartContent(userVoiceInput, mediaItems = [], options = {}) {
+    // If Gemini is not configured, return a smart fallback instead of throwing
     if (!this.isAvailable()) {
-      throw new Error('AI service is not available. Please configure Gemini API key.');
+      return this.generateFallbackContent(userVoiceInput, mediaItems);
     }
 
     console.log('🤖 Starting AI content generation...');

@@ -1,22 +1,4 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  query, 
-  where, 
-  orderBy, 
-  limit,
-  serverTimestamp,
-  increment,
-  arrayUnion,
-  arrayRemove
-} from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db as firestore } from '../config/firebase';
 import Logger from '../utils/Logger';
 
 // Generic Firebase service class for CRUD operations
@@ -24,10 +6,10 @@ class FirebaseService {
   // Create a new document
   static async create(collectionName, data) {
     try {
-      const docRef = await addDoc(collection(db, collectionName), {
+      const docRef = await db.collection(collectionName).add({
         ...data,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        createdAt: firestore.FieldValue.serverTimestamp(),
+        updatedAt: firestore.FieldValue.serverTimestamp()
       });
       Logger.firebase(`Created document in ${collectionName}`, { id: docRef.id });
       return { success: true, id: docRef.id };
@@ -40,10 +22,10 @@ class FirebaseService {
   // Read a single document
   static async read(collectionName, docId) {
     try {
-      const docRef = doc(db, collectionName, docId);
-      const docSnap = await getDoc(docRef);
+      const docRef = db.collection(collectionName).doc(docId);
+      const docSnap = await docRef.get();
       
-      if (docSnap.exists()) {
+      if (docSnap.exists) {
         return { success: true, data: { id: docSnap.id, ...docSnap.data() } };
       } else {
         return { success: false, error: 'Document not found' };
@@ -57,10 +39,10 @@ class FirebaseService {
   // Update a document
   static async update(collectionName, docId, data) {
     try {
-      const docRef = doc(db, collectionName, docId);
-      await updateDoc(docRef, {
+      const docRef = db.collection(collectionName).doc(docId);
+      await docRef.update({
         ...data,
-        updatedAt: serverTimestamp()
+        updatedAt: firestore.FieldValue.serverTimestamp()
       });
       Logger.firebase(`Updated document ${collectionName}/${docId}`);
       return { success: true };
@@ -73,7 +55,7 @@ class FirebaseService {
   // Delete a document
   static async delete(collectionName, docId) {
     try {
-      await deleteDoc(doc(db, collectionName, docId));
+      await db.collection(collectionName).doc(docId).delete();
       Logger.firebase(`Deleted document ${collectionName}/${docId}`);
       return { success: true };
     } catch (error) {
@@ -85,27 +67,27 @@ class FirebaseService {
   // Query documents with filters
   static async query(collectionName, filters = [], orderByField = null, limitCount = null) {
     try {
-      let q = collection(db, collectionName);
+      let ref = db.collection(collectionName);
       
       // Apply filters
       filters.forEach(filter => {
-        q = query(q, where(filter.field, filter.operator, filter.value));
+        ref = ref.where(filter.field, filter.operator, filter.value);
       });
       
       // Apply ordering
       if (orderByField) {
-        q = query(q, orderBy(orderByField.field, orderByField.direction || 'asc'));
+        ref = ref.orderBy(orderByField.field, orderByField.direction || 'asc');
       }
       
       // Apply limit
       if (limitCount) {
-        q = query(q, limit(limitCount));
+        ref = ref.limit(limitCount);
       }
       
-      const snapshot = await getDocs(q);
-      const documents = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+      const snapshot = await ref.get();
+      const documents = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
       }));
       
       Logger.firebase(`Queried ${collectionName}`, { count: documents.length });
@@ -118,12 +100,11 @@ class FirebaseService {
 
   // Subscribe to document changes
   static subscribe(collectionName, docId, callback) {
-    const docRef = doc(db, collectionName, docId);
-    return onSnapshot(
-      docRef,
-      (doc) => {
-        if (doc.exists()) {
-          callback({ success: true, data: { id: doc.id, ...doc.data() } });
+    const docRef = db.collection(collectionName).doc(docId);
+    return docRef.onSnapshot(
+      (snapshot) => {
+        if (snapshot.exists) {
+          callback({ success: true, data: { id: snapshot.id, ...snapshot.data() } });
         } else {
           callback({ success: false, error: 'Document not found' });
         }
@@ -138,29 +119,28 @@ class FirebaseService {
   // Subscribe to collection changes
   static subscribeToCollection(collectionName, filters = [], orderByField = null, limitCount = null, callback) {
     try {
-      let q = collection(db, collectionName);
+      let ref = db.collection(collectionName);
       
       // Apply filters
       filters.forEach(filter => {
-        q = query(q, where(filter.field, filter.operator, filter.value));
+        ref = ref.where(filter.field, filter.operator, filter.value);
       });
       
       // Apply ordering
       if (orderByField) {
-        q = query(q, orderBy(orderByField.field, orderByField.direction || 'asc'));
+        ref = ref.orderBy(orderByField.field, orderByField.direction || 'asc');
       }
       
       // Apply limit
       if (limitCount) {
-        q = query(q, limit(limitCount));
+        ref = ref.limit(limitCount);
       }
       
-      return onSnapshot(
-        q,
+      return ref.onSnapshot(
         (snapshot) => {
-          const documents = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
+          const documents = snapshot.docs.map(d => ({
+            id: d.id,
+            ...d.data()
           }));
           callback({ success: true, data: documents });
         },
@@ -178,10 +158,10 @@ class FirebaseService {
   // Increment a numeric field
   static async incrementField(collectionName, docId, field, value = 1) {
     try {
-      const docRef = doc(db, collectionName, docId);
-      await updateDoc(docRef, {
-        [field]: increment(value),
-        updatedAt: serverTimestamp()
+      const docRef = db.collection(collectionName).doc(docId);
+      await docRef.update({
+        [field]: firestore.FieldValue.increment(value),
+        updatedAt: firestore.FieldValue.serverTimestamp()
       });
       return { success: true };
     } catch (error) {
@@ -193,10 +173,10 @@ class FirebaseService {
   // Add to array field
   static async addToArray(collectionName, docId, field, value) {
     try {
-      const docRef = doc(db, collectionName, docId);
-      await updateDoc(docRef, {
-        [field]: arrayUnion(value),
-        updatedAt: serverTimestamp()
+      const docRef = db.collection(collectionName).doc(docId);
+      await docRef.update({
+        [field]: firestore.FieldValue.arrayUnion(value),
+        updatedAt: firestore.FieldValue.serverTimestamp()
       });
       return { success: true };
     } catch (error) {
@@ -208,10 +188,10 @@ class FirebaseService {
   // Remove from array field
   static async removeFromArray(collectionName, docId, field, value) {
     try {
-      const docRef = doc(db, collectionName, docId);
-      await updateDoc(docRef, {
-        [field]: arrayRemove(value),
-        updatedAt: serverTimestamp()
+      const docRef = db.collection(collectionName).doc(docId);
+      await docRef.update({
+        [field]: firestore.FieldValue.arrayRemove(value),
+        updatedAt: firestore.FieldValue.serverTimestamp()
       });
       return { success: true };
     } catch (error) {

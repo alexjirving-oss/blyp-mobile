@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -8,9 +9,7 @@ import {
   Image,
   RefreshControl,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import firebase, { auth as authExport, db } from '../config/firebase';
 import { getUserActivities, ACTIVITY_TYPES } from '../utils/activityTracker';
 
 const ActivityFeed = ({ navigation }) => {
@@ -18,7 +17,8 @@ const ActivityFeed = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actorProfiles, setActorProfiles] = useState({});
-  const user = auth.currentUser;
+  const authObj = (typeof authExport === 'function' ? authExport() : authExport) || (firebase?.auth?.() || {});
+  const user = authObj.currentUser;
 
   useEffect(() => {
     if (!user) return;
@@ -38,9 +38,8 @@ const ActivityFeed = ({ navigation }) => {
       for (const actorId of uniqueActorIds) {
         if (!actorProfiles[actorId]) {
           try {
-            const userDocRef = doc(db, 'users', actorId);
-            const userDoc = await getDoc(userDocRef);
-            if (userDoc.exists()) {
+            const userDoc = await db.collection('users').doc(actorId).get();
+            if (userDoc.exists) {
               profiles[actorId] = userDoc.data();
             } else {
               // Create fallback profile based on user ID
@@ -178,7 +177,7 @@ const ActivityFeed = ({ navigation }) => {
         }
       >
         <View style={styles.emptyContainer}>
-          <Ionicons name="notifications-outline" size={64} color="#6b7280" />
+          <Icon  name="notifications-outline" size={64} color="#6b7280"  />
           <Text style={styles.emptyTitle}>No Activity Yet</Text>
           <Text style={styles.emptyText}>
             When people interact with your content, you'll see it here
@@ -230,7 +229,7 @@ const ActivityFeed = ({ navigation }) => {
             </View>
 
             <View style={[styles.activityIcon, { backgroundColor: `${icon.color}20` }]}>
-              <Ionicons name={icon.name} size={20} color={icon.color} />
+              <Icon  name={icon.name} size={20} color={icon.color}  />
             </View>
 
             {!activity.read && <View style={styles.unreadDot} />}

@@ -1,0 +1,10 @@
+FILE: firestore.rules
+- allow read, write: if true; present: False
+- uses request.auth: True
+- TODO/FIXME count: 0
+
+FILE: storage.rules
+- allow read, write: if true; present: False
+- uses request.auth: True
+- TODO/FIXME count: 0
+

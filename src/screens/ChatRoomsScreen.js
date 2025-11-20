@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -14,7 +15,6 @@ import {
   StatusBar,
   RefreshControl
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
@@ -220,12 +220,12 @@ const ChatRoomsScreen = ({ navigation }) => {
           <View style={styles.roomHeader}>
             <View style={styles.roomInfo}>
               <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
-                <Ionicons name={category.icon} size={20} color="#fff" />
+                <Icon  name={category.icon} size={20} color="#fff"  />
               </View>
               <View style={styles.roomDetails}>
                 <View style={styles.roomTitleRow}>
                   <Text style={styles.roomName} numberOfLines={1}>{room.name}</Text>
-                  {room.isPrivate && <Ionicons name="lock-closed" size={16} color="#f59e0b" />}
+                  {room.isPrivate && <Icon  name="lock-closed" size={16} color="#f59e0b"  />}
                 </View>
                 <Text style={styles.roomDescription} numberOfLines={2}>
                   {room.description || 'No description'}
@@ -242,12 +242,12 @@ const ChatRoomsScreen = ({ navigation }) => {
             <View style={styles.roomActions}>
               {isUserRoom ? (
                 <View style={[styles.statusBadge, styles.joinedBadge]}>
-                  <Ionicons name="checkmark" size={16} color="#10b981" />
+                  <Icon  name="checkmark" size={16} color="#10b981"  />
                   <Text style={styles.joinedText}>Joined</Text>
                 </View>
               ) : canJoin ? (
                 <TouchableOpacity style={[styles.statusBadge, styles.joinBadge]}>
-                  <Ionicons name="add" size={16} color="#3b82f6" />
+                  <Icon  name="add" size={16} color="#3b82f6"  />
                   <Text style={styles.joinText}>Join</Text>
                 </TouchableOpacity>
               ) : (
@@ -317,11 +317,11 @@ const ChatRoomsScreen = ({ navigation }) => {
             selectedCategory === category.id ? null : category.id
           )}
         >
-          <Ionicons 
+          <Icon  
             name={category.icon} 
             size={16} 
             color={selectedCategory === category.id ? '#fff' : category.color} 
-          />
+           />
           <Text style={[
             styles.categoryChipText,
             selectedCategory === category.id && styles.categoryChipTextActive
@@ -336,7 +336,7 @@ const ChatRoomsScreen = ({ navigation }) => {
   const renderSectionHeader = (title, icon, count = null) => (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionHeaderLeft}>
-        <Ionicons name={icon} size={24} color="#a855f7" />
+        <Icon  name={icon} size={24} color="#a855f7"  />
         <Text style={styles.sectionTitle}>{title}</Text>
         {count !== null && (
           <View style={styles.countBadge}>
@@ -351,7 +351,7 @@ const ChatRoomsScreen = ({ navigation }) => {
     if (data.length === 0) {
       return (
         <View style={styles.emptySection}>
-          <Ionicons name={emptyIcon} size={48} color="#374151" />
+          <Icon  name={emptyIcon} size={48} color="#374151"  />
           <Text style={styles.emptySectionTitle}>{emptyTitle}</Text>
           <Text style={styles.emptySectionText}>{emptyText}</Text>
         </View>
@@ -375,7 +375,7 @@ const ChatRoomsScreen = ({ navigation }) => {
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Icon  name="arrow-back" size={24} color="#fff"  />
         </TouchableOpacity>
         
         <Text style={styles.headerTitle}>💬 Chat Rooms</Text>
@@ -386,7 +386,7 @@ const ChatRoomsScreen = ({ navigation }) => {
           onPress={() => setShowCreateModal(true)}
         >
           <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.createButtonGradient}>
-            <Ionicons name="add" size={24} color="#fff" />
+            <Icon  name="add" size={24} color="#fff"  />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -394,7 +394,7 @@ const ChatRoomsScreen = ({ navigation }) => {
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#6b7280" />
+          <Icon  name="search" size={20} color="#6b7280"  />
           <TextInput
             style={styles.searchInput}
             placeholder="Search rooms..."
@@ -512,11 +512,11 @@ const ChatRoomsScreen = ({ navigation }) => {
                     ]}
                     onPress={() => setRoomCategory(category.id)}
                   >
-                    <Ionicons 
+                    <Icon  
                       name={category.icon} 
                       size={20} 
                       color={roomCategory === category.id ? '#fff' : category.color} 
-                    />
+                     />
                     <Text style={[
                       styles.categoryOptionText,
                       roomCategory === category.id && styles.categoryOptionTextActive

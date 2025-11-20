@@ -1,0 +1,178 @@
+// firestore.rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function signedIn() { 
+      return request.auth != null; 
+    }
+    
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    match /users/{userId} {
+      // Any authenticated user can read user profiles (needed for live users list)
+      allow read: if signedIn();
+      // Users can only write their own profile
+      allow create, update, delete: if isOwner(userId);
+
+      // Followers subcollection - anyone can read, only owner or follower can write
+      match /followers/{followerId} {
+        allow read: if true;
+        allow create, delete: if signedIn();
+        allow update: if isOwner(userId) || isOwner(followerId);
+      }
+
+      // Following subcollection - anyone can read, only owner can write
+      match /following/{followingId} {
+        allow read: if true;
+        allow create, delete: if isOwner(userId);
+        allow update: if isOwner(userId);
+      }
+    }
+
+    // ============================================
+    // USER PROFILES COLLECTION (for live users tracking)
+    // ============================================
+    match /userProfiles/{userId} {
+      // Any authenticated user can read profiles (needed for live users list)
+      allow read: if signedIn();
+      // Users can only write their own profile
+      allow create, update, delete: if isOwner(userId);
+    }
+
+    // ============================================
+    // GEMS COLLECTION
+    // ============================================
+    match /gems/{userId} {
+      // Each user can only read/write their own gems
+      allow read, write: if isOwner(userId);
+    }
+
+    // ============================================
+    // WALLETS COLLECTION (Blypcoin balance)
+    // ============================================
+    match /wallets/{userId} {
+      // Each user can only read/write their own wallet
+      allow read, write: if isOwner(userId);
+    }
+
+    // ============================================
+    // TRANSACTIONS COLLECTION
+    // ============================================
+    match /transactions/{transactionId} {
+      // Users can only read their own transactions
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      // Only create allowed (no updates/deletes for audit trail)
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ============================================
+    // POSTS COLLECTION
+    // ============================================
+    match /posts/{postId} {
+      // Anyone can read posts
+      allow read: if true;
+      // Only authenticated users can create posts
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      // Only post owner can update/delete
+      allow update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ============================================
+    // STREAMS COLLECTION (Live Streaming)
+    // ============================================
+    match /streams/{streamId} {
+      allow read: if true;
+      // Temporarily relaxed for testing - any authenticated user can create/update streams
+      allow create, update: if signedIn();
+      allow delete: if signedIn() && resource.data.hostUid == request.auth.uid;
+
+      // Stream comments - any signed-in user can write
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+        allow delete: if signedIn() && (
+          request.auth.uid == resource.data.userId || 
+          get(/databases/$(database)/documents/streams/$(streamId)).data.hostUid == request.auth.uid
+        );
+      }
+
+      // Stream segments - only host can write
+      match /segments/{segmentId} {
+        allow read: if true;
+        allow write: if signedIn() && get(/databases/$(database)/documents/streams/$(streamId)).data.hostUid == request.auth.uid;
+      }
+
+      // Messages: any signed-in user can write a message while stream is live
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if signedIn()
+          && get(/databases/$(database)/documents/streams/$(streamId)).data.status == "live"
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500;
+      }
+
+      // Join requests (optional for guest features)
+      match /joinRequests/{reqId} {
+        allow read: if signedIn() && (
+          get(/databases/$(database)/documents/streams/$(streamId)).data.hostUid == request.auth.uid
+          || resource.data.uid == request.auth.uid
+        );
+        allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+        allow update: if signedIn() && get(/databases/$(database)/documents/streams/$(streamId)).data.hostUid == request.auth.uid;
+      }
+    }
+
+    // ============================================
+    // CHAT ROOMS COLLECTION
+    // ============================================
+    match /chatRooms/{roomId} {
+      // Only participants can read/write chat rooms
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+      allow create: if signedIn() && request.auth.uid in request.resource.data.participants;
+      allow update: if signedIn() && request.auth.uid in resource.data.participants;
+      allow delete: if signedIn() && request.auth.uid in resource.data.participants;
+    }
+
+    // ============================================
+    // CHAT MESSAGES COLLECTION
+    // ============================================
+    match /chatMessages/{messageId} {
+      // Users can only read messages from rooms they're in
+      allow read: if signedIn() && 
+        request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(resource.data.roomId)).data.participants;
+      // Users can create messages in rooms they're in
+      allow create: if signedIn() && 
+        request.resource.data.senderId == request.auth.uid &&
+        request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(request.resource.data.roomId)).data.participants;
+      // Only sender can update/delete their own messages
+      allow update, delete: if signedIn() && resource.data.senderId == request.auth.uid;
+    }
+
+    // ============================================
+    // APP CONFIG COLLECTION
+    // ============================================
+    match /appConfig/{configId} {
+      // Everyone can read app config
+      allow read: if true;
+      // Only admins can write (you'll need to implement admin check)
+      allow write: if false; // Set to admin check when you have admin users
+    }
+
+    // ============================================
+    // LEGACY/BACKUP: liveStreams collection (if used)
+    // ============================================
+    match /liveStreams/{streamId} {
+      allow read: if true;
+      allow create: if signedIn();
+      allow update, delete: if signedIn() && resource.data.hostUid == request.auth.uid;
+    }
+  }
+}

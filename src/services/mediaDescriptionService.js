@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { geminiApiKey } from '../config/firebase';
 
 // Construct API URL with current key
@@ -6,34 +6,32 @@ const getApiUrl = () => `https://generativelanguage.googleapis.com/v1beta/models
 
 class MediaDescriptionService {
   /**
-   * Test connection to Gemini API with       // Test connection
-      const isConnected = await this.testConnection();
-      if (!isConnected) {
-        console.log('❌ Media description service connection failed');
-        throw new Error('Media description service not available');
-      } text request
+   * Test connection to Gemini API with a simple text request.
+   * Returns true when API is reachable and responds OK; otherwise false.
    */
   async testConnection() {
+    // Precompute request details so they are available in both try and catch
+    const payload = {
+      contents: [{
+        parts: [{
+          text: "Say 'Hello, API is working!' in exactly those words."
+        }]
+      }],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 50
+      }
+    };
+    const apiUrl = getApiUrl();
+
     try {
       console.log('🧪 Testing Gemini API connection with simple text request...');
-      
+
       if (!geminiApiKey) {
-        throw new Error('No API key configured');
+        console.log('⚠️ No Gemini API key configured; skipping connection test.');
+        return false;
       }
 
-      const payload = {
-        contents: [{
-          parts: [{
-            text: "Say 'Hello, API is working!' in exactly those words."
-          }]
-        }],
-        generationConfig: {
-          temperature: 0,
-          maxOutputTokens: 50
-        }
-      };
-
-      const apiUrl = getApiUrl();
       console.log('🔗 API URL:', apiUrl.substring(0, 80) + '...');
       console.log('📦 Test payload size:', JSON.stringify(payload).length, 'chars');
 
@@ -65,14 +63,14 @@ class MediaDescriptionService {
 
     } catch (error) {
       console.log('❌ Gemini API test error:', error.message);
-      
+
       // If aborted, try once more with longer timeout
-      if (error.name === 'AbortError' || error.message.includes('Aborted')) {
+      if (error.name === 'AbortError' || (typeof error.message === 'string' && error.message.includes('Aborted'))) {
         console.log('🔄 Retrying API test with longer timeout...');
         try {
           const retryController = new AbortController();
           const retryTimeoutId = setTimeout(() => retryController.abort(), 20000); // 20 second timeout
-          
+
           const retryResponse = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -81,9 +79,9 @@ class MediaDescriptionService {
             body: JSON.stringify(payload),
             signal: retryController.signal,
           });
-          
+
           clearTimeout(retryTimeoutId);
-          
+
           if (retryResponse.ok) {
             console.log('✅ API test successful on retry');
             return true;
@@ -92,7 +90,7 @@ class MediaDescriptionService {
           console.log('❌ API test retry also failed:', retryError.message);
         }
       }
-      
+
       return false;
     }
   }
@@ -610,8 +608,9 @@ One casual sentence, no emojis.`;
       // Test API connection first
       const isConnected = await this.testConnection();
       if (!isConnected) {
-        console.log('❌ Media description service connection failed');
-        throw new Error('Media description service not available');
+        console.log('ℹ️ Media description service unavailable; using fallbacks');
+        const fallbacks = mediaItems.map((item, index) => this.getFallbackDescription(item, index));
+        return fallbacks;
       }
 
       const descriptions = await Promise.all(
@@ -622,8 +621,7 @@ One casual sentence, no emojis.`;
       return descriptions;
 
     } catch (error) {
-      console.error('❌ Failed to generate media descriptions:', error.message);
-      console.error('❌ Full error:', error);
+      console.warn('⚠️ Failed to generate media descriptions:', error?.message || String(error));
       
       // Return fallback descriptions
       const fallbacks = mediaItems.map((item, index) => 

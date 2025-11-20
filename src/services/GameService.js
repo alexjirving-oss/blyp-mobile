@@ -12,7 +12,7 @@ import {
   getDoc,
   limit
 } from 'firebase/firestore';
-import { db, auth } from '../config/firebase';
+import { firestore as db, auth } from '../config/firebase';
 
 class GameService {
   // Create a new game room

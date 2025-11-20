@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
+import Icon from './Icon';
 import { View, Animated, StyleSheet, Dimensions } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-
 const { width, height } = Dimensions.get('window');
 
 const HeartAnimation = ({ visible, onAnimationComplete }) => {
@@ -157,7 +156,7 @@ const HeartAnimation = ({ visible, onAnimationComplete }) => {
           },
         ]}
       >
-        <Ionicons name="heart" size={30} color="#ff6b6b" />
+        <Icon  name="heart" size={30} color="#ff6b6b"  />
       </Animated.View>
 
       {/* Heart 2 */}
@@ -174,7 +173,7 @@ const HeartAnimation = ({ visible, onAnimationComplete }) => {
           },
         ]}
       >
-        <Ionicons name="heart" size={28} color="#ff8a95" />
+        <Icon  name="heart" size={28} color="#ff8a95"  />
       </Animated.View>
 
       {/* Heart 3 */}
@@ -191,7 +190,7 @@ const HeartAnimation = ({ visible, onAnimationComplete }) => {
           },
         ]}
       >
-        <Ionicons name="heart" size={25} color="#ffa8b4" />
+        <Icon  name="heart" size={25} color="#ffa8b4"  />
       </Animated.View>
     </View>
   );

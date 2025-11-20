@@ -3,7 +3,7 @@ export const mockVideoData = [
   {
     id: 'video-1',
     type: 'video',
-    videoUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+  videoUrl: null,
     user: { 
       username: '@alex_creator', 
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face' 
@@ -22,7 +22,7 @@ export const mockVideoData = [
   {
     id: 'video-2',
     type: 'video',
-    videoUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_2mb.mp4',
+  videoUrl: null,
     user: { 
       username: '@travel_buddy', 
       avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=100&h=100&fit=crop&crop=face' 
@@ -41,7 +41,7 @@ export const mockVideoData = [
   {
     id: 'video-3',
     type: 'video',
-    videoUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_5mb.mp4',
+  videoUrl: null,
     user: { 
       username: '@foodie_life', 
       avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=100&h=100&fit=crop&crop=face' 
@@ -60,7 +60,7 @@ export const mockVideoData = [
   {
     id: 'video-4',
     type: 'video',
-    videoUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+  videoUrl: null,
     user: { 
       username: '@fitness_guru', 
       avatar: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=100&h=100&fit=crop&crop=face' 
@@ -78,7 +78,7 @@ export const mockVideoData = [
   {
     id: 'video-5',
     type: 'video',
-    videoUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_2mb.mp4',
+  videoUrl: null,
     user: { 
       username: '@tech_reviewer', 
       avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face' 

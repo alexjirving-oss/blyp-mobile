@@ -24,13 +24,12 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to photo library to save and select media"
       }
     },
-  "android": {
+    "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
       },
       "package": "com.blyp.mobile",
-      "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "android.permission.CAMERA",
@@ -48,7 +47,6 @@
     },
     "plugins": [
       "sentry-expo",
-      "@react-native-firebase/app",
       [
         "expo-camera",
         {
@@ -76,7 +74,7 @@
       "eas": {
         "projectId": "5a294a13-3ebd-417a-860f-3229f97f4faf"
       },
-      "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyB_keeUJQhLwK8fUlnDRDoZDuO4rreneqY"
+      "EXPO_PUBLIC_GEMINI_API_KEY": ""
     },
     "androidNavigationBar": {
       "visible": "immersive"

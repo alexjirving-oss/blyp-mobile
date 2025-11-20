@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -10,7 +11,6 @@ import {
   ActivityIndicator,
   Dimensions
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import searchService from '../services/searchService';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
@@ -51,7 +51,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
         <View style={styles.userNameRow}>
           <Text style={styles.username}>@{item.username}</Text>
           {item.verified && (
-            <Ionicons name="checkmark-circle" size={16} color="#1da1f2" />
+            <Icon  name="checkmark-circle" size={16} color="#1da1f2"  />
           )}
         </View>
         <Text style={styles.displayName}>{item.displayName}</Text>
@@ -76,7 +76,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
       <Image source={{ uri: item.thumbnail }} style={styles.postThumbnail} />
       {item.type === 'video' && (
         <View style={styles.videoIndicator}>
-          <Ionicons name="play" size={20} color="#fff" />
+          <Icon  name="play" size={20} color="#fff"  />
         </View>
       )}
       <LinearGradient
@@ -85,11 +85,11 @@ const SearchResultsScreen = ({ route, navigation }) => {
       >
         <View style={styles.postStats}>
           <View style={styles.postStat}>
-            <Ionicons name="heart" size={14} color="#fff" />
+            <Icon  name="heart" size={14} color="#fff"  />
             <Text style={styles.postStatText}>{item.likes}</Text>
           </View>
           <View style={styles.postStat}>
-            <Ionicons name="chatbubble" size={14} color="#fff" />
+            <Icon  name="chatbubble" size={14} color="#fff"  />
             <Text style={styles.postStatText}>{item.comments}</Text>
           </View>
         </View>
@@ -106,7 +106,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
         colors={['#ec4899', '#be185d']}
         style={styles.hashtagIcon}
       >
-        <Ionicons name="pricetag" size={24} color="#fff" />
+        <Icon  name="pricetag" size={24} color="#fff"  />
       </LinearGradient>
       <View style={styles.hashtagInfo}>
         <Text style={styles.hashtagText}>{item.hashtag}</Text>
@@ -115,12 +115,12 @@ const SearchResultsScreen = ({ route, navigation }) => {
         </Text>
         {item.trending && (
           <View style={styles.trendingIndicator}>
-            <Ionicons name="trending-up" size={12} color="#ec4899" />
+            <Icon  name="trending-up" size={12} color="#ec4899"  />
             <Text style={styles.trendingText}>Trending</Text>
           </View>
         )}
       </View>
-      <Ionicons name="chevron-forward" size={20} color="#666" />
+      <Icon  name="chevron-forward" size={20} color="#666"  />
     </TouchableOpacity>
   );
 
@@ -133,7 +133,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
         colors={['#10b981', '#059669']}
         style={styles.locationIcon}
       >
-        <Ionicons name="location" size={24} color="#fff" />
+        <Icon  name="location" size={24} color="#fff"  />
       </LinearGradient>
       <View style={styles.locationInfo}>
         <Text style={styles.locationName}>{item.name}</Text>
@@ -141,13 +141,13 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {item.postCount.toLocaleString()} posts
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={20} color="#666" />
+      <Icon  name="chevron-forward" size={20} color="#666"  />
     </TouchableOpacity>
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Ionicons name="search" size={64} color="#666" />
+      <Icon  name="search" size={64} color="#666"  />
       <Text style={styles.emptyTitle}>No results found</Text>
       <Text style={styles.emptyText}>
         Try adjusting your search terms or browsing different categories
@@ -176,7 +176,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Icon  name="arrow-back" size={24} color="#fff"  />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Search Results</Text>
         </View>
@@ -197,7 +197,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Icon  name="arrow-back" size={24} color="#fff"  />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle}>Search Results</Text>
@@ -215,7 +215,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.users && results.users.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="people" size={20} color="#ec4899" />
+                <Icon  name="people" size={20} color="#ec4899"  />
                 <Text style={styles.sectionTitle}>Users ({results.users.length})</Text>
               </View>
               <FlatList
@@ -231,7 +231,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.posts && results.posts.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="grid" size={20} color="#ec4899" />
+                <Icon  name="grid" size={20} color="#ec4899"  />
                 <Text style={styles.sectionTitle}>Posts ({results.posts.length})</Text>
               </View>
               <FlatList
@@ -248,7 +248,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.hashtags && results.hashtags.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="pricetag" size={20} color="#ec4899" />
+                <Icon  name="pricetag" size={20} color="#ec4899"  />
                 <Text style={styles.sectionTitle}>Hashtags ({results.hashtags.length})</Text>
               </View>
               <FlatList
@@ -264,7 +264,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.locations && results.locations.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Ionicons name="location" size={20} color="#ec4899" />
+                <Icon  name="location" size={20} color="#ec4899"  />
                 <Text style={styles.sectionTitle}>Locations ({results.locations.length})</Text>
               </View>
               <FlatList

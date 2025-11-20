@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -8,7 +9,6 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
@@ -115,7 +115,7 @@ const VoiceMemoScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="close" size={24} color="#9ca3af" />
+          <Icon  name="close" size={24} color="#9ca3af"  />
         </TouchableOpacity>
         <Text style={styles.statusText}>
           {isRecording ? 'Recording...' : recordingUri ? 'Ready!' : 'Tap to record'}
@@ -153,11 +153,11 @@ const VoiceMemoScreen = () => {
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Ionicons 
+              <Icon  
                 name={isRecording ? 'stop' : 'mic'} 
                 size={48} 
                 color="white" 
-              />
+               />
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -169,11 +169,11 @@ const VoiceMemoScreen = () => {
               style={styles.playButton}
               onPress={isPlaying ? stopPlaying : playRecording}
             >
-              <Ionicons 
+              <Icon  
                 name={isPlaying ? 'pause' : 'play'} 
                 size={32} 
                 color="#a855f7" 
-              />
+               />
             </TouchableOpacity>
             
             <View style={styles.playbackActions}>
@@ -181,7 +181,7 @@ const VoiceMemoScreen = () => {
                 style={styles.actionButton}
                 onPress={deleteRecording}
               >
-                <Ionicons name="trash-outline" size={24} color="#ef4444" />
+                <Icon  name="trash-outline" size={24} color="#ef4444"  />
                 <Text style={styles.actionText}>Delete</Text>
               </TouchableOpacity>
               
@@ -189,7 +189,7 @@ const VoiceMemoScreen = () => {
                 style={styles.actionButton}
                 onPress={saveVoiceMemo}
               >
-                <Ionicons name="checkmark" size={24} color="#10b981" />
+                <Icon  name="checkmark" size={24} color="#10b981"  />
                 <Text style={styles.actionText}>Save</Text>
               </TouchableOpacity>
             </View>

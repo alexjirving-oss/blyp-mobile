@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -10,7 +11,6 @@ import {
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { Video } from 'expo-av';
 import { smartListGenerator } from '../utils/smartListGenerator';
 import { responsiveFont } from '../utils/scaleUtils';
@@ -98,11 +98,11 @@ const WhatsAppPopularTab = ({
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.categoryHeader}>
-          <Ionicons 
+          <Icon  
             name={category.icon || 'trophy'} 
             size={28} 
             color="#fff" 
-          />
+           />
           <Text style={styles.categoryTitle}>{category.name}</Text>
         </View>
         
@@ -165,16 +165,16 @@ const WhatsAppPopularTab = ({
           />
         ) : (
           <View style={[styles.postThumbnail, styles.placeholderThumbnail]}>
-            <Ionicons name="image" size={40} color="#9ca3af" />
+            <Icon  name="image" size={40} color="#9ca3af"  />
           </View>
         )}
         
         <View style={styles.mediaOverlay}>
-          <Ionicons 
+          <Icon  
             name={post.type === 'video' ? 'play-circle' : 'image'} 
             size={24} 
             color="#fff" 
-          />
+           />
         </View>
       </View>
 
@@ -185,23 +185,23 @@ const WhatsAppPopularTab = ({
         
         <View style={styles.postMetrics}>
           <View style={styles.metric}>
-            <Ionicons name="heart" size={14} color="#ec4899" />
+            <Icon  name="heart" size={14} color="#ec4899"  />
             <Text style={styles.metricText}>{post.likes || 0}</Text>
           </View>
           
           <View style={styles.metric}>
-            <Ionicons name="chatbubble" size={14} color="#8b5cf6" />
+            <Icon  name="chatbubble" size={14} color="#8b5cf6"  />
             <Text style={styles.metricText}>{post.comments?.length || 0}</Text>
           </View>
           
           <View style={styles.metric}>
-            <Ionicons name="share" size={14} color="#10b981" />
+            <Icon  name="share" size={14} color="#10b981"  />
             <Text style={styles.metricText}>{post.shares || 0}</Text>
           </View>
           
           {post.engagementScore && (
             <View style={styles.scoreMetric}>
-              <Ionicons name="trending-up" size={14} color="#f59e0b" />
+              <Icon  name="trending-up" size={14} color="#f59e0b"  />
               <Text style={styles.scoreText}>{Math.floor(post.engagementScore)}</Text>
             </View>
           )}
@@ -219,7 +219,7 @@ const WhatsAppPopularTab = ({
             colors={['#ef4444', '#dc2626']}
             style={styles.hotGradient}
           >
-            <Ionicons name="flame" size={20} color="#fff" />
+            <Icon  name="flame" size={20} color="#fff"  />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -236,7 +236,7 @@ const WhatsAppPopularTab = ({
             setFilteredPosts([]);
           }}
         >
-          <Ionicons name="close-circle" size={20} color="#ec4899" />
+          <Icon  name="close-circle" size={20} color="#ec4899"  />
           <Text style={styles.clearButtonText}>Clear Filter</Text>
         </TouchableOpacity>
       )}
@@ -246,7 +246,7 @@ const WhatsAppPopularTab = ({
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Ionicons name="flame" size={48} color="#ef4444" />
+        <Icon  name="flame" size={48} color="#ef4444"  />
         <Text style={styles.loadingText}>Finding what's hot right now...</Text>
       </View>
     );
@@ -255,7 +255,7 @@ const WhatsAppPopularTab = ({
   if (!popularityData) {
     return (
       <View style={styles.errorContainer}>
-        <Ionicons name="alert-circle" size={48} color="#ef4444" />
+        <Icon  name="alert-circle" size={48} color="#ef4444"  />
         <Text style={styles.errorText}>Unable to load popular content</Text>
       </View>
     );

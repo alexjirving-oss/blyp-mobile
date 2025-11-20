@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -9,7 +10,6 @@ import {
   ScrollView,
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as MediaLibrary from 'expo-media-library';
 import * as Device from 'expo-device';
@@ -206,6 +206,7 @@ const CameraScreen = () => {
 
   const openGallery = async () => {
     try {
+      console.log('🎯 GALLERY FUNCTION CALLED - openGallery starting...');
       console.log('📸 Opening gallery for multiple photo selection...');
       
       // Request photo library permissions
@@ -232,11 +233,14 @@ const CameraScreen = () => {
           timestamp: Date.now()
         }));
         
-        // Add to captured photos or replace them
-        setCapturedPhotos(galleryPhotos);
-        setIsMultiPhotoMode(true);
+        console.log('🚀 Navigating directly to Review with gallery photos for description overlay');
         
-        console.log('📸 Gallery photos added to captured array:', galleryPhotos.length);
+        // Navigate directly to Review screen to show description overlay
+        navigation.navigate('Review', { 
+          media: galleryPhotos, 
+          type: galleryPhotos.length === 1 ? 'photo' : 'photos',
+          source: 'gallery' // Mark as gallery source for proper overlay handling
+        });
       }
     } catch (error) {
       console.error('Gallery selection error:', error);
@@ -528,7 +532,7 @@ const CameraScreen = () => {
   if (!cameraPermission.granted || !microphonePermission.granted) {
     return (
       <View style={styles.permissionContainer}>
-        <Ionicons name="videocam-off" size={64} color="#6b7280" />
+        <Icon  name="videocam-off" size={64} color="#6b7280"  />
         <Text style={styles.permissionText}>Camera or Microphone access denied</Text>
         <Text style={styles.permissionSubtext}>
           Please enable camera and microphone permissions in your device settings for video recording
@@ -568,7 +572,7 @@ const CameraScreen = () => {
               style={styles.closeButton}
               onPress={() => navigation.goBack()}
             >
-              <Ionicons name="close" size={32} color="white" />
+              <Icon  name="close" size={32} color="white"  />
             </TouchableOpacity>
           </View>
 
@@ -577,7 +581,7 @@ const CameraScreen = () => {
               style={styles.galleryButton}
               onPress={openGallery}
             >
-              <Ionicons name="images" size={32} color="white" />
+              <Icon  name="images" size={32} color="white"  />
             </TouchableOpacity>
 
             <View style={styles.captureButtonContainer}>
@@ -588,7 +592,7 @@ const CameraScreen = () => {
                     style={styles.photoButton}
                     onPress={handleCapturePress}
                   >
-                    <Ionicons name="camera" size={32} color="white" />
+                    <Icon  name="camera" size={32} color="white"  />
                     <Text style={styles.buttonLabel}>Photo</Text>
                   </TouchableOpacity>
                   
@@ -599,11 +603,11 @@ const CameraScreen = () => {
                     ]}
                     onPress={handleLongPress}
                   >
-                    <Ionicons 
+                    <Icon  
                       name="videocam" 
                       size={32} 
                       color={isEmulator ? "#666" : "white"} 
-                    />
+                     />
                     <Text style={[
                       styles.buttonLabel,
                       isEmulator && styles.buttonLabelDisabled
@@ -649,7 +653,7 @@ const CameraScreen = () => {
                         style={styles.removePhotoButton}
                         onPress={() => removePhoto(index)}
                       >
-                        <Ionicons name="close-circle" size={24} color="red" />
+                        <Icon  name="close-circle" size={24} color="red"  />
                       </TouchableOpacity>
                     </View>
                   ))}
@@ -671,7 +675,7 @@ const CameraScreen = () => {
               style={styles.flipButton}
               onPress={toggleCameraType}
             >
-              <Ionicons name="camera-reverse" size={32} color="white" />
+              <Icon  name="camera-reverse" size={32} color="white"  />
             </TouchableOpacity>
           </View>
           

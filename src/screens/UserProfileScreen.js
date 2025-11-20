@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -12,9 +13,8 @@ import {
   StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import { useIsFocused } from '@react-navigation/native';
 import Toast from 'react-native-toast-message';
 import { responsiveFont } from '../utils/scaleUtils';
@@ -220,22 +220,22 @@ const UserProfileScreen = ({ route, navigation }) => {
           <Image source={{ uri: item.thumbnail }} style={styles.postThumbnail} />
         ) : (
           <View style={[styles.postThumbnail, styles.postThumbnailFallback]}>
-            <Ionicons name="image" size={24} color="#6b7280" />
+            <Icon  name="image" size={24} color="#6b7280"  />
           </View>
         )}
         {isVideo && (
           <View style={styles.videoIndicator}>
-            <Ionicons name="play" size={16} color="#fff" />
+            <Icon  name="play" size={16} color="#fff"  />
           </View>
         )}
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
             <View style={styles.postStat}>
-              <Ionicons name="heart" size={12} color="#fff" />
+              <Icon  name="heart" size={12} color="#fff"  />
               <Text style={styles.postStatText}>{formatNumber(item.likes || item.likeCount || 0)}</Text>
             </View>
             <View style={styles.postStat}>
-              <Ionicons name="eye" size={12} color="#fff" />
+              <Icon  name="eye" size={12} color="#fff"  />
               <Text style={styles.postStatText}>{formatNumber(item.views || 0)}</Text>
             </View>
           </View>
@@ -268,11 +268,11 @@ const UserProfileScreen = ({ route, navigation }) => {
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Ionicons name="arrow-back" size={24} color="#ffffff" />
+          <Icon  name="arrow-back" size={24} color="#ffffff"  />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{userProfile?.displayName}</Text>
         <TouchableOpacity style={styles.moreButton}>
-          <Ionicons name="ellipsis-horizontal" size={24} color="#ffffff" />
+          <Icon  name="ellipsis-horizontal" size={24} color="#ffffff"  />
         </TouchableOpacity>
       </View>
 
@@ -284,12 +284,12 @@ const UserProfileScreen = ({ route, navigation }) => {
               <Image source={{ uri: userProfile.avatar }} style={styles.avatar} />
             ) : (
               <View style={[styles.avatar, styles.avatarFallback]}>
-                <Ionicons name="person" size={40} color="#6b7280" />
+                <Icon  name="person" size={40} color="#6b7280"  />
               </View>
             )}
             {userProfile?.verified && (
               <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark" size={12} color="#fff" />
+                <Icon  name="checkmark" size={12} color="#fff"  />
               </View>
             )}
           </View>
@@ -335,7 +335,7 @@ const UserProfileScreen = ({ route, navigation }) => {
               </TouchableOpacity>
               
               <TouchableOpacity style={styles.messageButton}>
-                <Ionicons name="chatbubble-outline" size={20} color="#fff" />
+                <Icon  name="chatbubble-outline" size={20} color="#fff"  />
               </TouchableOpacity>
             </View>
           )}

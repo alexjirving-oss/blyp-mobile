@@ -1,5 +1,5 @@
 import { collection, getDocs } from 'firebase/firestore';
-import { db, auth } from '../config/firebase';
+import { firestore as db, auth } from '../config/firebase';
 
 // Quick debug function to check Firestore structure
 export const debugFollowersStructure = async () => {

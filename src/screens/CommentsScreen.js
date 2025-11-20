@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -14,8 +15,6 @@ import {
   Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { collection, addDoc, onSnapshot, orderBy, query, updateDoc, doc, arrayUnion, arrayRemove, increment, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -284,11 +283,11 @@ const CommentsScreen = ({ route, navigation }) => {
                 style={styles.commentAction}
                 onPress={() => handleLikeComment(reply.id, true, parentComment.id)}
               >
-                <Ionicons 
+                <Icon  
                   name={isLiked ? "heart" : "heart-outline"} 
                   size={16} 
                   color={isLiked ? "#ff1744" : "#666"} 
-                />
+                 />
                 <Text style={[styles.commentActionText, isLiked && { color: '#ff1744' }]}>
                   {reply.likes}
                 </Text>
@@ -324,11 +323,11 @@ const CommentsScreen = ({ route, navigation }) => {
                 style={styles.commentAction}
                 onPress={() => handleLikeComment(comment.id)}
               >
-                <Ionicons 
+                <Icon  
                   name={isLiked ? "heart" : "heart-outline"} 
                   size={16} 
                   color={isLiked ? "#ff1744" : "#666"} 
-                />
+                 />
                 <Text style={[styles.commentActionText, isLiked && { color: '#ff1744' }]}>
                   {comment.likes}
                 </Text>
@@ -391,7 +390,7 @@ const CommentsScreen = ({ route, navigation }) => {
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.closeButton} onPress={closeComments}>
-              <Ionicons name="close" size={28} color="#fff" />
+              <Icon  name="close" size={28} color="#fff"  />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Comments</Text>
             <View style={styles.headerSpacer} />
@@ -415,7 +414,7 @@ const CommentsScreen = ({ route, navigation }) => {
                 Replying to @{replyingTo.username}
               </Text>
               <TouchableOpacity onPress={() => setReplyingTo(null)}>
-                <Ionicons name="close" size={20} color="#666" />
+                <Icon  name="close" size={20} color="#666"  />
               </TouchableOpacity>
             </View>
           )}
@@ -443,7 +442,7 @@ const CommentsScreen = ({ route, navigation }) => {
                   colors={newComment.trim() ? ['#ec4899', '#be185d'] : ['#374151', '#374151']}
                   style={styles.sendGradient}
                 >
-                  <Ionicons name="send" size={20} color="#fff" />
+                  <Icon  name="send" size={20} color="#fff"  />
                 </LinearGradient>
               </TouchableOpacity>
             </View>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../../../src/components/Icon';
 import {
   View,
   Text,
@@ -7,7 +8,6 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { db } from '../config/firebase'; // Assuming you have a firebase config file
 import { collection, onSnapshot } from 'firebase/firestore';
 
@@ -40,7 +40,7 @@ const GameLobby = ({ navigation }) => {
     <TouchableOpacity style={styles.gameItem} onPress={() => handleJoinGame(item.id)}>
       <Text style={styles.gameTitle}>{item.title}</Text>
       <Text style={styles.gameDescription}>{item.description}</Text>
-      <Ionicons name="play" size={24} color="#4CAF50" />
+      <Icon  name="play" size={24} color="#4CAF50"  />
     </TouchableOpacity>
   );
 

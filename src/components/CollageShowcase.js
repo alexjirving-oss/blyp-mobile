@@ -8,8 +8,6 @@ import {
   Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-
 const { width: screenWidth } = Dimensions.get('window');
 
 const CollageShowcase = ({ 

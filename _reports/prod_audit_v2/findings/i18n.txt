@@ -1,0 +1,1 @@
+Hard-coded string chunks (rough): 56

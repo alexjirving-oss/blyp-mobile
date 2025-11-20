@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -10,7 +11,6 @@ import {
   RefreshControl,
   StatusBar
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import GameService from '../services/GameService';
 import { auth } from '../config/firebase';
@@ -34,7 +34,7 @@ const GamesScreen = ({ navigation }) => {
   const tabs = [
     { id: 'browse', label: 'Browse', icon: 'game-controller-outline' },
     { id: 'my-games', label: 'My Games', icon: 'trophy-outline' },
-    { id: 'stats', label: 'Stats', icon: 'analytics-outline' },
+    { id: 'live', label: 'Live', icon: 'radio-outline' },
   ];
 
   const gameTypes = [
@@ -248,7 +248,7 @@ const GamesScreen = ({ navigation }) => {
           <Text style={styles.playerCountText}>
             {item.players.length}/{item.maxPlayers}
           </Text>
-          <Ionicons name="people-outline" size={16} color="#9ca3af" />
+          <Icon  name="people-outline" size={16} color="#9ca3af"  />
         </View>
       </View>
       
@@ -329,7 +329,7 @@ const GamesScreen = ({ navigation }) => {
         </>
       ) : (
         <View style={styles.emptyStats}>
-          <Ionicons name="analytics-outline" size={64} color="#374151" />
+          <Icon  name="analytics-outline" size={64} color="#374151"  />
           <Text style={styles.emptyStatsTitle}>No Game Stats Yet</Text>
           <Text style={styles.emptyStatsText}>
             Play some games to see your statistics here!
@@ -363,17 +363,17 @@ const GamesScreen = ({ navigation }) => {
           <View style={styles.gameTileFooter}>
             <View style={styles.gameMetaInfo}>
               <View style={styles.metaItem}>
-                <Ionicons name="people" size={14} color="rgba(255,255,255,0.9)" />
+                <Icon  name="people" size={14} color="rgba(255,255,255,0.9)"  />
                 <Text style={styles.metaText}>{item.players}</Text>
               </View>
               <View style={styles.metaItem}>
-                <Ionicons name="time" size={14} color="rgba(255,255,255,0.9)" />
+                <Icon  name="time" size={14} color="rgba(255,255,255,0.9)"  />
                 <Text style={styles.metaText}>{item.playTime}</Text>
               </View>
             </View>
             
             <View style={styles.playButton}>
-              <Ionicons name="play" size={16} color="#fff" />
+              <Icon  name="play" size={16} color="#fff"  />
             </View>
           </View>
         </View>
@@ -418,7 +418,7 @@ const GamesScreen = ({ navigation }) => {
             }
             ListEmptyComponent={
               <View style={styles.emptyState}>
-                <Ionicons name="trophy-outline" size={64} color="#374151" />
+                <Icon  name="trophy-outline" size={64} color="#374151"  />
                 <Text style={styles.emptyStateTitle}>No Games Yet</Text>
                 <Text style={styles.emptyStateText}>
                   Join or create games to see them here!
@@ -449,7 +449,7 @@ const GamesScreen = ({ navigation }) => {
                 style={styles.popupClose}
                 onPress={() => setShowGamePopup(false)}
               >
-                <Ionicons name="close" size={24} color="#9ca3af" />
+                <Icon  name="close" size={24} color="#9ca3af"  />
               </TouchableOpacity>
 
               <LinearGradient colors={selectedGame.gradient} style={styles.popupHeader}>
@@ -461,17 +461,17 @@ const GamesScreen = ({ navigation }) => {
               <View style={styles.popupInfo}>
                 <View style={styles.popupMetaGrid}>
                   <View style={styles.popupMetaItem}>
-                    <Ionicons name="people" size={20} color="#a855f7" />
+                    <Icon  name="people" size={20} color="#a855f7"  />
                     <Text style={styles.popupMetaLabel}>Players</Text>
                     <Text style={styles.popupMetaValue}>{selectedGame.players}</Text>
                   </View>
                   <View style={styles.popupMetaItem}>
-                    <Ionicons name="time" size={20} color="#a855f7" />
+                    <Icon  name="time" size={20} color="#a855f7"  />
                     <Text style={styles.popupMetaLabel}>Duration</Text>
                     <Text style={styles.popupMetaValue}>{selectedGame.playTime}</Text>
                   </View>
                   <View style={styles.popupMetaItem}>
-                    <Ionicons name="star" size={20} color="#a855f7" />
+                    <Icon  name="star" size={20} color="#a855f7"  />
                     <Text style={styles.popupMetaLabel}>Difficulty</Text>
                     <Text style={styles.popupMetaValue}>{selectedGame.difficulty}</Text>
                   </View>
@@ -494,7 +494,7 @@ const GamesScreen = ({ navigation }) => {
                       </>
                     ) : (
                       <>
-                        <Ionicons name="play" size={20} color="#fff" />
+                        <Icon  name="play" size={20} color="#fff"  />
                         <Text style={styles.playNowText}>Play Now</Text>
                       </>
                     )}
@@ -523,7 +523,7 @@ const GamesScreen = ({ navigation }) => {
               onPress={() => setShowCreateModal(false)}
               style={styles.closeButton}
             >
-              <Ionicons name="close" size={24} color="#9ca3af" />
+              <Icon  name="close" size={24} color="#9ca3af"  />
             </TouchableOpacity>
           </View>
 
@@ -555,7 +555,7 @@ const GamesScreen = ({ navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-            <Ionicons name="menu" size={24} color="#d1d5db" />
+            <Icon  name="menu" size={24} color="#d1d5db"  />
           </TouchableOpacity>
           <View style={styles.logoContainer}>
             <BlypLogo useGradientBackground={true} />
@@ -565,7 +565,7 @@ const GamesScreen = ({ navigation }) => {
             onPress={() => setShowCreateModal(true)}
           >
             <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.createButtonGradient}>
-              <Ionicons name="add" size={20} color="#fff" />
+              <Icon  name="add" size={20} color="#fff"  />
               <Text style={styles.createButtonText}>Create</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -582,11 +582,11 @@ const GamesScreen = ({ navigation }) => {
               ]}
               onPress={() => setSelectedTab(tab.id)}
             >
-              <Ionicons
+              <Icon 
                 name={tab.icon}
                 size={18}
                 color={selectedTab === tab.id ? '#fff' : '#9ca3af'}
-              />
+               />
               <Text
                 style={[
                   styles.tabText,
@@ -625,7 +625,7 @@ const GamesScreen = ({ navigation }) => {
               style={styles.menuCloseButton}
               onPress={() => setMenuVisible(false)}
             >
-              <Ionicons name="close" size={24} color="#d1d5db" />
+              <Icon  name="close" size={24} color="#d1d5db"  />
             </TouchableOpacity>
             <Text style={styles.menuTitle}>Your Wallet</Text>
             

@@ -1,0 +1,1434 @@
+{
+  "#1/.expo/metro/externals/assert/index.js": [],
+  "#1/.expo/metro/externals/async_hooks/index.js": [],
+  "#1/.expo/metro/externals/buffer/index.js": [],
+  "#1/.expo/metro/externals/child_process/index.js": [],
+  "#1/.expo/metro/externals/cluster/index.js": [],
+  "#1/.expo/metro/externals/console/index.js": [],
+  "#1/.expo/metro/externals/constants/index.js": [],
+  "#1/.expo/metro/externals/crypto/index.js": [],
+  "#1/.expo/metro/externals/dgram/index.js": [],
+  "#1/.expo/metro/externals/diagnostics_channel/index.js": [],
+  "#1/.expo/metro/externals/dns/index.js": [],
+  "#1/.expo/metro/externals/domain/index.js": [],
+  "#1/.expo/metro/externals/events/index.js": [],
+  "#1/.expo/metro/externals/fs/index.js": [],
+  "#1/.expo/metro/externals/fs/promises/index.js": [],
+  "#1/.expo/metro/externals/http/index.js": [],
+  "#1/.expo/metro/externals/http2/index.js": [],
+  "#1/.expo/metro/externals/https/index.js": [],
+  "#1/.expo/metro/externals/inspector/index.js": [],
+  "#1/.expo/metro/externals/module/index.js": [],
+  "#1/.expo/metro/externals/net/index.js": [],
+  "#1/.expo/metro/externals/os/index.js": [],
+  "#1/.expo/metro/externals/path/index.js": [],
+  "#1/.expo/metro/externals/perf_hooks/index.js": [],
+  "#1/.expo/metro/externals/process/index.js": [],
+  "#1/.expo/metro/externals/punycode/index.js": [],
+  "#1/.expo/metro/externals/querystring/index.js": [],
+  "#1/.expo/metro/externals/readline/index.js": [],
+  "#1/.expo/metro/externals/repl/index.js": [],
+  "#1/.expo/metro/externals/stream/index.js": [],
+  "#1/.expo/metro/externals/string_decoder/index.js": [],
+  "#1/.expo/metro/externals/timers/index.js": [],
+  "#1/.expo/metro/externals/tls/index.js": [],
+  "#1/.expo/metro/externals/trace_events/index.js": [],
+  "#1/.expo/metro/externals/tty/index.js": [],
+  "#1/.expo/metro/externals/url/index.js": [],
+  "#1/.expo/metro/externals/util/index.js": [],
+  "#1/.expo/metro/externals/v8/index.js": [],
+  "#1/.expo/metro/externals/vm/index.js": [],
+  "#1/.expo/metro/externals/wasi/index.js": [],
+  "#1/.expo/metro/externals/worker_threads/index.js": [],
+  "#1/.expo/metro/externals/zlib/index.js": [],
+  "#1/.expo/metro/polyfill.js": [],
+  "#1/.expo/metro/polyfill.native.js": [],
+  "#1/.expo/metro/shims/react-native-web/dist/cjs/exports/AppRegistry/AppContainer.js": [],
+  "#1/.expo/metro/shims/react-native-web/dist/cjs/exports/BackHandler/index.js": [],
+  "#1/.expo/metro/shims/react-native-web/dist/exports/AppRegistry/AppContainer.js": [],
+  "#1/.expo/metro/shims/react-native-web/dist/exports/BackHandler/index.js": [],
+  "#1/App.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/components/CreatePostButton.js",
+    "#1/src/components/TabBarIcon.js",
+    "#1/src/hooks/useCommon.js",
+    "#1/src/hooks/useUnreadCount.js",
+    "#1/src/screens/AuthScreen.js",
+    "#1/src/screens/CameraScreen.js",
+    "#1/src/screens/ChatConversationScreen.js",
+    "#1/src/screens/ChatListScreen.js",
+    "#1/src/screens/CommentsScreen.js",
+    "#1/src/screens/EditProfileScreen.js",
+    "#1/src/screens/FindPeopleScreen.js",
+    "#1/src/screens/FollowersScreen.js",
+    "#1/src/screens/HomeScreen.js",
+    "#1/src/screens/MediaViewerScreen.js",
+    "#1/src/screens/MessengerScreen.js",
+    "#1/src/screens/PostPreviewScreen.js",
+    "#1/src/screens/ProfileScreen.js",
+    "#1/src/screens/ReviewScreen.js",
+    "#1/src/screens/SearchResultsScreen.js",
+    "#1/src/screens/SearchScreen.js",
+    "#1/src/screens/UserProfileScreen.js",
+    "#1/src/screens/VoiceMemoScreen.js",
+    "#1/src/utils/scaleUtils.js"
+  ],
+  "#1/babel.config.js": [],
+  "#1/blyp-multiplayer-games/src/components/GameInvite.js": [],
+  "#1/blyp-multiplayer-games/src/components/GameLeaderboard.js": [],
+  "#1/blyp-multiplayer-games/src/components/GameLobby.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/blyp-multiplayer-games/src/components/GameTimer.js": [],
+  "#1/blyp-multiplayer-games/src/components/PlayerAvatar.js": [],
+  "#1/blyp-multiplayer-games/src/games/GameManager.js": [
+    "#1/blyp-multiplayer-games/src/games/GameTypes.js"
+  ],
+  "#1/blyp-multiplayer-games/src/games/GameTypes.js": [],
+  "#1/blyp-multiplayer-games/src/games/QuickDraw/DrawingCanvas.js": [],
+  "#1/blyp-multiplayer-games/src/games/QuickDraw/QuickDrawGame.js": [
+    "#1/blyp-multiplayer-games/src/games/QuickDraw/DrawingCanvas.js",
+    "#1/blyp-multiplayer-games/src/games/QuickDraw/QuickDrawLogic.js"
+  ],
+  "#1/blyp-multiplayer-games/src/games/QuickDraw/QuickDrawLogic.js": [
+    "#1/blyp-multiplayer-games/src/utils/scoreUtils.js"
+  ],
+  "#1/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeBoard.js": [],
+  "#1/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeGame.js": [
+    "#1/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js"
+  ],
+  "#1/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js": [
+    "#1/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js"
+  ],
+  "#1/blyp-multiplayer-games/src/games/WordGuess/WordGuessBoard.js": [],
+  "#1/blyp-multiplayer-games/src/games/WordGuess/WordGuessGame.js": [],
+  "#1/blyp-multiplayer-games/src/games/WordGuess/WordGuessLogic.js": [
+    "#1/blyp-multiplayer-games/src/utils/randomUtils.js"
+  ],
+  "#1/blyp-multiplayer-games/src/screens/ActiveGamesScreen.js": [
+    "#1/blyp-multiplayer-games/src/services/GameService.js"
+  ],
+  "#1/blyp-multiplayer-games/src/screens/GameMenuScreen.js": [],
+  "#1/blyp-multiplayer-games/src/screens/GameResultScreen.js": [],
+  "#1/blyp-multiplayer-games/src/screens/GameRoomScreen.js": [
+    "#1/blyp-multiplayer-games/src/components/GameLeaderboard.js",
+    "#1/blyp-multiplayer-games/src/components/GameTimer.js",
+    "#1/blyp-multiplayer-games/src/games/GameManager.js"
+  ],
+  "#1/blyp-multiplayer-games/src/services/GameMatchmaking.js": [],
+  "#1/blyp-multiplayer-games/src/services/GameService.js": [],
+  "#1/blyp-multiplayer-games/src/services/RealtimeGameService.js": [],
+  "#1/blyp-multiplayer-games/src/types/gameTypes.js": [],
+  "#1/blyp-multiplayer-games/src/utils/gameUtils.js": [
+    "#1/blyp-multiplayer-games/src/utils/randomUtils.js"
+  ],
+  "#1/blyp-multiplayer-games/src/utils/randomUtils.js": [],
+  "#1/blyp-multiplayer-games/src/utils/scoreUtils.js": [
+    "#1/blyp-multiplayer-games/src/utils/gameUtils.js"
+  ],
+  "#1/check-posts.js": [],
+  "#1/cleanup-posts.js": [],
+  "#1/src/components/ActivityFeed.js": [
+    "#1/src/config/firebase.js",
+    "#1/src/utils/activityTracker.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/BlypLogo.js": [
+    "#1/src/utils/scaleUtils.js"
+  ],
+  "#1/src/components/CategoriesTab.js": [
+    "#1/src/utils/scaleUtils.js",
+    "#1/src/utils/smartListGenerator.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/CommentsModal.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/CreatePostButton.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/CustomText.js": [
+    "#1/src/utils/scaleUtils.js"
+  ],
+  "#1/src/components/EnhancedVideo.js": [],
+  "#1/src/components/FollowerBooster.js": [
+    "#1/src/utils/boostFollowers.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/HashtagsTab.js": [
+    "#1/src/utils/smartListGenerator.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/HeartAnimation.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/OptimizedVideo.js": [],
+  "#1/src/components/PhotoGallery.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/ScaledText.js": [],
+  "#1/src/components/SearchBar.js": [
+    "#1/src/services/searchService.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/TabBarIcon.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/components/WhatsAppPopularTab.js": [
+    "#1/src/utils/scaleUtils.js",
+    "#1/src/utils/smartListGenerator.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/config/firebase.js": [],
+  "#1/src/constants/mockData.js": [],
+  "#1/src/contexts/UnreadContext.js": [],
+  "#1/src/hooks/useCommon.js": [
+    "#1/src/config/firebase.js",
+    "#1/src/utils/Logger.js"
+  ],
+  "#1/src/hooks/useUnreadCount.js": [
+    "#1/src/utils/unreadCountManager.js"
+  ],
+  "#1/src/screens/AuthScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/screens/CameraScreen.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/ChatConversationScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/config/firebase.js",
+    "#1/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/ChatListScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/config/firebase.js",
+    "#1/src/utils/followUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/CommentsScreen.js": [
+    "#1/src/config/firebase.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/EditProfileScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/config/firebase.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/FindPeopleScreen.js": [
+    "#1/src/config/firebase.js",
+    "#1/src/utils/followUtils.js",
+    "#1/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/FollowersScreen.js": [
+    "#1/src/config/firebase.js",
+    "#1/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/HomeScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/components/CategoriesTab.js",
+    "#1/src/components/CommentsModal.js",
+    "#1/src/components/EnhancedVideo.js",
+    "#1/src/components/HashtagsTab.js",
+    "#1/src/components/HeartAnimation.js",
+    "#1/src/components/OptimizedVideo.js",
+    "#1/src/components/WhatsAppPopularTab.js",
+    "#1/src/config/firebase.js",
+    "#1/src/utils/activityTracker.js",
+    "#1/src/utils/scaleUtils.js",
+    "#1/src/utils/testDataHelper.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/MediaViewerScreen.js": [
+    "#1/src/components/HeartAnimation.js",
+    "#1/src/components/PhotoGallery.js",
+    "#1/src/config/firebase.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/MessengerScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/components/SearchBar.js",
+    "#1/src/config/firebase.js",
+    "#1/src/hooks/useCommon.js",
+    "#1/src/utils/Logger.js",
+    "#1/src/utils/followUtils.js",
+    "#1/src/utils/scaleUtils.js",
+    "#1/src/utils/unreadCountManager.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/PostPreviewScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/ProfileScreen.js": [
+    "#1/src/components/ActivityFeed.js",
+    "#1/src/components/BlypLogo.js",
+    "#1/src/components/FollowerBooster.js",
+    "#1/src/config/firebase.js",
+    "#1/src/utils/activityTracker.js",
+    "#1/src/utils/boostFollowers.js",
+    "#1/src/utils/followUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/ReviewScreen.js": [
+    "#1/src/components/BlypLogo.js",
+    "#1/src/config/firebase.js",
+    "#1/src/services/aiService.js",
+    "#1/src/services/geminiSpeechService.js",
+    "#1/src/services/mediaDescriptionService.js",
+    "#1/src/services/speechToTextService.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/SearchResultsScreen.js": [
+    "#1/src/services/searchService.js",
+    "#1/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/SearchScreen.js": [
+    "#1/src/services/searchService.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/UserProfileScreen.js": [
+    "#1/src/config/firebase.js",
+    "#1/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "#1/src/screens/VoiceMemoScreen.js": [
+    "src/components/Icon.js"
+  ],
+  "#1/src/services/FirebaseService.js": [
+    "#1/src/config/firebase.js",
+    "#1/src/utils/Logger.js"
+  ],
+  "#1/src/services/aiService.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/services/firebase.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/services/geminiSpeechService.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/services/mediaDescriptionService.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/services/realSpeechService.js": [],
+  "#1/src/services/searchService.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/services/simpleSpeechService.js": [],
+  "#1/src/services/speechToTextService.js": [],
+  "#1/src/styles/theme.js": [
+    "#1/src/utils/scaleUtils.js"
+  ],
+  "#1/src/utils/Logger.js": [],
+  "#1/src/utils/activityTracker.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/utils/boostFollowers.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/utils/debugFollowers.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/utils/followUtils.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/utils/performanceUtils.js": [],
+  "#1/src/utils/scaleUtils.js": [],
+  "#1/src/utils/smartListGenerator.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/utils/testDataHelper.js": [
+    "#1/src/config/firebase.js"
+  ],
+  "#1/src/utils/unreadCountManager.js": [],
+  "#1/test-api.js": [],
+  "App.js": [
+    "src/components/BlypLogo.js",
+    "src/components/CreatePostButton.js",
+    "src/components/TabBarIcon.js",
+    "src/components/TestRender.js",
+    "src/config/amplify.js",
+    "src/config/preAuthCleanup.js",
+    "src/hooks/useCommon.js",
+    "src/hooks/useUnreadCount.js",
+    "src/monitoring/sentry.js",
+    "src/screens/AuthScreen.js",
+    "src/screens/CameraScreen.js",
+    "src/screens/ChatConversationScreen.js",
+    "src/screens/ChatListScreen.js",
+    "src/screens/ChatRoomScreen.js",
+    "src/screens/ChatRoomsScreen.js",
+    "src/screens/CoinStoreScreen.js",
+    "src/screens/CommentsScreen.js",
+    "src/screens/EditProfileScreen.js",
+    "src/screens/FindPeopleScreen.js",
+    "src/screens/FollowersScreen.js",
+    "src/screens/GameRoomScreen.js",
+    "src/screens/GamesScreen.js",
+    "src/screens/HomeScreen.js",
+    "src/screens/LiveStreamScreen.js",
+    "src/screens/MediaViewerScreen.js",
+    "src/screens/MessengerScreen.js",
+    "src/screens/PostPreviewScreen.js",
+    "src/screens/ProfileScreen.js",
+    "src/screens/ReviewScreen.js",
+    "src/screens/SearchResultsScreen.js",
+    "src/screens/SearchScreen.js",
+    "src/screens/UserProfileScreen.js",
+    "src/screens/VoiceMemoScreen.js",
+    "src/utils/scaleUtils.js"
+  ],
+  "App.test.js": [],
+  "CAMERA_DEBUG_PLAN.js": [],
+  "CameraTestApp.js": [],
+  "LiveStreamTest.js": [],
+  "MinimalApp.js": [],
+  "MinimalCameraTest.js": [],
+  "QuickStreamTest.js": [],
+  "TestApp.js": [],
+  "TestLiveStreamSimple.js": [
+    "src/config/firebase.js"
+  ],
+  "__tests__/smoke.test.js": [
+    "src/utils/videoUrlFixer.js"
+  ],
+  "_reports/bundles/android/_expo/_expo/static/js/android/AppEntry-e8743817f49f3bc0bb3f9cae3630accc.js": [],
+  "_reports/bundles/ios/_expo/_expo/static/js/ios/AppEntry-62ff2969a2974b81a4de962917eab8bc.js": [],
+  "_reports/current_audit/inventory/app.config.js": [],
+  "_reports/current_audit/inventory/babel.config.js": [],
+  "_reports/current_audit/inventory/metro.config.js": [],
+  "_reports/current_audit/logs/aggregate_metrics.js": [],
+  "_reports/prod_audit_v2/run_audit.js": [],
+  "add-test-followers.js": [],
+  "amplify/backend/types/amplify-dependent-resources-ref.d.ts": [],
+  "apk-download-guide.js": [],
+  "app.config.js": [
+    "app.json"
+  ],
+  "app.json": [],
+  "babel.config.js": [],
+  "backup/369369369/.expo/metro/externals/assert/index.js": [],
+  "backup/369369369/.expo/metro/externals/async_hooks/index.js": [],
+  "backup/369369369/.expo/metro/externals/buffer/index.js": [],
+  "backup/369369369/.expo/metro/externals/child_process/index.js": [],
+  "backup/369369369/.expo/metro/externals/cluster/index.js": [],
+  "backup/369369369/.expo/metro/externals/console/index.js": [],
+  "backup/369369369/.expo/metro/externals/constants/index.js": [],
+  "backup/369369369/.expo/metro/externals/crypto/index.js": [],
+  "backup/369369369/.expo/metro/externals/dgram/index.js": [],
+  "backup/369369369/.expo/metro/externals/diagnostics_channel/index.js": [],
+  "backup/369369369/.expo/metro/externals/dns/index.js": [],
+  "backup/369369369/.expo/metro/externals/domain/index.js": [],
+  "backup/369369369/.expo/metro/externals/events/index.js": [],
+  "backup/369369369/.expo/metro/externals/fs/index.js": [],
+  "backup/369369369/.expo/metro/externals/fs/promises/index.js": [],
+  "backup/369369369/.expo/metro/externals/http/index.js": [],
+  "backup/369369369/.expo/metro/externals/http2/index.js": [],
+  "backup/369369369/.expo/metro/externals/https/index.js": [],
+  "backup/369369369/.expo/metro/externals/inspector/index.js": [],
+  "backup/369369369/.expo/metro/externals/module/index.js": [],
+  "backup/369369369/.expo/metro/externals/net/index.js": [],
+  "backup/369369369/.expo/metro/externals/os/index.js": [],
+  "backup/369369369/.expo/metro/externals/path/index.js": [],
+  "backup/369369369/.expo/metro/externals/perf_hooks/index.js": [],
+  "backup/369369369/.expo/metro/externals/process/index.js": [],
+  "backup/369369369/.expo/metro/externals/punycode/index.js": [],
+  "backup/369369369/.expo/metro/externals/querystring/index.js": [],
+  "backup/369369369/.expo/metro/externals/readline/index.js": [],
+  "backup/369369369/.expo/metro/externals/repl/index.js": [],
+  "backup/369369369/.expo/metro/externals/stream/index.js": [],
+  "backup/369369369/.expo/metro/externals/string_decoder/index.js": [],
+  "backup/369369369/.expo/metro/externals/timers/index.js": [],
+  "backup/369369369/.expo/metro/externals/tls/index.js": [],
+  "backup/369369369/.expo/metro/externals/trace_events/index.js": [],
+  "backup/369369369/.expo/metro/externals/tty/index.js": [],
+  "backup/369369369/.expo/metro/externals/url/index.js": [],
+  "backup/369369369/.expo/metro/externals/util/index.js": [],
+  "backup/369369369/.expo/metro/externals/v8/index.js": [],
+  "backup/369369369/.expo/metro/externals/vm/index.js": [],
+  "backup/369369369/.expo/metro/externals/wasi/index.js": [],
+  "backup/369369369/.expo/metro/externals/worker_threads/index.js": [],
+  "backup/369369369/.expo/metro/externals/zlib/index.js": [],
+  "backup/369369369/.expo/metro/polyfill.js": [],
+  "backup/369369369/.expo/metro/polyfill.native.js": [],
+  "backup/369369369/.expo/metro/shims/react-native-web/dist/cjs/exports/AppRegistry/AppContainer.js": [],
+  "backup/369369369/.expo/metro/shims/react-native-web/dist/cjs/exports/BackHandler/index.js": [],
+  "backup/369369369/.expo/metro/shims/react-native-web/dist/exports/AppRegistry/AppContainer.js": [],
+  "backup/369369369/.expo/metro/shims/react-native-web/dist/exports/BackHandler/index.js": [],
+  "backup/369369369/App.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/components/CreatePostButton.js",
+    "backup/369369369/src/components/TabBarIcon.js",
+    "backup/369369369/src/hooks/useCommon.js",
+    "backup/369369369/src/hooks/useUnreadCount.js",
+    "backup/369369369/src/screens/AuthScreen.js",
+    "backup/369369369/src/screens/CameraScreen.js",
+    "backup/369369369/src/screens/ChatConversationScreen.js",
+    "backup/369369369/src/screens/ChatListScreen.js",
+    "backup/369369369/src/screens/CommentsScreen.js",
+    "backup/369369369/src/screens/EditProfileScreen.js",
+    "backup/369369369/src/screens/FindPeopleScreen.js",
+    "backup/369369369/src/screens/FollowersScreen.js",
+    "backup/369369369/src/screens/HomeScreen.js",
+    "backup/369369369/src/screens/MediaViewerScreen.js",
+    "backup/369369369/src/screens/MessengerScreen.js",
+    "backup/369369369/src/screens/PostPreviewScreen.js",
+    "backup/369369369/src/screens/ProfileScreen.js",
+    "backup/369369369/src/screens/ReviewScreen.js",
+    "backup/369369369/src/screens/SearchResultsScreen.js",
+    "backup/369369369/src/screens/SearchScreen.js",
+    "backup/369369369/src/screens/UserProfileScreen.js",
+    "backup/369369369/src/screens/VoiceMemoScreen.js",
+    "backup/369369369/src/utils/scaleUtils.js"
+  ],
+  "backup/369369369/babel.config.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/components/GameInvite.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/components/GameLeaderboard.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/components/GameLobby.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/components/GameTimer.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/components/PlayerAvatar.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/games/GameManager.js": [
+    "backup/369369369/blyp-multiplayer-games/src/games/GameTypes.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/games/GameTypes.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/games/QuickDraw/DrawingCanvas.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/games/QuickDraw/QuickDrawGame.js": [
+    "backup/369369369/blyp-multiplayer-games/src/games/QuickDraw/DrawingCanvas.js",
+    "backup/369369369/blyp-multiplayer-games/src/games/QuickDraw/QuickDrawLogic.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/games/QuickDraw/QuickDrawLogic.js": [
+    "backup/369369369/blyp-multiplayer-games/src/utils/scoreUtils.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeBoard.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeGame.js": [
+    "backup/369369369/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js": [
+    "backup/369369369/blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/games/WordGuess/WordGuessBoard.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/games/WordGuess/WordGuessGame.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/games/WordGuess/WordGuessLogic.js": [
+    "backup/369369369/blyp-multiplayer-games/src/utils/randomUtils.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/screens/ActiveGamesScreen.js": [
+    "backup/369369369/blyp-multiplayer-games/src/services/GameService.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/screens/GameMenuScreen.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/screens/GameResultScreen.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/screens/GameRoomScreen.js": [
+    "backup/369369369/blyp-multiplayer-games/src/components/GameLeaderboard.js",
+    "backup/369369369/blyp-multiplayer-games/src/components/GameTimer.js",
+    "backup/369369369/blyp-multiplayer-games/src/games/GameManager.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/services/GameMatchmaking.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/services/GameService.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/services/RealtimeGameService.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/types/gameTypes.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/utils/gameUtils.js": [
+    "backup/369369369/blyp-multiplayer-games/src/utils/randomUtils.js"
+  ],
+  "backup/369369369/blyp-multiplayer-games/src/utils/randomUtils.js": [],
+  "backup/369369369/blyp-multiplayer-games/src/utils/scoreUtils.js": [
+    "backup/369369369/blyp-multiplayer-games/src/utils/gameUtils.js"
+  ],
+  "backup/369369369/check-posts.js": [],
+  "backup/369369369/cleanup-posts.js": [],
+  "backup/369369369/src/components/ActivityFeed.js": [
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/activityTracker.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/BlypLogo.js": [
+    "backup/369369369/src/utils/scaleUtils.js"
+  ],
+  "backup/369369369/src/components/CategoriesTab.js": [
+    "backup/369369369/src/utils/scaleUtils.js",
+    "backup/369369369/src/utils/smartListGenerator.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/CommentsModal.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/CreatePostButton.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/CustomText.js": [
+    "backup/369369369/src/utils/scaleUtils.js"
+  ],
+  "backup/369369369/src/components/EnhancedVideo.js": [],
+  "backup/369369369/src/components/FollowerBooster.js": [
+    "backup/369369369/src/utils/boostFollowers.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/HashtagsTab.js": [
+    "backup/369369369/src/utils/smartListGenerator.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/HeartAnimation.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/OptimizedVideo.js": [],
+  "backup/369369369/src/components/PhotoGallery.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/ScaledText.js": [],
+  "backup/369369369/src/components/SearchBar.js": [
+    "backup/369369369/src/services/searchService.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/TabBarIcon.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/components/WhatsAppPopularTab.js": [
+    "backup/369369369/src/utils/scaleUtils.js",
+    "backup/369369369/src/utils/smartListGenerator.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/config/firebase.js": [],
+  "backup/369369369/src/constants/mockData.js": [],
+  "backup/369369369/src/contexts/UnreadContext.js": [],
+  "backup/369369369/src/hooks/useCommon.js": [
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/Logger.js"
+  ],
+  "backup/369369369/src/hooks/useUnreadCount.js": [
+    "backup/369369369/src/utils/unreadCountManager.js"
+  ],
+  "backup/369369369/src/screens/AuthScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/screens/CameraScreen.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/ChatConversationScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/ChatListScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/followUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/CommentsScreen.js": [
+    "backup/369369369/src/config/firebase.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/EditProfileScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/config/firebase.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/FindPeopleScreen.js": [
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/followUtils.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/FollowersScreen.js": [
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/HomeScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/components/CategoriesTab.js",
+    "backup/369369369/src/components/CommentsModal.js",
+    "backup/369369369/src/components/EnhancedVideo.js",
+    "backup/369369369/src/components/HashtagsTab.js",
+    "backup/369369369/src/components/HeartAnimation.js",
+    "backup/369369369/src/components/OptimizedVideo.js",
+    "backup/369369369/src/components/WhatsAppPopularTab.js",
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/activityTracker.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "backup/369369369/src/utils/testDataHelper.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/MediaViewerScreen.js": [
+    "backup/369369369/src/components/HeartAnimation.js",
+    "backup/369369369/src/components/PhotoGallery.js",
+    "backup/369369369/src/config/firebase.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/MessengerScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/components/SearchBar.js",
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/hooks/useCommon.js",
+    "backup/369369369/src/utils/Logger.js",
+    "backup/369369369/src/utils/followUtils.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "backup/369369369/src/utils/unreadCountManager.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/PostPreviewScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/ProfileScreen.js": [
+    "backup/369369369/src/components/ActivityFeed.js",
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/components/FollowerBooster.js",
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/activityTracker.js",
+    "backup/369369369/src/utils/boostFollowers.js",
+    "backup/369369369/src/utils/followUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/ReviewScreen.js": [
+    "backup/369369369/src/components/BlypLogo.js",
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/services/aiService.js",
+    "backup/369369369/src/services/geminiSpeechService.js",
+    "backup/369369369/src/services/mediaDescriptionService.js",
+    "backup/369369369/src/services/speechToTextService.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/SearchResultsScreen.js": [
+    "backup/369369369/src/services/searchService.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/SearchScreen.js": [
+    "backup/369369369/src/services/searchService.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/UserProfileScreen.js": [
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/scaleUtils.js",
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/screens/VoiceMemoScreen.js": [
+    "src/components/Icon.js"
+  ],
+  "backup/369369369/src/services/FirebaseService.js": [
+    "backup/369369369/src/config/firebase.js",
+    "backup/369369369/src/utils/Logger.js"
+  ],
+  "backup/369369369/src/services/aiService.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/services/firebase.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/services/geminiSpeechService.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/services/mediaDescriptionService.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/services/realSpeechService.js": [],
+  "backup/369369369/src/services/searchService.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/services/simpleSpeechService.js": [],
+  "backup/369369369/src/services/speechToTextService.js": [],
+  "backup/369369369/src/styles/theme.js": [
+    "backup/369369369/src/utils/scaleUtils.js"
+  ],
+  "backup/369369369/src/utils/Logger.js": [],
+  "backup/369369369/src/utils/activityTracker.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/utils/boostFollowers.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/utils/debugFollowers.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/utils/followUtils.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/utils/performanceUtils.js": [],
+  "backup/369369369/src/utils/scaleUtils.js": [],
+  "backup/369369369/src/utils/smartListGenerator.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/utils/testDataHelper.js": [
+    "backup/369369369/src/config/firebase.js"
+  ],
+  "backup/369369369/src/utils/unreadCountManager.js": [],
+  "backup/369369369/test-api.js": [],
+  "blyp-gaming-features/src/components/GameCard.tsx": [],
+  "blyp-gaming-features/src/components/GameInvite.tsx": [
+    "blyp-gaming-features/src/types/index.ts"
+  ],
+  "blyp-gaming-features/src/components/GameLobby.tsx": [
+    "blyp-gaming-features/src/services/gameService.ts",
+    "blyp-gaming-features/src/types/game.ts"
+  ],
+  "blyp-gaming-features/src/components/Leaderboard.tsx": [
+    "blyp-gaming-features/src/services/gameService.ts"
+  ],
+  "blyp-gaming-features/src/config/games.ts": [],
+  "blyp-gaming-features/src/hooks/useGameState.ts": [
+    "blyp-gaming-features/src/services/gameService.ts",
+    "blyp-gaming-features/src/types/game.ts"
+  ],
+  "blyp-gaming-features/src/hooks/useMultiplayer.ts": [
+    "blyp-gaming-features/src/services/multiplayerService.ts",
+    "blyp-gaming-features/src/types/multiplayer.ts"
+  ],
+  "blyp-gaming-features/src/hooks/useSocket.ts": [],
+  "blyp-gaming-features/src/screens/GameDetailScreen.tsx": [
+    "blyp-gaming-features/src/services/gameService.ts",
+    "blyp-gaming-features/src/types/game.ts"
+  ],
+  "blyp-gaming-features/src/screens/GameHistoryScreen.tsx": [
+    "blyp-gaming-features/src/services/gameService.ts",
+    "blyp-gaming-features/src/types/game.ts"
+  ],
+  "blyp-gaming-features/src/screens/GamesScreen.tsx": [
+    "blyp-gaming-features/src/components/GameCard.tsx",
+    "blyp-gaming-features/src/services/gameService.ts",
+    "blyp-gaming-features/src/types/game.ts"
+  ],
+  "blyp-gaming-features/src/screens/MultiplayerLobbyScreen.tsx": [
+    "blyp-gaming-features/src/hooks/useMultiplayer.ts",
+    "blyp-gaming-features/src/types/multiplayer.ts"
+  ],
+  "blyp-gaming-features/src/services/gameService.ts": [
+    "blyp-gaming-features/src/types/game.ts"
+  ],
+  "blyp-gaming-features/src/services/multiplayerService.ts": [
+    "blyp-gaming-features/src/types/multiplayer.ts"
+  ],
+  "blyp-gaming-features/src/services/socketService.ts": [],
+  "blyp-gaming-features/src/types/game.ts": [],
+  "blyp-gaming-features/src/types/index.ts": [
+    "blyp-gaming-features/src/types/game.ts",
+    "blyp-gaming-features/src/types/multiplayer.ts"
+  ],
+  "blyp-gaming-features/src/types/multiplayer.ts": [],
+  "blyp-gaming-features/src/utils/gameLogic.ts": [],
+  "blyp-gaming-features/src/utils/scoring.ts": [],
+  "blyp-multiplayer-games/src/components/GameInvite.js": [],
+  "blyp-multiplayer-games/src/components/GameLeaderboard.js": [],
+  "blyp-multiplayer-games/src/components/GameLobby.js": [
+    "src/components/Icon.js"
+  ],
+  "blyp-multiplayer-games/src/components/GameTimer.js": [],
+  "blyp-multiplayer-games/src/components/PlayerAvatar.js": [],
+  "blyp-multiplayer-games/src/games/GameManager.js": [
+    "blyp-multiplayer-games/src/games/GameTypes.js"
+  ],
+  "blyp-multiplayer-games/src/games/GameTypes.js": [],
+  "blyp-multiplayer-games/src/games/QuickDraw/DrawingCanvas.js": [],
+  "blyp-multiplayer-games/src/games/QuickDraw/QuickDrawGame.js": [
+    "blyp-multiplayer-games/src/games/QuickDraw/DrawingCanvas.js",
+    "blyp-multiplayer-games/src/games/QuickDraw/QuickDrawLogic.js"
+  ],
+  "blyp-multiplayer-games/src/games/QuickDraw/QuickDrawLogic.js": [
+    "blyp-multiplayer-games/src/utils/scoreUtils.js"
+  ],
+  "blyp-multiplayer-games/src/games/TicTacToe/TicTacToeBoard.js": [],
+  "blyp-multiplayer-games/src/games/TicTacToe/TicTacToeGame.js": [
+    "blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js"
+  ],
+  "blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js": [
+    "blyp-multiplayer-games/src/games/TicTacToe/TicTacToeLogic.js"
+  ],
+  "blyp-multiplayer-games/src/games/WordGuess/WordGuessBoard.js": [],
+  "blyp-multiplayer-games/src/games/WordGuess/WordGuessGame.js": [],
+  "blyp-multiplayer-games/src/games/WordGuess/WordGuessLogic.js": [
+    "blyp-multiplayer-games/src/utils/randomUtils.js"
+  ],
+  "blyp-multiplayer-games/src/screens/ActiveGamesScreen.js": [
+    "blyp-multiplayer-games/src/services/GameService.js"
+  ],
+  "blyp-multiplayer-games/src/screens/GameMenuScreen.js": [],
+  "blyp-multiplayer-games/src/screens/GameResultScreen.js": [],
+  "blyp-multiplayer-games/src/screens/GameRoomScreen.js": [
+    "blyp-multiplayer-games/src/components/GameLeaderboard.js",
+    "blyp-multiplayer-games/src/components/GameTimer.js",
+    "blyp-multiplayer-games/src/games/GameManager.js"
+  ],
+  "blyp-multiplayer-games/src/services/GameMatchmaking.js": [],
+  "blyp-multiplayer-games/src/services/GameService.js": [],
+  "blyp-multiplayer-games/src/services/RealtimeGameService.js": [],
+  "blyp-multiplayer-games/src/types/gameTypes.js": [],
+  "blyp-multiplayer-games/src/types/gameTypes.ts": [],
+  "blyp-multiplayer-games/src/utils/gameUtils.js": [
+    "blyp-multiplayer-games/src/utils/randomUtils.js"
+  ],
+  "blyp-multiplayer-games/src/utils/randomUtils.js": [],
+  "blyp-multiplayer-games/src/utils/scoreUtils.js": [
+    "blyp-multiplayer-games/src/utils/gameUtils.js"
+  ],
+  "check-posts.js": [],
+  "check-storage.js": [],
+  "check-stream-status.js": [],
+  "cleanup-fake-followers.js": [],
+  "cleanup-game-posts.js": [],
+  "cleanup-old-streams-admin.js": [],
+  "cleanup-old-streams.js": [],
+  "cleanup-posts.js": [],
+  "comprehensive-video-fixes.js": [
+    "src/config/firebase.js"
+  ],
+  "connection-test.js": [],
+  "coverage/lcov-report/block-navigation.js": [],
+  "coverage/lcov-report/prettify.js": [],
+  "coverage/lcov-report/sorter.js": [],
+  "debug-412-errors.js": [
+    "src/config/firebase.js"
+  ],
+  "debug-streaming.js": [
+    "src/config/firebase.js"
+  ],
+  "debug-video-autoplay.js": [],
+  "diagnose-bucket.js": [],
+  "diagnose-camera-issue.js": [],
+  "fix-screen-layouts.js": [],
+  "functions/lib/index.js": [],
+  "functions/scripts/dist/list-buckets.js": [],
+  "functions/scripts/list-buckets.js": [],
+  "functions/scripts/list-buckets.ts": [],
+  "functions/src/index.ts": [],
+  "index.js": [
+    "App.js"
+  ],
+  "jest.config.js": [],
+  "jest.setup.js": [],
+  "metro.config.js": [],
+  "plugins/withReactNativeWebRTC.js": [],
+  "production-validation.js": [],
+  "quick-validation.js": [],
+  "remove-fake-followers-admin.js": [],
+  "remove-fake-followers.js": [],
+  "run-enterprise-tests.js": [],
+  "scripts/find-web-firebase-usage.js": [],
+  "scripts/gen-perf-plan.js": [],
+  "scripts/generate-aws-exports.js": [],
+  "scripts/migrate-icons.js": [],
+  "scripts/perf-fallback.js": [],
+  "scripts/qa-gate.js": [],
+  "scripts/scan-secrets.js": [],
+  "scripts/sentry-test.js": [
+    "sentry.js"
+  ],
+  "scripts/test-firestore-rules.js": [],
+  "scripts/test-storage-rules.js": [],
+  "scripts/upload-test-segment.js": [],
+  "sentry.js": [
+    "src/monitoring/sentry.js"
+  ],
+  "src/aws-exports.js": [],
+  "src/components/APKFixedLiveStreamBroadcaster.js": [
+    "src/components/Icon.js",
+    "src/services/ScalableHLSService.js"
+  ],
+  "src/components/ActivityFeed.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/utils/activityTracker.js"
+  ],
+  "src/components/AudioTile.js": [],
+  "src/components/BlypCoinBooster.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js"
+  ],
+  "src/components/BlypCoinWallet.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js"
+  ],
+  "src/components/BlypLogo.js": [
+    "src/utils/scaleUtils.js"
+  ],
+  "src/components/CategoriesTab.js": [
+    "src/components/Icon.js",
+    "src/utils/scaleUtils.js",
+    "src/utils/smartListGenerator.js"
+  ],
+  "src/components/CollageCreator.js": [],
+  "src/components/CollageShowcase.js": [],
+  "src/components/CommentsModal.js": [
+    "src/components/Icon.js"
+  ],
+  "src/components/CreatePostButton.js": [
+    "src/components/Icon.js"
+  ],
+  "src/components/CreatePostButton_BROKEN.js": [
+    "src/components/Icon.js"
+  ],
+  "src/components/CreatePostButton_MINIMAL.js": [],
+  "src/components/CustomText.js": [
+    "src/utils/scaleUtils.js"
+  ],
+  "src/components/DailyRewards.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js"
+  ],
+  "src/components/DebugLiveStreamViewer.js": [
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/components/EnhancedLiveStreamViewer.js": [
+    "src/components/LiveStreamViewer_FIXED.js",
+    "src/components/LiveStreamViewer_PRODUCTION.js",
+    "src/components/LiveStreamViewer_WORKING.js"
+  ],
+  "src/components/EnhancedVideo.js": [],
+  "src/components/FollowerBooster.js": [
+    "src/components/Icon.js",
+    "src/utils/boostFollowers.js"
+  ],
+  "src/components/GiftSystem.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js"
+  ],
+  "src/components/HashtagsTab.js": [
+    "src/components/Icon.js",
+    "src/utils/smartListGenerator.js"
+  ],
+  "src/components/HeaderContainer.js": [],
+  "src/components/HeartAnimation.js": [
+    "src/components/Icon.js"
+  ],
+  "src/components/Icon.js": [],
+  "src/components/IntelligentAdaptivePlayer.js": [
+    "src/components/Icon.js",
+    "src/services/ScalableHLSService.js"
+  ],
+  "src/components/LiveStreamBroadcaster.js": [
+    "src/components/Icon.js",
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/components/LiveStreamViewer.js": [
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/components/LiveStreamViewer_FIXED.js": [
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/components/LiveStreamViewer_PRODUCTION.js": [
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/components/LiveStreamViewer_WORKING.js": [],
+  "src/components/LiveUsersTab.js": [
+    "src/services/LiveService.js"
+  ],
+  "src/components/OptimizedVideo.js": [],
+  "src/components/PhotoGallery.js": [
+    "src/components/Icon.js"
+  ],
+  "src/components/ProductionLiveStreamBroadcaster.js": [
+    "src/components/Icon.js",
+    "src/services/ScalableHLSService.js"
+  ],
+  "src/components/RockPaperScissorsGame.js": [
+    "src/services/GameService.js"
+  ],
+  "src/components/ScaledText.js": [],
+  "src/components/ScreenContainer.js": [],
+  "src/components/SearchBar.js": [
+    "src/components/Icon.js",
+    "src/services/searchService.js"
+  ],
+  "src/components/SimpleLiveStreamBroadcaster.js": [
+    "src/components/Icon.js",
+    "src/services/ScalableHLSService.js"
+  ],
+  "src/components/SimpleStreamViewer.js": [
+    "src/config/firebase.js"
+  ],
+  "src/components/SmartLiveStreamViewer.js": [
+    "src/components/LiveStreamViewer.js",
+    "src/components/LiveStreamViewer_FIXED.js",
+    "src/components/LiveStreamViewer_PRODUCTION.js",
+    "src/components/LiveStreamViewer_WORKING.js"
+  ],
+  "src/components/TabBarIcon.js": [],
+  "src/components/TestBroadcaster.js": [],
+  "src/components/TestComponent.js": [],
+  "src/components/TestRender.js": [],
+  "src/components/UltraSimpleBroadcaster.js": [],
+  "src/components/WhatsAppPopularTab.js": [
+    "src/components/Icon.js",
+    "src/utils/scaleUtils.js",
+    "src/utils/smartListGenerator.js"
+  ],
+  "src/config/StreamingConfig.js": [],
+  "src/config/StreamingFeatureFlag.js": [
+    "src/config/firebase.js"
+  ],
+  "src/config/agora.js": [],
+  "src/config/amplify.js": [
+    "src/aws-exports.js"
+  ],
+  "src/config/firebase.js": [],
+  "src/config/preAuthCleanup.js": [],
+  "src/config/supabase.js": [],
+  "src/constants/mockData.js": [],
+  "src/contexts/UnreadContext.js": [],
+  "src/examples/LiveStreamIntegrationExamples.js": [
+    "src/components/Icon.js",
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/hooks/useCommon.js": [
+    "src/aws-exports.js",
+    "src/utils/Logger.js"
+  ],
+  "src/hooks/useUnreadCount.js": [
+    "src/utils/unreadCountManager.js"
+  ],
+  "src/integration/EnterpriseSystemIntegration.js": [
+    "src/services/EnterpriseAnalyticsService.js",
+    "src/services/EnterpriseStorageService.js",
+    "src/services/ScalableHLSService.js",
+    "src/testing/EnterpriseLiveStreamTester.js"
+  ],
+  "src/lib/auth/errors.js": [],
+  "src/lib/auth/index.js": [
+    "src/lib/auth/errors.js"
+  ],
+  "src/monitoring/sentry.js": [],
+  "src/screens/AuthScreen.js": [
+    "src/aws-exports.js",
+    "src/components/BlypLogo.js",
+    "src/hooks/useCommon.js",
+    "src/lib/auth/errors.js"
+  ],
+  "src/screens/CameraScreen.js": [
+    "src/components/Icon.js"
+  ],
+  "src/screens/ChatConversationScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/utils/scaleUtils.js"
+  ],
+  "src/screens/ChatListScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js",
+    "src/components/LiveUsersTab.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js",
+    "src/services/ChatRoomService.js",
+    "src/services/GameService.js",
+    "src/services/GemService.js",
+    "src/utils/followUtils.js"
+  ],
+  "src/screens/ChatRoomScreen.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/ChatRoomService.js"
+  ],
+  "src/screens/ChatRoomsScreen.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/ChatRoomService.js"
+  ],
+  "src/screens/CoinStoreScreen.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js",
+    "src/services/GemService.js"
+  ],
+  "src/screens/CommentsScreen.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js"
+  ],
+  "src/screens/EditProfileScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js",
+    "src/config/firebase.js"
+  ],
+  "src/screens/EnterpriseLiveStreamScreen.js": [
+    "src/components/Icon.js",
+    "src/components/IntelligentAdaptivePlayer.js",
+    "src/components/ProductionLiveStreamBroadcaster.js",
+    "src/config/firebase.js",
+    "src/services/ScalableHLSService.js"
+  ],
+  "src/screens/FindPeopleScreen.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/utils/followUtils.js",
+    "src/utils/scaleUtils.js"
+  ],
+  "src/screens/FirebaseTestScreen.js": [
+    "src/config/firebase.js"
+  ],
+  "src/screens/FollowersScreen.js": [
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/utils/scaleUtils.js"
+  ],
+  "src/screens/GameRoomScreen.js": [
+    "src/components/Icon.js",
+    "src/components/RockPaperScissorsGame.js",
+    "src/config/firebase.js",
+    "src/services/GameService.js"
+  ],
+  "src/screens/GamesScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/GameService.js"
+  ],
+  "src/screens/HomeScreen.js": [
+    "src/components/AudioTile.js",
+    "src/components/BlypCoinWallet.js",
+    "src/components/BlypLogo.js",
+    "src/components/CategoriesTab.js",
+    "src/components/CommentsModal.js",
+    "src/components/DailyRewards.js",
+    "src/components/EnhancedVideo.js",
+    "src/components/GiftSystem.js",
+    "src/components/HashtagsTab.js",
+    "src/components/HeartAnimation.js",
+    "src/components/Icon.js",
+    "src/components/OptimizedVideo.js",
+    "src/components/WhatsAppPopularTab.js",
+    "src/config/firebase.js",
+    "src/services/BlypCoinService.js",
+    "src/services/GemService.js",
+    "src/utils/activityTracker.js",
+    "src/utils/scaleUtils.js",
+    "src/utils/testDataHelper.js",
+    "src/utils/urlUtils.js"
+  ],
+  "src/screens/LiveStreamScreen-OLD-BROKEN.js": [
+    "src/components/Icon.js",
+    "src/components/ScreenContainer.js",
+    "src/config/firebase.js",
+    "src/services/AgoraService.js",
+    "src/services/LiveStreamService.js"
+  ],
+  "src/screens/LiveStreamScreen.js": [
+    "src/components/Icon.js",
+    "src/components/LiveStreamViewer.js",
+    "src/config/firebase.js",
+    "src/services/HLSLiveStreamService.js",
+    "src/services/LiveService.js"
+  ],
+  "src/screens/LiveStreamScreen_BROKEN.js": [
+    "connection-test.js",
+    "src/components/APKFixedLiveStreamBroadcaster.js",
+    "src/components/DebugLiveStreamViewer.js",
+    "src/components/EnhancedLiveStreamViewer.js",
+    "src/components/Icon.js",
+    "src/components/LiveStreamBroadcaster.js",
+    "src/components/LiveStreamViewer_FIXED.js",
+    "src/components/LiveStreamViewer_PRODUCTION.js",
+    "src/components/ScreenContainer.js",
+    "src/components/SimpleLiveStreamBroadcaster.js",
+    "src/components/SmartLiveStreamViewer.js",
+    "src/components/TestBroadcaster.js",
+    "src/components/UltraSimpleBroadcaster.js",
+    "src/config/StreamingConfig.js",
+    "src/config/firebase.js",
+    "src/services/ErrorMonitoringService.js",
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/screens/LiveStreamScreen_MINIMAL.js": [
+    "src/components/Icon.js"
+  ],
+  "src/screens/LiveStreamScreen_TEST.js": [],
+  "src/screens/MediaViewerScreen.js": [
+    "src/components/HeartAnimation.js",
+    "src/components/Icon.js",
+    "src/components/PhotoGallery.js",
+    "src/config/firebase.js",
+    "src/utils/urlUtils.js"
+  ],
+  "src/screens/MessengerScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js",
+    "src/components/ScreenContainer.js",
+    "src/components/SearchBar.js",
+    "src/config/firebase.js",
+    "src/hooks/useCommon.js",
+    "src/services/BlypCoinService.js",
+    "src/services/GemService.js",
+    "src/utils/Logger.js",
+    "src/utils/followUtils.js",
+    "src/utils/scaleUtils.js",
+    "src/utils/unreadCountManager.js"
+  ],
+  "src/screens/PostPreviewScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js"
+  ],
+  "src/screens/ProfileScreen.js": [
+    "src/components/ActivityFeed.js",
+    "src/components/BlypLogo.js",
+    "src/components/FollowerBooster.js",
+    "src/components/Icon.js",
+    "src/config/StreamingFeatureFlag.js",
+    "src/config/firebase.js",
+    "src/examples/LiveStreamIntegrationExamples.js",
+    "src/utils/activityTracker.js",
+    "src/utils/boostFollowers.js",
+    "src/utils/followUtils.js",
+    "src/utils/testFollowers.js"
+  ],
+  "src/screens/ReviewScreen.js": [
+    "src/components/BlypLogo.js",
+    "src/components/Icon.js",
+    "src/config/firebase.js",
+    "src/services/aiService.js",
+    "src/services/geminiSpeechService.js",
+    "src/services/mediaDescriptionService.js",
+    "src/services/speechToTextService.js"
+  ],
+  "src/screens/SearchResultsScreen.js": [
+    "src/components/Icon.js",
+    "src/services/searchService.js",
+    "src/utils/scaleUtils.js"
+  ],
+  "src/screens/SearchScreen.js": [
+    "src/components/Icon.js",
+    "src/components/ScreenContainer.js",
+    "src/services/searchService.js"
+  ],
+  "src/screens/UserProfileScreen.js": [
+    "src/components/Icon.js",
+    "src/components/ScreenContainer.js",
+    "src/config/firebase.js",
+    "src/utils/scaleUtils.js"
+  ],
+  "src/screens/VoiceMemoScreen.js": [
+    "src/components/Icon.js"
+  ],
+  "src/services/AgoraService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/BlypCoinService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/ChatRoomService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/CleanupService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/EnterpriseAnalyticsService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/EnterpriseStorageService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/ErrorMonitoringService.js": [],
+  "src/services/FirebaseService.js": [
+    "src/config/firebase.js",
+    "src/utils/Logger.js"
+  ],
+  "src/services/FirestoreLiveService.ts": [
+    "src/config/firebase.js"
+  ],
+  "src/services/GameService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/GemService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/HLSLiveStreamService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/LiveService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/LiveStreamService.js": [
+    "src/config/firebase.js",
+    "src/utils/activityTracker.js"
+  ],
+  "src/services/LiveStreamingStressTest.js": [
+    "src/services/ErrorMonitoringService.js",
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/services/ScalableHLSService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/aiService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/firebase.js": [],
+  "src/services/geminiSpeechService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/mediaDescriptionService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/realSpeechService.js": [],
+  "src/services/searchService.js": [
+    "src/config/firebase.js"
+  ],
+  "src/services/simpleSpeechService.js": [],
+  "src/services/speechToTextService.js": [],
+  "src/styles/theme.js": [
+    "src/utils/scaleUtils.js"
+  ],
+  "src/testing/EnterpriseLiveStreamTester.js": [
+    "src/config/firebase.js",
+    "src/services/EnterpriseAnalyticsService.js",
+    "src/services/EnterpriseStorageService.js",
+    "src/services/ScalableHLSService.js"
+  ],
+  "src/utils/LiveStreamDebugger.js": [
+    "src/config/firebase.js",
+    "src/services/HLSLiveStreamService.js"
+  ],
+  "src/utils/Logger.js": [],
+  "src/utils/ViewerTestSuite.js": [],
+  "src/utils/activityTracker.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/boostFollowers.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/debugFollowers.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/firebaseStorageFix.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/followUtils.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/performanceUtils.js": [],
+  "src/utils/permissions.js": [],
+  "src/utils/scaleUtils.js": [],
+  "src/utils/smartListGenerator.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/testDataHelper.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/testFollowers.js": [
+    "src/config/firebase.js"
+  ],
+  "src/utils/unreadCountManager.js": [],
+  "src/utils/urlUtils.js": [],
+  "src/utils/videoFix.js": [],
+  "src/utils/videoUrlFixer.js": [],
+  "test-api.js": [],
+  "test-apk-livestream.js": [],
+  "test-app-loading.js": [],
+  "test-camera-api.js": [],
+  "test-camera-recording.js": [],
+  "test-camera-visibility.js": [],
+  "test-enterprise-system.js": [],
+  "test-live-streaming.js": [],
+  "test-livestream.js": [],
+  "test-tiktok-streaming.js": [],
+  "validate-apk-fix.js": [],
+  "validate-live-streaming-fixes.js": [],
+  "validate-live-streaming.js": []
+}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -11,9 +12,8 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { doc, getDoc, getDocs } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 
 const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => {
@@ -156,7 +156,7 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
             style={styles.walletButton}
             onPress={openWalletModal}
           >
-            <Ionicons name="wallet" size={20} color="#fff" />
+            <Icon  name="wallet" size={20} color="#fff"  />
           </TouchableOpacity>
         </View>
 
@@ -165,7 +165,7 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
             style={styles.actionButton}
             onPress={() => navigation?.navigate('CoinStore')}
           >
-            <Ionicons name="add" size={16} color="#fff" />
+            <Icon  name="add" size={16} color="#fff"  />
             <Text style={styles.actionText}>Buy Coins</Text>
           </TouchableOpacity>
 
@@ -174,7 +174,7 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
               style={[styles.actionButton, styles.dailyButton]}
               onPress={handleClaimDailyReward}
             >
-              <Ionicons name="gift" size={16} color="#fff" />
+              <Icon  name="gift" size={16} color="#fff"  />
               <Text style={styles.actionText}>Daily Reward</Text>
             </TouchableOpacity>
           )}
@@ -183,7 +183,7 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
             style={styles.actionButton}
             onPress={openWalletModal}
           >
-            <Ionicons name="list" size={16} color="#fff" />
+            <Icon  name="list" size={16} color="#fff"  />
             <Text style={styles.actionText}>History</Text>
           </TouchableOpacity>
         </View>
@@ -202,7 +202,7 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
               style={styles.closeButton}
               onPress={() => setShowModal(false)}
             >
-              <Ionicons name="close" size={24} color="#fff" />
+              <Icon  name="close" size={24} color="#fff"  />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Wallet Details</Text>
             <View style={styles.placeholder} />

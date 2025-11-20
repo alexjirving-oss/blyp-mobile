@@ -1,0 +1,252 @@
+[
+  {
+    "path": "C:\\Users\\Alex\\369369369\\blyp-dev-client.apk",
+    "ext": "apk",
+    "bytes": 192137645
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\dist\\blyp.universal.apks",
+    "ext": "apks",
+    "bytes": 94506453
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\dist\\blyp.universal.zip",
+    "ext": "zip",
+    "bytes": 94506453
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\dist\\universal\\universal.apk",
+    "ext": "apk",
+    "bytes": 94506153
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\dist\\blyp-production.aab",
+    "ext": "aab",
+    "bytes": 45748278
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\dist\\bundletool.jar",
+    "ext": "jar",
+    "bytes": 29105379
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\file-tree.txt",
+    "ext": "txt",
+    "bytes": 9570954
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\screenshot.png",
+    "ext": "png",
+    "bytes": 3170792
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\package-lock.json",
+    "ext": "json",
+    "bytes": 937943
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\d2\\c3a2bc04ed751b6d5abbdeeff34baff7372d0c",
+    "ext": "",
+    "bytes": 731921
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\2e\\494f7b9e8b2b83d4bc3193876202c0bac8d655",
+    "ext": "",
+    "bytes": 731886
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\11\\ad993520492138f9a19936e7b167fbdcd5605a",
+    "ext": "",
+    "bytes": 664687
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\76\\d770cced85f9c0a0c6d3a0417097a81cf9fead",
+    "ext": "",
+    "bytes": 651929
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\ab\\19beb3ba5163441fa0eb5f3f030913ef31e057",
+    "ext": "",
+    "bytes": 651580
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\66\\8d6b0182d0b838b31bc7335816d50eefb7ca05",
+    "ext": "",
+    "bytes": 648136
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\ba\\873595714be0aed5b3f40c3f409125d58b741e",
+    "ext": "",
+    "bytes": 581562
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\#1\\package-lock.json",
+    "ext": "json",
+    "bytes": 580160
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\backup\\369369369\\package-lock.json",
+    "ext": "json",
+    "bytes": 580160
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\61\\9c403e9c4285d20a0948a7335c546cc7710261",
+    "ext": "",
+    "bytes": 461521
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\e7\\8761379433cd2932355ce8d7e84e6bc2d417c9",
+    "ext": "",
+    "bytes": 416194
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\9f\\b7b59a52570832fc5628a650657e41ba5b10f2",
+    "ext": "",
+    "bytes": 331337
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\d7\\94d5d43057165e406a9784199804be7cbdf64f",
+    "ext": "",
+    "bytes": 330746
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\e8\\f83d43c748d4ebd4fb4801438c224ff84f5385",
+    "ext": "",
+    "bytes": 313879
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\1a\\4ae7852e4a02c47b133a9783cfc7c025e5d271",
+    "ext": "",
+    "bytes": 278612
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\e9\\3c66816c5547bafdbf74f6d19147a37c7939fb",
+    "ext": "",
+    "bytes": 278198
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\30\\3dda771cf18be859a570b97c76c0e397f7fcee",
+    "ext": "",
+    "bytes": 278085
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\37\\29748d8f2f894015db5483acf1323bb696bb9b",
+    "ext": "",
+    "bytes": 277780
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\49\\fda0d13158be0ada56ac9b48cdb6eb99f3f6de",
+    "ext": "",
+    "bytes": 276688
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\0d\\dca0eba6980d02a322268712fb9924f7116932",
+    "ext": "",
+    "bytes": 276657
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\9a\\fd414a0493e4be00088e2798b835aea7f93a18",
+    "ext": "",
+    "bytes": 273659
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\c8\\700858c2915d4e01e5544c3402028f48947156",
+    "ext": "",
+    "bytes": 273521
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\d5\\73d63e5e419492f19a9c811a427e195a46868d",
+    "ext": "",
+    "bytes": 268840
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\8e\\b0243b625eb27a7c99ce18ddcc907d4d36e7f9",
+    "ext": "",
+    "bytes": 268367
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\5d\\ac7d504f1cfdebae794e34d88985591a6c7e3a",
+    "ext": "",
+    "bytes": 268170
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\b2\\1ba36b964c29ebe8ba43ae1b83876508c0f165",
+    "ext": "",
+    "bytes": 266698
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\77\\76f000d701e20120514b2120c986e7f16ece91",
+    "ext": "",
+    "bytes": 262226
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\94\\22fc570b31851209faed575868fb431304efc2",
+    "ext": "",
+    "bytes": 255551
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\functions\\package-lock.json",
+    "ext": "json",
+    "bytes": 254532
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\3e\\578cba22f36815be265dde1eb9cc5b76576ead",
+    "ext": "",
+    "bytes": 235435
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\ae\\81f6f149c574f8c203661ae759088e8648701d",
+    "ext": "",
+    "bytes": 215539
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\2c\\6242689ee5af537e7d3ceb954cf0ba7551c953",
+    "ext": "",
+    "bytes": 200024
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\f3\\a888b77ab6291156a8a2edf68d7c2ba4ecad18",
+    "ext": "",
+    "bytes": 199614
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\e7\\e2ecfa341157f2a42ec210bf82cc0156a5540b",
+    "ext": "",
+    "bytes": 196315
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\9d\\09b0feb85c35beeaddd31246be0b7c8e0e69a4",
+    "ext": "",
+    "bytes": 189630
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\92\\e78d1c19649f29a57fc0186d78ad4d59160d0b",
+    "ext": "",
+    "bytes": 189198
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\20\\f130b8e3015bf3b9edd27c6c151b943dc0d1cf",
+    "ext": "",
+    "bytes": 188102
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\96\\e2e81a3d1e00f2638000e2110075d3af23cfbe",
+    "ext": "",
+    "bytes": 182862
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\8f\\eefb17190748b8a8ce12ac0a757deb34f9bdc4",
+    "ext": "",
+    "bytes": 178212
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\37\\561be224aaa7484d50a4c89fa38d8023616c06",
+    "ext": "",
+    "bytes": 166122
+  },
+  {
+    "path": "C:\\Users\\Alex\\369369369\\.git\\objects\\27\\74ec8695dcbc8a80aaade998c64889bebd5513",
+    "ext": "",
+    "bytes": 156370
+  }
+]

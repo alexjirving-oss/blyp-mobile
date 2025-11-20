@@ -1,0 +1,39 @@
+{
+  "timestamp": "2025-11-05T00:00:00Z",
+  "git": { "branch": "master", "short_sha": "45f0e46", "dirty": true, "ahead": 0, "behind": 0 },
+  "node": "v22.20.0", "packageManager": "npm",
+  "reactNative": "0.81.5", "expo": "~54.0.22", "androidSDK": "", "gradle": "", "kotlin": "", "jdk": "17.0.16",
+  "typecheck": { "passed": true, "errors": 0 },
+  "eslint": { "passed": false, "errors": 0, "warnings": 0 },
+  "prettier": { "passed": false, "count": 399 },
+  "deps": {
+    "count": 70, "prod": 46, "dev": 24,
+    "unused": [], "missing": [], "outdated": { "total": 0, "critical": [] },
+    "vulns": { "total": 0, "high": 0, "critical": 0 }
+  },
+  "bundle": { "est_js_bytes": 0, "asset_bytes": 0, "modules": 0 },
+  "android": { "compileSdk": "", "targetSdk": "", "minSdk": "", "proguardConfigured": false },
+  "expoConfig": { "config_ok": false, "eas_schemes": ["blyp"], "permissions": [
+    "android.permission.CAMERA",
+    "android.permission.RECORD_AUDIO",
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.MODIFY_AUDIO_SETTINGS",
+    "android.permission.WAKE_LOCK"
+  ] },
+  "firebase": { "hasConfig": false, "rules_ok": true, "rules_findings": [] },
+  "secrets": { "hardcoded_hits": 10, "env_examples_ok": true },
+  "media_pipeline": { "has_hls_upload": true, "uses_expo_av": true, "cleanup_jobs_found": true },
+  "tests": { "has_jest": true, "test_count": 0, "passed": 0, "failed": 1 },
+  "files": { "total": 6425, "ts": 17, "js": 523, "tsx": 8, "jsx": 0, "assets": 104 },
+  "performance_hints": [
+    "Many unformatted files detected by Prettier (399).",
+    "Expo doctor flagged duplicate config (app.json + app.config.js).",
+    "Android SDK environment variables not set (ANDROID_HOME/ANDROID_SDK_ROOT).",
+    "JS bundle estimate failed (react-native CLI)."
+  ],
+  "red_flags": [
+    "ESLint failed (exit 2, details not captured).",
+    "Jest suite failed to run (exit 1)."
+  ]
+}

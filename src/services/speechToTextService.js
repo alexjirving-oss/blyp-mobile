@@ -16,8 +16,27 @@ class SpeechToTextService {
     this.recording = null;
     this.isRecording = false;
     this.recordingStartTime = null;
+    this._stopping = false;
+    this._starting = false;
+    this._lastError = null;
     // Use Audio.RecordingOptionsPresets for better compatibility
-    this.recordingSettings = Audio.RecordingOptionsPresets.HIGH_QUALITY;
+    // Extend preset with metering enabled for speech detection
+    const preset = Audio.RecordingOptionsPresets.HIGH_QUALITY;
+    this.recordingSettings = {
+      ...preset,
+      android: {
+        ...preset.android,
+        extension: '.m4a',
+        outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4,
+        audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC,
+      },
+      ios: {
+        ...preset.ios,
+        extension: '.m4a',
+        audioQuality: Audio.RECORDING_OPTION_IOS_AUDIO_QUALITY_HIGH,
+      },
+      isMeteringEnabled: true,
+    };
   }
 
   /**
@@ -69,20 +88,61 @@ class SpeechToTextService {
    * @returns {Promise<boolean>} Success status
    */
   async startRecording(onStatusUpdate, onAutoStop = null, silenceTimeout = 3000) {
+    if (this._starting) {
+      console.warn('⚠️ startRecording invoked while starting; treating as pending success');
+      return true;
+    }
+    if (this.isRecording && this.recording) {
+      console.log('ℹ️ Already recording; returning existing session');
+      return true;
+    }
+    this._starting = true;
+    this._lastError = null;
     try {
       // Request permissions
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
+        this._starting = false;
         return false;
       }
 
       // Set up audio mode
       await this.setupAudioMode();
+      // Additional Android audio config for robustness
+      try {
+        if (Platform.OS === 'android') {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+            shouldDuckAndroid: true,
+            stayActiveInBackground: false,
+            playThroughEarpieceAndroid: false
+          });
+        }
+      } catch (androidModeErr) {
+        console.warn('⚠️ Android audio mode extended config failed:', androidModeErr?.message);
+      }
 
       // Create recording with both platform options
       console.log('🎤 Starting voice recording...');
       
-      const { recording } = await Audio.Recording.createAsync(this.recordingSettings);
+      let recording;
+      try {
+        const created = await Audio.Recording.createAsync(this.recordingSettings);
+        recording = created.recording;
+      } catch (primaryErr) {
+        console.warn('⚠️ Primary recording init failed, retrying with LOW_QUALITY:', primaryErr?.message);
+        try {
+          const fallbackCreated = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.LOW_QUALITY);
+          recording = fallbackCreated.recording;
+        } catch (fallbackErr) {
+          console.error('❌ Fallback recording init failed:', fallbackErr?.message);
+          this._lastError = fallbackErr;
+          this._starting = false;
+          return false;
+        }
+      }
       
       this.recording = recording;
       this.isRecording = true;
@@ -124,7 +184,7 @@ class SpeechToTextService {
               const timeSinceLastSound = currentTime - lastSoundTime;
               
               // Auto-stop if we've been silent for the timeout AND we had some speech before
-              if (silenceDuration > silenceTimeout && timeSinceLastSound > silenceTimeout && lastSoundTime > 0) {
+              if (!this._stopping && silenceDuration > silenceTimeout && timeSinceLastSound > silenceTimeout && lastSoundTime > 0) {
                 console.log('🔇 Silence detected - auto-stopping recording...');
                 this.stopRecording().then(() => {
                   if (onAutoStop) {
@@ -138,12 +198,15 @@ class SpeechToTextService {
       }
 
       console.log('✅ Voice recording started successfully');
+      this._starting = false;
       return true;
 
     } catch (error) {
       console.error('❌ Failed to start voice recording:', error);
       this.isRecording = false;
       this.recording = null;
+      this._starting = false;
+      this._lastError = error;
       
       Alert.alert(
         'Recording Error', 
@@ -161,16 +224,23 @@ class SpeechToTextService {
    * @returns {Promise<string|null>} Audio file URI or null if failed
    */
   async stopRecording() {
-    if (!this.recording || !this.isRecording) {
+    if (this._stopping) {
+      console.warn('⚠️ Recording stop already in progress');
+      return null;
+    }
+
+    const rec = this.recording; // capture local ref to guard against races
+    if (!rec || !this.isRecording) {
       console.warn('⚠️ No active recording to stop');
       return null;
     }
 
     try {
+      this._stopping = true;
       console.log('🛑 Stopping voice recording...');
       
       // Check recording status before stopping
-      const status = await this.recording.getStatusAsync();
+      const status = await rec.getStatusAsync();
       
       // Ensure minimum recording duration (500ms) to prevent "no valid audio data" errors
       if (status.durationMillis && status.durationMillis < 500) {
@@ -178,11 +248,12 @@ class SpeechToTextService {
         await new Promise(resolve => setTimeout(resolve, 500 - status.durationMillis));
       }
       
-      await this.recording.stopAndUnloadAsync();
-      const uri = this.recording.getURI();
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI?.() || null;
       
       this.isRecording = false;
       this.recording = null;
+      this._stopping = false;
 
       // Validate URI exists
       if (!uri) {
@@ -196,6 +267,7 @@ class SpeechToTextService {
       console.error('❌ Failed to stop voice recording:', error);
       this.isRecording = false;
       this.recording = null;
+      this._stopping = false;
       
       // Throw the error so it can be handled by the calling function
       throw new Error(`Stop encountered an error: ${error.message}`);
@@ -228,7 +300,9 @@ class SpeechToTextService {
   getRecordingStatus() {
     return {
       isRecording: this.isRecording,
-      hasActiveRecording: Boolean(this.recording)
+      hasActiveRecording: Boolean(this.recording),
+      starting: this._starting,
+      lastError: this._lastError?.message || null
     };
   }
 

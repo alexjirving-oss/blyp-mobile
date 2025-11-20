@@ -1,11 +1,20 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import * as Icons from 'lucide-react-native';
 
-const TabBarIcon = ({ name, color, size, badge }) => {
+// Map existing names to lucide components
+const iconMap = {
+  home: Icons.Home,
+  'game-controller': Icons.Gamepad2 || Icons.Gamepad,
+  'paper-plane': Icons.Send,
+  person: Icons.User,
+};
+
+const TabBarIcon = ({ name, color, size = 24, badge }) => {
+  const IconComp = iconMap[name] || Icons.Circle;
   return (
     <View style={styles.container}>
-      <Ionicons name={name} size={24} color={color} />
+      <IconComp size={size} color={color} />
       {badge && badge > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>

@@ -7,7 +7,7 @@ import {
   getDoc,
   onSnapshot 
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 /**
  * Follow a user

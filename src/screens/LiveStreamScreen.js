@@ -1,808 +1,912 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
-  StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
-  Image,
-  FlatList,
+  StyleSheet,
   TextInput,
-  Platform,
-  StatusBar,
-  ScrollView,
   KeyboardAvoidingView,
-  Dimensions
+  Platform,
+  Alert,
+  FlatList,
+  Dimensions,
+  Animated,
+  Easing,
+  AppState,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { Audio } from 'expo-av';
 import { auth } from '../config/firebase';
-import LiveStreamService from '../services/LiveStreamService';
-import AgoraService from '../services/AgoraService';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
-import { BlurView } from 'expo-blur';
-import { RtcLocalView, RtcRemoteView, VideoRenderMode } from 'react-native-agora';
-import ScreenContainer from '../components/ScreenContainer';
+import { useRenderTimer, useTrackAsync } from '../performance/hooks';
+import { StatusBar } from 'expo-status-bar';
+import { createStream, endStream } from '../services/LiveService';
+import LiveStreamViewer from '../components/LiveStreamViewer';
+import HLSLiveStreamService from '../services/HLSLiveStreamService';
 
-/**
- * LiveStreamScreen component
- * Handles both the streaming and viewing experience
- */
-const LiveStreamScreen = () => {
-  const navigation = useNavigation();
-  const route = useRoute();
-  const { streamId, isCreator = !streamId } = route.params || {}; // Default to creator if no streamId
-  const user = auth.currentUser;
+const { width, height } = Dimensions.get('window');
+
+// Debug: Log to verify correct imports
+console.log('📸 LiveStreamScreen: CameraView imported?', typeof CameraView);
+
+export default function LiveStreamScreen({ navigation, route }) {
+  useRenderTimer('LiveStreamScreen');
+  const trackAsync = useTrackAsync();
+  // Extract route params
+  const { mode, hostUid, streamId: routeStreamId, displayName } = route.params || {};
+  // Use RNFirebase auth from config
   
-  // State
-  const [stream, setStream] = useState(null);
+  // Determine if this user is the host/broadcaster
+  const isHost = mode === 'host' || (!mode && (auth.currentUser?.uid === hostUid));
+  const isViewer = mode === 'viewer';
+  
+  console.log('📺 LiveStreamScreen mode:', { mode, isHost, isViewer, hostUid, routeStreamId });
+  
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
+  const [streamStartTime, setStreamStartTime] = useState(null);
+  const [viewCount, setViewCount] = useState(0);
+  const [heartCount, setHeartCount] = useState(0);
   const [comments, setComments] = useState([]);
-  const [commentText, setCommentText] = useState('');
-  const [viewerCount, setViewerCount] = useState(0);
-  const [likeCount, setLikeCount] = useState(0);
-  const [hasLiked, setHasLiked] = useState(false);
-  const [isLive, setIsLive] = useState(false);
-  const [showInfo, setShowInfo] = useState(true);
-  
-  // Agora state
-  const [remoteUsers, setRemoteUsers] = useState({});
-  const [isAudioMuted, setIsAudioMuted] = useState(false);
-  const [isVideoDisabled, setIsVideoDisabled] = useState(false);
-  const [isFrontCamera, setIsFrontCamera] = useState(true);
-  
-  // Creator-only state
+  const [newComment, setNewComment] = useState('');
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [thumbnailUri, setThumbnailUri] = useState(null);
-  const [isConfiguring, setIsConfiguring] = useState(isCreator);
+  const [streamId, setStreamId] = useState(null);
+  const [showCountdown, setShowCountdown] = useState(false);
+  const [countdownValue, setCountdownValue] = useState(3);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState(0); // Timer in milliseconds
+  const [segmentNumber, setSegmentNumber] = useState(0); // Track segment count
+  const [isRecording, setIsRecording] = useState(false); // Track if camera is recording
   
-  // Effect to initialize/cleanup stream
+  const cameraRef = useRef(null);
+  const recordingIntervalRef = useRef(null); // For segment loop
+  // CameraView uses 'facing' prop with 'front' or 'back' strings
+  const [facing, setFacing] = useState('front');
+  const animatedValue = useRef(new Animated.Value(0)).current;
+  
+  // Using RNFirebase services via imported modules/services
+
+  // Handle app state changes (background/foreground)
   useEffect(() => {
-    let unsubscribeStream;
-    let unsubscribeComments;
-    
-    const initStream = async () => {
-      try {
-        console.log('🚀 LiveStream: Initializing stream...', { isCreator, streamId });
-        
-        // If we're the creator and there's no streamId, we're setting up a new stream
-        if (isCreator && !streamId) {
-          console.log('📝 LiveStream: Setting up new stream configuration');
-          setIsConfiguring(true);
-          
-          // Initialize Agora for preview
-          console.log('🎥 LiveStream: Initializing Agora for preview...');
-          await AgoraService.init();
-          await AgoraService.startPreview();
-          console.log('✅ LiveStream: Agora preview started successfully');
-          
-          return;
-        }
-        
-        // If we have a streamId, subscribe to it
-        if (streamId) {
-          // Subscribe to stream data
-          unsubscribeStream = LiveStreamService.subscribeToStream(streamId, (streamData) => {
-            if (!streamData) {
-              // Stream ended or doesn't exist
-              navigation.goBack();
-              return;
-            }
-            
-            setStream(streamData);
-            setTitle(streamData.title || '');
-            setDescription(streamData.description || '');
-            setLikeCount(streamData.likeCount || 0);
-            setViewerCount(streamData.viewCount || 0);
-            setIsLive(streamData.status === 'live');
-            
-            // Initialize Agora with the channel info
-            if (streamData.channelName && streamData.status === 'live') {
-              initializeRTC(streamData.channelName, isCreator);
-            }
-          });
-          
-          // Subscribe to comments
-          unsubscribeComments = LiveStreamService.subscribeToComments(streamId, (commentsList) => {
-            setComments(commentsList);
-          });
-          
-          // Register as a viewer
-          await LiveStreamService.updateViewCount(streamId, true);
-        }
-      } catch (error) {
-        console.error('❌ Error initializing stream:', error);
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (nextAppState === 'active') {
+        // App came to foreground, reinitialize camera
+        setCameraReady(false);
+        // Short delay to allow UI to update
+        setTimeout(() => setCameraReady(true), 500);
       }
-    };
-    
-    initStream();
-    
-    // Cleanup function
+    });
+
     return () => {
-      if (unsubscribeStream) unsubscribeStream();
-      if (unsubscribeComments) unsubscribeComments();
-      
-      // Unregister as a viewer when leaving
-      if (streamId) {
-        LiveStreamService.updateViewCount(streamId, false);
-      }
-      
-      // Clean up Agora RTC engine
-      AgoraService.destroy();
+      subscription.remove();
     };
-  }, [streamId, isCreator]);
-  
-  /**
-   * Start a new livestream
-   */
-  const startStream = async () => {
-    try {
-      console.log('🚀 Starting livestream...');
-      setIsConfiguring(false);
-      
-      // Create stream in Firebase
-      const newStreamId = await LiveStreamService.createStream({
-        title,
-        description,
-        thumbnailFile: thumbnailUri, // This would need conversion to blob/file
-        settings: {
-          privacy: 'public',
-          allowComments: true,
-        }
-      });
-      
-      // Get the stream data to get the channel name
-      const streamData = await new Promise((resolve) => {
-        const unsubscribe = LiveStreamService.subscribeToStream(newStreamId, (data) => {
-          unsubscribe();
-          resolve(data);
-        });
-      });
-      
-      // Initialize Agora with the channel name
-      if (streamData && streamData.channelName) {
-        await initializeRTC(streamData.channelName, true); // true = as broadcaster
-      } else {
-        throw new Error('Failed to get channel name for stream');
-      }
-      
-      // Update route params
-      navigation.setParams({ streamId: newStreamId, isCreator: true });
-    } catch (error) {
-      console.error('❌ Error starting stream:', error);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    
+    // Request permissions using hooks
+    if (!cameraPermission) {
+      requestCameraPermission();
     }
+    if (!microphonePermission) {
+      requestMicrophonePermission();
+    }
+    
+    // Set camera as ready after permissions
+    if (mounted && cameraPermission?.granted) {
+      setCameraReady(true);
+      console.log('📸 Camera permissions granted');
+    }
+
+    // Focus effect to ensure camera is initialized when navigating to this screen
+    const unsubscribeFocus = navigation.addListener('focus', () => {
+      setCameraReady(true);
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribeFocus();
+      
+      // Cleanup when component unmounts
+      if (isStreaming) {
+        stopStreaming();
+      }
+    };
+  }, [navigation, cameraPermission, microphonePermission]);
+
+  // Timer effect: Update elapsed time every second when streaming
+  useEffect(() => {
+    if (!isStreaming || !streamStartTime) {
+      setElapsedTime(0);
+      return;
+    }
+
+    console.log('⏱️ Starting timer interval');
+    const timerInterval = setInterval(() => {
+      const elapsed = Date.now() - streamStartTime;
+      setElapsedTime(elapsed);
+    }, 1000);
+
+    return () => {
+      console.log('⏱️ Clearing timer interval');
+      clearInterval(timerInterval);
+    };
+  }, [isStreaming, streamStartTime]);
+
+  // Viewer mode: Subscribe to stream stats (view count, hearts)
+  useEffect(() => {
+    if (!isViewer || !routeStreamId) return;
+
+    console.log('📊 Viewer subscribing to stream stats:', routeStreamId);
+    const unsubscribe = HLSLiveStreamService.subscribeToStream(routeStreamId, (data) => {
+      if (data) {
+        setViewCount(data.viewCount || 0);
+        setHeartCount(data.likes || 0);
+      } else {
+        console.log('⚠️ Stream not found or ended:', routeStreamId);
+      }
+    });
+
+    return () => {
+      console.log('📊 Unsubscribing from stream stats');
+      unsubscribe();
+    };
+  }, [isViewer, routeStreamId]);
+
+  // Removed legacy startRecordingSegment that used Web SDK; using HLSLiveStreamService instead
+
+  const startStreaming = async () => {
+    if (!title.trim()) {
+      Alert.alert('Missing Title', 'Please enter a title for your live stream.');
+      return;
+    }
+
+    // Check if camera is ready and ref is available
+    if (!cameraRef.current) {
+      console.log('⏳ Camera not ready yet, waiting...');
+      
+      // Make sure camera is enabled
+      setCameraReady(true);
+      
+      // Wait for camera to initialize
+      setTimeout(() => {
+        if (cameraRef.current) {
+          console.log('✅ Camera is now ready after waiting');
+          startCountdown();
+        } else {
+          Alert.alert('Camera Error', 'Camera is not available. Please try restarting the app.');
+        }
+      }, 1000);
+      return;
+    }
+    
+    console.log('✅ Camera is ready, starting countdown');
+    startCountdown();
   };
   
-  /**
-   * End the current livestream
-   */
-  const endStream = async () => {
-    try {
-      if (!streamId) return;
+  // Extracted countdown logic to separate function for clarity
+  const startCountdown = () => {
+    // Start countdown animation
+    setShowCountdown(true);
+    setCountdownValue(3);
+    
+    let count = 3;
+    const countdownInterval = setInterval(() => {
+      count--;
+      setCountdownValue(count);
       
-      await LiveStreamService.endStream(streamId);
+      if (count === 0) {
+        clearInterval(countdownInterval);
+        setTimeout(() => {
+          setShowCountdown(false);
+          actuallyStartStream();
+        }, 1000);
+      }
+    }, 1000);
+  };
+
+  const actuallyStartStream = async () => {
+    // Double-check camera ref is still available
+    if (!cameraRef.current) {
+      Alert.alert('Camera Error', 'Camera reference was lost. Please try again.');
+      return;
+    }
+
+    try {
+      console.log('🚀 Starting HLS live stream with camera:', cameraRef.current);
+      
+      // 🔥 Use HLSLiveStreamService to create stream in liveStreams collection
+      const { streamId: newStreamId, streamData } = await HLSLiveStreamService.createStream({
+        title: title,
+        description: '',
+        thumbnailFile: null
+      });
+      
+      setStreamId(newStreamId);
+      console.log('✅ HLS Stream created:', newStreamId);
+      
+      // Also update user status using LiveService for live list
+      const { ensureUserProfile } = require('../services/LiveService');
+      await ensureUserProfile();
+      await createStream({
+        streamId: newStreamId,
+        title: title,
+        thumbnailUrl: null
+      });
+      console.log('✅ User marked as live in users collection');
+      
+      setIsStreaming(true);
+      setStreamStartTime(Date.now());
+      setSegmentNumber(0);
+      
+      // Start continuous segment recording (2.5 second intervals)
+      startSegmentRecordingLoop(newStreamId);
+      
+      console.log('🎉 Live streaming started successfully');
+      
+    } catch (error) {
+      console.error('❌ Stream start error:', error);
+      Alert.alert('Streaming Error', 'Could not start live stream. Please try again.');
+      setIsStreaming(false);
+    }
+  };
+
+  // Continuous segment recording loop
+  const startSegmentRecordingLoop = async (streamIdParam) => {
+    const currentStreamId = streamIdParam || streamId;
+    if (!currentStreamId) {
+      console.error('❌ No stream ID for recording');
+      return;
+    }
+
+    console.log('🎬 Starting segment recording loop');
+    
+    const recordNextSegment = async () => {
+      if (!cameraRef.current || !isStreaming) {
+        console.log('⏹️ Stopping segment loop: camera or stream unavailable');
+        if (recordingIntervalRef.current) {
+          clearInterval(recordingIntervalRef.current);
+          recordingIntervalRef.current = null;
+        }
+        return;
+      }
+
+      try {
+        setIsRecording(true);
+        console.log(`📹 Recording segment ${segmentNumber}...`);
+        
+        // Record 2.5 second segment
+        const video = await cameraRef.current.recordAsync({
+          maxDuration: 2.5,
+          quality: '720p',
+        });
+        
+        setIsRecording(false);
+        console.log(`✅ Segment ${segmentNumber} recorded:`, video.uri);
+        
+        // Upload segment to Firebase Storage
+        await HLSLiveStreamService.uploadSegment(currentStreamId, video.uri, segmentNumber);
+        console.log(`✅ Segment ${segmentNumber} uploaded`);
+        
+        setSegmentNumber(prev => prev + 1);
+        
+      } catch (error) {
+        setIsRecording(false);
+        console.error(`❌ Error recording segment ${segmentNumber}:`, error);
+      }
+    };
+
+    // Record first segment immediately
+    await recordNextSegment();
+    
+    // Then continue every 2.5 seconds
+    recordingIntervalRef.current = setInterval(recordNextSegment, 2500);
+  };
+
+  const stopStreaming = async () => {
+    try {
+      // Stop segment recording loop
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+        console.log('⏹️ Stopped segment recording loop');
+      }
+      
+      // Stop camera recording if active
+      if (cameraRef.current && isRecording) {
+        await cameraRef.current.stopRecording();
+      }
+      
+      // 🔥 End stream in HLSLiveStreamService
+      if (streamId) {
+        await HLSLiveStreamService.endStream(streamId);
+        console.log('✅ HLS Stream ended:', streamId);
+        
+        // Also end in LiveService to update user status
+        await endStream(streamId);
+        console.log('✅ User status set to "offline"');
+      }
+      
+      setIsStreaming(false);
+      setStreamStartTime(null);
+      setStreamId(null);
+      setSegmentNumber(0);
+      setIsRecording(false);
+      setComments([]);
+      setViewCount(0);
+      setHeartCount(0);
+      setTitle('');
+      
       navigation.goBack();
     } catch (error) {
-      console.error('❌ Error ending stream:', error);
+      console.error('❌ Error stopping stream:', error);
+      // Still cleanup local state even if Firebase fails
+      setIsStreaming(false);
+      setStreamStartTime(null);
+      setStreamId(null);
+      setSegmentNumber(0);
+      setIsRecording(false);
+      navigation.goBack();
     }
   };
-  
-  /**
-   * Initialize Agora RTC Engine
-   * @param {string} channelName - Channel name for Agora
-   * @param {boolean} asBroadcaster - Whether to join as broadcaster or audience
-   */
-  const initializeRTC = async (channelName, asBroadcaster) => {
+
+  const sendHeart = async () => {
+    // Animate heart icon
+    Animated.sequence([
+      Animated.timing(animatedValue, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.elastic(1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(animatedValue, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+    
+    setHeartCount(heartCount + 1);
+    
+    // Update like count in Firestore asynchronously (non-blocking)
     try {
-      console.log(`🎬 Initializing RTC for channel: ${channelName} as ${asBroadcaster ? 'broadcaster' : 'audience'}`);
-      
-      // Initialize Agora engine
-      await AgoraService.init();
-      
-      // Set up event listeners
-      AgoraService.addListener('JoinChannelSuccess', (channel, uid, elapsed) => {
-        console.log(`✅ Successfully joined channel: ${channel} as UID: ${uid}`);
-        setIsLive(true);
-      });
-      
-      AgoraService.addListener('UserJoined', (uid, elapsed) => {
-        console.log(`👤 Remote user joined: ${uid}`);
-        setRemoteUsers(prev => ({
-          ...prev,
-          [uid]: true
-        }));
-      });
-      
-      AgoraService.addListener('UserOffline', (uid, reason) => {
-        console.log(`👋 Remote user left: ${uid}`);
-        setRemoteUsers(prev => {
-          const users = {...prev};
-          delete users[uid];
-          return users;
-        });
-      });
-      
-      AgoraService.addListener('Error', (err) => {
-        console.error(`❌ Agora error: ${err}`);
-      });
-      
-      AgoraService.addListener('ConnectionStateChanged', (state, reason) => {
-        console.log(`🔌 Connection state changed to: ${state}, reason: ${reason}`);
-      });
-      
-      // Join the channel as broadcaster or audience
-      if (asBroadcaster) {
-        await AgoraService.joinChannelAsBroadcaster(channelName);
-      } else {
-        await AgoraService.joinChannelAsAudience(channelName);
+      if (isViewer && routeStreamId) {
+        HLSLiveStreamService.addLike(routeStreamId);
       }
-      
-      console.log('✅ Successfully initialized RTC engine');
-    } catch (error) {
-      console.error('❌ Error initializing RTC engine:', error);
+    } catch (_e) {
+      // ignore like failures for UX smoothness
     }
   };
-  
-  /**
-   * Send a comment
-   */
+
   const sendComment = async () => {
-    if (!commentText.trim() || !streamId) return;
-    
+    if (!newComment.trim() || !streamId) return;
     try {
-      await LiveStreamService.addComment(streamId, commentText);
-      setCommentText('');
+      await HLSLiveStreamService.addComment(streamId, newComment);
+      setNewComment('');
     } catch (error) {
-      console.error('❌ Error sending comment:', error);
+      console.error('Error sending comment:', error);
     }
   };
-  
-  /**
-   * Toggle like status
-   */
-  const toggleLike = async () => {
-    if (!streamId) return;
-    
-    try {
-      await LiveStreamService.updateLikeCount(streamId, !hasLiked);
-      setHasLiked(!hasLiked);
-      setLikeCount(prev => hasLiked ? prev - 1 : prev + 1);
-    } catch (error) {
-      console.error('❌ Error toggling like:', error);
-    }
+
+  // Subscribe to comments while hosting
+  useEffect(() => {
+    if (!isStreaming || !streamId) return;
+    const unsubscribe = HLSLiveStreamService.subscribeToComments(streamId, (items) => {
+      // Normalize to expected shape for UI
+      const normalized = items.map((c) => ({
+        id: c.id,
+        username: c.userName || c.username || 'User',
+        text: c.content || c.text || '',
+      }));
+      setComments(normalized);
+    });
+    return () => unsubscribe && unsubscribe();
+  }, [isStreaming, streamId]);
+
+  const flipCamera = () => {
+    setFacing(current => (current === 'front' ? 'back' : 'front'));
   };
-  
-  /**
-   * Select thumbnail image
-   */
-  const selectThumbnail = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.8,
-      });
-      
-      if (!result.canceled && result.assets && result.assets[0]) {
-        setThumbnailUri(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('❌ Error selecting thumbnail:', error);
-    }
+
+  const formatDuration = (milliseconds) => {
+    if (!milliseconds) return '00:00';
+    const seconds = Math.floor((milliseconds / 1000) % 60);
+    const minutes = Math.floor((milliseconds / 1000 / 60) % 60);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
-  
-  /**
-   * Render stream configuration screen
-   */
-  const renderStreamConfig = () => (
-    <ScrollView style={styles.configContainer}>
-      <View style={styles.configContent}>
-        <Text style={styles.configTitle}>New Livestream</Text>
+
+  const scale = animatedValue.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 1.2, 1],
+  });
+
+  // Handle camera ready state
+  const handleCameraReady = () => {
+    console.log('📸 Camera is now READY');
+    setCameraReady(true);
+  };
+
+  if (cameraPermission === null || microphonePermission === null) {
+    return <View style={styles.container} />;
+  }
+
+  // Viewer mode: Show actual live stream playback
+  if (isViewer) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="light" />
         
-        <TouchableOpacity style={styles.thumbnailSelector} onPress={selectThumbnail}>
-          {thumbnailUri ? (
-            <Image source={{ uri: thumbnailUri }} style={styles.thumbnail} />
-          ) : (
-            <View style={styles.thumbnailPlaceholder}>
-              <Ionicons name="image-outline" size={48} color="#94a3b8" />
-              <Text style={styles.thumbnailText}>Tap to select thumbnail</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-        
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Title</Text>
-          <TextInput
-            style={styles.input}
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Stream title"
-            placeholderTextColor="#64748b"
-            maxLength={100}
-          />
-        </View>
-        
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>Description</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="What's this stream about?"
-            placeholderTextColor="#64748b"
-            multiline
-            maxLength={500}
-          />
-        </View>
-        
+        {/* Back button overlay */}
         <TouchableOpacity 
-          style={styles.startButton}
-          onPress={startStream}
-        >
-          <LinearGradient
-            colors={['#a855f7', '#d946ef', '#ec4899']}
-            style={styles.buttonGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Text style={styles.buttonText}>Go Live</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.cancelButton}
+          style={styles.viewerBackButton}
           onPress={() => navigation.goBack()}
         >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
+          <Icon  name="arrow-back" size={28} color="white"  />
         </TouchableOpacity>
-      </View>
-    </ScrollView>
-  );
-  
-  /**
-   * Render comment item
-   */
-  const renderCommentItem = ({ item }) => (
-    <View style={styles.commentItem}>
-      <Image 
-        source={{ uri: item.photoURL || `https://placehold.co/40x40/475569/e2e8f0?text=${item.displayName?.charAt(0).toUpperCase() || 'A'}` }} 
-        style={styles.commentAvatar} 
-      />
-      <View style={styles.commentContent}>
-        <Text style={styles.commentUsername}>{item.displayName || 'Anonymous'}</Text>
-        <Text style={styles.commentText}>{item.content}</Text>
-      </View>
-    </View>
-  );
-  
-  // If configuring a new stream, show config screen
-  if (isConfiguring) {
-    return (
-      <ScreenContainer>
-        <SafeAreaView style={styles.container}>
-          <StatusBar barStyle="light-content" />
-          {renderStreamConfig()}
-        </SafeAreaView>
-      </ScreenContainer>
-    );
-  }
-  
-  return (
-    <ScreenContainer>
-      <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      
-      {/* Video Stream View with Agora */}
-      <View style={styles.videoContainer}>
-        {isLive ? (
-          // If livestream is active
-          isCreator ? (
-            // Local view for streamer
-            <RtcLocalView.SurfaceView 
-              style={styles.fullScreenVideo}
-              channelId={stream?.channelName || ''}
-              renderMode={VideoRenderMode.FILL}
-            />
-          ) : (
-            // Remote view for viewers
-            Object.keys(remoteUsers).length > 0 ? (
-              <RtcRemoteView.SurfaceView
-                style={styles.fullScreenVideo}
-                uid={parseInt(Object.keys(remoteUsers)[0])}
-                channelId={stream?.channelName || ''}
-                renderMode={VideoRenderMode.FILL}
-                zOrderMediaOverlay={true}
-              />
-            ) : (
-              // Waiting for streamer
-              <View style={styles.videoPlaceholder}>
-                <Text style={styles.placeholderText}>
-                  Waiting for stream...
-                </Text>
-              </View>
-            )
-          )
-        ) : (
-          // If stream isn't live yet or has ended
-          <View style={styles.videoPlaceholder}>
-            <Text style={styles.placeholderText}>
-              {stream?.status === 'ended' ? 'Stream Ended' : 'Preparing Stream...'}
-            </Text>
-          </View>
-        )}
         
-        {/* Stream Info Overlay (toggles with tap) */}
-        {showInfo && (
-          <TouchableOpacity 
-            style={styles.infoOverlay} 
-            activeOpacity={1}
-            onPress={() => setShowInfo(false)}
-          >
-            <BlurView intensity={15} style={styles.blurView}>
-              <View style={styles.streamHeader}>
-                <View style={styles.streamInfo}>
-                  <View style={styles.liveBadge}>
-                    <Text style={styles.liveText}>LIVE</Text>
-                  </View>
-                  <Text style={styles.viewerCount}>
-                    <Ionicons name="eye" size={14} color="#ffffff" /> {viewerCount}
-                  </Text>
-                </View>
-                
-                {isCreator && (
-                  <TouchableOpacity style={styles.endButton} onPress={endStream}>
-                    <Text style={styles.endButtonText}>End Stream</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              
-              <View style={styles.streamDetails}>
-                <Text style={styles.streamTitle}>{title || 'Untitled Stream'}</Text>
-                <Text style={styles.streamDescription}>{description || ''}</Text>
-              </View>
-              
-              <View style={styles.creatorInfo}>
-                <Image 
-                  source={{ uri: stream?.creatorPhotoURL || user?.photoURL || `https://placehold.co/40x40/475569/e2e8f0?text=${user?.displayName?.charAt(0).toUpperCase() || 'A'}` }} 
-                  style={styles.creatorAvatar} 
-                />
-                <Text style={styles.creatorName}>
-                  {stream?.creatorName || user?.displayName || 'Anonymous'}
-                </Text>
-              </View>
-            </BlurView>
-          </TouchableOpacity>
-        )}
-        
-        {/* Show/Hide Info Button */}
-        {!showInfo && (
-          <TouchableOpacity 
-            style={styles.showInfoButton}
-            onPress={() => setShowInfo(true)}
-          >
-            <Ionicons name="information-circle" size={24} color="#ffffff" />
-          </TouchableOpacity>
-        )}
-      </View>
-      
-      {/* Comments Section */}
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.commentsContainer}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
-      >
-        <FlatList
-          data={comments}
-          renderItem={renderCommentItem}
-          keyExtractor={(item) => item.id}
-          style={styles.commentsList}
-          inverted
-        />
-        
-        <View style={styles.commentInputContainer}>
-          <TextInput
-            style={styles.commentInput}
-            value={commentText}
-            onChangeText={setCommentText}
-            placeholder="Add a comment..."
-            placeholderTextColor="#64748b"
-          />
-          
-          <View style={styles.commentActions}>
-            <TouchableOpacity style={styles.likeButton} onPress={toggleLike}>
-              <Ionicons 
-                name={hasLiked ? "heart" : "heart-outline"} 
-                size={24} 
-                color={hasLiked ? "#ec4899" : "#ffffff"} 
-              />
-              {likeCount > 0 && (
-                <Text style={styles.likeCount}>{likeCount}</Text>
-              )}
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.sendButton} 
-              onPress={sendComment}
-              disabled={!commentText.trim()}
-            >
-              <Ionicons name="send" size={24} color={commentText.trim() ? "#6366f1" : "#475569"} />
-            </TouchableOpacity>
+        {/* Broadcaster name overlay */}
+        <View style={styles.viewerHeader}>
+          <Text style={styles.viewerBroadcasterName}>
+            {displayName || 'Unknown'}
+          </Text>
+          <View style={styles.liveBadge}>
+            <View style={styles.liveIndicator} />
+            <Text style={styles.liveText}>LIVE</Text>
           </View>
         </View>
-      </KeyboardAvoidingView>
-      </SafeAreaView>
-    </ScreenContainer>
+        
+        {/* Actual video playback */}
+        <LiveStreamViewer 
+          streamId={routeStreamId}
+          style={styles.viewerVideo}
+          onError={(error) => {
+            console.error('❌ Viewer playback error:', error);
+            Alert.alert(
+              'Playback Error',
+              'Unable to load stream. The broadcaster may have ended the stream.',
+              [{ text: 'OK', onPress: () => navigation.goBack() }]
+            );
+          }}
+        />
+        
+        {/* View count and likes overlay */}
+        <View style={styles.viewerStats}>
+          <View style={styles.statItem}>
+            <Icon  name="eye" size={20} color="white"  />
+            <Text style={styles.statText}>{viewCount}</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Icon  name="heart" size={20} color="#ff2d55"  />
+            <Text style={styles.statText}>{heartCount}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Host mode: Show broadcaster UI with camera permissions check
+  if (cameraPermission.status !== 'granted' || microphonePermission.status !== 'granted') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.permissionText}>
+          Camera and microphone access is required for live streaming.
+        </Text>
+        <TouchableOpacity 
+          style={styles.permissionButton}
+          onPress={() => {
+            requestCameraPermission();
+            requestMicrophonePermission();
+          }}
+        >
+          <Text style={styles.permissionButtonText}>Grant Permissions</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Host mode: Main broadcaster UI
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <StatusBar style="light" />
+      <View style={styles.cameraContainer}>
+        {cameraReady && (
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            facing={facing}
+            onCameraReady={handleCameraReady}
+          />
+        )}
+        
+        {showCountdown && (
+          <View style={styles.countdownContainer}>
+            <Text style={styles.countdownText}>{countdownValue}</Text>
+          </View>
+        )}
+        
+        {!isStreaming ? (
+          <View style={styles.setupContainer}>
+            <TextInput
+              style={styles.titleInput}
+              value={title}
+              onChangeText={setTitle}
+              placeholder="Enter a title for your stream..."
+              placeholderTextColor="#999"
+            />
+            <TouchableOpacity
+              style={[
+                styles.goLiveButton,
+                !title.trim() && styles.disabledButton,
+              ]}
+              onPress={startStreaming}
+              disabled={!title.trim()}
+            >
+              <Text style={styles.goLiveButtonText}>Go Live</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <View style={styles.liveIndicatorContainer}>
+              <Text style={styles.liveText}>LIVE</Text>
+              <Text style={styles.viewCount}>{viewCount} watching</Text>
+              <Text style={styles.duration}>
+                {formatDuration(elapsedTime)}
+              </Text>
+              {isRecording && (
+                <View style={styles.recordingIndicator}>
+                  <View style={styles.recordingDot} />
+                  <Text style={styles.recordingText}>REC</Text>
+                </View>
+              )}
+              <Text style={styles.segmentCount}>Seg: {segmentNumber}</Text>
+            </View>
+            
+            <TouchableOpacity style={styles.closeButton} onPress={stopStreaming}>
+              <Icon  name="close" size={30} color="white"  />
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.flipButton} onPress={flipCamera}>
+              <Icon  name="camera-reverse" size={30} color="white"  />
+            </TouchableOpacity>
+            
+            <View style={styles.commentsContainer}>
+              <FlatList
+                data={comments}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <View style={styles.commentItem}>
+                    <Text style={styles.commentUsername}>{item.username}</Text>
+                    <Text style={styles.commentText}>{item.text}</Text>
+                  </View>
+                )}
+                inverted
+                contentContainerStyle={{ flexDirection: 'column-reverse' }}
+              />
+              
+              <View style={styles.commentInputContainer}>
+                <TextInput
+                  style={styles.commentInput}
+                  value={newComment}
+                  onChangeText={setNewComment}
+                  placeholder="Add a comment..."
+                  placeholderTextColor="#999"
+                />
+                <TouchableOpacity style={styles.sendButton} onPress={sendComment}>
+                  <Icon  name="send" size={24} color="white"  />
+                </TouchableOpacity>
+                
+                <TouchableOpacity style={styles.heartButton} onPress={sendHeart}>
+                  <Animated.View style={{ transform: [{ scale }] }}>
+                    <Icon  name="heart" size={24} color="#FF007A"  />
+                  </Animated.View>
+                  <Text style={styles.heartCount}>{heartCount}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
+      </View>
+    </KeyboardAvoidingView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
-  },
-  videoContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  videoPlaceholder: {
-    flex: 1,
-    backgroundColor: '#1e293b',
-    justifyContent: 'center',
+    backgroundColor: '#000',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  placeholderText: {
-    color: '#94a3b8',
-    fontSize: 18,
+  permissionText: {
+    color: 'white',
+    fontSize: 16,
+    textAlign: 'center',
+    marginHorizontal: 20,
+  },
+  permissionButton: {
+    backgroundColor: '#FF007A',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    marginTop: 20,
+  },
+  permissionButtonText: {
+    color: 'white',
+    fontSize: 16,
     fontWeight: 'bold',
   },
-  infoOverlay: {
+  cameraContainer: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
+  setupContainer: {
     position: 'absolute',
-    top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
-    padding: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
-  blurView: {
-    padding: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
+  titleInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    color: 'white',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
   },
-  streamHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
+  goLiveButton: {
+    backgroundColor: '#FF007A',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+    alignSelf: 'center',
+    marginTop: 20,
   },
-  streamInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  disabledButton: {
+    backgroundColor: '#555',
+    opacity: 0.6,
   },
-  liveBadge: {
-    backgroundColor: '#ef4444',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  liveText: {
-    color: '#ffffff',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  viewerCount: {
-    color: '#ffffff',
-    fontSize: 14,
-  },
-  endButton: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ef4444',
-  },
-  endButtonText: {
-    color: '#ef4444',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  streamDetails: {
-    marginBottom: 16,
-  },
-  streamTitle: {
-    color: '#ffffff',
+  goLiveButtonText: {
+    color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 4,
+    textAlign: 'center',
   },
-  streamDescription: {
-    color: '#cbd5e1',
-    fontSize: 14,
-  },
-  creatorInfo: {
+  liveIndicatorContainer: {
+    position: 'absolute',
+    top: 40,
+    left: 20,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  creatorAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  creatorName: {
-    color: '#ffffff',
+  liveText: {
+    backgroundColor: '#FF0000',
+    color: 'white',
     fontWeight: 'bold',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
     fontSize: 14,
   },
-  showInfoButton: {
+  viewCount: {
+    color: 'white',
+    marginLeft: 10,
+    fontSize: 14,
+  },
+  duration: {
+    color: 'white',
+    marginLeft: 10,
+    fontSize: 14,
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 10,
+    backgroundColor: 'rgba(255, 0, 0, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ff0000',
+    marginRight: 4,
+  },
+  recordingText: {
+    color: '#ff0000',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  segmentCount: {
+    color: 'white',
+    marginLeft: 10,
+    fontSize: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  closeButton: {
     position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    top: 40,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
     width: 40,
     height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flipButton: {
+    position: 'absolute',
+    top: 40,
+    right: 80,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   commentsContainer: {
-    height: '40%', // Take up 40% of screen height
-    borderTopWidth: 1,
-    borderTopColor: '#1e293b',
-    backgroundColor: '#0f172a',
-  },
-  commentsList: {
-    flex: 1,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    maxHeight: height * 0.4,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   commentItem: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  commentAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
-  },
-  commentContent: {
-    flex: 1,
+    padding: 10,
+    borderRadius: 10,
+    marginHorizontal: 10,
+    marginVertical: 5,
   },
   commentUsername: {
-    color: '#ffffff',
+    color: '#FF007A',
     fontWeight: 'bold',
     fontSize: 14,
-    marginBottom: 2,
   },
   commentText: {
-    color: '#e2e8f0',
+    color: 'white',
     fontSize: 14,
   },
   commentInputContainer: {
     flexDirection: 'row',
-    padding: 16,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
     borderTopWidth: 1,
-    borderTopColor: '#1e293b',
+    borderTopColor: 'rgba(255, 255, 255, 0.2)',
+    paddingBottom: Platform.OS === 'ios' ? 30 : 10,
   },
   commentInput: {
     flex: 1,
-    backgroundColor: '#1e293b',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: 20,
-    paddingHorizontal: 16,
     paddingVertical: 8,
-    color: '#ffffff',
+    paddingHorizontal: 15,
+    color: 'white',
     fontSize: 14,
-    marginRight: 8,
-  },
-  commentActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  likeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  likeCount: {
-    color: '#ffffff',
-    marginLeft: 4,
-    fontSize: 14,
+    marginRight: 10,
   },
   sendButton: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#FF007A',
     width: 40,
     height: 40,
     borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  heartButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heartCount: {
+    color: 'white',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  countdownContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
-  fullScreenVideo: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  // Stream configuration styles
-  configContainer: {
-    flex: 1,
-  },
-  configContent: {
-    padding: 16,
-  },
-  configTitle: {
-    color: '#ffffff',
-    fontSize: 24,
+  countdownText: {
+    color: 'white',
+    fontSize: 80,
     fontWeight: 'bold',
-    marginBottom: 24,
-    textAlign: 'center',
   },
-  thumbnailSelector: {
-    height: 200,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 24,
-  },
-  thumbnail: {
-    width: '100%',
-    height: '100%',
-  },
-  thumbnailPlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#1e293b',
+  // Viewer mode styles
+  viewerBackButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  viewerHeader: {
+    position: 'absolute',
+    top: 50,
+    left: 80,
+    right: 20,
+    zIndex: 10,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  thumbnailText: {
-    color: '#94a3b8',
-    marginTop: 8,
-    fontSize: 14,
+  viewerBroadcasterName: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
-  inputContainer: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    color: '#e2e8f0',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    color: '#ffffff',
-    fontSize: 14,
-  },
-  textArea: {
-    height: 120,
-    textAlignVertical: 'top',
-  },
-  startButton: {
-    marginTop: 24,
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  buttonGradient: {
-    paddingVertical: 16,
+  liveBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#ff2d55',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
   },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
+  liveIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'white',
+    marginRight: 6,
+  },
+  liveText: {
+    color: 'white',
+    fontSize: 12,
     fontWeight: 'bold',
   },
-  cancelButton: {
-    paddingVertical: 16,
-    alignItems: 'center',
+  viewerVideo: {
+    width: '100%',
+    height: '100%',
   },
-  cancelButtonText: {
-    color: '#94a3b8',
-    fontSize: 16,
+  viewerStats: {
+    position: 'absolute',
+    bottom: 100,
+    right: 20,
+    zIndex: 10,
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 10,
+  },
+  statText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 6,
   },
 });
-
-export default LiveStreamScreen;

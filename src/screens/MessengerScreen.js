@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -19,10 +20,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
-import { Ionicons } from '@expo/vector-icons';
 import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../utils/scaleUtils';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, where, or, and, getDocs } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { firebaseEnabled, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList, followUser } from '../utils/followUtils';
 import BlypLogo from '../components/BlypLogo';
 import SearchBar from '../components/SearchBar';
@@ -33,6 +33,21 @@ import unreadCountManager from '../utils/unreadCountManager';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 const MessengerScreen = ({ navigation }) => {
+  // If Firebase is disabled (stub mode), show a friendly message and skip all listeners
+  if (!firebaseEnabled) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+        <BlypLogo useGradientBackground={false} />
+        <Text style={{ color: '#94a3b8', marginTop: 12, textAlign: 'center' }}>
+          Messaging is temporarily unavailable in this build.
+        </Text>
+        <Text style={{ color: '#64748b', marginTop: 6, textAlign: 'center', fontSize: 12 }}>
+          Enable Firebase to use chats and live users.
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
   // Get screen dimensions
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
   
@@ -422,7 +437,7 @@ const MessengerScreen = ({ navigation }) => {
       <View style={styles.chatItemWrapper}>
         {/* Delete background */}
         <View style={styles.deleteBackground}>
-          <Ionicons name="trash" size={24} color="#fff" />
+          <Icon  name="trash" size={24} color="#fff"  />
           <Text style={styles.deleteText}>Delete</Text>
         </View>
         
@@ -664,7 +679,7 @@ const MessengerScreen = ({ navigation }) => {
           style={styles.messageButton}
           onPress={() => startNewChat(item)}
         >
-          <Ionicons name="chatbubble" size={18} color="#fff" />
+          <Icon  name="chatbubble" size={18} color="#fff"  />
         </TouchableOpacity>
       </View>
     </View>
@@ -756,7 +771,7 @@ const MessengerScreen = ({ navigation }) => {
     <View style={styles.header}>
       <View style={styles.headerTop}>
         <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-          <Ionicons name="menu" size={24} color="#d1d5db" />
+          <Icon  name="menu" size={24} color="#d1d5db"  />
         </TouchableOpacity>
         <View style={styles.logoContainer}>
           <BlypLogo useGradientBackground={true} />
@@ -765,7 +780,7 @@ const MessengerScreen = ({ navigation }) => {
           style={styles.searchButton}
           onPress={() => navigation.navigate('Search')}
         >
-          <Ionicons name="search" size={24} color="#d1d5db" />
+          <Icon  name="search" size={24} color="#d1d5db"  />
         </TouchableOpacity>
       </View>
       
@@ -857,7 +872,7 @@ const MessengerScreen = ({ navigation }) => {
           <View style={styles.chatsList}>
             {allUserChats.length === 0 ? (
               <View style={styles.emptyState}>
-                <Ionicons name="chatbubble-ellipses-outline" size={64} color="#6b7280" />
+                <Icon  name="chatbubble-ellipses-outline" size={64} color="#6b7280"  />
                 <Text style={styles.emptyTitle}>No conversations yet</Text>
                 <Text style={styles.emptySubtitle}>
                   Start chatting with someone from your network
@@ -873,7 +888,7 @@ const MessengerScreen = ({ navigation }) => {
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                   >
-                    <Ionicons name="add-circle" size={22} color="#fff" style={styles.newChatIcon} />
+                    <Icon  name="add-circle" size={22} color="#fff" style={styles.newChatIcon}  />
                     <Text style={styles.newChatButtonText}>Start New Chat</Text>
                   </LinearGradient>
                 </TouchableOpacity>
@@ -894,7 +909,7 @@ const MessengerScreen = ({ navigation }) => {
       case 'calls':
         return (
           <View style={styles.emptyState}>
-            <Ionicons name="call-outline" size={64} color="#6b7280" />
+            <Icon  name="call-outline" size={64} color="#6b7280"  />
             <Text style={styles.emptyTitle}>No recent calls</Text>
             <Text style={styles.emptySubtitle}>
               Your call history will appear here
@@ -905,7 +920,7 @@ const MessengerScreen = ({ navigation }) => {
       case 'groups':
         return (
           <View style={styles.emptyState}>
-            <Ionicons name="people-outline" size={64} color="#6b7280" />
+            <Icon  name="people-outline" size={64} color="#6b7280"  />
             <Text style={styles.emptyTitle}>No groups yet</Text>
             <Text style={styles.emptySubtitle}>
               Create or join groups to start chatting
@@ -916,7 +931,7 @@ const MessengerScreen = ({ navigation }) => {
       case 'status':
         return (
           <View style={styles.emptyState}>
-            <Ionicons name="radio-outline" size={64} color="#6b7280" />
+            <Icon  name="radio-outline" size={64} color="#6b7280"  />
             <Text style={styles.emptyTitle}>No status updates</Text>
             <Text style={styles.emptySubtitle}>
               Share your status with friends
@@ -942,7 +957,7 @@ const MessengerScreen = ({ navigation }) => {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={() => (
           <View style={styles.emptyState}>
-            <Ionicons name="chatbubbles-outline" size={64} color="#6b7280" />
+            <Icon  name="chatbubbles-outline" size={64} color="#6b7280"  />
             <Text style={styles.emptyStateTitle}>No people to chat with</Text>
             <Text style={styles.emptyStateText}>
               Follow some people to start conversations
@@ -1008,7 +1023,7 @@ const MessengerScreen = ({ navigation }) => {
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
         <View style={styles.authRequiredContainer}>
-          <Ionicons name="chatbubbles-outline" size={64} color="#6b7280" />
+          <Icon  name="chatbubbles-outline" size={64} color="#6b7280"  />
           <Text style={styles.authRequiredTitle}>Authentication Required</Text>
           <Text style={styles.authRequiredText}>Please sign in to access your messages</Text>
           <TouchableOpacity 
@@ -1054,7 +1069,7 @@ const MessengerScreen = ({ navigation }) => {
           colors={['#25d366', '#128c7e']} // WhatsApp green colors
           style={styles.fabGradient}
         >
-          <Ionicons name="chatbubble" size={24} color="#fff" />
+          <Icon  name="chatbubble" size={24} color="#fff"  />
         </LinearGradient>
       </TouchableOpacity>
 
@@ -1075,7 +1090,7 @@ const MessengerScreen = ({ navigation }) => {
               style={styles.menuCloseButton}
               onPress={() => setMenuVisible(false)}
             >
-              <Ionicons name="close" size={24} color="#d1d5db" />
+              <Icon  name="close" size={24} color="#d1d5db"  />
             </TouchableOpacity>
             <Text style={styles.menuTitle}>Your Wallet</Text>
             

@@ -1,0 +1,20 @@
+// Project-specific spell checker dictionary for Blyp streaming app
+Firestore
+firestore
+Mbps
+kbps
+Millis
+COOLDOWN
+unreadcount
+hlslivestream
+firebaseapp
+appspot
+Blyp
+TikTok
+livestream
+livestreams
+streamId
+userId
+segmentNumber
+downloadURL
+serverTimestamp

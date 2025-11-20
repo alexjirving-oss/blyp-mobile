@@ -1,0 +1,183 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@expo/cli": {
+      "name": "@expo/cli",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "send"
+      ],
+      "effects": [
+        "expo"
+      ],
+      "range": "<=0.0.0-canary-20231123-1b19f96-4 || 0.0.1-canary-20231125-d600e44 - 0.0.1-canary-20240418-8d74597 || 0.2.0 - 0.21.1 || 1.0.0-canary-20240927-ab8a962 - 1.0.0-canary-20241021-c4b5a93",
+      "nodes": [
+        "node_modules/@expo/cli"
+      ],
+      "fixAvailable": true
+    },
+    "@sentry/browser": {
+      "name": "@sentry/browser",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1099838,
+          "name": "@sentry/browser",
+          "dependency": "@sentry/browser",
+          "title": "Sentry SDK Prototype Pollution gadget in JavaScript SDKs",
+          "url": "https://github.com/advisories/GHSA-593m-55hh-j8gv",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-913"
+          ],
+          "cvss": {
+            "score": 5.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+          },
+          "range": "<7.119.1"
+        }
+      ],
+      "effects": [
+        "@sentry/react",
+        "@sentry/react-native"
+      ],
+      "range": "<7.119.1",
+      "nodes": [
+        "node_modules/@sentry/browser",
+        "node_modules/@sentry/react-native/node_modules/@sentry/browser"
+      ],
+      "fixAvailable": {
+        "name": "sentry-expo",
+        "version": "5.0.3",
+        "isSemVerMajor": true
+      }
+    },
+    "@sentry/react": {
+      "name": "@sentry/react",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@sentry/browser"
+      ],
+      "effects": [
+        "@sentry/react-native",
+        "sentry-expo"
+      ],
+      "range": "<=7.119.0",
+      "nodes": [
+        "node_modules/@sentry/react",
+        "node_modules/@sentry/react-native/node_modules/@sentry/react"
+      ],
+      "fixAvailable": {
+        "name": "sentry-expo",
+        "version": "5.0.3",
+        "isSemVerMajor": true
+      }
+    },
+    "@sentry/react-native": {
+      "name": "@sentry/react-native",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@sentry/browser",
+        "@sentry/react"
+      ],
+      "effects": [
+        "sentry-expo"
+      ],
+      "range": "<=5.33.1",
+      "nodes": [
+        "node_modules/@sentry/react-native"
+      ],
+      "fixAvailable": {
+        "name": "sentry-expo",
+        "version": "5.0.3",
+        "isSemVerMajor": true
+      }
+    },
+    "expo": {
+      "name": "expo",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "@expo/cli"
+      ],
+      "effects": [],
+      "range": "46.0.0-alpha.0 - 52.0.4",
+      "nodes": [
+        "node_modules/expo"
+      ],
+      "fixAvailable": true
+    },
+    "send": {
+      "name": "send",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1109556,
+          "name": "send",
+          "dependency": "send",
+          "title": "send vulnerable to template injection that can lead to XSS",
+          "url": "https://github.com/advisories/GHSA-m6fv-jmcg-4jfg",
+          "severity": "low",
+          "cwe": [
+            "CWE-79"
+          ],
+          "cvss": {
+            "score": 5,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:L"
+          },
+          "range": "<0.19.0"
+        }
+      ],
+      "effects": [
+        "@expo/cli"
+      ],
+      "range": "<0.19.0",
+      "nodes": [
+        "node_modules/send"
+      ],
+      "fixAvailable": true
+    },
+    "sentry-expo": {
+      "name": "sentry-expo",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        "@sentry/react",
+        "@sentry/react-native"
+      ],
+      "effects": [],
+      "range": ">=2.0.0",
+      "nodes": [
+        "node_modules/sentry-expo"
+      ],
+      "fixAvailable": {
+        "name": "sentry-expo",
+        "version": "5.0.3",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 3,
+      "moderate": 4,
+      "high": 0,
+      "critical": 0,
+      "total": 7
+    },
+    "dependencies": {
+      "prod": 1422,
+      "dev": 425,
+      "optional": 63,
+      "peer": 91,
+      "peerOptional": 0,
+      "total": 1898
+    }
+  }
+}

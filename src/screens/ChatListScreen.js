@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -13,10 +14,9 @@ import {
   Modal,
   ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList } from '../utils/followUtils';
 import { useIsFocused } from '@react-navigation/native';
 import BlypLogo from '../components/BlypLogo';
@@ -24,6 +24,7 @@ import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import ChatRoomService from '../services/ChatRoomService';
 import GameService from '../services/GameService';
+import LiveUsersTab from '../components/LiveUsersTab';
 
 const ROOM_CATEGORIES = [
   { id: 'general', name: 'General', icon: 'chatbubbles-outline', color: '#3b82f6' },
@@ -130,6 +131,10 @@ const ChatListScreen = ({ navigation }) => {
   const [selectedGameTab, setSelectedGameTab] = useState('browse');
   const [showCreateGameModal, setShowCreateGameModal] = useState(false);
   
+  // Live users state
+  const [liveUsers, setLiveUsers] = useState([]);
+  const [liveUsersLoading, setLiveUsersLoading] = useState(true);
+  
   const isFocused = useIsFocused();
   const currentUser = auth.currentUser;
 
@@ -144,6 +149,8 @@ const ChatListScreen = ({ navigation }) => {
         loadRooms();
       } else if (selectedTab === 'requests') {
         loadGames();
+      } else if (selectedTab === 'notifications') {
+        loadLiveUsers();
       }
     }
   }, [isFocused, currentUser, selectedTab]);
@@ -206,6 +213,62 @@ const ChatListScreen = ({ navigation }) => {
       unsubscribeRooms();
       unsubscribeUserRooms();
     };
+  };
+
+  const loadLiveUsers = () => {
+    if (!currentUser) return;
+
+    setLiveUsersLoading(true);
+
+    // Query for users who are currently live streaming
+    const liveUsersQuery = query(
+      collection(db, 'userProfiles'),
+      where('isLive', '==', true)
+    );
+
+    const unsubscribe = onSnapshot(liveUsersQuery, async (snapshot) => {
+      try {
+        const liveUsersList = [];
+        
+        // For each live user, get their stream details
+        for (const userDoc of snapshot.docs) {
+          const userData = userDoc.data();
+          
+          // If user has a current stream, get the stream details
+          if (userData.currentStreamId) {
+            try {
+              const streamDoc = await getDoc(doc(db, 'liveStreams', userData.currentStreamId));
+              if (streamDoc.exists()) {
+                const streamData = streamDoc.data();
+                liveUsersList.push({
+                  id: userDoc.id,
+                  ...userData,
+                  liveStreamTitle: streamData.title,
+                  streamStatus: streamData.status,
+                  viewCount: streamData.viewCount || 0
+                });
+              } else {
+                // Stream doesn't exist, user shouldn't be marked as live
+                console.warn(`User ${userDoc.id} is marked as live but stream ${userData.currentStreamId} not found`);
+              }
+            } catch (streamError) {
+              console.error('Error fetching stream details:', streamError);
+            }
+          }
+        }
+        
+        setLiveUsers(liveUsersList);
+        setLiveUsersLoading(false);
+      } catch (error) {
+        console.error('Error processing live users:', error);
+        setLiveUsersLoading(false);
+      }
+    }, (error) => {
+      console.error('Error loading live users:', error);
+      setLiveUsersLoading(false);
+    });
+
+    return unsubscribe;
   };
 
   useEffect(() => {
@@ -467,7 +530,7 @@ const ChatListScreen = ({ navigation }) => {
                 {item.participantInfo.name}
               </Text>
               {item.isPinned && (
-                <Ionicons name="pin" size={14} color="#a855f7" />
+                <Icon  name="pin" size={14} color="#a855f7"  />
               )}
             </View>
             <Text style={[styles.timestamp, isUnread && styles.unreadTimestamp]}>
@@ -520,12 +583,12 @@ const ChatListScreen = ({ navigation }) => {
           <View style={styles.roomHeader}>
             <View style={styles.roomInfo}>
               <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
-                <Ionicons name={category.icon} size={20} color="#fff" />
+                <Icon  name={category.icon} size={20} color="#fff"  />
               </View>
               <View style={styles.roomDetails}>
                 <View style={styles.roomTitleRow}>
                   <Text style={styles.roomName} numberOfLines={1}>{room.name}</Text>
-                  {room.isPrivate && <Ionicons name="lock-closed" size={16} color="#f59e0b" />}
+                  {room.isPrivate && <Icon  name="lock-closed" size={16} color="#f59e0b"  />}
                 </View>
                 <Text style={styles.roomDescription} numberOfLines={2}>
                   {room.description || 'No description'}
@@ -542,17 +605,17 @@ const ChatListScreen = ({ navigation }) => {
             <View style={styles.roomActions}>
               {isUserRoom ? (
                 <View style={[styles.statusBadge, styles.joinedBadge]}>
-                  <Ionicons name="checkmark" size={16} color="#10b981" />
+                  <Icon  name="checkmark" size={16} color="#10b981"  />
                   <Text style={styles.joinedText}>Joined</Text>
                 </View>
               ) : canJoin ? (
                 <TouchableOpacity style={[styles.statusBadge, styles.joinBadge]}>
-                  <Ionicons name="add" size={16} color="#3b82f6" />
+                  <Icon  name="add" size={16} color="#3b82f6"  />
                   <Text style={styles.joinText}>Join</Text>
                 </TouchableOpacity>
               ) : (
                 <View style={[styles.statusBadge, styles.fullBadge]}>
-                  <Ionicons name="people" size={16} color="#6b7280" />
+                  <Icon  name="people" size={16} color="#6b7280"  />
                   <Text style={styles.fullText}>Full</Text>
                 </View>
               )}
@@ -567,7 +630,7 @@ const ChatListScreen = ({ navigation }) => {
     if (data.length === 0) {
       return (
         <View style={styles.emptySection}>
-          <Ionicons name={emptyIcon} size={48} color="#374151" />
+          <Icon  name={emptyIcon} size={48} color="#374151"  />
           <Text style={styles.emptySectionTitle}>{emptyTitle}</Text>
           <Text style={styles.emptySectionText}>{emptyText}</Text>
         </View>
@@ -616,11 +679,11 @@ const ChatListScreen = ({ navigation }) => {
             selectedCategory === category.id ? null : category.id
           )}
         >
-          <Ionicons 
+          <Icon  
             name={category.icon} 
             size={16} 
             color={selectedCategory === category.id ? '#fff' : category.color} 
-          />
+           />
           <Text style={[
             styles.categoryChipText,
             selectedCategory === category.id && styles.categoryChipTextActive
@@ -660,7 +723,7 @@ const ChatListScreen = ({ navigation }) => {
         </View>
         <Text style={styles.gameTypeDescription}>{gameType.description}</Text>
         <View style={styles.playButton}>
-          <Ionicons name="play" size={16} color="#fff" />
+          <Icon  name="play" size={16} color="#fff"  />
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -692,7 +755,7 @@ const ChatListScreen = ({ navigation }) => {
               </View>
             </View>
             <View style={styles.activeGamePlayers}>
-              <Ionicons name="people" size={16} color="#9ca3af" />
+              <Icon  name="people" size={16} color="#9ca3af"  />
               <Text style={styles.activeGamePlayerCount}>
                 {game.players.length}/{game.maxPlayers}
               </Text>
@@ -701,7 +764,7 @@ const ChatListScreen = ({ navigation }) => {
           
           {isUserGame && (
             <View style={styles.activeGameBadge}>
-              <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+              <Icon  name="checkmark-circle" size={16} color="#10b981"  />
               <Text style={styles.activeGameBadgeText}>Your Game</Text>
             </View>
           )}
@@ -718,7 +781,7 @@ const ChatListScreen = ({ navigation }) => {
             {/* Search Bar */}
             <View style={styles.searchContainer}>
               <View style={styles.searchBar}>
-                <Ionicons name="search" size={20} color="#6b7280" />
+                <Icon  name="search" size={20} color="#6b7280"  />
                 <TextInput
                   style={styles.searchInput}
                   placeholder="Search rooms..."
@@ -740,7 +803,7 @@ const ChatListScreen = ({ navigation }) => {
               {activeRooms.length > 0 && (
                 <View style={styles.roomSection}>
                   <View style={styles.sectionHeader}>
-                    <Ionicons name="pulse-outline" size={24} color="#a855f7" />
+                    <Icon  name="pulse-outline" size={24} color="#a855f7"  />
                     <Text style={styles.sectionTitle}>Active Rooms</Text>
                     <View style={styles.countBadge}>
                       <Text style={styles.countText}>{activeRooms.length}</Text>
@@ -759,7 +822,7 @@ const ChatListScreen = ({ navigation }) => {
               {userRooms.length > 0 && (
                 <View style={styles.roomSection}>
                   <View style={styles.sectionHeader}>
-                    <Ionicons name="chatbubbles-outline" size={24} color="#a855f7" />
+                    <Icon  name="chatbubbles-outline" size={24} color="#a855f7"  />
                     <Text style={styles.sectionTitle}>My Rooms</Text>
                     <View style={styles.countBadge}>
                       <Text style={styles.countText}>{userRooms.length}</Text>
@@ -777,7 +840,7 @@ const ChatListScreen = ({ navigation }) => {
               {/* Browse All Rooms Section */}
               <View style={styles.roomSection}>
                 <View style={styles.sectionHeader}>
-                  <Ionicons name="search-outline" size={24} color="#a855f7" />
+                  <Icon  name="search-outline" size={24} color="#a855f7"  />
                   <Text style={styles.sectionTitle}>Browse Rooms</Text>
                   <View style={styles.countBadge}>
                     <Text style={styles.countText}>{rooms.length}</Text>
@@ -812,11 +875,11 @@ const ChatListScreen = ({ navigation }) => {
                     ]}
                     onPress={() => setSelectedGameTab(tab.key)}
                   >
-                    <Ionicons 
+                    <Icon  
                       name={tab.icon} 
                       size={18} 
                       color={selectedGameTab === tab.key ? '#fff' : '#9ca3af'} 
-                    />
+                     />
                     <Text style={[
                       styles.gameTabText,
                       selectedGameTab === tab.key && styles.activeGameTabText
@@ -838,14 +901,14 @@ const ChatListScreen = ({ navigation }) => {
                     onPress={() => setShowCreateGameModal(true)}
                   >
                     <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.createGameGradient}>
-                      <Ionicons name="add-circle-outline" size={24} color="#fff" />
+                      <Icon  name="add-circle-outline" size={24} color="#fff"  />
                       <Text style={styles.createGameText}>Create New Game</Text>
                     </LinearGradient>
                   </TouchableOpacity>
 
                   {/* Game Types Grid */}
                   <View style={styles.gameTypesHeader}>
-                    <Ionicons name="game-controller-outline" size={20} color="#a855f7" />
+                    <Icon  name="game-controller-outline" size={20} color="#a855f7"  />
                     <Text style={styles.gameTypesTitle}>Available Games</Text>
                   </View>
                   <FlatList
@@ -863,7 +926,7 @@ const ChatListScreen = ({ navigation }) => {
               {selectedGameTab === 'active' && (
                 <View>
                   <View style={styles.activeGamesHeader}>
-                    <Ionicons name="play-circle-outline" size={20} color="#10b981" />
+                    <Icon  name="play-circle-outline" size={20} color="#10b981"  />
                     <Text style={styles.activeGamesTitle}>Join Active Games</Text>
                     <View style={styles.countBadge}>
                       <Text style={styles.countText}>{availableGames.length}</Text>
@@ -876,7 +939,7 @@ const ChatListScreen = ({ navigation }) => {
                     </View>
                   ) : availableGames.length === 0 ? (
                     <View style={styles.emptySection}>
-                      <Ionicons name="game-controller-outline" size={48} color="#374151" />
+                      <Icon  name="game-controller-outline" size={48} color="#374151"  />
                       <Text style={styles.emptySectionTitle}>No Active Games</Text>
                       <Text style={styles.emptySectionText}>
                         No games are currently waiting for players. Create one to get started!
@@ -897,7 +960,7 @@ const ChatListScreen = ({ navigation }) => {
               {selectedGameTab === 'my-games' && (
                 <View>
                   <View style={styles.myGamesHeader}>
-                    <Ionicons name="trophy-outline" size={20} color="#f59e0b" />
+                    <Icon  name="trophy-outline" size={20} color="#f59e0b"  />
                     <Text style={styles.myGamesTitle}>My Game History</Text>
                     <View style={styles.countBadge}>
                       <Text style={styles.countText}>{myGames.length}</Text>
@@ -910,7 +973,7 @@ const ChatListScreen = ({ navigation }) => {
                     </View>
                   ) : myGames.length === 0 ? (
                     <View style={styles.emptySection}>
-                      <Ionicons name="trophy-outline" size={48} color="#374151" />
+                      <Icon  name="trophy-outline" size={48} color="#374151"  />
                       <Text style={styles.emptySectionTitle}>No Games Yet</Text>
                       <Text style={styles.emptySectionText}>
                         You haven't played any games yet. Start by creating or joining a game!
@@ -930,20 +993,12 @@ const ChatListScreen = ({ navigation }) => {
             </ScrollView>
           </View>
         );
-      case 'notifications': // Active Now
-        return (
-          <View style={styles.comingSoon}>
-            <Ionicons name="pulse-outline" size={64} color="#374151" />
-            <Text style={styles.comingSoonTitle}>Active Now</Text>
-            <Text style={styles.comingSoonText}>
-              See who's online and available to play.
-            </Text>
-          </View>
-        );
+      case 'notifications': // Live Users (renamed from Active Now to Live)
+        return <LiveUsersTab />;
       case 'groups': // Leaderboard
         return (
           <View style={styles.comingSoon}>
-            <Ionicons name="trophy-outline" size={64} color="#374151" />
+            <Icon  name="trophy-outline" size={64} color="#374151"  />
             <Text style={styles.comingSoonTitle}>Leaderboard</Text>
             <Text style={styles.comingSoonText}>
               Check top players and your ranking.
@@ -964,7 +1019,7 @@ const ChatListScreen = ({ navigation }) => {
         <View style={styles.header}>
           <View style={styles.headerTop}>
             <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-              <Ionicons name="menu-outline" size={24} color="#d1d5db" />
+              <Icon  name="menu-outline" size={24} color="#d1d5db"  />
             </TouchableOpacity>
             <View style={styles.logoContainer}>
               <BlypLogo useGradientBackground={true} />
@@ -973,7 +1028,7 @@ const ChatListScreen = ({ navigation }) => {
               style={styles.searchButton}
               onPress={() => navigation.navigate('Search')}
             >
-              <Ionicons name="search" size={24} color="#d1d5db" />
+              <Icon  name="search" size={24} color="#d1d5db"  />
             </TouchableOpacity>
           </View>
           
@@ -983,7 +1038,7 @@ const ChatListScreen = ({ navigation }) => {
               {[
                 { key: 'chats', label: 'Rooms' },
                 { key: 'requests', label: 'Games' },
-                { key: 'notifications', label: 'Active Now' },
+                { key: 'notifications', label: 'Live' },
                 { key: 'groups', label: 'Leaderboard' }
               ].map((tab, index) => (
                 <TouchableOpacity
@@ -1032,7 +1087,7 @@ const ChatListScreen = ({ navigation }) => {
               style={styles.menuCloseButton}
               onPress={() => setMenuVisible(false)}
             >
-              <Ionicons name="close" size={24} color="#d1d5db" />
+              <Icon  name="close" size={24} color="#d1d5db"  />
             </TouchableOpacity>
             <Text style={styles.menuTitle}>Your Wallet</Text>
             
@@ -1078,7 +1133,7 @@ const ChatListScreen = ({ navigation }) => {
                 style={styles.modalCloseButton}
                 onPress={() => setShowCreateGameModal(false)}
               >
-                <Ionicons name="close" size={24} color="#9ca3af" />
+                <Icon  name="close" size={24} color="#9ca3af"  />
               </TouchableOpacity>
             </View>
             
@@ -1103,7 +1158,7 @@ const ChatListScreen = ({ navigation }) => {
                         {gameType.players} • {gameType.difficulty} • {gameType.playTime}
                       </Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+                    <Icon  name="chevron-forward" size={20} color="rgba(255,255,255,0.7)"  />
                   </LinearGradient>
                 </TouchableOpacity>
               ))}
@@ -1956,6 +2011,164 @@ const styles = StyleSheet.create({
   modalGameMeta: {
     color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 12,
+  },
+
+  // Live Users Styles
+  liveUsersContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  liveUsersHeader: {
+    marginBottom: 20,
+  },
+  liveHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  liveUsersTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    marginLeft: 12,
+    flex: 1,
+  },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(236, 72, 153, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ec4899',
+    marginRight: 6,
+  },
+  liveBadgeText: {
+    color: '#ec4899',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  liveUsersSubtitle: {
+    color: '#9ca3af',
+    fontSize: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 60,
+  },
+  loadingText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  emptyLiveContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 60,
+  },
+  emptyLiveTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  emptyLiveText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  liveUsersList: {
+    flex: 1,
+  },
+  liveUserCard: {
+    marginBottom: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  liveUserGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  liveUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  liveUserAvatar: {
+    position: 'relative',
+    marginRight: 16,
+  },
+  liveUserImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  liveUserImageFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#374151',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  liveIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#000',
+    borderRadius: 8,
+    padding: 2,
+  },
+  liveIndicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ec4899',
+  },
+  liveUserDetails: {
+    flex: 1,
+  },
+  liveUserName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  liveUserStatus: {
+    color: '#ec4899',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  liveStreamTitle: {
+    color: '#9ca3af',
+    fontSize: 13,
+  },
+  liveUserAction: {
+    marginLeft: 12,
+  },
+  watchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  watchButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
 });
 

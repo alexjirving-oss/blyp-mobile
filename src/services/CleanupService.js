@@ -1,5 +1,5 @@
 import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 class CleanupService {
   static async cleanupGamePosts(userId) {

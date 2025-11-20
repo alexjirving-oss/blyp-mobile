@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -12,9 +13,8 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, addDoc, serverTimestamp, where, getDocs } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList, followUser } from '../utils/followUtils';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
@@ -190,7 +190,7 @@ const FindPeopleScreen = ({ navigation }) => {
             style={[styles.actionButton, styles.messageButton]}
             onPress={() => startNewChat(item)}
           >
-            <Ionicons name="chatbubble" size={16} color="#fff" />
+            <Icon  name="chatbubble" size={16} color="#fff"  />
             <Text style={styles.actionButtonText}>Message</Text>
           </TouchableOpacity>
           
@@ -199,7 +199,7 @@ const FindPeopleScreen = ({ navigation }) => {
               style={[styles.actionButton, styles.followButton]}
               onPress={() => handleFollow(item.id)}
             >
-              <Ionicons name="person-add" size={16} color="#00D4AA" />
+              <Icon  name="person-add" size={16} color="#00D4AA"  />
               <Text style={[styles.actionButtonText, { color: '#00D4AA' }]}>Follow</Text>
             </TouchableOpacity>
           )}
@@ -228,7 +228,7 @@ const FindPeopleScreen = ({ navigation }) => {
             style={styles.backButton} 
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={24} color="#d1d5db" />
+            <Icon  name="arrow-back" size={24} color="#d1d5db"  />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Find People</Text>
           <View style={styles.headerSpacer} />
@@ -237,7 +237,7 @@ const FindPeopleScreen = ({ navigation }) => {
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <View style={styles.searchInputContainer}>
-            <Ionicons name="search" size={20} color="#8e9297" style={styles.searchIcon} />
+            <Icon  name="search" size={20} color="#8e9297" style={styles.searchIcon}  />
             <TextInput
               style={styles.searchInput}
               placeholder="Search by username, name, or email..."
@@ -247,7 +247,7 @@ const FindPeopleScreen = ({ navigation }) => {
             />
             {searchText.length > 0 && (
               <TouchableOpacity onPress={() => setSearchText('')}>
-                <Ionicons name="close-circle" size={20} color="#8e9297" />
+                <Icon  name="close-circle" size={20} color="#8e9297"  />
               </TouchableOpacity>
             )}
           </View>
@@ -276,7 +276,7 @@ const FindPeopleScreen = ({ navigation }) => {
                 showsVerticalScrollIndicator={false}
                 ListEmptyComponent={
                   <View style={styles.emptyState}>
-                    <Ionicons name="search" size={48} color="#4b5563" />
+                    <Icon  name="search" size={48} color="#4b5563"  />
                     <Text style={styles.emptyStateText}>No users found</Text>
                     <Text style={styles.emptyStateSubtext}>Try a different search term</Text>
                   </View>
@@ -302,7 +302,7 @@ const FindPeopleScreen = ({ navigation }) => {
                     </View>
                   ) : (
                     <View style={styles.emptyState}>
-                      <Ionicons name="people" size={48} color="#4b5563" />
+                      <Icon  name="people" size={48} color="#4b5563"  />
                       <Text style={styles.emptyStateText}>No users found</Text>
                       <Text style={styles.emptyStateSubtext}>Check back later for new users</Text>
                     </View>

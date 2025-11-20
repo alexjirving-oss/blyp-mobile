@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Icon from './Icon';
 import {
   View,
   Text,
@@ -10,7 +11,6 @@ import {
   TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { smartListGenerator } from '../utils/smartListGenerator';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -110,7 +110,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
               {hashtag}
             </Text>
             {selectedHashtags.includes(hashtag) && (
-              <Ionicons name="checkmark" size={14} color="#fff" style={styles.checkIcon} />
+              <Icon  name="checkmark" size={14} color="#fff" style={styles.checkIcon}  />
             )}
           </TouchableOpacity>
         ))}
@@ -127,7 +127,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
       
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+        <Icon  name="search" size={20} color="#9ca3af" style={styles.searchIcon}  />
         <TextInput
           style={styles.searchInput}
           placeholder="Search hashtags..."
@@ -156,7 +156,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
               >
                 <Text style={styles.selectedHashtagText}>{hashtag}</Text>
                 <TouchableOpacity onPress={() => handleHashtagPress(hashtag)}>
-                  <Ionicons name="close" size={14} color="#fff" />
+                  <Icon  name="close" size={14} color="#fff"  />
                 </TouchableOpacity>
               </LinearGradient>
             ))}
@@ -186,7 +186,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Ionicons name="pricetag" size={48} color="#8b5cf6" />
+        <Icon  name="pricetag" size={48} color="#8b5cf6"  />
         <Text style={styles.loadingText}>Generating smart hashtags...</Text>
       </View>
     );

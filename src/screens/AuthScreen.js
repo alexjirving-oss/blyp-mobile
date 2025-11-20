@@ -11,13 +11,11 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword,
-  updateProfile 
-} from 'firebase/auth';
-import { auth } from '../config/firebase';
+import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
+import { mapAuthError } from '../lib/auth/errors';
 import BlypLogo from '../components/BlypLogo';
+import awsconfig from '../aws-exports';
+import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
 
 const AuthScreen = () => {
   const [isLogin, setIsLogin] = useState(false);
@@ -25,6 +23,69 @@ const AuthScreen = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [confirmCode, setConfirmCode] = useState('');
+  const [confirmEmail, setConfirmEmail] = useState('');
+  const [lastError, setLastError] = useState('');
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [resetMode, setResetMode] = useState(false);
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [attempts, setAttempts] = useState(0);
+  const [suggestReset, setSuggestReset] = useState(false);
+  const [accountExists, setAccountExists] = useState(undefined); // undefined=unknown, true/false known
+  const [lockoutDetected, setLockoutDetected] = useState(false);
+
+  const [showRawError, setShowRawError] = useState(false);
+  const [rawErrorObj, setRawErrorObj] = useState(null);
+
+  const recordError = (err) => {
+    try {
+      setRawErrorObj(err);
+      const code = err?.code || err?.name;
+      const msg = err?.message || String(err);
+      console.warn('[BLYP][AUTH][ERROR]', code, msg);
+    } catch {}
+  };
+
+  const maskEmail = (raw) => {
+    try {
+      if (!raw) return '';
+      const trimmed = String(raw).trim();
+      const [user, domain] = trimmed.split('@');
+      if (!domain) return user.slice(0, 2) + '***';
+      return user.slice(0, 2) + '***@' + domain;
+    } catch {
+      return '***';
+    }
+  };
+
+  const probeAccountExistence = (emailToProbe) => {
+    // Avoid redundant probes or empty emails
+    const norm = (emailToProbe || '').trim();
+    if (!norm || accountExists !== undefined) return;
+    try {
+      const tempUser = new CognitoUser({ Username: norm, Pool: userPool });
+      tempUser.forgotPassword({
+        onSuccess: () => {
+          // If reset started or code callback executed, user exists
+          setAccountExists(true);
+        },
+        inputVerificationCode: () => {
+          setAccountExists(true);
+        },
+        onFailure: (e) => {
+          // UserNotFoundException => user does not exist
+          if (e?.code === 'UserNotFoundException') {
+            setAccountExists(false);
+          } else {
+            // Leave as unknown for other errors to avoid leaking enumeration details
+            setAccountExists(undefined);
+          }
+        }
+      });
+    } catch {}
+  };
 
   const handleAuth = async () => {
     if (!email || !password || (!isLogin && !username)) {
@@ -33,18 +94,220 @@ const AuthScreen = () => {
     }
 
     setLoading(true);
+    console.log('🔐 Auth attempt:', isLogin ? 'LOGIN' : 'SIGNUP', maskEmail(email));
+    
     try {
-      if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
-      } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(userCredential.user, { displayName: username });
+      // Forgot password flow (change password after code)
+      if (resetMode && resetCode.trim() && newPassword.trim()) {
+        setLoading(true);
+        const emailToReset = email.trim();
+        const cognitoUser = new CognitoUser({ Username: emailToReset, Pool: userPool });
+        console.log('🔐 Reset attempt (confirm new password)', maskEmail(emailToReset));
+        cognitoUser.confirmPassword(resetCode.trim(), newPassword.trim(), {
+          onSuccess: () => {
+            console.log('✅ Password reset success');
+            Alert.alert('Password Reset', 'Your password has been updated. Please log in.');
+            setResetMode(false);
+            setResetCode('');
+            setNewPassword('');
+            setLoading(false);
+          },
+          onFailure: (err) => {
+            console.error('❌ Password reset failed:', err);
+            setLastError(err?.message || String(err));
+            Alert.alert('Reset Error', err?.message || 'Could not reset password.');
+            setLoading(false);
+          }
+        });
+        return;
       }
-    } catch (error) {
-      Alert.alert('Authentication Error', error.message);
-    } finally {
-      setLoading(false);
-    }
+      if (needsConfirm) {
+        // Confirm code then auto-login
+  const emailToConfirm = (confirmEmail || email).trim();
+  const cognitoUser = new CognitoUser({ Username: emailToConfirm, Pool: userPool });
+        cognitoUser.confirmRegistration(confirmCode.trim(), true, (err, result) => {
+          const proceedToLogin = () => {
+            // Auto sign-in (treat already-confirmed as success path)
+            const authDetails = new AuthenticationDetails({ Username: email, Password: password });
+            cognitoUser.authenticateUser(authDetails, {
+              onSuccess: () => {
+                console.log('✅ Auto-login after confirm');
+                setNeedsConfirm(false);
+                setConfirmCode('');
+                setConfirmEmail('');
+                try { refreshAuthNow?.(cognitoUser); } catch {}
+                setLoading(false);
+              },
+              onFailure: (loginErr) => {
+                console.error('❌ Login failed after confirm:', loginErr);
+                setLastError(loginErr?.message || String(loginErr));
+                Alert.alert('Authentication Error', loginErr.message);
+                setLoading(false);
+              }
+            });
+          };
+
+          if (err) {
+            // Handle "already confirmed" gracefully
+            const msg = err?.message || '';
+            if (/current status is CONFIRMED/i.test(msg) || msg.toLowerCase().includes('status is confirmed')) {
+              console.warn('[BLYP][AUTH] User already confirmed; continuing to login.');
+              proceedToLogin();
+              return;
+            }
+            console.error('❌ Confirmation failed:', err);
+            setLastError(msg || String(err));
+            Alert.alert('Confirmation Error', msg);
+            setLoading(false);
+            return;
+          }
+          console.log('✅ Confirmation success:', result);
+          proceedToLogin();
+        });
+      } else if (isLogin) {
+        // Sign in
+        const authDetails = new AuthenticationDetails({ Username: email, Password: password });
+        const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
+        
+        cognitoUser.authenticateUser(authDetails, {
+          onSuccess: (result) => {
+            console.log('✅ Sign in successful for', maskEmail(email));
+              // Immediately lift auth state using the current CognitoUser
+              try { refreshAuthNow?.(cognitoUser); } catch {}
+            setLoading(false);
+          },
+          onFailure: (err) => {
+            recordError(err);
+            const friendly = mapAuthError(err);
+            console.error('❌ Login failed:', err);
+            setLastError(friendly?.message || err?.message || String(err));
+            setAttempts(a => a + 1);
+            if (err?.code === 'UserNotConfirmedException') {
+              console.log('ℹ️ User not confirmed. Prompting for code...');
+              const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+              pendingUser.resendConfirmationCode((resendErr, resendRes) => {
+                if (resendErr) {
+                  console.error('❌ Resend code failed:', resendErr);
+                  setLastError(resendErr?.message || String(resendErr));
+                } else {
+                  const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
+                  console.log('📧 Code re-sent');
+                }
+              });
+              setNeedsConfirm(true);
+              setConfirmEmail(email);
+              Alert.alert('Confirm Your Account', 'We sent you a verification code. Enter it to finish sign-in.');
+            } else if (err?.code === 'NotAuthorizedException' && /[A-Z]/.test(email)) {
+              // Fallback: attempt lowercase username if mixed case might cause mismatch
+              const lowered = email.toLowerCase();
+              if (lowered !== email) {
+                console.log('ℹ️ Retrying sign-in with lowercase username fallback for', maskEmail(email));
+                const authDetails2 = new AuthenticationDetails({ Username: lowered, Password: password });
+                const cognitoUser2 = new CognitoUser({ Username: lowered, Pool: userPool });
+                cognitoUser2.authenticateUser(authDetails2, {
+                  onSuccess: () => {
+                    console.log('✅ Sign in successful (lowercase fallback) for', maskEmail(lowered));
+                    try { refreshAuthNow?.(cognitoUser2); } catch {}
+                    setLoading(false);
+                  },
+                  onFailure: (err2) => {
+                    recordError(err2);
+                    console.error('❌ Lowercase fallback failed:', err2);
+                    const friendly2 = mapAuthError(err2);
+                    setLastError(friendly2?.message || err2?.message || String(err2));
+                    Alert.alert('Authentication Error', friendly2?.message || err2.message);
+                    setLoading(false);
+                  }
+                });
+                return;
+              }
+            } else {
+              Alert.alert('Authentication Error', friendly?.message || err.message);
+              // After 2 failed attempts with same credentials, surface reset suggestion
+              if (attempts + 1 >= 2) {
+                setSuggestReset(true);
+              }
+              // Detect lockout phrasing and immediately show reset UI
+              const msg = (err?.message || '').toLowerCase();
+              if (msg.includes('attempts exceeded')) {
+                setLockoutDetected(true);
+                setSuggestReset(true);
+              }
+              // Probe existence to help user choose between reset vs signup
+              probeAccountExistence(email);
+            }
+            setLoading(false);
+          }
+        });
+      } else {
+        // Sign up
+        console.log('📝 Starting signup for:', maskEmail(email));
+        // Ensure email attribute is set so Cognito can deliver verification codes
+        const attributes = [
+          { Name: 'name', Value: username },
+          { Name: 'email', Value: email },
+          { Name: 'preferred_username', Value: username || email },
+        ];
+        userPool.signUp(email, password, attributes, null, (err, result) => {
+          console.log('📝 Signup callback fired', err ? 'ERROR' : 'SUCCESS');
+          
+          if (err) {
+            const friendly = mapAuthError(err);
+            console.error('❌ Signup error:', err);
+            setLastError(friendly?.message || err?.message || String(err));
+            if (err?.code === 'UsernameExistsException') {
+              console.log('ℹ️ User exists but may be unconfirmed; attempting to resend code for', maskEmail(email));
+              const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+              pendingUser.resendConfirmationCode((resendErr, resendRes) => {
+                if (resendErr) {
+                  console.error('❌ Resend code failed:', resendErr);
+                  setLastError(resendErr?.message || String(resendErr));
+                  Alert.alert('Account Issue', 'This account already exists and may not be confirmed. Try "Log In" then "Resend code".');
+                } else {
+                  const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
+                  Alert.alert('Verify Your Email', `We re-sent a verification code to ${dest}. Enter it to finish sign-up.`);
+                  setNeedsConfirm(true);
+                  setConfirmEmail(email);
+                }
+              });
+            } else {
+              Alert.alert('Authentication Error', friendly?.message || err.message);
+              // Apply a brief cooldown on known quota limits to avoid hammering
+              if (friendly?.code === 'email_quota_exceeded') {
+                setCooldownUntil(Date.now() + 30_000);
+              }
+            }
+            setLoading(false);
+            return;
+          }
+          
+          // Do NOT resend here; Cognito already sent a code on sign-up.
+          const dest = result?.codeDeliveryDetails?.Destination || 'your email';
+          setNeedsConfirm(true);
+          setConfirmEmail(email);
+          Alert.alert('Verify Your Email', `We sent you a verification code to ${dest}. Enter it to finish sign-up.`);
+          setLoading(false);
+        });
+      }
+          } catch (e) {
+            console.error('❌ Error preparing confirmation:', e);
+            setLastError(e?.message || String(e));
+            Alert.alert('Verification Error', 'Could not initiate email verification. Please try again.');
+            setLoading(false);
+          }
+  };
+
+  const handleReset = async () => {
+    setLoading(true);
+    // Clear any previous error and reset confirmation state
+    setLastError('');
+    try {
+      await clearCognitoSessions();
+      setNeedsConfirm(false);
+      setConfirmCode('');
+      setConfirmEmail('');
+    } catch {}
+    setLoading(false);
   };
 
   return (
@@ -54,7 +317,7 @@ const AuthScreen = () => {
         style={styles.content}
       >
         <View style={styles.logoContainer}>
-          <BlypLogo useGradientBackground={false} textStyle={{ fontSize: 48, color: '#ec4899' }} />
+          <BlypLogo useGradientBackground={true} />
           <Text style={styles.welcomeText}>Welcome to</Text>
         </View>
 
@@ -82,48 +345,276 @@ const AuthScreen = () => {
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
+            editable={!needsConfirm}
           />
 
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#9ca3af"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-          />
+          {!resetMode && (
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor="#9ca3af"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+          )}
+          {resetMode && (
+            <>
+              <Text style={{ color: '#9ca3af', marginBottom: 8 }}>Resetting password for: <Text style={{ color: '#fff' }}>{email}</Text></Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Reset code"
+                placeholderTextColor="#9ca3af"
+                value={resetCode}
+                onChangeText={setResetCode}
+                keyboardType="number-pad"
+                autoCapitalize="none"
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="New password"
+                placeholderTextColor="#9ca3af"
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </>
+          )}
 
-          <TouchableOpacity
-            style={styles.submitButton}
-            onPress={handleAuth}
-            disabled={loading}
-          >
-            <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
-              style={styles.submitGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+          {!needsConfirm && !resetMode && (
+            <TouchableOpacity
+              style={styles.submitButton}
+              onPress={handleAuth}
+              disabled={loading || Date.now() < cooldownUntil}
             >
-              <Text style={styles.submitText}>
-                {loading ? 'Please wait...' : (isLogin ? 'Log In' : 'Sign Up')}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={['#a855f7', '#d946ef', '#ec4899']}
+                style={styles.submitGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Text style={styles.submitText}>
+                  {loading
+                    ? 'Please wait...'
+                    : Date.now() < cooldownUntil
+                      ? 'Temporarily limited…'
+                      : (isLogin ? 'Log In' : 'Sign Up')}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
 
-          <TouchableOpacity
-            style={styles.toggleButton}
-            onPress={() => setIsLogin(!isLogin)}
-          >
-            <Text style={styles.toggleText}>
-              {isLogin ? "Don't have an account? " : 'Already have an account? '}
-              <Text style={styles.toggleLink}>
-                {isLogin ? 'Sign Up' : 'Log In'}
+          {resetMode && (
+            <TouchableOpacity
+              style={styles.submitButton}
+              onPress={handleAuth}
+              disabled={loading || !resetCode.trim() || !newPassword.trim()}
+            >
+              <LinearGradient
+                colors={['#a855f7', '#d946ef', '#ec4899']}
+                style={styles.submitGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Text style={styles.submitText}>
+                  {loading ? 'Updating...' : 'Set New Password'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          {needsConfirm && !resetMode && (
+            <View>
+              <Text style={{ color: '#9ca3af', marginBottom: 8 }}>
+                Confirming email: <Text style={{ color: '#fff' }}>{confirmEmail || email}</Text>
               </Text>
-            </Text>
-          </TouchableOpacity>
+              <TextInput
+                style={styles.input}
+                placeholder="Confirmation code"
+                placeholderTextColor="#9ca3af"
+                value={confirmCode}
+                onChangeText={setConfirmCode}
+                keyboardType="number-pad"
+                autoCapitalize="none"
+              />
+
+              <TouchableOpacity
+                style={styles.submitButton}
+                onPress={handleAuth}
+                disabled={loading || !confirmCode.trim()}
+              >
+                <LinearGradient
+                  colors={['#a855f7', '#d946ef', '#ec4899']}
+                  style={styles.submitGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={styles.submitText}>
+                    {loading ? 'Confirming...' : 'Confirm & Continue'}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.toggleButton, { marginTop: 8 }]}
+                onPress={() => {
+                  const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+                  pendingUser.resendConfirmationCode((resendErr, resendRes) => {
+                    if (resendErr) {
+                      console.error('❌ Resend code failed:', resendErr);
+                      setLastError(resendErr?.message || String(resendErr));
+                      Alert.alert('Resend Failed', resendErr?.message || 'Could not resend verification code.');
+                    } else {
+                      const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
+                      Alert.alert('Code Sent', `We resent the verification code to ${dest}.`);
+                    }
+                  });
+                }}
+              >
+                <Text style={styles.toggleText}>
+                  Didn't get a code? <Text style={styles.toggleLink}>Resend</Text>
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.toggleButton, { marginTop: 8 }]}
+                onPress={handleReset}
+              >
+                <Text style={styles.toggleText}>
+                  Wrong email? <Text style={styles.toggleLink}>Reset</Text>
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {!needsConfirm && !resetMode && (
+            <TouchableOpacity
+              style={styles.toggleButton}
+              onPress={() => setIsLogin(!isLogin)}
+            >
+              <Text style={styles.toggleText}>
+                {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                <Text style={styles.toggleLink}>
+                  {isLogin ? 'Sign Up' : 'Log In'}
+                </Text>
+              </Text>
+            </TouchableOpacity>
+          )}
+          {isLogin && !needsConfirm && !resetMode && (
+            <TouchableOpacity
+              style={styles.toggleButton}
+              onPress={() => {
+                if (!email.trim()) {
+                  Alert.alert('Reset Password', 'Enter your email above first.');
+                  return;
+                }
+                setLastError('');
+                const pendingUser = new CognitoUser({ Username: email.trim(), Pool: userPool });
+                console.log('🔐 Forgot password initiate for', maskEmail(email.trim()));
+                pendingUser.forgotPassword({
+                  onSuccess: () => {
+                    Alert.alert('Reset Started', 'Check your email for the reset code.');
+                    setResetMode(true);
+                  },
+                  onFailure: (err) => {
+                    recordError(err);
+                    console.error('❌ Forgot password failed:', err);
+                    setLastError(err?.message || String(err));
+                    Alert.alert('Reset Failed', err?.message || 'Could not start password reset.');
+                  },
+                  inputVerificationCode: (data) => {
+                    // Cognito sometimes calls this callback before onSuccess; treat as success path
+                    Alert.alert('Reset Code Sent', 'Enter the code below with a new password.');
+                    setResetMode(true);
+                  }
+                });
+              }}
+            >
+              <Text style={styles.toggleText}>Forgot password? <Text style={styles.toggleLink}>Reset</Text></Text>
+            </TouchableOpacity>
+          )}
+          {isLogin && !needsConfirm && !resetMode && suggestReset && (
+            <TouchableOpacity
+              style={styles.toggleButton}
+              onPress={() => {
+                setSuggestReset(false);
+                if (!email.trim()) {
+                  Alert.alert('Reset Password', 'Enter your email above first.');
+                  return;
+                }
+                const pendingUser = new CognitoUser({ Username: email.trim(), Pool: userPool });
+                console.log('🔐 Auto-forgot after repeated failures for', maskEmail(email.trim()));
+                pendingUser.forgotPassword({
+                  onSuccess: () => {
+                    Alert.alert('Reset Started', 'Check your email for the reset code.');
+                    setResetMode(true);
+                  },
+                  onFailure: (err) => {
+                    recordError(err);
+                    console.error('❌ Auto-forgot failed:', err);
+                    setLastError(err?.message || String(err));
+                    Alert.alert('Reset Failed', err?.message || 'Could not start password reset.');
+                  },
+                  inputVerificationCode: () => {
+                    Alert.alert('Reset Code Sent', 'Enter the code below with a new password.');
+                    setResetMode(true);
+                  }
+                });
+              }}
+            >
+              <Text style={styles.toggleText}>Trouble logging in? <Text style={styles.toggleLink}>Send reset code</Text></Text>
+            </TouchableOpacity>
+          )}
+          {isLogin && !needsConfirm && !resetMode && accountExists === false && (
+            <View style={{ marginTop: 8 }}>
+              <Text style={[styles.toggleText, { textAlign: 'center' }]}>Account not found for this email.</Text>
+              <TouchableOpacity style={styles.toggleButton} onPress={() => setIsLogin(false)}>
+                <Text style={styles.toggleText}>Create a new account? <Text style={styles.toggleLink}>Sign Up</Text></Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {isLogin && !needsConfirm && !resetMode && lockoutDetected && (
+            <Text style={[styles.toggleText, { marginTop: 8, textAlign: 'center', color: '#fca5a5' }]}>Too many failed attempts. Reset required.</Text>
+          )}
+          {resetMode && (
+            <TouchableOpacity
+              style={styles.toggleButton}
+              onPress={() => {
+                setResetMode(false);
+                setResetCode('');
+                setNewPassword('');
+              }}
+            >
+              <Text style={styles.toggleText}>Back to <Text style={styles.toggleLink}>{isLogin ? 'Log In' : 'Sign Up'}</Text></Text>
+            </TouchableOpacity>
+          )}
+          {!!lastError && (
+            <TouchableOpacity
+              style={[styles.toggleButton, { marginTop: 4 }]}
+              onPress={() => setShowRawError(v => !v)}
+            >
+              <Text style={styles.toggleText}>Debug: <Text style={styles.toggleLink}>{showRawError ? 'Hide error details' : 'Show error details'}</Text></Text>
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
+      {/* Debug footer to verify pool/region and show last error */}
+      <View style={{ padding: 8 }}>
+        <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center' }}>
+          Pool: {awsconfig.aws_user_pools_id} · Region: {awsconfig.aws_cognito_region}
+        </Text>
+        {!!lastError && (
+          <Text style={{ color: '#fca5a5', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+            {lastError}
+          </Text>
+        )}
+        {showRawError && rawErrorObj && (
+          <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
+            Code: {rawErrorObj.code || rawErrorObj.name} | Message: {rawErrorObj.message}
+          </Text>
+        )}
+      </View>
     </SafeAreaView>
   );
 };

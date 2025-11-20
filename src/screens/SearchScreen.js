@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -12,7 +13,6 @@ import {
   Dimensions
 } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
-import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import searchService from '../services/searchService';
 
@@ -94,7 +94,7 @@ const SearchScreen = ({ navigation }) => {
   const renderSearchInput = () => (
     <View style={styles.searchContainer}>
       <View style={styles.searchInputContainer}>
-        <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+        <Icon  name="search" size={20} color="#666" style={styles.searchIcon}  />
         <TextInput
           ref={searchInputRef}
           style={styles.searchInput}
@@ -109,7 +109,7 @@ const SearchScreen = ({ navigation }) => {
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
-            <Ionicons name="close-circle" size={20} color="#666" />
+            <Icon  name="close-circle" size={20} color="#666"  />
           </TouchableOpacity>
         )}
       </View>
@@ -132,11 +132,11 @@ const SearchScreen = ({ navigation }) => {
           ]}
           onPress={() => setSelectedTab(tab.id)}
         >
-          <Ionicons 
+          <Icon  
             name={tab.icon} 
             size={16} 
             color={selectedTab === tab.id ? '#fff' : '#666'} 
-          />
+           />
           <Text style={[
             styles.tabText,
             selectedTab === tab.id && styles.activeTabText
@@ -158,7 +158,7 @@ const SearchScreen = ({ navigation }) => {
         <View style={styles.userNameRow}>
           <Text style={styles.username}>@{item.username}</Text>
           {item.verified && (
-            <Ionicons name="checkmark-circle" size={16} color="#1da1f2" />
+            <Icon  name="checkmark-circle" size={16} color="#1da1f2"  />
           )}
         </View>
         <Text style={styles.displayName}>{item.displayName}</Text>
@@ -178,12 +178,12 @@ const SearchScreen = ({ navigation }) => {
       <Image source={{ uri: item.thumbnail }} style={styles.postThumbnail} />
       {item.type === 'video' && (
         <View style={styles.videoIndicator}>
-          <Ionicons name="play" size={16} color="#fff" />
+          <Icon  name="play" size={16} color="#fff"  />
         </View>
       )}
       <View style={styles.postStats}>
         <View style={styles.postStat}>
-          <Ionicons name="heart" size={12} color="#fff" />
+          <Icon  name="heart" size={12} color="#fff"  />
           <Text style={styles.postStatText}>{item.likes}</Text>
         </View>
       </View>
@@ -196,7 +196,7 @@ const SearchScreen = ({ navigation }) => {
       onPress={() => navigation.navigate('HashtagPosts', { hashtag: item.hashtag })}
     >
       <View style={styles.hashtagIcon}>
-        <Ionicons name="pricetag" size={24} color="#ec4899" />
+        <Icon  name="pricetag" size={24} color="#ec4899"  />
       </View>
       <View style={styles.hashtagInfo}>
         <Text style={styles.hashtagText}>{item.hashtag}</Text>
@@ -218,7 +218,7 @@ const SearchScreen = ({ navigation }) => {
       onPress={() => navigation.navigate('LocationPosts', { locationId: item.id })}
     >
       <View style={styles.locationIcon}>
-        <Ionicons name="location" size={24} color="#10b981" />
+        <Icon  name="location" size={24} color="#10b981"  />
       </View>
       <View style={styles.locationInfo}>
         <Text style={styles.locationName}>{item.name}</Text>
@@ -241,7 +241,7 @@ const SearchScreen = ({ navigation }) => {
               style={styles.suggestionItem}
               onPress={() => handleSuggestionPress(item)}
             >
-              <Ionicons name="time-outline" size={16} color="#666" />
+              <Icon  name="time-outline" size={16} color="#666"  />
               <Text style={styles.suggestionText}>{item}</Text>
             </TouchableOpacity>
           ))}
@@ -258,7 +258,7 @@ const SearchScreen = ({ navigation }) => {
               style={styles.suggestionItem}
               onPress={() => handleSuggestionPress(item)}
             >
-              <Ionicons name="trending-up" size={16} color="#ec4899" />
+              <Icon  name="trending-up" size={16} color="#ec4899"  />
               <Text style={styles.suggestionText}>{item}</Text>
             </TouchableOpacity>
           ))}

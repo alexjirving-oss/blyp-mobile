@@ -1,11 +1,25 @@
 {
   "cli": {
-    "version": ">= 3.0.0"
+    "version": ">= 3.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+          "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
+          "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
+          "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_XUqSwhnMU",
+          "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "596o731c5h9l12b4j1gsjfqhid",
+          "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3"
+      },
+      "cache": {
+        "key": "webrtc-dev-001"
+      }
     },
     "preview": {
       "distribution": "internal",
@@ -16,6 +30,13 @@
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
+        "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
+        "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_XUqSwhnMU",
+        "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "596o731c5h9l12b4j1gsjfqhid",
+        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3"
       }
     }
   },

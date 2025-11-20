@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Icon from '../components/Icon';
 import {
   View,
   Text,
@@ -14,15 +15,18 @@ import {
   Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Video } from 'expo-av';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../config/firebase';
+import * as FileSystem from 'expo-file-system';
+import { db as firestore, auth, storage } from '../config/firebase';
+import { serverTimestamp } from 'firebase/firestore';
+import { signInAnonymously } from 'firebase/auth';
+import { firebaseNative } from '../config/firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useAuth } from '../hooks/useCommon';
 import Toast from 'react-native-toast-message';
 import BlypLogo from '../components/BlypLogo';
 import aiService from '../services/aiService';
@@ -33,7 +37,20 @@ import mediaDescriptionService from '../services/mediaDescriptionService';
 const ReviewScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { media, type, mode, transcript } = route.params || {};
+  const { media, type, mode, transcript, source } = route.params || {};
+  const { user: cognitoUser, isAuthenticated } = useAuth();
+  
+  // Debug route params on screen initialization
+  console.log('🚀 ReviewScreen initialized with route params:', {
+    mediaCount: media ? (Array.isArray(media) ? media.length : 1) : 0,
+    type,
+    mode,
+    source,
+    hasTranscript: !!transcript
+  });
+  
+  // Store source in state to persist across re-renders
+  const [sourceType, setSourceType] = useState(() => source);
   
   // Initialize mediaItems state - convert single media to array or use empty array
   const [mediaItems, setMediaItems] = useState(() => {
@@ -45,6 +62,8 @@ const ReviewScreen = () => {
   
   const [caption, setCaption] = useState(transcript || '');
   const [isUploading, setIsUploading] = useState(false);
+  // Track if Firebase Web API key appears suspended (auth error pattern)
+  const [firebaseSuspended, setFirebaseSuspended] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [voiceMemo, setVoiceMemo] = useState(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState({
@@ -91,23 +110,41 @@ const ReviewScreen = () => {
     }
   }, [transcript]);
   
-  // Auto-show description overlay immediately when coming from camera
+  // Auto-show description overlay immediately when media is added
   useEffect(() => {
     console.log('🔍 Checking auto-show conditions:', {
       mediaItemsLength: mediaItems.length,
       type: type,
-      showDescriptionMethodOverlay: showDescriptionMethodOverlay
+      sourceType: sourceType,
+      showDescriptionMethodOverlay: showDescriptionMethodOverlay,
+      overlayAlreadyShown: overlayAlreadyShown,
+      shouldAutoTriggerStepByStep: shouldAutoTriggerStepByStep
     });
     
-    if (mediaItems.length > 0 && (type === 'photo' || type === 'photos') && !showDescriptionMethodOverlay) {
-      // Show description overlay for both single and multiple photos
-      console.log('📸 Showing description overlay for', mediaItems.length, 'photos');
-      if (!overlayAlreadyShown) {
+    if (mediaItems.length > 0 && (type === 'photo' || type === 'photos') && !showDescriptionMethodOverlay && !overlayAlreadyShown) {
+      // Show description overlay for both single and multiple photos from camera OR gallery
+      console.log(`📸 TRIGGERING description overlay for ${mediaItems.length} photos from ${sourceType || 'camera'}`);
+      
+      // For gallery selections, ensure we don't auto-trigger AI processing (but still show description overlay)
+      if (sourceType === 'gallery') {
+        console.log('🖼️ Gallery source detected - preventing auto AI triggers but showing description overlay');
+        setShouldAutoTriggerStepByStep(false);
+        setUserRequestedAI(false);
+        // Clear any pending AI states
+        setIsGeneratingContent(false);
+        setIsGeneratingDescriptions(false);
+        setIsProcessingAllAI(false);
+        setShowStepByStepOverlay(false);
+      }
+      
+      // Use setTimeout to ensure this happens after component render
+      setTimeout(() => {
         setShowDescriptionMethodOverlay(true);
         setOverlayAlreadyShown(true);
-      }
+        console.log('✅ Description overlay state set to TRUE');
+      }, 100);
     }
-  }, [mediaItems, type, showDescriptionMethodOverlay]);
+  }, [mediaItems, type, sourceType]);
   
   // Removed backup trigger to prevent duplicate overlays
   
@@ -205,7 +242,7 @@ const ReviewScreen = () => {
         updatedAt: serverTimestamp()
       };
 
-      await addDoc(collection(db, 'drafts'), draftData);
+      await firestore.collection('drafts').add(draftData);
       
       Toast.show({
         type: 'success',
@@ -292,11 +329,29 @@ const ReviewScreen = () => {
     }
   }, [mediaItems, stepByStepProcessed, showStepByStepOverlay, pendingStepByStepProcessing, shouldAutoTriggerStepByStep]);
 
-  // Auto-generate descriptions for each photo as soon as it's added
+  // Auto-generate descriptions for each photo as soon as it's added (camera flow only)
   useEffect(() => {
     const autoGenerateDescriptions = async () => {
       // Only generate if we have media items and no descriptions yet
       if (mediaItems.length === 0) return;
+      
+      // 🚫 SKIP auto-generation for gallery sources - they should use the overlay flow
+      console.log('🔍 DEBUGGING: Source value for auto-generation check:', sourceType);
+      if (sourceType === 'gallery') {
+        console.log('🚫 Skipping auto-description generation for gallery source');
+        console.log('📱 Triggering blue description overlay for gallery source instead');
+        
+        // Show the blue "tap to describe" overlay for gallery selections
+        if (!overlayAlreadyShown && !showDescriptionMethodOverlay) {
+          setTimeout(() => {
+            console.log('🎯 Showing description overlay for gallery source');
+            setShowDescriptionMethodOverlay(true);
+            setOverlayAlreadyShown(true);
+          }, 300); // Small delay to ensure UI is ready
+        }
+        
+        return;
+      }
       
       // Check if any photos need descriptions
       const needsDescriptions = mediaItems.some((item, index) => {
@@ -305,7 +360,7 @@ const ReviewScreen = () => {
       
       if (!needsDescriptions) return;
       
-      console.log('🤖 Auto-generating descriptions for new photos...');
+      console.log('🤖 Auto-generating descriptions for new photos (camera flow only)...');
       
       // Use existing generateMediaDescriptions with forceGeneration=true to bypass userRequestedAI check
       await generateMediaDescriptions(true);
@@ -315,7 +370,7 @@ const ReviewScreen = () => {
     if (!showStepByStepOverlay && !stepByStepProcessed && !pendingStepByStepProcessing) {
       autoGenerateDescriptions();
     }
-  }, [mediaItems]); // Only depend on mediaItems changes
+  }, [mediaItems, sourceType]); // Depend on sourceType to properly handle gallery vs camera
 
   // Auto-trigger logic removed - camera flow now goes directly to step-by-step processing
 
@@ -452,9 +507,16 @@ const ReviewScreen = () => {
 
       // Get transcription
       const audioUri = await speechToTextService.stopRecording();
-      
       if (!audioUri) {
-        throw new Error('No audio recorded');
+        console.log('⚠️ stopVoiceDescription: audioUri null; providing manual input fallback instead of error');
+        setIsTranscribing(false);
+        Toast.show({
+          type: 'info',
+          text1: '🎤 No audio captured',
+          text2: 'Type your description manually',
+          position: 'bottom'
+        });
+        return;
       }
 
       // Use Gemini AI for speech transcription with timeout
@@ -465,13 +527,17 @@ const ReviewScreen = () => {
         setTimeout(() => reject(new Error('Transcription timeout after 30 seconds')), 30000)
       );
       
-      const transcript = await Promise.race([transcriptionPromise, timeoutPromise]);
+      let transcript = await Promise.race([transcriptionPromise, timeoutPromise]);
+      if (!transcript || /no clear speech/i.test(transcript)) {
+        console.log('🌀 Low-confidence transcript; using placeholder text');
+        transcript = 'Spoken description captured';
+      }
       setVoiceTranscript(transcript);
 
       console.log('📝 Voice transcript:', transcript);
 
       // Handle transcription result
-      if (transcript && !transcript.includes('Audio recorded') && !transcript.includes('🎤')) {
+      if (transcript && transcript.trim() !== '' && !/tap to type|audio recorded|no clear speech/i.test(transcript)) {
         // Add to accumulated voice inputs
         setAccumulatedVoiceInputs(prev => {
           const newInputs = [...prev, transcript];
@@ -527,6 +593,7 @@ const ReviewScreen = () => {
       } else {
         console.log('🎤 Voice recording complete - using fallback placeholder');
         setIsTranscribing(false);
+        // Pre-fill manual description with empty string, keep placeholder hidden
         setManualDescription('');
         
         Toast.show({
@@ -539,12 +606,8 @@ const ReviewScreen = () => {
         // Don't auto-trigger if recording was from description overlay
         if (isRecordingFromOverlay) {
           console.log('🎤 No transcript from overlay recording - staying in overlay');
-          Toast.show({
-            type: 'info',
-            text1: '🎤 Voice recorded',
-            text2: 'No clear speech detected, try recording again',
-            position: 'bottom',
-          });
+          // Instead of an error toast, quietly present the manual input already opened above
+          console.log('ℹ️ Fallback: manual input shown instead of error toast');
           return;
         }
         
@@ -899,6 +962,8 @@ const ReviewScreen = () => {
 
   const addMediaFromLibrary = async () => {
     try {
+      console.log('🎯 GALLERY FUNCTION CALLED - addMediaFromLibrary starting...');
+      
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
         allowsMultipleSelection: true,
@@ -906,6 +971,10 @@ const ReviewScreen = () => {
       });
 
       if (!result.canceled && result.assets?.length > 0) {
+        // 🔥 SET SOURCE TO GALLERY for proper overlay handling
+        setSourceType('gallery');
+        console.log('📸 Source set to gallery for', result.assets.length, 'items');
+        
         // Add new media to existing mediaItems
         const newMediaItems = result.assets.map(asset => ({
           ...asset,
@@ -1671,43 +1740,42 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
     });
   };
 
-  const uploadMedia = async (mediaUri, mediaType) => {
-    const user = auth.currentUser;
-    if (!user) throw new Error('User not authenticated');
-
+  const uploadMedia = async (mediaUri, mediaType, fbUser) => {
+    if (!fbUser || !fbUser.uid) {
+      throw new Error('User not authenticated (no Firebase UID)');
+    }
     console.log('📤 Starting media upload...');
     console.log('📤 Media URI:', mediaUri);
     console.log('📤 Media type:', mediaType);
+    console.log('📤 Using Firebase UID:', fbUser.uid);
 
-    const response = await fetch(mediaUri);
-    const blob = await response.blob();
-    
-    console.log('📤 Blob size:', blob.size);
-    
+    // Constrain file extensions to proven-good types
     const fileExtension = mediaType === 'photo' ? 'jpg' : 'mp4';
     const fileName = `${mediaType}-${Date.now()}.${fileExtension}`;
-    const storageRef = ref(storage, `users/${user.uid}/media/${fileName}`);
-    
+    const filePath = `users/${fbUser.uid}/media/${fileName}`;
+    const fileRef = storageRef(storage, filePath);
+
     console.log('📤 Uploading to:', fileName);
-    
-    // Add timeout to upload
-    const uploadPromise = uploadBytes(storageRef, blob);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Upload timeout after 60 seconds')), 60000)
-    );
-    
+
+    // Original working pattern: fetch -> blob -> uploadBytes (no metadata)
+    const resp = await fetch(mediaUri);
+    if (!resp.ok) throw new Error(`fetch failed status=${resp.status}`);
+    const blob = await resp.blob();
+    if (!blob || blob.size === 0) throw new Error('empty blob');
+
+    // Add a long timeout to avoid hangs in poor networks
+    const uploadPromise = uploadBytes(fileRef, blob);
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Upload timeout after 60 seconds')), 60000));
     await Promise.race([uploadPromise, timeoutPromise]);
-    
+
     console.log('📤 Upload complete, getting download URL...');
-    
-    const downloadURL = await getDownloadURL(storageRef);
-    
+    const downloadURL = await getDownloadURL(fileRef);
     console.log('📤 Download URL:', downloadURL);
-    
+
     let thumbnailUrl = null;
     
     // Generate thumbnail for videos
-    if (mediaType === 'video') {
+  if (mediaType === 'video') {
       try {
         console.log('🎬 Generating video thumbnail...');
         
@@ -1728,17 +1796,23 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         
         console.log('✅ Thumbnail generated:', thumbnailUri);
         
-        // Upload thumbnail
-        const thumbnailResponse = await fetch(thumbnailUri);
-        const thumbnailBlob = await thumbnailResponse.blob();
-        
+        // Upload thumbnail using the same Firebase UID namespace
         const thumbnailFileName = `thumbnail-${Date.now()}.jpg`;
-        const thumbnailStorageRef = ref(storage, `users/${user.uid}/thumbnails/${thumbnailFileName}`);
-        
-        await uploadBytes(thumbnailStorageRef, thumbnailBlob);
-        thumbnailUrl = await getDownloadURL(thumbnailStorageRef);
-        
-        console.log('✅ Thumbnail uploaded:', thumbnailUrl);
+        const thumbPath = `users/${fbUser.uid}/thumbnails/${thumbnailFileName}`;
+        const thumbRef = storageRef(storage, thumbPath);
+        const tResp = await fetch(thumbnailUri);
+        if (tResp.ok) {
+          const tBlob = await tResp.blob();
+          if (tBlob && tBlob.size > 0) {
+            await uploadBytes(thumbRef, tBlob);
+            thumbnailUrl = await getDownloadURL(thumbRef);
+            console.log('✅ Thumbnail uploaded:', thumbnailUrl);
+          } else {
+            console.warn('⚠️ Thumbnail blob empty; skipping thumbnail upload');
+          }
+        } else {
+          console.warn(`⚠️ Thumbnail fetch failed status=${tResp.status}; skipping thumbnail upload`);
+        }
         
       } catch (error) {
         console.error('⚠️ Failed to generate thumbnail:', error);
@@ -1747,10 +1821,15 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       }
     }
     
+    // Normalize media descriptor for downstream rendering
+    let normalizedType = 'image';
+    if (mediaType === 'video') normalizedType = 'video';
+    else if (mediaType === 'audio') normalizedType = 'audio';
+
     return {
       url: downloadURL,
-      type: mediaType === 'photo' ? 'image/jpeg' : 'video/mp4',
-      thumbnail: thumbnailUrl
+      type: normalizedType,
+      thumbnail: thumbnailUrl || null,
     };
   };
 
@@ -1759,17 +1838,49 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       Alert.alert('Error', 'Please add a caption or media');
       return;
     }
-
-    const user = auth.currentUser;
+    // Ensure Firebase user BEFORE any uploads (rules require auth != null)
+    let fbUser = auth.currentUser;
+    try {
+      if (!fbUser) {
+        console.log('🔐 Ensuring Firebase auth (anonymous)');
+        if (firebaseNative && typeof auth?.signInAnonymously === 'function') {
+          const cred = await auth.signInAnonymously();
+          fbUser = cred?.user || cred; // native returns user directly on some versions
+        } else {
+          const cred = await signInAnonymously(auth);
+          fbUser = cred.user;
+        }
+      }
+    } catch (authErr) {
+      const msg = authErr?.message || '';
+      console.error('❌ Firebase anonymous auth failed:', msg);
+      const suspended = /has-been-suspended/i.test(msg);
+      if (suspended) {
+        setFirebaseSuspended(true);
+        console.error('🛑 Detected suspended Firebase Web API key. Posting disabled until key rotated.');
+        Alert.alert(
+          'Firebase Key Suspended',
+          'The Firebase Web API key used by this build appears suspended (anonymous auth blocked).\n\nAction: In Firebase Console > Project Settings > General, create/rotate a new Web API key. Update EXPO_PUBLIC_FIREBASE_API_KEY (and any firebase.local override), then restart the dev client. Posting is disabled until fixed.'
+        );
+      } else {
+        Alert.alert('Auth Error', 'Unable to authenticate with Firebase. Please check network or Firebase config.');
+      }
+      return;
+    }
+    const appUser = fbUser; // Do NOT fall back to Cognito for Storage/Firestore rules
     
     console.log('🚀 Starting post creation...');
-    console.log('🚀 Current user:', user);
-    console.log('🚀 User UID:', user?.uid);
+    console.log('🚀 Current user (fb||cognito):', appUser);
+    console.log('🚀 User ID:', fbUser?.uid || cognitoUser?.getUsername?.());
     console.log('🚀 Caption:', caption);
     console.log('🚀 Media:', media);
     
-    if (!user) {
-      Alert.alert('Error', 'Please log in to post');
+    if (firebaseSuspended) {
+      Alert.alert('Posting Disabled', 'Firebase key suspended. Rotate key before posting.');
+      return;
+    }
+    if (!appUser) {
+      Alert.alert('Error', 'No Firebase user; cannot post');
       return;
     }
 
@@ -1786,10 +1897,22 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           if (mediaItem.uri) {
             try {
               console.log(`📤 Uploading media ${i + 1}/${mediaItems.length}... Type: ${mediaItem.type}`);
-              const mediaData = await uploadMedia(mediaItem.uri, mediaItem.type);
+              const mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser);
               uploadedMedia.push(mediaData);
             } catch (uploadError) {
-              console.error(`📤 Media upload ${i + 1} failed:`, uploadError);
+              // Expanded diagnostics for storage/unknown issues
+              const errObj = uploadError || {};
+              const diag = {
+                index: i + 1,
+                code: errObj.code,
+                name: errObj.name,
+                message: errObj.message,
+                customData: errObj.customData || errObj._customData,
+                serverResponse: errObj.serverResponse || errObj.response || (errObj.error && errObj.error.serverResponse),
+                stack: errObj.stack ? errObj.stack.split('\n').slice(0, 3) : null
+              };
+              console.error(`📤 Media upload ${i + 1} failed`, diag);
+              console.log('📤 Retry/skip decision prompt will appear');
               
               // Ask user if they want to continue without this media
               const continueWithoutMedia = await new Promise((resolve) => {
@@ -1816,22 +1939,27 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       }
 
       // Determine post type based on media
-      const hasVideo = uploadedMedia.some(m => m.type === 'video');
-      const hasImage = uploadedMedia.some(m => m.type === 'image');
-      const postType = hasVideo ? 'video' : hasImage ? 'image' : 'text';
+  const hasVideo = uploadedMedia.some(m => m.type === 'video');
+  const hasImage = uploadedMedia.some(m => m.type === 'image');
+  const hasAudio = uploadedMedia.some(m => m.type === 'audio');
+  const postType = hasVideo ? 'video' : hasImage ? 'image' : hasAudio ? 'audio' : 'text';
       
       // Get primary media URLs for compatibility
       const primaryMedia = uploadedMedia[0];
-      const videoUrl = hasVideo ? primaryMedia?.url : null;
-      const imageUrl = hasImage ? primaryMedia?.url : null;
+  const videoUrl = hasVideo ? primaryMedia?.url : null;
+  const imageUrl = hasImage ? primaryMedia?.url : null;
+  const audioUrl = hasAudio ? primaryMedia?.url : null;
 
       // Extract thumbnail URL from the primary media
       const thumbnailUrl = uploadedMedia[0]?.thumbnail;
       
+      const appUserId = fbUser?.uid || cognitoUser?.getUsername?.() || 'anonymous';
+      const displayName = fbUser?.displayName || cognitoUser?.getUsername?.() || 'Anonymous';
+      const photoURL = fbUser?.photoURL || null;
       const postData = {
-        userId: user.uid,
-        username: user.displayName || 'Anonymous',
-        userPhotoURL: user.photoURL,
+        userId: appUserId,
+        username: displayName,
+        userPhotoURL: photoURL,
         title: generatedContent?.title || caption.substring(0, 50) || 'New Post',
         transcript: caption,
         description: generatedContent?.description || caption, // Use AI description if available
@@ -1840,12 +1968,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         emoji: uploadedMedia.length > 0 ? '📸' : '💭',
         media: uploadedMedia,
         type: postType, // Add post type
-        videoUrl: videoUrl, // Add direct video URL
-        imageUrl: imageUrl, // Add direct image URL
-        thumbnail: thumbnailUrl, // Add thumbnail URL for video posts
-        user: { // Add user object for compatibility
-          username: user.displayName || 'Anonymous',
-          avatar: user.photoURL
+  videoUrl: videoUrl, // Add direct video URL
+  imageUrl: imageUrl, // Add direct image URL
+  audioUrl: audioUrl, // Add direct audio URL
+        thumbnail: thumbnailUrl || null, // Guard against undefined (Firestore rejects undefined)
+        user: {
+          username: displayName,
+          avatar: photoURL
         },
         likes: 0, // Add likes field
         comments: 0, // Add comments field  
@@ -1859,7 +1988,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       console.log('=== SAVING POST TO FIREBASE ===');
       console.log('Post data:', postData);
       
-      const docRef = await addDoc(collection(db, 'posts'), postData);
+      const docRef = await firestore.collection('posts').add(postData);
       
       console.log('✅ Post saved successfully with ID:', docRef.id);
       
@@ -2056,11 +2185,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       ]}
       onPress={() => togglePlatform(platform)}
     >
-      <Ionicons 
+      <Icon  
         name={icon} 
         size={20} 
         color={selectedPlatforms[platform] ? 'white' : '#9ca3af'} 
-      />
+       />
       <Text style={[
         styles.platformText,
         selectedPlatforms[platform] && { color: 'white' }
@@ -2075,7 +2204,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackNavigation}>
-          <Ionicons name="arrow-back" size={24} color="#ffffff" />
+          <Icon  name="arrow-back" size={24} color="#ffffff"  />
         </TouchableOpacity>
         <BlypLogo useGradientBackground={false} textStyle={{ fontSize: 24 }} />
         <View style={{ width: 24 }} />
@@ -2105,7 +2234,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               colors={['#10b981', '#059669']}
               style={styles.topActionGradient}
             >
-              <Ionicons name="camera" size={24} color="white" />
+              <Icon  name="camera" size={24} color="white"  />
               <Text style={styles.topActionText}>Take Photo</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -2118,7 +2247,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               colors={['#3b82f6', '#2563eb']}
               style={styles.topActionGradient}
             >
-              <Ionicons name="videocam" size={24} color="white" />
+              <Icon  name="videocam" size={24} color="white"  />
               <Text style={styles.topActionText}>Take Video</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -2131,7 +2260,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               colors={['#a855f7', '#d946ef']}
               style={styles.topActionGradient}
             >
-              <Ionicons name="mic" size={24} color="white" />
+              <Icon  name="mic" size={24} color="white"  />
               <Text style={styles.topActionText}>Voice Note</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -2144,7 +2273,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               colors={['#f59e0b', '#d97706']}
               style={styles.topActionGradient}
             >
-              <Ionicons name="images" size={24} color="white" />
+              <Icon  name="images" size={24} color="white"  />
               <Text style={styles.topActionText}>My Media</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -2187,7 +2316,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                         removeMediaItem(index);
                       }}
                     >
-                      <Ionicons name="close-circle" size={16} color="#FF4444" />
+                      <Icon  name="close-circle" size={16} color="#FF4444"  />
                     </TouchableOpacity>
                   </View>
                   
@@ -2207,7 +2336,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         {(allContextualData.photoDescriptions.length > 0 || allContextualData.voiceInputs.length > 0) && (
           <View style={styles.comprehensiveAiSection}>
             <View style={styles.aiSummaryHeader}>
-              <Ionicons name="bulb" size={24} color="#a855f7" />
+              <Icon  name="bulb" size={24} color="#a855f7"  />
               <Text style={styles.aiSummaryTitle}>AI Data Collected</Text>
             </View>
             
@@ -2244,7 +2373,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 {isGeneratingContent ? (
                   <ActivityIndicator size="small" color="white" />
                 ) : (
-                  <Ionicons name="bulb" size={24} color="white" />
+                  <Icon  name="bulb" size={24} color="white"  />
                 )}
                 <Text style={styles.comprehensiveAiButtonText}>
                   {isGeneratingContent ? 'Generating...' : 'Generate Comprehensive AI Post'}
@@ -2273,11 +2402,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {isTranscribing ? (
                 <ActivityIndicator size="large" color="white" />
               ) : (
-                <Ionicons 
+                <Icon  
                   name={isRecording ? "stop" : "mic"} 
                   size={32} 
                   color="white" 
-                />
+                 />
               )}
             </LinearGradient>
           </TouchableOpacity>
@@ -2304,11 +2433,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             onPress={() => setIsManualDescriptionExpanded(!isManualDescriptionExpanded)}
           >
             <Text style={styles.sectionLabel}>Or describe in text:</Text>
-            <Ionicons 
+            <Icon  
               name={isManualDescriptionExpanded ? "chevron-up" : "chevron-down"} 
               size={20} 
               color="#9ca3af" 
-            />
+             />
           </TouchableOpacity>
           
           {isManualDescriptionExpanded && (
@@ -2356,7 +2485,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     <ActivityIndicator size="small" color="white" />
                   ) : (
                     <>
-                      <Ionicons name="sparkles" size={20} color="white" />
+                      <Icon  name="sparkles" size={20} color="white"  />
                       <Text style={styles.enhanceFromTextButtonText}>Enhance with AI</Text>
                     </>
                   )}
@@ -2377,7 +2506,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 setCaption(aiCaption);
               }}
             >
-              <Ionicons name="sparkles" size={18} color={contentView === 'ai' ? "white" : "#a855f7"} />
+              <Icon  name="sparkles" size={18} color={contentView === 'ai' ? "white" : "#a855f7"}  />
               <Text style={[styles.toggleButtonText, contentView === 'ai' && styles.activeToggleText]}>AI Enhanced</Text>
             </TouchableOpacity>
             
@@ -2388,7 +2517,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 setCaption(originalCaption);
               }}
             >
-              <Ionicons name="document-text" size={18} color={contentView === 'original' ? "white" : "#6b7280"} />
+              <Icon  name="document-text" size={18} color={contentView === 'original' ? "white" : "#6b7280"}  />
               <Text style={[styles.toggleButtonText, contentView === 'original' && styles.activeToggleText]}>Original</Text>
             </TouchableOpacity>
           </View>
@@ -2417,7 +2546,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   colors={['#a855f7', '#d946ef']}
                   style={styles.enhanceAiGradient}
                 >
-                  <Ionicons name="sparkles" size={20} color="white" />
+                  <Icon  name="sparkles" size={20} color="white"  />
                   <Text style={styles.enhanceAiButtonText}>Enhance with AI</Text>
                 </LinearGradient>
               </TouchableOpacity>
@@ -2518,7 +2647,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               style={styles.actionButton}
               onPress={handleMediaLibraryPress}
             >
-              <Ionicons name="images" size={20} color="#9ca3af" />
+              <Icon  name="images" size={20} color="#9ca3af"  />
               <Text style={styles.actionButtonText}>Add Media</Text>
             </TouchableOpacity>
 
@@ -2546,7 +2675,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 }
               }}
             >
-              <Ionicons name="pricetag" size={20} color="#9ca3af" />
+              <Icon  name="pricetag" size={20} color="#9ca3af"  />
               <Text style={styles.actionButtonText}>Generate #</Text>
             </TouchableOpacity>
           </View>
@@ -2612,7 +2741,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Media {selectedMedia.index + 1}</Text>
                   <TouchableOpacity onPress={closeMediaViewer} style={styles.closeButton}>
-                    <Ionicons name="close" size={24} color="white" />
+                    <Icon  name="close" size={24} color="white"  />
                   </TouchableOpacity>
                 </View>
                 
@@ -2658,7 +2787,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                       colors={['#ef4444', '#dc2626']}
                       style={styles.modalActionGradient}
                     >
-                      <Ionicons name="trash" size={20} color="white" />
+                      <Icon  name="trash" size={20} color="white"  />
                       <Text style={styles.modalActionText}>Remove</Text>
                     </LinearGradient>
                   </TouchableOpacity>
@@ -2682,7 +2811,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Ionicons name="sparkles" size={48} color="white" />
+                <Icon  name="sparkles" size={48} color="white"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Analyzing Media</Text>
               <Text style={styles.aiOverlaySubtitle}>AI is examining your photos and videos...</Text>
@@ -2707,7 +2836,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Ionicons name="create" size={48} color="white" />
+                <Icon  name="create" size={48} color="white"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Creating Your Post</Text>
               <Text style={styles.aiOverlaySubtitle}>AI is writing the perfect caption...</Text>
@@ -2732,7 +2861,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Ionicons name="cloud-upload" size={48} color="white" />
+                <Icon  name="cloud-upload" size={48} color="white"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Uploading Your Post</Text>
               <Text style={styles.aiOverlaySubtitle}>Preparing your content...</Text>
@@ -2757,7 +2886,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Ionicons name="sparkles" size={48} color="white" />
+                <Icon  name="sparkles" size={48} color="white"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Blyp AI Processing</Text>
               <Text style={styles.aiOverlaySubtitle}>Blyp AI is now generating your post...</Text>
@@ -2784,7 +2913,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {/* Header */}
               <View style={styles.stepByStepHeader}>
                 <View style={styles.stepByStepIconContainer}>
-                  <Ionicons name="sparkles" size={32} color="white" />
+                  <Icon  name="sparkles" size={32} color="white"  />
                 </View>
                 <Text style={styles.stepByStepTitle}>Creating Your Post</Text>
                 <Text style={styles.stepByStepSubtitle}>
@@ -2803,15 +2932,15 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     ]}>
                       {step.isVoice ? (
                         index < currentStep ? (
-                          <Ionicons name="checkmark" size={16} color="white" />
+                          <Icon  name="checkmark" size={16} color="white"  />
                         ) : index === currentStep ? (
                           <ActivityIndicator size="small" color="white" />
                         ) : (
-                          <Ionicons name="mic" size={14} color="white" />
+                          <Icon  name="mic" size={14} color="white"  />
                         )
                       ) : (
                         index < currentStep ? (
-                          <Ionicons name="checkmark" size={16} color="white" />
+                          <Icon  name="checkmark" size={16} color="white"  />
                         ) : index === currentStep ? (
                           <ActivityIndicator size="small" color="white" />
                         ) : (
@@ -2868,7 +2997,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {/* Header */}
               <View style={styles.reviewHeader}>
                 <View style={styles.reviewIconContainer}>
-                  <Ionicons name="document-text" size={32} color="white" />
+                  <Icon  name="document-text" size={32} color="white"  />
                 </View>
                 <Text style={styles.reviewTitle}>Review & Generate</Text>
                 <Text style={styles.reviewSubtitle}>
@@ -2880,7 +3009,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {reviewData.voiceInput && (
                 <View style={styles.reviewSection}>
                   <View style={styles.reviewSectionHeader}>
-                    <Ionicons name="mic" size={20} color="white" />
+                    <Icon  name="mic" size={20} color="white"  />
                     <Text style={styles.reviewSectionTitle}>Voice Input</Text>
                   </View>
                   <View style={styles.reviewContentBox}>
@@ -2895,7 +3024,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {reviewData.photoDescriptions && reviewData.photoDescriptions.length > 0 && (
                 <View style={styles.reviewSection}>
                   <View style={styles.reviewSectionHeader}>
-                    <Ionicons name="images" size={20} color="white" />
+                    <Icon  name="images" size={20} color="white"  />
                     <Text style={styles.reviewSectionTitle}>
                       Photo Description{reviewData.photoDescriptions.length > 1 ? 's' : ''}
                     </Text>
@@ -2934,7 +3063,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     </>
                   ) : (
                     <>
-                      <Ionicons name="sparkles" size={20} color="white" style={{ marginRight: 8 }} />
+                      <Icon  name="sparkles" size={20} color="white" style={{ marginRight: 8 }}  />
                       <Text style={styles.generateAIButtonText}>Generate AI Post</Text>
                     </>
                   )}
@@ -2970,7 +3099,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {/* Header */}
               <View style={styles.descriptionMethodHeader}>
                 <View style={styles.descriptionMethodIconContainer}>
-                  <Ionicons name="chatbubble-ellipses" size={32} color="white" />
+                  <Icon  name="chatbubble-ellipses" size={32} color="white"  />
                 </View>
                 <Text style={styles.descriptionMethodTitle}>Add Description</Text>
                 <Text style={styles.descriptionMethodSubtitle}>
@@ -2992,11 +3121,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   styles.descriptionOptionIconContainer,
                   isRecording && { backgroundColor: '#ef4444' }
                 ]}>
-                  <Ionicons 
+                  <Icon  
                     name={isRecording ? "mic" : "mic-outline"} 
                     size={24} 
                     color={isRecording ? "white" : "#3b82f6"} 
-                  />
+                   />
                 </View>
                 <View style={styles.descriptionOptionContent}>
                   <Text style={styles.descriptionOptionTitle}>
@@ -3011,7 +3140,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     <View style={styles.recordingDot} />
                   </View>
                 ) : (
-                  <Ionicons name="hand-left" size={20} color="rgba(255,255,255,0.7)" />
+                  <Icon  name="hand-left" size={20} color="rgba(255,255,255,0.7)"  />
                 )}
               </TouchableOpacity>
 
@@ -3021,13 +3150,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 onPress={handleTextDescription}
               >
                 <View style={styles.descriptionOptionIconContainer}>
-                  <Ionicons name="create" size={24} color="#3b82f6" />
+                  <Icon  name="create" size={24} color="#3b82f6"  />
                 </View>
                 <View style={styles.descriptionOptionContent}>
                   <Text style={styles.descriptionOptionTitle}>Type Description</Text>
                   <Text style={styles.descriptionOptionSubtitle}>Write your description</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+                <Icon  name="chevron-forward" size={20} color="rgba(255,255,255,0.7)"  />
               </TouchableOpacity>
 
               {/* Text Input Box (shown when text option is selected) */}
@@ -3060,13 +3189,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   onPress={handleContinueWithoutDescription}
                 >
                   <View style={styles.descriptionOptionIconContainer}>
-                    <Ionicons name="arrow-forward-circle" size={24} color="#10b981" />
+                    <Icon  name="arrow-forward-circle" size={24} color="#10b981"  />
                   </View>
                   <View style={styles.descriptionOptionContent}>
                     <Text style={styles.descriptionOptionTitle}>Continue Without Description</Text>
                     <Text style={styles.descriptionOptionSubtitle}>Process photos as-is</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+                  <Icon  name="chevron-forward" size={20} color="rgba(255,255,255,0.7)"  />
                 </TouchableOpacity>
               )}
             </LinearGradient>
@@ -3089,7 +3218,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               {/* Header with camera icon */}
               <View style={styles.multiPhotoModalHeader}>
                 <View style={styles.multiPhotoIconContainer}>
-                  <Ionicons name="camera" size={32} color="white" />
+                  <Icon  name="camera" size={32} color="white"  />
                 </View>
                 <Text style={styles.multiPhotoModalTitle}>Photo Captured!</Text>
                 <Text style={styles.multiPhotoModalSubtitle}>
@@ -3104,7 +3233,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   onPress={handleTakeAnotherPhoto}
                 >
                   <View style={styles.multiPhotoActionContent}>
-                    <Ionicons name="camera-outline" size={24} color="white" />
+                    <Icon  name="camera-outline" size={24} color="white"  />
                     <Text style={styles.multiPhotoActionText}>Take Another Photo</Text>
                   </View>
                 </TouchableOpacity>
@@ -3114,7 +3243,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   onPress={handleContinueWithPost}
                 >
                   <View style={styles.multiPhotoActionContent}>
-                    <Ionicons name="checkmark-circle-outline" size={24} color="white" />
+                    <Icon  name="checkmark-circle-outline" size={24} color="white"  />
                     <Text style={styles.multiPhotoActionText}>Continue with Post</Text>
                   </View>
                 </TouchableOpacity>
@@ -3139,7 +3268,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             >
               {/* Header */}
               <View style={styles.confirmationModalHeader}>
-                <Ionicons name="warning-outline" size={48} color="#f59e0b" />
+                <Icon  name="warning-outline" size={48} color="#f59e0b"  />
                 <Text style={styles.confirmationModalTitle}>Unsaved Changes</Text>
                 <Text style={styles.confirmationModalSubtitle}>
                   You have unsaved content. What would you like to do?
@@ -3157,7 +3286,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     colors={['#10b981', '#059669']}
                     style={styles.confirmationActionGradient}
                   >
-                    <Ionicons name="bookmark-outline" size={24} color="white" />
+                    <Icon  name="bookmark-outline" size={24} color="white"  />
                     <Text style={styles.confirmationActionText}>Save as Draft</Text>
                   </LinearGradient>
                 </TouchableOpacity>
@@ -3171,7 +3300,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     colors={['#ef4444', '#dc2626']}
                     style={styles.confirmationActionGradient}
                   >
-                    <Ionicons name="trash-outline" size={24} color="white" />
+                    <Icon  name="trash-outline" size={24} color="white"  />
                     <Text style={styles.confirmationActionText}>Discard Changes</Text>
                   </LinearGradient>
                 </TouchableOpacity>

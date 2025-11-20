@@ -1,8 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { geminiApiKey } from '../config/firebase';
 
+const AI_ENABLED = !!geminiApiKey;
+
 // Initialize Gemini AI with proper API key
-const genAI = new GoogleGenerativeAI(geminiApiKey);
+const genAI = AI_ENABLED ? new GoogleGenerativeAI(geminiApiKey) : null;
 
 /**
  * Rate limiting and caching system
@@ -50,7 +52,7 @@ class RateLimiter {
  */
 export class SmartListGenerator {
   constructor() {
-    this.model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' });
+    this.model = genAI ? genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' }) : null;
     this.rateLimiter = new RateLimiter();
   }
 
@@ -59,6 +61,9 @@ export class SmartListGenerator {
    */
   async generateCategories(posts) {
     try {
+      if (!this.model) {
+        return this.getFallbackCategories();
+      }
       const cacheKey = 'categories';
       
       // Check cache first
@@ -151,6 +156,9 @@ Make categories engaging and discoverable. Use emojis in names.
    */
   async generateHashtags(posts, userInteractions = []) {
     try {
+      if (!this.model) {
+        return this.getFallbackHashtags();
+      }
       const cacheKey = 'hashtags';
       
       // Check cache first
@@ -332,6 +340,11 @@ Each category should have 8-12 relevant hashtags.
    */
   async generatePopularityRankings(posts) {
     try {
+      if (!this.model) {
+        return this.getFallbackPopularityRankings(
+          posts.filter(p => p.id && !String(p.id).startsWith('video-'))
+        );
+      }
       const cacheKey = 'popularity';
       
       // Check cache first

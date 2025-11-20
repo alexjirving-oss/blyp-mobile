@@ -16,7 +16,7 @@ import {
   serverTimestamp,
   increment
 } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 
 class ChatRoomService {
   constructor() {

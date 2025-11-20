@@ -1,0 +1,29 @@
+# Backups and duplicates
+\#1/
+backup/
+
+# Node and build artifacts
+node_modules/
+.expo/
+.eas/
+dist/
+build/
+android/app/build/
+ios/build/
+
+# Secrets / binaries
+android/app/google-services.json
+*.keystore
+*.p12
+*.pem
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.mov
+*.aac
+*.ttf
+*.otf
+*.zip
+*.pdf

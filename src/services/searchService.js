@@ -1,5 +1,5 @@
 import { collection, query, where, orderBy, limit, getDocs, startAt, endAt } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { firestore as db } from '../config/firebase';
 
 class SearchService {
   constructor() {
