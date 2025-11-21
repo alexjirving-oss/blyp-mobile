@@ -17,6 +17,7 @@ import { mapAuthError } from '../lib/auth/errors';
 import BlypLogo from '../components/BlypLogo';
 import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
+import { isSocialAuthEnabled, signInWithGoogle, signInWithFacebook } from '../services/socialAuthService';
 
 const AuthScreen = () => {
   const [isLogin, setIsLogin] = useState(false);
@@ -37,6 +38,7 @@ const AuthScreen = () => {
   const [suggestReset, setSuggestReset] = useState(false);
   const [accountExists, setAccountExists] = useState(undefined); // undefined=unknown, true/false known
   const [lockoutDetected, setLockoutDetected] = useState(false);
+  const [isSocialAuthInProgress, setIsSocialAuthInProgress] = useState(false);
 
   const [showRawError, setShowRawError] = useState(false);
   const [rawErrorObj, setRawErrorObj] = useState(null);
@@ -341,6 +343,56 @@ const AuthScreen = () => {
           }
   };
 
+  const handleGoogleSignInPress = async () => {
+    if (!isSocialAuthEnabled()) {
+      console.log('[AUTH][SOCIAL] Social auth disabled via env or missing client IDs');
+      return;
+    }
+
+    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
+      console.log('[AUTH][SOCIAL] Ignoring Google tap while auth is busy or cooled down');
+      return;
+    }
+
+    setIsSocialAuthInProgress(true);
+    console.log('[AUTH][SOCIAL] Starting Google sign-in at', new Date().toISOString());
+
+    try {
+      const result = await signInWithGoogle();
+      console.log('[AUTH][SOCIAL] Google sign-in result', result);
+      // TODO: Send result to backend / Cognito federation once implemented
+    } catch (err) {
+      console.log('[AUTH][SOCIAL] Google sign-in error', { message: err?.message, code: err?.code });
+    } finally {
+      setIsSocialAuthInProgress(false);
+    }
+  };
+
+  const handleFacebookSignInPress = async () => {
+    if (!isSocialAuthEnabled()) {
+      console.log('[AUTH][SOCIAL] Social auth disabled via env or missing client IDs');
+      return;
+    }
+
+    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
+      console.log('[AUTH][SOCIAL] Ignoring Facebook tap while auth is busy or cooled down');
+      return;
+    }
+
+    setIsSocialAuthInProgress(true);
+    console.log('[AUTH][SOCIAL] Starting Facebook sign-in at', new Date().toISOString());
+
+    try {
+      const result = await signInWithFacebook();
+      console.log('[AUTH][SOCIAL] Facebook sign-in result', result);
+      // TODO: Send result to backend / Cognito federation once implemented
+    } catch (err) {
+      console.log('[AUTH][SOCIAL] Facebook sign-in error', { message: err?.message, code: err?.code });
+    } finally {
+      setIsSocialAuthInProgress(false);
+    }
+  };
+
   const handleReset = async () => {
     setLoading(true);
     // Clear any previous error and reset confirmation state
@@ -450,6 +502,48 @@ const AuthScreen = () => {
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
+          )}
+
+          {isSocialAuthEnabled() && !needsConfirm && !resetMode && (
+            <>
+              <View style={styles.socialDivider}>
+                <View style={styles.socialDividerLine} />
+                <Text style={styles.socialDividerText} allowFontScaling={false}>
+                  Or continue with
+                </Text>
+                <View style={styles.socialDividerLine} />
+              </View>
+
+              <View style={styles.socialButtonsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.socialButton,
+                    isSocialAuthInProgress && styles.socialButtonDisabled,
+                  ]}
+                  onPress={handleGoogleSignInPress}
+                  disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
+                  activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
+                >
+                  <Text style={styles.socialButtonText} allowFontScaling={false}>
+                    Continue with Google
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.socialButton,
+                    isSocialAuthInProgress && styles.socialButtonDisabled,
+                  ]}
+                  onPress={handleFacebookSignInPress}
+                  disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
+                  activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
+                >
+                  <Text style={styles.socialButtonText} allowFontScaling={false}>
+                    Continue with Facebook
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
           )}
 
           {resetMode && (
@@ -764,6 +858,44 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     zIndex: 999,
     elevation: 999,
+  },
+  socialDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  socialDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#1f2933',
+  },
+  socialDividerText: {
+    marginHorizontal: 12,
+    color: '#6b7280',
+    fontSize: 13,
+  },
+  socialButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  socialButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#374151',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#020617',
+  },
+  socialButtonDisabled: {
+    opacity: 0.6,
+  },
+  socialButtonText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 
