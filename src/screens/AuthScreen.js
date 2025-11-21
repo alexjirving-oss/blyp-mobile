@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  ActivityIndicator,
   StyleSheet,
   SafeAreaView,
   KeyboardAvoidingView,
@@ -23,6 +24,7 @@ const AuthScreen = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [confirmCode, setConfirmCode] = useState('');
   const [confirmEmail, setConfirmEmail] = useState('');
@@ -166,6 +168,20 @@ const AuthScreen = () => {
         });
       } else if (isLogin) {
         // Sign in
+        console.log(
+          '[AUTH][UI] Login button pressed at',
+          new Date().toISOString(),
+          { isLogin, isSigningIn }
+        );
+        if (isSigningIn) {
+          console.log('[AUTH] Ignoring duplicate sign-in tap while already signing in');
+          return;
+        }
+        console.log(
+          '[AUTH][STATE] Setting isSigningIn=true at',
+          new Date().toISOString()
+        );
+        setIsSigningIn(true);
         const authDetails = new AuthenticationDetails({ Username: email, Password: password });
         const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
         
@@ -174,6 +190,11 @@ const AuthScreen = () => {
             console.log('✅ Sign in successful for', maskEmail(email));
               // Immediately lift auth state using the current CognitoUser
               try { refreshAuthNow?.(cognitoUser); } catch {}
+            console.log(
+              '[AUTH][STATE] isSigningIn=false (success) at',
+              new Date().toISOString()
+            );
+            setIsSigningIn(false);
             setLoading(false);
           },
           onFailure: (err) => {
@@ -197,6 +218,12 @@ const AuthScreen = () => {
               setNeedsConfirm(true);
               setConfirmEmail(email);
               Alert.alert('Confirm Your Account', 'We sent you a verification code. Enter it to finish sign-in.');
+              console.log(
+                '[AUTH][STATE] isSigningIn=false (error: NotConfirmed) at',
+                new Date().toISOString(),
+                { message: err?.message, code: err?.code }
+              );
+              setIsSigningIn(false);
             } else if (err?.code === 'NotAuthorizedException' && /[A-Z]/.test(email)) {
               // Fallback: attempt lowercase username if mixed case might cause mismatch
               const lowered = email.toLowerCase();
@@ -208,6 +235,11 @@ const AuthScreen = () => {
                   onSuccess: () => {
                     console.log('✅ Sign in successful (lowercase fallback) for', maskEmail(lowered));
                     try { refreshAuthNow?.(cognitoUser2); } catch {}
+                    console.log(
+                      '[AUTH][STATE] isSigningIn=false (success) at',
+                      new Date().toISOString()
+                    );
+                    setIsSigningIn(false);
                     setLoading(false);
                   },
                   onFailure: (err2) => {
@@ -216,6 +248,12 @@ const AuthScreen = () => {
                     const friendly2 = mapAuthError(err2);
                     setLastError(friendly2?.message || err2?.message || String(err2));
                     Alert.alert('Authentication Error', friendly2?.message || err2.message);
+                    console.log(
+                      '[AUTH][STATE] isSigningIn=false (error: LowercaseFallback) at',
+                      new Date().toISOString(),
+                      { message: err2?.message, code: err2?.code }
+                    );
+                    setIsSigningIn(false);
                     setLoading(false);
                   }
                 });
@@ -235,6 +273,12 @@ const AuthScreen = () => {
               }
               // Probe existence to help user choose between reset vs signup
               probeAccountExistence(email);
+              console.log(
+                '[AUTH][STATE] isSigningIn=false (error: General) at',
+                new Date().toISOString(),
+                { message: err?.message, code: err?.code }
+              );
+              setIsSigningIn(false);
             }
             setLoading(false);
           }
@@ -389,7 +433,7 @@ const AuthScreen = () => {
             <TouchableOpacity
               style={styles.submitButton}
               onPress={handleAuth}
-              disabled={loading || Date.now() < cooldownUntil}
+              disabled={(isLogin ? isSigningIn : loading) || Date.now() < cooldownUntil}
             >
               <LinearGradient
                 colors={['#a855f7', '#d946ef', '#ec4899']}
@@ -398,11 +442,11 @@ const AuthScreen = () => {
                 end={{ x: 1, y: 1 }}
               >
                 <Text style={styles.submitText}>
-                  {loading
-                    ? 'Please wait...'
-                    : Date.now() < cooldownUntil
-                      ? 'Temporarily limited…'
-                      : (isLogin ? 'Log In' : 'Sign Up')}
+                  {isLogin
+                    ? (isSigningIn
+                        ? 'Loading...'
+                        : (Date.now() < cooldownUntil ? 'Temporarily limited…' : 'Log In'))
+                    : (loading ? 'Please wait...' : 'Sign Up')}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -619,6 +663,11 @@ const AuthScreen = () => {
           )}
         </View>
       )}
+      {isSigningIn && (
+        <View style={styles.authLoadingOverlay}>
+          <ActivityIndicator size="large" color="#ec4899" />
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -703,6 +752,18 @@ const styles = StyleSheet.create({
   toggleLink: {
     color: '#a855f7',
     fontWeight: '600',
+  },
+  authLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    zIndex: 999,
+    elevation: 999,
   },
 });
 
