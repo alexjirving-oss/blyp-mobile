@@ -396,56 +396,48 @@ export default function App() {
       }
     }, 15000);
     (async () => {
-      // Hard delay to let RN polyfills and Dev Client settle
-      await new Promise((res) => setTimeout(res, 3000));
+      // Reduced settle delay (retain minimal guard for polyfills)
+      await new Promise((res) => setTimeout(res, 1000));
 
       if (cancelled) return;
 
-      // Defer non-essential startup side-effects to avoid early network calls
+      // Critical path: pre-auth cleanup only (stability)
       try {
-        // eslint-disable-next-line no-console
         console.warn('[BLYP][BOOTSTRAP] step preAuthCleanup start');
-        // Proactively clean malformed Cognito tokens before Amplify/Cognito usage
         await import('./src/config/preAuthCleanup');
-        // eslint-disable-next-line no-console
         console.warn('[BLYP][BOOTSTRAP] step preAuthCleanup done');
       } catch {}
-      try {
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] step amplify start');
-        // Initialize AWS Amplify if configured (no secrets committed)
-        await import('./src/config/amplify');
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] step amplify done');
-      } catch {}
-      try {
-        if (firebaseNative && crashlytics) {
-          crashlytics.log('App bootstrap complete');
-        }
-      } catch {}
-      try {
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] step sentry start');
-        // Initialize observability (no-op if DSN not provided)
-        await import('./src/monitoring/sentry');
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] step sentry done');
-      } catch {}
-      try {
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] step streamingFlag start');
-        // Prime remote streaming flag (non-blocking; enables kill-switch overrides)
-        const { primeStreamingFlag } = await import('./src/config/StreamingFeatureFlag');
-        primeStreamingFlag();
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] step streamingFlag done');
-      } catch {}
 
-      if (!cancelled) setReady(true);
       if (!cancelled) {
-        // eslint-disable-next-line no-console
-        console.warn('[BLYP][BOOTSTRAP] ready=true (deferred init complete)');
+        setReady(true);
+        console.warn('[BLYP][BOOTSTRAP] ready=true (core init only)');
+        setLoadingNote('Ready – finishing background initialization…');
       }
+
+      // Deferred non-critical initialization (fire-and-forget)
+      (async () => {
+        try {
+          console.warn('[BLYP][BOOTSTRAP][DEFER] amplify start');
+          await import('./src/config/amplify');
+          console.warn('[BLYP][BOOTSTRAP][DEFER] amplify done');
+        } catch {}
+        try {
+          console.warn('[BLYP][BOOTSTRAP][DEFER] sentry start');
+          await import('./src/monitoring/sentry');
+          console.warn('[BLYP][BOOTSTRAP][DEFER] sentry done');
+        } catch {}
+        try {
+          console.warn('[BLYP][BOOTSTRAP][DEFER] streamingFlag start');
+          const { primeStreamingFlag } = await import('./src/config/StreamingFeatureFlag');
+          primeStreamingFlag();
+          console.warn('[BLYP][BOOTSTRAP][DEFER] streamingFlag done');
+        } catch {}
+        try {
+          if (firebaseNative && crashlytics) {
+            crashlytics.log('Deferred bootstrap complete');
+          }
+        } catch {}
+      })();
     })();
 
     return () => { cancelled = true; clearTimeout(warnTimeout); clearTimeout(hardFallbackTimeout); };
