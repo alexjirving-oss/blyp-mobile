@@ -47,6 +47,7 @@ export default function UnifiedVideo({
   // Branch 2: experimental expo-video path (basic wiring only)
   const videoRef = useRef(null);
   const contentFit = resizeMode === 'contain' ? 'contain' : 'cover';
+  const initialVolume = typeof volume === 'number' ? volume : undefined;
 
   // Map expo-video status object into an expo-av-like subset.
   const mapVideoStatusToExpoAVShape = (status) => {
@@ -105,6 +106,13 @@ export default function UnifiedVideo({
     }
   }, [shouldPlay]);
 
+  // Apply volume changes (best-effort; guarded for backend capability)
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (initialVolume === undefined) return;
+    videoRef.current.setVolumeAsync?.(initialVolume).catch(() => {});
+  }, [initialVolume]);
+
   return (
     <VideoView
       ref={videoRef}
@@ -113,6 +121,7 @@ export default function UnifiedVideo({
       contentFit={contentFit}
       isLooping={isLooping}
       isMuted={isMuted}
+      volume={initialVolume}
       onError={handleError}
       onLoad={handleLoad}
       onPlaybackStatusUpdate={handleStatusUpdate}
