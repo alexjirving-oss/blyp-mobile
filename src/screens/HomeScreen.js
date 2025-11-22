@@ -21,7 +21,7 @@ import { db, auth, firebaseEnabled, firestore } from '../config/firebase';
 import SimpleVideo from '../components/OptimizedVideo'; // legacy simple
 import EnhancedVideo from '../components/EnhancedVideo';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Video } from 'expo-av';
+import UnifiedVideo from '../components/UnifiedVideo';
 import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker';
 import BlypLogo from '../components/BlypLogo';
 import { addTestPostsWithMultiplePhotos } from '../utils/testDataHelper';
@@ -712,7 +712,7 @@ const HomeScreen = ({ navigation }) => {
                   videoUrl: item.videoUrl,
                   mediaUrl: mediaItems[0]?.url,
                 })}
-                <Video
+                <UnifiedVideo
                   source={{
                     uri:
                       item.videoUrl ||
