@@ -10,7 +10,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
 import StreamSegmentsAdapter from '../services/StreamSegmentsAdapter';
 import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
@@ -544,7 +544,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   return (
     <View style={[styles.container, style]}>
       {/* Primary video player */}
-      <Video
+      <UnifiedVideo
         ref={videoRef}
         style={styles.video}
         resizeMode="cover" // TikTok-style full coverage
@@ -556,7 +556,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       />
       
       {/* Secondary video player for preloading (hidden) */}
-      <Video
+      <UnifiedVideo
         ref={secondaryVideoRef}
         style={styles.hiddenVideo}
         resizeMode="cover"

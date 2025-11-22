@@ -14,7 +14,7 @@ import {
   Alert,
   Dimensions,
 } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 

@@ -24,7 +24,7 @@ import {
   AppState,
   TouchableOpacity,
 } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 import NetInfo from '@react-native-community/netinfo';
 import ScalableHLSService from '../services/ScalableHLSService';
 
@@ -856,7 +856,7 @@ const IntelligentAdaptivePlayer = ({
 
   return (
     <View style={[styles.container, style]}>
-      <Video
+      <UnifiedVideo
         ref={videoRef}
         style={styles.video}
         useNativeControls={false}

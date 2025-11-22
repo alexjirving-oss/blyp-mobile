@@ -11,7 +11,7 @@ import {
   Text,
   ScrollView,
 } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
 
 const DebugLiveStreamViewer = ({ streamId, style }) => {
@@ -93,7 +93,7 @@ const DebugLiveStreamViewer = ({ streamId, style }) => {
       {/* Video Area */}
       <View style={styles.videoArea}>
         {currentUrl ? (
-          <Video
+          <UnifiedVideo
             source={{ uri: currentUrl }}
             style={styles.video}
             shouldPlay={true}

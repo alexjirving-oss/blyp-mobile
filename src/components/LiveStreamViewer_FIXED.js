@@ -19,7 +19,7 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -372,7 +372,7 @@ const LiveStreamViewerFixed = ({ streamId, style, onError }) => {
   return (
     <View style={[styles.container, style]}>      
       {currentSegmentUrl ? (
-        <Video
+        <UnifiedVideo
           ref={videoRef}
           source={{ uri: currentSegmentUrl }}
           style={styles.video}

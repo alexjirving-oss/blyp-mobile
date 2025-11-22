@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -39,6 +39,13 @@ const AuthScreen = () => {
   const [accountExists, setAccountExists] = useState(undefined); // undefined=unknown, true/false known
   const [lockoutDetected, setLockoutDetected] = useState(false);
   const [isSocialAuthInProgress, setIsSocialAuthInProgress] = useState(false);
+
+  // TODO[BLYP][UX]: Future onboarding polish:
+  //  - Consider one-line tagline under logo
+  //  - Optional “By continuing you agree to …” legal line at bottom of screen
+  //  - A/B test sign-in vs sign-up default focus
+
+  const loginStartRef = useRef(null);
 
   const [showRawError, setShowRawError] = useState(false);
   const [rawErrorObj, setRawErrorObj] = useState(null);
@@ -99,6 +106,11 @@ const AuthScreen = () => {
         email: maskEmail(email),
         contextKeys: Object.keys(context || {}),
       });
+      if (loginStartRef.current) {
+        const durationMs = Date.now() - loginStartRef.current;
+        console.log('[AUTH][METRICS] Login success duration(ms):', durationMs);
+        loginStartRef.current = null;
+      }
       // Lift auth state immediately if we have a CognitoUser reference
       if (context?.cognitoUser) {
         try { refreshAuthNow?.(context.cognitoUser); } catch {}
@@ -212,6 +224,8 @@ const AuthScreen = () => {
           new Date().toISOString()
         );
         setIsSigningIn(true);
+        loginStartRef.current = Date.now();
+        console.log('[AUTH][METRICS] Login start at', new Date(loginStartRef.current).toISOString());
         const authDetails = new AuthenticationDetails({ Username: email, Password: password });
         const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
         
@@ -532,6 +546,10 @@ const AuthScreen = () => {
               </View>
 
               <View style={styles.socialButtonsRow}>
+                {/* TODO[BLYP][UX]: Design final copy/layout for Google/Facebook sign-in row
+                    - Confirm brand guidelines (Google / Meta)
+                    - Decide button ordering and spacing relative to email/password form
+                    - Add tracking for tap events (provider, success/failure, latency) */}
                 <TouchableOpacity
                   style={[
                     styles.socialButton,
