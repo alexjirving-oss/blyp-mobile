@@ -24,6 +24,16 @@ export default function UnifiedVideo({
   onPlaybackStatusUpdate, // retained for compatibility; not mapped in expo-video branch yet
   ...rest
 }) {
+  // Dev-only backend selection logging
+  if (__DEV__) {
+    const backend = ENABLE_EXPO_VIDEO ? 'expo-video' : 'expo-av';
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[VIDEO][UnifiedVideo] backend selected:', backend, {
+        uri: source && source.uri,
+      });
+    } catch {}
+  }
   // Branch 1: current stable path (expo-av)
   if (!ENABLE_EXPO_VIDEO) {
     return (
