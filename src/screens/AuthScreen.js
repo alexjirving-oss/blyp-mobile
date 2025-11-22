@@ -91,6 +91,34 @@ const AuthScreen = () => {
     } catch {}
   };
 
+  // Unified success handler for any auth source (password, confirmed signup, social OAuth)
+  const handleAuthSuccess = (source, context = {}) => {
+    try {
+      console.log('[AUTH][SUCCESS]', source, {
+        at: new Date().toISOString(),
+        email: maskEmail(email),
+        contextKeys: Object.keys(context || {}),
+      });
+      // Lift auth state immediately if we have a CognitoUser reference
+      if (context?.cognitoUser) {
+        try { refreshAuthNow?.(context.cognitoUser); } catch {}
+      }
+      // Clear signing flags
+      setIsSigningIn(false);
+      setLoading(false);
+      // Clear confirmation flow state (only relevant for signup/confirm path)
+      if (needsConfirm) {
+        setNeedsConfirm(false);
+        setConfirmCode('');
+        setConfirmEmail('');
+      }
+      // Basic cooldown to prevent rapid re-entry taps after success
+      setCooldownUntil(Date.now() + 1500);
+    } catch (e) {
+      console.warn('[AUTH][SUCCESS][WARN] Post-success cleanup failed', e?.message || e);
+    }
+  };
+
   const handleAuth = async () => {
     if (!email || !password || (!isLogin && !username)) {
       Alert.alert('Error', 'Please fill in all fields');
@@ -190,14 +218,7 @@ const AuthScreen = () => {
         cognitoUser.authenticateUser(authDetails, {
           onSuccess: (result) => {
             console.log('✅ Sign in successful for', maskEmail(email));
-              // Immediately lift auth state using the current CognitoUser
-              try { refreshAuthNow?.(cognitoUser); } catch {}
-            console.log(
-              '[AUTH][STATE] isSigningIn=false (success) at',
-              new Date().toISOString()
-            );
-            setIsSigningIn(false);
-            setLoading(false);
+            handleAuthSuccess('password_login', { cognitoUser, tokens: result });
           },
           onFailure: (err) => {
             recordError(err);
@@ -236,13 +257,7 @@ const AuthScreen = () => {
                 cognitoUser2.authenticateUser(authDetails2, {
                   onSuccess: () => {
                     console.log('✅ Sign in successful (lowercase fallback) for', maskEmail(lowered));
-                    try { refreshAuthNow?.(cognitoUser2); } catch {}
-                    console.log(
-                      '[AUTH][STATE] isSigningIn=false (success) at',
-                      new Date().toISOString()
-                    );
-                    setIsSigningIn(false);
-                    setLoading(false);
+                    handleAuthSuccess('password_login_lowercase_fallback', { cognitoUser: cognitoUser2 });
                   },
                   onFailure: (err2) => {
                     recordError(err2);
@@ -360,7 +375,8 @@ const AuthScreen = () => {
     try {
       const result = await signInWithGoogle();
       console.log('[AUTH][SOCIAL] Google sign-in result', result);
-      // TODO: Send result to backend / Cognito federation once implemented
+      // Future: exchange tokens with backend for Cognito federation.
+      handleAuthSuccess('google_oauth', { socialUser: result });
     } catch (err) {
       console.log('[AUTH][SOCIAL] Google sign-in error', { message: err?.message, code: err?.code });
     } finally {
@@ -385,7 +401,8 @@ const AuthScreen = () => {
     try {
       const result = await signInWithFacebook();
       console.log('[AUTH][SOCIAL] Facebook sign-in result', result);
-      // TODO: Send result to backend / Cognito federation once implemented
+      // Future: exchange tokens with backend for Cognito federation.
+      handleAuthSuccess('facebook_oauth', { socialUser: result });
     } catch (err) {
       console.log('[AUTH][SOCIAL] Facebook sign-in error', { message: err?.message, code: err?.code });
     } finally {
