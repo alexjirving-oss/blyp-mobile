@@ -11,7 +11,7 @@ import {
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 import { smartListGenerator } from '../utils/smartListGenerator';
 import { responsiveFont } from '../utils/scaleUtils';
 
@@ -150,7 +150,7 @@ const WhatsAppPopularTab = ({
 
       <View style={styles.postMedia}>
         {post.type === 'video' ? (
-          <Video
+          <UnifiedVideo
             source={{ uri: post.videoUrl }}
             style={styles.postThumbnail}
             resizeMode="cover"
