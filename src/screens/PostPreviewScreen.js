@@ -12,7 +12,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video } from 'expo-av';
+import UnifiedVideo from '../components/UnifiedVideo';
 import BlypLogo from '../components/BlypLogo';
 import { useNavigation, useRoute } from '@react-navigation/native';
 
@@ -58,7 +58,7 @@ const PostPreviewScreen = () => {
     if (post.type === 'video' || media.type === 'video' || media.url?.includes('.mp4')) {
       return (
         <View style={styles.videoContainer}>
-          <Video
+          <UnifiedVideo
             ref={videoRef}
             source={{ uri: media.url }}
             style={styles.video}

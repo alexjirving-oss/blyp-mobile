@@ -13,7 +13,7 @@ import {
   Animated,
   PanGesturer,
 } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from '../components/UnifiedVideo';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
 import { db, firestore, auth, firebaseEnabled } from '../config/firebase';
@@ -206,7 +206,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
       const fixedUrl = fixStorageUrl(post.videoUrl);
       console.log('📹 Rendering video from videoUrl:', fixedUrl);
       return (
-        <Video
+        <UnifiedVideo
           source={{ uri: fixedUrl }}
           style={styles.media}
           useNativeControls={true}
@@ -259,7 +259,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
         const fixedUrl = fixStorageUrl(firstVideo.url || firstVideo.uri);
         console.log('📹 Rendering video from media array:', { original: firstVideo, fixedUrl });
         return (
-          <Video
+          <UnifiedVideo
             source={{ uri: fixedUrl }}
             style={styles.media}
             useNativeControls={true}

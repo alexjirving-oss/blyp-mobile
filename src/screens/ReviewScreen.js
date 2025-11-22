@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { Video } from 'expo-av';
+import UnifiedVideo from '../components/UnifiedVideo';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -2299,7 +2299,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                         style={styles.mediaItemPreview} 
                       />
                     ) : (
-                      <Video
+                      <UnifiedVideo
                         source={{ uri: item.uri }}
                         style={styles.mediaItemPreview}
                         useNativeControls={false}
@@ -2754,7 +2754,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                       resizeMode="contain"
                     />
                   ) : (
-                    <Video
+                    <UnifiedVideo
                       source={{ uri: selectedMedia.uri }}
                       style={styles.modalMediaPreview}
                       useNativeControls
