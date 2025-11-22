@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { View, Image, ActivityIndicator, StyleSheet } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 import * as FileSystem from 'expo-file-system/legacy';
 
 function EnhancedVideo({
@@ -97,7 +97,7 @@ function EnhancedVideo({
         <View style={[StyleSheet.absoluteFill, styles.error]} />
       )}
 
-      <Video
+      <UnifiedVideo
         ref={videoRef}
         source={source}
         style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', opacity: videoLoaded ? 1 : 0 }]}

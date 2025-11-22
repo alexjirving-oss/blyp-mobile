@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { View, Image } from 'react-native';
-import { Video } from 'expo-av';
+import UnifiedVideo from './UnifiedVideo';
 
 const SimpleVideo = ({ 
   source, 
@@ -25,7 +25,7 @@ const SimpleVideo = ({
       )}
       
       {/* Video */}
-      <Video
+      <UnifiedVideo
         ref={videoRef}
         source={source}
         style={style}
