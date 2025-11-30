@@ -21,6 +21,8 @@ import { auth } from '../config/firebase';
 import { useRenderTimer, useTrackAsync } from '../performance/hooks';
 import { StatusBar } from 'expo-status-bar';
 import { createStream, endStream } from '../services/LiveService';
+// Unified live model kill switch
+import { ENABLE_LIVE_FEATURES } from '../config/liveStreamModel';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
 
@@ -215,6 +217,10 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
 
     try {
+      if (!ENABLE_LIVE_FEATURES) {
+        console.warn('[LIVE] Start blocked by kill switch');
+        return;
+      }
       console.log('🚀 Starting HLS live stream with camera:', cameraRef.current);
       
       // 🔥 Use HLSLiveStreamService to create stream in liveStreams collection
@@ -230,7 +236,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       // Also update user status using LiveService for live list
       const { ensureUserProfile } = require('../services/LiveService');
       await ensureUserProfile();
-      await createStream({
+      await createStream({ // TODO(stage2-live-unification): Remove dual create (presence + liveStreams) after consolidation.
         streamId: newStreamId,
         title: title,
         thumbnailUrl: null
@@ -321,12 +327,16 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       // 🔥 End stream in HLSLiveStreamService
       if (streamId) {
+        if (!ENABLE_LIVE_FEATURES) {
+          console.warn('[LIVE] End blocked by kill switch');
+        } else {
         await HLSLiveStreamService.endStream(streamId);
         console.log('✅ HLS Stream ended:', streamId);
         
         // Also end in LiveService to update user status
         await endStream(streamId);
         console.log('✅ User status set to "offline"');
+        }
       }
       
       setIsStreaming(false);
@@ -432,6 +442,14 @@ export default function LiveStreamScreen({ navigation, route }) {
   }
 
   // Viewer mode: Show actual live stream playback
+  if (!ENABLE_LIVE_FEATURES) {
+    return (
+      <View style={styles.container}>
+        <Text style={{ color: 'white' }}>Live streaming is currently disabled.</Text>
+      </View>
+    );
+  }
+
   if (isViewer) {
     return (
       <View style={styles.container}>
@@ -613,6 +631,9 @@ export default function LiveStreamScreen({ navigation, route }) {
     </KeyboardAvoidingView>
   );
 }
+
+// TODO(stage2-live-unification): Consolidate presence/live stream docs; remove direct LiveService dual-write.
+// TODO(stage2-live-unification): Migrate viewCount to unified field if discrepancy found.
 
 const styles = StyleSheet.create({
   container: {

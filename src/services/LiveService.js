@@ -1,4 +1,14 @@
 import { db, auth } from '../config/firebase';
+// Unified live model constants & flags
+import {
+  LIVE_STREAMS_COLLECTION,
+  PRESENCE_STREAMS_COLLECTION,
+  ENABLE_LIVE_FEATURES,
+  ENABLE_LIVE_SEGMENTS_SUBCOLLECTION,
+  ENABLE_LEGACY_SEGMENTS_MAP,
+  ENABLE_PLAYLIST_MANIFEST_VIEWER,
+  decideSegmentSource,
+} from '../config/liveStreamModel';
 import { serverTimestamp } from 'firebase/firestore';
 
 // ---------- USERS ----------
@@ -32,10 +42,15 @@ export async function ensureUserProfile() {
 
 // ---------- STREAMS ----------
 export async function createStream({ streamId, title, thumbnailUrl }) {
+  if (!ENABLE_LIVE_FEATURES) {
+    console.warn('[LIVE] createStream disabled by kill switch');
+    return;
+  }
   const uid = auth.currentUser.uid;
 
   // Create/merge stream doc with merge:true to avoid overwriting
-  await db.collection("streams").doc(streamId).set({
+  // Use presence/chat collection (legacy) constant; stream viewer data lives separately in liveStreams
+  await db.collection(PRESENCE_STREAMS_COLLECTION).doc(streamId).set({ // TODO(stage2-live-unification): Merge presence/chat into unified liveStreams document or dedicated presence subcollection.
     hostUid: uid,
     title,
     status: "live",
@@ -55,9 +70,13 @@ export async function endStream(streamId) {
     console.warn('Cannot end stream: No authenticated user');
     return;
   }
+  if (!ENABLE_LIVE_FEATURES) {
+    console.warn('[LIVE] endStream disabled by kill switch');
+    return;
+  }
 
   // Mark stream ended
-  await db.collection("streams").doc(streamId).update({
+  await db.collection(PRESENCE_STREAMS_COLLECTION).doc(streamId).update({ // TODO(stage2-live-unification): Presence end logic to merge with unified endLiveStream helper.
     status: "ended",
     endedAt: serverTimestamp(),
   });
@@ -68,7 +87,7 @@ export async function endStream(streamId) {
 
 // ---------- VIEWERS ----------
 export async function incrementViewer(streamId, delta) {
-  const ref = db.collection("streams").doc(streamId);
+  const ref = db.collection(PRESENCE_STREAMS_COLLECTION).doc(streamId);
   // Note: runTransaction not available in compatibility wrapper
   // Using a simple update instead
   const snap = await ref.get();
@@ -79,9 +98,13 @@ export async function incrementViewer(streamId, delta) {
 
 // ---------- MESSAGES ----------
 export async function sendMessage(streamId, { uid, displayName, text }) {
+  if (!ENABLE_LIVE_FEATURES) {
+    console.warn('[LIVE] sendMessage disabled by kill switch');
+    return;
+  }
   if (!text || !text.trim()) throw new Error("Message text required");
   if (text.length > 500) throw new Error("Message too long");
-  const col = db.collection("streams").doc(streamId).collection("messages");
+  const col = db.collection(PRESENCE_STREAMS_COLLECTION).doc(streamId).collection("messages");
   await col.add({
     uid,
     displayName,
@@ -113,7 +136,7 @@ export function subscribeToLiveUsers(callback) {
 }
 
 export function subscribeToStreamMessages(streamId, callback) {
-  const col = db.collection("streams").doc(streamId).collection("messages");
+  const col = db.collection(PRESENCE_STREAMS_COLLECTION).doc(streamId).collection("messages");
   return col.onSnapshot((snap) => {
     callback(snap.docs.map(dSnap => ({ id: dSnap.id, ...dSnap.data() })));
   }, (error) => {
@@ -121,3 +144,6 @@ export function subscribeToStreamMessages(streamId, callback) {
     callback([]);
   });
 }
+
+// TODO(stage2-live-unification): Presence/chat split vs liveStreams consolidation to be revisited.
+// TODO(stage2-live-unification): Decide segment source here if segment presence logic is added later.

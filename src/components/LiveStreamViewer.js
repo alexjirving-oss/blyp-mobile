@@ -22,6 +22,16 @@ import { decideNextQuality, createSlidingWindowCounter, emitQualitySwitchEvent }
 import SegmentBandwidthEstimatorService from '../services/SegmentBandwidthEstimatorService';
 import NetInfo from '@react-native-community/netinfo';
 import { isManifestEnabled, isPlaylistViewerEnabled, getFeatureFlags } from '../config/FeatureFlags';
+// Unified live model (Stage 2.1B incremental adaptation)
+import {
+  decideSegmentSource,
+  LIVE_STREAMS_COLLECTION,
+  SEGMENTS_SUBCOLLECTION,
+  ENABLE_LIVE_FEATURES,
+  ENABLE_LIVE_SEGMENTS_SUBCOLLECTION,
+  ENABLE_LEGACY_SEGMENTS_MAP,
+  ENABLE_PLAYLIST_MANIFEST_VIEWER,
+} from '../config/liveStreamModel';
 
 const LiveStreamViewer = ({ streamId, onError, style }) => {
   const videoRef = useRef(null);
@@ -51,6 +61,20 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const stallCounterRef = useRef(createSlidingWindowCounter(15000)); // 15s window
   const lastEstimatorEmitRef = useRef(0); // throttle ABR estimator analytics
 
+  // Kill switch: graceful early fallback (no subscriptions, timers)
+  if (!ENABLE_LIVE_FEATURES) {
+    return (
+      <View style={[styles.container, style, { justifyContent: 'center', alignItems: 'center' }]}> 
+        <Text style={{ color: 'white', fontSize: 16 }}>Live streaming is currently disabled.</Text>
+      </View>
+    );
+  }
+
+  // Segment source adapter (subcollection | legacyMap | playlist)
+  const segmentSource = decideSegmentSource();
+  // TODO(stage2-live-unification): Remove legacyMap fallback once all streams migrated.
+  // TODO(stage2-live-unification): Consolidate playlist ABR path with canonical segment window adapter.
+
   // TikTok-style segment subscription with intelligent buffering
   useEffect(() => {
     if (!streamId) return;
@@ -72,24 +96,39 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       
       // TikTok-style intelligent segment management
       if (data.currentSegment >= 0) {
-          const latestSegment = data.currentSegment;
-          // Prefer adapter window (subcollection) fallback to legacy map
-          const windowSegments = await StreamSegmentsAdapter.getWindow(streamId, 5);
-          const newBuffer = new Map();
-        windowSegments.forEach(s => newBuffer.set(s.number, { ...s, timestamp: Date.now() }));
-        setSegmentBuffer(newBuffer);
-        if (currentSegment === -1 && latestSegment >= 0) {
-          // Initial playback start should not reference a quality adaptation decision yet.
-          // Cooldown logic applies only to subsequent quality switches handled in adaptation loop.
-          setCurrentSegment(Math.max(0, latestSegment - 1));
-          startPlayback();
+        const latestSegment = data.currentSegment;
+        let windowSegments = [];
+        if (segmentSource === 'subcollection') {
+          // Subcollection window retrieval (adapter already handles size + recent ordering)
+          windowSegments = await StreamSegmentsAdapter.getWindow(streamId, 5);
+        } else if (segmentSource === 'legacyMap') {
+          // Legacy inline map fallback
+          // TODO(stage2-live-unification): Remove legacy map buffering logic.
+          const segs = [];
+          for (let i = Math.max(0, latestSegment - 4); i <= latestSegment; i++) {
+            const legacySeg = data.segments?.[i];
+            if (legacySeg && legacySeg.url) segs.push({ number: i, url: legacySeg.url });
+          }
+          windowSegments = segs;
+        } else if (segmentSource === 'playlist') {
+          // Playlist mode uses parsed segments below; treat here as empty initial buffer
+          windowSegments = [];
         }
-        // Manifest feature flag instrumentation (transitional)
-        if (isManifestEnabled()) {
+        if (segmentSource !== 'playlist') {
+          const newBuffer = new Map();
+          windowSegments.forEach(s => newBuffer.set(s.number, { ...s, timestamp: Date.now() }));
+          setSegmentBuffer(newBuffer);
+          if (currentSegment === -1 && latestSegment >= 0 && newBuffer.size) {
+            setCurrentSegment(Math.max(0, latestSegment - 1));
+            startPlayback();
+          }
+        }
+        // Manifest / playlist handling (transitional ABR path)
+        if (segmentSource === 'playlist' && isManifestEnabled()) {
           try {
             let manifest = await ManifestService.generateLocalManifest(streamId);
             // Attempt remote master playlist fetch if playlist viewer mode enabled
-            if (isPlaylistViewerEnabled()) {
+            if (ENABLE_PLAYLIST_MANIFEST_VIEWER && isPlaylistViewerEnabled()) {
               const remoteMaster = await PlaylistFetchService.getMaster(streamId);
               if (remoteMaster) {
                 EnterpriseAnalyticsService.addEvent({ type: 'playlist_master_fetched', streamId, timestamp: Date.now() });
@@ -130,7 +169,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
               timestamp: Date.now()
             });
             // Optional playlist viewer mode: parse quality playlist (simulate single quality)
-            if (isPlaylistViewerEnabled() && manifest) {
+            if (ENABLE_PLAYLIST_MANIFEST_VIEWER && isPlaylistViewerEnabled() && manifest) {
               // For transitional mode, treat entire manifest as single quality playlist
               const parsedSegments = PlaylistParserService.parseQuality(manifest);
               if (parsedSegments.length) {
