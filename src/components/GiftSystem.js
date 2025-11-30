@@ -15,6 +15,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { auth } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
+import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
+import { ENABLE_PURCHASES } from '../config/economyModel';
 
 const { width } = Dimensions.get('window');
 
@@ -73,6 +75,10 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
   }, [currentUser]);
 
   const handleSendGift = async (gift) => {
+    if (!ENABLE_PURCHASES) {
+      Alert.alert('Gifting Disabled', 'Gifting is currently unavailable.');
+      return;
+    }
     if (!currentUser) {
       Alert.alert('Login Required', 'Please login to send gifts');
       return;
@@ -118,6 +124,26 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
     
     try {
       await BlypCoinService.sendGift(currentUser.uid, creatorId, gift.id, gift.cost);
+      // Analytics instrumentation
+      EnterpriseAnalyticsService.addEvent({
+        type: 'economy_gift_send',
+        timestamp: Date.now(),
+        userId: currentUser.uid,
+        gift: {
+          giftType: gift.id,
+          cost: gift.cost,
+          rarity: gift.rarity
+        },
+        recipient: {
+          toUserId: creatorId,
+          name: typeof creatorName === 'string' ? creatorName : undefined
+        },
+        context: {
+          postId,
+          source: 'gift_modal'
+        }
+      });
+      // TODO(stage2-economy-safety): Add fraud heuristics (velocity, duplicate rapid sends) before processing sendGift.
       
       // Trigger gift animation
       triggerGiftAnimation(gift);
@@ -136,6 +162,15 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
       
     } catch (error) {
       console.error('Error sending gift:', error);
+      EnterpriseAnalyticsService.addEvent({
+        type: 'economy_gift_error',
+        timestamp: Date.now(),
+        userId: currentUser?.uid,
+        error: { message: error?.message },
+        gift: { giftType: gift.id, cost: gift.cost },
+        recipient: { toUserId: creatorId },
+        context: { postId }
+      });
       Alert.alert('Error', 'Failed to send gift. Please try again.');
       setSelectedGift(null);
     } finally {

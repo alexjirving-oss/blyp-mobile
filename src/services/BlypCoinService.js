@@ -1,10 +1,10 @@
-import { 
-  doc, 
+import {
+  doc,
   getDoc,
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  increment, 
+  getDocs,
+  setDoc,
+  updateDoc,
+  increment,
   serverTimestamp,
   collection,
   addDoc,
@@ -16,12 +16,57 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { firestore as db } from '../config/firebase';
+// Centralized economy model & flags
+import {
+  WALLETS_COLLECTION,
+  TRANSACTIONS_COLLECTION,
+  GIFTS_COLLECTION,
+  ENABLE_PURCHASES,
+  ALLOW_SIMULATED_CLIENT_TOPUPS,
+  REQUIRE_SERVER_RECEIPT_VALIDATION,
+  isUnsafeSimulationMode,
+  shouldUseServerValidation
+} from '../config/economyModel';
+import { verifyPlayStorePurchase } from './BillingVerificationService';
+import { appendLedgerEntryViaTransaction } from './LedgerService';
+import analytics from './EnterpriseAnalyticsService';
+
+// Stage 3.1 verification bridge (still gated by flags)
+// TODO(stage3-economy-hardening): Wire real productId & purchaseToken from platform billing integration.
+async function verifyPurchaseWithServer(purchasePayload) {
+  // Simulation mode: always succeed explicitly
+  if (isUnsafeSimulationMode()) {
+    return { ok: true, reason: 'simulation-mode' };
+  }
+  // Server validation not required yet → behave as previous (no-op success)
+  if (!shouldUseServerValidation()) {
+    return { ok: true, reason: 'not-implemented' };
+  }
+  // Attempt server verification (Play Store path placeholder)
+  const { userId, amount, metadata } = purchasePayload || {};
+  const productId = metadata?.packageId || metadata?.productId; // heuristic until real mapping
+  const purchaseToken = metadata?.purchaseToken; // likely undefined until integrated
+  const result = await verifyPlayStorePurchase({ productId, purchaseToken, userId });
+  if (!result.ok) {
+    analytics?.addEvent?.({
+      type: 'economy_purchase_verification_failed',
+      userId,
+      asset: 'coin',
+      productId,
+      amount,
+      reason: result.reason,
+      provider: result.provider,
+      timestamp: Date.now()
+    });
+  }
+  return { ok: result.ok, reason: result.reason };
+}
 
 class BlypCoinService {
   // Get user's current Blypcoin balance
   static async getUserBalance(userId) {
     try {
-      const userWalletRef = doc(db, 'wallets', userId);
+      const userWalletRef = doc(db, WALLETS_COLLECTION, userId);
       const walletDoc = await getDoc(userWalletRef);
       
       if (walletDoc.exists()) {
@@ -45,7 +90,7 @@ class BlypCoinService {
 
   // Subscribe to real-time balance updates
   static subscribeToBalance(userId, callback) {
-    const userWalletRef = doc(db, 'wallets', userId);
+    const userWalletRef = doc(db, WALLETS_COLLECTION, userId);
     
     return onSnapshot(userWalletRef, (doc) => {
       if (doc.exists()) {
@@ -61,9 +106,25 @@ class BlypCoinService {
 
   // Add Blypcoins to user account (earning/purchasing)
   static async addCoins(userId, amount, reason = 'purchase', metadata = {}) {
+    // Guard purchases globally
+    if (reason === 'purchase' && !ENABLE_PURCHASES) {
+      console.warn('[ECONOMY] Purchases disabled via ENABLE_PURCHASES flag');
+      return null; // safe no-op
+    }
+    if (reason === 'purchase' && !ALLOW_SIMULATED_CLIENT_TOPUPS && !REQUIRE_SERVER_RECEIPT_VALIDATION) {
+      console.warn('[ECONOMY] Simulated topups disabled without server validation');
+      return null; // safe no-op
+    }
+    if (reason === 'purchase') {
+      const verify = await verifyPurchaseWithServer({ userId, amount, metadata });
+      if (!verify.ok) {
+        console.warn('[ECONOMY] Purchase verification failed');
+        return null;
+      }
+    }
     try {
       const result = await runTransaction(db, async (transaction) => {
-        const userWalletRef = doc(db, 'wallets', userId);
+        const userWalletRef = doc(db, WALLETS_COLLECTION, userId);
         const walletDoc = await transaction.get(userWalletRef);
         
         let currentBalance = 0;
@@ -87,16 +148,17 @@ class BlypCoinService {
           createdAt: walletDoc.exists() ? walletDoc.data().createdAt : serverTimestamp()
         });
         
-        // Record transaction
-        const transactionRef = doc(collection(db, 'transactions'));
-        transaction.set(transactionRef, {
+        // Record transaction (ledger routed)
+        appendLedgerEntryViaTransaction(transaction, {
           userId,
-          type: 'credit',
+          ledgerType: reason === 'purchase' ? 'coin_purchase' : (reason === 'daily_reward' ? 'daily_reward' : 'adjustment'),
           amount,
-          reason,
+          currency: 'COIN',
+          txType: 'credit',
           balance: newBalance,
-          timestamp: serverTimestamp(),
-          metadata
+          reason,
+          metadata,
+          source: reason === 'purchase' ? 'store' : 'admin'
         });
         
         return newBalance;
@@ -114,7 +176,7 @@ class BlypCoinService {
   static async spendCoins(userId, amount, reason = 'purchase', metadata = {}) {
     try {
       const result = await runTransaction(db, async (transaction) => {
-        const userWalletRef = doc(db, 'wallets', userId);
+        const userWalletRef = doc(db, WALLETS_COLLECTION, userId);
         const walletDoc = await transaction.get(userWalletRef);
         
         if (!walletDoc.exists()) {
@@ -138,16 +200,17 @@ class BlypCoinService {
           lastUpdated: serverTimestamp()
         });
         
-        // Record transaction
-        const transactionRef = doc(collection(db, 'transactions'));
-        transaction.set(transactionRef, {
+        // Record transaction (ledger routed)
+        appendLedgerEntryViaTransaction(transaction, {
           userId,
-          type: 'debit',
+          ledgerType: reason === 'gift_send' ? 'gift_send' : 'adjustment',
           amount,
-          reason,
+          currency: 'COIN',
+          txType: 'debit',
           balance: newBalance,
-          timestamp: serverTimestamp(),
-          metadata
+          reason,
+          metadata,
+          source: 'store'
         });
         
         return newBalance;
@@ -166,8 +229,8 @@ class BlypCoinService {
     try {
       const result = await runTransaction(db, async (transaction) => {
         // ALL READS FIRST - Firestore transaction requirement
-        const senderWalletRef = doc(db, 'wallets', fromUserId);
-        const receiverWalletRef = doc(db, 'wallets', toUserId);
+        const senderWalletRef = doc(db, WALLETS_COLLECTION, fromUserId);
+        const receiverWalletRef = doc(db, WALLETS_COLLECTION, toUserId);
         
         // Read both wallets first
         const senderWallet = await transaction.get(senderWalletRef);
@@ -208,7 +271,7 @@ class BlypCoinService {
         }
         
         // Record gift transaction
-        const giftRef = doc(collection(db, 'gifts'));
+        const giftRef = doc(collection(db, GIFTS_COLLECTION));
         transaction.set(giftRef, {
           fromUserId,
           toUserId,
@@ -219,27 +282,30 @@ class BlypCoinService {
           status: 'completed'
         });
         
-        // Record transactions
-        const senderTransactionRef = doc(collection(db, 'transactions'));
-        transaction.set(senderTransactionRef, {
+        // Record transactions (ledger routed)
+        appendLedgerEntryViaTransaction(transaction, {
           userId: fromUserId,
-          type: 'debit',
+          ledgerType: 'gift_send',
           amount: cost,
-          reason: 'gift_sent',
+          currency: 'COIN',
+          txType: 'debit',
           balance: senderBalance,
-          timestamp: serverTimestamp(),
-          metadata: { giftType, recipient: toUserId }
+          reason: 'gift_sent',
+          relatedUserId: toUserId,
+          metadata: { giftType, recipient: toUserId },
+          source: 'live'
         });
-        
-        const receiverTransactionRef = doc(collection(db, 'transactions'));
-        transaction.set(receiverTransactionRef, {
+        appendLedgerEntryViaTransaction(transaction, {
           userId: toUserId,
-          type: 'credit',
+          ledgerType: 'gift_receive',
           amount: receiverAmount,
-          reason: 'gift_received',
+          currency: 'COIN',
+          txType: 'credit',
           balance: (receiverWallet.exists() ? receiverWallet.data().balance : 0) + receiverAmount,
-          timestamp: serverTimestamp(),
-          metadata: { giftType, sender: fromUserId }
+          reason: 'gift_received',
+          relatedUserId: fromUserId,
+          metadata: { giftType, sender: fromUserId },
+          source: 'live'
         });
         
         return { senderBalance, receiverAmount };
@@ -257,7 +323,7 @@ class BlypCoinService {
   static async getTransactionHistory(userId, limitCount = 50) {
     try {
       const q = query(
-        collection(db, 'transactions'),
+        collection(db, TRANSACTIONS_COLLECTION),
         where('userId', '==', userId),
         orderBy('timestamp', 'desc'),
         limit(limitCount)
@@ -284,7 +350,7 @@ class BlypCoinService {
   // Daily check-in reward
   static async claimDailyReward(userId) {
     try {
-      const userRef = doc(db, 'users', userId);
+      const userRef = doc(db, 'users', userId); // User collection remains separate.
       const userDoc = await getDoc(userRef);
       
       if (!userDoc.exists()) {
@@ -324,7 +390,7 @@ class BlypCoinService {
       });
       
       // Add coins
-      await this.addCoins(userId, totalReward, 'daily_reward', { streak, baseReward, streakBonus });
+      await this.addCoins(userId, totalReward, 'daily_reward', { streak, baseReward, streakBonus }); // TODO(stage2-economy-safety): Consider moving daily rewards to server-side authority.
       
       return { reward: totalReward, streak };
     } catch (error) {
@@ -393,5 +459,9 @@ class BlypCoinService {
     ];
   }
 }
+
+// TODO(stage2-economy-safety): Enforce server-side validation for all purchase reasons.
+// TODO(stage2-economy-safety): Introduce withdrawal flow guarded by ENABLE_WITHDRAWALS.
+// TODO(stage2-economy-safety): Add velocity / anti-fraud checks for sendGift operations.
 
 export default BlypCoinService;
