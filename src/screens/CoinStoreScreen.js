@@ -15,6 +15,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { auth } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
+import {
+  ENABLE_PURCHASES,
+  ALLOW_SIMULATED_CLIENT_TOPUPS,
+  REQUIRE_SERVER_RECEIPT_VALIDATION,
+  isUnsafeSimulationMode,
+  shouldUseServerValidation
+} from '../config/economyModel';
 
 const { width } = Dimensions.get('window');
 
@@ -106,6 +113,10 @@ const CoinStoreScreen = ({ navigation }) => {
   };
 
   const handlePurchase = async (packageData) => {
+    if (!ENABLE_PURCHASES) {
+      Alert.alert('Purchases Disabled', 'Purchases are currently unavailable.');
+      return;
+    }
     if (!currentUser) {
       Alert.alert('Error', 'Please log in to purchase Blypcoins');
       return;
@@ -128,7 +139,12 @@ const CoinStoreScreen = ({ navigation }) => {
     setLoading(true);
     try {
       // In a real app, integrate with payment processor (Stripe, Apple Pay, etc.)
-      // For demo, we'll simulate the purchase
+      // For demo, we simulate the purchase (unsafe path allowed only in simulation mode)
+      // TODO(stage2-economy-safety): Replace with platform billing + server validation.
+      if (!ALLOW_SIMULATED_CLIENT_TOPUPS && !REQUIRE_SERVER_RECEIPT_VALIDATION) {
+        console.warn('[ECONOMY] Simulated top-up path blocked by flags');
+        return;
+      }
       
       const totalCoins = packageData.coins + packageData.bonus;
       
@@ -159,6 +175,10 @@ const CoinStoreScreen = ({ navigation }) => {
   };
 
   const handleGemPurchase = async (packageData) => {
+    if (!ENABLE_PURCHASES) {
+      Alert.alert('Purchases Disabled', 'Purchases are currently unavailable.');
+      return;
+    }
     if (!currentUser) {
       Alert.alert('Error', 'Please log in to purchase Gems');
       return;
@@ -181,6 +201,11 @@ const CoinStoreScreen = ({ navigation }) => {
     setLoading(true);
     try {
       const totalGems = packageData.gems + packageData.bonus;
+      // TODO(stage2-economy-safety): Replace with gem billing + server validation.
+      if (!ALLOW_SIMULATED_CLIENT_TOPUPS && !REQUIRE_SERVER_RECEIPT_VALIDATION) {
+        console.warn('[ECONOMY] Simulated gem top-up path blocked by flags');
+        return;
+      }
       
       await GemService.addGems(
         currentUser.uid,
@@ -296,6 +321,27 @@ const CoinStoreScreen = ({ navigation }) => {
     );
   };
 
+  // If purchases globally disabled show info message only
+  if (!ENABLE_PURCHASES) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon  name="arrow-back" size={24} color="#fff"  />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Currency Store</Text>
+        </View>
+        <View style={{ padding:20 }}>
+          <Text style={{ color:'#fff', fontSize:16 }}>Purchases are currently unavailable. Please try again later.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
@@ -359,6 +405,13 @@ const CoinStoreScreen = ({ navigation }) => {
                 : 'Premium currency for exclusive features, rare gifts, and special perks!'
               }
             </Text>
+            {isUnsafeSimulationMode() && (
+              <Text style={[styles.infoText, { marginTop:12, color:'#ffdd55' }]}>Dev Simulation Mode – purchases not server-validated.</Text>
+            )}
+            {shouldUseServerValidation() && !process.env.EXPO_PUBLIC_BILLING_VERIFY_URL && (
+              <Text style={[styles.infoText, { marginTop:12, color:'#f87171' }]}>Billing verification backend missing – purchases will fail verification when flag flipped.</Text>
+            )}
+            {/* TODO(stage3-economy-hardening): Show clearer UI messaging when billing verification required but backend URL misconfigured. */}
           </LinearGradient>
         </View>
 
