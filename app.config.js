@@ -17,6 +17,8 @@ module.exports = () => {
     eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
     // Key value is injected at build/runtime from env; blank string in code ensures no committed secret.
     EXPO_PUBLIC_GEMINI_API_KEY: resolvedGeminiKey,
+    EXPO_PUBLIC_ENABLE_STREAMING: process.env.EXPO_PUBLIC_ENABLE_STREAMING === '1' ? '1' : '0',
+    EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
     },

@@ -21,10 +21,9 @@ import { auth } from '../config/firebase';
 import { useRenderTimer, useTrackAsync } from '../performance/hooks';
 import { useAuth } from '../hooks/useCommon';
 import { StatusBar } from 'expo-status-bar';
-import { createStream, endStream } from '../services/LiveService';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import LiveStreamViewer from '../components/LiveStreamViewer';
-import HLSLiveStreamService from '../services/HLSLiveStreamService';
+import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 
 const { width, height } = Dimensions.get('window');
 
@@ -274,22 +273,22 @@ export default function LiveStreamScreen({ navigation, route }) {
         setIsStreaming(false);
         return;
       }
-      console.log('🚀 Starting HLS live stream with camera:', cameraRef.current);
+      console.log('🚀 Starting live stream with camera:', cameraRef.current);
       
-      // 🔥 Use HLSLiveStreamService to create stream in liveStreams collection
-      const result = await HLSLiveStreamService.createStream({
-        title: title,
-        description: '',
-        thumbnailFile: null,
+      // Use streaming backend (HLS or Agora) via factory
+      const backend = getStreamingBackend();
+      const result = await backend.createStream({
         userId: firebaseUid,
-        userDisplayName: auth?.currentUser?.displayName || undefined,
-        userPhotoURL: auth?.currentUser?.photoURL || undefined,
+        title: title,
+        displayName: auth?.currentUser?.displayName || null,
+        photoURL: auth?.currentUser?.photoURL || null,
+        email: auth?.currentUser?.email || null,
       });
       
-      // Handle structured error (e.g., NOT_LOGGED_IN)
-      if (result && result.ok === false) {
+      // Handle structured error
+      if (!result.ok) {
         console.error('❌ Stream creation failed:', result.reason || result.error);
-        if (result.reason === 'HLS_BACKEND_NOT_CONFIGURED') {
+        if (result.reason === 'BACKEND_NOT_CONFIGURED') {
           Alert.alert('Live streaming not available', 'Our live streaming backend is not fully configured yet. Please try again later.');
         } else if (result.reason === 'NOT_LOGGED_IN') {
           Alert.alert('Login required to go live.', 'Please log in and try again.');
@@ -300,35 +299,11 @@ export default function LiveStreamScreen({ navigation, route }) {
         return;
       }
       
-      const { streamId: newStreamId, streamData } = result;
+      const newStreamId = result.data.streamId;
       
       setStreamId(newStreamId);
-      console.log('✅ HLS Stream created:', newStreamId);
-      
-      // Also update user status using LiveService for live list
-      const { ensureUserProfile } = require('../services/LiveService');
-      await ensureUserProfile({
-        userId: firebaseUid,
-        displayName: auth?.currentUser?.displayName || undefined,
-        photoURL: auth?.currentUser?.photoURL || undefined,
-        email: auth?.currentUser?.email || undefined,
-      });
-      const liveServiceResult = await createStream({
-        streamId: newStreamId,
-        title: title,
-        thumbnailUrl: null,
-        userId: firebaseUid,
-      });
-      
-      // Handle error from LiveService
-      if (liveServiceResult && liveServiceResult.ok === false) {
-        console.error('❌ LiveService createStream failed:', liveServiceResult.reason);
-        Alert.alert('Streaming Error', liveServiceResult.error || 'Could not mark user as live.');
-        setIsStreaming(false);
-        return;
-      }
-      
-      console.log('✅ User marked as live in users collection');
+      console.log('✅ Stream created:', newStreamId);
+      console.log('✅ User marked as live in users collection (via backend)');
       
       setIsStreaming(true);
       setStreamStartTime(Date.now());
@@ -384,9 +359,20 @@ export default function LiveStreamScreen({ navigation, route }) {
         setIsRecording(false);
         console.log(`✅ Segment ${segmentNumber} recorded:`, video.uri);
         
-        // Upload segment to Firebase Storage
-        await HLSLiveStreamService.uploadSegment(currentStreamId, video.uri, segmentNumber, firebaseUid);
-        console.log(`✅ Segment ${segmentNumber} uploaded`);
+        // Upload segment via streaming backend
+        const backend = getStreamingBackend();
+        const uploadResult = await backend.uploadSegment({
+          streamId: currentStreamId,
+          userId: firebaseUid,
+          fileUri: video.uri,
+          segmentNumber,
+        });
+        
+        if (!uploadResult.ok) {
+          console.error(`❌ Segment ${segmentNumber} upload failed:`, uploadResult.error);
+        } else {
+          console.log(`✅ Segment ${segmentNumber} uploaded`);
+        }
         
         setSegmentNumber(prev => prev + 1);
         
@@ -417,15 +403,18 @@ export default function LiveStreamScreen({ navigation, route }) {
         await cameraRef.current.stopRecording();
       }
       
-      // 🔥 End stream in HLSLiveStreamService
+      // End stream via streaming backend
       if (streamId) {
         const firebaseUid = auth?.currentUser?.uid || null;
-        await HLSLiveStreamService.endStream(streamId, firebaseUid);
-        console.log('✅ HLS Stream ended:', streamId);
+        const backend = getStreamingBackend();
+        const endResult = await backend.endStream({ streamId, userId: firebaseUid });
         
-        // Also end in LiveService to update user status
-        await endStream(streamId, firebaseUid);
-        console.log('✅ User status set to "offline"');
+        if (!endResult.ok) {
+          console.warn('⚠️ Stream end failed:', endResult.error);
+        } else {
+          console.log('✅ Stream ended:', streamId);
+          console.log('✅ User status set to "offline" (via backend)');
+        }
       }
       
       setIsStreaming(false);
@@ -532,6 +521,27 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   // Viewer mode: Show actual live stream playback
   if (isViewer) {
+    // Feature flag guard for viewer mode
+    if (!isLiveStreamingEnabled()) {
+      return (
+        <View style={styles.container}>
+          <StatusBar style="light" />
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorTitle}>Live streaming not available</Text>
+            <Text style={styles.errorMessage}>
+              Live streaming is currently disabled for this build.
+            </Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Text style={styles.retryText}>Go Back</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -561,9 +571,21 @@ export default function LiveStreamScreen({ navigation, route }) {
           style={styles.viewerVideo}
           onError={(error) => {
             console.error('❌ Viewer playback error:', error);
+            const errorMsg = error?.message || 'Unable to load stream';
+            let userMsg = 'This stream is not available right now.';
+            
+            // Map structured errors to user messages
+            if (errorMsg.includes('ended') || errorMsg.includes('Stream has ended')) {
+              userMsg = 'This stream has ended.';
+            } else if (errorMsg.includes('not found') || errorMsg.includes('does not exist')) {
+              userMsg = 'This stream does not exist.';
+            } else if (errorMsg.includes('connection') || errorMsg.includes('network')) {
+              userMsg = 'Connection error. Please check your internet and try again.';
+            }
+            
             Alert.alert(
-              'Playback Error',
-              'Unable to load stream. The broadcaster may have ended the stream.',
+              'Stream Unavailable',
+              userMsg,
               [{ text: 'OK', onPress: () => navigation.goBack() }]
             );
           }}
@@ -662,6 +684,9 @@ export default function LiveStreamScreen({ navigation, route }) {
                 </View>
               )}
               <Text style={styles.segmentCount}>Seg: {segmentNumber}</Text>
+              {streamId && (
+                <Text style={styles.streamIdDebug}>ID: {streamId}</Text>
+              )}
             </View>
             
             <TouchableOpacity style={styles.closeButton} onPress={stopStreaming}>
@@ -834,6 +859,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
+  },
+  streamIdDebug: {
+    color: '#ffeb3b',
+    marginLeft: 10,
+    fontSize: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    fontFamily: 'monospace',
   },
   closeButton: {
     position: 'absolute',

@@ -11,7 +11,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
-import HLSLiveStreamService from '../services/HLSLiveStreamService';
+import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import StreamSegmentsAdapter from '../services/StreamSegmentsAdapter';
 import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
 import ManifestService from '../services/ManifestService';
@@ -58,8 +58,11 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   if (__DEV__) console.log(`🎬 TikTok-style viewer initializing for stream ${streamId}`);
     setConnectionStatus('connecting');
     
-    // Subscribe to stream updates with enhanced error handling
-    unsubscribeRef.current = HLSLiveStreamService.subscribeToStream(streamId, async (data) => {
+    // Subscribe to stream updates via streaming backend
+    const backend = getStreamingBackend();
+    unsubscribeRef.current = backend.subscribeToStream(streamId, async (snapshot) => {
+      // Backend returns ViewerStreamSnapshot | null
+      const data = snapshot;
       if (!data) {
         console.log('📡 Stream ended or connection lost');
         setConnectionStatus('ended');
