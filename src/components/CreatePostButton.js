@@ -10,9 +10,10 @@ const CreatePostButton = ({ accessibilityState }) => {
   const navigation = useNavigation();
   const [showMenu, setShowMenu] = useState(false);
   const [showPostOptions, setShowPostOptions] = useState(false);
-  const { user } = useAuth();
+  const { uid, isAuthenticated, authReady } = useAuth();
   const streamingEnabled = isLiveStreamingEnabled();
-  const canGoLive = !!user?.uid && streamingEnabled;
+  const canGoLive = streamingEnabled;
+  const canCreatePost = authReady; // Only show when auth is stable
 
   const handlePress = () => {
     setShowMenu(true);
@@ -22,6 +23,18 @@ const CreatePostButton = ({ accessibilityState }) => {
     setShowMenu(false);
     switch (option) {
       case 'post':
+        // Check auth before showing post options
+        if (!authReady || !isAuthenticated || !uid) {
+          Alert.alert(
+            'Login required',
+            'You need to be logged in to create a post.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Login', onPress: () => navigation.navigate('Auth') }
+            ]
+          );
+          return;
+        }
         // Show the new post options overlay instead of going directly to Review
         setShowPostOptions(true);
         break;
@@ -33,34 +46,45 @@ const CreatePostButton = ({ accessibilityState }) => {
           );
           return;
         }
-        if (!user?.uid) {
-          Alert.alert(
-            'Login required',
-            'You need to be logged in to go live.'
-          );
-          return;
-        }
+        // Auth check is done in LiveStreamScreen itself (defense-in-depth)
         navigation.navigate('LiveStreamScreen', { mode: 'host' });
         break;
     }
   };
 
   const handlePostOption = (option) => {
-    setShowPostOptions(false);
-    switch (option) {
-      case 'takePhoto':
-        navigation.navigate('Camera');
-        break;
-      case 'takeVideo':
-        navigation.navigate('Camera');
-        break;
-      case 'voiceNote':
-        navigation.navigate('VoiceMemo');
-        break;
-      case 'myMedia':
-        navigation.navigate('Review', { mode: 'new' });
-        break;
+    if (!authReady) {
+      Alert.alert("Please wait", "Still loading your account.");
+      return;
     }
+    if (!isAuthenticated) {
+      Alert.alert(
+        "Login Required",
+        "You must be logged in to create a post.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Login",
+            onPress: () => navigation.navigate("Auth"),
+          },
+        ]
+      );
+      return;
+    }
+
+    setShowPostOptions(false);
+
+    if (option === "photo") {
+      navigation.navigate("Review", { mode: "photo" });
+      return;
+    }
+
+    if (option === "video") {
+      navigation.navigate("Review", { mode: "video" });
+      return;
+    }
+
+    console.warn("[POST] Unknown option:", option);
   };
 
   return (
@@ -96,19 +120,21 @@ const CreatePostButton = ({ accessibilityState }) => {
           <View style={styles.menuContainer}>
             <View style={styles.menuHandle} />
             
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => handleMenuOption('post')}
-            >
-              <LinearGradient
-                colors={['#a855f7', '#d946ef', '#ec4899']}
-                style={styles.menuItemGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+            {canCreatePost && (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => handleMenuOption('post')}
               >
-                <Text style={styles.menuItemTextMain}>New Post</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={['#a855f7', '#d946ef', '#ec4899']}
+                  style={styles.menuItemGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={styles.menuItemTextMain}>New Post</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
 
             {canGoLive && (
               <TouchableOpacity
@@ -152,42 +178,22 @@ const CreatePostButton = ({ accessibilityState }) => {
             <View style={styles.postOptionsGrid}>
               <TouchableOpacity
                 style={styles.postOptionButton}
-                onPress={() => handlePostOption('takePhoto')}
+                onPress={() => handlePostOption('photo')}
               >
                 <View style={styles.postOptionIconContainer}>
                   <Icon  name="camera" size={28} color="#a855f7"  />
                 </View>
-                <Text style={styles.postOptionText}>Take Photo</Text>
+                <Text style={styles.postOptionText}>Photo</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.postOptionButton}
-                onPress={() => handlePostOption('takeVideo')}
+                onPress={() => handlePostOption('video')}
               >
                 <View style={styles.postOptionIconContainer}>
                   <Icon  name="videocam" size={28} color="#d946ef"  />
                 </View>
-                <Text style={styles.postOptionText}>Take Video</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.postOptionButton}
-                onPress={() => handlePostOption('voiceNote')}
-              >
-                <View style={styles.postOptionIconContainer}>
-                  <Icon  name="mic" size={28} color="#ec4899"  />
-                </View>
-                <Text style={styles.postOptionText}>Voice Note</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.postOptionButton}
-                onPress={() => handlePostOption('myMedia')}
-              >
-                <View style={styles.postOptionIconContainer}>
-                  <Icon  name="images" size={28} color="#8b5cf6"  />
-                </View>
-                <Text style={styles.postOptionText}>My Media</Text>
+                <Text style={styles.postOptionText}>Video</Text>
               </TouchableOpacity>
             </View>
           </View>

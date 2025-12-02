@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CognitoUserPool } from 'amazon-cognito-identity-js';
 import Logger from '../utils/Logger';
@@ -237,7 +237,7 @@ export const useAuth = () => {
   
   // Enforce invariants: if authenticated, we MUST have a uid
   // Extract uid from Cognito user (username as fallback) or Firebase user
-  const uid = React.useMemo(() => {
+  const uid = useMemo(() => {
     if (!user) return null;
     
     // Firebase user path (when preferFirebase is true)
@@ -272,7 +272,7 @@ export const useAuth = () => {
   const isAuthenticated = authReady && !!user && !!uid;
   
   // Log hard error if we detect broken state
-  React.useEffect(() => {
+  useEffect(() => {
     if (user && !uid && !loading && authReady) {
       console.error('[AUTH][INVARIANT VIOLATION] User object exists but no uid could be extracted. Forcing isAuthenticated=false.', {
         hasUser: !!user,
@@ -285,7 +285,7 @@ export const useAuth = () => {
   }, [user, uid, loading, preferFirebase, authReady]);
   
   // Log race detection when components try to access before ready
-  React.useEffect(() => {
+  useEffect(() => {
     if (!authReady && !loading) {
       console.warn('[AUTH][RACE_DETECTED] Auth accessed before stabilization complete');
     }
