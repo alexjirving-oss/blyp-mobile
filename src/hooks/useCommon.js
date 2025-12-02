@@ -33,10 +33,15 @@ export const clearCognitoSessions = async () => {
 
 // Custom hook for authentication state
 export const useAuth = () => {
-  const [user, setUser] = useState(undefined);
-  const [loading, setLoading] = useState(true);
-  const [authReady, setAuthReady] = useState(false); // NEW: signals auth system is stable
-  const [error, setError] = useState(null);
+  // Internal state: store only raw values, derive isAuthenticated at the end
+  const [state, setState] = useState({
+    user: undefined,
+    uid: null,
+    loading: true,
+    authReady: false, // Starts false, becomes true once, never flips back
+    error: null,
+  });
+  
   // Prefer Firebase auth if explicitly requested via env, else use Cognito as default
   const preferFirebase = (() => {
     try {
@@ -48,18 +53,64 @@ export const useAuth = () => {
     }
   })();
   
+  // Helper: Extract uid from user object (Cognito or Firebase)
+  const extractUid = useCallback((user) => {
+    if (!user) return null;
+    
+    // Firebase user path
+    if (firebaseEnabled && preferFirebase && user.uid) {
+      return user.uid;
+    }
+    
+    // Cognito user path
+    try {
+      if (user.attributes?.sub) return user.attributes.sub;
+      if (user.username) return user.username;
+      if (typeof user.getUsername === 'function') {
+        const username = user.getUsername();
+        if (username) return username;
+      }
+    } catch (err) {
+      console.error('[AUTH] Error extracting uid:', err);
+    }
+    
+    return null;
+  }, [preferFirebase]);
+  
+  // Helper: Set auth state atomically (enforces invariants)
+  const setAuthState = useCallback((updates) => {
+    setState((prev) => {
+      const nextUser = updates.user !== undefined ? updates.user : prev.user;
+      const nextUid = updates.uid !== undefined ? updates.uid : (nextUser ? extractUid(nextUser) : prev.uid);
+      const nextLoading = updates.loading !== undefined ? updates.loading : prev.loading;
+      const nextError = updates.error !== undefined ? updates.error : prev.error;
+      
+      // INVARIANT 1: authReady can only transition false → true, never back
+      const nextAuthReady = updates.authReady === true ? true : prev.authReady;
+      
+      return {
+        user: nextUser,
+        uid: nextUid,
+        loading: nextLoading,
+        authReady: nextAuthReady,
+        error: nextError,
+      };
+    });
+  }, [extractUid]);
+  
   useEffect(() => {
-    // Fast-path: if Firebase is enabled and preferred, mirror the previous working auth behavior
+    // Fast-path: Firebase auth (if enabled and preferred)
     if (firebaseEnabled && preferFirebase && firebaseAuth && typeof firebaseAuth.onAuthStateChanged === 'function') {
       try {
         const unsub = firebaseAuth.onAuthStateChanged((fbUser) => {
-          setUser(fbUser || null);
-          setLoading(false);
-          // Mark auth as ready once we've received first Firebase callback
-          if (!authReady) {
-            setAuthReady(true);
-            console.log('[AUTH][READY] Firebase auth stabilized', { hasUser: !!fbUser });
-          }
+          // Firebase callback: set user + mark ready atomically
+          setAuthState({
+            user: fbUser || null,
+            uid: fbUser?.uid || null,
+            loading: false,
+            authReady: true, // Always mark ready after first Firebase callback
+          });
+          console.log('[AUTH][READY] Firebase auth stabilized', { hasUser: !!fbUser });
         });
         return () => {
           try { unsub && unsub(); } catch {}
@@ -71,142 +122,109 @@ export const useAuth = () => {
     const setFromSession = async () => {
       try {
         const current = userPool.getCurrentUser();
+        
         if (!current) {
-          // If we recently logged in, hold the authenticated state briefly
+          // Optimistic window: if we just logged in, keep that user briefly
           if (optimisticUser && Date.now() < optimisticHoldUntil) {
             try {
               optimisticUser.getSession((err, session) => {
                 if (!err && session?.isValid?.()) {
-                  setUser(optimisticUser);
-                  setLoading(false);
+                  const uid = extractUid(optimisticUser);
+                  setAuthState({ user: optimisticUser, uid, loading: false, authReady: true });
                   return;
                 }
-                // While within the grace window, avoid flipping to null to prevent UI bounce
+                // Session invalid but within grace window: keep lastKnownUser if present
                 if (Date.now() < suppressInvalidationUntil && lastKnownUser) {
-                  setUser((prev) => prev ?? lastKnownUser);
-                  setLoading(false);
+                  const uid = extractUid(lastKnownUser);
+                  setAuthState({ user: lastKnownUser, uid, loading: false, authReady: true });
                   return;
                 }
-                setUser((prev) => (prev === null ? prev : null));
-                setLoading(false);
+                // Outside grace: clear to logged-out state
+                setAuthState({ user: null, uid: null, loading: false, authReady: true });
               });
               return;
             } catch {}
           }
-          // If we have a lastKnownUser with a valid session, use it to avoid flicker
-          if (lastKnownUser) {
-            try {
-              lastKnownUser.getSession((err, session) => {
-                if (!err && session?.isValid?.()) {
-                  setUser(lastKnownUser);
-                  setLoading(false);
-                  return;
-                }
-                // During grace window keep lastKnownUser to avoid bounce
-                if (Date.now() < suppressInvalidationUntil) {
-                  setUser((prev) => prev ?? lastKnownUser);
-                  setLoading(false);
-                  return;
-                }
-                setUser((prev) => (prev === null ? prev : null));
-                setLoading(false);
-              });
-              return;
-            } catch {}
-          }
-          // During the grace window, prefer lastKnownUser even if current not yet loaded
+          
+          // Grace window: use lastKnownUser if still within window
           if (lastKnownUser && Date.now() < suppressInvalidationUntil) {
             try {
               lastKnownUser.getSession((err, session) => {
                 if (!err && session?.isValid?.()) {
-                  setUser(lastKnownUser);
-                  setLoading(false);
+                  const uid = extractUid(lastKnownUser);
+                  setAuthState({ user: lastKnownUser, uid, loading: false, authReady: true });
                   return;
                 }
-                // Keep user sticky during grace even if session check is lagging
-                setUser((prev) => prev ?? lastKnownUser);
-                setLoading(false);
+                // Keep lastKnownUser sticky during grace even if session check lags
+                const uid = extractUid(lastKnownUser);
+                setAuthState({ user: lastKnownUser, uid, loading: false, authReady: true });
               });
               return;
             } catch {}
           }
-          setUser((prev) => (prev === null ? prev : null));
-          setLoading(false);
-          // Mark auth as ready even when no user (stable logged-out state)
-          if (!authReady) {
-            setAuthReady(true);
-            console.log('[AUTH][READY] Cognito auth stabilized (no user)');
-          }
+          
+          // No current user, no optimistic hold: stable logged-out state
+          setAuthState({ user: null, uid: null, loading: false, authReady: true });
+          console.log('[AUTH][READY] Cognito auth stabilized (no user)');
           return;
         }
+        
+        // We have a current user from pool: validate session
         current.getSession(async (err, session) => {
           const invalidate = async () => {
-            // Respect grace window to reduce post-login bounce; keep user sticky
+            // Respect grace window to reduce post-login bounce
             if (Date.now() < suppressInvalidationUntil && lastKnownUser) {
-              setUser((prev) => prev ?? lastKnownUser);
-              setLoading(false);
+              const uid = extractUid(lastKnownUser);
+              setAuthState({ user: lastKnownUser, uid, loading: false, authReady: true });
               return;
             }
-            try {
-              current.signOut?.();
-            } catch {}
+            // Outside grace: invalidate and clear
+            try { current.signOut?.(); } catch {}
             await clearCognitoSessions();
-            setUser((prev) => (prev === null ? prev : null));
-            setLoading(false);
+            setAuthState({ user: null, uid: null, loading: false, authReady: true });
           };
 
           if (err || !session?.isValid?.()) {
             return void invalidate();
           }
-          // Guard against malformed session tokens (prevents jwtToken.split errors)
+          
+          // Guard against malformed tokens (prevents jwtToken.split errors)
           try {
             const idToken = session.getIdToken?.();
             const raw = idToken?.getJwtToken?.();
-            if (!raw || typeof raw !== 'string') {
-              return void invalidate();
-            }
-            // Also ensure looks like a JWT a.b.c
-            if (!/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(raw)) {
-              return void invalidate();
-            }
+            if (!raw || typeof raw !== 'string') return void invalidate();
+            // Ensure JWT shape a.b.c
+            if (!/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(raw)) return void invalidate();
           } catch {
             return void invalidate();
           }
-          setUser((prev) => (prev === current ? prev : current));
-          setLoading(false);
-          // Mark auth as ready once we've validated session
-          if (!authReady) {
-            setAuthReady(true);
-            console.log('[AUTH][READY] Cognito auth stabilized with valid session');
-          }
+          
+          // Valid session: set user + mark ready
+          const uid = extractUid(current);
+          setAuthState({ user: current, uid, loading: false, authReady: true });
+          console.log('[AUTH][READY] Cognito auth stabilized with valid session');
         });
       } catch (e) {
-        // If library throws while constructing session, nuke cached tokens and proceed unauthenticated
-        // During grace window, don't immediately clear to avoid bounce
+        // Library threw during session construction: clear corrupted tokens
         if (Date.now() < suppressInvalidationUntil && lastKnownUser) {
-          setUser((prev) => prev ?? lastKnownUser);
-          setLoading(false);
+          const uid = extractUid(lastKnownUser);
+          setAuthState({ user: lastKnownUser, uid, loading: false, authReady: true });
         } else {
           await clearCognitoSessions();
-          setUser((prev) => (prev === null ? prev : null));
-          setLoading(false);
-          // Mark auth as ready even after clearing corrupted session
-          if (!authReady) {
-            setAuthReady(true);
-            console.log('[AUTH][READY] Cognito auth stabilized (cleared corrupted session)');
-          }
+          setAuthState({ user: null, uid: null, loading: false, authReady: true });
+          console.log('[AUTH][READY] Cognito auth stabilized (cleared corrupted session)');
         }
       }
     };
 
-    // initial
+    // Initial load
     setFromSession();
 
-    // expose external refresh trigger; allow fast-path with provided CognitoUser
+    // Expose external refresh trigger (for post-login callbacks)
     refreshAuthNow = async (maybeUser) => {
       if (maybeUser) {
         try {
-          // Ensure the provided user actually has a valid session
+          // Validate the provided user has a valid session
           maybeUser.getSession((err, session) => {
             if (err || !session?.isValid?.()) {
               return setFromSession();
@@ -216,15 +234,14 @@ export const useAuth = () => {
             optimisticHoldUntil = Date.now() + 120000; // 120s hold
             lastKnownUser = maybeUser; // remember beyond hold window
             suppressInvalidationUntil = Date.now() + 180000; // 180s grace
-            setUser(maybeUser);
-            setLoading(false);
-            // Immediately mark as ready when explicitly refreshed with valid user
-            setAuthReady(true);
+            
+            const uid = extractUid(maybeUser);
+            setAuthState({ user: maybeUser, uid, loading: false, authReady: true });
             console.log('[AUTH][READY] Explicit refresh with valid user');
           });
           return;
         } catch {
-          // fallback to regular flow
+          // Fallback to regular flow
         }
       }
       return setFromSession();
@@ -233,48 +250,17 @@ export const useAuth = () => {
     // Poll every 2 seconds to reflect background auth changes
     const interval = setInterval(setFromSession, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, [setAuthState, extractUid]);
   
-  // Enforce invariants: if authenticated, we MUST have a uid
-  // Extract uid from Cognito user (username as fallback) or Firebase user
-  const uid = useMemo(() => {
-    if (!user) return null;
-    
-    // Firebase user path (when preferFirebase is true)
-    if (firebaseEnabled && preferFirebase && user.uid) {
-      return user.uid;
-    }
-    
-    // Cognito user path (default)
-    try {
-      // Try to get sub from attributes (standard Cognito field)
-      if (user.attributes?.sub) {
-        return user.attributes.sub;
-      }
-      // Fallback to username (Cognito guaranteed field)
-      if (user.username) {
-        return user.username;
-      }
-      // Last resort: try getUsername() method
-      if (typeof user.getUsername === 'function') {
-        const username = user.getUsername();
-        if (username) return username;
-      }
-    } catch (err) {
-      console.error('[AUTH] Error extracting uid from user:', err);
-    }
-    
-    return null;
-  }, [user, preferFirebase]);
+  // Derive final values from state (INVARIANT 2 & 3)
+  const { user, uid, loading, authReady, error } = state;
+  const hasUser = !!user && !!uid; // INVARIANT 2: hasUser iff we have both user and uid
+  const isAuthenticated = authReady && hasUser; // INVARIANT 3: authenticated = ready AND has user+uid
   
-  // CRITICAL: isAuthenticated only true when auth system is ready AND we have valid uid
-  // This prevents race conditions where screens access auth before it's stable
-  const isAuthenticated = authReady && !!user && !!uid;
-  
-  // Log hard error if we detect broken state
+  // Log invariant violation if user exists but uid is missing
   useEffect(() => {
     if (user && !uid && !loading && authReady) {
-      console.error('[AUTH][INVARIANT VIOLATION] User object exists but no uid could be extracted. Forcing isAuthenticated=false.', {
+      console.error('[AUTH][INVARIANT VIOLATION] User exists but no uid extracted', {
         hasUser: !!user,
         userKeys: user ? Object.keys(user).slice(0, 10) : [],
         preferFirebase,
@@ -284,20 +270,33 @@ export const useAuth = () => {
     }
   }, [user, uid, loading, preferFirebase, authReady]);
   
-  // Log race detection when components try to access before ready
+  // Log race detection when components access before ready (warning only)
   useEffect(() => {
     if (!authReady && !loading) {
       console.warn('[AUTH][RACE_DETECTED] Auth accessed before stabilization complete');
     }
   }, [authReady, loading]);
   
+  // Temporary debug log to confirm real auth state after login
+  if (__DEV__) {
+    console.log('[AUTH DEBUG]', {
+      uid,
+      hasUser,
+      authReady,
+      isAuthenticated,
+      loading,
+      devBypass: process.env.EXPO_PUBLIC_DEV_FORCE_NO_AUTH,
+    });
+  }
+  
   return { 
     user, 
     uid, 
     loading, 
-    authReady,  // NEW: expose ready state
+    authReady,
     error, 
     isAuthenticated,
+    hasUser, // NEW: expose derived hasUser
     // Aliases for compatibility
     currentUser: user
   };
