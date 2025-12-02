@@ -23,15 +23,19 @@ const CreatePostButton = ({ accessibilityState }) => {
     setShowMenu(false);
     switch (option) {
       case 'post':
+        // Check auth readiness first
+        if (!authReady) {
+          Alert.alert(
+            'Please wait',
+            'Still loading your account. Please try again in a moment.'
+          );
+          return;
+        }
         // Check auth before showing post options
-        if (!authReady || !isAuthenticated || !uid) {
+        if (!isAuthenticated || !uid) {
           Alert.alert(
             'Login required',
-            'You need to be logged in to create a post.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Login', onPress: () => navigation.navigate('Auth') }
-            ]
+            'You need to be logged in to create a post. Please log in and try again.'
           );
           return;
         }
@@ -46,28 +50,39 @@ const CreatePostButton = ({ accessibilityState }) => {
           );
           return;
         }
-        // Auth check is done in LiveStreamScreen itself (defense-in-depth)
+        // Check auth readiness
+        if (!authReady) {
+          Alert.alert(
+            'Please wait',
+            'Still loading your account. Please try again in a moment.'
+          );
+          return;
+        }
+        // Check authentication
+        if (!isAuthenticated || !uid) {
+          Alert.alert(
+            'Login required',
+            'You need to be logged in to go live. Please log in and try again.'
+          );
+          return;
+        }
+        // Auth check is also done in LiveStreamScreen itself (defense-in-depth)
         navigation.navigate('LiveStreamScreen', { mode: 'host' });
         break;
     }
   };
 
   const handlePostOption = (option) => {
+    // Verify auth readiness
     if (!authReady) {
       Alert.alert("Please wait", "Still loading your account.");
       return;
     }
-    if (!isAuthenticated) {
+    // Verify authentication with uid check
+    if (!isAuthenticated || !uid) {
       Alert.alert(
         "Login Required",
-        "You must be logged in to create a post.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Login",
-            onPress: () => navigation.navigate("Auth"),
-          },
-        ]
+        "You must be logged in to create a post. Please log in and try again."
       );
       return;
     }

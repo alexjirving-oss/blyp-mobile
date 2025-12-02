@@ -87,33 +87,12 @@ const MessengerScreen = ({ navigation }) => {
     }, 0);
   }, [chats, uid]);
 
-  useEffect(() => {
-    // Block until auth system is ready and user is authenticated
-    if (!authReady || authLoading || !isAuthenticated || !currentUser) {
-      console.log('⏳ MESSENGER: Waiting for authentication...', { authReady, authLoading, isAuthenticated, hasUser: !!currentUser });
+  // Define callback functions BEFORE the useEffect that uses them
+  const loadBalances = React.useCallback(async () => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadBalances - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
       return;
     }
-    
-    console.log('🚀 MESSENGER: Loading chat data for user:', currentUser.uid);
-    
-    // Load chats, following users, all users with proper cleanup
-    const unsubscribeChats = loadChats();
-    const unsubscribeFollowing = loadFollowingUsers();
-    const unsubscribeAllUsers = loadAllUsers();
-    loadBalances();
-
-    return () => {
-      console.log('🧹 MESSENGER: Cleaning up Firebase listeners');
-      if (unsubscribeChats) unsubscribeChats();
-      if (unsubscribeFollowing) unsubscribeFollowing();
-      if (unsubscribeAllUsers) unsubscribeAllUsers();
-    };
-  // Only depend on authReady, authLoading, isAuthenticated, and uid - not the entire currentUser object
-  // Using function references in dependencies to ensure they're stable
-  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadBalances]);
-  
-  const loadBalances = React.useCallback(async () => {
-    if (!uid) return;
     try {
       const coins = await BlypCoinService.getUserBalance(uid);
       const gems = await GemService.getUserGems(uid);
@@ -124,36 +103,11 @@ const MessengerScreen = ({ navigation }) => {
       setCoinBalance(0);
       setGemBalance(0);
     }
-  }, [uid]);
-
-  // Update unread count manager when total count changes
-  useEffect(() => {
-    unreadCountManager.setUnreadCount(totalUnreadCount);
-    console.log('📊 MESSENGER: Unread count updated:', totalUnreadCount);
-    
-    // No cleanup needed for this effect since it's just updating a value
-  }, [totalUnreadCount]);
-
-  // Update filtered users when following list changes
-  useEffect(() => {
-    console.log('🔥 MESSENGER: Filtering users - allUsers:', allUsers.length, 'followingIds:', followingUserIds.size);
-    if (allUsers.length > 0 && uid) {
-      // TEMPORARILY SHOW ALL USERS (ignoring following status for testing)  
-      const filteredUsers = allUsers.filter(user => 
-        user.id !== uid
-      );
-      Logger.firebase('Filtered users for display', { 
-        filteredCount: filteredUsers.length,
-        users: filteredUsers.map(u => ({ id: u.id, username: u.username }))
-      });
-    }
-  }, [followingUserIds, allUsers, uid]);
-
-
+  }, [uid, authReady, isAuthenticated]);
 
   const loadChats = React.useCallback(() => {
     if (!uid) {
-      console.warn('MESSENGER: No uid available, cannot load chats');
+      console.warn('[MESSENGER] Skipping loadChats - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
       return () => {};
     }
     
@@ -202,11 +156,11 @@ const MessengerScreen = ({ navigation }) => {
       setLoading(false);
       return () => {};
     }
-  }, [uid]);
+  }, [uid, authReady, isAuthenticated]);
 
   const loadFollowingUsers = React.useCallback(() => {
     if (!uid) {
-      console.warn('MESSENGER: No uid available, cannot load following users');
+      console.warn('[MESSENGER] Skipping loadFollowingUsers - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
       return () => {};
     }
     
@@ -221,43 +175,11 @@ const MessengerScreen = ({ navigation }) => {
     });
     
     return unsubscribe;
-  }, [uid]);
-  
-  // Separate effect to fetch user data when followingUserIds changes
-  useEffect(() => {
-    if (!followingUserIds || followingUserIds.size === 0) return;
-    
-    console.log('🔄 MESSENGER: Fetching data for', followingUserIds.size, 'following users');
-    
-    const fetchFollowingUserData = async () => {
-      try {
-        const followingUsersData = [];
-        for (const userId of followingUserIds) {
-          try {
-            const userDoc = await getDoc(doc(db, 'users', userId));
-            if (userDoc.exists()) {
-              followingUsersData.push({
-                id: userDoc.id,
-                ...userDoc.data()
-              });
-            }
-          } catch (error) {
-            console.error('Error fetching individual user data:', error);
-          }
-        }
-        
-        setFollowingUsers(followingUsersData);
-      } catch (error) {
-        console.error('Error in fetchFollowingUserData:', error);
-      }
-    };
-    
-    fetchFollowingUserData();
-  }, [followingUserIds]);
+  }, [uid, authReady, isAuthenticated]);
 
   const loadAllUsers = React.useCallback(() => {
     if (!uid) {
-      console.warn('MESSENGER: No uid available, cannot load all users');
+      console.warn('[MESSENGER] Skipping loadAllUsers - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
       return () => {};
     }
     try {
@@ -292,9 +214,86 @@ const MessengerScreen = ({ navigation }) => {
       console.error('❌ MESSENGER: Error setting up users listener:', error);
       return () => {};
     }
-  }, [uid]);
+  }, [uid, authReady, isAuthenticated]);
 
+  // Main effect to load data when auth is ready
+  useEffect(() => {
+    // Block until auth system is ready and user is authenticated
+    if (!authReady || authLoading || !isAuthenticated || !uid) {
+      console.log('⏳ MESSENGER: Waiting for authentication...', { authReady, authLoading, isAuthenticated, uidPresent: !!uid });
+      return;
+    }
+    
+    console.log('🚀 MESSENGER: Loading chat data for user:', uid);
+    
+    // Load chats, following users, all users with proper cleanup
+    const unsubscribeChats = loadChats();
+    const unsubscribeFollowing = loadFollowingUsers();
+    const unsubscribeAllUsers = loadAllUsers();
+    loadBalances();
 
+    return () => {
+      console.log('🧹 MESSENGER: Cleaning up Firebase listeners');
+      if (unsubscribeChats) unsubscribeChats();
+      if (unsubscribeFollowing) unsubscribeFollowing();
+      if (unsubscribeAllUsers) unsubscribeAllUsers();
+    };
+  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadBalances]);
+
+  // Update unread count manager when total count changes
+  useEffect(() => {
+    unreadCountManager.setUnreadCount(totalUnreadCount);
+    console.log('📊 MESSENGER: Unread count updated:', totalUnreadCount);
+    
+    // No cleanup needed for this effect since it's just updating a value
+  }, [totalUnreadCount]);
+
+  // Update filtered users when following list changes
+  useEffect(() => {
+    console.log('🔥 MESSENGER: Filtering users - allUsers:', allUsers.length, 'followingIds:', followingUserIds.size);
+    if (allUsers.length > 0 && uid) {
+      // TEMPORARILY SHOW ALL USERS (ignoring following status for testing)  
+      const filteredUsers = allUsers.filter(user => 
+        user.id !== uid
+      );
+      Logger.firebase('Filtered users for display', { 
+        filteredCount: filteredUsers.length,
+        users: filteredUsers.map(u => ({ id: u.id, username: u.username }))
+      });
+    }
+  }, [followingUserIds, allUsers, uid]);
+
+  // Separate effect to fetch user data when followingUserIds changes
+  useEffect(() => {
+    if (!followingUserIds || followingUserIds.size === 0) return;
+    
+    console.log('🔄 MESSENGER: Fetching data for', followingUserIds.size, 'following users');
+    
+    const fetchFollowingUserData = async () => {
+      try {
+        const followingUsersData = [];
+        for (const userId of followingUserIds) {
+          try {
+            const userDoc = await getDoc(doc(db, 'users', userId));
+            if (userDoc.exists()) {
+              followingUsersData.push({
+                id: userDoc.id,
+                ...userDoc.data()
+              });
+            }
+          } catch (error) {
+            console.error('Error fetching individual user data:', error);
+          }
+        }
+        
+        setFollowingUsers(followingUsersData);
+      } catch (error) {
+        console.error('Error in fetchFollowingUserData:', error);
+      }
+    };
+    
+    fetchFollowingUserData();
+  }, [followingUserIds]);
 
   const formatLastMessageTime = (timestamp) => {
     if (!timestamp) return '';

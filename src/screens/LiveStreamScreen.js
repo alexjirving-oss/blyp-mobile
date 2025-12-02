@@ -235,20 +235,30 @@ export default function LiveStreamScreen({ navigation, route }) {
   };
 
   const actuallyStartStream = async () => {
+    // Auth guard: ensure user is logged in before attempting stream
+    if (!authReady) {
+      console.warn('[LIVE] Cannot start stream – auth not ready');
+      Alert.alert(
+        'Please wait',
+        'Still loading your account. Please try again in a moment.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    if (!isAuthenticated || !currentUser) {
+      console.warn('[LIVE] Cannot start stream – no logged-in user');
+      Alert.alert(
+        'Login Required',
+        'You need to be logged in to go live. Please log in and try again.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
     // Double-check camera ref is still available
     if (!cameraRef.current) {
       Alert.alert('Camera Error', 'Camera reference was lost. Please try again.');
-
-          // Auth guard: ensure user is logged in before attempting stream
-          if (!authReady || !currentUser || !isAuthenticated) {
-            console.warn('[LIVE] Cannot start stream – no logged-in user');
-            Alert.alert(
-              'Login Required',
-              'You need to be logged in to go live. Please log in and try again.',
-              [{ text: 'OK' }]
-            );
-            return;
-          }
       return;
     }
 
