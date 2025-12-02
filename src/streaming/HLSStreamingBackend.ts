@@ -40,9 +40,17 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
 
       // HLS service already returns { ok, reason, error, streamId, streamData }
       if (!hlsResult.ok) {
+        // Map HLS_BACKEND_ERROR to generic BACKEND_ERROR, preserve PERMISSION_DENIED
+        const mappedReason = hlsResult.reason === 'PERMISSION_DENIED' 
+          ? 'PERMISSION_DENIED' 
+          : hlsResult.reason === 'HLS_BACKEND_NOT_CONFIGURED' 
+          ? 'BACKEND_NOT_CONFIGURED'
+          : hlsResult.reason === 'NOT_LOGGED_IN'
+          ? 'NOT_LOGGED_IN'
+          : 'BACKEND_ERROR';
         return {
           ok: false,
-          reason: (hlsResult.reason as any) || 'BACKEND_ERROR',
+          reason: mappedReason as any,
           error: hlsResult.error,
         };
       }
@@ -79,28 +87,29 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
    */
   async uploadSegment({ streamId, userId, fileUri, segmentNumber }): Promise<StreamingResult<{ segmentNumber: number }>> {
     try {
-      // HLS service uploadSegment already returns structured result
-      const result = await HLSLiveStreamServiceInstance.uploadSegment(
+      // HLS service uploadSegment throws on error, not structured result
+      await HLSLiveStreamServiceInstance.uploadSegment(
         streamId,
         fileUri,
         segmentNumber,
         userId
       );
 
-      if (!result.ok) {
-        return {
-          ok: false,
-          reason: (result.reason as any) || 'BACKEND_ERROR',
-          error: result.error,
-        };
-      }
-
       return {
         ok: true,
         data: { segmentNumber },
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('[HLSBackend] uploadSegment error:', error);
+      // Map permission denied errors from Storage/Firestore
+      if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
+        console.error('[HLS][SECURITY] Permission denied in uploadSegment - check Storage/Firestore rules');
+        return {
+          ok: false,
+          reason: 'PERMISSION_DENIED',
+          error: 'You do not have permission to upload segments to this stream',
+        };
+      }
       return {
         ok: false,
         reason: 'BACKEND_ERROR',
@@ -118,9 +127,13 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
       const result = await HLSLiveStreamServiceInstance.endStream(streamId, userId);
 
       if (!result.ok) {
+        // Map HLS-specific reasons to StreamingErrorReason
+        const mappedReason = result.reason === 'PERMISSION_DENIED' 
+          ? 'PERMISSION_DENIED' 
+          : 'BACKEND_ERROR';
         return {
           ok: false,
-          reason: (result.reason as any) || 'BACKEND_ERROR',
+          reason: mappedReason as any,
           error: result.error,
         };
       }

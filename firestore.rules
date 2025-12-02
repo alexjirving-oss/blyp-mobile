@@ -1,8 +1,138 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
     }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isValidString(value, maxLen) {
+      return value is string && value.size() > 0 && value.size() <= maxLen;
+    }
+    
+    // ========== LIVE STREAMS ==========
+    
+    // Main stream documents - host can create/update their own, everyone can read
+    match /liveStreams/{streamId} {
+      // Anyone can read public live streams
+      allow read: if true;
+      
+      // Only authenticated users can create streams
+      allow create: if isAuthenticated()
+        && isOwner(request.resource.data.userId)
+        && isValidString(request.resource.data.title, 200)
+        && request.resource.data.status == 'live';
+      
+      // Only the host can update their stream
+      allow update: if isAuthenticated()
+        && isOwner(resource.data.userId)
+        && request.resource.data.userId == resource.data.userId; // userId cannot change
+      
+      // Only the host can delete (optional - prefer keeping ended streams)
+      allow delete: if isAuthenticated()
+        && isOwner(resource.data.userId);
+      
+      // Segment subcollection - host can write, everyone can read
+      match /segments/{segmentId} {
+        allow read: if true;
+        
+        allow create, update: if isAuthenticated()
+          && isOwner(get(/databases/$(database)/documents/liveStreams/$(streamId)).data.userId)
+          && request.resource.data.number is int
+          && request.resource.data.number >= 0;
+        
+        allow delete: if isAuthenticated()
+          && isOwner(get(/databases/$(database)/documents/liveStreams/$(streamId)).data.userId);
+      }
+      
+      // Comments subcollection - anyone authenticated can comment, everyone can read
+      match /comments/{commentId} {
+        allow read: if true;
+        
+        allow create: if isAuthenticated()
+          && isOwner(request.resource.data.userId)
+          && isValidString(request.resource.data.content, 1000)
+          && request.resource.data.userId == request.auth.uid;
+        
+        // Only comment author can update/delete their own comment
+        allow update, delete: if isAuthenticated()
+          && isOwner(resource.data.userId);
+      }
+      
+      // Likes subcollection - user can manage their own like, everyone can read
+      match /likes/{userId} {
+        allow read: if true;
+        
+        allow create, update, delete: if isAuthenticated()
+          && isOwner(userId);
+      }
+    }
+    
+    // ========== USER PROFILES ==========
+    
+    // User profile documents - owner can write, everyone can read public fields
+    match /userProfiles/{userId} {
+      allow read: if true;
+      
+      allow create, update: if isAuthenticated()
+        && isOwner(userId);
+      
+      allow delete: if isAuthenticated()
+        && isOwner(userId);
+    }
+    
+    // ========== LIVE SERVICE USERS ==========
+    
+    // LiveService user presence - owner can write, everyone can read
+    match /users/{userId} {
+      allow read: if true;
+      
+      allow create, update: if isAuthenticated()
+        && isOwner(userId);
+      
+      allow delete: if isAuthenticated()
+        && isOwner(userId);
+    }
+    
+    // ========== LIVE SERVICE STREAMS ==========
+    
+    // LiveService stream metadata - host can write, everyone can read
+    match /streams/{streamId} {
+      allow read: if true;
+      
+      // Only authenticated users can create streams
+      allow create: if isAuthenticated()
+        && isOwner(request.resource.data.hostUid);
+      
+      // Only the host can update their stream
+      allow update: if isAuthenticated()
+        && isOwner(resource.data.hostUid)
+        && request.resource.data.hostUid == resource.data.hostUid; // hostUid cannot change
+      
+      // Only the host can delete
+      allow delete: if isAuthenticated()
+        && isOwner(resource.data.hostUid);
+      
+      // Stream messages subcollection - anyone authenticated can send, everyone can read
+      match /messages/{messageId} {
+        allow read: if true;
+        
+        allow create: if isAuthenticated()
+          && request.resource.data.uid == request.auth.uid
+          && isValidString(request.resource.data.text, 500);
+        
+        // Only message sender can delete their message
+        allow delete: if isAuthenticated()
+          && isOwner(resource.data.uid);
+      }
+    }
+    
+    // ========== DEFAULT DENY ==========
+    // All other collections are denied by default
   }
 }

@@ -155,6 +155,11 @@ class HLSLiveStreamService {
       
     } catch (error) {
       console.error('❌ Error creating stream:', error);
+      // Map permission denied errors to structured reason
+      if (error?.code === 'permission-denied') {
+        console.error('[HLS][SECURITY] Permission denied creating stream - check Firestore rules');
+        return { ok: false, reason: 'PERMISSION_DENIED', error: 'You do not have permission to create this stream' };
+      }
       return { ok: false, reason: 'HLS_BACKEND_ERROR', error: error?.message || 'Failed to create stream' };
     }
   }
@@ -285,6 +290,10 @@ class HLSLiveStreamService {
       return downloadURL;
     } catch (error) {
       console.error(`❌ Error uploading segment ${segmentNumber}:`, error);
+      // Map permission denied errors
+      if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
+        console.error('[HLS][SECURITY] Permission denied uploading segment - check Storage rules and userId ownership');
+      }
       this.currentActiveUploads = Math.max(0, this.currentActiveUploads - 1);
       this._drainUploadQueue();
       throw error;
@@ -581,6 +590,11 @@ class HLSLiveStreamService {
       
     } catch (error) {
       console.error('❌ Error ending stream:', error);
+      // Map permission denied errors
+      if (error?.code === 'permission-denied') {
+        console.error('[HLS][SECURITY] Permission denied ending stream - verify userId ownership');
+        return { ok: false, reason: 'PERMISSION_DENIED', error: 'You do not have permission to end this stream' };
+      }
       return { ok: false, reason: 'HLS_BACKEND_ERROR', error: error?.message || 'Failed to end stream' };
     }
   }

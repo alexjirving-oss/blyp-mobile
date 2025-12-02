@@ -57,6 +57,7 @@ export type StreamingErrorReason =
   | 'BACKEND_NOT_CONFIGURED'
   | 'STREAM_NOT_FOUND'
   | 'STREAM_ENDED'
+  | 'PERMISSION_DENIED'
   | 'BACKEND_ERROR';
 
 /**
