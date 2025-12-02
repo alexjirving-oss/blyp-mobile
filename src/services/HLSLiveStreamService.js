@@ -61,15 +61,21 @@ class HLSLiveStreamService {
    * Create a new live stream - Production Ready with Input Validation
    */
   async createStream({ title, description, thumbnailFile, userId, userDisplayName, userPhotoURL } = {}) {
+    console.log('[HLS][SERVICE][AUTH] createStream called with userId:', userId ? 'present' : 'MISSING');
+    
     try {
       if (!firebaseEnabled || !db || !storage || typeof db.collection !== 'function') {
         console.warn('[HLS] Backend not configured for live streaming');
         return { ok: false, reason: 'HLS_BACKEND_NOT_CONFIGURED', error: 'Live streaming backend is not configured' };
       }
+      
+      // CRITICAL: Only check userId param, do NOT re-check auth.currentUser
       if (!userId || typeof userId !== 'string') {
-        console.warn('[HLS] createStream called without userId');
+        console.error('[HLS][SERVICE][AUTH] createStream blocked: userId param missing or invalid');
         return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in to stream' };
       }
+      
+      console.log('[HLS][SERVICE][AUTH] Proceeding with userId from caller:', userId);
       
       // Production validation: Ensure all inputs are properly typed
       const validTitle = typeof title === 'string' ? title.trim() : '';
@@ -130,13 +136,13 @@ class HLSLiveStreamService {
       const streamId = streamRef.id;
   console.log('[METRIC][createStream_addDoc_complete]', new Date().toISOString(), { streamId, elapsedMs: Date.now() - t1Start });
       
-      // Update user profile to mark as live
+      // Update user profile to mark as live (create if missing)
       try {
-        await db.collection('userProfiles').doc(userId).update({
+        await db.collection('userProfiles').doc(userId).set({
           isLive: true,
           currentStreamId: streamId,
           lastStreamStarted: serverTimestamp()
-        });
+        }, { merge: true });
         console.log('✅ User profile updated - marked as live');
       } catch (profileError) {
         console.error('❌ Error updating user profile:', profileError);
@@ -168,6 +174,8 @@ class HLSLiveStreamService {
    * Upload a video segment to Firebase Storage - Production Ready with Full Validation
    */
   async uploadSegment(streamId, videoUri, segmentNumber, userId) {
+    console.log('[HLS][SERVICE][AUTH] uploadSegment called with userId:', userId ? 'present' : 'MISSING');
+    
     try {
       // Production validation: Check all required parameters
       if (!streamId || typeof streamId !== 'string') {
@@ -180,9 +188,13 @@ class HLSLiveStreamService {
         throw new Error('Invalid segmentNumber: must be a non-negative number');
       }
       
+      // CRITICAL: Trust userId param, do NOT re-check auth.currentUser
       if (!userId || typeof userId !== 'string') {
+        console.error('[HLS][SERVICE][AUTH] uploadSegment blocked: userId param missing or invalid');
         throw new Error('User must be logged in with valid UID');
       }
+      
+      console.log('[HLS][SERVICE][AUTH] Proceeding with userId from caller:', userId);
       
       // Concurrency gate: defer if semaphore exhausted
       if (this.currentActiveUploads >= this.maxConcurrentUploads) {
@@ -562,13 +574,13 @@ class HLSLiveStreamService {
       });
       console.log('[METRIC][endStream_statusUpdated]', new Date().toISOString(), { streamId, elapsedMs: Date.now() - tEndStart });
       
-      // Update user profile to mark as no longer live
+      // Update user profile to mark as no longer live (create if missing)
       try {
-        await db.collection('userProfiles').doc(userId).update({
+        await db.collection('userProfiles').doc(userId).set({
           isLive: false,
           currentStreamId: null,
           lastStreamEnded: serverTimestamp()
-        });
+        }, { merge: true });
         console.log('✅ User profile updated - no longer live');
       } catch (profileError) {
         console.error('❌ Error updating user profile:', profileError);

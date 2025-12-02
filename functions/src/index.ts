@@ -13,6 +13,8 @@
 import * as functions from 'firebase-functions';
 // Export billing verification function (Stage 3 economy hardening)
 export { billingVerify } from './billingVerify';
+// Export DEV-ONLY Firestore reset function (maintenance only)
+export { devResetFirestore } from './devReset';
 import * as admin from 'firebase-admin';
 import { Storage } from '@google-cloud/storage';
 // @ts-ignore (library lacks bundled types)

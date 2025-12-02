@@ -25,6 +25,7 @@ import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
+import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -34,7 +35,7 @@ console.log('📸 LiveStreamScreen: CameraView imported?', typeof CameraView);
 export default function LiveStreamScreen({ navigation, route }) {
   useRenderTimer('LiveStreamScreen');
   const trackAsync = useTrackAsync();
-    const { user: currentUser, isAuthenticated, authReady, loading: authLoading } = useAuth();
+  const { uid, isAuthenticated, authReady, loading: authLoading } = useAuth();
   
   // Safe route/params extraction with defaults
   const safeRoute = route || {};
@@ -46,13 +47,20 @@ export default function LiveStreamScreen({ navigation, route }) {
     displayName = 'Unknown' 
   } = safeParams;
   
-  // Use RNFirebase auth from config
-  
   // Determine if this user is the host/broadcaster
-  const isHost = mode === 'host' || (!mode && (auth.currentUser?.uid === hostUid));
+  const isHost = mode === 'host';
   const isViewer = mode === 'viewer';
   
   console.log('📺 LiveStreamScreen mode:', { mode, isHost, isViewer, hostUid, routeStreamId });
+  
+  // Log auth state on mount for debugging
+  useEffect(() => {
+    console.log('[LIVE][AUTH_STATE_ON_MOUNT]', {
+      uid,
+      isAuthenticated,
+      authReady,
+    });
+  }, [uid, isAuthenticated, authReady]);
   
   const [isStreaming, setIsStreaming] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -110,23 +118,35 @@ export default function LiveStreamScreen({ navigation, route }) {
     
     // Request permissions using hooks
     if (!cameraPermission) {
+      console.log('[CAMERA] Requesting camera permission...');
       requestCameraPermission();
     }
     if (!microphonePermission) {
+      console.log('[CAMERA] Requesting microphone permission...');
       requestMicrophonePermission();
     }
     
-    // Set camera as ready after permissions
-    if (mounted && cameraPermission?.granted) {
+    // CRITICAL: Set camera as ready ONLY after BOTH permissions granted
+    if (mounted && cameraPermission?.granted && microphonePermission?.granted) {
+      console.log('[LIVE][CAMERA_PERMISSIONS_STATE] Both granted, setting cameraReady=true');
       setCameraReady(true);
-      console.log('📸 Camera permissions granted');
+    } else {
+      console.log('[LIVE][CAMERA_PERMISSIONS_STATE] Waiting for permissions:', {
+        cameraGranted: cameraPermission?.granted,
+        micGranted: microphonePermission?.granted,
+        cameraReady,
+      });
     }
 
     // Focus effect to ensure camera is initialized when navigating to this screen
     let unsubscribeFocus;
     if (navigation && navigation.addListener) {
       unsubscribeFocus = navigation.addListener('focus', () => {
-        setCameraReady(true);
+        console.log('[CAMERA] Screen focused, checking permissions again');
+        if (cameraPermission?.granted && microphonePermission?.granted) {
+          console.log('[CAMERA] Permissions OK on focus, setting cameraReady=true');
+          setCameraReady(true);
+        }
       });
     }
 
@@ -167,7 +187,7 @@ export default function LiveStreamScreen({ navigation, route }) {
     if (!isViewer || !routeStreamId) return;
 
     console.log('📊 Viewer subscribing to stream stats:', routeStreamId);
-    const unsubscribe = HLSLiveStreamService.subscribeToStream(routeStreamId, (data) => {
+    const unsubscribe = HLSLiveStreamServiceInstance.subscribeToStream(routeStreamId, (data) => {
       if (data) {
         setViewCount(data.viewCount || 0);
         setHeartCount(data.likes || 0);
@@ -237,21 +257,29 @@ export default function LiveStreamScreen({ navigation, route }) {
   const actuallyStartStream = async () => {
     // Auth guard: ensure user is logged in before attempting stream
     if (!authReady) {
-      console.warn('[LIVE] Cannot start stream – auth not ready');
+      console.warn('[LIVE][AUTH_GUARD_FAIL]', {
+        reason: 'AUTH_NOT_READY',
+        uid,
+        isAuthenticated,
+        authReady,
+      });
       Alert.alert(
         'Please wait',
-        'Still loading your account. Please try again in a moment.',
-        [{ text: 'OK' }]
+        'We are still finishing login. Try again in a moment.'
       );
       return;
     }
     
-    if (!isAuthenticated || !currentUser) {
-      console.warn('[LIVE] Cannot start stream – no logged-in user');
+    if (!isAuthenticated || !uid) {
+      console.warn('[LIVE][AUTH_GUARD_FAIL]', {
+        reason: 'NO_UID_OR_NOT_AUTHENTICATED',
+        uid,
+        isAuthenticated,
+        authReady,
+      });
       Alert.alert(
-        'Login Required',
-        'You need to be logged in to go live. Please log in and try again.',
-        [{ text: 'OK' }]
+        'Login required',
+        'You must be logged in to go live.'
       );
       return;
     }
@@ -272,24 +300,19 @@ export default function LiveStreamScreen({ navigation, route }) {
         setIsStreaming(false);
         return;
       }
-      // Require Firebase UID for Firestore/Storage auth-backed operations
-      const firebaseUid = auth?.currentUser?.uid || null;
-      if (!firebaseUid) {
-        console.warn('[LIVE] Cannot start stream – no Firebase UID');
-        Alert.alert(
-          'Login Required',
-          'You need to be logged in to go live. Please log in and try again.',
-          [{ text: 'OK' }]
-        );
-        setIsStreaming(false);
-        return;
-      }
+      
       console.log('🚀 Starting live stream with camera:', cameraRef.current);
+      
+      console.log('[LIVE][CREATE_STREAM_CALL]', {
+        userId: uid,
+        title,
+        mode,
+      });
       
       // Log UI-initiated stream start request
       logStreamingEvent('STREAM_START_REQUEST', {
         backendId: 'HLS',
-        userId: firebaseUid,
+        userId: uid,
         source: 'UI',
         mode: 'host',
       });
@@ -297,11 +320,11 @@ export default function LiveStreamScreen({ navigation, route }) {
       // Use streaming backend (HLS or Agora) via factory
       const backend = getStreamingBackend();
       const result = await backend.createStream({
-        userId: firebaseUid,
+        userId: uid,
         title: title,
-        displayName: auth?.currentUser?.displayName || null,
-        photoURL: auth?.currentUser?.photoURL || null,
-        email: auth?.currentUser?.email || null,
+        displayName: null, // Backend will pull from userProfiles if needed
+        photoURL: null,
+        email: null,
       });
       
       // Handle structured error
@@ -310,26 +333,58 @@ export default function LiveStreamScreen({ navigation, route }) {
         
         logStreamingEvent('STREAM_START_FAILURE', {
           backendId: 'HLS',
-          userId: firebaseUid,
+          userId: uid,
           reason: result.reason,
           errorMessage: result.error,
           source: 'UI',
         });
 
-        if (result.reason === 'BACKEND_NOT_CONFIGURED') {
-          Alert.alert('Live streaming not available', 'Our live streaming backend is not fully configured yet. Please try again later.');
-        } else if (result.reason === 'NOT_LOGGED_IN') {
-          Alert.alert('Login required to go live.', 'Please log in and try again.');
-        } else {
-          Alert.alert('Streaming Error', result.error || 'Could not start live stream.');
+        if (result.reason === 'NOT_LOGGED_IN') {
+          console.error('[LIVE][BACKEND_AUTH_MISMATCH]', {
+            reason: result.reason,
+            error: result.error,
+            userId: uid,
+            authReady,
+            isAuthenticated,
+          });
+          Alert.alert(
+            'Streaming error',
+            'We had a problem starting your stream. Please try again.'
+          );
+          setIsStreaming(false);
+          return;
         }
+
+        if (result.reason === 'BACKEND_NOT_CONFIGURED') {
+          Alert.alert(
+            'Live streaming not available',
+            'The live streaming backend is not configured right now.'
+          );
+          setIsStreaming(false);
+          return;
+        }
+
+        if (result.reason === 'PERMISSION_DENIED') {
+          Alert.alert(
+            'Live streaming not available',
+            'You do not have permission to stream from this account.'
+          );
+          setIsStreaming(false);
+          return;
+        }
+
+        console.error('[LIVE][STREAM] createStream failed', result);
+        Alert.alert(
+          'Streaming error',
+          result.error || 'Unable to start live stream.'
+        );
         setIsStreaming(false);
         return;
       }
 
       logStreamingEvent('STREAM_START_SUCCESS', {
         backendId: 'HLS',
-        userId: firebaseUid,
+        userId: uid,
         streamId: result.data.streamId,
         source: 'UI',
       });
@@ -363,9 +418,8 @@ export default function LiveStreamScreen({ navigation, route }) {
       console.error('❌ No stream ID for recording');
       return;
     }
-    const firebaseUid = auth?.currentUser?.uid || null;
-    if (!firebaseUid) {
-      console.error('❌ No Firebase UID for recording uploads');
+    if (!uid) {
+      console.error('❌ No user ID for recording uploads');
       return;
     }
 
@@ -398,7 +452,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         const backend = getStreamingBackend();
         const uploadResult = await backend.uploadSegment({
           streamId: currentStreamId,
-          userId: firebaseUid,
+          userId: uid,
           fileUri: video.uri,
           segmentNumber,
         });
@@ -440,24 +494,22 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       // End stream via streaming backend
       if (streamId) {
-        const firebaseUid = auth?.currentUser?.uid || null;
-        
         logStreamingEvent('STREAM_END_REQUEST', {
           backendId: 'HLS',
           streamId,
-          userId: firebaseUid,
+          userId: uid,
           source: 'UI',
         });
 
         const backend = getStreamingBackend();
-        const endResult = await backend.endStream({ streamId, userId: firebaseUid });
+        const endResult = await backend.endStream({ streamId, userId: uid });
         
         if (!endResult.ok) {
           console.warn('⚠️ Stream end failed:', endResult.error);
           logStreamingEvent('STREAM_END_FAILURE', {
             backendId: 'HLS',
             streamId,
-            userId: firebaseUid,
+            userId: uid,
             reason: endResult.reason,
             errorMessage: endResult.error,
             source: 'UI',
@@ -468,7 +520,7 @@ export default function LiveStreamScreen({ navigation, route }) {
           logStreamingEvent('STREAM_END_SUCCESS', {
             backendId: 'HLS',
             streamId,
-            userId: firebaseUid,
+            userId: uid,
             source: 'UI',
           });
         }
@@ -518,7 +570,7 @@ export default function LiveStreamScreen({ navigation, route }) {
     // Update like count in Firestore asynchronously (non-blocking)
     try {
       if (isViewer && routeStreamId) {
-        HLSLiveStreamService.addLike(routeStreamId);
+        HLSLiveStreamServiceInstance.addLike(routeStreamId);
       }
     } catch (_e) {
       // ignore like failures for UX smoothness
@@ -528,7 +580,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   const sendComment = async () => {
     if (!newComment.trim() || !streamId) return;
     try {
-      await HLSLiveStreamService.addComment(streamId, newComment);
+      await HLSLiveStreamServiceInstance.addComment(streamId, newComment);
       setNewComment('');
     } catch (error) {
       console.error('Error sending comment:', error);
@@ -538,7 +590,7 @@ export default function LiveStreamScreen({ navigation, route }) {
   // Subscribe to comments while hosting
   useEffect(() => {
     if (!isStreaming || !streamId) return;
-    const unsubscribe = HLSLiveStreamService.subscribeToComments(streamId, (items) => {
+    const unsubscribe = HLSLiveStreamServiceInstance.subscribeToComments(streamId, (items) => {
       // Normalize to expected shape for UI
       const normalized = items.map((c) => ({
         id: c.id,
@@ -568,8 +620,8 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   // Handle camera ready state
   const handleCameraReady = () => {
-    console.log('📸 Camera is now READY');
-    setCameraReady(true);
+    console.log('[LIVE][CAMERA_READY] CameraView is ready');
+    // Note: setCameraReady already managed by permission effect
   };
 
   if (cameraPermission === null || microphonePermission === null) {
@@ -691,13 +743,24 @@ export default function LiveStreamScreen({ navigation, route }) {
     >
       <StatusBar style="light" />
       <View style={styles.cameraContainer}>
-        {cameraReady && (
+        {cameraReady ? (
           <CameraView
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
             facing={facing}
-            onCameraReady={handleCameraReady}
+            onCameraReady={() => {
+              console.log('[CAMERA] ✅ CameraView onCameraReady fired - camera stream ACTIVE');
+              handleCameraReady();
+            }}
           />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }]}>
+            <Text style={{ color: '#fff', fontSize: 16 }}>
+              {cameraPermission?.granted && microphonePermission?.granted 
+                ? '📸 Loading camera...' 
+                : '🔒 Waiting for permissions...'}
+            </Text>
+          </View>
         )}
         
         {showCountdown && (
