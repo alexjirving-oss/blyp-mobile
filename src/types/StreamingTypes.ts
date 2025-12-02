@@ -61,6 +61,44 @@ export type StreamingErrorReason =
   | 'BACKEND_ERROR';
 
 /**
+ * Streaming event types for observability
+ */
+export type StreamingEventType =
+  | 'STREAM_START_REQUEST'
+  | 'STREAM_START_SUCCESS'
+  | 'STREAM_START_FAILURE'
+  | 'STREAM_END_REQUEST'
+  | 'STREAM_END_SUCCESS'
+  | 'STREAM_END_FAILURE'
+  | 'SEGMENT_UPLOAD_REQUEST'
+  | 'SEGMENT_UPLOAD_SUCCESS'
+  | 'SEGMENT_UPLOAD_FAILURE'
+  | 'VIEWER_SUBSCRIBE_REQUEST'
+  | 'VIEWER_SUBSCRIBE_SNAPSHOT'
+  | 'VIEWER_SUBSCRIBE_END'
+  | 'VIEWER_ERROR'
+  | 'BACKEND_NOT_CONFIGURED'
+  | 'PERMISSION_DENIED'
+  | 'BACKEND_ERROR';
+
+/**
+ * Streaming log payload for structured events
+ */
+export interface StreamingLogPayload {
+  backendId?: StreamingBackendId;
+  streamId?: string;
+  userId?: string;
+  segmentNumber?: number;
+  reason?: StreamingErrorReason;
+  errorMessage?: string;
+  status?: string;
+  viewerCount?: number;
+  source?: string; // 'UI' | 'viewer_ui' | 'backend'
+  mode?: string; // 'host' | 'viewer'
+  [key: string]: unknown;
+}
+
+/**
  * Unified result type for all streaming operations
  */
 export interface StreamingResult<T = unknown> {

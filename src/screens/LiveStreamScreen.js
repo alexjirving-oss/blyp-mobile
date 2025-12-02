@@ -24,6 +24,7 @@ import { StatusBar } from 'expo-status-bar';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
+import { logStreamingEvent } from '../streaming/StreamingLog';
 
 const { width, height } = Dimensions.get('window');
 
@@ -275,6 +276,14 @@ export default function LiveStreamScreen({ navigation, route }) {
       }
       console.log('🚀 Starting live stream with camera:', cameraRef.current);
       
+      // Log UI-initiated stream start request
+      logStreamingEvent('STREAM_START_REQUEST', {
+        backendId: 'HLS',
+        userId: firebaseUid,
+        source: 'UI',
+        mode: 'host',
+      });
+
       // Use streaming backend (HLS or Agora) via factory
       const backend = getStreamingBackend();
       const result = await backend.createStream({
@@ -288,6 +297,15 @@ export default function LiveStreamScreen({ navigation, route }) {
       // Handle structured error
       if (!result.ok) {
         console.error('❌ Stream creation failed:', result.reason || result.error);
+        
+        logStreamingEvent('STREAM_START_FAILURE', {
+          backendId: 'HLS',
+          userId: firebaseUid,
+          reason: result.reason,
+          errorMessage: result.error,
+          source: 'UI',
+        });
+
         if (result.reason === 'BACKEND_NOT_CONFIGURED') {
           Alert.alert('Live streaming not available', 'Our live streaming backend is not fully configured yet. Please try again later.');
         } else if (result.reason === 'NOT_LOGGED_IN') {
@@ -298,6 +316,13 @@ export default function LiveStreamScreen({ navigation, route }) {
         setIsStreaming(false);
         return;
       }
+
+      logStreamingEvent('STREAM_START_SUCCESS', {
+        backendId: 'HLS',
+        userId: firebaseUid,
+        streamId: result.data.streamId,
+        source: 'UI',
+      });
       
       const newStreamId = result.data.streamId;
       
@@ -406,14 +431,36 @@ export default function LiveStreamScreen({ navigation, route }) {
       // End stream via streaming backend
       if (streamId) {
         const firebaseUid = auth?.currentUser?.uid || null;
+        
+        logStreamingEvent('STREAM_END_REQUEST', {
+          backendId: 'HLS',
+          streamId,
+          userId: firebaseUid,
+          source: 'UI',
+        });
+
         const backend = getStreamingBackend();
         const endResult = await backend.endStream({ streamId, userId: firebaseUid });
         
         if (!endResult.ok) {
           console.warn('⚠️ Stream end failed:', endResult.error);
+          logStreamingEvent('STREAM_END_FAILURE', {
+            backendId: 'HLS',
+            streamId,
+            userId: firebaseUid,
+            reason: endResult.reason,
+            errorMessage: endResult.error,
+            source: 'UI',
+          });
         } else {
           console.log('✅ Stream ended:', streamId);
           console.log('✅ User status set to "offline" (via backend)');
+          logStreamingEvent('STREAM_END_SUCCESS', {
+            backendId: 'HLS',
+            streamId,
+            userId: firebaseUid,
+            source: 'UI',
+          });
         }
       }
       

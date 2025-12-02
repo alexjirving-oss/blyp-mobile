@@ -7,6 +7,7 @@
 
 import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
 import { ensureUserProfile, createStream as liveServiceCreateStream } from '../services/LiveService';
+import { logStreamingEvent } from './StreamingLog';
 import type {
   StreamingBackendAPI,
   StreamingResult,
@@ -26,6 +27,12 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
    * Create a new live stream with user profile setup
    */
   async createStream({ userId, title, displayName, photoURL, email }): Promise<StreamingResult<HostStreamMeta>> {
+    logStreamingEvent('STREAM_START_REQUEST', {
+      backendId: 'HLS',
+      userId,
+      source: 'backend',
+    });
+
     try {
       // Ensure user profile exists (LiveService presence)
       await ensureUserProfile({ userId, displayName, photoURL, email });
@@ -63,6 +70,13 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
         userId,
       });
 
+      logStreamingEvent('STREAM_START_SUCCESS', {
+        backendId: 'HLS',
+        streamId: hlsResult.streamId,
+        userId,
+        source: 'backend',
+      });
+
       return {
         ok: true,
         data: {
@@ -74,6 +88,15 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
       };
     } catch (error) {
       console.error('[HLSBackend] createStream error:', error);
+      
+      logStreamingEvent('STREAM_START_FAILURE', {
+        backendId: 'HLS',
+        userId,
+        reason: 'BACKEND_ERROR',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        source: 'backend',
+      });
+
       return {
         ok: false,
         reason: 'BACKEND_ERROR',
@@ -86,6 +109,14 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
    * Upload a segment to Firebase Storage
    */
   async uploadSegment({ streamId, userId, fileUri, segmentNumber }): Promise<StreamingResult<{ segmentNumber: number }>> {
+    logStreamingEvent('SEGMENT_UPLOAD_REQUEST', {
+      backendId: 'HLS',
+      streamId,
+      userId,
+      segmentNumber,
+      source: 'backend',
+    });
+
     try {
       // HLS service uploadSegment throws on error, not structured result
       await HLSLiveStreamServiceInstance.uploadSegment(
@@ -95,21 +126,50 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
         userId
       );
 
+      logStreamingEvent('SEGMENT_UPLOAD_SUCCESS', {
+        backendId: 'HLS',
+        streamId,
+        userId,
+        segmentNumber,
+        source: 'backend',
+      });
+
       return {
         ok: true,
         data: { segmentNumber },
       };
     } catch (error: any) {
       console.error('[HLSBackend] uploadSegment error:', error);
+      
       // Map permission denied errors from Storage/Firestore
       if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
         console.error('[HLS][SECURITY] Permission denied in uploadSegment - check Storage/Firestore rules');
+        logStreamingEvent('SEGMENT_UPLOAD_FAILURE', {
+          backendId: 'HLS',
+          streamId,
+          userId,
+          segmentNumber,
+          reason: 'PERMISSION_DENIED',
+          errorMessage: 'Permission denied',
+          source: 'backend',
+        });
         return {
           ok: false,
           reason: 'PERMISSION_DENIED',
           error: 'You do not have permission to upload segments to this stream',
         };
       }
+
+      logStreamingEvent('SEGMENT_UPLOAD_FAILURE', {
+        backendId: 'HLS',
+        streamId,
+        userId,
+        segmentNumber,
+        reason: 'BACKEND_ERROR',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        source: 'backend',
+      });
+
       return {
         ok: false,
         reason: 'BACKEND_ERROR',
@@ -122,6 +182,13 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
    * End the live stream
    */
   async endStream({ streamId, userId }): Promise<StreamingResult<void>> {
+    logStreamingEvent('STREAM_END_REQUEST', {
+      backendId: 'HLS',
+      streamId,
+      userId,
+      source: 'backend',
+    });
+
     try {
       // HLS service endStream already returns structured result
       const result = await HLSLiveStreamServiceInstance.endStream(streamId, userId);
@@ -131,6 +198,16 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
         const mappedReason = result.reason === 'PERMISSION_DENIED' 
           ? 'PERMISSION_DENIED' 
           : 'BACKEND_ERROR';
+
+        logStreamingEvent('STREAM_END_FAILURE', {
+          backendId: 'HLS',
+          streamId,
+          userId,
+          reason: mappedReason as any,
+          errorMessage: result.error,
+          source: 'backend',
+        });
+
         return {
           ok: false,
           reason: mappedReason as any,
@@ -138,9 +215,26 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
         };
       }
 
+      logStreamingEvent('STREAM_END_SUCCESS', {
+        backendId: 'HLS',
+        streamId,
+        userId,
+        source: 'backend',
+      });
+
       return { ok: true };
     } catch (error) {
       console.error('[HLSBackend] endStream error:', error);
+      
+      logStreamingEvent('STREAM_END_FAILURE', {
+        backendId: 'HLS',
+        streamId,
+        userId,
+        reason: 'BACKEND_ERROR',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        source: 'backend',
+      });
+
       return {
         ok: false,
         reason: 'BACKEND_ERROR',
@@ -155,12 +249,27 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
    * Maps Firestore snapshot to ViewerStreamSnapshot interface.
    */
   subscribeToStream(streamId: string, onSnapshot: (snapshot: ViewerStreamSnapshot | null) => void): () => void {
+    logStreamingEvent('VIEWER_SUBSCRIBE_REQUEST', {
+      backendId: 'HLS',
+      streamId,
+      source: 'backend',
+    });
+
+    let snapshotCount = 0;
+
     // Forward to HLS service, normalizing the snapshot format
-    return HLSLiveStreamServiceInstance.subscribeToStream(streamId, (rawData: any) => {
+    const unsubscribe = HLSLiveStreamServiceInstance.subscribeToStream(streamId, (rawData: any) => {
       if (!rawData) {
+        logStreamingEvent('VIEWER_SUBSCRIBE_END', {
+          backendId: 'HLS',
+          streamId,
+          source: 'backend',
+        });
         onSnapshot(null);
         return;
       }
+
+      snapshotCount++;
 
       // Map Firestore document to ViewerStreamSnapshot
       const segments: ViewerStreamSegment[] = [];
@@ -182,7 +291,7 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
       // Sort segments by index
       segments.sort((a, b) => a.index - b.index);
 
-      onSnapshot({
+      const snapshot: ViewerStreamSnapshot = {
         streamId,
         title: rawData.title || 'Untitled Stream',
         hostUserId: rawData.hostUserId || rawData.userId,
@@ -191,7 +300,30 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
         currentSegment: rawData.currentSegment,
         viewCount: rawData.viewCount || 0,
         status: rawData.status,
-      });
+      };
+
+      // Log snapshot every 10th update to avoid spam
+      if (snapshotCount === 1 || snapshotCount % 10 === 0) {
+        logStreamingEvent('VIEWER_SUBSCRIBE_SNAPSHOT', {
+          backendId: 'HLS',
+          streamId,
+          status: snapshot.status,
+          viewerCount: snapshot.viewCount,
+          source: 'backend',
+        });
+      }
+
+      onSnapshot(snapshot);
     });
+
+    // Wrap unsubscribe to log termination
+    return () => {
+      logStreamingEvent('VIEWER_SUBSCRIBE_END', {
+        backendId: 'HLS',
+        streamId,
+        source: 'backend',
+      });
+      unsubscribe();
+    };
   },
 };

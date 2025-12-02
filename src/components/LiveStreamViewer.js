@@ -12,6 +12,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
+import { logStreamingEvent } from '../streaming/StreamingLog';
 import StreamSegmentsAdapter from '../services/StreamSegmentsAdapter';
 import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
 import ManifestService from '../services/ManifestService';
@@ -58,6 +59,13 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   if (__DEV__) console.log(`🎬 TikTok-style viewer initializing for stream ${streamId}`);
     setConnectionStatus('connecting');
     
+    // Log viewer subscribe request
+    logStreamingEvent('VIEWER_SUBSCRIBE_REQUEST', {
+      backendId: 'HLS',
+      streamId,
+      source: 'viewer_ui',
+    });
+
     // Subscribe to stream updates via streaming backend
     const backend = getStreamingBackend();
     unsubscribeRef.current = backend.subscribeToStream(streamId, async (snapshot) => {
@@ -66,8 +74,24 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       if (!data) {
         console.log('📡 Stream ended or connection lost');
         setConnectionStatus('ended');
+        logStreamingEvent('VIEWER_SUBSCRIBE_END', {
+          backendId: 'HLS',
+          streamId,
+          source: 'viewer_ui',
+        });
         handleStreamEnd();
         return; // End early when stream data unavailable
+      }
+
+      // Log first successful snapshot (status=live)
+      if (connectionStatus === 'connecting' && data.status === 'live') {
+        logStreamingEvent('VIEWER_SUBSCRIBE_SNAPSHOT', {
+          backendId: 'HLS',
+          streamId,
+          status: 'live',
+          viewerCount: data.viewCount,
+          source: 'viewer_ui',
+        });
       }
 
       setStreamData(data);
@@ -361,10 +385,19 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const handleStreamEnd = useCallback(() => {
     setIsPlaying(false);
     setIsBuffering(false);
+    
+    logStreamingEvent('VIEWER_ERROR', {
+      backendId: 'HLS',
+      streamId,
+      reason: 'STREAM_ENDED',
+      errorMessage: 'Stream has ended',
+      source: 'viewer_ui',
+    });
+
     // Ensure all subscriptions and timers are cleared on early termination
     cleanup();
     onError?.(new Error('Stream has ended'));
-  }, [onError]);
+  }, [onError, streamId]);
 
   /**
    * Cleanup function
