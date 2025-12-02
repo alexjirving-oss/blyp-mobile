@@ -12,8 +12,11 @@ const CreatePostButton = ({ accessibilityState }) => {
   const [showPostOptions, setShowPostOptions] = useState(false);
   const { uid, isAuthenticated, authReady } = useAuth();
   const streamingEnabled = isLiveStreamingEnabled();
-  const canGoLive = streamingEnabled;
-  const canCreatePost = authReady; // Only show when auth is stable
+  
+  // Visibility: show buttons always, do auth checks at action time
+  const canShowPlusMenu = true; // Always allow opening menu
+  const canShowPost = true; // Always show Post option
+  const canShowGoLive = streamingEnabled; // Show Go Live when streaming enabled
 
   const handlePress = () => {
     setShowMenu(true);
@@ -135,7 +138,7 @@ const CreatePostButton = ({ accessibilityState }) => {
           <View style={styles.menuContainer}>
             <View style={styles.menuHandle} />
             
-            {canCreatePost && (
+            {canShowPost && (
               <TouchableOpacity
                 style={styles.menuItem}
                 onPress={() => handleMenuOption('post')}
@@ -151,7 +154,7 @@ const CreatePostButton = ({ accessibilityState }) => {
               </TouchableOpacity>
             )}
 
-            {canGoLive && (
+            {canShowGoLive && (
               <TouchableOpacity
                 style={styles.menuItem}
                 onPress={() => handleMenuOption('live')}

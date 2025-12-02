@@ -52,7 +52,7 @@ class RateLimiter {
  */
 export class SmartListGenerator {
   constructor() {
-    this.model = genAI ? genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' }) : null;
+    this.model = genAI ? genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }) : null;
     this.rateLimiter = new RateLimiter();
   }
 

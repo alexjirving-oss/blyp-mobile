@@ -80,7 +80,7 @@ if ($GeminiKey) {
 if ($env:EXPO_PUBLIC_GEMINI_API_KEY) {
     # Optionally set URL if not provided (code also builds it, but set for clarity)
     if (-not $env:EXPO_PUBLIC_GEMINI_API_URL) {
-        $env:EXPO_PUBLIC_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=$($env:EXPO_PUBLIC_GEMINI_API_KEY)"
+        $env:EXPO_PUBLIC_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$($env:EXPO_PUBLIC_GEMINI_API_KEY)"
     }
 } else {
     Write-Host "   [INFO] Gemini key not found in env; AI will run in fallback mode." -ForegroundColor DarkYellow

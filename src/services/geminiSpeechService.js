@@ -83,15 +83,15 @@ class GeminiSpeechService {
         model
       });
 
-      const primaryModel = (this.apiUrl.includes(':generateContent') && this.apiUrl.split('/models/')[1]?.split(':')[0]) || 'gemini-2.5-flash-preview-05-20';
+      const primaryModel = (this.apiUrl.includes(':generateContent') && this.apiUrl.split('/models/')[1]?.split(':')[0]) || 'gemini-2.5-flash';
       const secondaryModel = 'gemini-1.5-flash';
       console.log(`🧪 Primary model: ${primaryModel} Secondary model: ${secondaryModel}`);
 
       console.log('🌐 Sending audio to Gemini for transcription...');
 
-      // Create timeout promise
+      // Create timeout promise (30 seconds for audio processing)
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout after 15 seconds')), 15000)
+        setTimeout(() => reject(new Error('Request timeout after 30 seconds')), 30000)
       );
 
       // Create fetch promise  
@@ -119,13 +119,21 @@ class GeminiSpeechService {
       let transcriptCandidate = this.extractTranscript(result);
       if (!transcriptCandidate) {
         console.warn('⚠️ Primary model produced no transcript; trying secondary model');
-        const response2 = await fetchWithModel(secondaryModel);
-        if (response2.ok) {
-          result = await response2.json();
-          console.log('📨 Raw Gemini response (secondary):', JSON.stringify(result).slice(0, 500));
-          transcriptCandidate = this.extractTranscript(result);
-        } else {
-          console.warn('⚠️ Secondary model request failed status=', response2.status);
+        try {
+          const secondaryPromise = fetchWithModel(secondaryModel);
+          const secondaryTimeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Secondary model timeout after 30 seconds')), 30000)
+          );
+          const response2 = await Promise.race([secondaryPromise, secondaryTimeout]);
+          if (response2.ok) {
+            result = await response2.json();
+            console.log('📨 Raw Gemini response (secondary):', JSON.stringify(result).slice(0, 500));
+            transcriptCandidate = this.extractTranscript(result);
+          } else {
+            console.warn('⚠️ Secondary model request failed status=', response2.status);
+          }
+        } catch (secondaryError) {
+          console.warn('⚠️ Secondary model failed:', secondaryError.message);
         }
       }
       

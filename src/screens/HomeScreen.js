@@ -394,19 +394,30 @@ const HomeScreen = ({ navigation }) => {
       .onSnapshot((snapshot) => {
         if (!mounted) return;
         const allPosts = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        const onlyVideos = allPosts.filter((p) => p.type === 'video');
-        const validVideos = onlyVideos.filter((p) => {
-          const uri = fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url);
-          return typeof uri === 'string' && uri.trim().length > 0;
+        // Show ALL posts (images and videos)
+        const validPosts = allPosts.filter((p) => {
+          // For videos, verify video URL exists
+          if (p.type === 'video') {
+            const uri = fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url);
+            return typeof uri === 'string' && uri.trim().length > 0;
+          }
+          // For images, verify image URL or media array exists
+          if (p.type === 'image') {
+            const hasImageUrl = p.imageUrl || p.mediaUrl;
+            const hasMediaArray = Array.isArray(p.media) && p.media.length > 0;
+            return hasImageUrl || hasMediaArray;
+          }
+          // Allow other post types through
+          return true;
         });
-        if (validVideos.length === 0) {
-          console.warn('WARN [HOME] No video posts found in Firestore (no fallback).');
+        if (validPosts.length === 0) {
+          console.warn('WARN [HOME] No posts found in Firestore.');
           setRandomPosts([]);
           setIsEmptyFeed(true);
           setLoading(false);
           isInitialLoad = false;
         } else {
-          const shuffled = [...validVideos].sort(() => 0.5 - Math.random());
+          const shuffled = [...validPosts].sort(() => 0.5 - Math.random());
           setRandomPosts(shuffled);
           setIsEmptyFeed(false);
           setLoading(false);
@@ -415,7 +426,7 @@ const HomeScreen = ({ navigation }) => {
         if (auth.currentUser) {
           const userId = auth.currentUser.uid;
           const likedState = {};
-          validVideos.forEach((post) => {
+          validPosts.forEach((post) => {
             likedState[post.id] = post.likedBy?.includes(userId) || false;
           });
           setLiked((prev) => ({ ...prev, ...likedState }));
@@ -970,7 +981,7 @@ const HomeScreen = ({ navigation }) => {
           return (
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
               <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center' }} allowFontScaling={false}>
-                No videos yet. Be the first to post on Blyp.
+                No posts yet. Be the first to share on Blyp!
               </Text>
             </View>
           );

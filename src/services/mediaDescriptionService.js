@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { geminiApiKey } from '../config/firebase';
 
 // Construct API URL with current key
-const getApiUrl = () => `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+const getApiUrl = () => `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
 
 class MediaDescriptionService {
   /**
