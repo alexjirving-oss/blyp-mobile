@@ -35,6 +35,7 @@ export const clearCognitoSessions = async () => {
 export const useAuth = () => {
   const [user, setUser] = useState(undefined);
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false); // NEW: signals auth system is stable
   const [error, setError] = useState(null);
   // Prefer Firebase auth if explicitly requested via env, else use Cognito as default
   const preferFirebase = (() => {
@@ -54,6 +55,11 @@ export const useAuth = () => {
         const unsub = firebaseAuth.onAuthStateChanged((fbUser) => {
           setUser(fbUser || null);
           setLoading(false);
+          // Mark auth as ready once we've received first Firebase callback
+          if (!authReady) {
+            setAuthReady(true);
+            console.log('[AUTH][READY] Firebase auth stabilized', { hasUser: !!fbUser });
+          }
         });
         return () => {
           try { unsub && unsub(); } catch {}
@@ -126,6 +132,11 @@ export const useAuth = () => {
           }
           setUser((prev) => (prev === null ? prev : null));
           setLoading(false);
+          // Mark auth as ready even when no user (stable logged-out state)
+          if (!authReady) {
+            setAuthReady(true);
+            console.log('[AUTH][READY] Cognito auth stabilized (no user)');
+          }
           return;
         }
         current.getSession(async (err, session) => {
@@ -163,6 +174,11 @@ export const useAuth = () => {
           }
           setUser((prev) => (prev === current ? prev : current));
           setLoading(false);
+          // Mark auth as ready once we've validated session
+          if (!authReady) {
+            setAuthReady(true);
+            console.log('[AUTH][READY] Cognito auth stabilized with valid session');
+          }
         });
       } catch (e) {
         // If library throws while constructing session, nuke cached tokens and proceed unauthenticated
@@ -174,6 +190,11 @@ export const useAuth = () => {
           await clearCognitoSessions();
           setUser((prev) => (prev === null ? prev : null));
           setLoading(false);
+          // Mark auth as ready even after clearing corrupted session
+          if (!authReady) {
+            setAuthReady(true);
+            console.log('[AUTH][READY] Cognito auth stabilized (cleared corrupted session)');
+          }
         }
       }
     };
@@ -197,6 +218,9 @@ export const useAuth = () => {
             suppressInvalidationUntil = Date.now() + 180000; // 180s grace
             setUser(maybeUser);
             setLoading(false);
+            // Immediately mark as ready when explicitly refreshed with valid user
+            setAuthReady(true);
+            console.log('[AUTH][READY] Explicit refresh with valid user');
           });
           return;
         } catch {
@@ -211,7 +235,72 @@ export const useAuth = () => {
     return () => clearInterval(interval);
   }, []);
   
-  return { user, loading, error, isAuthenticated: !!user };
+  // Enforce invariants: if authenticated, we MUST have a uid
+  // Extract uid from Cognito user (username as fallback) or Firebase user
+  const uid = React.useMemo(() => {
+    if (!user) return null;
+    
+    // Firebase user path (when preferFirebase is true)
+    if (firebaseEnabled && preferFirebase && user.uid) {
+      return user.uid;
+    }
+    
+    // Cognito user path (default)
+    try {
+      // Try to get sub from attributes (standard Cognito field)
+      if (user.attributes?.sub) {
+        return user.attributes.sub;
+      }
+      // Fallback to username (Cognito guaranteed field)
+      if (user.username) {
+        return user.username;
+      }
+      // Last resort: try getUsername() method
+      if (typeof user.getUsername === 'function') {
+        const username = user.getUsername();
+        if (username) return username;
+      }
+    } catch (err) {
+      console.error('[AUTH] Error extracting uid from user:', err);
+    }
+    
+    return null;
+  }, [user, preferFirebase]);
+  
+  // CRITICAL: isAuthenticated only true when auth system is ready AND we have valid uid
+  // This prevents race conditions where screens access auth before it's stable
+  const isAuthenticated = authReady && !!user && !!uid;
+  
+  // Log hard error if we detect broken state
+  React.useEffect(() => {
+    if (user && !uid && !loading && authReady) {
+      console.error('[AUTH][INVARIANT VIOLATION] User object exists but no uid could be extracted. Forcing isAuthenticated=false.', {
+        hasUser: !!user,
+        userKeys: user ? Object.keys(user).slice(0, 10) : [],
+        preferFirebase,
+        firebaseEnabled,
+        authReady
+      });
+    }
+  }, [user, uid, loading, preferFirebase, authReady]);
+  
+  // Log race detection when components try to access before ready
+  React.useEffect(() => {
+    if (!authReady && !loading) {
+      console.warn('[AUTH][RACE_DETECTED] Auth accessed before stabilization complete');
+    }
+  }, [authReady, loading]);
+  
+  return { 
+    user, 
+    uid, 
+    loading, 
+    authReady,  // NEW: expose ready state
+    error, 
+    isAuthenticated,
+    // Aliases for compatibility
+    currentUser: user
+  };
 };
 
 // Custom hook for Firestore document

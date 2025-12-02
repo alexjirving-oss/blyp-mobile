@@ -34,7 +34,7 @@ console.log('📸 LiveStreamScreen: CameraView imported?', typeof CameraView);
 export default function LiveStreamScreen({ navigation, route }) {
   useRenderTimer('LiveStreamScreen');
   const trackAsync = useTrackAsync();
-    const { user: currentUser, isAuthenticated, loading: authLoading } = useAuth();
+    const { user: currentUser, isAuthenticated, authReady, loading: authLoading } = useAuth();
   
   // Safe route/params extraction with defaults
   const safeRoute = route || {};
@@ -240,7 +240,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       Alert.alert('Camera Error', 'Camera reference was lost. Please try again.');
 
           // Auth guard: ensure user is logged in before attempting stream
-          if (!currentUser || !isAuthenticated) {
+          if (!authReady || !currentUser || !isAuthenticated) {
             console.warn('[LIVE] Cannot start stream – no logged-in user');
             Alert.alert(
               'Login Required',

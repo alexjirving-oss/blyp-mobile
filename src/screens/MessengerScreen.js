@@ -63,32 +63,34 @@ const MessengerScreen = ({ navigation }) => {
   const [gemBalance, setGemBalance] = useState(0);
   
   // Use proper authentication state management
-  const { user: currentUser, isAuthenticated, loading: authLoading } = useAuth();
+  const { user: currentUser, uid, isAuthenticated, authReady, loading: authLoading } = useAuth();
   
   // Debug authentication state
   useEffect(() => {
     console.log('🔐 MESSENGER AUTH STATE:', {
-      currentUser: currentUser?.uid,
+      uid,
       isAuthenticated,
+      authReady,
       authLoading,
+      hasUser: !!currentUser,
       displayName: currentUser?.displayName,
       email: currentUser?.email
     });
-  }, [currentUser?.uid, isAuthenticated, authLoading]);
+  }, [uid, isAuthenticated, authReady, authLoading, currentUser?.displayName, currentUser?.email]);
 
   // Calculate total unread messages (memoized to prevent infinite loops)
   const totalUnreadCount = React.useMemo(() => {
-    if (!currentUser?.uid) return 0;
+    if (!uid) return 0;
     return chats.reduce((total, chat) => {
-      const unreadCount = chat.unreadCount?.[currentUser.uid] || 0;
+      const unreadCount = chat.unreadCount?.[uid] || 0;
       return total + unreadCount;
     }, 0);
-  }, [chats, currentUser?.uid]);
+  }, [chats, uid]);
 
   useEffect(() => {
-    // Only load data when user is authenticated and not loading
-    if (authLoading || !isAuthenticated || !currentUser) {
-      console.log('⏳ MESSENGER: Waiting for authentication...', { authLoading, isAuthenticated, hasUser: !!currentUser });
+    // Block until auth system is ready and user is authenticated
+    if (!authReady || authLoading || !isAuthenticated || !currentUser) {
+      console.log('⏳ MESSENGER: Waiting for authentication...', { authReady, authLoading, isAuthenticated, hasUser: !!currentUser });
       return;
     }
     
@@ -106,15 +108,15 @@ const MessengerScreen = ({ navigation }) => {
       if (unsubscribeFollowing) unsubscribeFollowing();
       if (unsubscribeAllUsers) unsubscribeAllUsers();
     };
-  // Only depend on authLoading, isAuthenticated, and uid - not the entire currentUser object
+  // Only depend on authReady, authLoading, isAuthenticated, and uid - not the entire currentUser object
   // Using function references in dependencies to ensure they're stable
-  }, [authLoading, isAuthenticated, currentUser?.uid, loadChats, loadFollowingUsers, loadAllUsers, loadBalances]);
+  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadBalances]);
   
   const loadBalances = React.useCallback(async () => {
-    if (!currentUser?.uid) return;
+    if (!uid) return;
     try {
-      const coins = await BlypCoinService.getUserBalance(currentUser.uid);
-      const gems = await GemService.getUserGems(currentUser.uid);
+      const coins = await BlypCoinService.getUserBalance(uid);
+      const gems = await GemService.getUserGems(uid);
       setCoinBalance(coins);
       setGemBalance(gems);
     } catch (error) {
@@ -122,7 +124,7 @@ const MessengerScreen = ({ navigation }) => {
       setCoinBalance(0);
       setGemBalance(0);
     }
-  }, [currentUser?.uid]);
+  }, [uid]);
 
   // Update unread count manager when total count changes
   useEffect(() => {
@@ -135,28 +137,33 @@ const MessengerScreen = ({ navigation }) => {
   // Update filtered users when following list changes
   useEffect(() => {
     console.log('🔥 MESSENGER: Filtering users - allUsers:', allUsers.length, 'followingIds:', followingUserIds.size);
-    if (allUsers.length > 0 && currentUser?.uid) {
+    if (allUsers.length > 0 && uid) {
       // TEMPORARILY SHOW ALL USERS (ignoring following status for testing)  
       const filteredUsers = allUsers.filter(user => 
-        user.id !== currentUser.uid
+        user.id !== uid
       );
       Logger.firebase('Filtered users for display', { 
         filteredCount: filteredUsers.length,
         users: filteredUsers.map(u => ({ id: u.id, username: u.username }))
       });
     }
-  }, [followingUserIds, allUsers, currentUser?.uid]);
+  }, [followingUserIds, allUsers, uid]);
 
 
 
   const loadChats = React.useCallback(() => {
+    if (!uid) {
+      console.warn('MESSENGER: No uid available, cannot load chats');
+      return () => {};
+    }
+    
     try {
-      console.log('📥 MESSENGER: Loading chats for user:', currentUser.uid);
+      console.log('📥 MESSENGER: Loading chats for user:', uid);
       
       // Simplified query to avoid Firebase index requirements
       const q = query(
         collection(db, 'chats'),
-        where('participants', 'array-contains', currentUser.uid)
+        where('participants', 'array-contains', uid)
       );
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -195,13 +202,16 @@ const MessengerScreen = ({ navigation }) => {
       setLoading(false);
       return () => {};
     }
-  }, [currentUser?.uid]);
+  }, [uid]);
 
   const loadFollowingUsers = React.useCallback(() => {
-    if (!currentUser?.uid) return () => {};
+    if (!uid) {
+      console.warn('MESSENGER: No uid available, cannot load following users');
+      return () => {};
+    }
     
     // Subscribe to the list of users the current user is following
-    const unsubscribe = subscribeToFollowingList(currentUser.uid, (followingSet) => {
+    const unsubscribe = subscribeToFollowingList(uid, (followingSet) => {
       console.log('🔄 MESSENGER: Received following list update with', followingSet.size, 'users');
       setFollowingUserIds(followingSet);
       
@@ -211,7 +221,7 @@ const MessengerScreen = ({ navigation }) => {
     });
     
     return unsubscribe;
-  }, [currentUser?.uid]);
+  }, [uid]);
   
   // Separate effect to fetch user data when followingUserIds changes
   useEffect(() => {
@@ -246,11 +256,14 @@ const MessengerScreen = ({ navigation }) => {
   }, [followingUserIds]);
 
   const loadAllUsers = React.useCallback(() => {
-    if (!currentUser?.uid) return () => {};
+    if (!uid) {
+      console.warn('MESSENGER: No uid available, cannot load all users');
+      return () => {};
+    }
     try {
       // Subscribe to all users for the "People you may know" section
-      console.log('👥 MESSENGER: Loading all users for current user:', currentUser.uid);
-      Logger.firebase('Loading all users for current user', { userId: currentUser.uid });
+      console.log('👥 MESSENGER: Loading all users for current user:', uid);
+      Logger.firebase('Loading all users for current user', { userId: uid });
       const q = query(collection(db, 'users'));
       
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -260,7 +273,7 @@ const MessengerScreen = ({ navigation }) => {
           id: doc.id,
           username: doc.data().username || doc.data().displayName || 'Unknown User',
           ...doc.data()
-        })).filter(user => user.id !== currentUser.uid); // Only exclude current user
+        })).filter(user => user.id !== uid); // Only exclude current user
         
         console.log('✅ MESSENGER: Filtered users:', allUsersData.length, 'users after excluding current user');
         
@@ -279,7 +292,7 @@ const MessengerScreen = ({ navigation }) => {
       console.error('❌ MESSENGER: Error setting up users listener:', error);
       return () => {};
     }
-  }, [currentUser?.uid]);
+  }, [uid]);
 
 
 
@@ -1005,7 +1018,7 @@ const MessengerScreen = ({ navigation }) => {
   };
 
   // Show loading screen while authentication is loading
-  if (authLoading) {
+  if (!authReady || authLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
@@ -1018,7 +1031,7 @@ const MessengerScreen = ({ navigation }) => {
   }
 
   // Show authentication required screen if not authenticated
-  if (!isAuthenticated || !currentUser) {
+  if (!authReady || !isAuthenticated || !currentUser) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />

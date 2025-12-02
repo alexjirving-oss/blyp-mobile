@@ -11,7 +11,7 @@ import { useAuth } from '../hooks/useCommon';
 export default function ModerationQueueScreen() {
   const { isAdmin, loading: roleLoading } = useIsAdmin();
   const { items, loading, markUnderReview, resolve, refresh } = useModerationQueue({ auto: isAdmin, limit: 50 });
-  const { user } = useAuth();
+  const { user, authReady } = useAuth();
 
   if (roleLoading) {
     return (<View style={styles.container}><ActivityIndicator color="#ec4899" /></View>);

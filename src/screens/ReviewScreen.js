@@ -38,7 +38,7 @@ const ReviewScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { media, type, mode, transcript, source } = route.params || {};
-  const { user: cognitoUser, isAuthenticated } = useAuth();
+  const { user: cognitoUser, isAuthenticated, authReady } = useAuth();
   
   // Debug route params on screen initialization
   console.log('🚀 ReviewScreen initialized with route params:', {

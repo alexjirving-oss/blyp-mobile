@@ -336,8 +336,8 @@ const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.log('💰 HOME: No user logged in, skipping balance subscriptions');
+    if (!currentUser || !currentUser.uid) {
+      console.log('💰 HOME: No user logged in or uid missing, skipping balance subscriptions');
       return;
     }
     console.log('💰 HOME: Setting up balance subscriptions for user:', currentUser.uid);
