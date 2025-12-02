@@ -3,11 +3,16 @@ import Icon from './Icon';
 import { TouchableOpacity, StyleSheet, Dimensions, Modal, View, Text, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../hooks/useCommon';
+import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 
 const CreatePostButton = ({ accessibilityState }) => {
   const navigation = useNavigation();
   const [showMenu, setShowMenu] = useState(false);
   const [showPostOptions, setShowPostOptions] = useState(false);
+  const { user } = useAuth();
+  const streamingEnabled = isLiveStreamingEnabled();
+  const canGoLive = !!user?.uid && streamingEnabled;
 
   const handlePress = () => {
     setShowMenu(true);
@@ -21,6 +26,20 @@ const CreatePostButton = ({ accessibilityState }) => {
         setShowPostOptions(true);
         break;
       case 'live':
+        if (!streamingEnabled) {
+          Alert.alert(
+            'Live streaming disabled',
+            'Live streaming is currently turned off for this build.'
+          );
+          return;
+        }
+        if (!user?.uid) {
+          Alert.alert(
+            'Login required',
+            'You need to be logged in to go live.'
+          );
+          return;
+        }
         navigation.navigate('LiveStreamScreen', { mode: 'host' });
         break;
     }
@@ -91,22 +110,24 @@ const CreatePostButton = ({ accessibilityState }) => {
               </LinearGradient>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => handleMenuOption('live')}
-            >
-              <LinearGradient
-                colors={['#ef4444', '#dc2626', '#b91c1c']}
-                style={styles.menuItemGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+            {canGoLive && (
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => handleMenuOption('live')}
               >
-                <View style={styles.liveButtonContent}>
-                  <Icon  name="radio-outline" size={20} color="#ffffff"  />
-                  <Text style={styles.menuItemTextLive}>Go Live</Text>
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
+                <LinearGradient
+                  colors={['#ef4444', '#dc2626', '#b91c1c']}
+                  style={styles.menuItemGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <View style={styles.liveButtonContent}>
+                    <Icon  name="radio-outline" size={20} color="#ffffff"  />
+                    <Text style={styles.menuItemTextLive}>Go Live</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
