@@ -507,6 +507,9 @@ const LiveStreamScreen = () => {
         title: title.trim(),
         description: description.trim(),
         thumbnailFile: thumbnailUri,
+        userId: auth?.currentUser?.uid || null,
+        userDisplayName: auth?.currentUser?.displayName || undefined,
+        userPhotoURL: auth?.currentUser?.photoURL || undefined,
       });
 
       // Extract streamId from the result object with validation
@@ -599,7 +602,7 @@ const LiveStreamScreen = () => {
               // Stop recording before ending stream
               stopVideoRecording();
               
-              await HLSLiveStreamService.endStream(route.params.streamId);
+              await HLSLiveStreamService.endStream(route.params.streamId, auth?.currentUser?.uid || null);
               navigation.goBack();
             } catch (error) {
               console.error('❌ Error ending stream:', error);
@@ -677,7 +680,7 @@ const LiveStreamScreen = () => {
         
         // Upload to Firebase in background (don't await to avoid blocking next recording)
         console.log(`🔥 [UPLOAD] Starting upload of segment ${segmentCounter} to Firebase...`);
-        HLSLiveStreamService.uploadSegment(streamId, video.uri, segmentCounter)
+        HLSLiveStreamService.uploadSegment(streamId, video.uri, segmentCounter, auth?.currentUser?.uid || null)
           .then((downloadURL) => {
             console.log(`✅ [UPLOAD] Segment ${segmentCounter} uploaded successfully:`, downloadURL);
           })

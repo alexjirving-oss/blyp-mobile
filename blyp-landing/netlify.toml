@@ -1,0 +1,33 @@
+# Netlify configuration for Blyp landing page
+# This is a static HTML site - no build process needed
+
+[build]
+  # No build command - pure static files
+  command = ""
+  # Publish the current directory
+  publish = "."
+
+# Optional: Configure custom headers for better security and caching
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Optional: 404 fallback to index (in case someone tries wrong paths)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 404

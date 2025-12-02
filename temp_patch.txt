@@ -1,0 +1,16 @@
+      // 🔥 Use HLSLiveStreamService to create stream in liveStreams collection
+      const result = await HLSLiveStreamService.createStream({
+        title: title,
+        description: '',
+        thumbnailFile: null
+      });
+      
+      // Handle structured error (e.g., NOT_LOGGED_IN)
+      if (result && result.ok === false) {
+        console.error('❌ Stream creation failed:', result.reason || result.error);
+        Alert.alert('Streaming Error', result.error || 'Could not start live stream.');
+        setIsStreaming(false);
+        return;
+      }
+      
+      const { streamId: newStreamId, streamData } = result;

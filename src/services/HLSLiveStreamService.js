@@ -15,7 +15,7 @@
  * ✅ Low latency (3-5 seconds typical)
  */
 
-import { db, auth, storage } from '../config/firebase';
+import { db, auth, storage, firebaseEnabled } from '../config/firebase';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { serverTimestamp, increment } from 'firebase/firestore';
@@ -60,10 +60,16 @@ class HLSLiveStreamService {
   /**
    * Create a new live stream - Production Ready with Input Validation
    */
-  async createStream({ title, description, thumbnailFile } = {}) {
+  async createStream({ title, description, thumbnailFile, userId, userDisplayName, userPhotoURL } = {}) {
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User must be logged in to stream');
+      if (!firebaseEnabled || !db || !storage || typeof db.collection !== 'function') {
+        console.warn('[HLS] Backend not configured for live streaming');
+        return { ok: false, reason: 'HLS_BACKEND_NOT_CONFIGURED', error: 'Live streaming backend is not configured' };
+      }
+      if (!userId || typeof userId !== 'string') {
+        console.warn('[HLS] createStream called without userId');
+        return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in to stream' };
+      }
       
       // Production validation: Ensure all inputs are properly typed
       const validTitle = typeof title === 'string' ? title.trim() : '';
@@ -76,7 +82,7 @@ class HLSLiveStreamService {
       let thumbnailUrl = null;
       if (thumbnailFile) {
         try {
-          const thumbnailPath = `streams/${user.uid}/thumbnail_${Date.now()}.jpg`;
+          const thumbnailPath = `streams/${userId}/thumbnail_${Date.now()}.jpg`;
           const thumbnailRef = ref(storage, thumbnailPath);
           // Prefer local URI upload via putFile
           if (typeof thumbnailFile === 'string') {
@@ -96,9 +102,9 @@ class HLSLiveStreamService {
       const streamData = {
         title: validTitle || 'Live Stream',
         description: validDescription || '',
-        userId: user.uid,
-        userName: (user.displayName && typeof user.displayName === 'string') ? user.displayName.trim() : 'Anonymous User',
-        userPhotoURL: (user.photoURL && typeof user.photoURL === 'string') ? user.photoURL : null,
+        userId: userId,
+        userName: (userDisplayName && typeof userDisplayName === 'string') ? userDisplayName.trim() : 'Anonymous User',
+        userPhotoURL: (userPhotoURL && typeof userPhotoURL === 'string') ? userPhotoURL : null,
         thumbnailUrl,
         status: 'live',
         segments: {}, // legacy inline segment map (temporary; will migrate to subcollection)
@@ -126,7 +132,7 @@ class HLSLiveStreamService {
       
       // Update user profile to mark as live
       try {
-        await db.collection('userProfiles').doc(user.uid).update({
+        await db.collection('userProfiles').doc(userId).update({
           isLive: true,
           currentStreamId: streamId,
           lastStreamStarted: serverTimestamp()
@@ -139,24 +145,24 @@ class HLSLiveStreamService {
       
       // Track active stream for cleanup
       this.activeStreams.set(streamId, {
-        userId: user.uid,
+        userId: userId,
         startTime: Date.now(),
         segmentCount: 0
       });
       
       console.log(`✅ Stream created: ${streamId}`);
-      return { streamId, streamData };
+      return { ok: true, streamId, streamData };
       
     } catch (error) {
       console.error('❌ Error creating stream:', error);
-      throw error;
+      return { ok: false, reason: 'HLS_BACKEND_ERROR', error: error?.message || 'Failed to create stream' };
     }
   }
 
   /**
    * Upload a video segment to Firebase Storage - Production Ready with Full Validation
    */
-  async uploadSegment(streamId, videoUri, segmentNumber) {
+  async uploadSegment(streamId, videoUri, segmentNumber, userId) {
     try {
       // Production validation: Check all required parameters
       if (!streamId || typeof streamId !== 'string') {
@@ -169,8 +175,7 @@ class HLSLiveStreamService {
         throw new Error('Invalid segmentNumber: must be a non-negative number');
       }
       
-      const user = auth.currentUser;
-      if (!user || !user.uid) {
+      if (!userId || typeof userId !== 'string') {
         throw new Error('User must be logged in with valid UID');
       }
       
@@ -186,7 +191,7 @@ class HLSLiveStreamService {
       console.log(`📤 Production upload (active=${this.currentActiveUploads}/${this.maxConcurrentUploads}) segment ${segmentNumber}`);
       
       // Production-grade storage path with validation
-      const validUserId = user.uid.toString().replace(/[^a-zA-Z0-9-_]/g, '_'); // Sanitize UID
+        const validUserId = userId.toString().replace(/[^a-zA-Z0-9-_]/g, '_'); // Sanitize UID
       const validStreamId = streamId.toString().replace(/[^a-zA-Z0-9-_]/g, '_'); // Sanitize streamId
       const storagePrefix = `streams/${validUserId}/${validStreamId}`;
       const segmentPath = `${storagePrefix}/segment_${segmentNumber}.mp4`;
@@ -520,10 +525,16 @@ class HLSLiveStreamService {
   /**
    * End a live stream
    */
-  async endStream(streamId) {
+  async endStream(streamId, userId) {
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User must be logged in');
+      if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
+        console.warn('[HLS] endStream called but backend not configured');
+        return { ok: false, reason: 'HLS_BACKEND_NOT_CONFIGURED', error: 'Live streaming backend is not configured' };
+      }
+      if (!userId || typeof userId !== 'string') {
+        console.warn('[HLS] endStream called without userId');
+        return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in' };
+      }
       
       console.log(`⏹️ Ending stream ${streamId}...`);
       
@@ -544,7 +555,7 @@ class HLSLiveStreamService {
       
       // Update user profile to mark as no longer live
       try {
-        await db.collection('userProfiles').doc(user.uid).update({
+        await db.collection('userProfiles').doc(userId).update({
           isLive: false,
           currentStreamId: null,
           lastStreamEnded: serverTimestamp()
@@ -566,10 +577,11 @@ class HLSLiveStreamService {
       }
       
       console.log(`✅ Stream ${streamId} ended successfully`);
+      return { ok: true };
       
     } catch (error) {
       console.error('❌ Error ending stream:', error);
-      throw error;
+      return { ok: false, reason: 'HLS_BACKEND_ERROR', error: error?.message || 'Failed to end stream' };
     }
   }
 

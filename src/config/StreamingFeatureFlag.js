@@ -15,8 +15,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 import { firestore as db } from './firebase';
 
-// Build-time default (set to true to ship feature; set false before launch to hide while code remains bundled)
-export const BUILD_ENABLE_LIVE_STREAMING = true;
+// Single source of truth default from env: EXPO_PUBLIC_ENABLE_STREAMING
+const __ENV_STREAMING = (process?.env?.EXPO_PUBLIC_ENABLE_STREAMING || '').toString().toLowerCase();
+export const BUILD_ENABLE_LIVE_STREAMING = __ENV_STREAMING === '1' || __ENV_STREAMING === 'true';
 
 // Firestore document path for remote toggle (create if absent):
 // collection: appConfig, doc: streaming

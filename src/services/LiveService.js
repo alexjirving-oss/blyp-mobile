@@ -11,28 +11,32 @@ export async function setUserStatus(uid, status, currentStreamId = null) {
   }, { merge: true });
 }
 
-export async function ensureUserProfile() {
-  const user = auth.currentUser;
-  if (!user) {
-    console.warn("Cannot ensure user profile: No authenticated user");
+export async function ensureUserProfile({ userId, displayName, photoURL, email } = {}) {
+  const effectiveUserId = userId || auth.currentUser?.uid;
+  if (!effectiveUserId) {
+    console.warn("Cannot ensure user profile: No userId provided");
     return;
   }
 
-  const ref = db.collection("users").doc(user.uid);
+  const ref = db.collection("users").doc(effectiveUserId);
   await ref.set({
-    displayName: user.displayName || user.email?.split("@")[0] || "Anonymous",
-    photoURL: user.photoURL || null,
-    email: user.email || null,
+    displayName: displayName || auth.currentUser?.displayName || auth.currentUser?.email?.split("@")[0] || "Anonymous",
+    photoURL: photoURL ?? auth.currentUser?.photoURL ?? null,
+    email: email ?? auth.currentUser?.email ?? null,
     updatedAt: serverTimestamp()
     // ❌ Removed forced status: "offline" to prevent overwriting "live" status
   }, { merge: true });
   
-  console.log("✅ User profile ensured for:", user.uid);
+  console.log("✅ User profile ensured for:", effectiveUserId);
 }
 
 // ---------- STREAMS ----------
-export async function createStream({ streamId, title, thumbnailUrl }) {
-  const uid = auth.currentUser.uid;
+export async function createStream({ streamId, title, thumbnailUrl, userId }) {
+  const uid = userId || auth.currentUser?.uid;
+  if (!uid) {
+    console.warn('[LiveService] createStream called without userId');
+    return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in to stream' };
+  }
 
   // Create/merge stream doc with merge:true to avoid overwriting
   await db.collection("streams").doc(streamId).set({
@@ -48,12 +52,11 @@ export async function createStream({ streamId, title, thumbnailUrl }) {
   await setUserStatus(uid, "live", streamId);
 }
 
-export async function endStream(streamId) {
-  const uid = auth.currentUser?.uid;
-  
+export async function endStream(streamId, userId) {
+  const uid = userId || auth.currentUser?.uid;
   if (!uid) {
-    console.warn('Cannot end stream: No authenticated user');
-    return;
+    console.warn('[LiveService] endStream called without userId');
+    return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in' };
   }
 
   // Mark stream ended

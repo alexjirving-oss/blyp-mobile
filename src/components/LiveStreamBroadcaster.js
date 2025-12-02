@@ -12,6 +12,7 @@ import Icon from './Icon';
 import { View, StyleSheet, Alert, Text, TouchableOpacity } from 'react-native';
 import { CameraView } from 'expo-camera';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
+import { auth } from '../config/firebase';
 
 const LiveStreamBroadcaster = ({ streamId, onSegmentUploaded, onError, style }) => {
   const cameraRef = useRef(null);
@@ -297,7 +298,7 @@ const LiveStreamBroadcaster = ({ streamId, onSegmentUploaded, onError, style }) 
         // SUCCESS: Real video was recorded - upload it
         console.log(`🎥 SUCCESS: Real video segment ${currentSegment} recorded: ${video.uri}`);
         
-        HLSLiveStreamService.uploadSegment(streamId, video.uri, currentSegment)
+        HLSLiveStreamService.uploadSegment(streamId, video.uri, currentSegment, auth?.currentUser?.uid || null)
           .then((downloadURL) => {
             console.log(`✅ Video segment ${currentSegment} uploaded to: ${downloadURL}`);
             onSegmentUploaded?.(currentSegment, downloadURL);

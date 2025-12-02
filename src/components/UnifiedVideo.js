@@ -2,7 +2,7 @@
 // Adapter to centralize video backend (expo-av vs expo-video) behind an env flag.
 // Default behavior (flag off): use expo-av Video to ensure zero regression.
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
 import { Video as ExpoAVVideo } from 'expo-av';
 import { VideoView } from 'expo-video';
 
@@ -24,13 +24,26 @@ export default function UnifiedVideo({
   onPlaybackStatusUpdate, // retained for compatibility; not mapped in expo-video branch yet
   ...rest
 }) {
+  // Guard against missing/invalid URI: do not play mock or placeholder content
+  const uri = source && typeof source.uri === 'string' ? source.uri.trim() : '';
+  if (!uri) {
+    try {
+      console.warn('[UnifiedVideo] Missing video URI. Rendering fallback UI only.');
+    } catch {}
+    return (
+      <View style={[style || StyleSheet.absoluteFill, { backgroundColor: '#0b1220', alignItems: 'center', justifyContent: 'center' }]}>
+        <Text style={{ color: '#64748b', fontSize: 14 }}>Video unavailable</Text>
+      </View>
+    );
+  }
+
   // Dev-only backend selection logging
   if (__DEV__) {
     const backend = ENABLE_EXPO_VIDEO ? 'expo-video' : 'expo-av';
     try {
       // eslint-disable-next-line no-console
       console.log('[VIDEO][UnifiedVideo] backend selected:', backend, {
-        uri: source && source.uri,
+        uri,
       });
     } catch {}
   }
@@ -38,7 +51,7 @@ export default function UnifiedVideo({
   if (!ENABLE_EXPO_VIDEO) {
     return (
       <ExpoAVVideo
-        source={source}
+        source={{ uri }}
         style={style || StyleSheet.absoluteFill}
         resizeMode={resizeMode}
         shouldPlay={shouldPlay}
@@ -127,7 +140,7 @@ export default function UnifiedVideo({
     <VideoView
       ref={videoRef}
       style={style || StyleSheet.absoluteFill}
-      source={source}
+      source={{ uri }}
       contentFit={contentFit}
       isLooping={isLooping}
       isMuted={isMuted}

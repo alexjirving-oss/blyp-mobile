@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Blyp – Short Video & Live Streaming</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta
+    name="description"
+    content="Blyp is a next-gen short-video and live streaming app built for creators, fans and real-time rewards."
+  />
+  <style>
+    :root {
+      --primary: #a855f7;       /* Synced from app theme */
+      --primary-dark: #9333ea;  /* Synced from app theme */
+      --accent: #ec4899;        /* Synced from app theme (secondary) */
+      --bg: #0f172a;            /* Synced from app theme */
+      --card: #1e293b;          /* Synced from app theme */
+      --text: #ffffff;
+      --muted: #94a3b8;         /* Synced from app theme */
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #1e293b 0, #0f172a 55%);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: 1080px;
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 40px;
+      align-items: center;
+    }
+
+    @media (max-width: 800px) {
+      .shell {
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(236, 72, 153, 0.8);
+    }
+
+    h1 {
+      font-size: clamp(32px, 4vw, 44px);
+      line-height: 1.05;
+      margin: 0 0 14px;
+      letter-spacing: -0.02em;
+    }
+
+    h1 span.highlight {
+      background: linear-gradient(135deg, var(--accent), var(--primary));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .sub {
+      max-width: 480px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 800px) {
+      .cta-row {
+        justify-content: center;
+      }
+      .sub {
+        margin-left: auto;
+        margin-right: auto;
+      }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 18px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: var(--muted);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .micro {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .micro strong {
+      color: #fff;
+      font-weight: 500;
+    }
+
+    .right {
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+
+    .phone-frame {
+      width: 260px;
+      max-width: 70vw;
+      border-radius: 32px;
+      padding: 10px;
+      background: radial-gradient(circle at top, #334155, #1e293b);
+      box-shadow:
+        0 20px 50px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+    }
+
+    .phone-screen {
+      border-radius: 26px;
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 9 / 19.5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .phone-screen img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .pill {
+      position: absolute;
+      bottom: -24px;
+      right: 0;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      backdrop-filter: blur(14px);
+    }
+
+    .pill-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.8);
+    }
+
+    footer {
+      text-align: center;
+      padding: 30px 18px 18px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    footer a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      text-decoration: underline;
+    }
+
+    .coins-promo {
+      margin-top: 80px;
+      padding: 32px 24px;
+      max-width: 1080px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .coins-promo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 32px;
+    }
+
+    @media (max-width: 800px) {
+      .coins-promo-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 20px;
+      }
+    }
+
+    .coins-promo-text h2 {
+      font-size: 20px;
+      margin: 0 0 8px;
+      font-weight: 600;
+    }
+
+    .coins-promo-text p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin: 0;
+      max-width: 580px;
+    }
+
+    .btn-outline {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: var(--text);
+      text-decoration: none;
+      transition: all 0.12s ease;
+      white-space: nowrap;
+    }
+
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .why-blyp-link {
+      font-size: 0.9rem;
+      opacity: 0.9;
+      margin-top: 12px;
+      display: inline-block;
+    }
+
+    .why-blyp-link a {
+      color: #a855f7;
+      text-decoration: underline;
+    }
+
+    .why-section {
+      margin-top: 60px;
+      padding: 40px 24px;
+      max-width: 1080px;
+      margin-left: auto;
+      margin-right: auto;
+      background: radial-gradient(circle at top left, rgba(168,85,247,0.08), rgba(15,23,42,0.6));
+      border-radius: 24px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .section-header {
+      margin-bottom: 28px;
+    }
+
+    .section-header h2 {
+      font-size: 24px;
+      margin: 8px 0 12px;
+      font-weight: 600;
+    }
+
+    .section-subtitle {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.6;
+      max-width: 680px;
+    }
+
+    .pill-tag {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.16);
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(0,0,0,0.2);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 8px;
+    }
+
+    .coins-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 800px) {
+      .coins-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .coins-card {
+      background: rgba(30, 41, 59, 0.5);
+      border-radius: 18px;
+      padding: 20px;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .coins-card h3 {
+      font-size: 18px;
+      margin: 0 0 10px;
+      font-weight: 600;
+    }
+
+    .coins-card p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin: 0 0 12px;
+    }
+
+    .coins-card ul {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 16px;
+    }
+
+    .coins-card ul li {
+      font-size: 14px;
+      color: var(--muted);
+      padding: 4px 0;
+      padding-left: 20px;
+      position: relative;
+    }
+
+    .coins-card ul li:before {
+      content: '•';
+      position: absolute;
+      left: 0;
+      color: var(--primary);
+      font-weight: bold;
+    }
+
+    .button-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: var(--text);
+      text-decoration: none;
+      transition: all 0.12s ease;
+    }
+
+    .button-secondary:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .section {
+      max-width: 1080px;
+      margin: 60px auto;
+      padding: 0 24px;
+    }
+
+    .section-inner {
+      text-align: center;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .section-title {
+      font-size: 24px;
+      font-weight: 600;
+      margin: 0 0 12px;
+    }
+
+    .section-description {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin: 0 0 20px;
+    }
+
+    .section-actions {
+      margin-top: 20px;
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 500;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: var(--text);
+      text-decoration: none;
+      transition: all 0.12s ease;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .comparison-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin: 16px 0 20px;
+    }
+
+    .comparison-pills .pill-tag {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.16);
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(0,0,0,0.2);
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="shell">
+      <div class="left">
+        <div class="badge">
+          <span class="badge-dot"></span>
+          <span>Early access · Beta launch</span>
+        </div>
+        <h1>
+          Say hi to <span class="highlight">Blyp</span> —
+          short video & live streaming built for creators.
+        </h1>
+        <p class="sub">
+          Go live in seconds, drop short clips, react in real-time and earn from your community.
+          Blyp is designed for high-energy creators and fans who want more than a basic feed.
+        </p>
+
+        <div class="cta-row">
+          <!-- Replace # with your real Play Store link when live -->
+          <a class="btn btn-primary" href="#playstore">
+            Get Blyp on Google Play
+          </a>
+          <a class="btn btn-ghost" href="mailto:hello@blyplive.com">
+            Talk to the team
+          </a>
+        </div>
+        <p class="micro">
+          <strong>Creators:</strong> want early access? Drop us a message with your handle and platform.
+        </p>
+      </div>
+
+      <div class="right">
+        <div class="phone-frame">
+          <div class="phone-screen">
+            <!-- Replace with a real screenshot file -->
+            <img src="assets/screenshot-feed.png" alt="Blyp app preview" />
+          </div>
+        </div>
+        <div class="pill">
+          <span class="pill-dot"></span>
+          <span>Live tests running now</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section id="coins-promo" class="section">
+    <div class="section-inner">
+      <h2 class="section-title">Blyp Coins on web</h2>
+      <p class="section-description">
+        Top up your Blyp Coins on blyplive.com to keep more value in the creator economy.
+        Web purchases avoid heavy app store fees, so more of what you spend reaches the
+        people you actually support.
+      </p>
+      <div class="section-actions">
+        <a href="/coins" class="btn-secondary">Learn more about Blyp Coins</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="why-blyp" class="section">
+    <div class="section-inner">
+      <h2 class="section-title">Why Blyp beats TikTok for creators & fans</h2>
+      <p class="section-description">
+        Blyp is built to fix the pain points of big platforms: better cuts for creators,
+        more transparent coins, and a live-first experience designed for real communities.
+      </p>
+      <div class="comparison-pills">
+        <div class="pill-tag">More of each coin to creators</div>
+        <div class="pill-tag">Live-first, not an afterthought</div>
+        <div class="pill-tag">Web coins with lower fees</div>
+      </div>
+      <div class="section-actions">
+        <a href="/why-blyp.html" class="btn-secondary">See the full comparison</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    © <span id="year"></span> Blyp · A product of blyplive.com · <a href="/coins">Blyp Coins (web top-ups)</a> · <a href="/why-blyp.html">Why Blyp beats TikTok</a> · <a href="/privacy">Privacy Policy</a>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+
+# Deployment
+.netlify/
+.vercel/
+dist/
+
+# Logs
+*.log

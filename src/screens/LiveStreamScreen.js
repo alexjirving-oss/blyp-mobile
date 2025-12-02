@@ -19,8 +19,10 @@ import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo
 import { Audio } from 'expo-av';
 import { auth } from '../config/firebase';
 import { useRenderTimer, useTrackAsync } from '../performance/hooks';
+import { useAuth } from '../hooks/useCommon';
 import { StatusBar } from 'expo-status-bar';
 import { createStream, endStream } from '../services/LiveService';
+import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
 
@@ -32,8 +34,18 @@ console.log('📸 LiveStreamScreen: CameraView imported?', typeof CameraView);
 export default function LiveStreamScreen({ navigation, route }) {
   useRenderTimer('LiveStreamScreen');
   const trackAsync = useTrackAsync();
-  // Extract route params
-  const { mode, hostUid, streamId: routeStreamId, displayName } = route.params || {};
+    const { user: currentUser, isAuthenticated, loading: authLoading } = useAuth();
+  
+  // Safe route/params extraction with defaults
+  const safeRoute = route || {};
+  const safeParams = safeRoute.params || {};
+  const { 
+    mode = 'host', 
+    hostUid = null, 
+    streamId: routeStreamId = null, 
+    displayName = 'Unknown' 
+  } = safeParams;
+  
   // Use RNFirebase auth from config
   
   // Determine if this user is the host/broadcaster
@@ -66,6 +78,16 @@ export default function LiveStreamScreen({ navigation, route }) {
   const animatedValue = useRef(new Animated.Value(0)).current;
   
   // Using RNFirebase services via imported modules/services
+
+  // Early-return guard: if viewer mode without streamId, navigate back
+  useEffect(() => {
+    if (mode === 'viewer' && !routeStreamId) {
+      console.warn('⚠️ [LIVE][NAV] Viewer mode requires streamId, navigating back');
+      if (navigation && navigation.goBack) {
+        navigation.goBack();
+      }
+    }
+  }, [mode, routeStreamId, navigation]);
 
   // Handle app state changes (background/foreground)
   useEffect(() => {
@@ -101,13 +123,18 @@ export default function LiveStreamScreen({ navigation, route }) {
     }
 
     // Focus effect to ensure camera is initialized when navigating to this screen
-    const unsubscribeFocus = navigation.addListener('focus', () => {
-      setCameraReady(true);
-    });
+    let unsubscribeFocus;
+    if (navigation && navigation.addListener) {
+      unsubscribeFocus = navigation.addListener('focus', () => {
+        setCameraReady(true);
+      });
+    }
 
     return () => {
       mounted = false;
-      unsubscribeFocus();
+      if (unsubscribeFocus) {
+        unsubscribeFocus();
+      }
       
       // Cleanup when component unmounts
       if (isStreaming) {
@@ -211,30 +238,96 @@ export default function LiveStreamScreen({ navigation, route }) {
     // Double-check camera ref is still available
     if (!cameraRef.current) {
       Alert.alert('Camera Error', 'Camera reference was lost. Please try again.');
+
+          // Auth guard: ensure user is logged in before attempting stream
+          if (!currentUser || !isAuthenticated) {
+            console.warn('[LIVE] Cannot start stream – no logged-in user');
+            Alert.alert(
+              'Login Required',
+              'You need to be logged in to go live. Please log in and try again.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
       return;
     }
 
     try {
+      // Feature flag guard: block if streaming disabled
+      if (!isLiveStreamingEnabled()) {
+        Alert.alert(
+          'Live streaming not available',
+          'Our live streaming backend is not fully configured yet. Please try again later.'
+        );
+        setIsStreaming(false);
+        return;
+      }
+      // Require Firebase UID for Firestore/Storage auth-backed operations
+      const firebaseUid = auth?.currentUser?.uid || null;
+      if (!firebaseUid) {
+        console.warn('[LIVE] Cannot start stream – no Firebase UID');
+        Alert.alert(
+          'Login Required',
+          'You need to be logged in to go live. Please log in and try again.',
+          [{ text: 'OK' }]
+        );
+        setIsStreaming(false);
+        return;
+      }
       console.log('🚀 Starting HLS live stream with camera:', cameraRef.current);
       
       // 🔥 Use HLSLiveStreamService to create stream in liveStreams collection
-      const { streamId: newStreamId, streamData } = await HLSLiveStreamService.createStream({
+      const result = await HLSLiveStreamService.createStream({
         title: title,
         description: '',
-        thumbnailFile: null
+        thumbnailFile: null,
+        userId: firebaseUid,
+        userDisplayName: auth?.currentUser?.displayName || undefined,
+        userPhotoURL: auth?.currentUser?.photoURL || undefined,
       });
+      
+      // Handle structured error (e.g., NOT_LOGGED_IN)
+      if (result && result.ok === false) {
+        console.error('❌ Stream creation failed:', result.reason || result.error);
+        if (result.reason === 'HLS_BACKEND_NOT_CONFIGURED') {
+          Alert.alert('Live streaming not available', 'Our live streaming backend is not fully configured yet. Please try again later.');
+        } else if (result.reason === 'NOT_LOGGED_IN') {
+          Alert.alert('Login required to go live.', 'Please log in and try again.');
+        } else {
+          Alert.alert('Streaming Error', result.error || 'Could not start live stream.');
+        }
+        setIsStreaming(false);
+        return;
+      }
+      
+      const { streamId: newStreamId, streamData } = result;
       
       setStreamId(newStreamId);
       console.log('✅ HLS Stream created:', newStreamId);
       
       // Also update user status using LiveService for live list
       const { ensureUserProfile } = require('../services/LiveService');
-      await ensureUserProfile();
-      await createStream({
+      await ensureUserProfile({
+        userId: firebaseUid,
+        displayName: auth?.currentUser?.displayName || undefined,
+        photoURL: auth?.currentUser?.photoURL || undefined,
+        email: auth?.currentUser?.email || undefined,
+      });
+      const liveServiceResult = await createStream({
         streamId: newStreamId,
         title: title,
-        thumbnailUrl: null
+        thumbnailUrl: null,
+        userId: firebaseUid,
       });
+      
+      // Handle error from LiveService
+      if (liveServiceResult && liveServiceResult.ok === false) {
+        console.error('❌ LiveService createStream failed:', liveServiceResult.reason);
+        Alert.alert('Streaming Error', liveServiceResult.error || 'Could not mark user as live.');
+        setIsStreaming(false);
+        return;
+      }
+      
       console.log('✅ User marked as live in users collection');
       
       setIsStreaming(true);
@@ -258,6 +351,11 @@ export default function LiveStreamScreen({ navigation, route }) {
     const currentStreamId = streamIdParam || streamId;
     if (!currentStreamId) {
       console.error('❌ No stream ID for recording');
+      return;
+    }
+    const firebaseUid = auth?.currentUser?.uid || null;
+    if (!firebaseUid) {
+      console.error('❌ No Firebase UID for recording uploads');
       return;
     }
 
@@ -287,7 +385,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         console.log(`✅ Segment ${segmentNumber} recorded:`, video.uri);
         
         // Upload segment to Firebase Storage
-        await HLSLiveStreamService.uploadSegment(currentStreamId, video.uri, segmentNumber);
+        await HLSLiveStreamService.uploadSegment(currentStreamId, video.uri, segmentNumber, firebaseUid);
         console.log(`✅ Segment ${segmentNumber} uploaded`);
         
         setSegmentNumber(prev => prev + 1);
@@ -321,11 +419,12 @@ export default function LiveStreamScreen({ navigation, route }) {
       
       // 🔥 End stream in HLSLiveStreamService
       if (streamId) {
-        await HLSLiveStreamService.endStream(streamId);
+        const firebaseUid = auth?.currentUser?.uid || null;
+        await HLSLiveStreamService.endStream(streamId, firebaseUid);
         console.log('✅ HLS Stream ended:', streamId);
         
         // Also end in LiveService to update user status
-        await endStream(streamId);
+        await endStream(streamId, firebaseUid);
         console.log('✅ User status set to "offline"');
       }
       

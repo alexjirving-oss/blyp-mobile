@@ -44,101 +44,7 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const DEFAULT_HEADER_HEIGHT = responsiveSize(120);
 const footerHeight = responsiveSize(88);
 
-const mockVideoData = [
-  {
-    id: 'video-1',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    user: {
-      username: '@alex_creator',
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'Amazing sunset vibes! 🌅 Perfect golden hour captured in the mountains #sunset #nature #peaceful #goldenhour',
-    likes: 1234,
-    comments: [
-      { user: 'nature_lover', text: 'Breathtaking! 😍' },
-      { user: 'photographer', text: 'What camera did you use?' },
-      { user: 'hiker_girl', text: 'Location please!' },
-    ],
-    shares: 45,
-    views: 12340,
-    music: 'Original Sound - alex_creator',
-  },
-  {
-    id: 'video-2',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    user: {
-      username: '@travel_buddy',
-      avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'City life hits different at night ✨🏙️ The energy is unmatched! #cityvibes #nightlife #urban #travel',
-    likes: 2156,
-    comments: [
-      { user: 'city_explorer', text: 'Which city is this?' },
-      { user: 'night_owl', text: 'Love the vibes!' },
-      { user: 'urban_photographer', text: 'Amazing shots! 📸' },
-    ],
-    shares: 78,
-    views: 21560,
-    music: 'Trending - City Nights',
-  },
-  {
-    id: 'video-3',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-    user: {
-      username: '@foodie_life',
-      avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'Making the perfect pasta 🍝 Who wants the recipe? This took 3 hours but so worth it! #cooking #pasta #foodie #recipe #italian',
-    likes: 3421,
-    comments: [
-      { user: 'pasta_lover', text: 'Recipe please! 🙏' },
-      { user: 'italian_chef', text: 'Looks authentic!' },
-      { user: 'hungry_student', text: 'Making this tonight!' },
-    ],
-    shares: 156,
-    views: 34210,
-    music: 'Cooking Vibes - Chef Sounds',
-  },
-  {
-    id: 'video-4',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    user: {
-      username: '@fitness_guru',
-      avatar: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'Morning workout routine 💪 Start your day right! No equipment needed #fitness #workout #morning #health #motivation',
-    likes: 892,
-    comments: [
-      { user: 'fitness_fan', text: 'This is perfect!' },
-      { user: 'morning_person', text: 'Love the energy!' },
-    ],
-    shares: 34,
-    views: 8920,
-    music: 'Pump It Up - Workout Mix',
-  },
-  {
-    id: 'video-5',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-    user: {
-      username: '@tech_reviewer',
-      avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'This new gadget is INSANE! 📱 Game changer for creators #tech #gadget #review #creator #innovation',
-    likes: 1567,
-    comments: [
-      { user: 'tech_enthusiast', text: 'Need this!' },
-      { user: 'creator_life', text: 'Where can I buy it?' },
-    ],
-    shares: 67,
-    views: 15670,
-    music: 'Tech Beats - Digital Sounds',
-  },
-];
+// All mock/fallback video content removed. Feed now relies solely on Firestore.
 
 const randomCommentsData = [
   { user: 'sarah_m', text: 'This is amazing! 🔥', time: '2m' },
@@ -251,7 +157,8 @@ const formatBalance = (balance) => {
 };
 
 const HomeScreen = ({ navigation }) => {
-  const [videos, setVideos] = useState(mockVideoData);
+  const [videos, setVideos] = useState([]);
+    const [isEmptyFeed, setIsEmptyFeed] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [liked, setLiked] = useState({});
   const [following, setFollowing] = useState({});
@@ -377,8 +284,8 @@ const HomeScreen = ({ navigation }) => {
   useEffect(() => {
     console.log('🎬 HOME: Setting up video data listener');
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
-      console.log('⚠️ HOME: Firebase disabled or db unavailable, using mockVideoData');
-      setVideos(mockVideoData);
+      console.warn('WARN [HOME] Firebase disabled or db unavailable (videos).');
+      setVideos([]);
       return;
     }
     let isInitialLoad = true;
@@ -392,17 +299,17 @@ const HomeScreen = ({ navigation }) => {
           if (!isMounted) return;
           const allDocs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           const videoData = allDocs.filter((p) => p.type === 'video');
+          const validVideos = videoData.filter((p) => {
+            const uri = fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url);
+            return typeof uri === 'string' && uri.trim().length > 0;
+          });
           console.log('📱 HOME: Firestore posts snapshot', {
             totalDocs: allDocs.length,
             videoDocs: videoData.length,
+            validVideoDocs: validVideos.length,
             sample: allDocs.slice(0, 3).map((p) => ({ id: p.id, type: p.type, videoUrl: p.videoUrl })),
           });
-          if (videoData.length > 0) {
-            setVideos(videoData);
-          } else {
-            console.log('🧪 HOME: No videos found in Firestore, using mockVideoData fallback');
-            setVideos(mockVideoData);
-          }
+          setVideos(validVideos);
           if (isInitialLoad) {
             setCurrentIndex(0);
             isInitialLoad = false;
@@ -410,8 +317,7 @@ const HomeScreen = ({ navigation }) => {
           if (auth.currentUser) {
             const userId = auth.currentUser.uid;
             const likedState = {};
-            const source = videoData.length > 0 ? videoData : mockVideoData;
-            source.forEach((video) => {
+            validVideos.forEach((video) => {
               likedState[video.id] = video.likedBy?.includes?.(userId) || false;
             });
             setLiked((prev) => ({ ...prev, ...likedState }));
@@ -473,8 +379,9 @@ const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
-      console.log('⚠️ HOME: Firebase disabled or db unavailable for random posts, using mock fallback');
-      setRandomPosts(mockVideoData);
+      console.warn('WARN [HOME] Firebase disabled or db unavailable (randomPosts).');
+      setRandomPosts([]);
+      setIsEmptyFeed(true);
       setLoading(false);
       return;
     }
@@ -487,20 +394,28 @@ const HomeScreen = ({ navigation }) => {
       .onSnapshot((snapshot) => {
         if (!mounted) return;
         const allPosts = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        if (isInitialLoad) {
-          const source = allPosts.length > 0 ? allPosts : mockVideoData;
-          const shuffled = [...source].sort(() => 0.5 - Math.random());
-          setRandomPosts(shuffled);
+        const onlyVideos = allPosts.filter((p) => p.type === 'video');
+        const validVideos = onlyVideos.filter((p) => {
+          const uri = fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url);
+          return typeof uri === 'string' && uri.trim().length > 0;
+        });
+        if (validVideos.length === 0) {
+          console.warn('WARN [HOME] No video posts found in Firestore (no fallback).');
+          setRandomPosts([]);
+          setIsEmptyFeed(true);
           setLoading(false);
           isInitialLoad = false;
         } else {
-          setRandomPosts(allPosts.length > 0 ? allPosts : mockVideoData);
+          const shuffled = [...validVideos].sort(() => 0.5 - Math.random());
+          setRandomPosts(shuffled);
+          setIsEmptyFeed(false);
+          setLoading(false);
+          isInitialLoad = false;
         }
         if (auth.currentUser) {
           const userId = auth.currentUser.uid;
           const likedState = {};
-          const source2 = allPosts.length > 0 ? allPosts : mockVideoData;
-          source2.forEach((post) => {
+          validVideos.forEach((post) => {
             likedState[post.id] = post.likedBy?.includes(userId) || false;
           });
           setLiked((prev) => ({ ...prev, ...likedState }));
@@ -714,10 +629,7 @@ const HomeScreen = ({ navigation }) => {
                 })}
                 <UnifiedVideo
                   source={{
-                    uri:
-                      item.videoUrl ||
-                      mediaItems[0]?.url ||
-                      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+                    uri: fixStorageUrl(item.videoUrl || mediaItems[0]?.url),
                   }}
                   style={StyleSheet.absoluteFill}
                   resizeMode="cover"
@@ -748,13 +660,33 @@ const HomeScreen = ({ navigation }) => {
             ) : (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => handlePostPress(item)}>
                 <View style={{ position: 'relative', width: '100%', height: '100%' }}>
-                  <Image 
-                    source={{ uri: fixStorageUrl(item.imageUrl || mediaItems[0]?.url || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=400&fit=crop') }} 
-                    style={styles.video}
-                    onLoadStart={() => console.log('📷 HomeScreen: Image loading started')}
-                    onLoad={() => console.log('✅ HomeScreen: Image loaded successfully')}
-                    onError={(error) => console.error('❌ HomeScreen: Image load error:', error)}
-                  />
+                  {(() => {
+                    const imageUri = fixStorageUrl(item.imageUrl || mediaItems[0]?.url);
+                    const hasValidImage = typeof imageUri === 'string' && imageUri.trim().length > 0;
+                    
+                    if (!hasValidImage) {
+                      return (
+                        <View style={[styles.video, { backgroundColor: '#1e293b', alignItems: 'center', justifyContent: 'center' }]}>
+                          <Text style={{ color: '#64748b', fontSize: 14 }}>Image unavailable</Text>
+                        </View>
+                      );
+                    }
+                    
+                    return (
+                      <Image 
+                        source={{ uri: imageUri }} 
+                        style={styles.video}
+                        onLoadStart={() => console.log('📷 HomeScreen: Image loading started')}
+                        onLoad={() => console.log('✅ HomeScreen: Image loaded successfully')}
+                        onError={(error) => {
+                          console.warn('[HOME] Image failed to load', {
+                            uri: imageUri,
+                            error: error?.nativeEvent ?? null
+                          });
+                        }}
+                      />
+                    );
+                  })()}
                   <View style={styles.imageEnhancementOverlay} />
                 </View>
               </TouchableOpacity>
@@ -1034,7 +966,15 @@ const HomeScreen = ({ navigation }) => {
             </View>
           );
         }
-
+        if (isEmptyFeed || randomPosts.length === 0) {
+          return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 }}>
+              <Text style={{ color: '#94a3b8', fontSize: 16, textAlign: 'center' }} allowFontScaling={false}>
+                No videos yet. Be the first to post on Blyp.
+              </Text>
+            </View>
+          );
+        }
         return (
           <View style={{ height: feedHeight }}>
             <FlatList
