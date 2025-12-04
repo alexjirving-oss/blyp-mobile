@@ -69,6 +69,12 @@ const CreatePostButton = ({ accessibilityState }) => {
           );
           return;
         }
+        console.log('[LIVE][ENTRY] Navigating to LiveStreamScreen from plus menu', {
+          authReady,
+          isAuthenticated,
+          hasUid: !!uid,
+          streamingEnabled
+        });
         // Auth check is also done in LiveStreamScreen itself (defense-in-depth)
         navigation.navigate('LiveStreamScreen', { mode: 'host' });
         break;
@@ -92,13 +98,20 @@ const CreatePostButton = ({ accessibilityState }) => {
 
     setShowPostOptions(false);
 
+    console.log('[POST][ENTRY] Navigating to Review from plus menu', {
+      option,
+      authReady,
+      isAuthenticated,
+      hasUid: !!uid
+    });
+
     if (option === "photo") {
-      navigation.navigate("Review", { mode: "photo" });
+      navigation.navigate("Review", { mode: "photo", entryPoint: "plus_menu" });
       return;
     }
 
     if (option === "video") {
-      navigation.navigate("Review", { mode: "video" });
+      navigation.navigate("Review", { mode: "video", entryPoint: "plus_menu" });
       return;
     }
 

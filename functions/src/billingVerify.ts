@@ -38,7 +38,8 @@ async function verifyWithGooglePlay(productId: string, purchaseToken: string, us
 
 export const billingVerify = functions.https.onRequest(async (req, res) => {
   if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    res.status(405).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    return;
   }
 
   const authHeader = req.headers.authorization || '';
@@ -50,13 +51,15 @@ export const billingVerify = functions.https.onRequest(async (req, res) => {
     decoded = await admin.auth().verifyIdToken(idToken);
   } catch (err) {
     console.error('[BILLING] Invalid auth token', err);
-    return res.status(401).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    res.status(401).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    return;
   }
 
   const body = req.body as BillingVerifyRequest;
   if (!body || !body.userId || decoded.uid !== body.userId) {
     console.error('[BILLING] userId mismatch', { bodyUserId: body?.userId, authUid: decoded?.uid });
-    return res.status(403).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    res.status(403).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    return;
   }
 
   const { provider, productId, purchaseToken, userId } = body;
@@ -66,7 +69,8 @@ export const billingVerify = functions.https.onRequest(async (req, res) => {
     const tokenDoc = await tokenDocRef.get();
 
     if (tokenDoc.exists) {
-      return res.json({ ok: false, reason: 'token-already-used' } as BillingVerifyResponse);
+      res.json({ ok: false, reason: 'token-already-used' } as BillingVerifyResponse);
+      return;
     }
 
     let result: BillingVerifyResponse;
@@ -78,7 +82,8 @@ export const billingVerify = functions.https.onRequest(async (req, res) => {
     }
 
     if (!result.ok) {
-      return res.json(result);
+      res.json(result);
+      return;
     }
 
     await tokenDocRef.set({
@@ -90,9 +95,9 @@ export const billingVerify = functions.https.onRequest(async (req, res) => {
 
     // TODO(stage3-economy-ledger): Append server-side ledger entry mirroring mobile ledgerType coin_purchase/gem_purchase.
 
-    return res.json({ ok: true, reason: 'verified' } as BillingVerifyResponse);
+    res.json({ ok: true, reason: 'verified' } as BillingVerifyResponse);
   } catch (err) {
     console.error('[BILLING] Unexpected error', err);
-    return res.status(500).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
+    res.status(500).json({ ok: false, reason: 'backend-error' } as BillingVerifyResponse);
   }
 });

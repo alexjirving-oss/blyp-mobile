@@ -22,22 +22,14 @@ Write-Host "Step 3: Deploying devResetFirestore function..." -ForegroundColor Cy
 firebase deploy --only functions:devResetFirestore
 Write-Host ""
 
-# Step 4: Get function URL
+# Step 4: Show call command
 Write-Host "✅ Deployment complete!" -ForegroundColor Green
 Write-Host ""
-Write-Host "📋 To call the function:" -ForegroundColor Yellow
+Write-Host "📋 To call the function, copy and run these commands:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "curl -X POST ``" -ForegroundColor White
-Write-Host "  -H `"x-admin-reset-key: $secret`" ``" -ForegroundColor White
-Write-Host "  `"https://us-central1-blyp-610ee.cloudfunctions.net/devResetFirestore`"" -ForegroundColor White
+
+Write-Host "`$secret = '$secret'" -ForegroundColor Cyan
+Write-Host "`$headers = @{ 'x-admin-reset-key' = `$secret }" -ForegroundColor Cyan
+Write-Host "Invoke-WebRequest -Method POST -Uri https://us-central1-blyp-610ee.cloudfunctions.net/devResetFirestore -Headers `$headers" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Or use Invoke-WebRequest:" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "`$headers = @{ 'x-admin-reset-key' = '$secret' }" -ForegroundColor White
-Write-Host "Invoke-WebRequest -Method POST ``" -ForegroundColor White
-Write-Host "  -Uri 'https://us-central1-blyp-610ee.cloudfunctions.net/devResetFirestore' ``" -ForegroundColor White
-Write-Host "  -Headers `$headers" -ForegroundColor White
-Write-Host ""
-Write-Host "⚠️  After running reset, delete this function:" -ForegroundColor Red
-Write-Host "   - Comment out export in src/index.ts" -ForegroundColor White
-Write-Host "   - Run: firebase deploy --only functions" -ForegroundColor White
+Write-Host "⚠️  After running reset, cleanup with: .\cleanup-reset-function.ps1" -ForegroundColor Red

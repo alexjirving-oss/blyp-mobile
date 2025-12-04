@@ -24,6 +24,20 @@ import { fixStorageUrl } from '../utils/urlUtils';
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const MediaViewerScreen = ({ route, navigation }) => {
+  // Guard against missing navigation params
+  if (!route || !route.params) {
+    console.warn('MediaViewerScreen: Missing navigation params', { route });
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+        <Text style={{ color: 'white' }}>
+          Invalid media viewer launch — no media provided.
+        </Text>
+      </View>
+    );
+  }
+  
+  console.log('[MediaViewerScreen] Opening with params:', route?.params);
+  
   const { post, postId, posts, currentIndex } = route.params;
   
   // Get the actual post object - handle both direct post and posts array

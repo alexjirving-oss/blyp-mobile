@@ -15,6 +15,8 @@ import * as functions from 'firebase-functions';
 export { billingVerify } from './billingVerify';
 // Export DEV-ONLY Firestore reset function (maintenance only)
 export { devResetFirestore } from './devReset';
+// Export live stream API functions
+export { addLiveStreamComment, addLiveStreamLike } from './liveStreamApi';
 import * as admin from 'firebase-admin';
 import { Storage } from '@google-cloud/storage';
 // @ts-ignore (library lacks bundled types)
@@ -69,7 +71,9 @@ function parseStreamPath(filePath: string) {
 }
 
 // Initialize Firebase Admin (use project default bucket, which may use the firebasestorage.app domain)
-admin.initializeApp();
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
 const db = admin.firestore();
 const storage = new Storage();

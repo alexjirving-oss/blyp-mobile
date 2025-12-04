@@ -71,7 +71,10 @@ import HomeScreen from './src/screens/HomeScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatConversationScreen from './src/screens/ChatConversationScreen';
 import MessengerScreen from './src/screens/MessengerScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
+// Legacy Profile is kept for reference; new v3 replaces it
+// import ProfileScreen from './src/screens/ProfileScreen';
+const ProfileScreenV3 = React.lazy(() => import('./src/screens/ProfileScreen.v3'));
+import { WalletStub, SettingsStub, MyVideosStub, PastLivesStub, LiveUnavailableStub } from './src/screens/StubScreens';
 import EditProfileScreen from './src/screens/EditProfileScreen';
 import AuthScreen from './src/screens/AuthScreen';
 const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
@@ -166,7 +169,11 @@ function MainTabs() {
       />
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
+        children={() => (
+          <Suspense fallback={null}>
+            <ProfileScreenV3 />
+          </Suspense>
+        )}
         options={{
           tabBarIcon: ({ color, size }) => (
             <TabBarIcon name="person" color={color} size={size} />
@@ -216,18 +223,23 @@ function AppStack() {
           <ReviewScreen />
         </Suspense>
       )} />
-      <Stack.Screen name="MediaViewer" children={() => (
+      <Stack.Screen name="MediaViewer" children={(props) => (
         <Suspense fallback={null}>
-          <MediaViewerScreen />
+          <MediaViewerScreen {...props} />
         </Suspense>
       )} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="WalletStub" component={WalletStub} />
+      <Stack.Screen name="SettingsStub" component={SettingsStub} />
+      <Stack.Screen name="MyVideosStub" component={MyVideosStub} />
+      <Stack.Screen name="PastLivesStub" component={PastLivesStub} />
+      <Stack.Screen name="LiveUnavailableStub" component={LiveUnavailableStub} />
       <Stack.Screen name="VoiceMemo" component={VoiceMemoScreen} />
       <Stack.Screen name="LiveStreamScreen" children={() => (
         <Suspense fallback={null}>
           <LiveStreamScreen />
         </Suspense>
       )} />
-      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
       <Stack.Screen name="PostPreview" component={PostPreviewScreen} />
       <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
       <Stack.Screen name="Games" children={() => (
@@ -261,9 +273,15 @@ function AppInner() {
   useEffect(() => {
     if (user) {
       setHadUser(true);
-      authStickyUntilRef.current = Date.now() + 180000; // 3 minutes
+      // Sticky window: keep UI authenticated as long as useAuth() keeps user alive
+      // This prevents visual flicker during polling, but doesn't create fake auth
+      authStickyUntilRef.current = Date.now() + (365 * 24 * 60 * 60 * 1000); // 1 year (effectively permanent)
+    } else if (!user && hadUser) {
+      // User actually logged out - clear sticky window immediately
+      authStickyUntilRef.current = 0;
+      setHadUser(false);
     }
-  }, [user]);
+  }, [user, hadUser]);
   const effectiveUser = user || (hadUser && Date.now() < authStickyUntilRef.current ? {} : null);
   // Development-only auth bypass (does NOT grant real identity). Keeps Security priority by requiring explicit env flag.
   const devForceNoAuth = (process.env?.EXPO_PUBLIC_DEV_FORCE_NO_AUTH === '1');

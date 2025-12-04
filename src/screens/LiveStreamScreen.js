@@ -17,9 +17,10 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
-import { auth } from '../config/firebase';
+import { auth, firebaseNative } from '../config/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { useRenderTimer, useTrackAsync } from '../performance/hooks';
-import { useAuth } from '../hooks/useCommon';
+import { useAuth, getCognitoIdToken } from '../hooks/useCommon';
 import { StatusBar } from 'expo-status-bar';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import LiveStreamViewer from '../components/LiveStreamViewer';
@@ -282,6 +283,22 @@ export default function LiveStreamScreen({ navigation, route }) {
         'You must be logged in to go live.'
       );
       return;
+    }
+    
+    // Ensure Firebase auth (for Firestore rules) - same pattern as ReviewScreen
+    try {
+      if (!auth.currentUser) {
+        console.log('🔐 [LIVE] Ensuring Firebase auth (anonymous) for Firestore access');
+        if (firebaseNative && typeof auth?.signInAnonymously === 'function') {
+          await auth.signInAnonymously();
+        } else {
+          await signInAnonymously(auth);
+        }
+        console.log('✅ [LIVE] Firebase auth established');
+      }
+    } catch (authErr) {
+      console.error('❌ [LIVE] Firebase auth failed:', authErr?.message);
+      // Continue anyway with Cognito UID - Firestore writes may still work
     }
     
     // Double-check camera ref is still available
@@ -567,10 +584,11 @@ export default function LiveStreamScreen({ navigation, route }) {
     
     setHeartCount(heartCount + 1);
     
-    // Update like count in Firestore asynchronously (non-blocking)
+    // Update like count via backend API asynchronously (non-blocking)
     try {
-      if (isViewer && routeStreamId) {
-        HLSLiveStreamServiceInstance.addLike(routeStreamId);
+      if (isViewer && routeStreamId && uid) {
+        const token = await getCognitoIdToken();
+        HLSLiveStreamServiceInstance.addLike(routeStreamId, uid, token);
       }
     } catch (_e) {
       // ignore like failures for UX smoothness
@@ -579,11 +597,20 @@ export default function LiveStreamScreen({ navigation, route }) {
 
   const sendComment = async () => {
     if (!newComment.trim() || !streamId) return;
+    
+    if (!uid || !isAuthenticated) {
+      console.error('Cannot send comment: user not authenticated');
+      Alert.alert('Login Required', 'You must be logged in to comment.');
+      return;
+    }
+    
     try {
-      await HLSLiveStreamServiceInstance.addComment(streamId, newComment);
+      const token = await getCognitoIdToken();
+      await HLSLiveStreamServiceInstance.addComment(streamId, newComment, uid, token);
       setNewComment('');
     } catch (error) {
       console.error('Error sending comment:', error);
+      Alert.alert('Error', 'Failed to send comment. Please try again.');
     }
   };
 

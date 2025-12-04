@@ -31,6 +31,44 @@ export const clearCognitoSessions = async () => {
   } catch {}
 };
 
+// Helper to get Cognito ID token (JWT) for API calls
+export const getCognitoIdToken = async () => {
+  return new Promise((resolve, reject) => {
+    const currentUser = userPool.getCurrentUser();
+    
+    if (!currentUser) {
+      reject(new Error('No authenticated user'));
+      return;
+    }
+    
+    currentUser.getSession((err, session) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!session?.isValid?.()) {
+        reject(new Error('Invalid session'));
+        return;
+      }
+      
+      try {
+        const idToken = session.getIdToken();
+        const jwtToken = idToken?.getJwtToken?.();
+        
+        if (!jwtToken || typeof jwtToken !== 'string') {
+          reject(new Error('No JWT token found'));
+          return;
+        }
+        
+        resolve(jwtToken);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+};
+
 // Custom hook for authentication state
 export const useAuth = () => {
   // Internal state: store only raw values, derive isAuthenticated at the end
@@ -233,7 +271,8 @@ export const useAuth = () => {
             optimisticUser = maybeUser;
             optimisticHoldUntil = Date.now() + 120000; // 120s hold
             lastKnownUser = maybeUser; // remember beyond hold window
-            suppressInvalidationUntil = Date.now() + 180000; // 180s grace
+            // Grace window: effectively infinite (session refresh handles expiry)
+            suppressInvalidationUntil = Date.now() + (365 * 24 * 60 * 60 * 1000); // 1 year (effectively permanent)
             
             const uid = extractUid(maybeUser);
             setAuthState({ user: maybeUser, uid, loading: false, authReady: true });

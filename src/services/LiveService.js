@@ -12,35 +12,39 @@ export async function setUserStatus(uid, status, currentStreamId = null) {
 }
 
 export async function ensureUserProfile({ userId, displayName, photoURL, email } = {}) {
-  const effectiveUserId = userId || auth.currentUser?.uid;
-  if (!effectiveUserId) {
-    console.warn("Cannot ensure user profile: No userId provided");
-    return;
+  console.log('[LiveService][AUTH] ensureUserProfile called with userId:', userId ? 'present' : 'MISSING');
+  
+  // CRITICAL: Trust userId param, do NOT fallback to auth.currentUser
+  if (!userId || typeof userId !== 'string') {
+    console.error('[LiveService][AUTH] ensureUserProfile blocked: userId param missing or invalid');
+    throw new Error('userId is required to ensure user profile');
   }
 
-  const ref = db.collection("users").doc(effectiveUserId);
+  const ref = db.collection("users").doc(userId);
   await ref.set({
-    displayName: displayName || auth.currentUser?.displayName || auth.currentUser?.email?.split("@")[0] || "Anonymous",
-    photoURL: photoURL ?? auth.currentUser?.photoURL ?? null,
-    email: email ?? auth.currentUser?.email ?? null,
+    displayName: displayName || "Anonymous",
+    photoURL: photoURL ?? null,
+    email: email ?? null,
     updatedAt: serverTimestamp()
     // ❌ Removed forced status: "offline" to prevent overwriting "live" status
   }, { merge: true });
   
-  console.log("✅ User profile ensured for:", effectiveUserId);
+  console.log("✅ User profile ensured for:", userId);
 }
 
 // ---------- STREAMS ----------
 export async function createStream({ streamId, title, thumbnailUrl, userId }) {
-  const uid = userId || auth.currentUser?.uid;
-  if (!uid) {
-    console.warn('[LiveService] createStream called without userId');
+  console.log('[LiveService][AUTH] createStream called with userId:', userId ? 'present' : 'MISSING');
+  
+  // CRITICAL: Trust userId param, do NOT fallback to auth.currentUser
+  if (!userId || typeof userId !== 'string') {
+    console.error('[LiveService][AUTH] createStream blocked: userId param missing or invalid');
     return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in to stream' };
   }
 
   // Create/merge stream doc with merge:true to avoid overwriting
   await db.collection("streams").doc(streamId).set({
-    hostUid: uid,
+    hostUid: userId,
     title,
     status: "live",
     createdAt: serverTimestamp(),
@@ -49,13 +53,15 @@ export async function createStream({ streamId, title, thumbnailUrl, userId }) {
   }, { merge: true });
 
   // Update user profile to "live" with streamId
-  await setUserStatus(uid, "live", streamId);
+  await setUserStatus(userId, "live", streamId);
 }
 
 export async function endStream(streamId, userId) {
-  const uid = userId || auth.currentUser?.uid;
-  if (!uid) {
-    console.warn('[LiveService] endStream called without userId');
+  console.log('[LiveService][AUTH] endStream called with userId:', userId ? 'present' : 'MISSING');
+  
+  // CRITICAL: Trust userId param, do NOT fallback to auth.currentUser
+  if (!userId || typeof userId !== 'string') {
+    console.error('[LiveService][AUTH] endStream blocked: userId param missing or invalid');
     return { ok: false, reason: 'NOT_LOGGED_IN', error: 'User must be logged in' };
   }
 
@@ -66,7 +72,7 @@ export async function endStream(streamId, userId) {
   });
 
   // Update user profile to "offline" and clear streamId
-  await setUserStatus(uid, "offline", null);
+  await setUserStatus(userId, "offline", null);
 }
 
 // ---------- VIEWERS ----------

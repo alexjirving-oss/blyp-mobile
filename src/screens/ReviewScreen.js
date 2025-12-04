@@ -33,20 +33,26 @@ import aiService from '../services/aiService';
 import speechToTextService from '../services/speechToTextService';
 import geminiSpeechService from '../services/geminiSpeechService';
 import mediaDescriptionService from '../services/mediaDescriptionService';
+// Caption orchestrator (smart-merge Option B)
+import { getPreviewCaption, freezeCaption } from '../../caption/orchestrator';
+import { preparePostMetadata } from '../../upload/preparePostMetadata';
 
 const ReviewScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { media, type, mode, transcript, source } = route.params || {};
+  const { media, type, mode, transcript, source, entryPoint } = route.params || {};
   const { user: cognitoUser, isAuthenticated, authReady } = useAuth();
   
   // Debug route params on screen initialization
-  console.log('🚀 ReviewScreen initialized with route params:', {
+  console.log('[POST][ENTRY] ReviewScreen opened', {
+    entryPoint: entryPoint || 'unknown',
     mediaCount: media ? (Array.isArray(media) ? media.length : 1) : 0,
     type,
     mode,
     source,
-    hasTranscript: !!transcript
+    hasTranscript: !!transcript,
+    authReady,
+    isAuthenticated
   });
   
   // Store source in state to persist across re-renders
@@ -78,7 +84,7 @@ const ReviewScreen = () => {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [generatedContent, setGeneratedContent] = useState(null);
   const [showAiContent, setShowAiContent] = useState(false);
-  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceCaption, setVoiceCaption] = useState('');
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingStartTime, setRecordingStartTime] = useState(null);
   const [generatedHashtags, setGeneratedHashtags] = useState([]);
@@ -92,6 +98,22 @@ const ReviewScreen = () => {
   
   // Manual Description States
   const [manualDescription, setManualDescription] = useState('');
+  const [aiGeneratedCaptionState, setAiGeneratedCaptionState] = useState(null);
+  const [generatedTitleState, setGeneratedTitleState] = useState(null);
+  const [generatedHashtagsState, setGeneratedHashtagsState] = useState([]);
+  const [editedAfterAI, setEditedAfterAI] = useState(false);
+  // Smart-merge caption state
+  const [captionState, setCaptionState] = useState({
+    photos: [],
+    manualCaption: '',
+    voiceCaption: '',
+    aiCaptionPerPhoto: {},
+    aiGeneratedCaption: null,
+    editedAfterAI: false,
+    previewCaption: '',
+    frozenCaption: undefined,
+    source: 'none'
+  });
   const [isGeneratingFromText, setIsGeneratingFromText] = useState(false);
   
   // UI State
@@ -109,6 +131,47 @@ const ReviewScreen = () => {
       setCaption(transcript);
     }
   }, [transcript]);
+
+  // Keep captionState in sync with UI inputs and AI data
+  // PRIORITY: editedAfterAI → aiGeneratedCaption → smart-merge (voice + photos)
+  useEffect(() => {
+    console.log('📋 Caption state update:', {
+      editedAfterAI,
+      hasAiGenerated: !!aiGeneratedCaptionState,
+      manualDescriptionLength: manualDescription?.length || 0,
+      voiceCaptionLength: voiceCaption?.length || 0
+    });
+    
+    // Build photos list with stable ids using index
+    const photos = (mediaItems || [])
+      .filter((m) => m?.type === 'photo' || m?.type === 'image')
+      .map((m, idx) => ({ id: String(idx) }));
+
+    // Map AI per-photo descriptions to ids (for smart-merge fallback)
+    const aiMap = {};
+    photos.forEach((p, idx) => {
+      const desc = mediaDescriptions?.[idx]?.description || mediaDescriptions?.[idx]?.text || mediaDescriptions?.[idx] || '';
+      if (typeof desc === 'string' && desc.trim().length > 0) {
+        aiMap[p.id] = desc.trim();
+      }
+    });
+
+    const nextState = {
+      photos,
+      manualCaption: manualDescription || '',
+      voiceCaption: voiceCaption || '',
+      aiCaptionPerPhoto: aiMap,
+      aiGeneratedCaption: aiGeneratedCaptionState || null,
+      editedAfterAI: editedAfterAI || false,
+      frozenCaption: captionState.frozenCaption,
+      source: captionState.source || 'none'
+    };
+
+    // Derive preview caption via orchestrator
+    // getPreviewCaption respects priority: frozen → manual (if editedAfterAI) → aiGeneratedCaption → smart-merge
+    const preview = getPreviewCaption(nextState);
+    setCaptionState({ ...nextState, previewCaption: preview });
+  }, [mediaItems, manualDescription, voiceCaption, mediaDescriptions, aiGeneratedCaptionState, editedAfterAI]);
   
   // Auto-show description overlay immediately when media is added
   useEffect(() => {
@@ -201,11 +264,10 @@ const ReviewScreen = () => {
   // Check if there's unsaved content
   const hasUnsavedContent = () => {
     return (
-      mediaItems.length > 0 || 
-      caption.trim() !== '' || 
-      originalCaption.trim() !== '' ||
-      aiCaption.trim() !== '' ||
-      manualDescription.trim() !== ''
+      mediaItems.length > 0 ||
+      (captionState.previewCaption || '').trim() !== '' ||
+      manualDescription.trim() !== '' ||
+      voiceCaption.trim() !== ''
     );
   };
 
@@ -532,7 +594,7 @@ const ReviewScreen = () => {
         console.log('🌀 Low-confidence transcript; using placeholder text');
         transcript = 'Spoken description captured';
       }
-      setVoiceTranscript(transcript);
+      setVoiceCaption(transcript);
 
       console.log('📝 Voice transcript:', transcript);
 
@@ -551,8 +613,15 @@ const ReviewScreen = () => {
           voiceInputs: [...prev.voiceInputs, transcript]
         }));
         
-        // Also put in manual text box for potential editing
-        setManualDescription(prev => prev ? `${prev}\n\n${transcript}` : transcript);
+        // Only pre-fill the caption with raw voice IF we haven't already
+        // generated an AI post caption. Once AI has run, voice should live
+        // in voiceCaption but must not overwrite the AI description.
+        setManualDescription(prev => {
+          if (aiGeneratedCaptionState) {
+            return prev;
+          }
+          return prev ? `${prev}\n\n${transcript}` : transcript;
+        });
         setIsTranscribing(false);
         
         Toast.show({
@@ -746,15 +815,63 @@ const ReviewScreen = () => {
         uri: firstMediaItem.uri?.substring(0, 50) + '...' 
       });
 
-      // Generate comprehensive post data using the new service
-      const aiContent = await mediaDescriptionService.generateFullPostData(
+      // Build contextual prompt combining voice (PRIMARY) + photo descriptions
+      const hasVoice = voiceInput && voiceInput.trim().length > 0;
+      const hasPhotoDescriptions = mediaDescriptions && mediaDescriptions.length > 0;
+      
+      let contextPrompt = '';
+      if (hasVoice && hasPhotoDescriptions) {
+        // VOICE + PHOTO: treat voice as PRIMARY
+        contextPrompt = `Create a SHORT social media post emphasizing the user's voice message, with photos as visual context.
+
+🗣️ User's Voice (PRIMARY): "${voiceInput}"
+
+📸 Photo Context:
+${mediaDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+INSTRUCTIONS:
+- Write PRIMARILY about what the user said
+- Use photo descriptions only as context/validation
+- Make it natural and authentic
+- Keep it SHORT and catchy
+- Return JSON: {title, description, hashtags}`;
+        console.log('🎤📸 Using CONTEXTUAL path (voice PRIMARY + photos)');
+      } else if (hasPhotoDescriptions && !hasVoice) {
+        contextPrompt = `Create a social media post from these photo descriptions:
+
+${mediaDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+Write a natural, engaging caption with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('📸 Using CONTEXTUAL path (photos only)');
+      } else if (hasVoice && !hasPhotoDescriptions) {
+        contextPrompt = `Create a social media post from this message:
+
+"${voiceInput}"
+
+Write naturally with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('🎤 Using CONTEXTUAL path (voice only)');
+      } else {
+        throw new Error('No voice or photo descriptions available');
+      }
+
+      // Always use CONTEXTUAL generation for consistent results
+      const aiContent = await mediaDescriptionService.generateFullPostDataWithContext(
         firstMediaItem.uri, 
-        voiceInput
+        contextPrompt,
+        mediaDescriptions || []
       );
 
       console.log('✅ AI content generated:', aiContent);
 
       if (aiContent) {
+        // Store AI-generated content for caption pipeline
+        setAiGeneratedCaptionState(aiContent.description || '');
+        setGeneratedTitleState(aiContent.title || '');
+        setGeneratedHashtagsState(aiContent.hashtags || []);
+        setEditedAfterAI(false);
+        setManualDescription(aiContent.description || '');
+        
+        // Keep legacy state
         setGeneratedContent(aiContent);
         setAiCaption(aiContent.description);
         setCaption(aiContent.description);
@@ -783,6 +900,14 @@ const ReviewScreen = () => {
       
       console.log('🔄 Using personalized fallback with user input:', { voiceInput, fallbackContent });
       
+      // Store fallback in caption pipeline
+      setAiGeneratedCaptionState(fallbackContent.description || '');
+      setGeneratedTitleState(fallbackContent.title || '');
+      setGeneratedHashtagsState(fallbackContent.hashtags || []);
+      setEditedAfterAI(false);
+      setManualDescription(fallbackContent.description || '');
+      
+      // Keep legacy state
       setGeneratedContent(fallbackContent);
       setAiCaption(fallbackContent.description);
       setCaption(fallbackContent.description);
@@ -930,6 +1055,14 @@ const ReviewScreen = () => {
       );
 
       if (aiContent) {
+        // Store AI-generated content in new state variables for caption pipeline
+        setAiGeneratedCaptionState(aiContent.description || '');
+        setGeneratedTitleState(aiContent.title || '');
+        setGeneratedHashtagsState(aiContent.hashtags || []);
+        setEditedAfterAI(false);
+        setManualDescription(aiContent.description || '');
+        
+        // Keep legacy state for backward compatibility
         setGeneratedContent(aiContent);
         setAiCaption(aiContent.description);
         setCaption(aiContent.description);
@@ -1039,9 +1172,9 @@ const ReviewScreen = () => {
   };
 
   // Initialize step-by-step processing immediately for voice input
-  const initializeStepByStepProcessingWithVoice = async (voiceTranscript = null) => {
+  const initializeStepByStepProcessingWithVoice = async (voiceCaption = null) => {
     try {
-      console.log('🚀 Initializing step-by-step processing with voice input:', voiceTranscript);
+      console.log('🚀 Initializing step-by-step processing with voice input:', voiceCaption);
       
       // Prepare steps for each photo + voice input
       const steps = [];
@@ -1054,11 +1187,11 @@ const ReviewScreen = () => {
       });
       
       // Add voice input step with actual transcript or placeholder
-      if (voiceTranscript) {
+      if (voiceCaption) {
         steps.push({
           title: 'Voice Input',
-          description: voiceTranscript.length > 60 ? voiceTranscript.slice(0, 60) + '...' : voiceTranscript,
-          fullDescription: voiceTranscript,
+          description: voiceCaption.length > 60 ? voiceCaption.slice(0, 60) + '...' : voiceCaption,
+          fullDescription: voiceCaption,
           completed: true,
           isVoice: true
         });
@@ -1085,7 +1218,7 @@ const ReviewScreen = () => {
       setShowStepByStepOverlay(true);
       
       // Start processing photos
-      await processPhotosStepByStepWithVoice(voiceTranscript);
+      await processPhotosStepByStepWithVoice(voiceCaption);
       
     } catch (error) {
       console.error('❌ Failed to initialize immediate step-by-step processing:', error);
@@ -1154,9 +1287,9 @@ const ReviewScreen = () => {
   };
 
   // Process photos step by step with voice input
-  const processPhotosStepByStepWithVoice = async (voiceTranscript = null) => {
+  const processPhotosStepByStepWithVoice = async (voiceCaption = null) => {
     try {
-      console.log('🚀 Starting step-by-step processing with voice transcript:', voiceTranscript);
+      console.log('🚀 Starting step-by-step processing with voice transcript:', voiceCaption);
       
       // Initialize steps for photos + voice + AI generation
       const steps = [];
@@ -1171,7 +1304,7 @@ const ReviewScreen = () => {
       // Add voice step
       steps.push({
         title: 'Voice Input',
-        description: voiceTranscript ? 'Processing voice description...' : 'Waiting for voice input...',
+        description: voiceCaption ? 'Processing voice description...' : 'Waiting for voice input...',
         completed: false
       });
       
@@ -1216,19 +1349,19 @@ const ReviewScreen = () => {
       const voiceStepIndex = mediaItems.length;
       setCurrentStep(voiceStepIndex);
       
-      if (voiceTranscript) {
+      if (voiceCaption) {
         setCurrentStepDescription('Processing voice description...');
         
         // Update voice step to show the actual transcript
         setAiSteps(prev => prev.map((step, index) => 
-          index === voiceStepIndex ? { ...step, completed: true, description: voiceTranscript } : step
+          index === voiceStepIndex ? { ...step, completed: true, description: voiceCaption } : step
         ));
         
         // Small delay to show the voice step
         await new Promise(resolve => setTimeout(resolve, 1200));
         
         // Complete the final step with AI generation
-        await completeStepByStepProcessing(voiceTranscript, descriptions);
+        await completeStepByStepProcessing(voiceCaption, descriptions);
       } else {
         setCurrentStepDescription('Waiting for voice description...');
         // Store descriptions for when voice completes
@@ -1376,7 +1509,7 @@ const ReviewScreen = () => {
   };
 
   // Complete step-by-step processing with voice input and photo descriptions
-  const completeStepByStepProcessing = async (voiceTranscript, photoDescriptions) => {
+  const completeStepByStepProcessing = async (voiceCaption, photoDescriptions) => {
     try {
       console.log('🎯 Completing step-by-step processing with voice and photos');
       
@@ -1399,7 +1532,7 @@ const ReviewScreen = () => {
       
       // Store the data for review overlay
       setReviewData({
-        voiceInput: voiceTranscript,
+        voiceInput: voiceCaption,
         photoDescriptions: photoDescriptions,
         isGeneratingAI: false
       });
@@ -1429,37 +1562,68 @@ const ReviewScreen = () => {
       // Update review overlay to show generating state
       setReviewData(prev => ({ ...prev, isGeneratingAI: true }));
       
-      // Generate AI content - COMPLETELY IGNORE PHOTO, FOCUS ON VOICE
-      const enhancedPrompt = `IGNORE THE IMAGE. Write a social media post ONLY about what the user said: "${reviewData.voiceInput}".
-
-USER'S MESSAGE (ONLY FOCUS): "${reviewData.voiceInput}"
-Photo context (ignore this): ${reviewData.photoDescriptions.join('. ')}
-
-ABSOLUTE RULES:
-- DO NOT describe what's in the photo
-- Write ONLY about: "${reviewData.voiceInput}"
-- If they mention feelings/thoughts not visible in photo, write about those
-- Write casually and naturally like a real person would post
-- Don't overuse slang abbreviations - keep it natural
-- Make the post about their WORDS, not visual elements
-- Generate a SHORT CATCHY TITLE (50 characters max) based on "${reviewData.voiceInput}"
-
-EXAMPLES:
-- Voice: "I'm so tired" → Write about being tired, NOT the laptop/coding
-- Voice: "this coffee is amazing" → Write about coffee, even if not in photo
-- Voice: "stressed about deadlines" → Focus on stress, not what's visible
-
-The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a short title!`;
-      console.log('🎤📸 Generating content FORCING user voice priority over photo content');
+      // Determine what inputs we have
+      const hasVoice = reviewData.voiceInput && reviewData.voiceInput.trim().length > 0;
+      const hasPhotoDescriptions = reviewData.photoDescriptions && reviewData.photoDescriptions.length > 0;
       
+      let contextPrompt = '';
+      
+      if (hasVoice && hasPhotoDescriptions) {
+        // PRIMARY CASE: Voice + Photo Descriptions - VOICE IS PRIMARY
+        contextPrompt = `Create a SHORT social media post emphasizing the user's voice message, with photos as visual context.
+
+🗣️ User's Voice (PRIMARY): "${reviewData.voiceInput}"
+
+📸 Photo Context:
+${reviewData.photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+INSTRUCTIONS:
+- Write PRIMARILY about what the user said
+- Use photos only as context/validation
+- Make it natural and authentic, like a real person posting
+- Generate a SHORT CATCHY TITLE (50 characters max)
+- Return JSON with: title, description, hashtags`;
+        console.log('🎤📸 Using CONTEXTUAL path (voice PRIMARY + photos)');
+      } else if (hasPhotoDescriptions && !hasVoice) {
+        // Photo descriptions only
+        contextPrompt = `Create a social media post from these photo descriptions:
+
+${reviewData.photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+Create a natural, engaging caption with a catchy title (50 chars max). Return JSON with: title, description, hashtags.`;
+        console.log('📸 Using CONTEXTUAL path (photos only)');
+      } else if (hasVoice && !hasPhotoDescriptions) {
+        // Voice only
+        contextPrompt = `Create a social media post from this user message:
+
+"${reviewData.voiceInput}"
+
+Write a natural, engaging caption with a catchy title (50 chars max). Return JSON with: title, description, hashtags.`;
+        console.log('🎤 Using CONTEXTUAL path (voice only)');
+      } else {
+        throw new Error('No voice or photo descriptions available');
+      }
+      
+      // ALWAYS use contextual path for consistency
       const aiContent = await mediaDescriptionService.generateFullPostDataWithContext(
         mediaItems[0].uri,
-        enhancedPrompt,
-        reviewData.photoDescriptions
+        contextPrompt,
+        reviewData.photoDescriptions || []
       );
       
-      // Apply the AI content
+      // Apply the AI content (SINGLE SOURCE OF TRUTH)
+      console.log('✅ AI post generated successfully:', aiContent.description);
+      
       setMediaDescriptions(reviewData.photoDescriptions);
+      
+      // Update caption pipeline state with AI-generated description
+      setAiGeneratedCaptionState(aiContent.description || '');
+      setGeneratedTitleState(aiContent.title || '');
+      setGeneratedHashtagsState(aiContent.hashtags || []);
+      setManualDescription(aiContent.description || ''); // Pre-fill TextInput
+      setEditedAfterAI(false); // Mark as NOT edited
+      
+      // Keep legacy state for backward compatibility
       setAiCaption(aiContent.description || '');
       setCaption(aiContent.description || '');
       setGeneratedHashtags(aiContent.hashtags || []);
@@ -1624,7 +1788,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           console.log('📝 Voice transcribed:', transcript);
           
           if (transcript && transcript.trim()) {
-            setVoiceTranscript(transcript);
+            setVoiceCaption(transcript);
             setOriginalCaption(transcript);
             setCaption(transcript);
             
@@ -1634,6 +1798,12 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               ...prev,
               voiceInputs: [...prev.voiceInputs, transcript]
             }));
+            
+            // Only pre-fill the caption with raw voice IF we haven't already
+            // generated an AI post caption.
+            if (!aiGeneratedCaptionState) {
+              setManualDescription(transcript);
+            }
             
             // Automatically trigger step-by-step AI processing after voice input
             console.log('🤖 Auto-triggering step-by-step processing after voice description');
@@ -1973,15 +2143,29 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       const appUserId = fbUser?.uid || cognitoUser?.getUsername?.() || 'anonymous';
       const displayName = fbUser?.displayName || cognitoUser?.getUsername?.() || 'Anonymous';
       const photoURL = fbUser?.photoURL || null;
+      // Freeze caption before preparing metadata
+      const frozen = freezeCaption(captionState);
+      setCaptionState(frozen);
+
+      // Prepare upload metadata with frozen caption
+      const metadata = preparePostMetadata({
+        captionState: frozen,
+        photos: (uploadedMedia || []).filter(m => m.type === 'image').map((m, idx) => ({ id: String(idx) }))
+      });
+
+      // Single source of truth for caption
+      const baseCaption = metadata.caption || '';
+      
       const postData = {
         userId: appUserId,
         username: displayName,
         userPhotoURL: photoURL,
-        title: generatedContent?.title || caption.substring(0, 50) || 'New Post',
-        transcript: caption,
-        description: generatedContent?.description || caption, // Use AI description if available
-        caption: caption, // Keep original caption field
-        tags: extractHashtags(caption),
+        title: (generatedTitleState && generatedTitleState.trim()) || baseCaption.substring(0, 80) || 'New Post',
+        transcript: baseCaption,
+        description: baseCaption,
+        caption: baseCaption,
+        tags: extractHashtags(baseCaption),
+        hashtags: generatedHashtagsState || [],
         emoji: uploadedMedia.length > 0 ? '📸' : '💭',
         media: uploadedMedia,
         type: postType, // Add post type
@@ -2009,25 +2193,36 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       
       console.log('✅ Post saved successfully with ID:', docRef.id);
       
-      // Start AI comment generation immediately after upload
-      setIsUploading(false); // Stop upload overlay
-      setIsGeneratingComments(true); // Start comment generation overlay
+      // Stop upload overlay and navigate immediately
+      setIsUploading(false);
       
-      // Generate AI comments for the post
-      console.log('🤖 Starting AI comment generation...');
-      const aiComments = await generateAIComments(postData);
-      setGeneratedComments(aiComments);
+      Toast.show({
+        type: 'success',
+        text1: '✨ Post created!',
+        text2: 'Your post is now live',
+        position: 'bottom',
+      });
       
-      setTimeout(() => {
-        setIsGeneratingComments(false);
-        Toast.show({
-          type: 'success',
-          text1: 'Post created with AI comments!',
-          text2: `Generated ${aiComments.length} smart comments`,
-          position: 'bottom',
+      // Navigate immediately - user doesn't need to wait
+      navigation.navigate('MainTabs', { screen: 'Home' });
+      
+      // Generate AI comments in background (non-blocking, fire-and-forget)
+      console.log('🤖 Starting background AI comment generation for post:', docRef.id);
+      generateAIComments(postData)
+        .then(aiComments => {
+          if (aiComments && aiComments.length > 0) {
+            console.log(`✅ Generated ${aiComments.length} AI comments in background`);
+            setGeneratedComments(aiComments);
+            // Optionally: Update Firestore post with AI comment IDs for future retrieval
+          }
+        })
+        .catch(err => {
+          console.warn('[POST][AI] Background AI comment generation failed', { 
+            postId: docRef.id, 
+            error: err?.message 
+          });
+          // Fail silently - post is already created successfully
         });
-        navigation.navigate('MainTabs', { screen: 'Home' });
-      }, 2000); // Show overlay for 2 seconds
       
     } catch (error) {
       console.error('Error posting:', error);
@@ -2080,35 +2275,52 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       console.log('🎯 Final voice inputs for comprehensive AI:', voiceInputs);
       console.log('🎯 Final photo descriptions for comprehensive AI:', photoDescriptions);
       
-      // Create comprehensive context prompt - FORCE user input priority
-      let contextPrompt = 'CRITICAL: Write about what the user SAID/WROTE - even if those things aren\'t visible in photos:\n\n';
+      // Build contextual prompt using SAME structure as other entry points
+      const hasVoice = voiceInputs && voiceInputs.length > 0;
+      const hasManualText = manualText && manualText.trim().length > 0;
+      const hasPhotoDescriptions = photoDescriptions && photoDescriptions.length > 0;
       
-      // Add voice inputs FIRST - this is the MAIN content
-      if (voiceInputs.length > 0) {
-        contextPrompt += '🎯 THE REAL STORY (user\'s words - 95% focus):\n';
-        voiceInputs.forEach((voice, index) => {
-          contextPrompt += `"${voice}"\n`;
-        });
-        contextPrompt += '\nThis is THE story - write about this even if photos don\'t show it.\n\n';
+      // Combine all voice inputs into single string
+      const combinedVoice = voiceInputs.join(' ');
+      
+      let contextPrompt = '';
+      if ((hasVoice || hasManualText) && hasPhotoDescriptions) {
+        // VOICE/TEXT + PHOTO: treat voice/text as PRIMARY
+        const primaryMessage = hasVoice ? combinedVoice : manualText;
+        contextPrompt = `Create a SHORT social media post emphasizing the user's message, with photos as visual context.
+
+🗣️ User's Message (PRIMARY): "${primaryMessage}"
+
+📸 Photo Context:
+${photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+INSTRUCTIONS:
+- Write PRIMARILY about what the user said
+- Use photo descriptions only as context/validation
+- Make it natural and authentic
+- Keep it SHORT and catchy
+- Return JSON: {title, description, hashtags}`;
+        console.log('🎤📸 Using CONTEXTUAL path (voice/text PRIMARY + photos)');
+      } else if (hasPhotoDescriptions && !hasVoice && !hasManualText) {
+        // Photos only
+        contextPrompt = `Create a social media post from these photo descriptions:
+
+${photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+Write a natural, engaging caption with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('📸 Using CONTEXTUAL path (photos only)');
+      } else if ((hasVoice || hasManualText) && !hasPhotoDescriptions) {
+        // Voice/text only
+        const primaryMessage = hasVoice ? combinedVoice : manualText;
+        contextPrompt = `Create a social media post from this message:
+
+"${primaryMessage}"
+
+Write naturally with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('🎤 Using CONTEXTUAL path (voice/text only)');
+      } else {
+        throw new Error('No voice, text, or photo descriptions available');
       }
-      
-      // Add manual text as primary if no voice
-      if (manualText && manualText.trim() && voiceInputs.length === 0) {
-        contextPrompt += `🎯 THE REAL STORY (user\'s message - 95% focus):\n"${manualText}"\n\nThis is THE story - write about this even if photos don\'t show it.\n\n`;
-      } else if (manualText && manualText.trim()) {
-        contextPrompt += `📝 Extra user context: ${manualText}\n\n`;
-      }
-      
-      // Add photo descriptions as minimal visual context
-      if (photoDescriptions.length > 0) {
-        contextPrompt += '📸 Photo context (minor background only):\n';
-        photoDescriptions.forEach((desc, index) => {
-          contextPrompt += `${desc}\n`;
-        });
-        contextPrompt += '\n';
-      }
-      
-      contextPrompt += 'CRITICAL RULES:\n- Write about what they SAID, even if not visible in photos\n- If they mention feelings/thoughts/activities not shown, INCLUDE THEM\n- Photos are just background - their words are the content\n- Write naturally and casually like a real person would post\n- Don\'t overuse slang abbreviations - keep it natural and relatable\n- Generate a SHORT CATCHY TITLE (50 characters max) based on their message\n- Their message is 95% of the post, photos are 5%\n- Focus on what they SAID, not what photos show';
       
       console.log('📝 Comprehensive context prompt:', contextPrompt);
       
@@ -2120,6 +2332,16 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       );
       
       if (aiContent) {
+        console.log('✅ AI post generated successfully:', aiContent.description);
+        
+        // Update caption pipeline state with AI-generated description (SINGLE SOURCE OF TRUTH)
+        setAiGeneratedCaptionState(aiContent.description || '');
+        setGeneratedTitleState(aiContent.title || '');
+        setGeneratedHashtagsState(aiContent.hashtags || []);
+        setManualDescription(aiContent.description || ''); // Pre-fill TextInput
+        setEditedAfterAI(false); // Mark as NOT edited
+        
+        // Keep legacy state for backward compatibility
         setGeneratedContent(aiContent);
         setAiCaption(aiContent.description);
         setCaption(aiContent.description);
@@ -2130,8 +2352,8 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         
         Toast.show({
           type: 'success',
-          text1: '🧠 Comprehensive AI Content Generated!',
-          text2: `Used ${photoDescriptions.length} photos + ${voiceInputs.length} voice inputs`,
+          text1: '🤖 AI Post Generated!',
+          text2: 'Voice + photos combined into one great post',
           position: 'bottom',
         });
       }
@@ -2350,7 +2572,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         )}
 
         {/* Comprehensive AI Data Summary */}
-        {(allContextualData.photoDescriptions.length > 0 || allContextualData.voiceInputs.length > 0) && (
+        {((mediaDescriptions && mediaDescriptions.length > 0) || allContextualData.voiceInputs.length > 0) && (
           <View style={styles.comprehensiveAiSection}>
             <View style={styles.aiSummaryHeader}>
               <Icon  name="bulb" size={24} color="#a855f7"  />
@@ -2358,11 +2580,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             </View>
             
             {/* Photo Descriptions Summary */}
-            {allContextualData.photoDescriptions.length > 0 && (
+            {mediaDescriptions && mediaDescriptions.length > 0 && (
               <View style={styles.aiDataItem}>
-                <Text style={styles.aiDataLabel}>📸 Photo Descriptions: {allContextualData.photoDescriptions.length}</Text>
+                <Text style={styles.aiDataLabel}>📸 Photo Descriptions: {mediaDescriptions.length}</Text>
                 <Text style={styles.aiDataPreview} numberOfLines={2}>
-                  {allContextualData.photoDescriptions.join(' • ')}
+                  {mediaDescriptions.filter(desc => desc && !desc.includes('captured at') && !desc.includes('quota limits')).join(' • ')}
                 </Text>
               </View>
             )}
@@ -2377,9 +2599,9 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               </View>
             )}
             
-            {/* Comprehensive AI Generate Button - HIDDEN */}
+            {/* Generate AI Post Button - Visible when data is collected */}
             <TouchableOpacity
-              style={[styles.comprehensiveAiButton, { display: 'none' }]}
+              style={styles.comprehensiveAiButton}
               onPress={generateComprehensiveAIContent}
               disabled={isGeneratingContent}
             >
@@ -2393,7 +2615,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   <Icon  name="bulb" size={24} color="white"  />
                 )}
                 <Text style={styles.comprehensiveAiButtonText}>
-                  {isGeneratingContent ? 'Generating...' : 'Generate Comprehensive AI Post'}
+                  {isGeneratingContent ? 'Generating AI Post...' : 'Generate AI Post'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -2540,13 +2762,22 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           </View>
           
           {/* Voice Transcript Box - Only shown in Original mode */}
-          {(contentView === 'original' && voiceTranscript) && (
+          {(contentView === 'original' && voiceCaption) && (
             <View style={styles.transcriptContainer}>
               <Text style={styles.transcriptLabel}>🎤 Audio Recorded</Text>
               <TextInput
                 style={styles.transcriptInput}
-                value={originalCaption || ''}
+                value={captionState.previewCaption || ''}
                 onChangeText={(text) => {
+                  // Track manual edits after AI generation
+                  if (aiGeneratedCaptionState && aiGeneratedCaptionState.trim().length > 0) {
+                    setEditedAfterAI(true);
+                  }
+                  
+                  // Update manual description (feeds into captionState)
+                  setManualDescription(text);
+                  
+                  // Keep legacy state
                   setOriginalCaption(text);
                   setCaption(text);
                 }}
@@ -2571,7 +2802,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           )}
           
           {/* Editable Caption - Hide in Original mode when transcript exists */}
-          {!(contentView === 'original' && voiceTranscript) && (
+          {!(contentView === 'original' && voiceCaption) && (
             <View style={styles.aiDescriptionBox}>
               {/* AI Generated Title */}
               {contentView === 'ai' && generatedContent?.title && (
@@ -2599,8 +2830,17 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 style={styles.aiCaptionInput}
                 placeholder="Edit your caption..."
                 placeholderTextColor="#9ca3af"
-                value={caption || ''}
+                value={manualDescription || ''}
                 onChangeText={(text) => {
+                  // Track manual edits after AI generation
+                  if (aiGeneratedCaptionState && aiGeneratedCaptionState.trim().length > 0) {
+                    setEditedAfterAI(true);
+                  }
+                  
+                  // Update manual description (this feeds into captionState)
+                  setManualDescription(text);
+                  
+                  // Keep legacy state for backward compatibility
                   setCaption(text);
                   if (contentView === 'ai') {
                     setAiCaption(text);

@@ -791,29 +791,35 @@ class HLSLiveStreamService {
   }
 
   /**
-   * Add comment to live stream with TikTok-style real-time updates
+   * Add comment to live stream via backend API
    */
-  async addComment(streamId, content) {
+  async addComment(streamId, content, userId, cognitoToken) {
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User must be logged in');
+      if (!userId || typeof userId !== 'string') {
+        throw new Error('userId is required to add comment');
+      }
+      
+      if (!cognitoToken) {
+        throw new Error('Authentication token required');
+      }
 
-      // Ensure any legacy embedded comments are migrated before adding new
-      await this.migrateEmbeddedComments(streamId);
+      // Call backend API instead of writing directly to Firestore
+      const response = await fetch('https://us-central1-blyp-master.cloudfunctions.net/addLiveStreamComment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cognitoToken}`
+        },
+        body: JSON.stringify({
+          streamId,
+          content: content.trim()
+        })
+      });
       
-      const comment = {
-        userId: user.uid,
-        userName: user.displayName || 'Anonymous',
-        userPhotoURL: user.photoURL || null,
-        content: content.trim(),
-        timestamp: serverTimestamp(),
-        // TikTok-style: engagement tracking
-        likes: 0,
-        isHighlighted: false
-      };
-      
-      // Add comment to subcollection (matches Firestore rules)
-      await db.collection('liveStreams').doc(streamId).collection('comments').add(comment);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add comment');
+      }
       
       console.log(`💬 Comment added to stream ${streamId}`);
       
@@ -869,24 +875,34 @@ class HLSLiveStreamService {
   }
 
   /**
-   * Add like to stream (TikTok-style continuous likes, no toggle)
+   * Add like to stream via backend API
    */
-  async addLike(streamId) {
+  async addLike(streamId, userId, cognitoToken) {
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User must be logged in');
+      if (!userId || typeof userId !== 'string') {
+        throw new Error('userId is required to add like');
+      }
       
-      const streamRef = db.collection('liveStreams').doc(streamId);
+      if (!cognitoToken) {
+        throw new Error('Authentication token required');
+      }
       
-      // Just increment like count (no toggle, continuous likes)
-      await streamRef.update({
-        likes: increment(1),
-        lastUpdated: serverTimestamp(),
-        // TikTok-style: track engagement
-        'streamHealth.engagementActivity': serverTimestamp()
+      // Call backend API instead of writing directly to Firestore
+      const response = await fetch('https://us-central1-blyp-master.cloudfunctions.net/addLiveStreamLike', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cognitoToken}`
+        },
+        body: JSON.stringify({ streamId })
       });
       
-      console.log(`❤️ Like added to stream ${streamId}`);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add like');
+      }
+      
+      console.log(`❤️ Like added to stream ${streamId} by user ${userId}`);
       
     } catch (error) {
       console.error('❌ Error adding like:', error);
@@ -897,19 +913,20 @@ class HLSLiveStreamService {
   /**
    * Toggle like on stream with TikTok-style instant feedback (LEGACY)
    */
-  async toggleLike(streamId, isLiking) {
+  async toggleLike(streamId, userId, isLiking) {
     try {
-      const user = auth.currentUser;
-      if (!user) throw new Error('User must be logged in');
+      if (!userId || typeof userId !== 'string') {
+        throw new Error('userId is required to toggle like');
+      }
       
   const streamRef = db.collection('liveStreams').doc(streamId);
-  const likeRef = streamRef.collection('likes').doc(user.uid);
+  const likeRef = streamRef.collection('likes').doc(userId);
       
       if (isLiking) {
         // Add like
         await likeRef.set({
           streamId,
-          userId: user.uid,
+          userId: userId,
           likedAt: serverTimestamp()
         });
         
@@ -937,12 +954,11 @@ class HLSLiveStreamService {
   /**
    * Check if user has liked the stream
    */
-  async hasUserLiked(streamId) {
+  async hasUserLiked(streamId, userId) {
     try {
-      const user = auth.currentUser;
-      if (!user) return false;
+      if (!userId) return false;
       
-  const likeRef = db.collection('liveStreams').doc(streamId).collection('likes').doc(user.uid);
+  const likeRef = db.collection('liveStreams').doc(streamId).collection('likes').doc(userId);
   const likeDoc = await likeRef.get();
   return likeDoc.exists;
     } catch (error) {

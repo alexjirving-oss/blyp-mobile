@@ -73,7 +73,7 @@ const AuthScreen = () => {
 
   const probeAccountExistence = (emailToProbe) => {
     // Avoid redundant probes or empty emails
-    const norm = (emailToProbe || '').trim();
+    const norm = String(emailToProbe || '').trim().toLowerCase();
     if (!norm || accountExists !== undefined) return;
     try {
       const tempUser = new CognitoUser({ Username: norm, Pool: userPool });
@@ -138,13 +138,14 @@ const AuthScreen = () => {
     }
 
     setLoading(true);
-    console.log('🔐 Auth attempt:', isLogin ? 'LOGIN' : 'SIGNUP', maskEmail(email));
+    const emailNorm = String(email || '').trim().toLowerCase();
+    console.log('🔐 Auth attempt:', isLogin ? 'LOGIN' : 'SIGNUP', maskEmail(emailNorm));
     
     try {
       // Forgot password flow (change password after code)
       if (resetMode && resetCode.trim() && newPassword.trim()) {
         setLoading(true);
-        const emailToReset = email.trim();
+        const emailToReset = emailNorm;
         const cognitoUser = new CognitoUser({ Username: emailToReset, Pool: userPool });
         console.log('🔐 Reset attempt (confirm new password)', maskEmail(emailToReset));
         cognitoUser.confirmPassword(resetCode.trim(), newPassword.trim(), {
@@ -167,12 +168,12 @@ const AuthScreen = () => {
       }
       if (needsConfirm) {
         // Confirm code then auto-login
-  const emailToConfirm = (confirmEmail || email).trim();
+  const emailToConfirm = String(confirmEmail || emailNorm).trim().toLowerCase();
   const cognitoUser = new CognitoUser({ Username: emailToConfirm, Pool: userPool });
         cognitoUser.confirmRegistration(confirmCode.trim(), true, (err, result) => {
           const proceedToLogin = () => {
             // Auto sign-in (treat already-confirmed as success path)
-            const authDetails = new AuthenticationDetails({ Username: email, Password: password });
+            const authDetails = new AuthenticationDetails({ Username: emailNorm, Password: password });
             cognitoUser.authenticateUser(authDetails, {
               onSuccess: () => {
                 console.log('✅ Auto-login after confirm');
@@ -226,12 +227,12 @@ const AuthScreen = () => {
         setIsSigningIn(true);
         loginStartRef.current = Date.now();
         console.log('[AUTH][METRICS] Login start at', new Date(loginStartRef.current).toISOString());
-        const authDetails = new AuthenticationDetails({ Username: email, Password: password });
-        const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
+        const authDetails = new AuthenticationDetails({ Username: emailNorm, Password: password });
+        const cognitoUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
         
         cognitoUser.authenticateUser(authDetails, {
           onSuccess: (result) => {
-            console.log('✅ Sign in successful for', maskEmail(email));
+            console.log('✅ Sign in successful for', maskEmail(emailNorm));
             handleAuthSuccess('password_login', { cognitoUser, tokens: result });
           },
           onFailure: (err) => {
@@ -242,7 +243,7 @@ const AuthScreen = () => {
             setAttempts(a => a + 1);
             if (err?.code === 'UserNotConfirmedException') {
               console.log('ℹ️ User not confirmed. Prompting for code...');
-              const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+              const pendingUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
               pendingUser.resendConfirmationCode((resendErr, resendRes) => {
                 if (resendErr) {
                   console.error('❌ Resend code failed:', resendErr);
@@ -253,7 +254,7 @@ const AuthScreen = () => {
                 }
               });
               setNeedsConfirm(true);
-              setConfirmEmail(email);
+              setConfirmEmail(emailNorm);
               Alert.alert('Confirm Your Account', 'We sent you a verification code. Enter it to finish sign-in.');
               console.log(
                 '[AUTH][STATE] isSigningIn=false (error: NotConfirmed) at',
@@ -261,35 +262,8 @@ const AuthScreen = () => {
                 { message: err?.message, code: err?.code }
               );
               setIsSigningIn(false);
-            } else if (err?.code === 'NotAuthorizedException' && /[A-Z]/.test(email)) {
-              // Fallback: attempt lowercase username if mixed case might cause mismatch
-              const lowered = email.toLowerCase();
-              if (lowered !== email) {
-                console.log('ℹ️ Retrying sign-in with lowercase username fallback for', maskEmail(email));
-                const authDetails2 = new AuthenticationDetails({ Username: lowered, Password: password });
-                const cognitoUser2 = new CognitoUser({ Username: lowered, Pool: userPool });
-                cognitoUser2.authenticateUser(authDetails2, {
-                  onSuccess: () => {
-                    console.log('✅ Sign in successful (lowercase fallback) for', maskEmail(lowered));
-                    handleAuthSuccess('password_login_lowercase_fallback', { cognitoUser: cognitoUser2 });
-                  },
-                  onFailure: (err2) => {
-                    recordError(err2);
-                    console.error('❌ Lowercase fallback failed:', err2);
-                    const friendly2 = mapAuthError(err2);
-                    setLastError(friendly2?.message || err2?.message || String(err2));
-                    Alert.alert('Authentication Error', friendly2?.message || err2.message);
-                    console.log(
-                      '[AUTH][STATE] isSigningIn=false (error: LowercaseFallback) at',
-                      new Date().toISOString(),
-                      { message: err2?.message, code: err2?.code }
-                    );
-                    setIsSigningIn(false);
-                    setLoading(false);
-                  }
-                });
-                return;
-              }
+            } else if (err?.code === 'UserNotFoundException') {
+              Alert.alert('Authentication Error', 'No account found for this email. Try signing up.');
             } else {
               Alert.alert('Authentication Error', friendly?.message || err.message);
               // After 2 failed attempts with same credentials, surface reset suggestion
@@ -303,7 +277,7 @@ const AuthScreen = () => {
                 setSuggestReset(true);
               }
               // Probe existence to help user choose between reset vs signup
-              probeAccountExistence(email);
+              probeAccountExistence(emailNorm);
               console.log(
                 '[AUTH][STATE] isSigningIn=false (error: General) at',
                 new Date().toISOString(),
@@ -316,14 +290,24 @@ const AuthScreen = () => {
         });
       } else {
         // Sign up
-        console.log('📝 Starting signup for:', maskEmail(email));
-        // Ensure email attribute is set so Cognito can deliver verification codes
+        const usernameNorm = String(username || '').trim();
+        
+        // Guard: username must be non-empty and NOT look like an email
+        if (!usernameNorm || usernameNorm.includes('@')) {
+          setLastError('Choose a username that is not an email address.');
+          Alert.alert('Invalid Username', 'Your username cannot be an email address. Please choose a different name.');
+          setLoading(false);
+          return;
+        }
+        
+        console.log('📝 Starting signup for:', maskEmail(emailNorm), 'with username:', usernameNorm);
+        // Pass username as Cognito Username; email is attribute only
         const attributes = [
-          { Name: 'name', Value: username },
-          { Name: 'email', Value: email },
-          { Name: 'preferred_username', Value: username || email },
+          { Name: 'email', Value: emailNorm },
+          { Name: 'preferred_username', Value: usernameNorm },
+          { Name: 'name', Value: usernameNorm },
         ];
-        userPool.signUp(email, password, attributes, null, (err, result) => {
+        userPool.signUp(usernameNorm, password, attributes, null, (err, result) => {
           console.log('📝 Signup callback fired', err ? 'ERROR' : 'SUCCESS');
           
           if (err) {
@@ -331,8 +315,8 @@ const AuthScreen = () => {
             console.error('❌ Signup error:', err);
             setLastError(friendly?.message || err?.message || String(err));
             if (err?.code === 'UsernameExistsException') {
-              console.log('ℹ️ User exists but may be unconfirmed; attempting to resend code for', maskEmail(email));
-              const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+              console.log('ℹ️ User exists but may be unconfirmed; attempting to resend code for username:', usernameNorm);
+                const pendingUser = new CognitoUser({ Username: usernameNorm, Pool: userPool });
               pendingUser.resendConfirmationCode((resendErr, resendRes) => {
                 if (resendErr) {
                   console.error('❌ Resend code failed:', resendErr);
@@ -342,7 +326,7 @@ const AuthScreen = () => {
                   const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
                   Alert.alert('Verify Your Email', `We re-sent a verification code to ${dest}. Enter it to finish sign-up.`);
                   setNeedsConfirm(true);
-                  setConfirmEmail(email);
+                  setConfirmEmail(usernameNorm);
                 }
               });
             } else {
@@ -359,7 +343,7 @@ const AuthScreen = () => {
           // Do NOT resend here; Cognito already sent a code on sign-up.
           const dest = result?.codeDeliveryDetails?.Destination || 'your email';
           setNeedsConfirm(true);
-          setConfirmEmail(email);
+          setConfirmEmail(usernameNorm);
           Alert.alert('Verify Your Email', `We sent you a verification code to ${dest}. Enter it to finish sign-up.`);
           setLoading(false);
         });
@@ -634,7 +618,7 @@ const AuthScreen = () => {
               <TouchableOpacity
                 style={[styles.toggleButton, { marginTop: 8 }]}
                 onPress={() => {
-                  const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+                  const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
                   pendingUser.resendConfirmationCode((resendErr, resendRes) => {
                     if (resendErr) {
                       console.error('❌ Resend code failed:', resendErr);
@@ -685,7 +669,7 @@ const AuthScreen = () => {
                   return;
                 }
                 setLastError('');
-                const pendingUser = new CognitoUser({ Username: email.trim(), Pool: userPool });
+                const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
                 console.log('🔐 Forgot password initiate for', maskEmail(email.trim()));
                 pendingUser.forgotPassword({
                   onSuccess: () => {
@@ -718,7 +702,7 @@ const AuthScreen = () => {
                   Alert.alert('Reset Password', 'Enter your email above first.');
                   return;
                 }
-                const pendingUser = new CognitoUser({ Username: email.trim(), Pool: userPool });
+                const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
                 console.log('🔐 Auto-forgot after repeated failures for', maskEmail(email.trim()));
                 pendingUser.forgotPassword({
                   onSuccess: () => {

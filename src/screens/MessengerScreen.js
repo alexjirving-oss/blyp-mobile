@@ -857,7 +857,7 @@ const MessengerScreen = ({ navigation }) => {
             }
           ]}>
             <LinearGradient
-              colors={['#25d366', '#128c7e']}
+              colors={['#a855f7', '#d946ef', '#ec4899']}
               style={styles.tabIndicatorGradient}
             />
           </View>

@@ -809,7 +809,7 @@ const HomeScreen = ({ navigation }) => {
       }}
     >
       <View style={styles.headerTop}>
-        <TouchableOpacity style={styles.headerMenuButton} onPress={() => setMenuVisible(true)}>
+        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
           <Icon  name="menu" size={24} color="#d1d5db"  />
         </TouchableOpacity>
         <View style={styles.logoContainer}>
@@ -829,15 +829,21 @@ const HomeScreen = ({ navigation }) => {
               </Text>
             </TouchableOpacity>
           ))}
-          <LinearGradient
-            colors={['#a855f7', '#d946ef', '#ec4899']}
-            style={[
-              styles.tabIndicator,
-              {
-                left: `${['A', 'B', 'C', 'D'].indexOf(selectedTab) * 25}%`,
-              },
-            ]}
-          />
+          
+          {/* Tab Indicator */}
+          <View style={[
+            styles.tabIndicator,
+            {
+              left: selectedTab === 'A' ? '2%' :
+                    selectedTab === 'B' ? '27%' :
+                    selectedTab === 'C' ? '52%' : '77%'
+            }
+          ]}>
+            <LinearGradient
+              colors={['#a855f7', '#d946ef', '#ec4899']}
+              style={styles.tabIndicatorGradient}
+            />
+          </View>
         </View>
       </View>
     </View>
@@ -1104,7 +1110,7 @@ const HomeScreen = ({ navigation }) => {
             </View>
 
             <TouchableOpacity
-              style={styles.menuButton}
+              style={styles.menuActionButton}
               onPress={() => {
                 setMenuVisible(false);
                 navigation.navigate('CoinStore');
@@ -1122,15 +1128,17 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: 'black' },
   header: { backgroundColor: '#0f172a', paddingTop: 50, paddingBottom: 1, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 16 },
-  headerMenuButton: { padding: 8 },
-  logoContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  headerTop: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, marginBottom: 16 },
+  menuButton: { padding: 8, position: 'absolute', left: 16 },
+  logoContainer: { justifyContent: 'center', alignItems: 'center', flex: 1 },
+  searchButton: { padding: 8, position: 'absolute', right: 16 },
   tabContainer: { paddingHorizontal: 16, paddingBottom: 12 },
   tabSelector: { position: 'relative', backgroundColor: '#374151', borderRadius: 9999, padding: 4, flexDirection: 'row' },
   tab: { flex: 1, paddingVertical: 6, alignItems: 'center', zIndex: 2 },
   tabText: { color: '#9ca3af', fontSize: 12, fontWeight: '600', includeFontPadding: false },
   activeTabText: { color: '#ffffff' },
   tabIndicator: { position: 'absolute', top: 2, bottom: 2, width: '25%', borderRadius: 9999, zIndex: 1 },
+  tabIndicatorGradient: { flex: 1, borderRadius: 9999 },
   fullscreenContent: { flex: 1, backgroundColor: 'black', position: 'relative' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   loadingText: { color: '#9ca3af', fontSize: responsiveFont(15) },
@@ -1178,7 +1186,7 @@ const styles = StyleSheet.create({
   balanceIcon: { fontSize: responsiveFont(20), marginRight: 8 },
   balanceLabel: { flex: 1, fontSize: responsiveFont(14), color: '#d1d5db' },
   balanceValue: { fontSize: responsiveFont(16), fontWeight: 'bold', color: '#ffffff' },
-  menuButton: { backgroundColor: 'rgba(236, 72, 153, 0.8)', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 16, alignItems: 'center' },
+  menuActionButton: { backgroundColor: 'rgba(236, 72, 153, 0.8)', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, marginTop: 16, alignItems: 'center' },
   menuButtonText: { color: '#ffffff', fontSize: responsiveFont(14), fontWeight: 'bold' },
 });
 

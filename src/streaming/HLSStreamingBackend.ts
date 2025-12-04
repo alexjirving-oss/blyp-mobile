@@ -27,6 +27,18 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
    * Create a new live stream with user profile setup
    */
   async createStream({ userId, title, displayName, photoURL, email }): Promise<StreamingResult<HostStreamMeta>> {
+    console.log('[HLS][AUTH] createStream called with userId:', userId ? 'present' : 'MISSING');
+    
+    // CRITICAL: Check userId upfront before any backend calls
+    if (!userId || typeof userId !== 'string') {
+      console.error('[HLS][AUTH] Backend received null/invalid userId - SYNTHESIZING NOT_LOGGED_IN');
+      return {
+        ok: false,
+        reason: 'NOT_LOGGED_IN',
+        error: 'User must be logged in to create stream',
+      };
+    }
+    
     logStreamingEvent('STREAM_START_REQUEST', {
       backendId: 'HLS',
       userId,
@@ -47,13 +59,38 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
 
       // HLS service already returns { ok, reason, error, streamId, streamData }
       if (!hlsResult.ok) {
-        // Map HLS_BACKEND_ERROR to generic BACKEND_ERROR, preserve PERMISSION_DENIED
+        console.log('[HLS][AUTH] HLS service returned error:', hlsResult.reason);
+        
+        // MEGA COMMAND: If backend reports NOT_LOGGED_IN but we passed userId, treat as backend error
+        if (hlsResult.reason === 'NOT_LOGGED_IN') {
+          if (userId) {
+            console.error('[HLS][AUTH] Backend reported NOT_LOGGED_IN despite userId supplied');
+            logStreamingEvent('STREAM_START_FAILURE', {
+              backendId: 'HLS',
+              userId,
+              source: 'backend',
+              reason: 'BACKEND_ERROR',
+              errorMessage: 'Backend reported NOT_LOGGED_IN even though userId was provided',
+            });
+            return {
+              ok: false,
+              reason: 'BACKEND_ERROR',
+              error: hlsResult.error || 'Streaming backend reported NOT_LOGGED_IN even though userId was provided.',
+            };
+          }
+          // Real NOT_LOGGED_IN (no userId was passed to backend)
+          return {
+            ok: false,
+            reason: 'NOT_LOGGED_IN',
+            error: hlsResult.error || 'User must be logged in to stream.',
+          };
+        }
+        
+        // Map other errors
         const mappedReason = hlsResult.reason === 'PERMISSION_DENIED' 
           ? 'PERMISSION_DENIED' 
           : hlsResult.reason === 'HLS_BACKEND_NOT_CONFIGURED' 
           ? 'BACKEND_NOT_CONFIGURED'
-          : hlsResult.reason === 'NOT_LOGGED_IN'
-          ? 'NOT_LOGGED_IN'
           : 'BACKEND_ERROR';
         return {
           ok: false,
