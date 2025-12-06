@@ -15,116 +15,208 @@ service cloud.firestore {
       return value is string && value.size() > 0 && value.size() <= maxLen;
     }
     
-    // ========== LIVE STREAMS ==========
+    // ========= DEV-OPEN: Live & Streams (Cognito-only env) =========
+    // WARNING: These rules must be tightened before production.
+    // They currently allow full read/write for liveStreams, streams, users, and userProfiles.
     
-    // Main stream documents - host can create/update their own, everyone can read
+    // Main stream documents
     match /liveStreams/{streamId} {
-      // Anyone can read public live streams
-      allow read: if true;
+      // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+      allow read, write: if true;
       
-      // Only authenticated users can create streams
-      allow create: if isAuthenticated()
-        && isOwner(request.resource.data.userId)
-        && isValidString(request.resource.data.title, 200)
-        && request.resource.data.status == 'live';
-      
-      // Host can update their stream
-      // Note: Admin SDK bypasses rules, so no special condition needed for backend writes
-      allow update: if isAuthenticated()
-        && isOwner(resource.data.userId)
-        && request.resource.data.userId == resource.data.userId; // userId cannot change
-      
-      // Only the host can delete (optional - prefer keeping ended streams)
-      allow delete: if isAuthenticated()
-        && isOwner(resource.data.userId);
-      
-      // Segment subcollection - host can write, everyone can read
+      // Segment subcollection
       match /segments/{segmentId} {
-        allow read: if true;
-        
-        allow create, update: if isAuthenticated()
-          && isOwner(get(/databases/$(database)/documents/liveStreams/$(streamId)).data.userId)
-          && request.resource.data.number is int
-          && request.resource.data.number >= 0;
-        
-        allow delete: if isAuthenticated()
-          && isOwner(get(/databases/$(database)/documents/liveStreams/$(streamId)).data.userId);
+        // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+        allow read, write: if true;
       }
       
-      // Comments subcollection - admin writes via backend API, everyone can read
+      // Comments subcollection
       match /comments/{commentId} {
-        allow read: if true;
-        
-        // Only Admin SDK can write (backend API validates Cognito token)
-        allow write: if false;
+        // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+        allow read, write: if true;
       }
       
-      // Likes subcollection - user can manage their own like, everyone can read
+      // Likes subcollection
       match /likes/{userId} {
-        allow read: if true;
-        
-        allow create, update, delete: if isAuthenticated()
-          && isOwner(userId);
+        // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+        allow read, write: if true;
+      }
+      
+      // Gifts subcollection (live streaming)
+      match /gifts/{giftId} {
+        allow read, write: if true;
+      }
+      
+      // Viewers subcollection (live streaming)
+      match /viewers/{viewerId} {
+        allow read, write: if true;
+      }
+      
+      // Controls subcollection (moderation)
+      match /controls/{controlId} {
+        allow read, write: if true;
       }
     }
     
-    // ========== USER PROFILES ==========
-    
-    // User profile documents - owner can write, everyone can read public fields
+    // User profile documents
     match /userProfiles/{userId} {
-      allow read: if true;
-      
-      allow create, update: if isAuthenticated()
-        && isOwner(userId);
-      
-      allow delete: if isAuthenticated()
-        && isOwner(userId);
+      // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+      allow read, write: if true;
     }
     
-    // ========== LIVE SERVICE USERS ==========
-    
-    // LiveService user presence - owner can write, everyone can read
+    // LiveService user presence
     match /users/{userId} {
-      allow read: if true;
+      // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+      allow read, write: if true;
       
-      allow create, update: if isAuthenticated()
-        && isOwner(userId);
+      // User subcollections
+      match /followers/{followerId} {
+        allow read, write: if true;
+      }
       
-      allow delete: if isAuthenticated()
-        && isOwner(userId);
+      match /following/{followingId} {
+        allow read, write: if true;
+      }
+      
+      match /liveStreamStats/{statsId} {
+        allow read, write: if true;
+      }
+      
+      match /chats/{chatId} {
+        allow read, write: if true;
+        
+        match /messages/{messageId} {
+          allow read, write: if true;
+        }
+      }
     }
     
-    // ========== LIVE SERVICE STREAMS ==========
-    
-    // LiveService stream metadata - host can write, everyone can read
+    // LiveService stream metadata
     match /streams/{streamId} {
-      allow read: if true;
+      // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+      allow read, write: if true;
       
-      // Only authenticated users can create streams
-      allow create: if isAuthenticated()
-        && isOwner(request.resource.data.hostUid);
-      
-      // Only the host can update their stream
-      allow update: if isAuthenticated()
-        && isOwner(resource.data.hostUid)
-        && request.resource.data.hostUid == resource.data.hostUid; // hostUid cannot change
-      
-      // Only the host can delete
-      allow delete: if isAuthenticated()
-        && isOwner(resource.data.hostUid);
-      
-      // Stream messages subcollection - anyone authenticated can send, everyone can read
+      // Stream messages subcollection
       match /messages/{messageId} {
-        allow read: if true;
-        
-        allow create: if isAuthenticated()
-          && request.resource.data.uid == request.auth.uid
-          && isValidString(request.resource.data.text, 500);
-        
-        // Only message sender can delete their message
-        allow delete: if isAuthenticated()
-          && isOwner(resource.data.uid);
+        // DEV-OPEN: Live/Streams temporarily fully open for Blyp finish phase.
+        allow read, write: if true;
       }
+    }
+    
+    // ========== DEV-OPEN: Core App & Economy Collections ==========
+    // WARNING: DEV ONLY – must be tightened before production.
+    
+    // Posts feed & user posts
+    match /posts/{postId} {
+      allow read, write: if true;
+    }
+    
+    // Activity feed / notifications
+    match /activities/{activityId} {
+      allow read, write: if true;
+    }
+    
+    // Economy: transactions, wallets, gems, gifts
+    match /transactions/{transactionId} {
+      allow read, write: if true;
+    }
+    
+    match /wallets/{walletId} {
+      allow read, write: if true;
+    }
+    
+    match /gems/{gemId} {
+      allow read, write: if true;
+    }
+    
+    match /gifts/{giftId} {
+      allow read, write: if true;
+    }
+    
+    // Moderation queues and actions
+    match /moderationQueue/{itemId} {
+      allow read, write: if true;
+    }
+    
+    match /moderationActions/{actionId} {
+      allow read, write: if true;
+    }
+    
+    // User reports
+    match /reports/{reportId} {
+      allow read, write: if true;
+    }
+    
+    // Post drafts
+    match /drafts/{draftId} {
+      allow read, write: if true;
+    }
+    
+    // Legacy followers collection (older schema)
+    match /followers/{followerDocId} {
+      allow read, write: if true;
+    }
+    
+    // Chats and chat rooms
+    match /chats/{chatId} {
+      allow read, write: if true;
+      
+      // Chat messages subcollection
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+    
+    match /chatRooms/{roomId} {
+      allow read, write: if true;
+    }
+    
+    // Game rooms
+    match /gameRooms/{gameRoomId} {
+      allow read, write: if true;
+    }
+    
+    // Analytics & alerts
+    match /analytics/{analyticsId} {
+      allow read, write: if true;
+    }
+    
+    match /alerts/{alertId} {
+      allow read, write: if true;
+    }
+    
+    // Remote config (e.g., streaming feature flags)
+    match /appConfig/{configId} {
+      allow read, write: if true;
+    }
+    
+    // Test collection used by FirebaseTestScreen
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+    
+    // Live users directory (for live streaming tab)
+    match /liveUsers/{userId} {
+      allow read, write: if true;
+    }
+    
+    // Conversations / direct messages
+    match /conversations/{conversationId} {
+      allow read, write: if true;
+      
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+    
+    // Stream analytics (if used)
+    match /streamAnalytics/{analyticsId} {
+      allow read, write: if true;
+    }
+    
+    // Stream alerts (if used)
+    match /streamAlerts/{alertId} {
+      allow read, write: if true;
     }
     
     // ========== DEFAULT DENY ==========

@@ -1,164 +1,167 @@
-import React, { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { View, Image, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
-import * as FileSystem from 'expo-file-system/legacy';
+import { getPlayableVideoUri } from '../utils/videoCache';
 
-function EnhancedVideo({
-  uri,
-  poster,
-  style,
-  shouldPlay,
-  shouldLoad,
-  isLooping = true,
-  isMuted = false,
-  resizeMode = 'contain',
-  onReady,
-  onError,
-}) {
+function EnhancedVideo(props) {
   const videoRef = useRef(null);
-  const [cachedUri, setCachedUri] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [buffering, setBuffering] = useState(false);
+  const [playableUri, setPlayableUri] = useState(null);
   const [videoLoaded, setVideoLoaded] = useState(false);
-  const loadStartRef = useRef(Date.now());
-  const loggedRef = useRef(false);
+  const [hasError, setHasError] = useState(false);
 
+  const remoteUri = props.uri || props.videoUrl;
+  const isFocused = props.shouldPlay ?? true;
+  const posterUri = props.poster;
+
+  // Resolve URI through cache helper
   useEffect(() => {
-    if (!shouldLoad || !uri || cachedUri) return;
-
     let cancelled = false;
-    async function cacheInBackground() {
-      try {
-        const fileName = encodeURIComponent(uri);
-        const fileUri = `${FileSystem.cacheDirectory}vid-${fileName}`;
-        const info = await FileSystem.getInfoAsync(fileUri);
-        if (cancelled) return;
 
-        if (!info.exists) {
-          setLoading(true);
-          const download = await FileSystem.downloadAsync(uri, fileUri);
-          if (cancelled) return;
-          setCachedUri(download.uri);
-        } else {
-          setCachedUri(info.uri);
-        }
-      } catch (e) {
+    async function resolveUri() {
+      if (!remoteUri) {
+        setPlayableUri(null);
+        setHasError(true);
+        return;
+      }
+
+      try {
+        const resolved = await getPlayableVideoUri(remoteUri);
         if (!cancelled) {
-          setError(e);
-          onError && onError(e);
+          setPlayableUri(resolved || remoteUri);
+          setHasError(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
+      } catch (error) {
+        if (!cancelled) {
+          if (__DEV__) {
+            console.warn('[EnhancedVideo] URI resolution failed, using remote', { error });
+          }
+          setPlayableUri(remoteUri);
+          setHasError(false);
+        }
       }
     }
-    cacheInBackground();
+
+    resolveUri();
+
     return () => {
       cancelled = true;
     };
-  }, [uri, shouldLoad, cachedUri, onError]);
+  }, [remoteUri]);
 
-  const handlePlayControl = useCallback(async () => {
-    if (!videoRef.current) return;
-    try {
-      if (shouldPlay) {
-        await videoRef.current.playAsync();
-      } else {
-        await videoRef.current.pauseAsync();
-      }
-    } catch {
-      // ignore
-    }
-  }, [shouldPlay]);
-
+  // Drive play/pause from focus
   useEffect(() => {
-    handlePlayControl();
-  }, [handlePlayControl]);
+    if (!videoRef.current || !videoLoaded || hasError) return;
 
-  const source = { uri: cachedUri || uri };
+    if (isFocused) {
+      videoRef.current.playAsync().catch(() => {});
+    } else {
+      videoRef.current.pauseAsync().catch(() => {});
+    }
+  }, [isFocused, videoLoaded, hasError]);
+
+  const handleLoad = (status) => {
+    if (__DEV__) {
+      console.log('[EnhancedVideo] onLoad', {
+        playableUri,
+        durationMillis: status?.durationMillis,
+      });
+    }
+    setVideoLoaded(true);
+    setHasError(false);
+    if (props.onReady) props.onReady();
+  };
+
+  const handleError = (error) => {
+    console.warn('[EnhancedVideo] onError', error);
+    setHasError(true);
+    setVideoLoaded(false);
+    if (props.onError) props.onError(error);
+  };
 
   return (
-    <View style={[style, { overflow: 'hidden', position: 'relative' }]}> 
-      {poster && !videoLoaded && (
-        <Image
-          source={{ uri: poster }}
-          style={[StyleSheet.absoluteFill, styles.poster]}
-          resizeMode="contain"
+    <View style={[styles.container, props.style]}>
+      {playableUri && (
+        <UnifiedVideo
+          ref={videoRef}
+          style={styles.video}
+          source={{ uri: playableUri }}
+          resizeMode={props.resizeMode || "cover"}
+          isLooping={props.isLooping ?? true}
+          isMuted={props.isMuted ?? true}
+          shouldPlay={isFocused}
+          onLoad={handleLoad}
+          onError={handleError}
+          onReadyForDisplay={() => {
+            if (__DEV__) {
+              console.log('[EnhancedVideo] onReadyForDisplay');
+            }
+            setVideoLoaded(true);
+          }}
+          onPlaybackStatusUpdate={
+            __DEV__
+              ? (status) => {
+                  if (status?.isLoaded && status?.isPlaying) {
+                    // Lightweight check to avoid spam
+                  }
+                  if (status?.error) {
+                    console.warn('[EnhancedVideo] playbackStatus error', status.error);
+                  }
+                }
+              : undefined
+          }
         />
       )}
 
-      {(loading || buffering) && (
-        <View style={[StyleSheet.absoluteFill, styles.loader]}>
+      {/* Poster while loading, if available */}
+      {!videoLoaded && !hasError && posterUri && (
+        <Image
+          source={{ uri: posterUri }}
+          style={styles.overlay}
+          resizeMode="cover"
+        />
+      )}
+
+      {/* Loading spinner while not loaded and no error */}
+      {!videoLoaded && !hasError && (
+        <View style={styles.loadingOverlay}>
           <ActivityIndicator color="#ec4899" />
         </View>
       )}
 
-      {error && (
-        <View style={[StyleSheet.absoluteFill, styles.error]} />
+      {/* Simple error overlay */}
+      {hasError && (
+        <View style={styles.errorOverlay}>
+          {/* Error indicator */}
+        </View>
       )}
-
-      <UnifiedVideo
-        ref={videoRef}
-        source={source}
-        style={[StyleSheet.absoluteFill, { backgroundColor: 'transparent', opacity: videoLoaded ? 1 : 0 }]}
-        shouldPlay={shouldPlay && videoLoaded}
-        isLooping={isLooping}
-        isMuted={isMuted}
-        resizeMode={resizeMode}
-        useNativeControls={false}
-        progressUpdateIntervalMillis={500}
-        onLoad={(status) => {
-          console.log('[EnhancedVideo] onLoad', {
-            uri: uri?.slice(0, 80),
-            cached: !!cachedUri,
-            durationMillis: status?.durationMillis,
-          });
-        }}
-        onReadyForDisplay={() => {
-          if (!loggedRef.current) {
-            const ms = Date.now() - loadStartRef.current;
-            if (ms > 1000) {
-              console.log('[VideoPerf] slow readyForDisplay', { uri: uri?.slice(0, 60), ms });
-            }
-            loggedRef.current = true;
-          }
-          console.log('[EnhancedVideo] onReadyForDisplay', { uri: uri?.slice(0, 80) });
-          setTimeout(() => {
-            setVideoLoaded(true);
-            onReady && onReady();
-          }, 300);
-        }}
-        onError={(e) => {
-          console.log('[EnhancedVideo] onError', { uri: uri?.slice(0, 80), error: e });
-          setError(e);
-          onError && onError(e);
-        }}
-        onPlaybackStatusUpdate={(status) => {
-          if (status?.error) {
-            console.log('[EnhancedVideo] playbackStatus error', { uri: uri?.slice(0, 80), error: status.error });
-          }
-          if (status.isBuffering !== undefined && status.isBuffering !== buffering) {
-            setBuffering(status.isBuffering);
-          }
-        }}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  poster: {
+  container: {
     width: '100%',
-    height: '100%',
+    aspectRatio: 9 / 16,
+    backgroundColor: 'black',
+    overflow: 'hidden',
   },
-  loader: {
+  video: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
   },
-  error: {
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#111827',
   },
 });
 
-export default memo(EnhancedVideo);
+export default EnhancedVideo;

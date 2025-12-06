@@ -12,6 +12,10 @@ const ENABLE_EXPO_VIDEO = process.env.EXPO_PUBLIC_ENABLE_EXPO_VIDEO === 'true' |
 // Public component API remains unchanged for callers.
 export default function UnifiedVideo({
   source,
+  uri,
+  playbackUrl,
+  streamUrl,
+  hlsUrl,
   style,
   resizeMode = 'cover',
   shouldPlay = false,
@@ -24,9 +28,17 @@ export default function UnifiedVideo({
   onPlaybackStatusUpdate, // retained for compatibility; not mapped in expo-video branch yet
   ...rest
 }) {
+  const resolvedUri = (() => {
+    const explicit = typeof uri === 'string' ? uri.trim() : '';
+    const altPlayback = typeof playbackUrl === 'string' ? playbackUrl.trim() : '';
+    const altStream = typeof streamUrl === 'string' ? streamUrl.trim() : '';
+    const altHls = typeof hlsUrl === 'string' ? hlsUrl.trim() : '';
+    const fromSource = source && typeof source.uri === 'string' ? source.uri.trim() : '';
+    return explicit || altPlayback || altStream || altHls || fromSource || '';
+  })();
+
   // Guard against missing/invalid URI: do not play mock or placeholder content
-  const uri = source && typeof source.uri === 'string' ? source.uri.trim() : '';
-  if (!uri) {
+  if (!resolvedUri) {
     try {
       console.warn('[UnifiedVideo] Missing video URI. Rendering fallback UI only.');
     } catch {}
@@ -43,7 +55,7 @@ export default function UnifiedVideo({
     try {
       // eslint-disable-next-line no-console
       console.log('[VIDEO][UnifiedVideo] backend selected:', backend, {
-        uri,
+        uri: resolvedUri,
       });
     } catch {}
   }
@@ -51,7 +63,7 @@ export default function UnifiedVideo({
   if (!ENABLE_EXPO_VIDEO) {
     return (
       <ExpoAVVideo
-        source={{ uri }}
+        source={{ uri: resolvedUri }}
         style={style || StyleSheet.absoluteFill}
         resizeMode={resizeMode}
         shouldPlay={shouldPlay}
@@ -140,7 +152,7 @@ export default function UnifiedVideo({
     <VideoView
       ref={videoRef}
       style={style || StyleSheet.absoluteFill}
-      source={{ uri }}
+      source={{ uri: resolvedUri }}
       contentFit={contentFit}
       isLooping={isLooping}
       isMuted={isMuted}

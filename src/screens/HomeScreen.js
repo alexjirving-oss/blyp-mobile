@@ -18,10 +18,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { db, auth, firebaseEnabled, firestore } from '../config/firebase';
-import SimpleVideo from '../components/OptimizedVideo'; // legacy simple
 import EnhancedVideo from '../components/EnhancedVideo';
-import * as FileSystem from 'expo-file-system/legacy';
-import UnifiedVideo from '../components/UnifiedVideo';
 import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker';
 import BlypLogo from '../components/BlypLogo';
 import { addTestPostsWithMultiplePhotos } from '../utils/testDataHelper';
@@ -38,6 +35,7 @@ import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { fixStorageUrl } from '../utils/urlUtils';
 import AudioTile from '../components/AudioTile';
+import { getPlayableVideoUri } from '../utils/videoCache';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -185,6 +183,7 @@ const HomeScreen = ({ navigation }) => {
   const descriptionHideTimeout = useRef(null);
   const [feedHeight, setFeedHeight] = useState(0);
   // feedHeight will be measured from the available content area (between header and bottom tabs)
+  const [prefetchedUris, setPrefetchedUris] = useState({});
 
   const flatListRef = useRef(null);
   const prefetchingRef = useRef({});
@@ -539,23 +538,32 @@ const HomeScreen = ({ navigation }) => {
     const nextIndex = current + 1;
 
     if (!list || list.length === 0 || nextIndex >= list.length) {
-      return;
+      return () => {
+        isMounted = false;
+      };
     }
 
     const nextItem = list[nextIndex];
-    let nextUriCandidate = nextItem?.videoUrl || nextItem?.media?.[0]?.url;
     const isVideo = nextItem?.type === 'video' || nextItem?.media?.[0]?.type?.includes('video');
+    const nextUriCandidate = fixStorageUrl(nextItem?.videoUrl || nextItem?.media?.[0]?.url);
 
-    nextUriCandidate = fixStorageUrl(nextUriCandidate);
-
-    if (isVideo && nextUriCandidate && !prefetchingRef.current[nextUriCandidate]) {
+    if (
+      isVideo &&
+      nextUriCandidate &&
+      !prefetchingRef.current[nextUriCandidate] &&
+      !prefetchedUris[nextUriCandidate]
+    ) {
       console.log('🎞️ HOME: Prefetching next video:', nextIndex);
       prefetchingRef.current[nextUriCandidate] = true;
 
-      const fileName = encodeURIComponent(nextUriCandidate).replace(/[^a-zA-Z0-9]/g, '').substring(0, 48);
-      const fileUri = `${FileSystem.cacheDirectory}vid-${fileName}.mp4`;
-
-      FileSystem.downloadAsync(nextUriCandidate, fileUri)
+      getPlayableVideoUri(nextUriCandidate)
+        .then((playableUri) => {
+          if (!isMounted) return;
+          setPrefetchedUris((prev) => {
+            if (prev[nextUriCandidate]) return prev;
+            return { ...prev, [nextUriCandidate]: playableUri };
+          });
+        })
         .catch((error) => {
           if (isMounted) {
             console.log('❌ HOME: Error prefetching video:', error);
@@ -567,7 +575,7 @@ const HomeScreen = ({ navigation }) => {
     return () => {
       isMounted = false;
     };
-  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts]);
+  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts, prefetchedUris]);
 
   // Warm TCP/SSL connections for next two videos in active feed
   useEffect(() => {
@@ -576,7 +584,9 @@ const HomeScreen = ({ navigation }) => {
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
 
-    if (!list || list.length === 0) return;
+    if (!list || list.length === 0) return () => {
+      isMounted = false;
+    };
 
     const targets = [current + 1, current + 2].filter((i) => i < list.length);
     const activeConnections = [];
@@ -585,6 +595,10 @@ const HomeScreen = ({ navigation }) => {
       const item = list[i];
       const uriCandidate = fixStorageUrl(item?.videoUrl || item?.media?.[0]?.url);
       const isVideo = item?.type === 'video' || item?.media?.[0]?.type?.includes('video');
+
+      if (isVideo && uriCandidate && prefetchedUris[uriCandidate]) {
+        return; // Already cached locally; no need to warm HEAD request.
+      }
 
       if (isVideo && uriCandidate) {
         console.log('🔌 HOME: Warming connection for video:', i);
@@ -613,7 +627,7 @@ const HomeScreen = ({ navigation }) => {
         }
       });
     };
-  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts]);
+  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts, prefetchedUris]);
 
   const renderRandomPostItem = ({ item, index, feedHeight }) => {
     const mediaItems = item.media || [{ url: fixStorageUrl(item.imageUrl || item.videoUrl), type: item.type }];
@@ -629,33 +643,34 @@ const HomeScreen = ({ navigation }) => {
           (() => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
+            const videoUri = fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
+            const cachedUri = prefetchedUris[videoUri];
+            const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 1;
+
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => handlePostPress(item)}>
                 {console.log('🎥 HOME: Rendering #4ME video item', {
                   id: item.id,
                   index,
                   isFocused: isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex,
-                  videoUrl: item.videoUrl,
-                  mediaUrl: mediaItems[0]?.url,
+                  videoUrl: videoUri,
+                  hasCachedUri: !!cachedUri,
                 })}
-                <UnifiedVideo
-                  source={{
-                    uri: fixStorageUrl(item.videoUrl || mediaItems[0]?.url),
-                  }}
+                <EnhancedVideo
+                  uri={videoUri}
+                  cachedUri={cachedUri}
+                  poster={item.thumbnail || item.user?.avatar}
                   style={StyleSheet.absoluteFill}
                   resizeMode="cover"
                   shouldPlay={isDiscoverItemActive(index)}
+                  shouldLoad={shouldLoad}
                   isLooping
                   isMuted={false}
                   onError={(e) => {
-                    console.log('❌ Feed Video error', { id: item.id, uri: item.videoUrl || mediaItems[0]?.url, error: e });
+                    console.log('❌ Feed Video error', { id: item.id, uri: videoUri, error: e });
                   }}
-                  onLoad={(info) => {
-                    console.log('🎥 Feed Video loaded', {
-                      id: item.id,
-                      uri: item.videoUrl || mediaItems[0]?.url,
-                      naturalSize: info.naturalSize,
-                    });
+                  onReady={() => {
+                    console.log('🎥 Feed Video ready', { id: item.id, uri: videoUri, cached: !!cachedUri });
                   }}
                 />
               </TouchableOpacity>

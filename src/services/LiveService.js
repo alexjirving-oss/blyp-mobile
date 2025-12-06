@@ -11,25 +11,56 @@ export async function setUserStatus(uid, status, currentStreamId = null) {
   }, { merge: true });
 }
 
+const PLACEHOLDER_NAMES = ['Anonymous', 'Anonymous User'];
+
+function isPlaceholderName(name) {
+  if (!name) return true;
+  const trimmed = String(name).trim();
+  return PLACEHOLDER_NAMES.includes(trimmed);
+}
+
 export async function ensureUserProfile({ userId, displayName, photoURL, email } = {}) {
-  console.log('[LiveService][AUTH] ensureUserProfile called with userId:', userId ? 'present' : 'MISSING');
-  
-  // CRITICAL: Trust userId param, do NOT fallback to auth.currentUser
-  if (!userId || typeof userId !== 'string') {
-    console.error('[LiveService][AUTH] ensureUserProfile blocked: userId param missing or invalid');
-    throw new Error('userId is required to ensure user profile');
+  if (!userId) {
+    console.warn('[LiveService][ensureUserProfile] Missing userId, aborting profile ensure');
+    return;
   }
 
-  const ref = db.collection("users").doc(userId);
-  await ref.set({
-    displayName: displayName || "Anonymous",
-    photoURL: photoURL ?? null,
-    email: email ?? null,
-    updatedAt: serverTimestamp()
-    // ❌ Removed forced status: "offline" to prevent overwriting "live" status
-  }, { merge: true });
-  
-  console.log("✅ User profile ensured for:", userId);
+  const ref = db.collection('users').doc(userId);
+  const snap = await ref.get();
+
+  let finalDisplayName = displayName ?? null;
+
+  // If no displayName provided, try to reuse existing non-placeholder value
+  if (!finalDisplayName && snap.exists) {
+    const existing = snap.data() || {};
+    if (
+      existing.displayName &&
+      typeof existing.displayName === 'string' &&
+      !isPlaceholderName(existing.displayName)
+    ) {
+      finalDisplayName = existing.displayName;
+    }
+  }
+
+  // Last-resort fallback: NEVER Anonymous strings, use uid
+  if (!finalDisplayName) {
+    finalDisplayName = userId;
+  }
+
+  await ref.set(
+    {
+      displayName: finalDisplayName,
+      photoURL: photoURL ?? null,
+      email: email ?? null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  console.log('[LiveService][ensureUserProfile] ensured profile', {
+    userId,
+    finalDisplayName,
+  });
 }
 
 // ---------- STREAMS ----------
@@ -101,24 +132,104 @@ export async function sendMessage(streamId, { uid, displayName, text }) {
 
 // ---------- SUBSCRIPTIONS ----------
 export function subscribeToLiveUsers(callback) {
-  const q = db.collection("users").where("status", "==", "live");
+  const cutoff = new Date(Date.now() - 90 * 1000); // require recent heartbeat
+  const q = db
+    .collection('liveStreams')
+    .where('status', '==', 'live')
+    .where('lastHeartbeatAt', '>=', cutoff)
+    .orderBy('lastHeartbeatAt', 'desc');
+
   return q.onSnapshot((snap) => {
-    const live = snap.docs.map(dSnap => {
+    console.log('[LIVE][SNAPSHOT] Raw live stream docs count:', snap.docs.length);
+
+    const live = snap.docs.map((dSnap, idx) => {
       const data = dSnap.data() || {};
+      console.log(`  Stream Doc ${idx}:`, dSnap.id, data);
       return {
         id: dSnap.id,
-        displayName: data.displayName || "Anonymous",
-        photoURL: data.photoURL || null,
-        currentStreamId: data.currentStreamId || null,
-        status: data.status || "offline",
+        streamId: dSnap.id,
+        userId: data.userId || null,
+        displayName: data.userName || data.displayName || 'Anonymous',
+        photoURL: data.userPhotoURL || data.photoURL || null,
+        status: data.status || 'live',
+        lastHeartbeatAt: data.lastHeartbeatAt,
       };
     });
-    console.log("📡 Live users snapshot:", live);
+
+    console.log('[LIVE][PROCESSED_STREAMS] Total live streams after mapping:', live.length);
+    live.forEach((stream, idx) => {
+      console.log(`  Processed Stream ${idx}:`, stream.streamId, stream.displayName);
+    });
+
     callback(live);
   }, (error) => {
-    console.error("Error subscribing to live users:", error);
+    console.error('Error subscribing to live streams:', error);
     callback([]);
   });
+}
+
+/**
+ * Subscribe to active live streams (primary source of truth).
+ * Source: liveStreams collection with status === 'live'
+ */
+export function subscribeToLiveStreams({ onChange, onError } = {}) {
+  // 90 second grace window: only show streams with recent heartbeat
+  const ACTIVE_GRACE_MS = 90 * 1000;
+  const activeSince = new Date(Date.now() - ACTIVE_GRACE_MS);
+
+  const colRef = db.collection('liveStreams');
+  const q = colRef
+    .where('status', '==', 'live')
+    .where('lastHeartbeatAt', '>=', activeSince)
+    .orderBy('lastHeartbeatAt', 'desc');
+
+  return q.onSnapshot(
+    snapshot => {
+      const streams = snapshot.docs.map(doc => {
+        const data = doc.data() || {};
+        return {
+          id: doc.id,
+          streamId: data.streamId || doc.id,
+          hostUid: data.hostUid || data.userId || null,
+          hostDisplayName: data.hostDisplayName || data.userName || 'Unknown',
+          title: data.title || '',
+          playbackUrl:
+            data.playbackUrl ||
+            data.hlsPlaybackUrl ||
+            (data.hls && data.hls.playbackUrl) ||
+            null,
+          status: data.status || 'unknown',
+          lastHeartbeatAt: data.lastHeartbeatAt || null,
+        };
+      });
+
+      console.log('[LIVE][DIRECTORY][SNAPSHOT]', {
+        count: streams.length,
+        ids: streams.map(s => s.streamId),
+        graceWindowMs: ACTIVE_GRACE_MS,
+      });
+
+      if (typeof onChange === 'function') {
+        onChange(streams);
+      } else {
+        console.warn(
+          '[LiveService][subscribeToLiveStreams] onChange is not a function; skipping UI update',
+          { onChangeType: typeof onChange }
+        );
+      }
+    },
+    error => {
+      console.error('[LIVE][DIRECTORY][SNAPSHOT_ERROR]', {
+        code: error.code,
+        message: error.message,
+      });
+      if (typeof onError === 'function') {
+        onError(error);
+      } else if (typeof onChange === 'function') {
+        onChange([]); // fail closed
+      }
+    },
+  );
 }
 
 export function subscribeToStreamMessages(streamId, callback) {

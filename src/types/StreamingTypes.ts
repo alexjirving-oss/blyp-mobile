@@ -47,6 +47,7 @@ export interface ViewerStreamSnapshot {
   currentSegment?: number;
   viewCount?: number;
   status?: string;
+  playbackUrl?: string;  // IVS playback URL or HLS manifest
 }
 
 /**

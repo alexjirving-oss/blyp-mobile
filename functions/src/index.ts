@@ -17,6 +17,8 @@ export { billingVerify } from './billingVerify';
 export { devResetFirestore } from './devReset';
 // Export live stream API functions
 export { addLiveStreamComment, addLiveStreamLike } from './liveStreamApi';
+// Export IVS live streaming functions
+export { hostStart, hostEnd, guestJoin, viewerJoin } from './live/liveRoutes';
 import * as admin from 'firebase-admin';
 import { Storage } from '@google-cloud/storage';
 // @ts-ignore (library lacks bundled types)

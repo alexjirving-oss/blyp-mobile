@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet, ActivityIndicator } from "react-native";
-import { subscribeToLiveUsers } from "../services/LiveService";
-import { useNavigation } from "@react-navigation/native";
+import { subscribeToLiveStreams } from "../services/LiveService";
+import { useNavigation, CommonActions } from "@react-navigation/native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -12,25 +12,30 @@ export default function LiveUsersTab() {
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    console.log('📡 LiveUsersTab: Setting up live users subscription');
-    const unsub = subscribeToLiveUsers((users) => {
-      console.log(`📊 LiveUsersTab: Received ${users.length} live users`);
-      console.log('📊 Raw users array:', JSON.stringify(users, null, 2));
-      users.forEach((user, index) => {
-        console.log(`  User ${index + 1}:`, {
-          id: user.id,
-          displayName: user.displayName,
-          photoURL: user.photoURL ? 'yes' : 'no',
-          currentStreamId: user.currentStreamId,
-          status: user.status
+    console.log('[LiveUsersTab] subscribing to live streams');
+
+    const unsub = subscribeToLiveStreams({
+      onChange: (streams) => {
+        console.log('[LiveUsersTab][DIRECTORY][SET_STREAMS]', {
+          count: streams.length,
+          ids: streams.map(s => s.id),
         });
-      });
-      setLiveUsers(users);
-      setLoading(false);
+        setLiveUsers(streams);
+        setLoading(false);
+      },
+      onError: (error) => {
+        console.warn('[LiveUsersTab][DIRECTORY][ERROR]', error);
+        setLoading(false);
+      },
     });
+
     return () => {
-      console.log('🔌 LiveUsersTab: Cleaning up subscription');
-      unsub();
+      if (typeof unsub === 'function') {
+        console.log('[LiveUsersTab] unsubscribing from live streams');
+        unsub();
+      } else {
+        console.warn('[LiveUsersTab] no unsubscribe function returned');
+      }
     };
   }, []);
 
@@ -64,24 +69,52 @@ export default function LiveUsersTab() {
         <FlatList
           data={liveUsers}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={[styles.listContainer, { paddingTop: insets.top + 10 }]}
-          renderItem={({ item }) => (
+          contentContainerStyle={[styles.listContainer, { paddingTop: insets.top + 140 }]}
+          renderItem={({ item }) => {
+            const handlePressLiveUser = () => {
+              console.log('='.repeat(60));
+              console.log('[LiveUsersTab][NAVIGATE_TO_STREAM] Tapped stream:', item.id);
+              console.log('[LiveUsersTab][STREAM_DATA]', {
+                streamId: item.id,
+                hostUid: item.hostUid,
+                hostDisplayName: item.hostDisplayName,
+                title: item.title,
+                status: item.status,
+              });
+              
+              if (!item.id) {
+                console.warn('[LiveUsersTab][NAVIGATE_ERROR] No stream ID', { item });
+                return;
+              }
+
+              const params = {
+                mode: 'viewer',
+                streamId: item.id,
+                hostUid: item.hostUid || item.userId,
+                hostDisplayName: item.hostDisplayName || 'Live Stream',
+              };
+
+              console.log('[LiveUsersTab][NAVIGATE_PARAMS]', params);
+              console.log('='.repeat(60));
+
+              // Navigate using CommonActions to ensure params reach the stack navigator
+              navigation.dispatch(
+                CommonActions.navigate({
+                  name: 'LiveStreamScreen',
+                  params: params,
+                })
+              );
+            };
+            
+            return (
             <TouchableOpacity
               style={styles.card}
-              onPress={() => {
-                console.log(`🎯 Navigating to stream for user: ${item.id}`);
-                navigation.navigate("LiveStreamScreen", {
-                  mode: "viewer",
-                  hostUid: item.id,
-                  streamId: item.currentStreamId || item.id,
-                  displayName: item.displayName || 'Unknown',
-                });
-              }}
+              onPress={handlePressLiveUser}
               activeOpacity={0.7}
             >
               <View style={styles.avatarContainer}>
                 <Image
-                  source={{ uri: item.photoURL || "https://ui-avatars.com/api/?name=" + encodeURIComponent(item.displayName || "User") }}
+                  source={{ uri: item.photoURL || "https://ui-avatars.com/api/?name=" + encodeURIComponent(item.hostDisplayName || "Live") }}
                   style={styles.avatar}
                 />
                 <View style={styles.liveBadge}>
@@ -90,15 +123,15 @@ export default function LiveUsersTab() {
               </View>
               <View style={styles.infoContainer}>
                 <Text style={styles.name} numberOfLines={1}>
-                  {item.displayName || "Unknown"}
+                  {item.hostDisplayName || "Unknown"}
                 </Text>
                 <View style={styles.statusRow}>
                   <Text style={styles.liveIndicator}>🔴</Text>
                   <Text style={styles.status}>Broadcasting now</Text>
                 </View>
-                {item.currentStreamTitle && (
+                {item.title && (
                   <Text style={styles.streamTitle} numberOfLines={1}>
-                    {item.currentStreamTitle}
+                    {item.title}
                   </Text>
                 )}
               </View>
@@ -106,7 +139,8 @@ export default function LiveUsersTab() {
                 <Text style={styles.chevronText}>›</Text>
               </View>
             </TouchableOpacity>
-          )}
+          );
+          }}
         />
       </LinearGradient>
     </View>

@@ -328,6 +328,13 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
       // Sort segments by index
       segments.sort((a, b) => a.index - b.index);
 
+      const playbackUrl =
+        rawData.playbackUrl ||
+        rawData.hlsPlaybackUrl ||
+        (rawData.hls && rawData.hls.playbackUrl) ||
+        rawData.latestSegmentUrl ||
+        null;
+
       const snapshot: ViewerStreamSnapshot = {
         streamId,
         title: rawData.title || 'Untitled Stream',
@@ -337,6 +344,7 @@ export const HLSStreamingBackend: StreamingBackendAPI = {
         currentSegment: rawData.currentSegment,
         viewCount: rawData.viewCount || 0,
         status: rawData.status,
+        playbackUrl,
       };
 
       // Log snapshot every 10th update to avoid spam

@@ -428,7 +428,7 @@ class ScalableHLSService {
       title: (title && typeof title === 'string') ? title.trim() : 'Live Stream',
       description: (description && typeof description === 'string') ? description.trim() : '',
       userId: user.uid,
-      userName: user.displayName || 'Anonymous User',
+      userName: user.displayName || user.uid,
       userPhotoURL: user.photoURL || null
     };
   }

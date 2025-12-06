@@ -34,6 +34,40 @@ import NetInfo from '@react-native-community/netinfo';
 import * as Device from 'expo-device';
 // Lazy-load expo-application at runtime to avoid native module crashes
 
+// Strip undefined / NaN / Infinity before sending to Firestore
+function sanitizeForFirestore(value) {
+  if (value === undefined) {
+    return undefined; // caller drops the key
+  }
+
+  if (value === null) return null;
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const cleaned = value
+      .map((v) => sanitizeForFirestore(v))
+      .filter((v) => v !== undefined);
+    return cleaned;
+  }
+
+  if (typeof value === 'object') {
+    const out = {};
+    Object.entries(value || {}).forEach(([k, v]) => {
+      const cleaned = sanitizeForFirestore(v);
+      if (cleaned !== undefined) {
+        out[k] = cleaned;
+      }
+    });
+    return out;
+  }
+
+  return value;
+}
+
 class EnterpriseAnalyticsService {
   constructor() {
     // Production analytics configuration
@@ -432,36 +466,42 @@ class EnterpriseAnalyticsService {
    */
   async trackError(streamId, errorData) {
     try {
+      const safeUserId = typeof auth?.currentUser?.uid === 'string' && auth.currentUser.uid.length > 0
+        ? auth.currentUser.uid
+        : null;
+
+      const safeErrorPayload = {
+        type: errorData?.type,
+        message: errorData?.message || errorData?.error || 'Unknown error',
+        code: errorData?.code,
+        severity: errorData?.severity || 'medium',
+        context: errorData?.context,
+        stack: typeof errorData?.stack === 'string' ? errorData.stack.slice(0, 4000) : undefined,
+      };
+
       const event = {
         type: 'error',
         streamId,
         timestamp: Date.now(),
-        userId: auth.currentUser?.uid,
+        userId: safeUserId,
         
         // Error details
-        error: {
-          type: errorData.type,
-          message: errorData.message,
-          code: errorData.code,
-          severity: errorData.severity || 'medium',
-          context: errorData.context,
-          stack: errorData.stack
-        },
+        error: safeErrorPayload,
         
         // Recovery details
         recovery: {
-          attempted: errorData.recoveryAttempted || false,
-          successful: errorData.recoverySuccessful || false,
-          method: errorData.recoveryMethod,
-          time: errorData.recoveryTime || 0
+          attempted: !!errorData?.recoveryAttempted,
+          successful: !!errorData?.recoverySuccessful,
+          method: errorData?.recoveryMethod,
+          time: typeof errorData?.recoveryTime === 'number' ? errorData.recoveryTime : 0
         },
         
         // System state
         system: {
           device: this.deviceContext,
           network: this.networkContext,
-          memoryPressure: errorData.memoryPressure || false,
-          batteryLow: errorData.batteryLow || false
+          memoryPressure: !!errorData?.memoryPressure,
+          batteryLow: !!errorData?.batteryLow
         }
       };
       
@@ -648,9 +688,12 @@ class EnterpriseAnalyticsService {
    */
   addEvent(event, highPriority = false) {
     try {
+      const safeUserId = typeof event?.userId === 'string' && event.userId.length > 0 ? event.userId : null;
+
       // Add timestamp and metadata
       const enrichedEvent = {
         ...event,
+        userId: safeUserId,
         id: this.generateEventId(),
         serverTimestamp: serverTimestamp(),
         retentionDays: this.config.privacy?.dataRetention || 90,
@@ -661,6 +704,8 @@ class EnterpriseAnalyticsService {
           ipAnonymized: true
         })
       };
+
+      const sanitizedEvent = sanitizeForFirestore(enrichedEvent);
       
       // In tests or when Firebase disabled, do not write to Firestore
       if (!this.canWrite) {
@@ -674,10 +719,10 @@ class EnterpriseAnalyticsService {
 
       if (highPriority) {
         // Send immediately for critical events
-        this.sendEvent(enrichedEvent);
+        this.sendEvent(sanitizedEvent);
       } else {
         // Add to buffer for batch processing
-        this.eventBuffer.push(enrichedEvent);
+        this.eventBuffer.push(sanitizedEvent);
         
         // Flush if buffer is full
         if (this.eventBuffer.length >= this.config.realTime.batchSize) {
@@ -697,15 +742,21 @@ class EnterpriseAnalyticsService {
     if (this.eventBuffer.length === 0) return;
     if (!this.canWrite) return; // skip writes in tests/disabled mode
     
+    let events = [];
     try {
       const batch = writeBatch(db);
-      const events = [...this.eventBuffer];
+      events = [...this.eventBuffer];
       this.eventBuffer = [];
       
       // Add events to batch
       events.forEach(event => {
         const eventRef = doc(collection(db, 'analytics'));
-        batch.set(eventRef, event);
+        const sanitizedEvent = sanitizeForFirestore(event);
+        // Strip any undefined that may remain at top-level
+        Object.keys(sanitizedEvent || {}).forEach((k) => {
+          if (sanitizedEvent[k] === undefined) delete sanitizedEvent[k];
+        });
+        batch.set(eventRef, sanitizedEvent);
       });
       
       // Commit batch
@@ -716,8 +767,10 @@ class EnterpriseAnalyticsService {
     } catch (error) {
       console.error('❌ Event buffer flush failed:', error);
       
-      // Re-add events to buffer on failure
-      this.eventBuffer.unshift(...events);
+      // Re-add events to buffer on failure (only if we have events)
+      if (events && events.length > 0) {
+        this.eventBuffer.unshift(...events);
+      }
     }
   }
 
@@ -727,7 +780,11 @@ class EnterpriseAnalyticsService {
   async sendEvent(event) {
     try {
       if (!this.canWrite) return; // skip writes in tests/disabled mode
-      await addDoc(collection(db, 'analytics'), event);
+      const sanitizedEvent = sanitizeForFirestore(event);
+      Object.keys(sanitizedEvent || {}).forEach((k) => {
+        if (sanitizedEvent[k] === undefined) delete sanitizedEvent[k];
+      });
+      await addDoc(collection(db, 'analytics'), sanitizedEvent);
       console.log(`⚡ Critical event sent: ${event.type}`);
       
     } catch (error) {

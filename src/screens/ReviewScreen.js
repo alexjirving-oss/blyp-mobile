@@ -23,7 +23,6 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system';
 import { db as firestore, auth, storage } from '../config/firebase';
 import { serverTimestamp } from 'firebase/firestore';
-import { signInAnonymously } from 'firebase/auth';
 import { firebaseNative } from '../config/firebase';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../hooks/useCommon';
@@ -2008,51 +2007,27 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       Alert.alert('Error', 'Please add a caption or media');
       return;
     }
-    // Ensure Firebase user BEFORE any uploads (rules require auth != null)
+    // DEV: Skip Firebase auth bridge (Firestore rules are open)
+    if (__DEV__) {
+      console.log('[POST][AUTH] DEV: skipping Firebase auth bridge (Firestore rules are open).');
+    }
+    
+    // Use Firebase user if available, otherwise create mock user with Cognito UID
     let fbUser = auth.currentUser;
-    try {
-      if (!fbUser) {
-        console.log('🔐 Ensuring Firebase auth (anonymous)');
-        if (firebaseNative && typeof auth?.signInAnonymously === 'function') {
-          const cred = await auth.signInAnonymously();
-          fbUser = cred?.user || cred; // native returns user directly on some versions
-        } else {
-          const cred = await signInAnonymously(auth);
-          fbUser = cred.user;
-        }
-      }
-    } catch (authErr) {
-      const msg = authErr?.message || '';
-      const isAdminRestricted = /admin-restricted-operation/i.test(msg);
-      
-      // If anonymous auth is disabled but we have a Cognito user, we can proceed with Cognito UID
-      if (isAdminRestricted && cognitoUser) {
-        console.log('⚠️ Anonymous auth disabled, but Cognito user exists - proceeding with Cognito UID');
-        console.log('🔑 Using Cognito UID for Firestore/Storage:', cognitoUser.getUsername?.());
-        // Create a mock Firebase user object with Cognito UID for compatibility
-        fbUser = { 
-          uid: cognitoUser.getUsername?.() || uid,
-          displayName: null,
-          email: null,
-          photoURL: null,
-          providerId: 'cognito'
-        };
-      } else {
-        // Only log error if we can't proceed with fallback
-        console.error('❌ Firebase anonymous auth failed:', msg);
-        const suspended = /has-been-suspended/i.test(msg);
-        if (suspended) {
-          setFirebaseSuspended(true);
-          console.error('🛑 Detected suspended Firebase Web API key. Posting disabled until key rotated.');
-          Alert.alert(
-            'Firebase Key Suspended',
-            'The Firebase Web API key used by this build appears suspended (anonymous auth blocked).\n\nAction: In Firebase Console > Project Settings > General, create/rotate a new Web API key. Update EXPO_PUBLIC_FIREBASE_API_KEY (and any firebase.local override), then restart the dev client. Posting is disabled until fixed.'
-          );
-        } else {
-          Alert.alert('Auth Error', 'Unable to authenticate with Firebase. Please check network or Firebase config.');
-        }
-        return;
-      }
+    if (!fbUser && cognitoUser) {
+      // Create mock Firebase user with Cognito UID for DEV-OPEN rules
+      fbUser = { 
+        uid: cognitoUser.getUsername?.() || uid,
+        displayName: null,
+        email: null,
+        photoURL: null,
+        providerId: 'cognito'
+      };
+    } else if (!fbUser) {
+      // No Firebase user and no Cognito user
+      console.error('❌ No user available for posting');
+      Alert.alert('Auth Error', 'You must be logged in to post.');
+      return;
     }
     const appUser = fbUser; // Use Firebase user if available, or Cognito-based mock user
     

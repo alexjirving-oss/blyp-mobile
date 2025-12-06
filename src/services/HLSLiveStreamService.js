@@ -18,7 +18,7 @@
 import { db, auth, storage, firebaseEnabled } from '../config/firebase';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
-import { serverTimestamp, increment } from 'firebase/firestore';
+import { serverTimestamp, increment, Timestamp } from 'firebase/firestore';
 
 async function uriToBlob(uri) {
   const res = await fetch(uri);
@@ -32,6 +32,7 @@ class HLSLiveStreamService {
     this.segmentInterval = 2500; // Optimized 2.5s interval for mobile networks
     this.maxSegmentsPerStream = 50; // Reduced for better memory management at scale
     this.uploadQueue = new Map(); // Track pending uploads with size limits
+    this.inFlightUploads = new Map(); // CRITICAL: prevent duplicate uploads per streamId:segmentNumber
     this.maxConcurrentUploads = 3; // Prevent overwhelming Firebase Storage
     this.retryAttempts = 3; // Production retry logic
     this.retryDelay = 1000; // Base retry delay in ms
@@ -109,7 +110,7 @@ class HLSLiveStreamService {
         title: validTitle || 'Live Stream',
         description: validDescription || '',
         userId: userId,
-        userName: (userDisplayName && typeof userDisplayName === 'string') ? userDisplayName.trim() : 'Anonymous User',
+        userName: (userDisplayName && typeof userDisplayName === 'string') ? userDisplayName.trim() : (userId || 'User'),
         userPhotoURL: (userPhotoURL && typeof userPhotoURL === 'string') ? userPhotoURL : null,
         thumbnailUrl,
         status: 'live',
@@ -121,6 +122,10 @@ class HLSLiveStreamService {
   createdAt: serverTimestamp(),
   startedAt: serverTimestamp(),
   lastUpdated: serverTimestamp(),
+          lastHeartbeatAt: serverTimestamp(),
+          status: 'live',
+          isLive: true,
+          playbackUrl: null,
         // TikTok-style metadata
         totalSegments: 0,
         avgSegmentSize: 0,
@@ -146,6 +151,33 @@ class HLSLiveStreamService {
         console.log('✅ User profile updated - marked as live');
       } catch (profileError) {
         console.error('❌ Error updating user profile:', profileError);
+        // Continue anyway - stream creation is more important
+      }
+      
+      // Update users collection for live discovery (CRITICAL for LiveUsersTab)
+      try {
+        // Compute final display name with proper fallback chain
+        let finalDisplayName = userDisplayName;
+        if (!finalDisplayName || typeof finalDisplayName !== 'string' || !finalDisplayName.trim()) {
+          // Fallback to userId if no valid displayName provided
+          finalDisplayName = (typeof userId === 'string' && userId.trim()) ? userId.trim() : 'User';
+        } else {
+          finalDisplayName = finalDisplayName.trim();
+        }
+        
+        await db.collection('users').doc(userId).set({
+          status: 'live',
+          currentStreamId: streamId,
+          displayName: finalDisplayName,
+          photoURL: userPhotoURL || null,
+          lastActive: serverTimestamp()
+        }, { merge: true });
+        console.log('[LIVE][PROFILE_WRITE] User status updated in users collection', {
+          userId,
+          displayName: finalDisplayName
+        });
+      } catch (usersError) {
+        console.error('❌ Error updating users collection:', usersError);
         // Continue anyway - stream creation is more important
       }
       
@@ -176,6 +208,13 @@ class HLSLiveStreamService {
   async uploadSegment(streamId, videoUri, segmentNumber, userId) {
     console.log('[HLS][SERVICE][AUTH] uploadSegment called with userId:', userId ? 'present' : 'MISSING');
     
+    // CRITICAL: Check for duplicate upload in progress
+    const uploadKey = `${streamId}:${segmentNumber}`;
+    if (this.inFlightUploads.has(uploadKey)) {
+      console.warn('[HLS][UPLOAD] Duplicate upload requested, reusing in-flight promise', { streamId, segmentNumber });
+      return this.inFlightUploads.get(uploadKey);
+    }
+    
     try {
       // Production validation: Check all required parameters
       if (!streamId || typeof streamId !== 'string') {
@@ -199,7 +238,8 @@ class HLSLiveStreamService {
       // Concurrency gate: defer if semaphore exhausted
       if (this.currentActiveUploads >= this.maxConcurrentUploads) {
         return new Promise((resolve, reject) => {
-          this.waitingUploadQueue.push({ streamId, videoUri, segmentNumber, resolve, reject });
+          // Preserve userId so queued uploads keep auth context when drained.
+          this.waitingUploadQueue.push({ streamId, videoUri, segmentNumber, userId, resolve, reject });
           console.log(`⏳ Upload queued (depth=${this.waitingUploadQueue.length}) segment=${segmentNumber}`);
         });
       }
@@ -230,82 +270,121 @@ class HLSLiveStreamService {
       };
       
       const startTs = Date.now();
-      const uploadPromise = this.retryOperation(uploadOperation);
       
-      this.uploadQueue.set(`${streamId}_${segmentNumber}`, uploadPromise);
-      
-      // Wait for upload to complete
-  const t2Start = Date.now();
-  await uploadPromise;
-  const latencyMs = Date.now() - startTs;
-      const downloadURL = await getDownloadURL(segmentRef);
-      
-      // Remove from queue
-      this.uploadQueue.delete(`${streamId}_${segmentNumber}`);
-      
-      // Update Firestore with new segment (TikTok-style atomic update)
-      const streamRef = db.collection('liveStreams').doc(streamId);
-      const segmentData = {
-        url: downloadURL,
-        uploadedAt: serverTimestamp(),
-        segmentNumber: segmentNumber
-      };
-      const legacyMapUpdate = this.disableLegacySegmentMap
-        ? { currentSegment: segmentNumber, lastSegmentUploadedAt: serverTimestamp(), totalSegments: segmentNumber + 1, streamHealth: { lastUpload: serverTimestamp(), uploadLatency: Date.now() } }
-        : { currentSegment: segmentNumber, [`segments.${segmentNumber}`]: segmentData, lastSegmentUploadedAt: serverTimestamp(), totalSegments: segmentNumber + 1, streamHealth: { lastUpload: serverTimestamp(), uploadLatency: Date.now() } };
-      // Write legacy map fields only if flag not disabling them (backward compatibility for viewer code).
-      await streamRef.update(legacyMapUpdate);
-      // Dual-write segment document in subcollection (vNext unified model)
-      try {
-        await streamRef.collection('segments').doc(String(segmentNumber)).set({
-          number: segmentNumber,
-          variant: 'source',
+      // CRITICAL: Create tracked promise for this upload to prevent duplicates
+      const trackedUploadPromise = (async () => {
+        const uploadPromise = this.retryOperation(uploadOperation);
+        
+        this.uploadQueue.set(`${streamId}_${segmentNumber}`, uploadPromise);
+        
+        // Wait for upload to complete
+        const t2Start = Date.now();
+        await uploadPromise;
+        const latencyMs = Date.now() - startTs;
+        const downloadURL = await getDownloadURL(segmentRef);
+        
+        // Remove from queue
+        this.uploadQueue.delete(`${streamId}_${segmentNumber}`);
+        
+        console.log(`[HLS][UPLOAD] Storage upload complete, now updating Firestore`, { streamId, segmentNumber, latencyMs });
+        
+        // CRITICAL: Update Firestore ONLY AFTER successful upload
+        // This ensures viewer never tries to play a segment that isn't fully available
+        const streamRef = db.collection('liveStreams').doc(streamId);
+        const segmentData = {
           url: downloadURL,
           uploadedAt: serverTimestamp(),
-          clientUploadLatencyMs: latencyMs,
-        });
-        // Opportunistic pruning (every 5 segments) to cap subcollection growth.
-        if (segmentNumber % 5 === 0) {
-          await this._pruneSegmentSubcollection(streamRef, this.maxSegmentsPerStream);
-        }
-      } catch (segDocErr) {
-        console.warn('⚠️ Segment subcollection write failed (non-fatal):', segDocErr?.message);
-      }
-      if (segmentNumber === 0) {
-        // Estimate file size from the original URI (blob not in scope here)
-        let estSize;
+          segmentNumber: segmentNumber
+        };
+        const legacyMapUpdate = this.disableLegacySegmentMap
+          ? {
+              currentSegment: segmentNumber,
+              lastSegmentUploadedAt: serverTimestamp(),
+              lastHeartbeatAt: serverTimestamp(),
+              playbackUrl: downloadURL,
+              totalSegments: segmentNumber + 1,
+              streamHealth: { lastUpload: serverTimestamp(), uploadLatency: latencyMs },
+            }
+          : {
+              currentSegment: segmentNumber,
+              [`segments.${segmentNumber}`]: segmentData,
+              lastSegmentUploadedAt: serverTimestamp(),
+              lastHeartbeatAt: serverTimestamp(),
+              playbackUrl: downloadURL,
+              totalSegments: segmentNumber + 1,
+              streamHealth: { lastUpload: serverTimestamp(), uploadLatency: latencyMs },
+            };
+        // Write legacy map fields only if flag not disabling them (backward compatibility for viewer code).
+        await streamRef.update(legacyMapUpdate);
+        
+        console.log(`[STREAM][HLS][SEGMENT_UPLOAD_SUCCESS]`, { streamId, segmentNumber, latencyMs, downloadURL });
+        
+        // Dual-write segment document in subcollection (vNext unified model)
         try {
-          const info = await FileSystem.getInfoAsync(videoUri);
-          estSize = info?.size;
-        } catch {}
-        console.log('[METRIC][T2_firstSegmentUploaded]', new Date().toISOString(), { streamId, segmentNumber, size: estSize, totalMsFromCall: Date.now() - t2Start });
-      }
-      
-      // TikTok-style cleanup old segments to manage storage costs
-      if (segmentNumber > this.maxSegmentsPerStream) {
-        this.cleanupOldSegments(streamId, storagePrefix, segmentNumber);
-      }
-      
-      console.log(`✅ TikTok upload complete: segment ${segmentNumber} latencyMs=${latencyMs} queueDepth=${this.waitingUploadQueue.length}`);
-
-      // Metrics hooks (placeholder for analytics integration)
-      try {
-        if (global.__BLYP_SEGMENT_METRICS__) {
-          global.__BLYP_SEGMENT_METRICS__.push({ streamId, segmentNumber, latencyMs, ts: Date.now() });
+          await streamRef.collection('segments').doc(String(segmentNumber)).set({
+            number: segmentNumber,
+            variant: 'source',
+            url: downloadURL,
+            uploadedAt: serverTimestamp(),
+            clientUploadLatencyMs: latencyMs,
+          });
+          // Opportunistic pruning (every 5 segments) to cap subcollection growth.
+          if (segmentNumber % 5 === 0) {
+            await this._pruneSegmentSubcollection(streamRef, this.maxSegmentsPerStream);
+          }
+        } catch (segDocErr) {
+          console.warn('⚠️ Segment subcollection write failed (non-fatal):', segDocErr?.message);
         }
-      } catch {}
+        
+        if (segmentNumber === 0) {
+          // Estimate file size from the original URI (blob not in scope here)
+          let estSize;
+          try {
+            const info = await FileSystem.getInfoAsync(videoUri);
+            estSize = info?.size;
+          } catch {}
+          console.log('[METRIC][T2_firstSegmentUploaded]', new Date().toISOString(), { streamId, segmentNumber, size: estSize, totalMsFromCall: Date.now() - t2Start });
+        }
+        
+        // TikTok-style cleanup old segments to manage storage costs
+        if (segmentNumber > this.maxSegmentsPerStream) {
+          this.cleanupOldSegments(streamId, storagePrefix, segmentNumber);
+        }
+        
+        console.log(`✅ TikTok upload complete: segment ${segmentNumber} latencyMs=${latencyMs} queueDepth=${this.waitingUploadQueue.length}`);
 
-      // Release semaphore and process next queued task if any
-      this.currentActiveUploads = Math.max(0, this.currentActiveUploads - 1);
-      this._drainUploadQueue();
+        // Metrics hooks (placeholder for analytics integration)
+        try {
+          if (global.__BLYP_SEGMENT_METRICS__) {
+            global.__BLYP_SEGMENT_METRICS__.push({ streamId, segmentNumber, latencyMs, ts: Date.now() });
+          }
+        } catch {}
+
+        return downloadURL;
+      })();
       
-      return downloadURL;
+      // Track this upload to prevent duplicates
+      this.inFlightUploads.set(uploadKey, trackedUploadPromise);
+      
+      try {
+        const result = await trackedUploadPromise;
+        return result;
+      } finally {
+        // CRITICAL: Always clean up in-flight tracking
+        this.inFlightUploads.delete(uploadKey);
+        
+        // Release semaphore and process next queued task if any
+        this.currentActiveUploads = Math.max(0, this.currentActiveUploads - 1);
+        this._drainUploadQueue();
+      }
     } catch (error) {
       console.error(`❌ Error uploading segment ${segmentNumber}:`, error);
       // Map permission denied errors
       if (error?.code === 'permission-denied' || error?.code === 'storage/unauthorized') {
         console.error('[HLS][SECURITY] Permission denied uploading segment - check Storage rules and userId ownership');
       }
+      // Clean up tracking on error
+      this.inFlightUploads.delete(uploadKey);
       this.currentActiveUploads = Math.max(0, this.currentActiveUploads - 1);
       this._drainUploadQueue();
       throw error;
@@ -419,7 +498,7 @@ class HLSLiveStreamService {
     while (this.waitingUploadQueue.length && this.currentActiveUploads < this.maxConcurrentUploads) {
       const next = this.waitingUploadQueue.shift();
       // Fire the actual upload and wire resolution
-      this.uploadSegment(next.streamId, next.videoUri, next.segmentNumber)
+      this.uploadSegment(next.streamId, next.videoUri, next.segmentNumber, next.userId)
         .then(next.resolve)
         .catch(next.reject);
     }
@@ -564,8 +643,10 @@ class HLSLiveStreamService {
       const tEndStart = Date.now();
       await streamRef.update({
         status: 'ended',
+        isLive: false,
         endedAt: serverTimestamp(),
         lastUpdated: serverTimestamp(),
+        lastHeartbeatAt: serverTimestamp(),
         streamHealth: {
           status: 'ended',
           endReason: 'user_ended',
@@ -584,6 +665,19 @@ class HLSLiveStreamService {
         console.log('✅ User profile updated - no longer live');
       } catch (profileError) {
         console.error('❌ Error updating user profile:', profileError);
+        // Continue anyway
+      }
+      
+      // Update users collection to remove from live discovery
+      try {
+        await db.collection('users').doc(userId).set({
+          status: 'offline',
+          currentStreamId: null,
+          lastActive: serverTimestamp()
+        }, { merge: true });
+        console.log('[LIVE][PROFILE_WRITE] User status cleared in users collection');
+      } catch (usersError) {
+        console.error('❌ Error clearing users collection:', usersError);
         // Continue anyway
       }
       
@@ -646,13 +740,15 @@ class HLSLiveStreamService {
   async getActiveStreams(maxResults = 20) {
     try {
   const streamsRef = db.collection('liveStreams');
+      const cutoff = Timestamp.fromMillis(Date.now() - 90 * 1000); // require heartbeat within last 90s
       
       // Try the complex query first (requires composite index)
       try {
         const querySnapshot = await streamsRef
           .where('status', '==', 'live')
+          .where('lastHeartbeatAt', '>=', cutoff)
+          .orderBy('lastHeartbeatAt', 'desc')
           .orderBy('viewCount', 'desc')
-          .orderBy('startedAt', 'desc')
           .limit(maxResults)
           .get();
         const streams = [];
@@ -686,6 +782,8 @@ class HLSLiveStreamService {
           
           const fallbackSnapshot = await streamsRef
             .where('status', '==', 'live')
+            .where('lastHeartbeatAt', '>=', cutoff)
+            .orderBy('lastHeartbeatAt', 'desc')
             .limit(maxResults)
             .get();
           const streams = [];
@@ -762,6 +860,60 @@ class HLSLiveStreamService {
       console.error('❌ Stream subscription error:', error);
       callback(null);
     });
+  }
+
+  /**
+   * Subscribe viewer to stream playback URL and status
+   * Returns playbackUrl which viewer passes to UnifiedVideo
+   */
+  subscribeViewer({ streamId, userId, onUpdate }) {
+    if (!streamId) {
+      console.warn('[STREAM][HLS][VIEWER_SUBSCRIBE_ABORT]', {
+        reason: 'no_stream_id',
+        userId,
+      });
+      onUpdate({ playbackUrl: null, status: 'missing_stream_id' });
+      return () => {};
+    }
+
+    console.log('[STREAM][HLS][VIEWER_SUBSCRIBE_REQUEST]', {
+      streamId,
+      userId,
+    });
+
+    const streamRef = db.collection('liveStreams').doc(streamId);
+
+    return streamRef.onSnapshot(
+      snap => {
+        if (!snap.exists) {
+          console.warn('[STREAM][HLS][VIEWER_STREAM_MISSING]', {
+            streamId,
+          });
+          onUpdate({ playbackUrl: null, status: 'not_found' });
+          return;
+        }
+
+        const data = snap.data() || {};
+        const playbackUrl =
+          data.playbackUrl ||
+          data.hlsPlaybackUrl ||
+          (data.hls && data.hls.playbackUrl) ||
+          null;
+
+        onUpdate({
+          playbackUrl,
+          status: data.status || 'unknown',
+        });
+      },
+      error => {
+        console.error('[STREAM][HLS][VIEWER_SUBSCRIBE_ERROR]', {
+          streamId,
+          code: error.code,
+          message: error.message,
+        });
+        onUpdate({ playbackUrl: null, status: 'error' });
+      },
+    );
   }
 
   /**

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Icon from '../components/Icon';
 import {
   View,
@@ -14,36 +14,54 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
-import { updateProfile } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, storage, firestore as db } from '../config/firebase';
+import { storage, firestore as db } from '../config/firebase';
+import { useAuth } from '../hooks/useCommon';
 import BlypLogo from '../components/BlypLogo';
 
-const EditProfileScreen = ({ navigation }) => {
-  const user = auth.currentUser;
-  const [displayName, setDisplayName] = useState(user?.displayName || '');
-  const [bio, setBio] = useState('');
-  const [profileImage, setProfileImage] = useState(user?.photoURL || '');
+const EditProfileScreen = ({ navigation, route }) => {
+  const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
+  const { uid, user: authUser, isAuthenticated, hasUser, authReady, getDisplayName } = useAuth();
+  const [displayName, setDisplayName] = useState(profileFromRoute?.displayName ?? '');
+  const [bio, setBio] = useState(profileFromRoute?.bio ?? '');
+  const [profileImage, setProfileImage] = useState(profileFromRoute?.photoURL ?? '');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const resolvedEmail = useMemo(() => {
+    if (profileFromRoute?.email) return profileFromRoute.email;
+    if (authUser?.email) return authUser.email;
+    if (authUser?.attributes?.email) return authUser.attributes.email;
+    return '';
+  }, [authUser, profileFromRoute]);
+
   // Load user profile data on component mount
   useEffect(() => {
     const loadUserProfile = async () => {
-      if (!user) return;
-      
+      if (!uid) {
+        setLoading(false);
+        return;
+      }
+
       try {
-        const userDocRef = doc(db, 'users', user.uid);
+        const displayFromAuth = typeof getDisplayName === 'function' ? getDisplayName() : '';
+        if (displayFromAuth && !displayName) {
+          setDisplayName(displayFromAuth);
+        }
+        if (authUser?.photoURL && !profileImage) {
+          setProfileImage(authUser.photoURL);
+        }
+
+        const userDocRef = doc(db, 'users', uid);
         const userDoc = await getDoc(userDocRef);
         
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          setBio(userData.bio || '');
-          // Update other fields if they exist in Firestore
-          if (userData.displayName) setDisplayName(userData.displayName);
-          if (userData.photoURL) setProfileImage(userData.photoURL);
+          if (userData.displayName) setDisplayName((prev) => prev || userData.displayName);
+          if (userData.bio) setBio(userData.bio);
+          if (userData.photoURL) setProfileImage((prev) => prev || userData.photoURL);
         }
       } catch (error) {
         console.error('Error loading user profile:', error);
@@ -53,7 +71,7 @@ const EditProfileScreen = ({ navigation }) => {
     };
 
     loadUserProfile();
-  }, [user]);
+  }, [uid, authUser, getDisplayName]);
 
   const pickImage = async () => {
     try {
@@ -114,15 +132,15 @@ const EditProfileScreen = ({ navigation }) => {
     );
   };
 
-  const uploadProfileImage = async (imageUri) => {
-    if (!user) throw new Error('User not authenticated');
+  const uploadProfileImage = async (imageUri, userId) => {
+    if (!userId) throw new Error('User not authenticated');
 
     const response = await fetch(imageUri);
     const blob = await response.blob();
     
     // Use a simpler path structure that works with default Firebase Storage rules
-    const fileName = `${user.uid}-profile-${Date.now()}.jpg`;
-    const storageRef = ref(storage, `users/${user.uid}/profile/${fileName}`);
+    const fileName = `${userId}-profile-${Date.now()}.jpg`;
+    const storageRef = ref(storage, `users/${userId}/profile/${fileName}`);
     
     await uploadBytes(storageRef, blob);
     const downloadURL = await getDownloadURL(storageRef);
@@ -131,6 +149,12 @@ const EditProfileScreen = ({ navigation }) => {
   };
 
   const handleSave = async () => {
+    if (!uid || !isAuthenticated || !hasUser || !authReady) {
+      console.error('[EditProfile] Save blocked: no authenticated user', { uid, isAuthenticated, hasUser, authReady });
+      Alert.alert('Error', 'You must be logged in to update your profile.');
+      return;
+    }
+
     if (!displayName.trim()) {
       Alert.alert('Error', 'Please enter a display name');
       return;
@@ -139,28 +163,22 @@ const EditProfileScreen = ({ navigation }) => {
     setIsSaving(true);
     
     try {
-      let photoURL = user?.photoURL;
-      
-      // Upload new profile image if changed
-      if (profileImage && profileImage !== user?.photoURL) {
+      let photoURL = profileImage;
+
+      // Upload new profile image if a local URI is present
+      if (profileImage && (profileImage.startsWith('file:') || profileImage.startsWith('content:') || profileImage.startsWith('asset:'))) {
         setIsUploading(true);
-        photoURL = await uploadProfileImage(profileImage);
+        photoURL = await uploadProfileImage(profileImage, uid);
         setIsUploading(false);
       }
 
-      // Update user profile in Firebase Auth
-      await updateProfile(user, {
-        displayName: displayName.trim(),
-        photoURL: photoURL,
-      });
-
-      // Save additional profile data to Firestore
-      const userDocRef = doc(db, 'users', user.uid);
+      // Save profile data to Firestore using Cognito uid
+      const userDocRef = doc(db, 'users', uid);
       await setDoc(userDocRef, {
         displayName: displayName.trim(),
         photoURL: photoURL,
         bio: bio.trim(),
-        email: user.email,
+        email: resolvedEmail,
         updatedAt: new Date(),
       }, { merge: true });
 
@@ -252,7 +270,7 @@ const EditProfileScreen = ({ navigation }) => {
             <Text style={styles.label}>Email</Text>
             <TextInput
               style={[styles.input, styles.disabledInput]}
-              value={user?.email || ''}
+              value={resolvedEmail}
               editable={false}
               placeholder="Email address"
               placeholderTextColor="#6b7280"

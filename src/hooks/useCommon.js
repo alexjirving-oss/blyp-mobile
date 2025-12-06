@@ -328,6 +328,39 @@ export const useAuth = () => {
     });
   }
   
+  // Extract display name from user object (Cognito or Firebase)
+  const getDisplayName = useCallback(() => {
+    if (!user) return null;
+    
+    // Firebase path
+    if (firebaseEnabled && preferFirebase && user.displayName) {
+      return user.displayName;
+    }
+    
+    // Cognito path: look for name in attributes
+    try {
+      if (user.attributes?.name && typeof user.attributes.name === 'string' && user.attributes.name.trim()) {
+        return user.attributes.name.trim();
+      }
+      if (user.attributes?.preferred_username && typeof user.attributes.preferred_username === 'string' && user.attributes.preferred_username.trim()) {
+        return user.attributes.preferred_username.trim();
+      }
+      if (user.attributes?.email && typeof user.attributes.email === 'string' && user.attributes.email.trim()) {
+        return user.attributes.email.split('@')[0]; // email prefix as fallback
+      }
+    } catch (err) {
+      console.error('[AUTH] Error extracting display name from attributes:', err);
+    }
+    
+    // Final fallback: use uid if we have it
+    if (typeof uid === 'string' && uid.trim()) {
+      return uid.trim();
+    }
+    
+    console.warn('[AUTH] No display name available, all fallbacks exhausted');
+    return null;
+  }, [user, uid, preferFirebase]);
+  
   return { 
     user, 
     uid, 
@@ -336,6 +369,7 @@ export const useAuth = () => {
     error, 
     isAuthenticated,
     hasUser, // NEW: expose derived hasUser
+    getDisplayName, // NEW: get user's display name
     // Aliases for compatibility
     currentUser: user
   };

@@ -37,7 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recalcModerationQueue = exports.aggregateReport = exports.purgeExpiredAnalytics = exports.generateThumbnails = exports.cleanupOldStreams = exports.updateStreamAnalytics = exports.processVideoSegment = exports.addLiveStreamLike = exports.addLiveStreamComment = exports.devResetFirestore = exports.billingVerify = void 0;
+exports.recalcModerationQueue = exports.aggregateReport = exports.purgeExpiredAnalytics = exports.generateThumbnails = exports.cleanupOldStreams = exports.updateStreamAnalytics = exports.processVideoSegment = exports.viewerJoin = exports.guestJoin = exports.hostEnd = exports.hostStart = exports.addLiveStreamLike = exports.addLiveStreamComment = exports.devResetFirestore = exports.billingVerify = void 0;
 const functions = __importStar(require("firebase-functions"));
 // Export billing verification function (Stage 3 economy hardening)
 var billingVerify_1 = require("./billingVerify");
@@ -49,6 +49,12 @@ Object.defineProperty(exports, "devResetFirestore", { enumerable: true, get: fun
 var liveStreamApi_1 = require("./liveStreamApi");
 Object.defineProperty(exports, "addLiveStreamComment", { enumerable: true, get: function () { return liveStreamApi_1.addLiveStreamComment; } });
 Object.defineProperty(exports, "addLiveStreamLike", { enumerable: true, get: function () { return liveStreamApi_1.addLiveStreamLike; } });
+// Export IVS live streaming functions
+var liveRoutes_1 = require("./live/liveRoutes");
+Object.defineProperty(exports, "hostStart", { enumerable: true, get: function () { return liveRoutes_1.hostStart; } });
+Object.defineProperty(exports, "hostEnd", { enumerable: true, get: function () { return liveRoutes_1.hostEnd; } });
+Object.defineProperty(exports, "guestJoin", { enumerable: true, get: function () { return liveRoutes_1.guestJoin; } });
+Object.defineProperty(exports, "viewerJoin", { enumerable: true, get: function () { return liveRoutes_1.viewerJoin; } });
 const admin = __importStar(require("firebase-admin"));
 const storage_1 = require("@google-cloud/storage");
 // @ts-ignore (library lacks bundled types)

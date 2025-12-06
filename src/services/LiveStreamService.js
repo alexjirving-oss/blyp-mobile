@@ -131,10 +131,12 @@ class LiveStreamService {
    */
   async getActiveStreams(maxResults = 20) {
     try {
+      const cutoff = new Date(Date.now() - 90 * 1000);
       const snapshot = await db
         .collection('liveStreams')
         .where('status', '==', 'live')
-        .orderBy('startedAt', 'desc')
+        .where('lastHeartbeatAt', '>=', cutoff)
+        .orderBy('lastHeartbeatAt', 'desc')
         .limit(maxResults)
         .get();
       return snapshot.docs.map(docSnap => ({

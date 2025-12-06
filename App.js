@@ -170,7 +170,17 @@ function MainTabs() {
       <Tab.Screen
         name="Profile"
         children={() => (
-          <Suspense fallback={null}>
+          <Suspense fallback={
+            <View style={{ flex: 1, backgroundColor: '#000' }}>
+              <StatusBar style="light" />
+              <View style={{ height: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingTop: 20 }}>
+                <BlypLogo width={80} height={32} />
+              </View>
+              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="large" color="#00F0FF" />
+              </View>
+            </View>
+          }>
             <ProfileScreenV3 />
           </Suspense>
         )}
@@ -235,11 +245,13 @@ function AppStack() {
       <Stack.Screen name="PastLivesStub" component={PastLivesStub} />
       <Stack.Screen name="LiveUnavailableStub" component={LiveUnavailableStub} />
       <Stack.Screen name="VoiceMemo" component={VoiceMemoScreen} />
-      <Stack.Screen name="LiveStreamScreen" children={() => (
-        <Suspense fallback={null}>
-          <LiveStreamScreen />
-        </Suspense>
-      )} />
+      <Stack.Screen name="LiveStreamScreen">
+        {(navProps) => (
+          <Suspense fallback={null}>
+            <LiveStreamScreen {...navProps} />
+          </Suspense>
+        )}
+      </Stack.Screen>
       <Stack.Screen name="PostPreview" component={PostPreviewScreen} />
       <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
       <Stack.Screen name="Games" children={() => (

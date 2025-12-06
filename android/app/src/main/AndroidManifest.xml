@@ -35,6 +35,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="blyp"/>
+        <data android:scheme="exp+blyp-mobile"/>
       </intent-filter>
     </activity>
   </application>

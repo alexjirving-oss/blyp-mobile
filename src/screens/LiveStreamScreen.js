@@ -17,8 +17,8 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
 import { auth, firebaseNative } from '../config/firebase';
-import { signInAnonymously } from 'firebase/auth';
 import { useRenderTimer, useTrackAsync } from '../performance/hooks';
 import { useAuth, getCognitoIdToken } from '../hooks/useCommon';
 import { StatusBar } from 'expo-status-bar';
@@ -27,41 +27,112 @@ import LiveStreamViewer from '../components/LiveStreamViewer';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
 import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
+// IVS Architecture imports (feature-flagged, default OFF)
+import { streamingConfig } from '../config/StreamingFeatureConfig';
+import { StreamingBackend } from '../config/StreamingBackend';
+import { useIVSHostSession } from '../live/ivs/hooks/useIVSHostSession';
+import { useIVSViewerSession } from '../live/ivs/hooks/useIVSViewerSession';
 
 const { width, height } = Dimensions.get('window');
 
 // Debug: Log to verify correct imports
 console.log('📸 LiveStreamScreen: CameraView imported?', typeof CameraView);
 
-export default function LiveStreamScreen({ navigation, route }) {
+const LiveStreamScreen = (props) => {
+  console.log('[LIVE][COMPONENT_MOUNT] LiveStreamScreen mounted');
+  console.log('[LIVE][PROPS_AT_MOUNT]', !!props, props ? Object.keys(props) : null);
+
+  const { navigation, route } = props || {};
+
+  console.log('[LIVE][RAW_ROUTE_OBJECT]', route);
+  console.log('[LIVE][ROUTE_PARAMS]', route?.params);
+  console.log('='.repeat(60));
+  
   useRenderTimer('LiveStreamScreen');
   const trackAsync = useTrackAsync();
-  const { uid, isAuthenticated, authReady, loading: authLoading } = useAuth();
+  const { uid, isAuthenticated, authReady, loading: authLoading, getDisplayName } = useAuth();
   
-  // Safe route/params extraction with defaults
+  // STEP 1: Clean, explicit route param parsing
+  // Route params are the SINGLE SOURCE OF TRUTH for viewer vs host mode
   const safeRoute = route || {};
-  const safeParams = safeRoute.params || {};
-  const { 
-    mode = 'host', 
-    hostUid = null, 
-    streamId: routeStreamId = null, 
-    displayName = 'Unknown' 
-  } = safeParams;
-  
-  // Determine if this user is the host/broadcaster
-  const isHost = mode === 'host';
-  const isViewer = mode === 'viewer';
-  
-  console.log('📺 LiveStreamScreen mode:', { mode, isHost, isViewer, hostUid, routeStreamId });
-  
-  // Log auth state on mount for debugging
-  useEffect(() => {
-    console.log('[LIVE][AUTH_STATE_ON_MOUNT]', {
-      uid,
-      isAuthenticated,
-      authReady,
-    });
-  }, [uid, isAuthenticated, authReady]);
+  const rawParams = safeRoute.params || {};
+
+  const routeMode =
+    typeof rawParams.mode === 'string' && rawParams.mode.length > 0
+      ? rawParams.mode
+      : null;
+
+  const routeHostUid =
+    typeof rawParams.hostUid === 'string' && rawParams.hostUid.trim().length > 0
+      ? rawParams.hostUid.trim()
+      : null;
+
+  const routeStreamId =
+    typeof rawParams.streamId === 'string' && rawParams.streamId.trim().length > 0
+      ? rawParams.streamId.trim()
+      : null;
+
+  const routeHostDisplayName =
+    typeof rawParams.hostDisplayName === 'string' && rawParams.hostDisplayName.trim().length > 0
+      ? rawParams.hostDisplayName.trim()
+      : null;
+
+  // Determine mode: viewer ONLY if all required params present
+  const isViewerRoute = routeMode === 'viewer' && !!routeHostUid && !!routeStreamId;
+
+  const mode = isViewerRoute ? 'viewer' : 'host';
+  const isViewer = isViewerRoute;
+  const isHost = !isViewer;
+
+  // CRITICAL DEBUG: Log decision
+  console.log('[LIVE][DECISION_MADE]', {
+    routeMode,
+    routeHostUid,
+    routeStreamId,
+    isViewerRoute,
+    mode,
+    isViewer,
+    isHost,
+  });
+
+  console.log('[LIVE][RECEIVED_ROUTE_PARAMS]', {
+    rawParams,
+    routeMode,
+    routeHostUid,
+    routeStreamId,
+    routeHostDisplayName,
+    isViewerRoute,
+    finalMode: mode,
+  });
+
+  // STEP 2: Safe displayName resolution
+  const getDisplayNameSafe = () => {
+    try {
+      if (typeof getDisplayName === 'function') {
+        const val = getDisplayName();
+        if (val && typeof val === 'string') {
+          return val;
+        }
+      }
+    } catch (e) {
+      console.warn('[LIVE][DISPLAYNAME_RESOLVE_ERROR]', e);
+    }
+    return uid || null;
+  };
+
+  const hostUid = isViewer ? routeHostUid : uid;
+  const hostDisplayName = isViewer
+    ? routeHostDisplayName || routeHostUid
+    : getDisplayNameSafe();
+
+  console.log('[LIVE][MODE_RESOLVED]', {
+    mode,
+    isViewer,
+    isHost,
+    hostUid,
+    hostDisplayName,
+    uid,
+  });
   
   const [isStreaming, setIsStreaming] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -78,6 +149,11 @@ export default function LiveStreamScreen({ navigation, route }) {
   const [cameraReady, setCameraReady] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0); // Timer in milliseconds
   const [segmentNumber, setSegmentNumber] = useState(0); // Track segment count
+  const SEGMENT_DURATION_SECONDS = 2.5;
+  const MIN_SEGMENT_BYTES = 50 * 1024; // Skip obviously truncated files (increased from 20KB)
+  const segmentIndexRef = useRef(0);
+  const streamingActiveRef = useRef(false);
+  const isRecordingSegmentRef = useRef(false); // CRITICAL: prevent re-entry
   const [isRecording, setIsRecording] = useState(false); // Track if camera is recording
   
   const cameraRef = useRef(null);
@@ -88,15 +164,60 @@ export default function LiveStreamScreen({ navigation, route }) {
   
   // Using RNFirebase services via imported modules/services
 
-  // Early-return guard: if viewer mode without streamId, navigate back
+  // IVS Architecture Integration (feature-flagged, default OFF)
+  const backend = streamingConfig.backend;
+  console.log('[LIVE][BACKEND_SELECTED]', backend);
+
+  // IVS Host Session (active if backend === IVS and isHost)
+  const ivsHostEnabled = backend === StreamingBackend.IVS && isHost === true;
+  
+  const ivsHostSession = useIVSHostSession({
+    enabled: ivsHostEnabled,
+    streamId: streamId || undefined,
+    title: title,
+  });
+
+  console.log('[LIVE][IVS_HOST_SESSION]', {
+    enabled: ivsHostEnabled,
+    backend,
+    connectionState: ivsHostSession.connectionState,
+    participants: ivsHostSession.participants.length,
+    networkQuality: ivsHostSession.networkQuality,
+    error: ivsHostSession.error,
+  });
+
+  // IVS Viewer Session (active if backend === IVS and isViewer)
+  const ivsViewerEnabled = backend === StreamingBackend.IVS && isViewer === true;
+
+  const ivsViewerSession = useIVSViewerSession({
+    streamId: routeStreamId || '',
+    enabled: ivsViewerEnabled && !!routeStreamId,
+    autoJoin: ivsViewerEnabled && !!routeStreamId,
+  });
+
+  console.log('[LIVE][IVS_VIEWER_SESSION]', {
+    enabled: ivsViewerEnabled,
+    backend,
+    connectionState: ivsViewerSession.connectionState,
+    networkQuality: ivsViewerSession.networkQuality,
+    error: ivsViewerSession.error,
+  });
+
+  // STEP 3 + Guard: Validate viewer route params and enforce single source of truth
   useEffect(() => {
-    if (mode === 'viewer' && !routeStreamId) {
-      console.warn('⚠️ [LIVE][NAV] Viewer mode requires streamId, navigating back');
+    // Viewer mode requires streamId and hostUid from route params
+    if (isViewer && (!routeStreamId || !routeHostUid)) {
+      console.warn('⚠️ [LIVE][GUARD] Viewer mode with invalid params, navigating back', {
+        mode,
+        isViewer,
+        routeStreamId,
+        routeHostUid,
+      });
       if (navigation && navigation.goBack) {
         navigation.goBack();
       }
     }
-  }, [mode, routeStreamId, navigation]);
+  }, [isViewer, routeStreamId, routeHostUid, navigation]);
 
   // Handle app state changes (background/foreground)
   useEffect(() => {
@@ -117,7 +238,15 @@ export default function LiveStreamScreen({ navigation, route }) {
   useEffect(() => {
     let mounted = true;
     
-    // Request permissions using hooks
+    // STEP 3: VIEWER MODE NEVER REQUESTS PERMISSIONS
+    if (!isHost) {
+      console.log('[LIVE][PERMISSIONS] Non-host mode: skipping camera and microphone permission requests');
+      setCameraReady(false); // Viewers don't need camera
+      return; // Exit immediately, do not request permissions
+    }
+    
+    // HOST MODE: Request camera and microphone permissions
+    console.log('[LIVE][PERMISSIONS] Host mode: requesting camera and microphone permissions');
     if (!cameraPermission) {
       console.log('[CAMERA] Requesting camera permission...');
       requestCameraPermission();
@@ -127,7 +256,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       requestMicrophonePermission();
     }
     
-    // CRITICAL: Set camera as ready ONLY after BOTH permissions granted
+    // CRITICAL: Set camera as ready ONLY after BOTH permissions granted (host mode only)
     if (mounted && cameraPermission?.granted && microphonePermission?.granted) {
       console.log('[LIVE][CAMERA_PERMISSIONS_STATE] Both granted, setting cameraReady=true');
       setCameraReady(true);
@@ -162,7 +291,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         stopStreaming();
       }
     };
-  }, [navigation, cameraPermission, microphonePermission]);
+  }, [navigation, cameraPermission, microphonePermission, isHost]);
 
   // Timer effect: Update elapsed time every second when streaming
   useEffect(() => {
@@ -206,6 +335,16 @@ export default function LiveStreamScreen({ navigation, route }) {
   // Removed legacy startRecordingSegment that used Web SDK; using HLSLiveStreamService instead
 
   const startStreaming = async () => {
+    // STEP 3: GUARD - Host only operation
+    if (!isHost) {
+      console.warn('[LIVE][GUARD] Ignoring startStreaming in non-host mode', {
+        isHost,
+        isViewer,
+        mode,
+      });
+      return;
+    }
+
     if (!title.trim()) {
       Alert.alert('Missing Title', 'Please enter a title for your live stream.');
       return;
@@ -256,6 +395,15 @@ export default function LiveStreamScreen({ navigation, route }) {
   };
 
   const actuallyStartStream = async () => {
+    // STEP 3: GUARD - Host only operation
+    if (!isHost) {
+      console.warn('[LIVE][GUARD] actuallyStartStream called in non-host mode, aborting', {
+        isHost,
+        mode,
+      });
+      return;
+    }
+
     // Auth guard: ensure user is logged in before attempting stream
     if (!authReady) {
       console.warn('[LIVE][AUTH_GUARD_FAIL]', {
@@ -285,26 +433,9 @@ export default function LiveStreamScreen({ navigation, route }) {
       return;
     }
     
-    // Ensure Firebase auth (for Firestore rules) - same pattern as ReviewScreen
-    try {
-      if (!auth.currentUser) {
-        console.log('🔐 [LIVE] Ensuring Firebase auth (anonymous) for Firestore access');
-        if (firebaseNative && typeof auth?.signInAnonymously === 'function') {
-          await auth.signInAnonymously();
-        } else {
-          await signInAnonymously(auth);
-        }
-        console.log('✅ [LIVE] Firebase auth established');
-      }
-    } catch (authErr) {
-      console.error('❌ [LIVE] Firebase auth failed:', authErr?.message);
-      // Continue anyway with Cognito UID - Firestore writes may still work
-    }
-    
-    // Double-check camera ref is still available
-    if (!cameraRef.current) {
-      Alert.alert('Camera Error', 'Camera reference was lost. Please try again.');
-      return;
+    // DEV: Skip Firebase auth bridge (Firestore rules are open)
+    if (__DEV__) {
+      console.log('[LIVE][AUTH] DEV: skipping Firebase auth bridge (Firestore rules are open).');
     }
 
     try {
@@ -318,15 +449,80 @@ export default function LiveStreamScreen({ navigation, route }) {
         return;
       }
       
-      console.log('🚀 Starting live stream with camera:', cameraRef.current);
+      console.log('🚀 Starting live stream', { backend, uid, title });
+      
+      const resolvedDisplayName = getDisplayNameSafe();
+      console.log('[LIVE][DEBUG_DISPLAYNAME_RESOLUTION]', {
+        resolvedDisplayName,
+        uid,
+      });
       
       console.log('[LIVE][CREATE_STREAM_CALL]', {
         userId: uid,
+        userDisplayName: resolvedDisplayName,
         title,
         mode,
+        backend,
       });
       
-      // Log UI-initiated stream start request
+      // IVS Backend: Start streaming via IVS Real-Time
+      if (backend === StreamingBackend.IVS) {
+        console.log('[LIVE][IVS] Starting IVS broadcast');
+        
+        logStreamingEvent('STREAM_START_REQUEST', {
+          backendId: 'IVS',
+          userId: uid,
+          source: 'UI',
+          mode: 'host',
+        });
+
+        try {
+          // IVS hook will fetch token and start native broadcast
+          await ivsHostSession.startStreaming();
+          
+          if (ivsHostSession.error) {
+            throw new Error(ivsHostSession.error);
+          }
+          
+          // Note: streamId will be set by backend response in hook
+          setIsStreaming(true);
+          setStreamStartTime(Date.now());
+          
+          logStreamingEvent('STREAM_START_SUCCESS', {
+            backendId: 'IVS',
+            userId: uid,
+            streamId: streamId,
+            source: 'UI',
+          });
+          
+          console.log('🎉 IVS live streaming started successfully');
+          
+        } catch (error) {
+          console.error('❌ IVS stream start error:', error);
+          
+          logStreamingEvent('STREAM_START_FAILURE', {
+            backendId: 'IVS',
+            userId: uid,
+            reason: error.message,
+            source: 'UI',
+          });
+          
+          Alert.alert('Streaming Error', error.message || 'Could not start IVS stream.');
+          setIsStreaming(false);
+        }
+        
+        return;
+      }
+      
+      // HLS Backend (Legacy): Start segment recording
+      console.log('[LIVE][HLS] Starting HLS segment recording (legacy)');
+      
+      // Double-check camera ref is available for HLS mode
+      if (!cameraRef.current) {
+        Alert.alert('Camera Error', 'Camera reference was lost. Please try again.');
+        return;
+      }
+      
       logStreamingEvent('STREAM_START_REQUEST', {
         backendId: 'HLS',
         userId: uid,
@@ -334,12 +530,11 @@ export default function LiveStreamScreen({ navigation, route }) {
         mode: 'host',
       });
 
-      // Use streaming backend (HLS or Agora) via factory
-      const backend = getStreamingBackend();
-      const result = await backend.createStream({
+      const hlsBackend = getStreamingBackend();
+      const result = await hlsBackend.createStream({
         userId: uid,
         title: title,
-        displayName: null, // Backend will pull from userProfiles if needed
+        displayName: resolvedDisplayName,
         photoURL: null,
         email: null,
       });
@@ -357,44 +552,27 @@ export default function LiveStreamScreen({ navigation, route }) {
         });
 
         if (result.reason === 'NOT_LOGGED_IN') {
-          console.error('[LIVE][BACKEND_AUTH_MISMATCH]', {
-            reason: result.reason,
-            error: result.error,
-            userId: uid,
-            authReady,
-            isAuthenticated,
-          });
           Alert.alert(
             'Streaming error',
             'We had a problem starting your stream. Please try again.'
           );
-          setIsStreaming(false);
-          return;
-        }
-
-        if (result.reason === 'BACKEND_NOT_CONFIGURED') {
+        } else if (result.reason === 'BACKEND_NOT_CONFIGURED') {
           Alert.alert(
             'Live streaming not available',
             'The live streaming backend is not configured right now.'
           );
-          setIsStreaming(false);
-          return;
-        }
-
-        if (result.reason === 'PERMISSION_DENIED') {
+        } else if (result.reason === 'PERMISSION_DENIED') {
           Alert.alert(
             'Live streaming not available',
             'You do not have permission to stream from this account.'
           );
-          setIsStreaming(false);
-          return;
+        } else {
+          Alert.alert(
+            'Streaming error',
+            result.error || 'Unable to start live stream.'
+          );
         }
-
-        console.error('[LIVE][STREAM] createStream failed', result);
-        Alert.alert(
-          'Streaming error',
-          result.error || 'Unable to start live stream.'
-        );
+        
         setIsStreaming(false);
         return;
       }
@@ -409,27 +587,38 @@ export default function LiveStreamScreen({ navigation, route }) {
       const newStreamId = result.data.streamId;
       
       setStreamId(newStreamId);
-      console.log('✅ Stream created:', newStreamId);
-      console.log('✅ User marked as live in users collection (via backend)');
+      console.log('✅ HLS Stream created:', newStreamId);
       
       setIsStreaming(true);
       setStreamStartTime(Date.now());
+      segmentIndexRef.current = 0;
+      streamingActiveRef.current = true;
       setSegmentNumber(0);
       
       // Start continuous segment recording (2.5 second intervals)
       startSegmentRecordingLoop(newStreamId);
       
-      console.log('🎉 Live streaming started successfully');
+      console.log('🎉 HLS live streaming started successfully');
       
     } catch (error) {
       console.error('❌ Stream start error:', error);
       Alert.alert('Streaming Error', 'Could not start live stream. Please try again.');
+      streamingActiveRef.current = false;
       setIsStreaming(false);
     }
   };
 
   // Continuous segment recording loop
   const startSegmentRecordingLoop = async (streamIdParam) => {
+    // STEP 3: GUARD - Host only operation
+    if (!isHost) {
+      console.warn('[LIVE][GUARD] startSegmentRecordingLoop called in non-host mode, blocking', {
+        isHost,
+        mode,
+      });
+      return;
+    }
+
     const currentStreamId = streamIdParam || streamId;
     if (!currentStreamId) {
       console.error('❌ No stream ID for recording');
@@ -440,109 +629,210 @@ export default function LiveStreamScreen({ navigation, route }) {
       return;
     }
 
-    console.log('🎬 Starting segment recording loop');
+    console.log('🎬 Starting segment recording loop', { currentStreamId });
     
     const recordNextSegment = async () => {
-      if (!cameraRef.current || !isStreaming) {
-        console.log('⏹️ Stopping segment loop: camera or stream unavailable');
-        if (recordingIntervalRef.current) {
-          clearInterval(recordingIntervalRef.current);
-          recordingIntervalRef.current = null;
-        }
+      const hasCamera = !!cameraRef.current;
+      const isStreamingActive = streamingActiveRef.current;
+      const currentSegmentNumber = segmentIndexRef.current;
+
+      console.log(`[RECORD_SEGMENT_${currentSegmentNumber}] CHECK: hasCamera=${hasCamera}, isStreamingActive=${isStreamingActive}`);
+
+      if (!hasCamera || !isStreamingActive) {
+        console.log('⏹️ Stopping segment loop: camera or stream unavailable', {
+          hasCamera,
+          isStreamingActive,
+          currentStreamId,
+        });
+        // Loop will exit naturally when isStreamingActive becomes false
         return;
       }
 
+      // CRITICAL: Prevent re-entry - only one recording at a time
+      if (isRecordingSegmentRef.current) {
+        console.warn(`[RECORD_SEGMENT_${currentSegmentNumber}] Already recording, skipping re-entry`);
+        return;
+      }
+
+      isRecordingSegmentRef.current = true;
+
       try {
         setIsRecording(true);
-        console.log(`📹 Recording segment ${segmentNumber}...`);
+        console.log(`📹 Recording segment ${currentSegmentNumber}... BEFORE recordAsync`);
         
         // Record 2.5 second segment
+        console.log(`[RECORD_SEGMENT_${currentSegmentNumber}] Calling recordAsync with maxDuration=${SEGMENT_DURATION_SECONDS}, quality=720p`);
         const video = await cameraRef.current.recordAsync({
-          maxDuration: 2.5,
+          maxDuration: SEGMENT_DURATION_SECONDS,
           quality: '720p',
         });
+        console.log(`[RECORD_SEGMENT_${currentSegmentNumber}] recordAsync COMPLETED, received video.uri`);
         
         setIsRecording(false);
-        console.log(`✅ Segment ${segmentNumber} recorded:`, video.uri);
+        console.log(`✅ Segment ${currentSegmentNumber} recorded:`, video.uri);
+
+        // Guard against truncated files that can produce invalid segments
+        let segmentSize = 0;
+        let fileExists = false;
+        try {
+          const info = await FileSystem.getInfoAsync(video.uri);
+          fileExists = info?.exists || false;
+          segmentSize = info?.size || 0;
+          console.log(`[RECORD_SEGMENT_${currentSegmentNumber}] File info: exists=${fileExists}, size=${segmentSize}`);
+          
+          if (!fileExists) {
+            console.error(`[RECORD_SEGMENT_${currentSegmentNumber}] File does not exist, aborting upload`, { uri: video.uri });
+            return;
+          }
+          
+          if (segmentSize < MIN_SEGMENT_BYTES) {
+            console.error(`[RECORD_SEGMENT_${currentSegmentNumber}] File too small (likely corrupt), aborting upload`, {
+              size: segmentSize,
+              minBytes: MIN_SEGMENT_BYTES,
+              uri: video.uri,
+            });
+            return;
+          }
+        } catch (infoErr) {
+          console.error(`[RECORD_SEGMENT_${currentSegmentNumber}] getInfoAsync failed, CANNOT validate segment`, infoErr);
+          // Without size validation, we MUST abort to prevent corrupt uploads
+          return;
+        }
         
         // Upload segment via streaming backend
         const backend = getStreamingBackend();
+        console.log(`[RECORD_SEGMENT_${currentSegmentNumber}] Uploading to backend...`);
         const uploadResult = await backend.uploadSegment({
           streamId: currentStreamId,
           userId: uid,
           fileUri: video.uri,
-          segmentNumber,
+          segmentNumber: currentSegmentNumber,
         });
         
         if (!uploadResult.ok) {
-          console.error(`❌ Segment ${segmentNumber} upload failed:`, uploadResult.error);
+          console.error(`❌ Segment ${currentSegmentNumber} upload failed:`, uploadResult.error);
         } else {
-          console.log(`✅ Segment ${segmentNumber} uploaded`);
+          console.log(`✅ Segment ${currentSegmentNumber} uploaded`);
         }
         
-        setSegmentNumber(prev => prev + 1);
+        // Increment ref first so next run uses N+1, then reflect to state for UI
+        segmentIndexRef.current = currentSegmentNumber + 1;
+        setSegmentNumber(segmentIndexRef.current);
+        console.log(`[RECORD_SEGMENT_${currentSegmentNumber}] Segment completed, incrementing counter -> ${segmentIndexRef.current}`);
         
       } catch (error) {
         setIsRecording(false);
-        console.error(`❌ Error recording segment ${segmentNumber}:`, error);
+        console.error(`❌ Error recording segment ${currentSegmentNumber}:`, error.message, error);
+        console.error(`[RECORD_SEGMENT_${currentSegmentNumber}] Full error stack:`, JSON.stringify(error, Object.getOwnPropertyNames(error)));
+      } finally {
+        // CRITICAL: Always release recording guard
+        isRecordingSegmentRef.current = false;
       }
     };
 
-    // Record first segment immediately
-    await recordNextSegment();
+    // CRITICAL: Sequential recording loop - wait for each segment to complete before starting next
+    // This prevents overlap and ensures upload finishes before viewer timeout
+    const recordLoop = async () => {
+      while (streamingActiveRef.current && cameraRef.current) {
+        await recordNextSegment();
+        // Short delay before next segment (allows state updates to propagate)
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      console.log('⏹️ Recording loop exited');
+    };
     
-    // Then continue every 2.5 seconds
-    recordingIntervalRef.current = setInterval(recordNextSegment, 2500);
+    // Start the loop
+    recordLoop().catch(err => {
+      console.error('❌ Recording loop crashed:', err);
+      streamingActiveRef.current = false;
+    });
   };
 
   const stopStreaming = async () => {
     try {
-      // Stop segment recording loop
-      if (recordingIntervalRef.current) {
-        clearInterval(recordingIntervalRef.current);
-        recordingIntervalRef.current = null;
-        console.log('⏹️ Stopped segment recording loop');
-      }
+      console.log('⏹️ Stopping stream', { backend, streamId });
       
-      // Stop camera recording if active
-      if (cameraRef.current && isRecording) {
-        await cameraRef.current.stopRecording();
-      }
-      
-      // End stream via streaming backend
-      if (streamId) {
+      // IVS Backend: Stop native broadcast
+      if (backend === StreamingBackend.IVS) {
+        console.log('[LIVE][IVS] Stopping IVS broadcast');
+        
         logStreamingEvent('STREAM_END_REQUEST', {
-          backendId: 'HLS',
+          backendId: 'IVS',
           streamId,
           userId: uid,
           source: 'UI',
         });
 
-        const backend = getStreamingBackend();
-        const endResult = await backend.endStream({ streamId, userId: uid });
-        
-        if (!endResult.ok) {
-          console.warn('⚠️ Stream end failed:', endResult.error);
-          logStreamingEvent('STREAM_END_FAILURE', {
-            backendId: 'HLS',
+        try {
+          await ivsHostSession.stopStreaming();
+          
+          logStreamingEvent('STREAM_END_SUCCESS', {
+            backendId: 'IVS',
             streamId,
             userId: uid,
-            reason: endResult.reason,
-            errorMessage: endResult.error,
             source: 'UI',
           });
-        } else {
-          console.log('✅ Stream ended:', streamId);
-          console.log('✅ User status set to "offline" (via backend)');
-          logStreamingEvent('STREAM_END_SUCCESS', {
-            backendId: 'HLS',
+          
+          console.log('✅ IVS stream stopped');
+        } catch (error) {
+          console.warn('⚠️ IVS stream stop failed:', error);
+          
+          logStreamingEvent('STREAM_END_FAILURE', {
+            backendId: 'IVS',
             streamId,
             userId: uid,
+            reason: error.message,
             source: 'UI',
           });
         }
+      } else {
+        // HLS Backend (Legacy): Stop segment recording
+        console.log('[LIVE][HLS] Stopping HLS segment recording (legacy)');
+        
+        // Signal loop to stop (it will exit on next iteration)
+        streamingActiveRef.current = false;
+        segmentIndexRef.current = 0;
+        
+        // Stop camera recording if active
+        if (cameraRef.current && isRecording) {
+          await cameraRef.current.stopRecording();
+        }
+        
+        // End stream via HLS backend
+        if (streamId) {
+          logStreamingEvent('STREAM_END_REQUEST', {
+            backendId: 'HLS',
+            streamId,
+            userId: uid,
+            source: 'UI',
+          });
+
+          const hlsBackend = getStreamingBackend();
+          const endResult = await hlsBackend.endStream({ streamId, userId: uid });
+          
+          if (!endResult.ok) {
+            console.warn('⚠️ HLS stream end failed:', endResult.error);
+            logStreamingEvent('STREAM_END_FAILURE', {
+              backendId: 'HLS',
+              streamId,
+              userId: uid,
+              reason: endResult.reason,
+              errorMessage: endResult.error,
+              source: 'UI',
+            });
+          } else {
+            console.log('✅ HLS stream ended:', streamId);
+            logStreamingEvent('STREAM_END_SUCCESS', {
+              backendId: 'HLS',
+              streamId,
+              userId: uid,
+              source: 'UI',
+            });
+          }
+        }
       }
       
+      // Cleanup state
       setIsStreaming(false);
       setStreamStartTime(null);
       setStreamId(null);
@@ -556,7 +846,7 @@ export default function LiveStreamScreen({ navigation, route }) {
       navigation.goBack();
     } catch (error) {
       console.error('❌ Error stopping stream:', error);
-      // Still cleanup local state even if Firebase fails
+      // Still cleanup local state even if backend fails
       setIsStreaming(false);
       setStreamStartTime(null);
       setStreamId(null);
@@ -693,7 +983,7 @@ export default function LiveStreamScreen({ navigation, route }) {
         {/* Broadcaster name overlay */}
         <View style={styles.viewerHeader}>
           <Text style={styles.viewerBroadcasterName}>
-            {displayName || 'Unknown'}
+            {hostDisplayName || 'Unknown'}
           </Text>
           <View style={styles.liveBadge}>
             <View style={styles.liveIndicator} />
@@ -769,12 +1059,25 @@ export default function LiveStreamScreen({ navigation, route }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <StatusBar style="light" />
-      <View style={styles.cameraContainer}>
+      
+      {/* VIEWER MODE: Show viewer UI instead of camera */}
+      {isViewer ? (
+        <View style={{ flex: 1 }}>
+          <LiveStreamViewer 
+            streamId={routeStreamId} 
+            hostUid={hostUid}
+          />
+        </View>
+      ) : (
+        /* HOST MODE: Show camera and streaming UI */
+        <View style={styles.cameraContainer}>
         {cameraReady ? (
           <CameraView
             ref={cameraRef}
             style={StyleSheet.absoluteFill}
             facing={facing}
+            // Must be in video mode for recordAsync to resolve
+            mode="video"
             onCameraReady={() => {
               console.log('[CAMERA] ✅ CameraView onCameraReady fired - camera stream ACTIVE');
               handleCameraReady();
@@ -880,7 +1183,8 @@ export default function LiveStreamScreen({ navigation, route }) {
             </View>
           </>
         )}
-      </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -1191,3 +1495,5 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
 });
+
+export default LiveStreamScreen;

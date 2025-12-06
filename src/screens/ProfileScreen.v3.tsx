@@ -306,18 +306,20 @@ const ProfileScreenV3: React.FC = () => {
     }
   }, [nav]);
 
-  const renderPostItem = useCallback(({ item: post }: { item: any }) => (
+  const renderPostItem = useCallback(({ item: post }: { item: any }) => {
+    // For videos, use thumbnail field; for images use imageUrl
+    const thumbUri = post.type === 'video' 
+      ? (post.thumbnail || post.thumbnailUrl || post.videoUrl)
+      : (post.imageUrl || post.media?.[0]?.url);
+    
+    return (
     <TouchableOpacity
       style={styles.postCard}
       onPress={() => handlePostPress(post)}
       activeOpacity={0.8}
     >
-      {post.type === 'video' && post.videoUrl ? (
-        <Image source={{ uri: post.videoUrl }} style={styles.postThumb} resizeMode="cover" />
-      ) : post.imageUrl ? (
-        <Image source={{ uri: post.imageUrl }} style={styles.postThumb} resizeMode="cover" />
-      ) : post.media?.[0]?.url ? (
-        <Image source={{ uri: post.media[0].url }} style={styles.postThumb} resizeMode="cover" />
+      {thumbUri ? (
+        <Image source={{ uri: thumbUri }} style={styles.postThumb} resizeMode="cover" />
       ) : (
         <View style={[styles.postThumb, styles.postThumbPlaceholder]}>
           <Icon name={"image" as any} size={24} color="#64748b" style={{}} strokeWidth={undefined} />
@@ -339,10 +341,15 @@ const ProfileScreenV3: React.FC = () => {
         </View>
       </View>
     </TouchableOpacity>
-  ), [handlePostPress]);
+    );
+  }, [handlePostPress]);
 
-  // Render states
-  if (!uid) {
+  // Unified loading state: auth not ready OR profile not loaded
+  const isLoading = !authReady || authLoading || busy;
+  const hasUser = !!uid;
+
+  // OLD CODE - DISABLED
+  if (false && !uid) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
@@ -361,7 +368,7 @@ const ProfileScreenV3: React.FC = () => {
     );
   }
 
-  if (busy) {
+  if (false && busy) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
@@ -378,7 +385,7 @@ const ProfileScreenV3: React.FC = () => {
     );
   }
 
-  if (err) {
+  if (false && err) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
@@ -458,15 +465,41 @@ const ProfileScreenV3: React.FC = () => {
         </View>
       </HeaderContainer>
 
-      <ScrollView 
+      {!hasUser ? (
+        // Logged out state
+        <View style={styles.centerArea}> 
+          <Text style={styles.stateText}>You are logged out.</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={()=>nav.navigate('Auth' as never)}>
+            <Text style={styles.primaryBtnText}>Login / Sign up</Text>
+          </TouchableOpacity>
+        </View>
+      ) : err ? (
+        // Error state
+        <View style={styles.centerArea}> 
+          <Text style={styles.stateText}>Couldn't load profile</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={onRetry}>
+            <Text style={styles.primaryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView 
         style={styles.scrollView} 
         contentContainerStyle={[styles.scrollContent, { paddingTop: 8 }]} 
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ec4899"/>}
         showsVerticalScrollIndicator={false}
       >
-        {/* Tab Content: My Profile */}
-        {profileTab === 'myProfile' && (
-        <>
+        {isLoading ? (
+          // Loading skeleton - shown while auth/data loading
+          <View style={styles.centerArea}>
+            <ActivityIndicator color="#ec4899" size="large" />
+            <Text style={styles.stateSub}>Loading your profile…</Text>
+          </View>
+        ) : (
+          // Profile content
+          <>
+          {/* Tab Content: My Profile */}
+          {profileTab === 'myProfile' && (
+          <>
         {/* Profile Header Section */}
         <View style={styles.profileHeader}>
           {/* Avatar */}
@@ -611,9 +644,12 @@ const ProfileScreenV3: React.FC = () => {
             <Text style={styles.logoutBtnText}>Logout</Text>
           </TouchableOpacity>
         </View>
-        </>
+          </>
+          )}
+          </>
         )}
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 };

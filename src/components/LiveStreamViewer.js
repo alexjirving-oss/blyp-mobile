@@ -2,7 +2,8 @@
  * LiveStreamViewer Component - TikTok-Style Architecture
  * 
  * Production-grade live streaming viewer with:
- * - Continuous segment playback without interruption
+ * - IVS Real-Time for low-latency streaming (primary)
+ * - HLS segmented playback for legacy support
  * - Adaptive buffering for smooth experience
  * - Robust error recovery and fallback mechanisms
  * - Real-world performance optimizations
@@ -13,6 +14,7 @@ import { View, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
+import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
 import StreamSegmentsAdapter from '../services/StreamSegmentsAdapter';
 import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
 import ManifestService from '../services/ManifestService';
@@ -23,10 +25,119 @@ import { decideNextQuality, createSlidingWindowCounter, emitQualitySwitchEvent }
 import SegmentBandwidthEstimatorService from '../services/SegmentBandwidthEstimatorService';
 import NetInfo from '@react-native-community/netinfo';
 import { isManifestEnabled, isPlaylistViewerEnabled, getFeatureFlags } from '../config/FeatureFlags';
+import { useAuth } from '../hooks/useCommon';
+import { streamingConfig } from '../config/StreamingFeatureConfig';
+import { StreamingBackend } from '../config/StreamingBackend';
+import { useIVSViewerSession } from '../live/ivs/hooks/useIVSViewerSession';
 
-const LiveStreamViewer = ({ streamId, onError, style }) => {
+const LiveStreamViewer = ({ streamId, onError, style, hostUid }) => {
+  const backend = streamingConfig.backend;
+  
+  // IVS Viewer Mode
+  if (backend === StreamingBackend.IVS) {
+    return <IVSLiveStreamViewer streamId={streamId} hostUid={hostUid} onError={onError} style={style} />;
+  }
+  
+  // HLS Legacy Mode
+  return <HLSLiveStreamViewer streamId={streamId} onError={onError} style={style} />;
+};
+
+/**
+ * IVS Live Stream Viewer
+ * Uses Amazon IVS Real-Time for low-latency streaming
+ */
+const IVSLiveStreamViewer = ({ streamId, hostUid, onError, style }) => {
+  const { uid } = useAuth();
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+
+  const ivsSession = useIVSViewerSession({
+    streamId: streamId || '',
+    enabled: !!streamId,
+    autoJoin: true,
+  });
+
+  useEffect(() => {
+    if (ivsSession.error) {
+      console.error('[IVS_VIEWER] Error:', ivsSession.error);
+      if (onError) onError(ivsSession.error);
+      setConnectionStatus('error');
+    } else if (ivsSession.connectionState === 'connected') {
+      setConnectionStatus('connected');
+    } else if (ivsSession.connectionState === 'disconnected') {
+      setConnectionStatus('disconnected');
+    }
+  }, [ivsSession.error, ivsSession.connectionState, onError]);
+
+  // Track view count on mount/unmount
+  useEffect(() => {
+    if (!streamId) return;
+
+    logStreamingEvent('VIEWER_JOIN', {
+      backendId: 'IVS',
+      streamId,
+      userId: uid,
+      source: 'viewer_ui',
+    });
+
+    HLSLiveStreamServiceInstance.updateViewCount(streamId, 1);
+
+    return () => {
+      logStreamingEvent('VIEWER_LEAVE', {
+        backendId: 'IVS',
+        streamId,
+        userId: uid,
+        source: 'viewer_ui',
+      });
+      
+      HLSLiveStreamServiceInstance.updateViewCount(streamId, -1);
+    };
+  }, [streamId, uid]);
+
+  if (connectionStatus === 'connecting') {
+    return (
+      <View style={[styles.container, style]}>
+        <ActivityIndicator size="large" color="#fff" />
+        <Text style={styles.statusText}>Connecting to live stream...</Text>
+      </View>
+    );
+  }
+
+  if (connectionStatus === 'error') {
+    return (
+      <View style={[styles.container, style]}>
+        <Text style={styles.errorText}>Failed to connect to stream</Text>
+        <Text style={styles.statusText}>{ivsSession.error}</Text>
+      </View>
+    );
+  }
+
+  if (connectionStatus === 'disconnected') {
+    return (
+      <View style={[styles.container, style]}>
+        <Text style={styles.statusText}>Stream ended</Text>
+      </View>
+    );
+  }
+
+  // TODO: Render native IVS player view
+  return (
+    <View style={[styles.container, style]}>
+      <Text style={styles.statusText}>IVS Player (Native View Coming Soon)</Text>
+      <Text style={styles.debugText}>Stream: {streamId}</Text>
+      <Text style={styles.debugText}>Connection: {ivsSession.connectionState}</Text>
+    </View>
+  );
+};
+
+/**
+ * HLS Live Stream Viewer (Legacy)
+ * Uses segmented HLS playback
+ */
+const HLSLiveStreamViewer = ({ streamId, onError, style }) => {
+  const { uid } = useAuth();
   const videoRef = useRef(null);
   const secondaryVideoRef = useRef(null);
+  const [playbackUrl, setPlaybackUrl] = useState(null);
   
   // TikTok-style state management
   const [currentSegment, setCurrentSegment] = useState(-1);
@@ -63,6 +174,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
     logStreamingEvent('VIEWER_SUBSCRIBE_REQUEST', {
       backendId: 'HLS',
       streamId,
+      userId: uid || null,
       source: 'viewer_ui',
     });
 
@@ -96,6 +208,22 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
 
       setStreamData(data);
       setConnectionStatus('connected');
+
+      // Capture playback URL if provided by backend
+      if (data?.playbackUrl) {
+        console.log('[LiveStreamViewer][PLAYBACK_URL] Received:', {
+          playbackUrl: data.playbackUrl,
+          status: data.status,
+          streamId: data.streamId,
+        });
+        setPlaybackUrl(data.playbackUrl);
+      } else {
+        console.warn('[LiveStreamViewer][NO_PLAYBACK_URL]', {
+          streamId,
+          status: data?.status,
+          dataKeys: data ? Object.keys(data) : 'null',
+        });
+      }
       
       // TikTok-style intelligent segment management
       if (data.currentSegment >= 0) {
@@ -198,9 +326,9 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   // Update view count on mount/unmount
   useEffect(() => {
     if (!streamId) return;
-    HLSLiveStreamService.updateViewCount(streamId, true).catch(() => {});
+    HLSLiveStreamServiceInstance.updateViewCount(streamId, true).catch(() => {});
     return () => {
-      HLSLiveStreamService.updateViewCount(streamId, false).catch(() => {});
+      HLSLiveStreamServiceInstance.updateViewCount(streamId, false).catch(() => {});
     };
   }, [streamId]);
 
@@ -583,6 +711,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       <UnifiedVideo
         ref={videoRef}
         style={styles.video}
+        uri={playbackUrl || undefined}
         resizeMode="cover" // TikTok-style full coverage
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         shouldPlay={true}
@@ -766,6 +895,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'monospace',
     marginVertical: 1,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 16,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#FF1744',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
 
