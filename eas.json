@@ -16,7 +16,9 @@
           "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
           "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_XUqSwhnMU",
           "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "596o731c5h9l12b4j1gsjfqhid",
-          "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3"
+          "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3",
+          "EXPO_PUBLIC_STREAMING_BACKEND": "ivs",
+          "EXPO_PUBLIC_API_BASE_URL": "http://192.168.0.50:3000"
       },
       "cache": {
         "key": "webrtc-dev-001"

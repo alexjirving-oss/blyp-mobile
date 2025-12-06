@@ -15,6 +15,9 @@ import { getCognitoIdToken } from '../hooks/useCommon';
 // API base URL from environment; required for IVS backend integration
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
+// Log the resolved config once to validate env wiring
+console.log('[IVS_API][CONFIG]', { API_BASE_URL });
+
 if (!API_BASE_URL && process.env.NODE_ENV === 'production') {
   console.warn(
     '[IVS_API] EXPO_PUBLIC_API_BASE_URL not configured. ' +

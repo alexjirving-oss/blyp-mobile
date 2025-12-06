@@ -1,5 +1,6 @@
 // Single source of truth for Expo config.
 // This replaces app.json to avoid duplication and Expo Doctor warnings.
+require('dotenv/config');
 
 module.exports = () => {
   // Prefer dynamic config only (avoid static app.json conflicts)
