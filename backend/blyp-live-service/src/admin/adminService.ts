@@ -12,6 +12,21 @@ export type AdminUserRow = {
     updatedAt: string | null;
 };
 
+export type AdminUserPostRow = {
+    postId: string;
+    userId: string;
+    content: string;
+    mediaUrl: string | null;
+    videoUrl: string | null;
+    postType: string;
+    likeCount: number;
+    commentCount: number;
+    isRemoved: boolean;
+    removedReason: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+};
+
 function adminDb(): Knex {
     return getEconomyInfra().db;
 }
@@ -38,6 +53,18 @@ async function tableHasColumn(db: Knex, table: string, column: string): Promise<
         [table, column]
     );
     return Boolean((rs as any)?.rows?.[0]);
+}
+
+async function tableHasAnyColumn(db: Knex, table: string, columns: string[]): Promise<string | null> {
+    for (const column of columns) {
+        try {
+            const ok = await tableHasColumn(db, table, column);
+            if (ok) return column;
+        } catch {
+            // Probe only.
+        }
+    }
+    return null;
 }
 
 async function tableExists(db: Knex, table: string): Promise<boolean> {
@@ -350,4 +377,228 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
             error: e?.message || String(e),
         };
     }
+}
+
+async function resolvePostsTableColumns(db: Knex): Promise<{
+    table: string;
+    idCol: string;
+    userCol: string;
+    contentCol: string | null;
+    mediaCol: string | null;
+    videoCol: string | null;
+    typeCol: string | null;
+    likeCol: string | null;
+    commentCol: string | null;
+    createdCol: string | null;
+    updatedCol: string | null;
+} | null> {
+    const candidates = ['posts', 'user_posts', 'feed_posts'];
+    for (const table of candidates) {
+        const exists = await tableExists(db, table);
+        if (!exists) continue;
+
+        const idCol = await tableHasAnyColumn(db, table, ['id', 'post_id']);
+        const userCol = await tableHasAnyColumn(db, table, ['user_id', 'userId', 'author_id', 'creator_user_id']);
+        if (!idCol || !userCol) continue;
+
+        const contentCol = await tableHasAnyColumn(db, table, ['content', 'caption', 'text']);
+        const mediaCol = await tableHasAnyColumn(db, table, ['media_url', 'mediaUrl', 'thumbnail_url']);
+        const videoCol = await tableHasAnyColumn(db, table, ['video_url', 'videoUrl']);
+        const typeCol = await tableHasAnyColumn(db, table, ['post_type', 'type']);
+        const likeCol = await tableHasAnyColumn(db, table, ['like_count', 'likes']);
+        const commentCol = await tableHasAnyColumn(db, table, ['comment_count', 'comments']);
+        const createdCol = await tableHasAnyColumn(db, table, ['created_at', 'createdAt', 'date']);
+        const updatedCol = await tableHasAnyColumn(db, table, ['updated_at', 'updatedAt', 'date']);
+
+        return {
+            table,
+            idCol,
+            userCol,
+            contentCol,
+            mediaCol,
+            videoCol,
+            typeCol,
+            likeCol,
+            commentCol,
+            createdCol,
+            updatedCol,
+        };
+    }
+    return null;
+}
+
+async function ensurePostAdminStateTable(db: Knex): Promise<void> {
+    await db.raw(
+        `
+        CREATE TABLE IF NOT EXISTS post_admin_state (
+          post_id text PRIMARY KEY,
+          is_removed boolean NOT NULL DEFAULT false,
+          removed_reason text,
+          removed_by_user_id text,
+          removed_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        `
+    );
+}
+
+export async function listAdminUserPosts(input: {
+    userId: string;
+    q?: string;
+    limit: number;
+    offset: number;
+}): Promise<{ items: AdminUserPostRow[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
+    const db = adminDb();
+    await ensurePostAdminStateTable(db);
+    const postSource = await resolvePostsTableColumns(db);
+    if (!postSource) {
+        return {
+            items: [],
+            total: 0,
+            limit: input.limit,
+            offset: input.offset,
+            degraded: true,
+            detail: 'No supported posts table found (expected posts/user_posts/feed_posts with id and user columns).',
+        };
+    }
+
+    const q = (input.q || '').trim();
+    const like = `%${q}%`;
+
+    const projection = [
+        `p.${postSource.idCol}::text AS post_id`,
+        `p.${postSource.userCol}::text AS user_id`,
+        postSource.contentCol ? `COALESCE(p.${postSource.contentCol}::text, '') AS content` : `''::text AS content`,
+        postSource.mediaCol ? `p.${postSource.mediaCol}::text AS media_url` : `NULL::text AS media_url`,
+        postSource.videoCol ? `p.${postSource.videoCol}::text AS video_url` : `NULL::text AS video_url`,
+        postSource.typeCol ? `COALESCE(p.${postSource.typeCol}::text, 'post') AS post_type` : `'post'::text AS post_type`,
+        postSource.likeCol ? `COALESCE(p.${postSource.likeCol}, 0)::bigint AS like_count` : `0::bigint AS like_count`,
+        postSource.commentCol ? `COALESCE(p.${postSource.commentCol}, 0)::bigint AS comment_count` : `0::bigint AS comment_count`,
+        `COALESCE(ps.is_removed, false) AS is_removed`,
+        `ps.removed_reason`,
+        postSource.createdCol ? `p.${postSource.createdCol} AS created_at` : `NULL::timestamptz AS created_at`,
+        postSource.updatedCol ? `p.${postSource.updatedCol} AS updated_at` : `NULL::timestamptz AS updated_at`,
+    ];
+
+    const orderCol = postSource.createdCol || postSource.updatedCol || postSource.idCol;
+    const usersSql = `
+      SELECT
+        ${projection.join(',\n        ')}
+      FROM ${postSource.table} p
+      LEFT JOIN post_admin_state ps ON ps.post_id = p.${postSource.idCol}::text
+      WHERE p.${postSource.userCol}::text = ?
+        AND (? = '' OR COALESCE(${postSource.contentCol ? `p.${postSource.contentCol}::text` : "''"}, '') ILIKE ? OR p.${postSource.idCol}::text ILIKE ?)
+      ORDER BY p.${orderCol} DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const countSql = `
+      SELECT COUNT(*)::bigint AS total
+      FROM ${postSource.table} p
+      WHERE p.${postSource.userCol}::text = ?
+        AND (? = '' OR COALESCE(${postSource.contentCol ? `p.${postSource.contentCol}::text` : "''"}, '') ILIKE ? OR p.${postSource.idCol}::text ILIKE ?)
+    `;
+
+    const [rowsRs, countRs] = await Promise.all([
+        db.raw(usersSql, [input.userId, q, like, like, input.limit, input.offset]),
+        db.raw(countSql, [input.userId, q, like, like]),
+    ]);
+
+    const rows = ((rowsRs as any)?.rows || []) as Array<any>;
+    const items: AdminUserPostRow[] = rows.map((r) => ({
+        postId: String(r.post_id),
+        userId: String(r.user_id),
+        content: String(r.content || ''),
+        mediaUrl: r.media_url ? String(r.media_url) : null,
+        videoUrl: r.video_url ? String(r.video_url) : null,
+        postType: String(r.post_type || 'post'),
+        likeCount: Number(r.like_count || 0),
+        commentCount: Number(r.comment_count || 0),
+        isRemoved: Boolean(r.is_removed),
+        removedReason: r.removed_reason ? String(r.removed_reason) : null,
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+    }));
+
+    const total = Number(((countRs as any)?.rows?.[0]?.total) || 0);
+    return {
+        items,
+        total,
+        limit: input.limit,
+        offset: input.offset,
+        sourceTable: postSource.table,
+    };
+}
+
+export async function removePostByAdmin(input: {
+    actorUserId: string;
+    targetPostId: string;
+    userId?: string;
+    reason: string | null;
+}): Promise<void> {
+    const db = adminDb();
+    await ensurePostAdminStateTable(db);
+
+    await db.raw(
+        `
+        INSERT INTO post_admin_state (post_id, is_removed, removed_reason, removed_by_user_id, removed_at)
+        VALUES (?, true, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (post_id)
+        DO UPDATE SET
+          is_removed = true,
+          removed_reason = EXCLUDED.removed_reason,
+          removed_by_user_id = EXCLUDED.removed_by_user_id,
+          removed_at = EXCLUDED.removed_at,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [input.targetPostId, input.reason, input.actorUserId]
+    );
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: 'post_remove',
+        targetType: 'post',
+        targetId: input.targetPostId,
+        metadata: {
+            reason: input.reason,
+            userId: input.userId || null,
+        },
+    });
+}
+
+export async function restorePostByAdmin(input: {
+    actorUserId: string;
+    targetPostId: string;
+    userId?: string;
+    reason: string | null;
+}): Promise<void> {
+    const db = adminDb();
+    await ensurePostAdminStateTable(db);
+
+    await db.raw(
+        `
+        INSERT INTO post_admin_state (post_id, is_removed, removed_reason, removed_by_user_id, removed_at)
+        VALUES (?, false, NULL, NULL, NULL)
+        ON CONFLICT (post_id)
+        DO UPDATE SET
+          is_removed = false,
+          removed_reason = NULL,
+          removed_by_user_id = NULL,
+          removed_at = NULL,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [input.targetPostId]
+    );
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: 'post_restore',
+        targetType: 'post',
+        targetId: input.targetPostId,
+        metadata: {
+            reason: input.reason,
+            userId: input.userId || null,
+        },
+    });
 }

@@ -3,8 +3,17 @@ import crypto from 'crypto';
 import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
-import { adminListUsersSchema, banUserSchema, unbanUserSchema } from './adminSchemas';
-import { banUserByAdmin, getAdminMetricsOverview, getAdminUserSourceStats, listAdminUsers, unbanUserByAdmin } from './adminService';
+import { adminListUserPostsSchema, adminListUsersSchema, banUserSchema, moderatePostSchema, unbanUserSchema } from './adminSchemas';
+import {
+    banUserByAdmin,
+    getAdminMetricsOverview,
+    getAdminUserSourceStats,
+    listAdminUserPosts,
+    listAdminUsers,
+    removePostByAdmin,
+    restorePostByAdmin,
+    unbanUserByAdmin,
+} from './adminService';
 
 const router = Router();
 
@@ -139,6 +148,31 @@ router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Respons
     }
 });
 
+router.get('/admin/users/:userId/posts', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!targetUserId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminListUserPostsSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await listAdminUserPosts({
+            userId: targetUserId,
+            q: parsed.data.q,
+            limit: parsed.data.limit,
+            offset: parsed.data.offset,
+        });
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/posts failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
 router.post('/admin/users/:userId/ban', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const actorUserId = String(req.user?.sub || '').trim();
@@ -188,6 +222,60 @@ router.post('/admin/users/:userId/unban', requireAdmin, async (req: AuthedReques
         return res.json({ ok: true, userId: targetUserId, isBanned: false });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/unban failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/posts/:postId/remove', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetPostId = String(req.params?.postId || '').trim();
+        if (!targetPostId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = moderatePostSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        await removePostByAdmin({
+            actorUserId,
+            targetPostId,
+            userId: parsed.data.userId,
+            reason: parsed.data.reason || null,
+        });
+
+        return res.json({ ok: true, postId: targetPostId, isRemoved: true });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/posts/:postId/remove failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/posts/:postId/restore', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetPostId = String(req.params?.postId || '').trim();
+        if (!targetPostId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = moderatePostSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        await restorePostByAdmin({
+            actorUserId,
+            targetPostId,
+            userId: parsed.data.userId,
+            reason: parsed.data.reason || null,
+        });
+
+        return res.json({ ok: true, postId: targetPostId, isRemoved: false });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/posts/:postId/restore failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });

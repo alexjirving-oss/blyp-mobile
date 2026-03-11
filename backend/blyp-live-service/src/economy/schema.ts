@@ -206,6 +206,16 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           UNIQUE (provider, provider_subscription_id)
         )`,
 
+        `CREATE TABLE IF NOT EXISTS post_admin_state (
+          post_id text PRIMARY KEY,
+          is_removed boolean NOT NULL DEFAULT false,
+          removed_reason text,
+          removed_by_user_id text,
+          removed_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_stream_id ON gift_events (stream_id)`,
@@ -221,6 +231,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_created ON admin_audit_log (actor_user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_audit_target_created ON admin_audit_log (target_type, target_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_status ON user_subscriptions (user_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_post_admin_state_removed ON post_admin_state (is_removed, updated_at DESC)`,
       ];
 
       for (const stmt of ddl) {
