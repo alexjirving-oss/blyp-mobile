@@ -41,17 +41,17 @@ async function tableHasColumn(db: Knex, table: string, column: string): Promise<
 }
 
 async function tableExists(db: Knex, table: string): Promise<boolean> {
-        const rs = await db.raw(
-                `
+    const rs = await db.raw(
+        `
                 SELECT 1
                 FROM information_schema.tables
                 WHERE table_schema = 'public'
                     AND table_name = ?
                 LIMIT 1
                 `,
-                [table]
-        );
-        return Boolean((rs as any)?.rows?.[0]);
+        [table]
+    );
+    return Boolean((rs as any)?.rows?.[0]);
 }
 
 async function buildUserIdsCte(db: Knex): Promise<string> {
@@ -159,7 +159,7 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
     const q = (input.q || '').trim();
     const like = `%${q}%`;
 
-        const usersSql = `
+    const usersSql = `
     ${userIdsCte}
     SELECT
       ids.user_id,
@@ -178,7 +178,7 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
     LIMIT ? OFFSET ?
   `;
 
-        const countSql = `
+    const countSql = `
         ${userIdsCte}
     SELECT COUNT(*)::bigint AS total
     FROM ids
@@ -219,7 +219,7 @@ async function upsertAdminState(input: {
     await db.raw(
         `
     INSERT INTO user_admin_state (user_id, role, is_banned, ban_reason, banned_until)
-    VALUES ($1, COALESCE($2, 'user'), $3, $4, $5)
+    VALUES (?, COALESCE(?, 'user'), ?, ?, ?)
     ON CONFLICT (user_id)
     DO UPDATE SET
       role = COALESCE(EXCLUDED.role, user_admin_state.role),
@@ -291,7 +291,7 @@ export async function writeAdminAudit(input: {
     await db.raw(
         `
     INSERT INTO admin_audit_log (actor_user_id, action, target_type, target_id, metadata)
-    VALUES ($1, $2, $3, $4, $5::jsonb)
+    VALUES (?, ?, ?, ?, ?::jsonb)
     `,
         [input.actorUserId, input.action, input.targetType, input.targetId, JSON.stringify(input.metadata || {})]
     );
@@ -300,9 +300,9 @@ export async function writeAdminAudit(input: {
 export async function getAdminMetricsOverview(): Promise<Record<string, unknown>> {
     const infra = getEconomyInfra();
     const db = infra.db;
-        const userIdsCte = await buildUserIdsCte(db);
+    const userIdsCte = await buildUserIdsCte(db);
 
-        const sql = `
+    const sql = `
         ${userIdsCte}
     SELECT
             (SELECT COUNT(*)::bigint FROM ids WHERE user_id IS NOT NULL AND user_id <> '') AS total_users,
