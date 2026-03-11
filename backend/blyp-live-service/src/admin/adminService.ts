@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
-import { getAdminFirestore } from '../config/firebaseAdmin';
 
 export type AdminUserRow = {
     userId: string;
@@ -82,6 +81,11 @@ type PostListItem = {
     userId: string;
     content: string;
     createdAt: string | null;
+    updatedAt: string | null;
+    postType: string;
+    mediaUrl: string | null;
+    videoUrl: string | null;
+    thumbnailUrl: string | null;
     isRemoved: boolean;
     removedReason: string | null;
     removedAt: string | null;
@@ -508,37 +512,161 @@ async function hasTable(db: Knex, tableName: string): Promise<boolean> {
     return Boolean((rs as any)?.rows?.[0]?.name);
 }
 
-async function detectUserIdColumn(db: Knex, tableName: string): Promise<string | null> {
-    const candidates = ['user_id', 'userid', 'userId', 'author_user_id', 'creator_user_id'];
+type TableRef = { schema: string; table: string };
+
+function quoteIdent(value: string): string {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+        throw new Error(`Invalid SQL identifier: ${value}`);
+    }
+    return `"${value}"`;
+}
+
+function tableQualifiedName(ref: TableRef): string {
+    return `${quoteIdent(ref.schema)}.${quoteIdent(ref.table)}`;
+}
+
+async function hasTableRef(db: Knex, ref: TableRef): Promise<boolean> {
+    const rs = await db.raw(
+        `
+        SELECT to_regclass(?)::text AS name
+        `,
+        [`${ref.schema}.${ref.table}`]
+    );
+    return Boolean((rs as any)?.rows?.[0]?.name);
+}
+
+async function tableHasColumnRef(db: Knex, ref: TableRef, column: string): Promise<boolean> {
+    const rs = await db.raw(
+        `
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = ?
+          AND table_name = ?
+          AND column_name = ?
+        LIMIT 1
+        `,
+        [ref.schema, ref.table, column]
+    );
+    return Boolean((rs as any)?.rows?.[0]);
+}
+
+function isLikelyPostTableName(tableName: string): boolean {
+    return /(post|feed|timeline|story|content|moment)/i.test(tableName || '');
+}
+
+async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
+    const rs = await db.raw(
+        `
+        SELECT table_schema, table_name
+        FROM information_schema.tables
+        WHERE table_type = 'BASE TABLE'
+          AND table_schema NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY table_schema ASC, table_name ASC
+        `
+    );
+
+    const refs = ((rs as any)?.rows || [])
+        .map((r: any) => ({
+            schema: String(r.table_schema || '').trim(),
+            table: String(r.table_name || '').trim(),
+        }))
+        .filter((r: TableRef) => r.schema && r.table);
+
+    const likely = refs.filter((r: TableRef) => isLikelyPostTableName(r.table));
+    const other = refs.filter((r: TableRef) => !isLikelyPostTableName(r.table));
+    return [...likely, ...other];
+}
+
+async function detectUserIdColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = [
+        'user_id',
+        'userid',
+        'userId',
+        'uid',
+        'author_user_id',
+        'creator_user_id',
+        'owner_user_id',
+        'owner_id',
+        'author_id',
+        'creator_id',
+        'profile_id',
+        'account_id',
+        'member_id',
+    ];
     for (const col of candidates) {
-        const ok = await tableHasColumn(db, tableName, col);
+        const ok = await tableHasColumnRef(db, ref, col);
         if (ok) return col;
     }
     return null;
 }
 
-async function detectPostIdColumn(db: Knex, tableName: string): Promise<string | null> {
-    const candidates = ['post_id', 'id'];
+async function detectPostIdColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['post_id', 'postid', 'postId', 'id', 'uuid', 'post_uuid', 'content_id'];
     for (const col of candidates) {
-        const ok = await tableHasColumn(db, tableName, col);
+        const ok = await tableHasColumnRef(db, ref, col);
         if (ok) return col;
     }
     return null;
 }
 
-async function detectTextColumn(db: Knex, tableName: string): Promise<string | null> {
-    const candidates = ['content', 'body', 'caption', 'text', 'description'];
+async function detectTextColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['content', 'body', 'caption', 'text', 'description', 'title', 'message', 'post_text'];
     for (const col of candidates) {
-        const ok = await tableHasColumn(db, tableName, col);
+        const ok = await tableHasColumnRef(db, ref, col);
         if (ok) return col;
     }
     return null;
 }
 
-async function detectCreatedAtColumn(db: Knex, tableName: string): Promise<string | null> {
-    const candidates = ['created_at', 'createdAt', 'date'];
+async function detectCreatedAtColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['created_at', 'createdAt', 'created', 'date', 'inserted_at', 'published_at', 'timestamp'];
     for (const col of candidates) {
-        const ok = await tableHasColumn(db, tableName, col);
+        const ok = await tableHasColumnRef(db, ref, col);
+        if (ok) return col;
+    }
+    return null;
+}
+
+async function detectUpdatedAtColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['updated_at', 'updatedAt', 'modified_at', 'modifiedAt', 'edited_at', 'last_updated_at'];
+    for (const col of candidates) {
+        const ok = await tableHasColumnRef(db, ref, col);
+        if (ok) return col;
+    }
+    return null;
+}
+
+async function detectPostTypeColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['post_type', 'postType', 'type', 'kind', 'content_type'];
+    for (const col of candidates) {
+        const ok = await tableHasColumnRef(db, ref, col);
+        if (ok) return col;
+    }
+    return null;
+}
+
+async function detectMediaUrlColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['media_url', 'mediaUrl', 'asset_url', 'assetUrl', 'file_url', 'fileUrl', 'url'];
+    for (const col of candidates) {
+        const ok = await tableHasColumnRef(db, ref, col);
+        if (ok) return col;
+    }
+    return null;
+}
+
+async function detectVideoUrlColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['video_url', 'videoUrl', 'stream_url', 'streamUrl', 'playback_url', 'playbackUrl'];
+    for (const col of candidates) {
+        const ok = await tableHasColumnRef(db, ref, col);
+        if (ok) return col;
+    }
+    return null;
+}
+
+async function detectThumbnailUrlColumn(db: Knex, ref: TableRef): Promise<string | null> {
+    const candidates = ['thumbnail_url', 'thumbnailUrl', 'thumb_url', 'thumbUrl', 'preview_url', 'previewUrl', 'image_url', 'imageUrl', 'cover_url', 'coverUrl'];
+    for (const col of candidates) {
+        const ok = await tableHasColumnRef(db, ref, col);
         if (ok) return col;
     }
     return null;
@@ -546,135 +674,74 @@ async function detectCreatedAtColumn(db: Knex, tableName: string): Promise<strin
 
 async function resolvePostSource(db: Knex): Promise<{
     table: string;
+    schema: string;
+    qualifiedTable: string;
     userIdCol: string;
     postIdCol: string;
     textCol: string | null;
     createdAtCol: string | null;
+    updatedAtCol: string | null;
+    postTypeCol: string | null;
+    mediaUrlCol: string | null;
+    videoUrlCol: string | null;
+    thumbnailUrlCol: string | null;
 } | null> {
-    const preferredTables = ['posts', 'user_posts', 'feed_posts'];
-    for (const tableName of preferredTables) {
-        const exists = await hasTable(db, tableName);
+    const preferredRefs: TableRef[] = [
+        { schema: 'public', table: 'posts' },
+        { schema: 'public', table: 'user_posts' },
+        { schema: 'public', table: 'feed_posts' },
+        { schema: 'app_public', table: 'posts' },
+        { schema: 'app_public', table: 'user_posts' },
+        { schema: 'app_public', table: 'feed_posts' },
+    ];
+
+    for (const ref of preferredRefs) {
+        const exists = await hasTableRef(db, ref);
         if (!exists) continue;
-        const userIdCol = await detectUserIdColumn(db, tableName);
-        const postIdCol = await detectPostIdColumn(db, tableName);
+        const userIdCol = await detectUserIdColumn(db, ref);
+        const postIdCol = await detectPostIdColumn(db, ref);
         if (!userIdCol || !postIdCol) continue;
         return {
-            table: tableName,
+            schema: ref.schema,
+            table: ref.table,
+            qualifiedTable: tableQualifiedName(ref),
             userIdCol,
             postIdCol,
-            textCol: await detectTextColumn(db, tableName),
-            createdAtCol: await detectCreatedAtColumn(db, tableName),
+            textCol: await detectTextColumn(db, ref),
+            createdAtCol: await detectCreatedAtColumn(db, ref),
+            updatedAtCol: await detectUpdatedAtColumn(db, ref),
+            postTypeCol: await detectPostTypeColumn(db, ref),
+            mediaUrlCol: await detectMediaUrlColumn(db, ref),
+            videoUrlCol: await detectVideoUrlColumn(db, ref),
+            thumbnailUrlCol: await detectThumbnailUrlColumn(db, ref),
         };
     }
 
-    const rs = await db.raw(
-        `
-        SELECT table_name
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-        ORDER BY table_name ASC
-        `
-    );
-    const allTables = ((rs as any)?.rows || []).map((r: any) => String(r.table_name || '')).filter(Boolean);
-    for (const tableName of allTables) {
-        const userIdCol = await detectUserIdColumn(db, tableName);
-        const postIdCol = await detectPostIdColumn(db, tableName);
+    const allTables = await listCandidatePostTables(db);
+    for (const ref of allTables) {
+        const userIdCol = await detectUserIdColumn(db, ref);
+        const postIdCol = await detectPostIdColumn(db, ref);
         if (!userIdCol || !postIdCol) continue;
         return {
-            table: tableName,
+            schema: ref.schema,
+            table: ref.table,
+            qualifiedTable: tableQualifiedName(ref),
             userIdCol,
             postIdCol,
-            textCol: await detectTextColumn(db, tableName),
-            createdAtCol: await detectCreatedAtColumn(db, tableName),
+            textCol: await detectTextColumn(db, ref),
+            createdAtCol: await detectCreatedAtColumn(db, ref),
+            updatedAtCol: await detectUpdatedAtColumn(db, ref),
+            postTypeCol: await detectPostTypeColumn(db, ref),
+            mediaUrlCol: await detectMediaUrlColumn(db, ref),
+            videoUrlCol: await detectVideoUrlColumn(db, ref),
+            thumbnailUrlCol: await detectThumbnailUrlColumn(db, ref),
         };
     }
 
     return null;
 }
 
-export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; degraded?: boolean; detail?: string }> {
-    const firestoreDb = getAdminFirestore();
-    if (firestoreDb) {
-        try {
-            const snap = await firestoreDb
-                .collection('posts')
-                .where('userId', '==', input.userId)
-                .orderBy('date', 'desc')
-                .get();
-
-            const q = asString(input.q || '').toLowerCase();
-            let allDocs: PostListItem[] = snap.docs.map((doc) => {
-                const data = doc.data();
-                const rawDate = data.date as { toDate?: () => Date } | Date | string | null | undefined;
-                let dateIso: string | null = null;
-                if (rawDate) {
-                    if (typeof (rawDate as { toDate?: () => Date }).toDate === 'function') {
-                        dateIso = toIso((rawDate as { toDate: () => Date }).toDate());
-                    } else {
-                        dateIso = toIso(rawDate);
-                    }
-                }
-                return {
-                    postId: doc.id,
-                    userId: asString(data['userId']),
-                    content: asString(data['caption'] || data['description'] || data['title'] || ''),
-                    createdAt: dateIso,
-                    isRemoved: false,
-                    removedReason: null as string | null,
-                    removedAt: null as string | null,
-                };
-            });
-
-            if (q) {
-                allDocs = allDocs.filter(
-                    (item) =>
-                        item.content.toLowerCase().includes(q) ||
-                        item.postId.toLowerCase().includes(q),
-                );
-            }
-
-            // Enrich with admin remove/restore state from Postgres
-            if (allDocs.length > 0) {
-                try {
-                    const db = adminDb();
-                    const postIds = allDocs.map((d) => d.postId);
-                    const stateRows = await db('post_admin_state')
-                        .whereIn('post_id', postIds)
-                        .select('post_id', 'is_removed', 'removed_reason', 'removed_at');
-                    const stateMap = new Map<string, Record<string, unknown>>();
-                    for (const row of stateRows as Array<Record<string, unknown>>) {
-                        stateMap.set(String(row['post_id']), row);
-                    }
-                    for (const item of allDocs) {
-                        const state = stateMap.get(item.postId);
-                        if (state) {
-                            item.isRemoved = asBool(state['is_removed']);
-                            item.removedReason = asString(state['removed_reason']) || null;
-                            item.removedAt = toIso(state['removed_at']);
-                        }
-                    }
-                } catch {
-                    // post_admin_state enrichment is optional; Postgres may be unavailable
-                }
-            }
-
-            const total = allDocs.length;
-            const items = allDocs.slice(input.offset, input.offset + input.limit);
-            return { items, total, limit: input.limit, offset: input.offset };
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            return {
-                items: [],
-                total: 0,
-                limit: input.limit,
-                offset: input.offset,
-                degraded: true,
-                detail: `Firestore posts query failed: ${msg}`,
-            };
-        }
-    }
-
-    // Firestore not configured — fall back to SQL table scan
+export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
     const db = adminDb();
     const source = await resolvePostSource(db);
     if (!source) {
@@ -684,27 +751,39 @@ export async function listAdminUserPosts(input: { userId: string; q?: string; li
             limit: input.limit,
             offset: input.offset,
             degraded: true,
-            detail: 'Posts not available: Firestore not configured (set FIREBASE_SERVICE_ACCOUNT_JSON) and no SQL posts table found.',
+            detail: 'No supported posts table found (searched accessible non-system SQL schemas for post-like tables with user and id columns).',
         };
     }
 
     const q = asString(input.q || '');
     const like = `%${q}%`;
-    const textExpr = source.textCol ? `COALESCE(CAST(p.${source.textCol} AS text), '')` : `''`;
-    const createdExpr = source.createdAtCol ? `p.${source.createdAtCol}` : 'NULL';
+    const postIdExpr = `p.${quoteIdent(source.postIdCol)}`;
+    const userIdExpr = `p.${quoteIdent(source.userIdCol)}`;
+    const textExpr = source.textCol ? `COALESCE(CAST(p.${quoteIdent(source.textCol)} AS text), '')` : `''`;
+    const createdExpr = source.createdAtCol ? `p.${quoteIdent(source.createdAtCol)}` : 'NULL';
+    const updatedExpr = source.updatedAtCol ? `p.${quoteIdent(source.updatedAtCol)}` : createdExpr;
+    const postTypeExpr = source.postTypeCol ? `COALESCE(CAST(p.${quoteIdent(source.postTypeCol)} AS text), 'post')` : `'post'`;
+    const mediaUrlExpr = source.mediaUrlCol ? `NULLIF(CAST(p.${quoteIdent(source.mediaUrlCol)} AS text), '')` : 'NULL';
+    const videoUrlExpr = source.videoUrlCol ? `NULLIF(CAST(p.${quoteIdent(source.videoUrlCol)} AS text), '')` : 'NULL';
+    const thumbnailUrlExpr = source.thumbnailUrlCol ? `NULLIF(CAST(p.${quoteIdent(source.thumbnailUrlCol)} AS text), '')` : 'NULL';
 
     const selectSql = `
         SELECT
-            CAST(p.${source.postIdCol} AS text) AS post_id,
-            CAST(p.${source.userIdCol} AS text) AS user_id,
+            CAST(${postIdExpr} AS text) AS post_id,
+            CAST(${userIdExpr} AS text) AS user_id,
             ${textExpr} AS content,
             ${createdExpr} AS created_at,
+            ${updatedExpr} AS updated_at,
+            ${postTypeExpr} AS post_type,
+            ${mediaUrlExpr} AS media_url,
+            ${videoUrlExpr} AS video_url,
+            ${thumbnailUrlExpr} AS thumbnail_url,
             COALESCE(ps.is_removed, false) AS is_removed,
             ps.removed_reason,
             ps.removed_at
-        FROM ${source.table} p
-        LEFT JOIN post_admin_state ps ON ps.post_id = CAST(p.${source.postIdCol} AS text)
-        WHERE CAST(p.${source.userIdCol} AS text) = ?
+        FROM ${source.qualifiedTable} p
+        LEFT JOIN post_admin_state ps ON ps.post_id = CAST(${postIdExpr} AS text)
+        WHERE CAST(${userIdExpr} AS text) = ?
           AND (? = '' OR ${textExpr} ILIKE ?)
         ORDER BY ${createdExpr} DESC NULLS LAST
         LIMIT ? OFFSET ?
@@ -712,8 +791,8 @@ export async function listAdminUserPosts(input: { userId: string; q?: string; li
 
     const countSql = `
         SELECT COUNT(*)::bigint AS total
-        FROM ${source.table} p
-        WHERE CAST(p.${source.userIdCol} AS text) = ?
+        FROM ${source.qualifiedTable} p
+        WHERE CAST(${userIdExpr} AS text) = ?
           AND (? = '' OR ${textExpr} ILIKE ?)
     `;
 
@@ -728,6 +807,11 @@ export async function listAdminUserPosts(input: { userId: string; q?: string; li
         userId: String(r.user_id),
         content: asString(r.content),
         createdAt: toIso(r.created_at),
+        updatedAt: toIso(r.updated_at),
+        postType: asString(r.post_type) || 'post',
+        mediaUrl: asString(r.media_url) || null,
+        videoUrl: asString(r.video_url) || null,
+        thumbnailUrl: asString(r.thumbnail_url) || null,
         isRemoved: asBool(r.is_removed),
         removedReason: asString(r.removed_reason) || null,
         removedAt: toIso(r.removed_at),
@@ -738,6 +822,7 @@ export async function listAdminUserPosts(input: { userId: string; q?: string; li
         total: Number((countRs as any)?.rows?.[0]?.total || 0),
         limit: input.limit,
         offset: input.offset,
+        sourceTable: `${source.schema}.${source.table}`,
     };
 }
 
