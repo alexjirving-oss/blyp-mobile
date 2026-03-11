@@ -173,9 +173,9 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
     LEFT JOIN user_admin_state s ON s.user_id = ids.user_id
         WHERE ids.user_id IS NOT NULL
             AND ids.user_id <> ''
-            AND ($1 = '' OR ids.user_id ILIKE $2)
+            AND (? = '' OR ids.user_id ILIKE ?)
     ORDER BY ids.user_id ASC
-    LIMIT $3 OFFSET $4
+    LIMIT ? OFFSET ?
   `;
 
         const countSql = `
@@ -184,7 +184,7 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
     FROM ids
         WHERE ids.user_id IS NOT NULL
             AND ids.user_id <> ''
-            AND ($1 = '' OR ids.user_id ILIKE $2)
+            AND (? = '' OR ids.user_id ILIKE ?)
   `;
 
     const [usersRs, countRs] = await Promise.all([
