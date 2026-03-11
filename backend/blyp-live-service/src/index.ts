@@ -93,15 +93,16 @@ async function main() {
 
   // For local/dev bring-up we still want the service to boot (so mobile can hit /health
   // and non-economy endpoints), even if DB/Redis aren't available.
+  // Schema bootstrap only depends on DB; do not gate it on Redis readiness.
   const [dbStatus, redisStatus] = await Promise.all([checkDb(db), checkRedis(redis)]);
-  if (dbStatus.ok && redisStatus.ok) {
+  if (dbStatus.ok) {
     try {
       await ensureEconomySchema(db);
     } catch (e: any) {
       logger.error({ err: e?.message || String(e) }, '[startup] economy schema ensure failed');
     }
   } else {
-    logger.warn({ db: dbStatus, redis: redisStatus }, '[startup] DB/Redis not ready; starting anyway');
+    logger.warn({ db: dbStatus, redis: redisStatus }, '[startup] DB not ready; starting anyway');
   }
 
   const server = http.createServer(app);
