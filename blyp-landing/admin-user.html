@@ -711,7 +711,7 @@
                 return {
                     apiBase: String(parsed.apiBase || DEFAULT_API_BASE).trim(),
                     sessionToken: String(parsed.sessionToken).trim(),
-                    timeoutMs: Number(parsed.timeoutMs || 8000),
+                    timeoutMs: Number(parsed.timeoutMs || 15000),
                 };
             } catch {
                 return null;
