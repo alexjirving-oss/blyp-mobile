@@ -43,3 +43,5 @@ services:
         value: 30
       - key: IDEMPOTENCY_TTL_SECONDS
         value: 86400
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false

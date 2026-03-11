@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
+import { getAdminFirestore } from '../config/firebaseAdmin';
 
 export type AdminUserRow = {
     userId: string;
@@ -592,6 +593,88 @@ async function resolvePostSource(db: Knex): Promise<{
 }
 
 export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; degraded?: boolean; detail?: string }> {
+    const firestoreDb = getAdminFirestore();
+    if (firestoreDb) {
+        try {
+            const snap = await firestoreDb
+                .collection('posts')
+                .where('userId', '==', input.userId)
+                .orderBy('date', 'desc')
+                .get();
+
+            const q = asString(input.q || '').toLowerCase();
+            let allDocs: PostListItem[] = snap.docs.map((doc) => {
+                const data = doc.data();
+                const rawDate = data.date as { toDate?: () => Date } | Date | string | null | undefined;
+                let dateIso: string | null = null;
+                if (rawDate) {
+                    if (typeof (rawDate as { toDate?: () => Date }).toDate === 'function') {
+                        dateIso = toIso((rawDate as { toDate: () => Date }).toDate());
+                    } else {
+                        dateIso = toIso(rawDate);
+                    }
+                }
+                return {
+                    postId: doc.id,
+                    userId: asString(data['userId']),
+                    content: asString(data['caption'] || data['description'] || data['title'] || ''),
+                    createdAt: dateIso,
+                    isRemoved: false,
+                    removedReason: null as string | null,
+                    removedAt: null as string | null,
+                };
+            });
+
+            if (q) {
+                allDocs = allDocs.filter(
+                    (item) =>
+                        item.content.toLowerCase().includes(q) ||
+                        item.postId.toLowerCase().includes(q),
+                );
+            }
+
+            // Enrich with admin remove/restore state from Postgres
+            if (allDocs.length > 0) {
+                try {
+                    const db = adminDb();
+                    const postIds = allDocs.map((d) => d.postId);
+                    const stateRows = await db('post_admin_state')
+                        .whereIn('post_id', postIds)
+                        .select('post_id', 'is_removed', 'removed_reason', 'removed_at');
+                    const stateMap = new Map<string, Record<string, unknown>>();
+                    for (const row of stateRows as Array<Record<string, unknown>>) {
+                        stateMap.set(String(row['post_id']), row);
+                    }
+                    for (const item of allDocs) {
+                        const state = stateMap.get(item.postId);
+                        if (state) {
+                            item.isRemoved = asBool(state['is_removed']);
+                            item.removedReason = asString(state['removed_reason']) || null;
+                            item.removedAt = toIso(state['removed_at']);
+                        }
+                    }
+                } catch {
+                    // post_admin_state enrichment is optional; Postgres may be unavailable
+                }
+            }
+
+            const total = allDocs.length;
+            const items = allDocs.slice(input.offset, input.offset + input.limit);
+            return { items, total, limit: input.limit, offset: input.offset };
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return {
+                items: [],
+                total: 0,
+                limit: input.limit,
+                offset: input.offset,
+                degraded: true,
+                detail: `Firestore posts query failed: ${msg}`,
+            };
+        }
+    }
+
+    // Firestore not configured — fall back to SQL table scan
     const db = adminDb();
     const source = await resolvePostSource(db);
     if (!source) {
@@ -601,7 +684,7 @@ export async function listAdminUserPosts(input: { userId: string; q?: string; li
             limit: input.limit,
             offset: input.offset,
             degraded: true,
-            detail: 'No supported posts table found (searched all public tables for post-like schemas with user and id columns).',
+            detail: 'Posts not available: Firestore not configured (set FIREBASE_SERVICE_ACCOUNT_JSON) and no SQL posts table found.',
         };
     }
 
