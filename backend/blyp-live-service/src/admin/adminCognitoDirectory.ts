@@ -4,6 +4,7 @@ import {
     type UserType,
 } from '@aws-sdk/client-cognito-identity-provider';
 import ENV from '../config/env';
+import { logger } from '../config/logger';
 
 export type DirectoryUser = {
     userId: string;
@@ -28,9 +29,24 @@ export type DirectoryUser = {
 let cachedClient: CognitoIdentityProviderClient | null = null;
 let cachedRegion = '';
 
+function poolRegionFromId(userPoolId: string): string {
+    const value = String(userPoolId || '').trim();
+    if (!value.includes('_')) return '';
+    return value.split('_')[0].trim();
+}
+
+function getRegionCandidates(userPoolId: string): string[] {
+    const candidates = [
+        poolRegionFromId(userPoolId),
+        String(ENV.COGNITO_REGION || '').trim(),
+        String(ENV.AWS_REGION || '').trim(),
+    ].filter(Boolean);
+    return Array.from(new Set(candidates));
+}
+
 function getClient(): CognitoIdentityProviderClient | null {
-    const region = String(ENV.COGNITO_REGION || '').trim();
     const userPoolId = String(ENV.COGNITO_USER_POOL_ID || '').trim();
+    const region = getRegionCandidates(userPoolId)[0] || '';
     if (!region || !userPoolId) {
         return null;
     }
@@ -112,31 +128,65 @@ function mapUser(user: UserType): DirectoryUser {
 }
 
 export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
-    const client = getClient();
     const userPoolId = getPoolId();
-    if (!client || !userPoolId) {
+    if (!userPoolId) {
+        logger.warn('[admin] Cognito directory disabled: COGNITO_USER_POOL_ID is missing');
         return [];
     }
 
-    const items: DirectoryUser[] = [];
-    let paginationToken: string | undefined;
+    const client = getClient();
+    if (!client) {
+        logger.warn('[admin] Cognito directory disabled: no usable region was resolved');
+        return [];
+    }
 
-    do {
-        const out = await client.send(new ListUsersCommand({
-            UserPoolId: userPoolId,
-            Limit: 60,
-            PaginationToken: paginationToken,
-        }));
-        for (const user of out.Users || []) {
-            const mapped = mapUser(user);
-            if (mapped.userId) {
-                items.push(mapped);
+    const regions = getRegionCandidates(userPoolId);
+    let lastError: unknown = null;
+
+    for (const region of regions) {
+        try {
+            if (!cachedClient || cachedRegion !== region) {
+                cachedRegion = region;
+                cachedClient = new CognitoIdentityProviderClient({ region });
             }
-        }
-        paginationToken = out.PaginationToken;
-    } while (paginationToken);
 
-    return items;
+            const items: DirectoryUser[] = [];
+            let paginationToken: string | undefined;
+
+            do {
+                const out = await cachedClient.send(new ListUsersCommand({
+                    UserPoolId: userPoolId,
+                    Limit: 60,
+                    PaginationToken: paginationToken,
+                }));
+                for (const user of out.Users || []) {
+                    const mapped = mapUser(user);
+                    if (mapped.userId) {
+                        items.push(mapped);
+                    }
+                }
+                paginationToken = out.PaginationToken;
+            } while (paginationToken);
+
+            if (region !== String(ENV.COGNITO_REGION || '').trim()) {
+                logger.info({ region }, '[admin] Cognito directory region fallback applied');
+            }
+            return items;
+        } catch (error: any) {
+            lastError = error;
+            logger.warn({
+                region,
+                code: String(error?.name || ''),
+                message: String(error?.message || error),
+            }, '[admin] Cognito list users failed for region candidate');
+        }
+    }
+
+    logger.warn({
+        code: String((lastError as any)?.name || ''),
+        message: String((lastError as any)?.message || lastError),
+    }, '[admin] Cognito directory unavailable; falling back to SQL-derived users only');
+    return [];
 }
 
 export async function findDirectoryUser(inputUserId: string): Promise<DirectoryUser | null> {
