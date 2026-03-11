@@ -1,10 +1,16 @@
-import type { Knex } from 'knex';
-import { getEconomyInfra } from '../economy/infra';
-import { checkDb, checkRedis } from '../economy/infra';
 import crypto from 'crypto';
+import type { Knex } from 'knex';
+import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
+import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
 
 export type AdminUserRow = {
     userId: string;
+    username?: string;
+    email?: string;
+    phoneNumber?: string;
+    displayName?: string;
+    userStatus?: string;
+    enabled?: boolean;
     role: string;
     isBanned: boolean;
     banReason: string | null;
@@ -13,55 +19,138 @@ export type AdminUserRow = {
     updatedAt: string | null;
 };
 
-export type AdminUserDetail = {
+type AdminVerification = {
+    isVerified: boolean;
+    note: string;
+    updatedAt: string | null;
+    updatedBy: string | null;
+};
+
+type AdminRestrictions = {
+    messagingRestricted: boolean;
+    liveRestricted: boolean;
+    loginRestricted: boolean;
+    accountRestricted: boolean;
+    reason: string;
+    expiresAt: string | null;
+    updatedAt: string | null;
+    updatedBy: string | null;
+};
+
+type AdminUserDetail = {
     userId: string;
+    username?: string;
+    email?: string;
+    phoneNumber?: string;
+    displayName?: string;
+    dateOfBirth?: string;
+    address?: string;
+    city?: string;
+    region?: string;
+    postcode?: string;
+    country?: string;
+    userStatus?: string;
+    enabled?: boolean;
     role: string;
     isBanned: boolean;
     banReason: string | null;
     bannedUntil: string | null;
-    verification: {
-        isVerified: boolean;
-        note: string | null;
-        verifiedAt: string | null;
-        verifiedBy: string | null;
-    };
-    restrictions: {
-        messagingRestricted: boolean;
-        liveRestricted: boolean;
-        accountRestricted: boolean;
-        reason: string | null;
-        expiresAt: string | null;
-        updatedAt: string | null;
-        updatedBy: string | null;
-    };
-    stats: {
-        ledgerEntries: number;
-        giftsSent: number;
-        giftsReceived: number;
-        subscriptions: number;
-        queuedAdminMessages: number;
-    };
+    verification: AdminVerification;
+    restrictions: AdminRestrictions;
+    createdAt: string | null;
+    updatedAt: string | null;
     recentActions: Array<{
         action: string;
         targetType: string;
         targetId: string;
         metadata: Record<string, unknown>;
-        createdAt: string;
+        createdAt: string | null;
     }>;
     recentMessages: Array<{
         messageId: string;
-        subject: string | null;
-        body: string;
         channel: string;
         status: string;
-        createdAt: string;
+        subject: string;
+        body: string;
+        createdAt: string | null;
     }>;
+};
+
+type PostListItem = {
+    postId: string;
+    userId: string;
+    content: string;
     createdAt: string | null;
-    updatedAt: string | null;
+    isRemoved: boolean;
+    removedReason: string | null;
+    removedAt: string | null;
 };
 
 function adminDb(): Knex {
     return getEconomyInfra().db;
+}
+
+function asObject(value: unknown): Record<string, any> {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return value as Record<string, any>;
+    }
+    return {};
+}
+
+function parseJson(input: unknown): Record<string, any> {
+    if (!input) return {};
+    if (typeof input === 'string') {
+        try {
+            return asObject(JSON.parse(input));
+        } catch {
+            return {};
+        }
+    }
+    return asObject(input);
+}
+
+function toIso(value: unknown): string | null {
+    if (!value) return null;
+    try {
+        const d = new Date(String(value));
+        if (Number.isNaN(d.getTime())) return null;
+        return d.toISOString();
+    } catch {
+        return null;
+    }
+}
+
+function asBool(value: unknown): boolean {
+    return value === true;
+}
+
+function asString(value: unknown): string {
+    if (typeof value !== 'string') return '';
+    return value.trim();
+}
+
+function buildVerification(metadata: Record<string, any>): AdminVerification {
+    const verification = asObject(metadata.verification);
+    return {
+        isVerified: asBool(verification.isVerified),
+        note: asString(verification.note),
+        updatedAt: toIso(verification.updatedAt),
+        updatedBy: asString(verification.updatedBy) || null,
+    };
+}
+
+function buildRestrictions(metadata: Record<string, any>): AdminRestrictions {
+    const restrictions = asObject(metadata.restrictions);
+    return {
+        messagingRestricted: asBool(restrictions.messagingRestricted),
+        liveRestricted: asBool(restrictions.liveRestricted),
+        loginRestricted: asBool(restrictions.loginRestricted),
+        accountRestricted: asBool(restrictions.accountRestricted),
+        reason: asString(restrictions.reason),
+        expiresAt: toIso(restrictions.expiresAt),
+        updatedAt: toIso(restrictions.updatedAt),
+        updatedBy: asString(restrictions.updatedBy) || null,
+    };
 }
 
 const OPTIONAL_USER_SOURCES: Array<{ table: string; column: string }> = [
@@ -86,51 +175,6 @@ async function tableHasColumn(db: Knex, table: string, column: string): Promise<
         [table, column]
     );
     return Boolean((rs as any)?.rows?.[0]);
-}
-
-async function tableHasAnyColumn(db: Knex, table: string, columns: string[]): Promise<boolean> {
-    if (!columns.length) return false;
-    const placeholders = columns.map(() => '?').join(', ');
-    const rs = await db.raw(
-        `
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = ?
-          AND column_name IN (${placeholders})
-        LIMIT 1
-        `,
-        [table, ...columns]
-    );
-    return Boolean((rs as any)?.rows?.[0]);
-}
-
-function sqlIdent(name: string): string {
-    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
-        throw new Error(`Unsafe SQL identifier: ${name}`);
-    }
-    return `"${name}"`;
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return value as Record<string, unknown>;
-}
-
-function asBool(value: unknown, fallback = false): boolean {
-    return typeof value === 'boolean' ? value : fallback;
-}
-
-function asStr(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    const t = value.trim();
-    return t ? t : null;
-}
-
-function asIso(value: unknown): string | null {
-    if (!value) return null;
-    const d = new Date(String(value));
-    return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 async function tableExists(db: Knex, table: string): Promise<boolean> {
@@ -176,6 +220,65 @@ async function buildUserIdsCte(db: Knex): Promise<string> {
     }
 
     return `WITH ids AS (${selects.join(' UNION ')})`;
+}
+
+function mergeUserRowWithDirectory(row: AdminUserRow | null, directoryUser: DirectoryUser | null): AdminUserRow {
+    return {
+        userId: row?.userId || directoryUser?.userId || '',
+        username: directoryUser?.username || row?.username || '',
+        email: directoryUser?.email || row?.email || '',
+        phoneNumber: directoryUser?.phoneNumber || row?.phoneNumber || '',
+        displayName: directoryUser?.displayName || row?.displayName || '',
+        userStatus: directoryUser?.userStatus || row?.userStatus || '',
+        enabled: directoryUser?.enabled ?? row?.enabled ?? true,
+        role: row?.role || 'user',
+        isBanned: row?.isBanned === true,
+        banReason: row?.banReason || null,
+        bannedUntil: row?.bannedUntil || null,
+        createdAt: row?.createdAt || directoryUser?.createdAt || null,
+        updatedAt: row?.updatedAt || directoryUser?.updatedAt || null,
+    };
+}
+
+function matchesAdminUserQuery(user: AdminUserRow, q: string): boolean {
+    if (!q) return true;
+    const lowered = q.toLowerCase();
+    return [user.userId, user.username, user.email, user.displayName, user.phoneNumber]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(lowered));
+}
+
+async function listSqlKnownUsers(): Promise<AdminUserRow[]> {
+    const db = adminDb();
+    const userIdsCte = await buildUserIdsCte(db);
+    const sql = `
+    ${userIdsCte}
+    SELECT DISTINCT
+      ids.user_id,
+      COALESCE(s.role, 'user') AS role,
+      COALESCE(s.is_banned, false) AS is_banned,
+      s.ban_reason,
+      s.banned_until,
+      s.created_at,
+      s.updated_at
+    FROM ids
+    LEFT JOIN user_admin_state s ON s.user_id = ids.user_id
+    WHERE ids.user_id IS NOT NULL
+      AND ids.user_id <> ''
+    ORDER BY ids.user_id ASC
+    `;
+
+    const usersRs = await db.raw(sql);
+    const rows = ((usersRs as any)?.rows || []) as Array<any>;
+    return rows.map((r) => ({
+        userId: String(r.user_id),
+        role: String(r.role || 'user'),
+        isBanned: Boolean(r.is_banned),
+        banReason: r.ban_reason ? String(r.ban_reason) : null,
+        bannedUntil: r.banned_until ? new Date(r.banned_until).toISOString() : null,
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+    }));
 }
 
 export async function getAdminUserSourceStats(): Promise<Record<string, unknown>> {
@@ -247,57 +350,61 @@ export async function getAdminUserSourceStats(): Promise<Record<string, unknown>
 }
 
 export async function listAdminUsers(input: { q?: string; limit: number; offset: number }): Promise<{ items: AdminUserRow[]; total: number; limit: number; offset: number }> {
-    const db = adminDb();
-    const userIdsCte = await buildUserIdsCte(db);
-    const q = (input.q || '').trim();
-    const like = `%${q}%`;
-
-    const usersSql = `
-    ${userIdsCte}
-    SELECT
-      ids.user_id,
-      COALESCE(s.role, 'user') AS role,
-      COALESCE(s.is_banned, false) AS is_banned,
-      s.ban_reason,
-      s.banned_until,
-      s.created_at,
-      s.updated_at
-    FROM ids
-    LEFT JOIN user_admin_state s ON s.user_id = ids.user_id
-        WHERE ids.user_id IS NOT NULL
-            AND ids.user_id <> ''
-            AND (? = '' OR ids.user_id ILIKE ?)
-    ORDER BY ids.user_id ASC
-    LIMIT ? OFFSET ?
-  `;
-
-    const countSql = `
-        ${userIdsCte}
-    SELECT COUNT(*)::bigint AS total
-    FROM ids
-        WHERE ids.user_id IS NOT NULL
-            AND ids.user_id <> ''
-            AND (? = '' OR ids.user_id ILIKE ?)
-  `;
-
-    const [usersRs, countRs] = await Promise.all([
-        db.raw(usersSql, [q, like, input.limit, input.offset]),
-        db.raw(countSql, [q, like]),
+    const q = asString(input.q || '').toLowerCase();
+    const [sqlUsers, directoryUsers] = await Promise.all([
+        listSqlKnownUsers(),
+        listDirectoryUsers(),
     ]);
 
-    const rows = ((usersRs as any)?.rows || []) as Array<any>;
-    const items: AdminUserRow[] = rows.map((r) => ({
-        userId: String(r.user_id),
-        role: String(r.role || 'user'),
-        isBanned: Boolean(r.is_banned),
-        banReason: r.ban_reason ? String(r.ban_reason) : null,
-        bannedUntil: r.banned_until ? new Date(r.banned_until).toISOString() : null,
-        createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
-        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
-    }));
+    const byId = new Map<string, AdminUserRow>();
+    for (const row of sqlUsers) {
+        byId.set(row.userId, row);
+    }
+    for (const directoryUser of directoryUsers) {
+        byId.set(directoryUser.userId, mergeUserRowWithDirectory(byId.get(directoryUser.userId) || null, directoryUser));
+    }
 
-    const total = Number(((countRs as any)?.rows?.[0]?.total) || 0);
+    const merged = Array.from(byId.values())
+        .filter((user) => matchesAdminUserQuery(user, q))
+        .sort((left, right) => {
+            const leftCreated = left.createdAt ? Date.parse(left.createdAt) : 0;
+            const rightCreated = right.createdAt ? Date.parse(right.createdAt) : 0;
+            if (leftCreated !== rightCreated) return rightCreated - leftCreated;
+            return String(left.userId).localeCompare(String(right.userId));
+        });
+
+    const total = merged.length;
+    const items = merged.slice(input.offset, input.offset + input.limit);
     return { items, total, limit: input.limit, offset: input.offset };
+}
+
+async function getAdminStateRow(userId: string): Promise<any | null> {
+    const db = adminDb();
+    const rs = await db.raw(
+        `
+        SELECT user_id, role, is_banned, ban_reason, banned_until, metadata, created_at, updated_at
+        FROM user_admin_state
+        WHERE user_id = ?
+        LIMIT 1
+        `,
+        [userId]
+    );
+    return (rs as any)?.rows?.[0] || null;
+}
+
+async function writeUserMetadata(userId: string, metadata: Record<string, unknown>): Promise<void> {
+    const db = adminDb();
+    await db.raw(
+        `
+        INSERT INTO user_admin_state (user_id, metadata)
+        VALUES (?, ?::jsonb)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+          metadata = EXCLUDED.metadata,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [userId, JSON.stringify(metadata || {})]
+    );
 }
 
 async function upsertAdminState(input: {
@@ -390,229 +497,103 @@ export async function writeAdminAudit(input: {
     );
 }
 
-export type AdminUserPostRow = {
-    postId: string;
-    userId: string;
-    postType: string | null;
-    content: string | null;
-    likeCount: number;
-    commentCount: number;
-    isRemoved: boolean;
-    removedReason: string | null;
-    removedByUserId: string | null;
-    removedAt: string | null;
-    createdAt: string | null;
-    updatedAt: string | null;
-};
+async function hasTable(db: Knex, tableName: string): Promise<boolean> {
+    const rs = await db.raw(
+        `
+        SELECT to_regclass(?)::text AS name
+        `,
+        [`public.${tableName}`]
+    );
+    return Boolean((rs as any)?.rows?.[0]?.name);
+}
 
-type ResolvedPostSource = {
-    table: string;
-    userCol: string;
-    idCol: string;
-    typeCol: string | null;
-    contentCol: string | null;
-    likeCol: string | null;
-    commentCol: string | null;
-    createdCol: string | null;
-    updatedCol: string | null;
-};
-
-const POST_TABLE_PREFERENCES = [
-    'posts',
-    'user_posts',
-    'feed_posts',
-    'videos',
-    'user_videos',
-    'content_posts',
-    'creator_posts',
-    'social_posts',
-    'timeline_posts',
-    'for_you_posts',
-];
-
-const POST_USER_COLS = ['user_id', 'author_user_id', 'creator_user_id', 'owner_user_id', 'uid'];
-const POST_ID_COLS = ['post_id', 'id', 'content_id', 'video_id', 'item_id'];
-const POST_TYPE_COLS = ['post_type', 'type', 'media_type', 'kind'];
-const POST_CONTENT_COLS = ['content', 'caption', 'text', 'description', 'body', 'title'];
-const POST_LIKE_COLS = ['like_count', 'likes_count', 'likes', 'heart_count'];
-const POST_COMMENT_COLS = ['comment_count', 'comments_count', 'comments', 'reply_count'];
-const POST_CREATED_COLS = ['created_at', 'posted_at', 'published_at', 'timestamp'];
-const POST_UPDATED_COLS = ['updated_at', 'modified_at', 'last_updated_at'];
-
-function pickFirst(columns: Set<string>, preferences: string[]): string | null {
-    for (const c of preferences) {
-        if (columns.has(c)) return c;
+async function detectUserIdColumn(db: Knex, tableName: string): Promise<string | null> {
+    const candidates = ['user_id', 'userid', 'userId', 'author_user_id', 'creator_user_id'];
+    for (const col of candidates) {
+        const ok = await tableHasColumn(db, tableName, col);
+        if (ok) return col;
     }
     return null;
 }
 
-function scorePostTable(table: string, cols: Set<string>): number {
-    let score = 0;
-    const prefIdx = POST_TABLE_PREFERENCES.indexOf(table);
-    if (prefIdx >= 0) score += 200 - prefIdx;
-    if (table.includes('post')) score += 50;
-    if (table.includes('video')) score += 30;
-    if (pickFirst(cols, POST_USER_COLS)) score += 25;
-    if (pickFirst(cols, POST_ID_COLS)) score += 25;
-    if (pickFirst(cols, POST_CONTENT_COLS)) score += 12;
-    if (pickFirst(cols, POST_CREATED_COLS) || pickFirst(cols, POST_UPDATED_COLS)) score += 8;
-    return score;
+async function detectPostIdColumn(db: Knex, tableName: string): Promise<string | null> {
+    const candidates = ['post_id', 'id'];
+    for (const col of candidates) {
+        const ok = await tableHasColumn(db, tableName, col);
+        if (ok) return col;
+    }
+    return null;
 }
 
-async function resolvePostsTableColumns(db: Knex): Promise<ResolvedPostSource | null> {
-    const allColumns = [
-        ...POST_USER_COLS,
-        ...POST_ID_COLS,
-        ...POST_TYPE_COLS,
-        ...POST_CONTENT_COLS,
-        ...POST_LIKE_COLS,
-        ...POST_COMMENT_COLS,
-        ...POST_CREATED_COLS,
-        ...POST_UPDATED_COLS,
-    ];
+async function detectTextColumn(db: Knex, tableName: string): Promise<string | null> {
+    const candidates = ['content', 'body', 'caption', 'text', 'description'];
+    for (const col of candidates) {
+        const ok = await tableHasColumn(db, tableName, col);
+        if (ok) return col;
+    }
+    return null;
+}
 
-    const placeholders = allColumns.map(() => '?').join(', ');
+async function detectCreatedAtColumn(db: Knex, tableName: string): Promise<string | null> {
+    const candidates = ['created_at', 'createdAt', 'date'];
+    for (const col of candidates) {
+        const ok = await tableHasColumn(db, tableName, col);
+        if (ok) return col;
+    }
+    return null;
+}
+
+async function resolvePostSource(db: Knex): Promise<{
+    table: string;
+    userIdCol: string;
+    postIdCol: string;
+    textCol: string | null;
+    createdAtCol: string | null;
+} | null> {
+    const preferredTables = ['posts', 'user_posts', 'feed_posts'];
+    for (const tableName of preferredTables) {
+        const exists = await hasTable(db, tableName);
+        if (!exists) continue;
+        const userIdCol = await detectUserIdColumn(db, tableName);
+        const postIdCol = await detectPostIdColumn(db, tableName);
+        if (!userIdCol || !postIdCol) continue;
+        return {
+            table: tableName,
+            userIdCol,
+            postIdCol,
+            textCol: await detectTextColumn(db, tableName),
+            createdAtCol: await detectCreatedAtColumn(db, tableName),
+        };
+    }
+
     const rs = await db.raw(
         `
-        SELECT table_name, column_name
-        FROM information_schema.columns
+        SELECT table_name
+        FROM information_schema.tables
         WHERE table_schema = 'public'
-          AND column_name IN (${placeholders})
-        `,
-        allColumns
+        ORDER BY table_name ASC
+        `
     );
-
-    const rows = ((rs as any)?.rows || []) as Array<{ table_name: string; column_name: string }>;
-    if (!rows.length) return null;
-
-    const tableCols = new Map<string, Set<string>>();
-    for (const r of rows) {
-        const t = String(r.table_name || '').trim();
-        const c = String(r.column_name || '').trim();
-        if (!t || !c) continue;
-        if (!tableCols.has(t)) tableCols.set(t, new Set<string>());
-        tableCols.get(t)!.add(c);
+    const allTables = ((rs as any)?.rows || []).map((r: any) => String(r.table_name || '')).filter(Boolean);
+    for (const tableName of allTables) {
+        const userIdCol = await detectUserIdColumn(db, tableName);
+        const postIdCol = await detectPostIdColumn(db, tableName);
+        if (!userIdCol || !postIdCol) continue;
+        return {
+            table: tableName,
+            userIdCol,
+            postIdCol,
+            textCol: await detectTextColumn(db, tableName),
+            createdAtCol: await detectCreatedAtColumn(db, tableName),
+        };
     }
 
-    const candidates: Array<{ table: string; cols: Set<string>; score: number }> = [];
-    for (const [table, cols] of tableCols.entries()) {
-        const userCol = pickFirst(cols, POST_USER_COLS);
-        const idCol = pickFirst(cols, POST_ID_COLS);
-        if (!userCol || !idCol) continue;
-        candidates.push({ table, cols, score: scorePostTable(table, cols) });
-    }
-
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.score - a.score);
-    const best = candidates[0];
-
-    return {
-        table: best.table,
-        userCol: pickFirst(best.cols, POST_USER_COLS)!,
-        idCol: pickFirst(best.cols, POST_ID_COLS)!,
-        typeCol: pickFirst(best.cols, POST_TYPE_COLS),
-        contentCol: pickFirst(best.cols, POST_CONTENT_COLS),
-        likeCol: pickFirst(best.cols, POST_LIKE_COLS),
-        commentCol: pickFirst(best.cols, POST_COMMENT_COLS),
-        createdCol: pickFirst(best.cols, POST_CREATED_COLS),
-        updatedCol: pickFirst(best.cols, POST_UPDATED_COLS),
-    };
+    return null;
 }
 
-async function ensurePostAdminStateTable(db: Knex): Promise<void> {
-    await db.raw(
-        `
-        CREATE TABLE IF NOT EXISTS post_admin_state (
-          post_id text PRIMARY KEY,
-          is_removed boolean NOT NULL DEFAULT false,
-          removed_reason text,
-          removed_by_user_id text,
-          removed_at timestamptz,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        `
-    );
-
-    await db.raw(
-        `CREATE INDEX IF NOT EXISTS idx_post_admin_state_removed ON post_admin_state (is_removed, updated_at DESC)`
-    );
-}
-
-async function ensureAdminUserMessagesTable(db: Knex): Promise<void> {
-    await db.raw(
-        `
-        CREATE TABLE IF NOT EXISTS admin_user_messages (
-          message_id text PRIMARY KEY,
-          actor_user_id text NOT NULL,
-          target_user_id text NOT NULL,
-          subject text,
-          body text NOT NULL,
-          channel text NOT NULL DEFAULT 'in_app',
-          status text NOT NULL DEFAULT 'queued',
-          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        `
-    );
-    await db.raw(
-        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_target_created ON admin_user_messages (target_user_id, created_at DESC)`
-    );
-    await db.raw(
-        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_status ON admin_user_messages (status, created_at DESC)`
-    );
-}
-
-async function getUserAdminState(db: Knex, userId: string): Promise<any | null> {
-    const rs = await db.raw(
-        `
-        SELECT user_id, role, is_banned, ban_reason, banned_until, metadata, created_at, updated_at
-        FROM user_admin_state
-        WHERE user_id = ?
-        LIMIT 1
-        `,
-        [userId]
-    );
-    return (rs as any)?.rows?.[0] || null;
-}
-
-async function upsertUserAdminState(db: Knex, input: {
-    userId: string;
-    role: string;
-    isBanned: boolean;
-    banReason: string | null;
-    bannedUntil: string | null;
-    metadata: Record<string, unknown>;
-}): Promise<void> {
-    await db.raw(
-        `
-        INSERT INTO user_admin_state (user_id, role, is_banned, ban_reason, banned_until, metadata)
-        VALUES (?, ?, ?, ?, ?, ?::jsonb)
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-          role = EXCLUDED.role,
-          is_banned = EXCLUDED.is_banned,
-          ban_reason = EXCLUDED.ban_reason,
-          banned_until = EXCLUDED.banned_until,
-          metadata = EXCLUDED.metadata,
-          updated_at = CURRENT_TIMESTAMP
-        `,
-        [input.userId, input.role, input.isBanned, input.banReason, input.bannedUntil, JSON.stringify(input.metadata || {})]
-    );
-}
-
-export async function listAdminUserPosts(input: {
-    userId: string;
-    q?: string;
-    limit: number;
-    offset: number;
-}): Promise<{ items: AdminUserPostRow[]; total: number; limit: number; offset: number; degraded?: boolean; detail?: string }> {
+export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; degraded?: boolean; detail?: string }> {
     const db = adminDb();
-    const q = String(input.q || '').trim();
-    const like = `%${q}%`;
-
-    const source = await resolvePostsTableColumns(db);
+    const source = await resolvePostSource(db);
     if (!source) {
         return {
             items: [],
@@ -624,99 +605,61 @@ export async function listAdminUserPosts(input: {
         };
     }
 
-    const table = sqlIdent(source.table);
-    const userCol = sqlIdent(source.userCol);
-    const idCol = sqlIdent(source.idCol);
-    const typeExpr = source.typeCol ? `p.${sqlIdent(source.typeCol)}` : 'NULL::text';
-    const contentExpr = source.contentCol ? `p.${sqlIdent(source.contentCol)}` : 'NULL::text';
-    const likeExpr = source.likeCol ? `COALESCE(p.${sqlIdent(source.likeCol)}, 0)` : '0';
-    const commentExpr = source.commentCol ? `COALESCE(p.${sqlIdent(source.commentCol)}, 0)` : '0';
-    const createdExpr = source.createdCol ? `p.${sqlIdent(source.createdCol)}` : 'NULL::timestamptz';
-    const updatedExpr = source.updatedCol
-        ? `p.${sqlIdent(source.updatedCol)}`
-        : source.createdCol
-            ? `p.${sqlIdent(source.createdCol)}`
-            : 'NULL::timestamptz';
-    const orderExpr = source.updatedCol
-        ? `p.${sqlIdent(source.updatedCol)}`
-        : source.createdCol
-            ? `p.${sqlIdent(source.createdCol)}`
-            : `p.${idCol}`;
+    const q = asString(input.q || '');
+    const like = `%${q}%`;
+    const textExpr = source.textCol ? `COALESCE(CAST(p.${source.textCol} AS text), '')` : `''`;
+    const createdExpr = source.createdAtCol ? `p.${source.createdAtCol}` : 'NULL';
 
-    const listSql = `
+    const selectSql = `
         SELECT
-          p.${idCol} AS post_id,
-          p.${userCol} AS user_id,
-          ${typeExpr} AS post_type,
-          ${contentExpr} AS content_text,
-          ${likeExpr}::bigint AS like_count,
-          ${commentExpr}::bigint AS comment_count,
-          COALESCE(s.is_removed, false) AS is_removed,
-          s.removed_reason,
-          s.removed_by_user_id,
-          s.removed_at,
-          ${createdExpr} AS created_at,
-          ${updatedExpr} AS updated_at
-        FROM ${table} p
-        LEFT JOIN post_admin_state s ON s.post_id = CAST(p.${idCol} AS text)
-        WHERE CAST(p.${userCol} AS text) = ?
-          AND (? = '' OR CAST(p.${idCol} AS text) ILIKE ? OR CAST(COALESCE(${contentExpr}, '') AS text) ILIKE ?)
-        ORDER BY ${orderExpr} DESC NULLS LAST
+            CAST(p.${source.postIdCol} AS text) AS post_id,
+            CAST(p.${source.userIdCol} AS text) AS user_id,
+            ${textExpr} AS content,
+            ${createdExpr} AS created_at,
+            COALESCE(ps.is_removed, false) AS is_removed,
+            ps.removed_reason,
+            ps.removed_at
+        FROM ${source.table} p
+        LEFT JOIN post_admin_state ps ON ps.post_id = CAST(p.${source.postIdCol} AS text)
+        WHERE CAST(p.${source.userIdCol} AS text) = ?
+          AND (? = '' OR ${textExpr} ILIKE ?)
+        ORDER BY ${createdExpr} DESC NULLS LAST
         LIMIT ? OFFSET ?
     `;
 
     const countSql = `
         SELECT COUNT(*)::bigint AS total
-        FROM ${table} p
-        WHERE CAST(p.${userCol} AS text) = ?
-          AND (? = '' OR CAST(p.${idCol} AS text) ILIKE ? OR CAST(COALESCE(${contentExpr}, '') AS text) ILIKE ?)
+        FROM ${source.table} p
+        WHERE CAST(p.${source.userIdCol} AS text) = ?
+          AND (? = '' OR ${textExpr} ILIKE ?)
     `;
 
-    try {
-        const [listRs, countRs] = await Promise.all([
-            db.raw(listSql, [input.userId, q, like, like, input.limit, input.offset]),
-            db.raw(countSql, [input.userId, q, like, like]),
-        ]);
+    const [rowsRs, countRs] = await Promise.all([
+        db.raw(selectSql, [input.userId, q, like, input.limit, input.offset]),
+        db.raw(countSql, [input.userId, q, like]),
+    ]);
 
-        const rows = ((listRs as any)?.rows || []) as Array<any>;
-        const items: AdminUserPostRow[] = rows.map((r) => ({
-            postId: String(r.post_id),
-            userId: String(r.user_id || input.userId),
-            postType: r.post_type ? String(r.post_type) : null,
-            content: r.content_text ? String(r.content_text) : null,
-            likeCount: Number(r.like_count || 0),
-            commentCount: Number(r.comment_count || 0),
-            isRemoved: Boolean(r.is_removed),
-            removedReason: r.removed_reason ? String(r.removed_reason) : null,
-            removedByUserId: r.removed_by_user_id ? String(r.removed_by_user_id) : null,
-            removedAt: r.removed_at ? new Date(r.removed_at).toISOString() : null,
-            createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
-            updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
-        }));
+    const rows = ((rowsRs as any)?.rows || []) as Array<any>;
+    const items: PostListItem[] = rows.map((r) => ({
+        postId: String(r.post_id),
+        userId: String(r.user_id),
+        content: asString(r.content),
+        createdAt: toIso(r.created_at),
+        isRemoved: asBool(r.is_removed),
+        removedReason: asString(r.removed_reason) || null,
+        removedAt: toIso(r.removed_at),
+    }));
 
-        const total = Number(((countRs as any)?.rows?.[0]?.total) || 0);
-        return { items, total, limit: input.limit, offset: input.offset };
-    } catch (e: any) {
-        return {
-            items: [],
-            total: 0,
-            limit: input.limit,
-            offset: input.offset,
-            degraded: true,
-            detail: `Post list degraded: ${e?.message || String(e)} (source table: ${source.table})`,
-        };
-    }
+    return {
+        items,
+        total: Number((countRs as any)?.rows?.[0]?.total || 0),
+        limit: input.limit,
+        offset: input.offset,
+    };
 }
 
-export async function removePostByAdmin(input: {
-    actorUserId: string;
-    targetPostId: string;
-    userId?: string;
-    reason: string | null;
-}): Promise<void> {
+export async function removePostByAdmin(input: { actorUserId: string; targetPostId: string; userId?: string; reason: string | null }): Promise<void> {
     const db = adminDb();
-    await ensurePostAdminStateTable(db);
-
     await db.raw(
         `
         INSERT INTO post_admin_state (post_id, is_removed, removed_reason, removed_by_user_id, removed_at)
@@ -726,7 +669,7 @@ export async function removePostByAdmin(input: {
           is_removed = true,
           removed_reason = EXCLUDED.removed_reason,
           removed_by_user_id = EXCLUDED.removed_by_user_id,
-          removed_at = EXCLUDED.removed_at,
+          removed_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
         `,
         [input.targetPostId, input.reason, input.actorUserId]
@@ -738,21 +681,14 @@ export async function removePostByAdmin(input: {
         targetType: 'post',
         targetId: input.targetPostId,
         metadata: {
-            userId: input.userId || null,
             reason: input.reason,
+            userId: input.userId || null,
         },
     });
 }
 
-export async function restorePostByAdmin(input: {
-    actorUserId: string;
-    targetPostId: string;
-    userId?: string;
-    reason: string | null;
-}): Promise<void> {
+export async function restorePostByAdmin(input: { actorUserId: string; targetPostId: string; userId?: string; reason: string | null }): Promise<void> {
     const db = adminDb();
-    await ensurePostAdminStateTable(db);
-
     await db.raw(
         `
         INSERT INTO post_admin_state (post_id, is_removed, removed_reason, removed_by_user_id, removed_at)
@@ -774,209 +710,211 @@ export async function restorePostByAdmin(input: {
         targetType: 'post',
         targetId: input.targetPostId,
         metadata: {
-            userId: input.userId || null,
             reason: input.reason,
+            userId: input.userId || null,
         },
     });
 }
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
     const db = adminDb();
-    await ensureAdminUserMessagesTable(db);
+    const state = await getAdminStateRow(userId);
+    const metadata = parseJson(state?.metadata);
+    const directoryUser = await findDirectoryUser(userId);
 
-    const state = await getUserAdminState(db, userId);
-    const metadata = asObject(state?.metadata);
-    const verification = asObject(metadata.verification);
-    const restrictions = asObject(metadata.restrictions);
-
-    const [ledgerRows, giftsSentRows, giftsReceivedRows, subsRows, msgRows, actionsRs, messagesRs] = await Promise.all([
-        db.raw(`SELECT COUNT(*)::bigint AS n FROM ledger_entries WHERE user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
-        db.raw(`SELECT COUNT(*)::bigint AS n FROM gift_events WHERE sender_user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
-        db.raw(`SELECT COUNT(*)::bigint AS n FROM gift_events WHERE receiver_user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
-        db.raw(`SELECT COUNT(*)::bigint AS n FROM user_subscriptions WHERE user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
-        db.raw(`SELECT COUNT(*)::bigint AS n FROM admin_user_messages WHERE target_user_id = ? AND status = 'queued'`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
+    const [actionsRs, messagesRs] = await Promise.all([
         db.raw(
             `
             SELECT action, target_type, target_id, metadata, created_at
             FROM admin_audit_log
-            WHERE target_id = ?
-               OR (target_type = 'user' AND target_id = ?)
-            ORDER BY created_at DESC
-            LIMIT 20
-            `,
-            [userId, userId]
-        ).catch(() => ({ rows: [] })),
-        db.raw(
-            `
-            SELECT message_id, subject, body, channel, status, created_at
-            FROM admin_user_messages
-            WHERE target_user_id = ?
+            WHERE target_type = 'user' AND target_id = ?
             ORDER BY created_at DESC
             LIMIT 20
             `,
             [userId]
-        ).catch(() => ({ rows: [] })),
+        ),
+        db.raw(
+            `
+            SELECT message_id, channel, status, subject, body, created_at
+            FROM admin_user_messages
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId]
+        ),
     ]);
+
+    const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
+        action: asString(r.action),
+        targetType: asString(r.target_type),
+        targetId: asString(r.target_id),
+        metadata: parseJson(r.metadata),
+        createdAt: toIso(r.created_at),
+    }));
+
+    const recentMessages = (((messagesRs as any)?.rows || []) as Array<any>).map((r) => ({
+        messageId: asString(r.message_id),
+        channel: asString(r.channel) || 'in_app',
+        status: asString(r.status) || 'queued',
+        subject: asString(r.subject),
+        body: asString(r.body),
+        createdAt: toIso(r.created_at),
+    }));
 
     return {
         userId,
-        role: String(state?.role || 'user'),
-        isBanned: Boolean(state?.is_banned),
-        banReason: state?.ban_reason ? String(state.ban_reason) : null,
-        bannedUntil: state?.banned_until ? new Date(state.banned_until).toISOString() : null,
-        verification: {
-            isVerified: asBool(verification.isVerified, false),
-            note: asStr(verification.note),
-            verifiedAt: asIso(verification.verifiedAt),
-            verifiedBy: asStr(verification.verifiedBy),
-        },
-        restrictions: {
-            messagingRestricted: asBool(restrictions.messagingRestricted, false),
-            liveRestricted: asBool(restrictions.liveRestricted, false),
-            accountRestricted: asBool(restrictions.accountRestricted, false),
-            reason: asStr(restrictions.reason),
-            expiresAt: asIso(restrictions.expiresAt),
-            updatedAt: asIso(restrictions.updatedAt),
-            updatedBy: asStr(restrictions.updatedBy),
-        },
-        stats: {
-            ledgerEntries: Number((ledgerRows as any)?.rows?.[0]?.n || 0),
-            giftsSent: Number((giftsSentRows as any)?.rows?.[0]?.n || 0),
-            giftsReceived: Number((giftsReceivedRows as any)?.rows?.[0]?.n || 0),
-            subscriptions: Number((subsRows as any)?.rows?.[0]?.n || 0),
-            queuedAdminMessages: Number((msgRows as any)?.rows?.[0]?.n || 0),
-        },
-        recentActions: (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
-            action: String(r.action || ''),
-            targetType: String(r.target_type || ''),
-            targetId: String(r.target_id || ''),
-            metadata: asObject(r.metadata),
-            createdAt: new Date(r.created_at).toISOString(),
-        })),
-        recentMessages: (((messagesRs as any)?.rows || []) as Array<any>).map((r) => ({
-            messageId: String(r.message_id),
-            subject: r.subject ? String(r.subject) : null,
-            body: String(r.body || ''),
-            channel: String(r.channel || 'in_app'),
-            status: String(r.status || 'queued'),
-            createdAt: new Date(r.created_at).toISOString(),
-        })),
-        createdAt: state?.created_at ? new Date(state.created_at).toISOString() : null,
-        updatedAt: state?.updated_at ? new Date(state.updated_at).toISOString() : null,
+        username: directoryUser?.username || '',
+        email: directoryUser?.email || '',
+        phoneNumber: directoryUser?.phoneNumber || '',
+        displayName: directoryUser?.displayName || '',
+        dateOfBirth: directoryUser?.dateOfBirth || '',
+        address: directoryUser?.address || '',
+        city: directoryUser?.city || '',
+        region: directoryUser?.region || '',
+        postcode: directoryUser?.postcode || '',
+        country: directoryUser?.country || '',
+        userStatus: directoryUser?.userStatus || '',
+        enabled: directoryUser?.enabled ?? true,
+        role: asString(state?.role) || 'user',
+        isBanned: asBool(state?.is_banned),
+        banReason: asString(state?.ban_reason) || null,
+        bannedUntil: toIso(state?.banned_until),
+        verification: buildVerification(metadata),
+        restrictions: buildRestrictions(metadata),
+        createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
+        updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
+        recentActions,
+        recentMessages,
     };
 }
 
-export async function updateAdminUserCapabilities(input: {
+export async function setAdminUserCapabilities(input: {
     actorUserId: string;
-    userId: string;
-    verified?: boolean;
-    verificationNote?: string;
-    messagingRestricted?: boolean;
-    liveRestricted?: boolean;
-    accountRestricted?: boolean;
-    reason?: string;
-    expiresAt?: string;
-}): Promise<void> {
-    const db = adminDb();
-    const state = await getUserAdminState(db, input.userId);
-    const metadata = asObject(state?.metadata);
+    targetUserId: string;
+    verified: boolean;
+    role?: string;
+    verificationNote?: string | null;
+    messagingRestricted: boolean;
+    liveRestricted: boolean;
+    loginRestricted: boolean;
+    accountRestricted: boolean;
+    reason?: string | null;
+    expiresAt?: string | null;
+}): Promise<AdminUserDetail> {
+    const now = new Date().toISOString();
+    const state = await getAdminStateRow(input.targetUserId);
+    const metadata = parseJson(state?.metadata);
 
-    const verification = {
-        ...asObject(metadata.verification),
-    } as Record<string, unknown>;
-    const restrictions = {
-        ...asObject(metadata.restrictions),
-    } as Record<string, unknown>;
-
-    if (input.verified !== undefined) {
-        verification.isVerified = input.verified;
-        verification.verifiedAt = new Date().toISOString();
-        verification.verifiedBy = input.actorUserId;
-    }
-    if (input.verificationNote !== undefined) {
-        verification.note = input.verificationNote || null;
-    }
-    if (input.messagingRestricted !== undefined) restrictions.messagingRestricted = input.messagingRestricted;
-    if (input.liveRestricted !== undefined) restrictions.liveRestricted = input.liveRestricted;
-    if (input.accountRestricted !== undefined) restrictions.accountRestricted = input.accountRestricted;
-    if (input.reason !== undefined) restrictions.reason = input.reason || null;
-    if (input.expiresAt !== undefined) restrictions.expiresAt = input.expiresAt || null;
-    restrictions.updatedAt = new Date().toISOString();
-    restrictions.updatedBy = input.actorUserId;
-
-    const mergedMetadata: Record<string, unknown> = {
+    const nextMetadata = {
         ...metadata,
-        verification,
-        restrictions,
+        verification: {
+            ...asObject(metadata.verification),
+            isVerified: input.verified === true,
+            note: asString(input.verificationNote || ''),
+            updatedAt: now,
+            updatedBy: input.actorUserId,
+        },
+        restrictions: {
+            ...asObject(metadata.restrictions),
+            messagingRestricted: input.messagingRestricted === true,
+            liveRestricted: input.liveRestricted === true,
+            loginRestricted: input.loginRestricted === true,
+            accountRestricted: input.accountRestricted === true,
+            reason: asString(input.reason || ''),
+            expiresAt: toIso(input.expiresAt) || null,
+            updatedAt: now,
+            updatedBy: input.actorUserId,
+        },
     };
 
-    await upsertUserAdminState(db, {
-        userId: input.userId,
-        role: String(state?.role || 'user'),
-        isBanned: Boolean(state?.is_banned || false),
-        banReason: state?.ban_reason ? String(state.ban_reason) : null,
-        bannedUntil: state?.banned_until ? new Date(state.banned_until).toISOString() : null,
-        metadata: mergedMetadata,
+    await upsertAdminState({
+        userId: input.targetUserId,
+        role: input.role || asString(state?.role) || 'user',
+        isBanned: asBool(state?.is_banned),
+        banReason: asString(state?.ban_reason) || null,
+        bannedUntil: toIso(state?.banned_until),
     });
+
+    await writeUserMetadata(input.targetUserId, nextMetadata);
 
     await writeAdminAudit({
         actorUserId: input.actorUserId,
-        action: 'user_capabilities_update',
+        action: 'user_capabilities_set',
         targetType: 'user',
-        targetId: input.userId,
+        targetId: input.targetUserId,
         metadata: {
-            verified: input.verified,
-            verificationNote: input.verificationNote,
-            messagingRestricted: input.messagingRestricted,
-            liveRestricted: input.liveRestricted,
-            accountRestricted: input.accountRestricted,
-            reason: input.reason,
-            expiresAt: input.expiresAt,
+            verification: nextMetadata.verification,
+            restrictions: nextMetadata.restrictions,
         },
     });
+
+    return getAdminUserDetail(input.targetUserId);
 }
 
-export async function sendAdminDirectMessage(input: {
+export async function queueAdminUserMessage(input: {
     actorUserId: string;
-    userId: string;
-    subject?: string;
+    targetUserId: string;
+    channel: string;
+    subject?: string | null;
     message: string;
-    channel: 'in_app' | 'email';
-}): Promise<{ messageId: string }> {
+}): Promise<{ messageId: string; status: string }> {
     const db = adminDb();
-    await ensureAdminUserMessagesTable(db);
-
     const messageId = `admmsg_${crypto.randomBytes(8).toString('hex')}`;
+    const channel = asString(input.channel) || 'in_app';
+
     await db.raw(
         `
-        INSERT INTO admin_user_messages (message_id, actor_user_id, target_user_id, subject, body, channel, status, metadata)
-        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?::jsonb)
+        INSERT INTO admin_user_messages (message_id, user_id, channel, status, subject, body, metadata)
+        VALUES (?, ?, ?, 'queued', ?, ?, ?::jsonb)
         `,
         [
             messageId,
-            input.actorUserId,
-            input.userId,
-            input.subject || null,
-            input.message,
-            input.channel,
-            JSON.stringify({ source: 'admin-dashboard' }),
+            input.targetUserId,
+            channel,
+            asString(input.subject || '') || null,
+            asString(input.message),
+            JSON.stringify({ actorUserId: input.actorUserId }),
         ]
     );
 
     await writeAdminAudit({
         actorUserId: input.actorUserId,
-        action: 'user_direct_message',
+        action: 'user_message_queued',
         targetType: 'user',
-        targetId: input.userId,
+        targetId: input.targetUserId,
         metadata: {
+            channel,
             messageId,
-            subject: input.subject || null,
-            channel: input.channel,
-            bodyPreview: input.message.slice(0, 180),
+            subject: asString(input.subject || ''),
         },
     });
 
-    return { messageId };
+    return { messageId, status: 'queued' };
+}
+
+export async function getEffectiveUserControls(userId: string): Promise<{
+    userId: string;
+    verification: AdminVerification;
+    restrictions: AdminRestrictions;
+    recentMessages: Array<{
+        messageId: string;
+        channel: string;
+        status: string;
+        subject: string;
+        body: string;
+        createdAt: string | null;
+    }>;
+    source: 'user_admin_state';
+}> {
+    const detail = await getAdminUserDetail(userId);
+    return {
+        userId,
+        verification: detail.verification,
+        restrictions: detail.restrictions,
+        recentMessages: detail.recentMessages,
+        source: 'user_admin_state',
+    };
 }
 
 export async function getAdminMetricsOverview(): Promise<Record<string, unknown>> {

@@ -1,13 +1,14 @@
 import { Router, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
 import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import {
-    adminDirectMessageSchema,
     adminListUserPostsSchema,
     adminListUsersSchema,
-    adminUpdateUserCapabilitiesSchema,
+    adminQueueUserMessageSchema,
+    adminSetCapabilitiesSchema,
     banUserSchema,
     moderatePostSchema,
     unbanUserSchema,
@@ -17,12 +18,13 @@ import {
     getAdminUserDetail,
     getAdminMetricsOverview,
     getAdminUserSourceStats,
+    getEffectiveUserControls,
     listAdminUserPosts,
     listAdminUsers,
+    queueAdminUserMessage,
     removePostByAdmin,
     restorePostByAdmin,
-    sendAdminDirectMessage,
-    updateAdminUserCapabilities,
+    setAdminUserCapabilities,
     unbanUserByAdmin,
 } from './adminService';
 
@@ -194,7 +196,7 @@ router.get('/admin/users/:userId', requireAdmin, async (req: AuthedRequest, res:
         const out = await getAdminUserDetail(targetUserId);
         return res.json(out);
     } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId detail failed');
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });
@@ -207,24 +209,26 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, async (req: Authe
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
-        const parsed = adminUpdateUserCapabilitiesSchema.safeParse(req.body);
+        const parsed = adminSetCapabilitiesSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
         }
 
-        await updateAdminUserCapabilities({
+        const out = await setAdminUserCapabilities({
             actorUserId,
-            userId: targetUserId,
+            targetUserId,
             verified: parsed.data.verified,
-            verificationNote: parsed.data.verificationNote,
+            role: parsed.data.role,
+            verificationNote: parsed.data.verificationNote || null,
             messagingRestricted: parsed.data.messagingRestricted,
             liveRestricted: parsed.data.liveRestricted,
+            loginRestricted: parsed.data.loginRestricted,
             accountRestricted: parsed.data.accountRestricted,
-            reason: parsed.data.reason,
-            expiresAt: parsed.data.expiresAt,
+            reason: parsed.data.reason || null,
+            expiresAt: parsed.data.expiresAt || null,
         });
 
-        return res.json({ ok: true, userId: targetUserId });
+        return res.json({ ok: true, userId: targetUserId, detail: out });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/capabilities failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
@@ -239,17 +243,17 @@ router.post('/admin/users/:userId/message', requireAdmin, async (req: AuthedRequ
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
-        const parsed = adminDirectMessageSchema.safeParse(req.body);
+        const parsed = adminQueueUserMessageSchema.safeParse(req.body);
         if (!parsed.success) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
         }
 
-        const out = await sendAdminDirectMessage({
+        const out = await queueAdminUserMessage({
             actorUserId,
-            userId: targetUserId,
-            subject: parsed.data.subject,
-            message: parsed.data.message,
+            targetUserId,
             channel: parsed.data.channel,
+            subject: parsed.data.subject || null,
+            message: parsed.data.message,
         });
 
         return res.json({ ok: true, userId: targetUserId, ...out });
@@ -383,6 +387,39 @@ router.get('/admin/users/sources', requireAdmin, async (_req: AuthedRequest, res
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/sources failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+// Read-only app-consumption route: authenticated users can fetch only their own controls/messages.
+router.get('/api/live/me/admin-controls', cognitoJwtMiddleware, async (req: AuthedRequest, res: Response) => {
+    try {
+        const userId = String(req.user?.sub || '').trim();
+        if (!userId) {
+            return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH', detail: 'missing user identity' });
+        }
+
+        const out = await getEffectiveUserControls(userId);
+        return res.json({ ok: true, ...out });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /api/live/me/admin-controls failed');
+        return res.status(200).json({
+            ok: false,
+            userId: String(req.user?.sub || ''),
+            verification: { isVerified: false, note: '', updatedAt: null, updatedBy: null },
+            restrictions: {
+                messagingRestricted: false,
+                liveRestricted: false,
+                accountRestricted: false,
+                reason: '',
+                expiresAt: null,
+                updatedAt: null,
+                updatedBy: null,
+            },
+            recentMessages: [],
+            source: 'unavailable',
+            degraded: true,
+            detail: e?.message || String(e),
+        });
     }
 });
 
