@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: blyp-live-service
+    runtime: node
+    rootDir: backend/blyp-live-service
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: AWS_REGION
+        value: eu-west-2
+      - key: COGNITO_REGION
+        value: eu-west-2
+      - key: IVS_REALTIME_REGION
+        value: eu-west-1
+      - key: COGNITO_USER_POOL_ID
+        sync: false
+      - key: LIVE_SESSIONS_TABLE
+        value: blyp_live_sessions
+      - key: LIVE_GUESTS_TABLE
+        value: blyp_live_guests
+      - key: ADMIN_ALLOWLIST_SUBS
+        sync: false
+      - key: POSTGRES_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ECONOMY_TAKE_RATE_BPS
+        value: 3000
+      - key: CREATOR_SHARE_BPS
+        value: 7000
+      - key: GEMS_PER_COIN_NUM
+        value: 1
+      - key: GEMS_PER_COIN_DEN
+        value: 1
+      - key: PENDING_GEMS_HOLD_SECONDS
+        value: 30
+      - key: IDEMPOTENCY_TTL_SECONDS
+        value: 86400
