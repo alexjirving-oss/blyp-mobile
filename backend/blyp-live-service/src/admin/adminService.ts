@@ -554,6 +554,10 @@ function isLikelyPostTableName(tableName: string): boolean {
     return /(post|feed|timeline|story|content|moment)/i.test(tableName || '');
 }
 
+function isExcludedPostSourceTable(tableName: string): boolean {
+    return /(flag|admin|state|audit|warning|report|restriction|message|moderat)/i.test(tableName || '');
+}
+
 async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
     const rs = await db.raw(
         `
@@ -570,7 +574,8 @@ async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
             schema: String(r.table_schema || '').trim(),
             table: String(r.table_name || '').trim(),
         }))
-        .filter((r: TableRef) => r.schema && r.table);
+        .filter((r: TableRef) => r.schema && r.table)
+        .filter((r: TableRef) => !isExcludedPostSourceTable(r.table));
 
     const likely = refs.filter((r: TableRef) => isLikelyPostTableName(r.table));
     const other = refs.filter((r: TableRef) => !isLikelyPostTableName(r.table));
