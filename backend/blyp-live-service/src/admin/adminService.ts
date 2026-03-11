@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
+import { getAdminFirestore } from '../config/firebaseAdmin';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
 
 export type AdminUserRow = {
@@ -746,18 +747,156 @@ async function resolvePostSource(db: Knex): Promise<{
     return null;
 }
 
-export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
-    const db = adminDb();
-    const source = await resolvePostSource(db);
-    if (!source) {
+function toMillisFromUnknown(value: any): number {
+    if (!value) return 0;
+    try {
+        if (typeof value?.toDate === 'function') {
+            const d = value.toDate();
+            return d instanceof Date ? d.getTime() : 0;
+        }
+        if (value instanceof Date) return value.getTime();
+        if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+        if (typeof value === 'string') {
+            const t = Date.parse(value);
+            return Number.isFinite(t) ? t : 0;
+        }
+        if (typeof value === 'object') {
+            const seconds = Number(value.seconds ?? value._seconds ?? 0);
+            const nanos = Number(value.nanoseconds ?? value._nanoseconds ?? 0);
+            if (Number.isFinite(seconds) && seconds > 0) {
+                return seconds * 1000 + Math.floor((Number.isFinite(nanos) ? nanos : 0) / 1_000_000);
+            }
+        }
+    } catch {
+        return 0;
+    }
+    return 0;
+}
+
+function pickStringFrom(value: any): string {
+    if (typeof value === 'string') return value.trim();
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const found = pickStringFrom(item);
+            if (found) return found;
+        }
+    }
+    if (value && typeof value === 'object') {
+        const candidates = [
+            value.url,
+            value.uri,
+            value.src,
+            value.imageUrl,
+            value.videoUrl,
+            value.mediaUrl,
+            value.thumbnailUrl,
+            value.thumbnail,
+        ];
+        for (const c of candidates) {
+            const found = pickStringFrom(c);
+            if (found) return found;
+        }
+    }
+    return '';
+}
+
+async function listAdminUserPostsFromFirestore(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
+    const firestore = getAdminFirestore();
+    if (!firestore) {
         return {
             items: [],
             total: 0,
             limit: input.limit,
             offset: input.offset,
             degraded: true,
-            detail: 'No supported posts table found (searched accessible non-system SQL schemas for post-like tables with user and id columns).',
+            detail: 'No supported SQL posts table found and Firestore admin is not configured.',
         };
+    }
+
+    const q = asString(input.q || '').toLowerCase();
+    const snap = await firestore.collection('posts').where('userId', '==', input.userId).get();
+    const docs = snap.docs.map((docSnap) => {
+        const data = (docSnap.data() || {}) as Record<string, any>;
+        const content = asString(data.content || data.text || data.caption || data.description || data.title);
+        const postType = asString(data.postType || data.type || data.kind) || 'post';
+        const mediaUrl = asString(data.mediaUrl || data.imageUrl || data.image || pickStringFrom(data.media));
+        const videoUrl = asString(data.videoUrl || data.streamUrl || data.playbackUrl);
+        const thumbnailUrl = asString(data.thumbnailUrl || data.thumbUrl || data.previewUrl || data.coverUrl || data.imageUrl);
+        const createdAtRaw = data.date || data.createdAt || data.created_at || data.timestamp;
+        const updatedAtRaw = data.updatedAt || data.updated_at || createdAtRaw;
+
+        return {
+            postId: asString(data.postId || data.id) || docSnap.id,
+            userId: asString(data.userId) || input.userId,
+            content,
+            createdAt: toIso(createdAtRaw),
+            updatedAt: toIso(updatedAtRaw),
+            _createdMs: toMillisFromUnknown(createdAtRaw),
+            postType,
+            mediaUrl: mediaUrl || null,
+            videoUrl: videoUrl || null,
+            thumbnailUrl: thumbnailUrl || null,
+        };
+    });
+
+    const filtered = docs
+        .filter((d) => !q || d.content.toLowerCase().includes(q) || d.postId.toLowerCase().includes(q))
+        .sort((a, b) => b._createdMs - a._createdMs);
+
+    const total = filtered.length;
+    const paged = filtered.slice(input.offset, input.offset + input.limit);
+
+    const moderationByPostId = new Map<string, { isRemoved: boolean; removedReason: string | null; removedAt: string | null }>();
+    const postIds = paged.map((p) => p.postId).filter(Boolean);
+    if (postIds.length > 0) {
+        try {
+            const rows = await adminDb()('post_admin_state')
+                .select('post_id', 'is_removed', 'removed_reason', 'removed_at')
+                .whereIn('post_id', postIds as string[]);
+            for (const row of rows as Array<any>) {
+                moderationByPostId.set(String(row.post_id), {
+                    isRemoved: asBool(row.is_removed),
+                    removedReason: asString(row.removed_reason) || null,
+                    removedAt: toIso(row.removed_at),
+                });
+            }
+        } catch {
+            // If moderation table read fails, keep posts visible with default moderation state.
+        }
+    }
+
+    const items: PostListItem[] = paged.map((p) => {
+        const m = moderationByPostId.get(p.postId);
+        return {
+            postId: p.postId,
+            userId: p.userId,
+            content: p.content,
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt,
+            postType: p.postType,
+            mediaUrl: p.mediaUrl,
+            videoUrl: p.videoUrl,
+            thumbnailUrl: p.thumbnailUrl,
+            isRemoved: m?.isRemoved === true,
+            removedReason: m?.removedReason || null,
+            removedAt: m?.removedAt || null,
+        };
+    });
+
+    return {
+        items,
+        total,
+        limit: input.limit,
+        offset: input.offset,
+        sourceTable: 'firestore.posts',
+    };
+}
+
+export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
+    const db = adminDb();
+    const source = await resolvePostSource(db);
+    if (!source) {
+        return listAdminUserPostsFromFirestore(input);
     }
 
     const q = asString(input.q || '');
