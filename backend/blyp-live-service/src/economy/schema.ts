@@ -216,6 +216,19 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
+        `CREATE TABLE IF NOT EXISTS admin_user_messages (
+          message_id text PRIMARY KEY,
+          actor_user_id text NOT NULL,
+          target_user_id text NOT NULL,
+          subject text,
+          body text NOT NULL,
+          channel text NOT NULL DEFAULT 'in_app',
+          status text NOT NULL DEFAULT 'queued',
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_stream_id ON gift_events (stream_id)`,
@@ -232,6 +245,8 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_admin_audit_target_created ON admin_audit_log (target_type, target_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_status ON user_subscriptions (user_id, status)`,
         `CREATE INDEX IF NOT EXISTS idx_post_admin_state_removed ON post_admin_state (is_removed, updated_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_target_created ON admin_user_messages (target_user_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_status ON admin_user_messages (status, created_at DESC)`,
       ];
 
       for (const stmt of ddl) {

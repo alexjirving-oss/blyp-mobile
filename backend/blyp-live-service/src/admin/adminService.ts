@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import { getEconomyInfra } from '../economy/infra';
 import { checkDb, checkRedis } from '../economy/infra';
+import crypto from 'crypto';
 
 export type AdminUserRow = {
     userId: string;
@@ -8,6 +9,53 @@ export type AdminUserRow = {
     isBanned: boolean;
     banReason: string | null;
     bannedUntil: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+};
+
+export type AdminUserDetail = {
+    userId: string;
+    role: string;
+    isBanned: boolean;
+    banReason: string | null;
+    bannedUntil: string | null;
+    verification: {
+        isVerified: boolean;
+        note: string | null;
+        verifiedAt: string | null;
+        verifiedBy: string | null;
+    };
+    restrictions: {
+        messagingRestricted: boolean;
+        liveRestricted: boolean;
+        accountRestricted: boolean;
+        reason: string | null;
+        expiresAt: string | null;
+        updatedAt: string | null;
+        updatedBy: string | null;
+    };
+    stats: {
+        ledgerEntries: number;
+        giftsSent: number;
+        giftsReceived: number;
+        subscriptions: number;
+        queuedAdminMessages: number;
+    };
+    recentActions: Array<{
+        action: string;
+        targetType: string;
+        targetId: string;
+        metadata: Record<string, unknown>;
+        createdAt: string;
+    }>;
+    recentMessages: Array<{
+        messageId: string;
+        subject: string | null;
+        body: string;
+        channel: string;
+        status: string;
+        createdAt: string;
+    }>;
     createdAt: string | null;
     updatedAt: string | null;
 };
@@ -62,6 +110,27 @@ function sqlIdent(name: string): string {
         throw new Error(`Unsafe SQL identifier: ${name}`);
     }
     return `"${name}"`;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return value as Record<string, unknown>;
+}
+
+function asBool(value: unknown, fallback = false): boolean {
+    return typeof value === 'boolean' ? value : fallback;
+}
+
+function asStr(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const t = value.trim();
+    return t ? t : null;
+}
+
+function asIso(value: unknown): string | null {
+    if (!value) return null;
+    const d = new Date(String(value));
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 async function tableExists(db: Knex, table: string): Promise<boolean> {
@@ -470,6 +539,69 @@ async function ensurePostAdminStateTable(db: Knex): Promise<void> {
     );
 }
 
+async function ensureAdminUserMessagesTable(db: Knex): Promise<void> {
+    await db.raw(
+        `
+        CREATE TABLE IF NOT EXISTS admin_user_messages (
+          message_id text PRIMARY KEY,
+          actor_user_id text NOT NULL,
+          target_user_id text NOT NULL,
+          subject text,
+          body text NOT NULL,
+          channel text NOT NULL DEFAULT 'in_app',
+          status text NOT NULL DEFAULT 'queued',
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        `
+    );
+    await db.raw(
+        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_target_created ON admin_user_messages (target_user_id, created_at DESC)`
+    );
+    await db.raw(
+        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_status ON admin_user_messages (status, created_at DESC)`
+    );
+}
+
+async function getUserAdminState(db: Knex, userId: string): Promise<any | null> {
+    const rs = await db.raw(
+        `
+        SELECT user_id, role, is_banned, ban_reason, banned_until, metadata, created_at, updated_at
+        FROM user_admin_state
+        WHERE user_id = ?
+        LIMIT 1
+        `,
+        [userId]
+    );
+    return (rs as any)?.rows?.[0] || null;
+}
+
+async function upsertUserAdminState(db: Knex, input: {
+    userId: string;
+    role: string;
+    isBanned: boolean;
+    banReason: string | null;
+    bannedUntil: string | null;
+    metadata: Record<string, unknown>;
+}): Promise<void> {
+    await db.raw(
+        `
+        INSERT INTO user_admin_state (user_id, role, is_banned, ban_reason, banned_until, metadata)
+        VALUES (?, ?, ?, ?, ?, ?::jsonb)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+          role = EXCLUDED.role,
+          is_banned = EXCLUDED.is_banned,
+          ban_reason = EXCLUDED.ban_reason,
+          banned_until = EXCLUDED.banned_until,
+          metadata = EXCLUDED.metadata,
+          updated_at = CURRENT_TIMESTAMP
+        `,
+        [input.userId, input.role, input.isBanned, input.banReason, input.bannedUntil, JSON.stringify(input.metadata || {})]
+    );
+}
+
 export async function listAdminUserPosts(input: {
     userId: string;
     q?: string;
@@ -646,6 +778,205 @@ export async function restorePostByAdmin(input: {
             reason: input.reason,
         },
     });
+}
+
+export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
+    const db = adminDb();
+    await ensureAdminUserMessagesTable(db);
+
+    const state = await getUserAdminState(db, userId);
+    const metadata = asObject(state?.metadata);
+    const verification = asObject(metadata.verification);
+    const restrictions = asObject(metadata.restrictions);
+
+    const [ledgerRows, giftsSentRows, giftsReceivedRows, subsRows, msgRows, actionsRs, messagesRs] = await Promise.all([
+        db.raw(`SELECT COUNT(*)::bigint AS n FROM ledger_entries WHERE user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
+        db.raw(`SELECT COUNT(*)::bigint AS n FROM gift_events WHERE sender_user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
+        db.raw(`SELECT COUNT(*)::bigint AS n FROM gift_events WHERE receiver_user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
+        db.raw(`SELECT COUNT(*)::bigint AS n FROM user_subscriptions WHERE user_id = ?`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
+        db.raw(`SELECT COUNT(*)::bigint AS n FROM admin_user_messages WHERE target_user_id = ? AND status = 'queued'`, [userId]).catch(() => ({ rows: [{ n: 0 }] })),
+        db.raw(
+            `
+            SELECT action, target_type, target_id, metadata, created_at
+            FROM admin_audit_log
+            WHERE target_id = ?
+               OR (target_type = 'user' AND target_id = ?)
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId, userId]
+        ).catch(() => ({ rows: [] })),
+        db.raw(
+            `
+            SELECT message_id, subject, body, channel, status, created_at
+            FROM admin_user_messages
+            WHERE target_user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId]
+        ).catch(() => ({ rows: [] })),
+    ]);
+
+    return {
+        userId,
+        role: String(state?.role || 'user'),
+        isBanned: Boolean(state?.is_banned),
+        banReason: state?.ban_reason ? String(state.ban_reason) : null,
+        bannedUntil: state?.banned_until ? new Date(state.banned_until).toISOString() : null,
+        verification: {
+            isVerified: asBool(verification.isVerified, false),
+            note: asStr(verification.note),
+            verifiedAt: asIso(verification.verifiedAt),
+            verifiedBy: asStr(verification.verifiedBy),
+        },
+        restrictions: {
+            messagingRestricted: asBool(restrictions.messagingRestricted, false),
+            liveRestricted: asBool(restrictions.liveRestricted, false),
+            accountRestricted: asBool(restrictions.accountRestricted, false),
+            reason: asStr(restrictions.reason),
+            expiresAt: asIso(restrictions.expiresAt),
+            updatedAt: asIso(restrictions.updatedAt),
+            updatedBy: asStr(restrictions.updatedBy),
+        },
+        stats: {
+            ledgerEntries: Number((ledgerRows as any)?.rows?.[0]?.n || 0),
+            giftsSent: Number((giftsSentRows as any)?.rows?.[0]?.n || 0),
+            giftsReceived: Number((giftsReceivedRows as any)?.rows?.[0]?.n || 0),
+            subscriptions: Number((subsRows as any)?.rows?.[0]?.n || 0),
+            queuedAdminMessages: Number((msgRows as any)?.rows?.[0]?.n || 0),
+        },
+        recentActions: (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
+            action: String(r.action || ''),
+            targetType: String(r.target_type || ''),
+            targetId: String(r.target_id || ''),
+            metadata: asObject(r.metadata),
+            createdAt: new Date(r.created_at).toISOString(),
+        })),
+        recentMessages: (((messagesRs as any)?.rows || []) as Array<any>).map((r) => ({
+            messageId: String(r.message_id),
+            subject: r.subject ? String(r.subject) : null,
+            body: String(r.body || ''),
+            channel: String(r.channel || 'in_app'),
+            status: String(r.status || 'queued'),
+            createdAt: new Date(r.created_at).toISOString(),
+        })),
+        createdAt: state?.created_at ? new Date(state.created_at).toISOString() : null,
+        updatedAt: state?.updated_at ? new Date(state.updated_at).toISOString() : null,
+    };
+}
+
+export async function updateAdminUserCapabilities(input: {
+    actorUserId: string;
+    userId: string;
+    verified?: boolean;
+    verificationNote?: string;
+    messagingRestricted?: boolean;
+    liveRestricted?: boolean;
+    accountRestricted?: boolean;
+    reason?: string;
+    expiresAt?: string;
+}): Promise<void> {
+    const db = adminDb();
+    const state = await getUserAdminState(db, input.userId);
+    const metadata = asObject(state?.metadata);
+
+    const verification = {
+        ...asObject(metadata.verification),
+    } as Record<string, unknown>;
+    const restrictions = {
+        ...asObject(metadata.restrictions),
+    } as Record<string, unknown>;
+
+    if (input.verified !== undefined) {
+        verification.isVerified = input.verified;
+        verification.verifiedAt = new Date().toISOString();
+        verification.verifiedBy = input.actorUserId;
+    }
+    if (input.verificationNote !== undefined) {
+        verification.note = input.verificationNote || null;
+    }
+    if (input.messagingRestricted !== undefined) restrictions.messagingRestricted = input.messagingRestricted;
+    if (input.liveRestricted !== undefined) restrictions.liveRestricted = input.liveRestricted;
+    if (input.accountRestricted !== undefined) restrictions.accountRestricted = input.accountRestricted;
+    if (input.reason !== undefined) restrictions.reason = input.reason || null;
+    if (input.expiresAt !== undefined) restrictions.expiresAt = input.expiresAt || null;
+    restrictions.updatedAt = new Date().toISOString();
+    restrictions.updatedBy = input.actorUserId;
+
+    const mergedMetadata: Record<string, unknown> = {
+        ...metadata,
+        verification,
+        restrictions,
+    };
+
+    await upsertUserAdminState(db, {
+        userId: input.userId,
+        role: String(state?.role || 'user'),
+        isBanned: Boolean(state?.is_banned || false),
+        banReason: state?.ban_reason ? String(state.ban_reason) : null,
+        bannedUntil: state?.banned_until ? new Date(state.banned_until).toISOString() : null,
+        metadata: mergedMetadata,
+    });
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: 'user_capabilities_update',
+        targetType: 'user',
+        targetId: input.userId,
+        metadata: {
+            verified: input.verified,
+            verificationNote: input.verificationNote,
+            messagingRestricted: input.messagingRestricted,
+            liveRestricted: input.liveRestricted,
+            accountRestricted: input.accountRestricted,
+            reason: input.reason,
+            expiresAt: input.expiresAt,
+        },
+    });
+}
+
+export async function sendAdminDirectMessage(input: {
+    actorUserId: string;
+    userId: string;
+    subject?: string;
+    message: string;
+    channel: 'in_app' | 'email';
+}): Promise<{ messageId: string }> {
+    const db = adminDb();
+    await ensureAdminUserMessagesTable(db);
+
+    const messageId = `admmsg_${crypto.randomBytes(8).toString('hex')}`;
+    await db.raw(
+        `
+        INSERT INTO admin_user_messages (message_id, actor_user_id, target_user_id, subject, body, channel, status, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?::jsonb)
+        `,
+        [
+            messageId,
+            input.actorUserId,
+            input.userId,
+            input.subject || null,
+            input.message,
+            input.channel,
+            JSON.stringify({ source: 'admin-dashboard' }),
+        ]
+    );
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: 'user_direct_message',
+        targetType: 'user',
+        targetId: input.userId,
+        metadata: {
+            messageId,
+            subject: input.subject || null,
+            channel: input.channel,
+            bodyPreview: input.message.slice(0, 180),
+        },
+    });
+
+    return { messageId };
 }
 
 export async function getAdminMetricsOverview(): Promise<Record<string, unknown>> {

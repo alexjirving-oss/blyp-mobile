@@ -3,15 +3,26 @@ import crypto from 'crypto';
 import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
-import { adminListUserPostsSchema, adminListUsersSchema, banUserSchema, moderatePostSchema, unbanUserSchema } from './adminSchemas';
+import {
+    adminDirectMessageSchema,
+    adminListUserPostsSchema,
+    adminListUsersSchema,
+    adminUpdateUserCapabilitiesSchema,
+    banUserSchema,
+    moderatePostSchema,
+    unbanUserSchema,
+} from './adminSchemas';
 import {
     banUserByAdmin,
+    getAdminUserDetail,
     getAdminMetricsOverview,
     getAdminUserSourceStats,
     listAdminUserPosts,
     listAdminUsers,
     removePostByAdmin,
     restorePostByAdmin,
+    sendAdminDirectMessage,
+    updateAdminUserCapabilities,
     unbanUserByAdmin,
 } from './adminService';
 
@@ -169,6 +180,81 @@ router.get('/admin/users/:userId/posts', requireAdmin, async (req: AuthedRequest
         return res.json(out);
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/posts failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/users/:userId', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!targetUserId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const out = await getAdminUserDetail(targetUserId);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId detail failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/users/:userId/capabilities', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!targetUserId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminUpdateUserCapabilitiesSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        await updateAdminUserCapabilities({
+            actorUserId,
+            userId: targetUserId,
+            verified: parsed.data.verified,
+            verificationNote: parsed.data.verificationNote,
+            messagingRestricted: parsed.data.messagingRestricted,
+            liveRestricted: parsed.data.liveRestricted,
+            accountRestricted: parsed.data.accountRestricted,
+            reason: parsed.data.reason,
+            expiresAt: parsed.data.expiresAt,
+        });
+
+        return res.json({ ok: true, userId: targetUserId });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/capabilities failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/users/:userId/message', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!targetUserId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminDirectMessageSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await sendAdminDirectMessage({
+            actorUserId,
+            userId: targetUserId,
+            subject: parsed.data.subject,
+            message: parsed.data.message,
+            channel: parsed.data.channel,
+        });
+
+        return res.json({ ok: true, userId: targetUserId, ...out });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/message failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });
