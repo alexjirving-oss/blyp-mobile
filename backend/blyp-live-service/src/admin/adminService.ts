@@ -371,6 +371,44 @@ function mergeUserRowWithDirectory(row: AdminUserRow | null, directoryUser: Dire
     };
 }
 
+const LINKED_DIRECTORY_STATUSES = new Set([
+    'CONFIRMED',
+    'EXTERNAL_PROVIDER',
+    'FORCE_CHANGE_PASSWORD',
+    'RESET_REQUIRED',
+]);
+
+function normalizeDirectoryStatus(value: unknown): string {
+    return asString(value).toUpperCase();
+}
+
+function isAppLinkedDirectoryUser(user: DirectoryUser): boolean {
+    if (!asString(user.userId)) {
+        return false;
+    }
+    if (user.enabled === false) {
+        return false;
+    }
+
+    const status = normalizeDirectoryStatus(user.userStatus);
+    if (!status) {
+        return true;
+    }
+
+    return LINKED_DIRECTORY_STATUSES.has(status);
+}
+
+function buildVisibleAdminUsers(sqlUsers: AdminUserRow[], directoryUsers: DirectoryUser[]): AdminUserRow[] {
+    const sqlUsersById = new Map<string, AdminUserRow>();
+    for (const row of sqlUsers) {
+        sqlUsersById.set(row.userId, row);
+    }
+
+    return directoryUsers
+        .filter(isAppLinkedDirectoryUser)
+        .map((directoryUser) => mergeUserRowWithDirectory(sqlUsersById.get(directoryUser.userId) || null, directoryUser));
+}
+
 function matchesAdminUserQuery(user: AdminUserRow, q: string): boolean {
     if (!q) return true;
     const lowered = q.toLowerCase();
@@ -487,15 +525,7 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
         listDirectoryUsers(),
     ]);
 
-    const byId = new Map<string, AdminUserRow>();
-    for (const row of sqlUsers) {
-        byId.set(row.userId, row);
-    }
-    for (const directoryUser of directoryUsers) {
-        byId.set(directoryUser.userId, mergeUserRowWithDirectory(byId.get(directoryUser.userId) || null, directoryUser));
-    }
-
-    const merged = Array.from(byId.values())
+    const merged = buildVisibleAdminUsers(sqlUsers, directoryUsers)
         .filter((user) => matchesAdminUserQuery(user, q))
         .sort((left, right) => {
             const leftCreated = left.createdAt ? Date.parse(left.createdAt) : 0;
@@ -1395,13 +1425,9 @@ export async function getEffectiveUserControls(userId: string): Promise<{
 export async function getAdminMetricsOverview(): Promise<Record<string, unknown>> {
     const infra = getEconomyInfra();
     const db = infra.db;
-    const userIdsCte = await buildUserIdsCte(db);
 
     const sql = `
-        ${userIdsCte}
     SELECT
-            (SELECT COUNT(*)::bigint FROM ids WHERE user_id IS NOT NULL AND user_id <> '') AS total_users,
-      (SELECT COUNT(*)::bigint FROM user_admin_state WHERE is_banned = true) AS banned_users,
       (SELECT COALESCE(SUM(coin_balance + bonus_coin_balance), 0)::bigint FROM wallets) AS total_coin_supply,
       (SELECT COUNT(*)::bigint FROM gift_events WHERE created_at >= NOW() - INTERVAL '24 hours') AS gifts_24h,
       (SELECT COUNT(*)::bigint FROM ledger_entries WHERE created_at >= NOW() - INTERVAL '24 hours') AS ledger_entries_24h,
@@ -1409,12 +1435,17 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
   `;
 
     try {
-        const rs = await db.raw(sql);
+        const [rs, sqlUsers, directoryUsers] = await Promise.all([
+            db.raw(sql),
+            listSqlKnownUsers(),
+            listDirectoryUsers(),
+        ]);
         const row = ((rs as any)?.rows?.[0] || {}) as Record<string, unknown>;
+        const visibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
 
         return {
-            totalUsers: Number(row.total_users || 0),
-            bannedUsers: Number(row.banned_users || 0),
+            totalUsers: visibleUsers.length,
+            bannedUsers: visibleUsers.filter((user) => user.isBanned).length,
             totalCoinSupply: Number(row.total_coin_supply || 0),
             gifts24h: Number(row.gifts_24h || 0),
             ledgerEntries24h: Number(row.ledger_entries_24h || 0),
