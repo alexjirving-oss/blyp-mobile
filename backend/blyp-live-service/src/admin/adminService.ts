@@ -502,6 +502,60 @@ async function listRelinkedUsersFromFirestorePosts(): Promise<Map<string, Firest
         }
     }
 
+    // Secondary pass: pull matching identities directly from Firestore users docs.
+    scanned = 0;
+    lastDoc = null;
+    while (scanned < MAX_DOCS_TO_SCAN) {
+        let query = firestore.collection('users').limit(BATCH_SIZE);
+        if (lastDoc) {
+            query = query.startAfter(lastDoc);
+        }
+
+        const snap = await query.get();
+        if (snap.empty) {
+            break;
+        }
+
+        for (const doc of snap.docs) {
+            scanned += 1;
+            const data = (doc.data() || {}) as Record<string, any>;
+            const userId = asString(data.userId || data.uid || data.id || doc.id);
+            if (!userId) {
+                if (scanned >= MAX_DOCS_TO_SCAN) break;
+                continue;
+            }
+
+            const username = asString(data.username || data.handle || data.userName || data.user_name);
+            const displayName = asString(data.displayName || data.name || data.userName || data.username || data.handle);
+            const email = asString(data.email);
+
+            const identityTokens = tokensFromIdentityParts([
+                username,
+                displayName,
+                email,
+                doc.id,
+            ]);
+
+            if (identityTokens.some((token) => ADMIN_RELINK_TARGET_HANDLES.has(token))) {
+                if (!relinked.has(userId)) {
+                    relinked.set(userId, {
+                        userId,
+                        username,
+                        displayName,
+                        email,
+                    });
+                }
+            }
+
+            if (scanned >= MAX_DOCS_TO_SCAN) break;
+        }
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+        if (!lastDoc || snap.size < BATCH_SIZE) {
+            break;
+        }
+    }
+
     return relinked;
 }
 
