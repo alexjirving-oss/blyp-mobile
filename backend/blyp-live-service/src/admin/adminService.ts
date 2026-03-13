@@ -176,6 +176,23 @@ type AdminFirestoreUserProfile = {
     updatedAt: string | null;
 };
 
+function pickIdentityFromPostDoc(postData: any, userId: string): { username: string | null; displayName: string | null; photoURL: string | null } {
+    const username = toTrimmedString(postData?.username || postData?.handle || postData?.userName);
+    const displayName = toTrimmedString(postData?.displayName || postData?.userName || postData?.userName || postData?.name);
+    const photoURL = toTrimmedString(
+        postData?.userPhotoURL || postData?.photoURL || postData?.photoUrl || postData?.avatarUrl || postData?.profileImageUrl || postData?.imageUrl
+    );
+
+    const safeUsername = username && !isPlaceholderName(username) && username !== userId ? username : null;
+    const safeDisplayName = displayName && !isPlaceholderName(displayName) && displayName !== userId ? displayName : null;
+
+    return {
+        username: safeUsername,
+        displayName: safeUsername || safeDisplayName,
+        photoURL,
+    };
+}
+
 function firestoreTimestampToIso(value: any): string | null {
     if (!value) return null;
     try {
@@ -217,6 +234,27 @@ async function getFirestoreUserProfile(userId: string, directoryUser: DirectoryU
         } catch (error: any) {
             logger.warn({ err: error?.message || String(error), userId, docId }, '[admin] getAdminUserDetail: firestore user profile lookup failed');
         }
+    }
+
+    // Fallback: some older accounts carry display identity fields on post documents.
+    try {
+        const postSnap = await firestore.collection('posts').where('userId', '==', userId).limit(1).get();
+        if (!postSnap.empty) {
+            const postData = postSnap.docs[0]?.data() || {};
+            const picked = pickIdentityFromPostDoc(postData, userId);
+            if (picked.displayName || picked.username || picked.photoURL) {
+                return {
+                    username: picked.username,
+                    displayName: picked.displayName,
+                    email: null,
+                    photoURL: picked.photoURL,
+                    createdAt: null,
+                    updatedAt: null,
+                };
+            }
+        }
+    } catch (error: any) {
+        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: firestore posts fallback lookup failed');
     }
 
     return null;
