@@ -45,6 +45,8 @@ type AdminUserDetail = {
     email?: string;
     phoneNumber?: string;
     displayName?: string;
+    photoURL?: string;
+    avatarUrl?: string;
     dateOfBirth?: string;
     address?: string;
     city?: string;
@@ -134,6 +136,90 @@ function asBool(value: unknown): boolean {
 function asString(value: unknown): string {
     if (typeof value !== 'string') return '';
     return value.trim();
+}
+
+function toTrimmedString(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed || null;
+}
+
+const PLACEHOLDER_NAMES = new Set(['anonymous', 'anonymous user', 'anon']);
+
+function isPlaceholderName(value: unknown): boolean {
+    const trimmed = toTrimmedString(value);
+    if (!trimmed) return true;
+    return PLACEHOLDER_NAMES.has(trimmed.replace(/^@+/, '').toLowerCase());
+}
+
+function pickBestProfileNameFromUserDoc(userDocData: any, userId: string): { username: string | null; displayName: string } {
+    const username = toTrimmedString(userDocData?.username || userDocData?.handle || userDocData?.userName);
+    const displayName = toTrimmedString(userDocData?.displayName || userDocData?.userName || userDocData?.name);
+
+    if (username && !isPlaceholderName(username) && username !== userId) {
+        return { username, displayName: username };
+    }
+
+    if (displayName && !isPlaceholderName(displayName) && displayName !== userId) {
+        return { username: null, displayName };
+    }
+
+    return { username: null, displayName: userId };
+}
+
+type AdminFirestoreUserProfile = {
+    username: string | null;
+    displayName: string | null;
+    email: string | null;
+    photoURL: string | null;
+    createdAt: string | null;
+    updatedAt: string | null;
+};
+
+function firestoreTimestampToIso(value: any): string | null {
+    if (!value) return null;
+    try {
+        if (typeof value?.toDate === 'function') {
+            return value.toDate().toISOString();
+        }
+        return toIso(value);
+    } catch {
+        return null;
+    }
+}
+
+async function getFirestoreUserProfile(userId: string, directoryUser: DirectoryUser | null): Promise<AdminFirestoreUserProfile | null> {
+    const firestore = getAdminFirestore();
+    if (!firestore) return null;
+
+    const candidateDocIds = Array.from(new Set([
+        userId,
+        directoryUser?.username || '',
+        directoryUser?.email || '',
+    ].map((value) => String(value || '').trim()).filter(Boolean)));
+
+    for (const docId of candidateDocIds) {
+        try {
+            const snap = await firestore.collection('users').doc(docId).get();
+            if (!snap.exists) continue;
+            const userData = snap.data() || {};
+            const picked = pickBestProfileNameFromUserDoc(userData, userId);
+            return {
+                username: picked.username,
+                displayName: picked.displayName,
+                email: toTrimmedString(userData.email),
+                photoURL: toTrimmedString(
+                    userData.photoURL || userData.photoUrl || userData.avatarUrl || userData.profileImageUrl || userData.imageUrl
+                ),
+                createdAt: firestoreTimestampToIso(userData.createdAt),
+                updatedAt: firestoreTimestampToIso(userData.updatedAt),
+            };
+        } catch (error: any) {
+            logger.warn({ err: error?.message || String(error), userId, docId }, '[admin] getAdminUserDetail: firestore user profile lookup failed');
+        }
+    }
+
+    return null;
 }
 
 function buildVerification(metadata: Record<string, any>): AdminVerification {
@@ -1045,6 +1131,13 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: directory lookup failed');
     }
 
+    let firestoreProfile: AdminFirestoreUserProfile | null = null;
+    try {
+        firestoreProfile = await getFirestoreUserProfile(userId, directoryUser);
+    } catch (error: any) {
+        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: firestore user profile fetch failed');
+    }
+
     let actionsRs: any = { rows: [] };
     let messagesRs: any = { rows: [] };
 
@@ -1082,9 +1175,10 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user messages query failed');
     }
 
-    const inferredEmail = directoryUser?.email || (userId.includes('@') ? userId : '');
-    const inferredUsername = directoryUser?.username || (inferredEmail ? inferredEmail.split('@')[0] : '');
-    const inferredDisplayName = directoryUser?.displayName || inferredUsername || inferredEmail || userId;
+    const inferredEmail = firestoreProfile?.email || directoryUser?.email || (userId.includes('@') ? userId : '');
+    const inferredUsername = firestoreProfile?.username || directoryUser?.username || (inferredEmail ? inferredEmail.split('@')[0] : '');
+    const inferredDisplayName = firestoreProfile?.displayName || directoryUser?.displayName || inferredUsername || inferredEmail || userId;
+    const inferredPhotoURL = firestoreProfile?.photoURL || null;
 
     const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
         action: asString(r.action),
@@ -1109,6 +1203,8 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         email: inferredEmail,
         phoneNumber: directoryUser?.phoneNumber || '',
         displayName: inferredDisplayName,
+        photoURL: inferredPhotoURL || undefined,
+        avatarUrl: inferredPhotoURL || undefined,
         dateOfBirth: directoryUser?.dateOfBirth || '',
         address: directoryUser?.address || '',
         city: directoryUser?.city || '',
@@ -1123,8 +1219,8 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         bannedUntil: toIso(state?.banned_until),
         verification: buildVerification(metadata),
         restrictions: buildRestrictions(metadata),
-        createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
-        updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
+        createdAt: toIso(state?.created_at) || firestoreProfile?.createdAt || directoryUser?.createdAt || null,
+        updatedAt: toIso(state?.updated_at) || firestoreProfile?.updatedAt || directoryUser?.updatedAt || null,
         recentActions,
         recentMessages,
     };
