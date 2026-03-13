@@ -378,159 +378,6 @@ const LINKED_DIRECTORY_STATUSES = new Set([
     'RESET_REQUIRED',
 ]);
 
-type FirestoreRelinkIdentity = {
-    userId: string;
-    username: string;
-    displayName: string;
-    email: string;
-};
-
-function createSyntheticRelinkUser(identity: FirestoreRelinkIdentity): AdminUserRow {
-    return {
-        userId: identity.userId,
-        username: identity.username,
-        email: identity.email,
-        phoneNumber: '',
-        displayName: identity.displayName || identity.username || identity.userId,
-        userStatus: 'SOURCE_LINKED',
-        enabled: true,
-        role: 'user',
-        isBanned: false,
-        banReason: null,
-        bannedUntil: null,
-        createdAt: null,
-        updatedAt: null,
-    };
-}
-
-async function listRelinkedUsersFromFirestorePosts(): Promise<Map<string, FirestoreRelinkIdentity>> {
-    const relinked = new Map<string, FirestoreRelinkIdentity>();
-
-    const firestore = getAdminFirestore();
-    if (!firestore) {
-        return relinked;
-    }
-
-    const MAX_DOCS_TO_SCAN = 4000;
-    const BATCH_SIZE = 500;
-    let scanned = 0;
-    let lastDoc: any = null;
-
-    while (scanned < MAX_DOCS_TO_SCAN) {
-        let query = firestore.collection('posts').limit(BATCH_SIZE);
-        if (lastDoc) {
-            query = query.startAfter(lastDoc);
-        }
-
-        const snap = await query.get();
-        if (snap.empty) {
-            break;
-        }
-
-        for (const doc of snap.docs) {
-            scanned += 1;
-            const data = (doc.data() || {}) as Record<string, any>;
-            const userId = asString(data.userId || data.uid || data.authorId || data.ownerId || data.creatorUserId);
-            if (!userId) {
-                if (scanned >= MAX_DOCS_TO_SCAN) break;
-                continue;
-            }
-
-            const username = asString(data.username || data.handle || data.userName || data.user_name);
-            const displayName = asString(data.displayName || data.name || data.userName || data.username || data.handle);
-            const email = asString(data.email);
-
-            if (!relinked.has(userId)) {
-                relinked.set(userId, {
-                    userId,
-                    username,
-                    displayName,
-                    email,
-                });
-            }
-
-            if (scanned >= MAX_DOCS_TO_SCAN) break;
-        }
-
-        lastDoc = snap.docs[snap.docs.length - 1];
-        if (!lastDoc || snap.size < BATCH_SIZE) {
-            break;
-        }
-    }
-
-    // Secondary pass: pull matching identities directly from Firestore users docs.
-    scanned = 0;
-    lastDoc = null;
-    while (scanned < MAX_DOCS_TO_SCAN) {
-        let query = firestore.collection('users').limit(BATCH_SIZE);
-        if (lastDoc) {
-            query = query.startAfter(lastDoc);
-        }
-
-        const snap = await query.get();
-        if (snap.empty) {
-            break;
-        }
-
-        for (const doc of snap.docs) {
-            scanned += 1;
-            const data = (doc.data() || {}) as Record<string, any>;
-            const userId = asString(data.userId || data.uid || data.id || doc.id);
-            if (!userId) {
-                if (scanned >= MAX_DOCS_TO_SCAN) break;
-                continue;
-            }
-
-            const username = asString(data.username || data.handle || data.userName || data.user_name);
-            const displayName = asString(data.displayName || data.name || data.userName || data.username || data.handle);
-            const email = asString(data.email);
-
-            if (!relinked.has(userId)) {
-                relinked.set(userId, {
-                    userId,
-                    username,
-                    displayName,
-                    email,
-                });
-            }
-
-            if (scanned >= MAX_DOCS_TO_SCAN) break;
-        }
-
-        lastDoc = snap.docs[snap.docs.length - 1];
-        if (!lastDoc || snap.size < BATCH_SIZE) {
-            break;
-        }
-    }
-
-    return relinked;
-}
-
-async function scopeAdminUsersForRelink(users: AdminUserRow[]): Promise<AdminUserRow[]> {
-    const usersById = new Map<string, AdminUserRow>();
-    for (const user of users) {
-        usersById.set(user.userId, user);
-    }
-
-    const relinkedById = await listRelinkedUsersFromFirestorePosts();
-    const scopedById = new Map<string, AdminUserRow>();
-
-    for (const user of users) {
-        scopedById.set(user.userId, user);
-    }
-
-    for (const [userId, identity] of relinkedById.entries()) {
-        const existing = usersById.get(userId);
-        scopedById.set(userId, existing || createSyntheticRelinkUser(identity));
-    }
-
-    if (scopedById.size > 0) {
-        return Array.from(scopedById.values());
-    }
-
-    return users;
-}
-
 function normalizeDirectoryStatus(value: unknown): string {
     return asString(value).toUpperCase();
 }
@@ -679,7 +526,7 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
     ]);
 
     const baseVisibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
-    const merged = (await scopeAdminUsersForRelink(baseVisibleUsers))
+    const merged = baseVisibleUsers
         .filter((user) => matchesAdminUserQuery(user, q))
         .sort((left, right) => {
             const leftCreated = left.createdAt ? Date.parse(left.createdAt) : 0;
@@ -1123,7 +970,13 @@ async function listAdminUserPostsFromFirestore(input: { userId: string; q?: stri
     }
 
     const q = asString(input.q || '').toLowerCase();
-    const snap = await firestore.collection('posts').where('userId', '==', input.userId).get();
+    // Keep Firestore reads bounded for admin paging to avoid loading an entire user history on each request.
+    const boundedFetchSize = Math.max(input.limit + input.offset, input.limit, 25);
+    const snap = await firestore
+        .collection('posts')
+        .where('userId', '==', input.userId)
+        .limit(boundedFetchSize)
+        .get();
     const docs = snap.docs.map((docSnap) => {
         const data = (docSnap.data() || {}) as Record<string, any>;
         const content = asString(data.content || data.text || data.caption || data.description || data.title);
@@ -1152,7 +1005,17 @@ async function listAdminUserPostsFromFirestore(input: { userId: string; q?: stri
         .filter((d) => !q || d.content.toLowerCase().includes(q) || d.postId.toLowerCase().includes(q))
         .sort((a, b) => b._createdMs - a._createdMs);
 
-    const total = filtered.length;
+    let total = filtered.length;
+    try {
+        const aggregate = await firestore.collection('posts').where('userId', '==', input.userId).count().get();
+        const aggregateCount = Number(aggregate.data()?.count || 0);
+        if (Number.isFinite(aggregateCount) && aggregateCount >= 0) {
+            total = aggregateCount;
+        }
+    } catch {
+        // If aggregate count isn't available, fall back to bounded fetch count.
+    }
+
     const paged = filtered.slice(input.offset, input.offset + input.limit);
 
     const moderationByPostId = new Map<string, { isRemoved: boolean; removedReason: string | null; removedAt: string | null }>();
@@ -1595,7 +1458,7 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
             listDirectoryUsers(),
         ]);
         const row = ((rs as any)?.rows?.[0] || {}) as Record<string, unknown>;
-        const visibleUsers = await scopeAdminUsersForRelink(buildVisibleAdminUsers(sqlUsers, directoryUsers));
+        const visibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
 
         return {
             totalUsers: visibleUsers.length,

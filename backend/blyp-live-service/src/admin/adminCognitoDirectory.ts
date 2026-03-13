@@ -28,6 +28,11 @@ export type DirectoryUser = {
 
 let cachedClient: CognitoIdentityProviderClient | null = null;
 let cachedRegion = '';
+let cachedDirectoryUsers: DirectoryUser[] | null = null;
+let cachedDirectoryUsersAt = 0;
+let inFlightDirectoryUsers: Promise<DirectoryUser[]> | null = null;
+
+const DIRECTORY_USERS_CACHE_TTL_MS = 60_000;
 
 function poolRegionFromId(userPoolId: string): string {
     const value = String(userPoolId || '').trim();
@@ -128,16 +133,29 @@ function mapUser(user: UserType): DirectoryUser {
 }
 
 export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
+    const now = Date.now();
+    if (cachedDirectoryUsers && now - cachedDirectoryUsersAt < DIRECTORY_USERS_CACHE_TTL_MS) {
+        return cachedDirectoryUsers;
+    }
+    if (inFlightDirectoryUsers) {
+        return inFlightDirectoryUsers;
+    }
+
+    inFlightDirectoryUsers = (async () => {
     const userPoolId = getPoolId();
     if (!userPoolId) {
         logger.warn('[admin] Cognito directory disabled: COGNITO_USER_POOL_ID is missing');
-        return [];
+            cachedDirectoryUsers = [];
+            cachedDirectoryUsersAt = Date.now();
+            return [];
     }
 
     const client = getClient();
     if (!client) {
         logger.warn('[admin] Cognito directory disabled: no usable region was resolved');
-        return [];
+            cachedDirectoryUsers = [];
+            cachedDirectoryUsersAt = Date.now();
+            return [];
     }
 
     const regions = getRegionCandidates(userPoolId);
@@ -171,6 +189,8 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
             if (region !== String(ENV.COGNITO_REGION || '').trim()) {
                 logger.info({ region }, '[admin] Cognito directory region fallback applied');
             }
+            cachedDirectoryUsers = items;
+            cachedDirectoryUsersAt = Date.now();
             return items;
         } catch (error: any) {
             lastError = error;
@@ -186,7 +206,16 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
         code: String((lastError as any)?.name || ''),
         message: String((lastError as any)?.message || lastError),
     }, '[admin] Cognito directory unavailable; falling back to SQL-derived users only');
-    return [];
+        cachedDirectoryUsers = [];
+        cachedDirectoryUsersAt = Date.now();
+        return [];
+    })();
+
+    try {
+        return await inFlightDirectoryUsers;
+    } finally {
+        inFlightDirectoryUsers = null;
+    }
 }
 
 export async function findDirectoryUser(inputUserId: string): Promise<DirectoryUser | null> {
