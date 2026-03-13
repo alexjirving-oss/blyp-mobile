@@ -378,42 +378,6 @@ const LINKED_DIRECTORY_STATUSES = new Set([
     'RESET_REQUIRED',
 ]);
 
-const ADMIN_RELINK_ANCHOR_USER_ID = '66a21254-00f1-70b8-a0f6-1d04eb79487b';
-const ADMIN_RELINK_TARGET_HANDLES = new Set([
-    'AI',
-    'WILLIAM',
-    'ALAX',
-    'BLYP',
-    'ALEX',
-]);
-
-function normalizeHandleToken(value: unknown): string {
-    return asString(value)
-        .replace(/^@+/, '')
-        .trim()
-        .toUpperCase();
-}
-
-function tokensFromIdentityParts(parts: unknown[]): string[] {
-    const tokens = new Set<string>();
-    for (const part of parts) {
-        const raw = asString(part);
-        if (!raw) continue;
-
-        const normalized = normalizeHandleToken(raw);
-        if (normalized) {
-            tokens.add(normalized);
-        }
-
-        const emailLocalPart = raw.includes('@') ? raw.split('@')[0] : '';
-        const normalizedEmailLocal = normalizeHandleToken(emailLocalPart);
-        if (normalizedEmailLocal) {
-            tokens.add(normalizedEmailLocal);
-        }
-    }
-    return Array.from(tokens);
-}
-
 type FirestoreRelinkIdentity = {
     userId: string;
     username: string;
@@ -476,21 +440,13 @@ async function listRelinkedUsersFromFirestorePosts(): Promise<Map<string, Firest
             const displayName = asString(data.displayName || data.name || data.userName || data.username || data.handle);
             const email = asString(data.email);
 
-            const identityTokens = tokensFromIdentityParts([
-                username,
-                displayName,
-                email,
-            ]);
-
-            if (identityTokens.some((token) => ADMIN_RELINK_TARGET_HANDLES.has(token))) {
-                if (!relinked.has(userId)) {
-                    relinked.set(userId, {
-                        userId,
-                        username,
-                        displayName,
-                        email,
-                    });
-                }
+            if (!relinked.has(userId)) {
+                relinked.set(userId, {
+                    userId,
+                    username,
+                    displayName,
+                    email,
+                });
             }
 
             if (scanned >= MAX_DOCS_TO_SCAN) break;
@@ -529,22 +485,13 @@ async function listRelinkedUsersFromFirestorePosts(): Promise<Map<string, Firest
             const displayName = asString(data.displayName || data.name || data.userName || data.username || data.handle);
             const email = asString(data.email);
 
-            const identityTokens = tokensFromIdentityParts([
-                username,
-                displayName,
-                email,
-                doc.id,
-            ]);
-
-            if (identityTokens.some((token) => ADMIN_RELINK_TARGET_HANDLES.has(token))) {
-                if (!relinked.has(userId)) {
-                    relinked.set(userId, {
-                        userId,
-                        username,
-                        displayName,
-                        email,
-                    });
-                }
+            if (!relinked.has(userId)) {
+                relinked.set(userId, {
+                    userId,
+                    username,
+                    displayName,
+                    email,
+                });
             }
 
             if (scanned >= MAX_DOCS_TO_SCAN) break;
@@ -568,9 +515,8 @@ async function scopeAdminUsersForRelink(users: AdminUserRow[]): Promise<AdminUse
     const relinkedById = await listRelinkedUsersFromFirestorePosts();
     const scopedById = new Map<string, AdminUserRow>();
 
-    const anchorUser = usersById.get(ADMIN_RELINK_ANCHOR_USER_ID);
-    if (anchorUser) {
-        scopedById.set(anchorUser.userId, anchorUser);
+    for (const user of users) {
+        scopedById.set(user.userId, user);
     }
 
     for (const [userId, identity] of relinkedById.entries()) {
@@ -580,10 +526,6 @@ async function scopeAdminUsersForRelink(users: AdminUserRow[]): Promise<AdminUse
 
     if (scopedById.size > 0) {
         return Array.from(scopedById.values());
-    }
-
-    if (anchorUser) {
-        return [anchorUser];
     }
 
     return users;
