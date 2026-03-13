@@ -1249,7 +1249,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
                 `
                 SELECT message_id, channel, status, subject, body, created_at
                 FROM admin_user_messages
-                WHERE user_id = ?
+                WHERE target_user_id = ?
                 ORDER BY created_at DESC
                 LIMIT 20
                 `,
@@ -1387,11 +1387,12 @@ export async function queueAdminUserMessage(input: {
 
     await db.raw(
         `
-        INSERT INTO admin_user_messages (message_id, user_id, channel, status, subject, body, metadata)
-        VALUES (?, ?, ?, 'queued', ?, ?, ?::jsonb)
+        INSERT INTO admin_user_messages (message_id, actor_user_id, target_user_id, channel, status, subject, body, metadata)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?::jsonb)
         `,
         [
             messageId,
+            input.actorUserId,
             input.targetUserId,
             channel,
             asString(input.subject || '') || null,
