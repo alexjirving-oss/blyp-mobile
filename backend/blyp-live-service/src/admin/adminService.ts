@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { getAdminFirestore } from '../config/firebaseAdmin';
+import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
 
 export type AdminUserRow = {
@@ -1030,32 +1031,60 @@ export async function restorePostByAdmin(input: { actorUserId: string; targetPos
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
     const db = adminDb();
-    const state = await getAdminStateRow(userId);
+    let state: any | null = null;
+    try {
+        state = await getAdminStateRow(userId);
+    } catch (error: any) {
+        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user_admin_state unavailable');
+    }
     const metadata = parseJson(state?.metadata);
-    const directoryUser = await findDirectoryUser(userId);
+    let directoryUser: DirectoryUser | null = null;
+    try {
+        directoryUser = await findDirectoryUser(userId);
+    } catch (error: any) {
+        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: directory lookup failed');
+    }
 
-    const [actionsRs, messagesRs] = await Promise.all([
-        db.raw(
-            `
-            SELECT action, target_type, target_id, metadata, created_at
-            FROM admin_audit_log
-            WHERE target_type = 'user' AND target_id = ?
-            ORDER BY created_at DESC
-            LIMIT 20
-            `,
-            [userId]
-        ),
-        db.raw(
-            `
-            SELECT message_id, channel, status, subject, body, created_at
-            FROM admin_user_messages
-            WHERE user_id = ?
-            ORDER BY created_at DESC
-            LIMIT 20
-            `,
-            [userId]
-        ),
-    ]);
+    let actionsRs: any = { rows: [] };
+    let messagesRs: any = { rows: [] };
+
+    try {
+        if (await hasTable(db, 'admin_audit_log')) {
+            actionsRs = await db.raw(
+                `
+                SELECT action, target_type, target_id, metadata, created_at
+                FROM admin_audit_log
+                WHERE target_type = 'user' AND target_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+                `,
+                [userId]
+            );
+        }
+    } catch (error: any) {
+        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: audit log query failed');
+    }
+
+    try {
+        if (await hasTable(db, 'admin_user_messages')) {
+            messagesRs = await db.raw(
+                `
+                SELECT message_id, channel, status, subject, body, created_at
+                FROM admin_user_messages
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+                `,
+                [userId]
+            );
+        }
+    } catch (error: any) {
+        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user messages query failed');
+    }
+
+    const inferredEmail = directoryUser?.email || (userId.includes('@') ? userId : '');
+    const inferredUsername = directoryUser?.username || (inferredEmail ? inferredEmail.split('@')[0] : '');
+    const inferredDisplayName = directoryUser?.displayName || inferredUsername || inferredEmail || userId;
 
     const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
         action: asString(r.action),
@@ -1076,10 +1105,10 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
 
     return {
         userId,
-        username: directoryUser?.username || '',
-        email: directoryUser?.email || '',
+        username: inferredUsername,
+        email: inferredEmail,
         phoneNumber: directoryUser?.phoneNumber || '',
-        displayName: directoryUser?.displayName || '',
+        displayName: inferredDisplayName,
         dateOfBirth: directoryUser?.dateOfBirth || '',
         address: directoryUser?.address || '',
         city: directoryUser?.city || '',
