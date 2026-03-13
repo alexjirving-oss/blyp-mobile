@@ -414,9 +414,33 @@ function tokensFromIdentityParts(parts: unknown[]): string[] {
     return Array.from(tokens);
 }
 
-async function listRelinkedUserIdsFromFirestorePosts(): Promise<Set<string>> {
-    const relinked = new Set<string>();
-    relinked.add(ADMIN_RELINK_ANCHOR_USER_ID);
+type FirestoreRelinkIdentity = {
+    userId: string;
+    username: string;
+    displayName: string;
+    email: string;
+};
+
+function createSyntheticRelinkUser(identity: FirestoreRelinkIdentity): AdminUserRow {
+    return {
+        userId: identity.userId,
+        username: identity.username,
+        email: identity.email,
+        phoneNumber: '',
+        displayName: identity.displayName || identity.username || identity.userId,
+        userStatus: 'SOURCE_LINKED',
+        enabled: true,
+        role: 'user',
+        isBanned: false,
+        banReason: null,
+        bannedUntil: null,
+        createdAt: null,
+        updatedAt: null,
+    };
+}
+
+async function listRelinkedUsersFromFirestorePosts(): Promise<Map<string, FirestoreRelinkIdentity>> {
+    const relinked = new Map<string, FirestoreRelinkIdentity>();
 
     const firestore = getAdminFirestore();
     if (!firestore) {
@@ -448,17 +472,25 @@ async function listRelinkedUserIdsFromFirestorePosts(): Promise<Set<string>> {
                 continue;
             }
 
+            const username = asString(data.username || data.handle || data.userName || data.user_name);
+            const displayName = asString(data.displayName || data.name || data.userName || data.username || data.handle);
+            const email = asString(data.email);
+
             const identityTokens = tokensFromIdentityParts([
-                data.username,
-                data.handle,
-                data.userName,
-                data.displayName,
-                data.name,
-                data.email,
+                username,
+                displayName,
+                email,
             ]);
 
             if (identityTokens.some((token) => ADMIN_RELINK_TARGET_HANDLES.has(token))) {
-                relinked.add(userId);
+                if (!relinked.has(userId)) {
+                    relinked.set(userId, {
+                        userId,
+                        username,
+                        displayName,
+                        email,
+                    });
+                }
             }
 
             if (scanned >= MAX_DOCS_TO_SCAN) break;
@@ -474,18 +506,33 @@ async function listRelinkedUserIdsFromFirestorePosts(): Promise<Set<string>> {
 }
 
 async function scopeAdminUsersForRelink(users: AdminUserRow[]): Promise<AdminUserRow[]> {
-    if (!users.length) {
-        return users;
+    const usersById = new Map<string, AdminUserRow>();
+    for (const user of users) {
+        usersById.set(user.userId, user);
     }
 
-    const allowedIds = await listRelinkedUserIdsFromFirestorePosts();
-    const scoped = users.filter((user) => allowedIds.has(user.userId));
-    if (scoped.length > 0) {
-        return scoped;
+    const relinkedById = await listRelinkedUsersFromFirestorePosts();
+    const scopedById = new Map<string, AdminUserRow>();
+
+    const anchorUser = usersById.get(ADMIN_RELINK_ANCHOR_USER_ID);
+    if (anchorUser) {
+        scopedById.set(anchorUser.userId, anchorUser);
     }
 
-    const fallback = users.find((user) => user.userId === ADMIN_RELINK_ANCHOR_USER_ID);
-    return fallback ? [fallback] : users;
+    for (const [userId, identity] of relinkedById.entries()) {
+        const existing = usersById.get(userId);
+        scopedById.set(userId, existing || createSyntheticRelinkUser(identity));
+    }
+
+    if (scopedById.size > 0) {
+        return Array.from(scopedById.values());
+    }
+
+    if (anchorUser) {
+        return [anchorUser];
+    }
+
+    return users;
 }
 
 function normalizeDirectoryStatus(value: unknown): string {
