@@ -378,6 +378,116 @@ const LINKED_DIRECTORY_STATUSES = new Set([
     'RESET_REQUIRED',
 ]);
 
+const ADMIN_RELINK_ANCHOR_USER_ID = '66a21254-00f1-70b8-a0f6-1d04eb79487b';
+const ADMIN_RELINK_TARGET_HANDLES = new Set([
+    'AI',
+    'WILLIAM',
+    'ALAX',
+    'BLYP',
+    'ALEX',
+]);
+
+function normalizeHandleToken(value: unknown): string {
+    return asString(value)
+        .replace(/^@+/, '')
+        .trim()
+        .toUpperCase();
+}
+
+function tokensFromIdentityParts(parts: unknown[]): string[] {
+    const tokens = new Set<string>();
+    for (const part of parts) {
+        const raw = asString(part);
+        if (!raw) continue;
+
+        const normalized = normalizeHandleToken(raw);
+        if (normalized) {
+            tokens.add(normalized);
+        }
+
+        const emailLocalPart = raw.includes('@') ? raw.split('@')[0] : '';
+        const normalizedEmailLocal = normalizeHandleToken(emailLocalPart);
+        if (normalizedEmailLocal) {
+            tokens.add(normalizedEmailLocal);
+        }
+    }
+    return Array.from(tokens);
+}
+
+async function listRelinkedUserIdsFromFirestorePosts(): Promise<Set<string>> {
+    const relinked = new Set<string>();
+    relinked.add(ADMIN_RELINK_ANCHOR_USER_ID);
+
+    const firestore = getAdminFirestore();
+    if (!firestore) {
+        return relinked;
+    }
+
+    const MAX_DOCS_TO_SCAN = 4000;
+    const BATCH_SIZE = 500;
+    let scanned = 0;
+    let lastDoc: any = null;
+
+    while (scanned < MAX_DOCS_TO_SCAN) {
+        let query = firestore.collection('posts').limit(BATCH_SIZE);
+        if (lastDoc) {
+            query = query.startAfter(lastDoc);
+        }
+
+        const snap = await query.get();
+        if (snap.empty) {
+            break;
+        }
+
+        for (const doc of snap.docs) {
+            scanned += 1;
+            const data = (doc.data() || {}) as Record<string, any>;
+            const userId = asString(data.userId || data.uid || data.authorId || data.ownerId || data.creatorUserId);
+            if (!userId) {
+                if (scanned >= MAX_DOCS_TO_SCAN) break;
+                continue;
+            }
+
+            const identityTokens = tokensFromIdentityParts([
+                data.username,
+                data.handle,
+                data.userName,
+                data.displayName,
+                data.name,
+                data.email,
+            ]);
+
+            if (identityTokens.some((token) => ADMIN_RELINK_TARGET_HANDLES.has(token))) {
+                relinked.add(userId);
+            }
+
+            if (scanned >= MAX_DOCS_TO_SCAN) break;
+        }
+
+        lastDoc = snap.docs[snap.docs.length - 1];
+        if (!lastDoc || snap.size < BATCH_SIZE) {
+            break;
+        }
+    }
+
+    return relinked;
+}
+
+async function scopeAdminUsersForRelink(users: AdminUserRow[]): Promise<AdminUserRow[]> {
+    if (!users.length) {
+        return users;
+    }
+
+    const allowedIds = await listRelinkedUserIdsFromFirestorePosts();
+    const scoped = users.filter((user) => allowedIds.has(user.userId));
+    if (scoped.length > 0) {
+        return scoped;
+    }
+
+    const fallback = users.find((user) => user.userId === ADMIN_RELINK_ANCHOR_USER_ID);
+    return fallback ? [fallback] : users;
+}
+
 function normalizeDirectoryStatus(value: unknown): string {
     return asString(value).toUpperCase();
 }
@@ -525,7 +635,8 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
         listDirectoryUsers(),
     ]);
 
-    const merged = buildVisibleAdminUsers(sqlUsers, directoryUsers)
+    const baseVisibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
+    const merged = (await scopeAdminUsersForRelink(baseVisibleUsers))
         .filter((user) => matchesAdminUserQuery(user, q))
         .sort((left, right) => {
             const leftCreated = left.createdAt ? Date.parse(left.createdAt) : 0;
@@ -1441,7 +1552,7 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
             listDirectoryUsers(),
         ]);
         const row = ((rs as any)?.rows?.[0] || {}) as Record<string, unknown>;
-        const visibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
+        const visibleUsers = await scopeAdminUsersForRelink(buildVisibleAdminUsers(sqlUsers, directoryUsers));
 
         return {
             totalUsers: visibleUsers.length,
