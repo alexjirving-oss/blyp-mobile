@@ -234,7 +234,11 @@ router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res
         });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/readiness failed');
-        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+        return res.status(500).json({
+            error: 'INTERNAL',
+            code: 'INTERNAL',
+            detail: e?.message || String(e),
+        });
     }
 });
 
