@@ -23,8 +23,10 @@ import {
   getSpotlightAvailability,
   getStreamSummary,
   getWallet,
+  IapVerifyError,
   joinLiveGame,
   purchasePromoteBattle,
+  verifyIapPurchase,
   sendGift,
   startLiveGame,
 } from './economyService';
@@ -277,13 +279,17 @@ router.post('/iap/verify', async (req: AuthedRequest, res) => {
     const parsed = iapVerifySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
 
-    // Phase 4: provider verification not implemented yet.
-    return res.status(500).json({
-      error: 'Provider verification not configured',
-      code: 'PROVIDER_ERROR',
-      detail: 'Apple/Google verification requires provider credentials and integration work (Phase 4).',
-    });
+    const out = await verifyIapPurchase(userId, parsed.data);
+    return res.json(out);
   } catch (e: any) {
+    if (e instanceof IapVerifyError) {
+      return res.status(e.httpStatus).json({
+        error: e.message,
+        code: e.code,
+        detail: e.detail,
+      });
+    }
+
     const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
@@ -339,7 +345,7 @@ router.post('/economy/admin/credit-coins', async (req: AuthedRequest, res) => {
       const perDay = await redis.incrby(perDayKey, coins);
       if (perDay === coins) await redis.expire(perDayKey, 60 * 60 * 48);
       if (perDay > 1_000_000) {
-        try { await redis.decrby(perDayKey, coins); } catch {}
+        try { await redis.decrby(perDayKey, coins); } catch { }
         throw new EconomyError('RATE_LIMIT', 429, 'Daily cap exceeded');
       }
     } catch (e: any) {

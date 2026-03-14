@@ -29,6 +29,8 @@ const economyEnvSchema = z.object({
 
   GOOGLE_PLAY_PACKAGE_NAME: z.string().optional(),
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  GOOGLE_PLAY_OAUTH_TOKEN_URI: z.string().optional(),
+  GOOGLE_PLAY_VERIFY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).optional(),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),

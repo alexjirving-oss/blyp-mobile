@@ -5,14 +5,24 @@ export const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-export const iapVerifySchema = z.object({
-  idempotencyKey: z.string().min(1),
-  platform: z.enum(['IOS', 'ANDROID']),
-  sku: z.string().min(1),
-  storeTransactionId: z.string().min(1),
-  purchaseToken: z.string().min(1).optional(),
-  receipt: z.string().min(1).optional(),
-});
+export const iapVerifySchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    platform: z.enum(['IOS', 'ANDROID']),
+    sku: z.string().min(1),
+    storeTransactionId: z.string().min(1),
+    purchaseToken: z.string().min(1).optional(),
+    receipt: z.string().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.platform === 'ANDROID' && !value.purchaseToken) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'purchaseToken is required for ANDROID',
+        path: ['purchaseToken'],
+      });
+    }
+  });
 
 export const giftSendSchema = z.object({
   idempotencyKey: z.string().min(1),
@@ -80,6 +90,7 @@ export const promoteSpotlightBookSchema = z
   .strict();
 
 export type GiftSendInput = z.infer<typeof giftSendSchema>;
+export type IapVerifyInput = z.infer<typeof iapVerifySchema>;
 export type AdminCreditCoinsInput = z.infer<typeof adminCreditCoinsSchema>;
 export type PromoteBattleInput = z.infer<typeof promoteBattleSchema>;
 export type PromoteTimeSlotBookInput = z.infer<typeof promoteTimeSlotBookSchema>;

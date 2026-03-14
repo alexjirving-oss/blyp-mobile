@@ -61,6 +61,25 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           PRIMARY KEY (platform, sku)
         )`,
 
+        `CREATE TABLE IF NOT EXISTS iap_receipts (
+          purchase_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          platform text NOT NULL,
+          sku text NOT NULL,
+          store_transaction_id text NOT NULL,
+          purchase_token text,
+          idempotency_key text NOT NULL,
+          verification_status text NOT NULL,
+          provider_response jsonb NOT NULL DEFAULT '{}'::jsonb,
+          granted_coins bigint NOT NULL DEFAULT 0,
+          ledger_entry_id text,
+          verified_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (user_id, idempotency_key),
+          UNIQUE (platform, store_transaction_id)
+        )`,
+
         `CREATE TABLE IF NOT EXISTS gift_catalog (
           gift_id text PRIMARY KEY,
           name text NOT NULL,
@@ -177,6 +196,19 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
+        `CREATE TABLE IF NOT EXISTS admin_user_messages (
+          message_id text PRIMARY KEY,
+          actor_user_id text NOT NULL,
+          target_user_id text NOT NULL,
+          subject text,
+          body text NOT NULL,
+          channel text NOT NULL DEFAULT 'in_app',
+          status text NOT NULL DEFAULT 'queued',
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
         `CREATE TABLE IF NOT EXISTS subscription_plans (
           plan_id text PRIMARY KEY,
           plan_name text NOT NULL,
@@ -216,60 +248,10 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
-        `CREATE TABLE IF NOT EXISTS admin_user_messages (
-          message_id text PRIMARY KEY,
-          actor_user_id text NOT NULL,
-          target_user_id text NOT NULL,
-          subject text,
-          body text NOT NULL,
-          channel text NOT NULL DEFAULT 'in_app',
-          status text NOT NULL DEFAULT 'queued',
-          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )`,
-
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
-          `CREATE TABLE IF NOT EXISTS post_flags (
-            flag_id text PRIMARY KEY,
-            post_id text NOT NULL,
-            user_id text NOT NULL,
-            flagged_by_user_id text NOT NULL,
-            reason text NOT NULL,
-            status text NOT NULL DEFAULT 'open',
-            admin_notes text,
-            resolved_by_user_id text,
-            resolved_at timestamptz,
-            metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-            created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-          )`,
-
-          `CREATE TABLE IF NOT EXISTS comment_admin_state (
-            comment_id text PRIMARY KEY,
-            post_id text NOT NULL,
-            is_removed boolean NOT NULL DEFAULT false,
-            removed_reason text,
-            removed_by_user_id text,
-            removed_at timestamptz,
-            created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-          )`,
-
-          `CREATE TABLE IF NOT EXISTS user_warnings (
-            warning_id text PRIMARY KEY,
-            target_user_id text NOT NULL,
-            issued_by_user_id text NOT NULL,
-            reason text NOT NULL,
-            severity text NOT NULL DEFAULT 'warning',
-            message text,
-            expires_at timestamptz,
-            acknowledged_at timestamptz,
-            metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-            created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-          )`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS uq_iap_receipts_platform_purchase_token ON iap_receipts (platform, purchase_token) WHERE purchase_token IS NOT NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_iap_receipts_user_created ON iap_receipts (user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_stream_id ON gift_events (stream_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_sender_user_id ON gift_events (sender_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_receiver_user_id ON gift_events (receiver_user_id)`,
@@ -282,17 +264,10 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_user_admin_state_is_banned ON user_admin_state (is_banned)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_created ON admin_audit_log (actor_user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_audit_target_created ON admin_audit_log (target_type, target_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_status ON user_subscriptions (user_id, status)`,
-        `CREATE INDEX IF NOT EXISTS idx_post_admin_state_removed ON post_admin_state (is_removed, updated_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_target_created ON admin_user_messages (target_user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_status ON admin_user_messages (status, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_post_flags_post_id ON post_flags (post_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_post_flags_user_id ON post_flags (user_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_post_flags_status ON post_flags (status, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_comment_admin_state_removed ON comment_admin_state (is_removed, updated_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_comment_admin_state_post_id ON comment_admin_state (post_id)`,
-        `CREATE INDEX IF NOT EXISTS idx_user_warnings_target_user_id ON user_warnings (target_user_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_user_warnings_severity ON user_warnings (severity, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_status ON user_subscriptions (user_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_post_admin_state_removed ON post_admin_state (is_removed, updated_at DESC)`,
       ];
 
       for (const stmt of ddl) {
@@ -327,6 +302,41 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         }
       } catch (e: any) {
         logger.warn({ err: e?.message || String(e) }, '[economy-schema] seed gift_catalog failed');
+      }
+
+      // Seed one minimal Android coin-pack SKU if none exists.
+      // This is a backend-readiness bootstrap only; provider verification still gates crediting.
+      try {
+        const existsRow = await db.raw("select to_regclass('public.iap_products') is not null as ok");
+        const exists = Boolean((existsRow as any)?.rows?.[0]?.ok);
+        if (!exists) {
+          logger.warn('[economy-schema] iap_products missing after ensure; skipping seed');
+        } else {
+          const activeAndroid = await db('iap_products')
+            .where({ platform: 'ANDROID', enabled: true })
+            .andWhere('coins_granted', '>', 0)
+            .first();
+
+          if (!activeAndroid) {
+            await db('iap_products')
+              .insert([
+                {
+                  platform: 'ANDROID',
+                  sku: 'blyp.android.proof.coinpack.100',
+                  coins_granted: 100,
+                  enabled: true,
+                  metadata: {
+                    source: 'schema_bootstrap',
+                    purpose: 'iap_verify_backend_proof_seed',
+                  },
+                },
+              ])
+              .onConflict(['platform', 'sku'])
+              .ignore();
+          }
+        }
+      } catch (e: any) {
+        logger.warn({ err: e?.message || String(e) }, '[economy-schema] seed iap_products failed');
       }
 
       logger.info('[economy-schema] ensured');

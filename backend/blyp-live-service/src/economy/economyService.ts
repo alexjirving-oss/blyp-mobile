@@ -1,14 +1,369 @@
 import { randomUUID } from 'crypto';
+import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
 import { getEconomyInfra } from './infra';
 import { getEconomyEnv } from '../config/economyEnv';
 import { EconomyError } from './economyErrors';
 import { decodeCursor, encodeCursor } from './cursor';
 import { emitGiftEvent, emitLiveGameEvent } from '../realtime/realtimeBus';
-import type { AdminCreditCoinsInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
+import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
+import { logger } from '../config/logger';
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+type IapVerifyErrorCode =
+  | 'INVALID_INPUT'
+  | 'SKU_DISABLED_OR_UNKNOWN'
+  | 'PURCHASE_NOT_VERIFIED'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'PLATFORM_NOT_IMPLEMENTED';
+
+export class IapVerifyError extends Error {
+  code: IapVerifyErrorCode;
+  httpStatus: number;
+  detail?: any;
+
+  constructor(code: IapVerifyErrorCode, httpStatus: number, message: string, detail?: any) {
+    super(message);
+    this.code = code;
+    this.httpStatus = httpStatus;
+    this.detail = detail;
+  }
+}
+
+function getNodeFetch(): any {
+  const fetchFn = (globalThis as any)?.fetch;
+  if (typeof fetchFn !== 'function') {
+    throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Global fetch is unavailable for provider verification');
+  }
+  return fetchFn;
+}
+
+function parseGoogleServiceAccount(rawJson: string) {
+  try {
+    const parsed = JSON.parse(rawJson);
+    const clientEmail = String(parsed?.client_email || '').trim();
+    const privateKey = String(parsed?.private_key || '').trim();
+    const tokenUri = String(parsed?.token_uri || '').trim() || 'https://oauth2.googleapis.com/token';
+    if (!clientEmail || !privateKey) {
+      throw new Error('Missing client_email/private_key');
+    }
+    return { clientEmail, privateKey, tokenUri };
+  } catch (e: any) {
+    throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Invalid GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', e?.message || String(e));
+  }
+}
+
+async function getGoogleAccessToken(serviceAccount: { clientEmail: string; privateKey: string; tokenUri: string }, timeoutMs: number) {
+  const now = Math.floor(Date.now() / 1000);
+  const assertion = jwt.sign(
+    {
+      iss: serviceAccount.clientEmail,
+      scope: 'https://www.googleapis.com/auth/androidpublisher',
+      aud: serviceAccount.tokenUri,
+      iat: now,
+      exp: now + 3600,
+    },
+    serviceAccount.privateKey,
+    { algorithm: 'RS256' }
+  );
+
+  const fetchFn = getNodeFetch();
+  const body = new URLSearchParams();
+  body.set('grant_type', 'urn:ietf:params:oauth:grant-type:jwt-bearer');
+  body.set('assertion', assertion);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const tokenRes = await fetchFn(serviceAccount.tokenUri, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: controller.signal,
+    });
+    const tokenJson = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !tokenJson?.access_token) {
+      throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Failed to obtain Google access token', {
+        httpStatus: tokenRes.status,
+        provider: tokenJson,
+      });
+    }
+    return String(tokenJson.access_token);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function verifyAndroidPurchaseWithProvider(input: IapVerifyInput) {
+  const env = getEconomyEnv();
+  const packageName = String(env.GOOGLE_PLAY_PACKAGE_NAME || '').trim();
+  const rawServiceAccount = String(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
+  const timeoutMs = Number(env.GOOGLE_PLAY_VERIFY_TIMEOUT_MS || 8000);
+
+  if (!packageName || !rawServiceAccount) {
+    throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Google Play verification is not configured');
+  }
+  if (!input.purchaseToken) {
+    throw new IapVerifyError('INVALID_INPUT', 400, 'purchaseToken is required for ANDROID');
+  }
+
+  const serviceAccount = parseGoogleServiceAccount(rawServiceAccount);
+  const accessToken = await getGoogleAccessToken(serviceAccount, timeoutMs);
+
+  const fetchFn = getNodeFetch();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const endpoint = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(
+    packageName
+  )}/purchases/products/${encodeURIComponent(input.sku)}/tokens/${encodeURIComponent(input.purchaseToken)}`;
+
+  try {
+    const verifyRes = await fetchFn(endpoint, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+
+    const verifyJson = await verifyRes.json().catch(() => ({}));
+
+    if (verifyRes.status === 404) {
+      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'Google Play purchase not found', verifyJson);
+    }
+    if (!verifyRes.ok) {
+      throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Google Play verification request failed', {
+        httpStatus: verifyRes.status,
+        provider: verifyJson,
+      });
+    }
+
+    const purchaseState = Number(verifyJson?.purchaseState);
+    if (purchaseState !== 0) {
+      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'Android purchase is not in purchased state', {
+        purchaseState,
+      });
+    }
+
+    const orderId = typeof verifyJson?.orderId === 'string' ? verifyJson.orderId.trim() : '';
+    if (orderId && orderId !== input.storeTransactionId) {
+      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'storeTransactionId does not match verified Android orderId', {
+        orderId,
+      });
+    }
+
+    return {
+      verifiedAt: nowIso(),
+      providerPayload: verifyJson,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function verifyIapPurchase(userId: string, input: IapVerifyInput) {
+  const { db } = getEconomyInfra();
+
+  if (!userId) {
+    throw new IapVerifyError('INVALID_INPUT', 400, 'Missing userId');
+  }
+  if (input.platform !== 'ANDROID') {
+    throw new IapVerifyError('PLATFORM_NOT_IMPLEMENTED', 501, 'Only ANDROID verification is implemented in this phase');
+  }
+  if (!input.purchaseToken) {
+    throw new IapVerifyError('INVALID_INPUT', 400, 'purchaseToken is required for ANDROID');
+  }
+
+  // Mandatory provider verification - fail closed.
+  const verification = await verifyAndroidPurchaseWithProvider(input);
+
+  const purchaseResult = await db.transaction(async (trx) => {
+    // Replay by user + idempotency key.
+    const replayByIdempotency = await trx('iap_receipts')
+      .where({ user_id: userId, idempotency_key: input.idempotencyKey })
+      .first();
+    if (replayByIdempotency && replayByIdempotency.verification_status === 'VERIFIED') {
+      const wallet = await trx('wallets').where({ user_id: userId }).first();
+      return {
+        purchaseId: String(replayByIdempotency.purchase_id),
+        replay: true,
+        platform: String(replayByIdempotency.platform),
+        sku: String(replayByIdempotency.sku),
+        grantedCoins: Number(replayByIdempotency.granted_coins || 0),
+        wallet: {
+          coinBalance: Number(wallet?.coin_balance || 0),
+          bonusCoinBalance: Number(wallet?.bonus_coin_balance || 0),
+          gemAvailable: Number(wallet?.gem_available || 0),
+          gemPending: Number(wallet?.gem_pending || 0),
+        },
+        ledgerEntryId: String(replayByIdempotency.ledger_entry_id || ''),
+        verifiedAt: new Date(replayByIdempotency.verified_at || replayByIdempotency.created_at).toISOString(),
+      };
+    }
+
+    // Store identity uniqueness: platform + storeTransactionId.
+    const existingByStoreTx = await trx('iap_receipts')
+      .where({ platform: input.platform, store_transaction_id: input.storeTransactionId })
+      .first();
+    if (existingByStoreTx) {
+      if (String(existingByStoreTx.user_id) !== userId) {
+        throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'storeTransactionId already used by another user');
+      }
+      if (existingByStoreTx.verification_status === 'VERIFIED') {
+        const wallet = await trx('wallets').where({ user_id: userId }).first();
+        return {
+          purchaseId: String(existingByStoreTx.purchase_id),
+          replay: true,
+          platform: String(existingByStoreTx.platform),
+          sku: String(existingByStoreTx.sku),
+          grantedCoins: Number(existingByStoreTx.granted_coins || 0),
+          wallet: {
+            coinBalance: Number(wallet?.coin_balance || 0),
+            bonusCoinBalance: Number(wallet?.bonus_coin_balance || 0),
+            gemAvailable: Number(wallet?.gem_available || 0),
+            gemPending: Number(wallet?.gem_pending || 0),
+          },
+          ledgerEntryId: String(existingByStoreTx.ledger_entry_id || ''),
+          verifiedAt: new Date(existingByStoreTx.verified_at || existingByStoreTx.created_at).toISOString(),
+        };
+      }
+      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'storeTransactionId already exists in non-verified state');
+    }
+
+    // Android token uniqueness: platform + purchaseToken.
+    const existingByToken = await trx('iap_receipts')
+      .where({ platform: input.platform, purchase_token: input.purchaseToken })
+      .first();
+    if (existingByToken) {
+      if (String(existingByToken.user_id) !== userId) {
+        throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'purchaseToken already used by another user');
+      }
+      if (existingByToken.verification_status === 'VERIFIED') {
+        const wallet = await trx('wallets').where({ user_id: userId }).first();
+        return {
+          purchaseId: String(existingByToken.purchase_id),
+          replay: true,
+          platform: String(existingByToken.platform),
+          sku: String(existingByToken.sku),
+          grantedCoins: Number(existingByToken.granted_coins || 0),
+          wallet: {
+            coinBalance: Number(wallet?.coin_balance || 0),
+            bonusCoinBalance: Number(wallet?.bonus_coin_balance || 0),
+            gemAvailable: Number(wallet?.gem_available || 0),
+            gemPending: Number(wallet?.gem_pending || 0),
+          },
+          ledgerEntryId: String(existingByToken.ledger_entry_id || ''),
+          verifiedAt: new Date(existingByToken.verified_at || existingByToken.created_at).toISOString(),
+        };
+      }
+      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'purchaseToken already exists in non-verified state');
+    }
+
+    const product = await trx('iap_products')
+      .where({ platform: input.platform, sku: input.sku, enabled: true })
+      .first();
+    if (!product) {
+      throw new IapVerifyError('SKU_DISABLED_OR_UNKNOWN', 409, 'SKU is disabled or unknown');
+    }
+
+    const grantedCoins = BigInt(product.coins_granted || 0);
+    if (grantedCoins <= 0n) {
+      throw new IapVerifyError('SKU_DISABLED_OR_UNKNOWN', 409, 'SKU has invalid granted coin amount');
+    }
+
+    await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+    const walletBefore = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+    if (!walletBefore) throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Failed to lock wallet row');
+
+    const beforeCoinBalance = BigInt(walletBefore.coin_balance || 0);
+    const afterCoinBalance = beforeCoinBalance + grantedCoins;
+    const purchaseId = randomUUID();
+    const ledgerEntryId = randomUUID();
+
+    const metadata = {
+      platform: input.platform,
+      sku: input.sku,
+      storeTransactionId: input.storeTransactionId,
+      purchaseToken: input.purchaseToken,
+      originalIdempotencyKey: input.idempotencyKey,
+      provider: verification.providerPayload,
+    };
+
+    await trx('iap_receipts').insert({
+      purchase_id: purchaseId,
+      user_id: userId,
+      platform: input.platform,
+      sku: input.sku,
+      store_transaction_id: input.storeTransactionId,
+      purchase_token: input.purchaseToken,
+      idempotency_key: input.idempotencyKey,
+      verification_status: 'VERIFIED',
+      provider_response: verification.providerPayload,
+      granted_coins: grantedCoins.toString(),
+      ledger_entry_id: ledgerEntryId,
+      verified_at: verification.verifiedAt,
+      created_at: verification.verifiedAt,
+      updated_at: verification.verifiedAt,
+    });
+
+    await trx('ledger_entries').insert({
+      ledger_id: ledgerEntryId,
+      user_id: userId,
+      entry_type: 'IAP_PURCHASE',
+      currency: 'COIN',
+      amount: grantedCoins.toString(),
+      status: 'POSTED',
+      reference_type: 'IAP_PURCHASE',
+      reference_id: purchaseId,
+      idempotency_key: `${input.idempotencyKey}:IAP`,
+      metadata,
+    });
+
+    await trx('wallets')
+      .where({ user_id: userId })
+      .update({
+        coin_balance: afterCoinBalance.toString(),
+        updated_at: trx.fn.now(),
+      });
+
+    const walletAfter = await trx('wallets').where({ user_id: userId }).first();
+
+    return {
+      purchaseId,
+      replay: false,
+      platform: input.platform,
+      sku: input.sku,
+      grantedCoins: Number(grantedCoins),
+      wallet: {
+        coinBalance: Number(walletAfter?.coin_balance || 0),
+        bonusCoinBalance: Number(walletAfter?.bonus_coin_balance || 0),
+        gemAvailable: Number(walletAfter?.gem_available || 0),
+        gemPending: Number(walletAfter?.gem_pending || 0),
+      },
+      ledgerEntryId,
+      verifiedAt: verification.verifiedAt,
+    };
+  });
+
+  logger.info(
+    {
+      userId,
+      platform: purchaseResult.platform,
+      sku: purchaseResult.sku,
+      purchaseId: purchaseResult.purchaseId,
+      replay: purchaseResult.replay,
+      grantedCoins: purchaseResult.grantedCoins,
+    },
+    '[economy] iap verify processed'
+  );
+
+  return purchaseResult;
 }
 
 type PromotePricing = {
@@ -478,9 +833,9 @@ export async function getLedger(userId: string, rawCursor?: string, rawLimit?: n
 
   const nextCursor = rows.length === limit
     ? encodeCursor({
-        createdAt: new Date(rows[rows.length - 1].createdAt).toISOString(),
-        ledgerId: rows[rows.length - 1].ledgerId,
-      })
+      createdAt: new Date(rows[rows.length - 1].createdAt).toISOString(),
+      ledgerId: rows[rows.length - 1].ledgerId,
+    })
     : null;
 
   return { items, nextCursor };
@@ -509,10 +864,10 @@ export async function getStreamSummary(userId: string, streamId: string) {
 
   const creator = creatorRow
     ? {
-        userId,
-        coinsReceived: Number(creatorRow.coins_received ?? 0),
-        gemsEarned: Number(creatorRow.gems_earned ?? 0),
-      }
+      userId,
+      coinsReceived: Number(creatorRow.coins_received ?? 0),
+      gemsEarned: Number(creatorRow.gems_earned ?? 0),
+    }
     : null;
 
   return {
@@ -960,13 +1315,13 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
           coinSpent: Number(BigInt(existing.coin_cost) + BigInt(existing.bonus_coin_cost)),
           state: game
             ? {
-                gameId: game.game_id,
-                streamId: game.stream_id,
-                hostUserId: game.host_user_id,
-                status: game.status,
-                entryFeeCoins: Number(game.entry_fee_coins),
-                poolCoins: Number(game.pool_coins),
-              }
+              gameId: game.game_id,
+              streamId: game.stream_id,
+              hostUserId: game.host_user_id,
+              status: game.status,
+              entryFeeCoins: Number(game.entry_fee_coins),
+              poolCoins: Number(game.pool_coins),
+            }
             : null,
         },
       };

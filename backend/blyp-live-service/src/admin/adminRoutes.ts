@@ -128,6 +128,120 @@ router.get('/admin/auth/me', requireAdmin, async (req: AuthedRequest, res: Respo
     return res.json({ ok: true, actorUserId });
 });
 
+router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        const { db } = getEconomyInfra();
+
+        const tableRows = await db.raw(
+            `
+            SELECT
+              to_regclass('public.iap_products') IS NOT NULL AS iap_products_exists,
+              to_regclass('public.iap_receipts') IS NOT NULL AS iap_receipts_exists
+            `
+        );
+        const tableFlags = (tableRows as any)?.rows?.[0] || {};
+
+        const userIdemRows = await db.raw(
+            `
+            WITH target AS (
+              SELECT c.oid
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relname = 'iap_receipts'
+              LIMIT 1
+            )
+            SELECT EXISTS (
+              SELECT 1
+              FROM pg_constraint c, target t
+              WHERE c.conrelid = t.oid
+                AND c.contype = 'u'
+                AND (
+                  SELECT array_agg(a.attname ORDER BY a.attname)
+                  FROM unnest(c.conkey) AS k(attnum)
+                  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                ) = ARRAY['idempotency_key', 'user_id']
+            ) AS ok
+            `
+        );
+        const uniqueUserIdempotency = Boolean((userIdemRows as any)?.rows?.[0]?.ok);
+
+        const storeTxRows = await db.raw(
+            `
+            WITH target AS (
+              SELECT c.oid
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relname = 'iap_receipts'
+              LIMIT 1
+            )
+            SELECT EXISTS (
+              SELECT 1
+              FROM pg_constraint c, target t
+              WHERE c.conrelid = t.oid
+                AND c.contype = 'u'
+                AND (
+                  SELECT array_agg(a.attname ORDER BY a.attname)
+                  FROM unnest(c.conkey) AS k(attnum)
+                  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                ) = ARRAY['platform', 'store_transaction_id']
+            ) AS ok
+            `
+        );
+        const uniquePlatformStoreTransaction = Boolean((storeTxRows as any)?.rows?.[0]?.ok);
+
+        const purchaseTokenRows = await db.raw(
+            `
+            SELECT EXISTS (
+              SELECT 1
+              FROM pg_indexes
+              WHERE schemaname = 'public'
+                AND tablename = 'iap_receipts'
+                AND indexdef ~* 'CREATE UNIQUE INDEX .* ON .*iap_receipts .*\\(platform, purchase_token\\).*WHERE \\(purchase_token IS NOT NULL\\)'
+            ) AS ok
+            `
+        );
+        const uniquePlatformPurchaseTokenNotNull = Boolean((purchaseTokenRows as any)?.rows?.[0]?.ok);
+
+        const packageNameConfigured = Boolean(String(process.env.GOOGLE_PLAY_PACKAGE_NAME || '').trim());
+        const serviceAccountRaw = String(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
+        let serviceAccountConfigured = false;
+        if (serviceAccountRaw) {
+            try {
+                const parsed = JSON.parse(serviceAccountRaw);
+                serviceAccountConfigured = Boolean(String(parsed?.client_email || '').trim() && String(parsed?.private_key || '').trim());
+            } catch {
+                serviceAccountConfigured = false;
+            }
+        }
+
+        const providerEnvReady = packageNameConfigured && serviceAccountConfigured;
+        const schemaReady = Boolean(tableFlags.iap_products_exists)
+            && Boolean(tableFlags.iap_receipts_exists)
+            && uniqueUserIdempotency
+            && uniquePlatformStoreTransaction
+            && uniquePlatformPurchaseTokenNotNull;
+
+        return res.json({
+            schemaReady,
+            schema: {
+                iap_products: Boolean(tableFlags.iap_products_exists),
+                iap_receipts: Boolean(tableFlags.iap_receipts_exists),
+                unique_user_idempotency_key: uniqueUserIdempotency,
+                unique_platform_store_transaction_id: uniquePlatformStoreTransaction,
+                unique_platform_purchase_token_not_null: uniquePlatformPurchaseTokenNotNull,
+            },
+            providerEnv: {
+                packageNameConfigured,
+                serviceAccountConfigured,
+                ready: providerEnvReady,
+            },
+        });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/readiness failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
 router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const parsed = adminListUsersSchema.safeParse(req.query);
