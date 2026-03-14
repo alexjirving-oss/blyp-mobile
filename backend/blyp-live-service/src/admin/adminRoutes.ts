@@ -238,6 +238,49 @@ router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res
     }
 });
 
+router.get('/admin/iap/receipt-probe', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const storeTransactionId = String(req.query?.storeTransactionId || '').trim();
+        const purchaseToken = String(req.query?.purchaseToken || '').trim();
+        if (!storeTransactionId && !purchaseToken) {
+            return res.status(400).json({
+                error: 'INVALID_INPUT',
+                code: 'INVALID_INPUT',
+                detail: 'storeTransactionId or purchaseToken is required',
+            });
+        }
+
+        const { db } = getEconomyInfra();
+        const base = db('iap_receipts').select('verification_status');
+
+        if (storeTransactionId && purchaseToken) {
+            base.where(function () {
+                this.where('store_transaction_id', storeTransactionId).orWhere('purchase_token', purchaseToken);
+            });
+        } else if (storeTransactionId) {
+            base.where({ store_transaction_id: storeTransactionId });
+        } else {
+            base.where({ purchase_token: purchaseToken });
+        }
+
+        const rows = await base;
+        const totalRows = rows.length;
+        const verifiedRows = rows.filter((r: any) => String(r?.verification_status || '').toUpperCase() === 'VERIFIED').length;
+
+        return res.json({
+            storeTransactionId: storeTransactionId || null,
+            purchaseToken: purchaseToken || null,
+            totalRows,
+            verifiedRows,
+            hasAnyRow: totalRows > 0,
+            hasVerifiedRow: verifiedRows > 0,
+        });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/receipt-probe failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
 router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const parsed = adminListUsersSchema.safeParse(req.query);
