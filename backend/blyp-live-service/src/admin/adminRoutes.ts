@@ -141,65 +141,61 @@ router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res
         );
         const tableFlags = (tableRows as any)?.rows?.[0] || {};
 
-        const userIdemRows = await db.raw(
-            `
-            WITH target AS (
-              SELECT c.oid
-              FROM pg_class c
-              JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'public' AND c.relname = 'iap_receipts'
-              LIMIT 1
-            )
-            SELECT EXISTS (
-              SELECT 1
-              FROM pg_constraint c, target t
-              WHERE c.conrelid = t.oid
-                AND c.contype = 'u'
-                AND (
-                  SELECT array_agg(a.attname ORDER BY a.attname)
-                  FROM unnest(c.conkey) AS k(attnum)
-                  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-                ) = ARRAY['idempotency_key', 'user_id']
-            ) AS ok
-            `
-        );
+                const userIdemRows = await db.raw(
+                        `
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM (
+                                SELECT tc.constraint_name, array_agg(kcu.column_name ORDER BY kcu.column_name) AS cols
+                                FROM information_schema.table_constraints tc
+                                JOIN information_schema.key_column_usage kcu
+                                    ON tc.constraint_name = kcu.constraint_name
+                                 AND tc.table_schema = kcu.table_schema
+                                 AND tc.table_name = kcu.table_name
+                                WHERE tc.table_schema = 'public'
+                                    AND tc.table_name = 'iap_receipts'
+                                    AND tc.constraint_type = 'UNIQUE'
+                                GROUP BY tc.constraint_name
+                            ) q
+                            WHERE q.cols = ARRAY['idempotency_key', 'user_id']
+                        ) AS ok
+                        `
+                );
         const uniqueUserIdempotency = Boolean((userIdemRows as any)?.rows?.[0]?.ok);
 
-        const storeTxRows = await db.raw(
-            `
-            WITH target AS (
-              SELECT c.oid
-              FROM pg_class c
-              JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = 'public' AND c.relname = 'iap_receipts'
-              LIMIT 1
-            )
-            SELECT EXISTS (
-              SELECT 1
-              FROM pg_constraint c, target t
-              WHERE c.conrelid = t.oid
-                AND c.contype = 'u'
-                AND (
-                  SELECT array_agg(a.attname ORDER BY a.attname)
-                  FROM unnest(c.conkey) AS k(attnum)
-                  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-                ) = ARRAY['platform', 'store_transaction_id']
-            ) AS ok
-            `
-        );
+                const storeTxRows = await db.raw(
+                        `
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM (
+                                SELECT tc.constraint_name, array_agg(kcu.column_name ORDER BY kcu.column_name) AS cols
+                                FROM information_schema.table_constraints tc
+                                JOIN information_schema.key_column_usage kcu
+                                    ON tc.constraint_name = kcu.constraint_name
+                                 AND tc.table_schema = kcu.table_schema
+                                 AND tc.table_name = kcu.table_name
+                                WHERE tc.table_schema = 'public'
+                                    AND tc.table_name = 'iap_receipts'
+                                    AND tc.constraint_type = 'UNIQUE'
+                                GROUP BY tc.constraint_name
+                            ) q
+                            WHERE q.cols = ARRAY['platform', 'store_transaction_id']
+                        ) AS ok
+                        `
+                );
         const uniquePlatformStoreTransaction = Boolean((storeTxRows as any)?.rows?.[0]?.ok);
 
-        const purchaseTokenRows = await db.raw(
-            `
-            SELECT EXISTS (
-              SELECT 1
-              FROM pg_indexes
-              WHERE schemaname = 'public'
-                AND tablename = 'iap_receipts'
-                AND indexdef ~* 'CREATE UNIQUE INDEX .* ON .*iap_receipts .*\\(platform, purchase_token\\).*WHERE \\(purchase_token IS NOT NULL\\)'
-            ) AS ok
-            `
-        );
+                const purchaseTokenRows = await db.raw(
+                        `
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM pg_indexes
+                            WHERE schemaname = 'public'
+                                AND tablename = 'iap_receipts'
+                                AND indexname = 'uq_iap_receipts_platform_purchase_token'
+                        ) AS ok
+                        `
+                );
         const uniquePlatformPurchaseTokenNotNull = Boolean((purchaseTokenRows as any)?.rows?.[0]?.ok);
 
         const packageNameConfigured = Boolean(String(process.env.GOOGLE_PLAY_PACKAGE_NAME || '').trim());
