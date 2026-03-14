@@ -144,20 +144,18 @@ router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res
                 const userIdemRows = await db.raw(
                         `
                         SELECT EXISTS (
-                            SELECT 1
-                            FROM (
-                                SELECT tc.constraint_name, array_agg(kcu.column_name ORDER BY kcu.column_name) AS cols
-                                FROM information_schema.table_constraints tc
-                                JOIN information_schema.key_column_usage kcu
-                                    ON tc.constraint_name = kcu.constraint_name
-                                 AND tc.table_schema = kcu.table_schema
-                                 AND tc.table_name = kcu.table_name
-                                WHERE tc.table_schema = 'public'
-                                    AND tc.table_name = 'iap_receipts'
-                                    AND tc.constraint_type = 'UNIQUE'
-                                GROUP BY tc.constraint_name
-                            ) q
-                            WHERE q.cols = ARRAY['idempotency_key', 'user_id']
+                            SELECT tc.constraint_name
+                            FROM information_schema.table_constraints tc
+                            JOIN information_schema.key_column_usage kcu
+                                ON tc.constraint_name = kcu.constraint_name
+                             AND tc.table_schema = kcu.table_schema
+                             AND tc.table_name = kcu.table_name
+                            WHERE tc.table_schema = 'public'
+                                AND tc.table_name = 'iap_receipts'
+                                AND tc.constraint_type = 'UNIQUE'
+                            GROUP BY tc.constraint_name
+                            HAVING COUNT(*) = 2
+                                 AND SUM(CASE WHEN kcu.column_name IN ('user_id', 'idempotency_key') THEN 1 ELSE 0 END) = 2
                         ) AS ok
                         `
                 );
@@ -166,20 +164,18 @@ router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res
                 const storeTxRows = await db.raw(
                         `
                         SELECT EXISTS (
-                            SELECT 1
-                            FROM (
-                                SELECT tc.constraint_name, array_agg(kcu.column_name ORDER BY kcu.column_name) AS cols
-                                FROM information_schema.table_constraints tc
-                                JOIN information_schema.key_column_usage kcu
-                                    ON tc.constraint_name = kcu.constraint_name
-                                 AND tc.table_schema = kcu.table_schema
-                                 AND tc.table_name = kcu.table_name
-                                WHERE tc.table_schema = 'public'
-                                    AND tc.table_name = 'iap_receipts'
-                                    AND tc.constraint_type = 'UNIQUE'
-                                GROUP BY tc.constraint_name
-                            ) q
-                            WHERE q.cols = ARRAY['platform', 'store_transaction_id']
+                            SELECT tc.constraint_name
+                            FROM information_schema.table_constraints tc
+                            JOIN information_schema.key_column_usage kcu
+                                ON tc.constraint_name = kcu.constraint_name
+                             AND tc.table_schema = kcu.table_schema
+                             AND tc.table_name = kcu.table_name
+                            WHERE tc.table_schema = 'public'
+                                AND tc.table_name = 'iap_receipts'
+                                AND tc.constraint_type = 'UNIQUE'
+                            GROUP BY tc.constraint_name
+                            HAVING COUNT(*) = 2
+                                 AND SUM(CASE WHEN kcu.column_name IN ('platform', 'store_transaction_id') THEN 1 ELSE 0 END) = 2
                         ) AS ok
                         `
                 );
