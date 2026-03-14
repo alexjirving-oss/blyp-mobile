@@ -43,5 +43,11 @@ services:
         value: 30
       - key: IDEMPOTENCY_TTL_SECONDS
         value: 86400
+      - key: GOOGLE_PLAY_PACKAGE_NAME
+        value: com.blyp.mobile
+      - key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_PLAY_VERIFY_TIMEOUT_MS
+        value: 8000
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
