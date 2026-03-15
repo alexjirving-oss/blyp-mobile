@@ -20,7 +20,7 @@ services:
       - key: IVS_REALTIME_REGION
         value: eu-west-1
       - key: COGNITO_USER_POOL_ID
-        sync: false
+        value: eu-west-2_ITX07Zvnt
       - key: LIVE_SESSIONS_TABLE
         value: blyp_live_sessions
       - key: LIVE_GUESTS_TABLE
