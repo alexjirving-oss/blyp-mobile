@@ -153,7 +153,9 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
         const client = getClient();
         if (!client) {
             logger.error({ userPoolId }, '[admin] Cognito directory region/client resolution failed');
-            throw new Error('Cognito directory unavailable: no usable region was resolved');
+            cachedDirectoryUsers = [];
+            cachedDirectoryUsersAt = Date.now();
+            return [];
         }
 
         const regions = getRegionCandidates(userPoolId);
