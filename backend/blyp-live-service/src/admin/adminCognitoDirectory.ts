@@ -142,73 +142,73 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
     }
 
     inFlightDirectoryUsers = (async () => {
-    const userPoolId = getPoolId();
-    if (!userPoolId) {
-        logger.warn('[admin] Cognito directory disabled: COGNITO_USER_POOL_ID is missing');
+        const userPoolId = getPoolId();
+        if (!userPoolId) {
+            logger.warn('[admin] Cognito directory disabled: COGNITO_USER_POOL_ID is missing');
             cachedDirectoryUsers = [];
             cachedDirectoryUsersAt = Date.now();
             return [];
-    }
-
-    const client = getClient();
-    if (!client) {
-        logger.warn('[admin] Cognito directory disabled: no usable region was resolved');
-            cachedDirectoryUsers = [];
-            cachedDirectoryUsersAt = Date.now();
-            return [];
-    }
-
-    const regions = getRegionCandidates(userPoolId);
-    let lastError: unknown = null;
-
-    for (const region of regions) {
-        try {
-            if (!cachedClient || cachedRegion !== region) {
-                cachedRegion = region;
-                cachedClient = new CognitoIdentityProviderClient({ region });
-            }
-
-            const items: DirectoryUser[] = [];
-            let paginationToken: string | undefined;
-
-            do {
-                const out = await cachedClient.send(new ListUsersCommand({
-                    UserPoolId: userPoolId,
-                    Limit: 60,
-                    PaginationToken: paginationToken,
-                }));
-                for (const user of out.Users || []) {
-                    const mapped = mapUser(user);
-                    if (mapped.userId) {
-                        items.push(mapped);
-                    }
-                }
-                paginationToken = out.PaginationToken;
-            } while (paginationToken);
-
-            if (region !== String(ENV.COGNITO_REGION || '').trim()) {
-                logger.info({ region }, '[admin] Cognito directory region fallback applied');
-            }
-            cachedDirectoryUsers = items;
-            cachedDirectoryUsersAt = Date.now();
-            return items;
-        } catch (error: any) {
-            lastError = error;
-            logger.warn({
-                region,
-                code: String(error?.name || ''),
-                message: String(error?.message || error),
-            }, '[admin] Cognito list users failed for region candidate');
         }
-    }
 
-    logger.warn({
-        code: String((lastError as any)?.name || ''),
-        message: String((lastError as any)?.message || lastError),
-    }, '[admin] Cognito directory unavailable; falling back to SQL-derived users only');
-        cachedDirectoryUsers = [];
-        cachedDirectoryUsersAt = Date.now();
-        return [];
+        const client = getClient();
+        if (!client) {
+            logger.error({ userPoolId }, '[admin] Cognito directory region/client resolution failed');
+            throw new Error('Cognito directory unavailable: no usable region was resolved');
+        }
+
+        const regions = getRegionCandidates(userPoolId);
+        let lastError: unknown = null;
+
+        for (const region of regions) {
+            try {
+                if (!cachedClient || cachedRegion !== region) {
+                    cachedRegion = region;
+                    cachedClient = new CognitoIdentityProviderClient({ region });
+                }
+
+                const items: DirectoryUser[] = [];
+                let paginationToken: string | undefined;
+
+                do {
+                    const out = await cachedClient.send(new ListUsersCommand({
+                        UserPoolId: userPoolId,
+                        Limit: 60,
+                        PaginationToken: paginationToken,
+                    }));
+                    for (const user of out.Users || []) {
+                        const mapped = mapUser(user);
+                        if (mapped.userId) {
+                            items.push(mapped);
+                        }
+                    }
+                    paginationToken = out.PaginationToken;
+                } while (paginationToken);
+
+                if (region !== String(ENV.COGNITO_REGION || '').trim()) {
+                    logger.info({ region }, '[admin] Cognito directory region fallback applied');
+                }
+                cachedDirectoryUsers = items;
+                cachedDirectoryUsersAt = Date.now();
+                return items;
+            } catch (error: any) {
+                lastError = error;
+                logger.warn({
+                    region,
+                    code: String(error?.name || ''),
+                    message: String(error?.message || error),
+                }, '[admin] Cognito list users failed for region candidate');
+            }
+        }
+
+        logger.error({
+            userPoolId,
+            regions,
+            code: String((lastError as any)?.name || ''),
+            message: String((lastError as any)?.message || lastError),
+        }, '[admin] Cognito directory unavailable after all region candidates failed');
+        throw (lastError instanceof Error
+            ? lastError
+            : new Error('Cognito directory unavailable: list users failed'));
     })();
 
     try {
