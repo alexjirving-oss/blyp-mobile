@@ -150,15 +150,13 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
             return [];
         }
 
-        const client = getClient();
-        if (!client) {
+        const regions = getRegionCandidates(userPoolId);
+        if (!regions.length) {
             logger.error({ userPoolId }, '[admin] Cognito directory region/client resolution failed');
             cachedDirectoryUsers = [];
             cachedDirectoryUsersAt = Date.now();
             return [];
         }
-
-        const regions = getRegionCandidates(userPoolId);
         let lastError: unknown = null;
 
         for (const region of regions) {
