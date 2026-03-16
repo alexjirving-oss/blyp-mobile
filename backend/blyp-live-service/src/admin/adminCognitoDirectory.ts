@@ -208,9 +208,12 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
             code: String((lastError as any)?.name || ''),
             message: String((lastError as any)?.message || lastError),
         }, '[admin] Cognito directory unavailable after all region candidates failed');
-        throw (lastError instanceof Error
-            ? lastError
-            : new Error('Cognito directory unavailable: list users failed'));
+
+        // Degrade gracefully: cache an empty list to avoid repeated retries/log spam
+        // and allow callers to fall back to non-directory sources.
+        cachedDirectoryUsers = [];
+        cachedDirectoryUsersAt = Date.now();
+        return [];
     })();
 
     try {
