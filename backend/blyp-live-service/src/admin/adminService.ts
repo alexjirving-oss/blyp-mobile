@@ -284,14 +284,141 @@ function buildRestrictions(metadata: Record<string, any>): AdminRestrictions {
     };
 }
 
-const OPTIONAL_USER_SOURCES: Array<{ table: string; column: string }> = [
-    { table: 'users', column: 'id' },
-    { table: 'users', column: 'user_id' },
-    { table: 'user_profiles', column: 'user_id' },
-    { table: 'profiles', column: 'user_id' },
-    { table: 'accounts', column: 'id' },
-    { table: 'accounts', column: 'user_id' },
+type SqlUserIdSource = {
+    name: string;
+    table: string;
+    column?: string;
+    selectSql: string;
+    countSql: string;
+};
+
+const CORE_SQL_USER_ID_SOURCES: SqlUserIdSource[] = [
+    {
+        name: 'wallets.user_id',
+        table: 'wallets',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM wallets WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM wallets WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'user_admin_state.user_id',
+        table: 'user_admin_state',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM user_admin_state WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM user_admin_state WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'ledger_entries.user_id',
+        table: 'ledger_entries',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM ledger_entries WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM ledger_entries WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'gift_events.sender_user_id',
+        table: 'gift_events',
+        selectSql: `SELECT DISTINCT sender_user_id AS user_id FROM gift_events WHERE sender_user_id IS NOT NULL AND sender_user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT sender_user_id)::bigint AS n FROM gift_events WHERE sender_user_id IS NOT NULL AND sender_user_id <> ''`,
+    },
+    {
+        name: 'gift_events.receiver_user_id',
+        table: 'gift_events',
+        selectSql: `SELECT DISTINCT receiver_user_id AS user_id FROM gift_events WHERE receiver_user_id IS NOT NULL AND receiver_user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT receiver_user_id)::bigint AS n FROM gift_events WHERE receiver_user_id IS NOT NULL AND receiver_user_id <> ''`,
+    },
+    {
+        name: 'stream_earnings.creator_user_id',
+        table: 'stream_earnings',
+        selectSql: `SELECT DISTINCT creator_user_id AS user_id FROM stream_earnings WHERE creator_user_id IS NOT NULL AND creator_user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT creator_user_id)::bigint AS n FROM stream_earnings WHERE creator_user_id IS NOT NULL AND creator_user_id <> ''`,
+    },
+    {
+        name: 'promotions.user_id',
+        table: 'promotions',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM promotions WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM promotions WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'live_games.host_user_id',
+        table: 'live_games',
+        selectSql: `SELECT DISTINCT host_user_id AS user_id FROM live_games WHERE host_user_id IS NOT NULL AND host_user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT host_user_id)::bigint AS n FROM live_games WHERE host_user_id IS NOT NULL AND host_user_id <> ''`,
+    },
+    {
+        name: 'live_game_entries.user_id',
+        table: 'live_game_entries',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM live_game_entries WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM live_game_entries WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'live_game_settlements.host_user_id',
+        table: 'live_game_settlements',
+        selectSql: `SELECT DISTINCT host_user_id AS user_id FROM live_game_settlements WHERE host_user_id IS NOT NULL AND host_user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT host_user_id)::bigint AS n FROM live_game_settlements WHERE host_user_id IS NOT NULL AND host_user_id <> ''`,
+    },
+    {
+        name: 'user_subscriptions.user_id',
+        table: 'user_subscriptions',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM user_subscriptions WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM user_subscriptions WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'admin_audit_log.actor_user_id',
+        table: 'admin_audit_log',
+        selectSql: `SELECT DISTINCT actor_user_id AS user_id FROM admin_audit_log WHERE actor_user_id IS NOT NULL AND actor_user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT actor_user_id)::bigint AS n FROM admin_audit_log WHERE actor_user_id IS NOT NULL AND actor_user_id <> ''`,
+    },
+    {
+        name: 'admin_audit_log.target_id(user)',
+        table: 'admin_audit_log',
+        selectSql: `SELECT DISTINCT target_id AS user_id FROM admin_audit_log WHERE target_type = 'user' AND target_id IS NOT NULL AND target_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT target_id)::bigint AS n FROM admin_audit_log WHERE target_type = 'user' AND target_id IS NOT NULL AND target_id <> ''`,
+    },
 ];
+
+const OPTIONAL_SQL_USER_ID_SOURCES: SqlUserIdSource[] = [
+    {
+        name: 'users.id',
+        table: 'users',
+        column: 'id',
+        selectSql: `SELECT DISTINCT id AS user_id FROM users WHERE id IS NOT NULL AND id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT id)::bigint AS n FROM users WHERE id IS NOT NULL AND id <> ''`,
+    },
+    {
+        name: 'users.user_id',
+        table: 'users',
+        column: 'user_id',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM users WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM users WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'user_profiles.user_id',
+        table: 'user_profiles',
+        column: 'user_id',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM user_profiles WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM user_profiles WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'profiles.user_id',
+        table: 'profiles',
+        column: 'user_id',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM profiles WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM profiles WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+    {
+        name: 'accounts.id',
+        table: 'accounts',
+        column: 'id',
+        selectSql: `SELECT DISTINCT id AS user_id FROM accounts WHERE id IS NOT NULL AND id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT id)::bigint AS n FROM accounts WHERE id IS NOT NULL AND id <> ''`,
+    },
+    {
+        name: 'accounts.user_id',
+        table: 'accounts',
+        column: 'user_id',
+        selectSql: `SELECT DISTINCT user_id AS user_id FROM accounts WHERE user_id IS NOT NULL AND user_id <> ''`,
+        countSql: `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM accounts WHERE user_id IS NOT NULL AND user_id <> ''`,
+    },
+];
+
+const ALL_SQL_USER_ID_SOURCES: SqlUserIdSource[] = [...CORE_SQL_USER_ID_SOURCES, ...OPTIONAL_SQL_USER_ID_SOURCES];
 
 async function tableHasColumn(db: Knex, table: string, column: string): Promise<boolean> {
     const rs = await db.raw(
@@ -322,32 +449,55 @@ async function tableExists(db: Knex, table: string): Promise<boolean> {
     return Boolean((rs as any)?.rows?.[0]);
 }
 
-async function buildUserIdsCte(db: Knex): Promise<string> {
-    const selects: string[] = [
-        'SELECT user_id FROM wallets',
-        'SELECT user_id FROM user_admin_state',
-        'SELECT user_id FROM ledger_entries',
-        'SELECT sender_user_id AS user_id FROM gift_events',
-        'SELECT receiver_user_id AS user_id FROM gift_events',
-        'SELECT creator_user_id AS user_id FROM stream_earnings',
-        'SELECT user_id FROM promotions',
-        'SELECT host_user_id AS user_id FROM live_games',
-        'SELECT user_id FROM live_game_entries',
-        'SELECT host_user_id AS user_id FROM live_game_settlements',
-        'SELECT user_id FROM user_subscriptions',
-        'SELECT actor_user_id AS user_id FROM admin_audit_log',
-        "SELECT target_id AS user_id FROM admin_audit_log WHERE target_type = 'user'",
-    ];
+async function sqlUserIdSourceExists(db: Knex, source: SqlUserIdSource): Promise<boolean> {
+    if (source.column) {
+        return tableHasColumn(db, source.table, source.column);
+    }
+    return tableExists(db, source.table);
+}
 
-    for (const src of OPTIONAL_USER_SOURCES) {
+async function collectDistinctSqlUserIds(db: Knex): Promise<string[]> {
+    const ids = new Set<string>();
+
+    for (const source of ALL_SQL_USER_ID_SOURCES) {
         try {
-            const ok = await tableHasColumn(db, src.table, src.column);
+            const exists = await sqlUserIdSourceExists(db, source);
+            if (!exists) {
+                continue;
+            }
+
+            const rs = await db.raw(source.selectSql);
+            const rows = ((rs as any)?.rows || []) as Array<Record<string, unknown>>;
+            for (const row of rows) {
+                const userId = asString(row.user_id);
+                if (userId) {
+                    ids.add(userId);
+                }
+            }
+        } catch {
+            // Source-level failures should not block fallback enumeration.
+        }
+    }
+
+    return Array.from(ids).sort((left, right) => left.localeCompare(right));
+}
+
+async function buildUserIdsCte(db: Knex): Promise<string> {
+    const selects: string[] = [];
+
+    for (const source of ALL_SQL_USER_ID_SOURCES) {
+        try {
+            const ok = await sqlUserIdSourceExists(db, source);
             if (ok) {
-                selects.push(`SELECT ${src.column} AS user_id FROM ${src.table}`);
+                selects.push(source.selectSql);
             }
         } catch {
             // Optional source probes should never break admin listing.
         }
+    }
+
+    if (selects.length === 0) {
+        return `WITH ids AS (SELECT NULL::text AS user_id WHERE FALSE)`;
     }
 
     return `WITH ids AS (${selects.join(' UNION ')})`;
@@ -419,55 +569,45 @@ function matchesAdminUserQuery(user: AdminUserRow, q: string): boolean {
 
 async function listSqlKnownUsers(): Promise<AdminUserRow[]> {
     const db = adminDb();
-    const userIdsCte = await buildUserIdsCte(db);
-    const sql = `
-    ${userIdsCte}
-    SELECT DISTINCT
-      ids.user_id,
-      COALESCE(s.role, 'user') AS role,
-      COALESCE(s.is_banned, false) AS is_banned,
-      s.ban_reason,
-      s.banned_until,
-      s.created_at,
-      s.updated_at
-    FROM ids
-    LEFT JOIN user_admin_state s ON s.user_id = ids.user_id
-    WHERE ids.user_id IS NOT NULL
-      AND ids.user_id <> ''
-    ORDER BY ids.user_id ASC
-    `;
+    const userIds = await collectDistinctSqlUserIds(db);
+    const stateByUserId = new Map<string, any>();
 
-    const usersRs = await db.raw(sql);
-    const rows = ((usersRs as any)?.rows || []) as Array<any>;
-    if (rows.length === 0) {
-        const diagnosticSql = `
-        ${userIdsCte}
-        , sample_ids AS (
-            SELECT DISTINCT ids.user_id
-            FROM ids
-            WHERE ids.user_id IS NOT NULL
-              AND ids.user_id <> ''
-            ORDER BY ids.user_id ASC
-            LIMIT 5
-        )
-        SELECT
-            (SELECT COUNT(*)::bigint FROM ids WHERE ids.user_id IS NOT NULL AND ids.user_id <> '') AS ids_count,
-            COALESCE((SELECT ARRAY_AGG(sample_ids.user_id) FROM sample_ids), ARRAY[]::text[]) AS sample_user_ids,
-            (SELECT COUNT(*)::bigint FROM user_admin_state s JOIN sample_ids ON sample_ids.user_id = s.user_id) AS sample_state_matches
-        `;
-
+    if (userIds.length > 0) {
         try {
-            const diagnosticRs = await db.raw(diagnosticSql);
-            const diagnosticRow = ((diagnosticRs as any)?.rows?.[0] || {}) as Record<string, unknown>;
-            const sampleUserIds = Array.isArray(diagnosticRow.sample_user_ids)
-                ? diagnosticRow.sample_user_ids.map((v) => String(v)).slice(0, 5)
-                : [];
-            const sampleStateMatches = Number(diagnosticRow.sample_state_matches || 0);
+            const stateRows = await db('user_admin_state')
+                .select('user_id', 'role', 'is_banned', 'ban_reason', 'banned_until', 'created_at', 'updated_at')
+                .whereIn('user_id', userIds);
+
+            for (const row of stateRows as Array<any>) {
+                stateByUserId.set(String(row.user_id), row);
+            }
+        } catch {
+            // Keep fallback enumeration available even if admin state enrichment is unavailable.
+        }
+    }
+
+    const rows = userIds.map((userId) => {
+        const state = stateByUserId.get(userId);
+        return {
+            userId,
+            role: String(state?.role || 'user'),
+            isBanned: Boolean(state?.is_banned),
+            banReason: state?.ban_reason ? String(state.ban_reason) : null,
+            bannedUntil: state?.banned_until ? new Date(state.banned_until).toISOString() : null,
+            createdAt: state?.created_at ? new Date(state.created_at).toISOString() : null,
+            updatedAt: state?.updated_at ? new Date(state.updated_at).toISOString() : null,
+        };
+    });
+
+    if (rows.length === 0) {
+        try {
+            const sampleUserIds = userIds.slice(0, 5);
+            const sampleStateMatches = sampleUserIds.filter((userId) => stateByUserId.has(userId)).length;
 
             logger.warn(
                 {
                     zeroRows: true,
-                    idsCount: Number(diagnosticRow.ids_count || 0),
+                    idsCount: userIds.length,
                     sampleUserIds,
                     sampleUserIdsHaveAdminStateMatch: sampleStateMatches > 0,
                     sampleUserIdsAdminStateMatchCount: sampleStateMatches,
@@ -485,72 +625,23 @@ async function listSqlKnownUsers(): Promise<AdminUserRow[]> {
         }
     }
 
-    return rows.map((r) => ({
-        userId: String(r.user_id),
-        role: String(r.role || 'user'),
-        isBanned: Boolean(r.is_banned),
-        banReason: r.ban_reason ? String(r.ban_reason) : null,
-        bannedUntil: r.banned_until ? new Date(r.banned_until).toISOString() : null,
-        createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
-        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
-    }));
+    return rows;
 }
 
 export async function getAdminUserSourceStats(): Promise<Record<string, unknown>> {
     const db = adminDb();
 
-    const sources: Array<{ name: string; table: string; sql?: string }> = [
-        { name: 'wallets.user_id', table: 'wallets' },
-        { name: 'user_admin_state.user_id', table: 'user_admin_state' },
-        { name: 'ledger_entries.user_id', table: 'ledger_entries' },
-        { name: 'gift_events.sender_user_id', table: 'gift_events', sql: 'SELECT COUNT(DISTINCT sender_user_id)::bigint AS n FROM gift_events' },
-        { name: 'gift_events.receiver_user_id', table: 'gift_events', sql: 'SELECT COUNT(DISTINCT receiver_user_id)::bigint AS n FROM gift_events' },
-        { name: 'stream_earnings.creator_user_id', table: 'stream_earnings', sql: 'SELECT COUNT(DISTINCT creator_user_id)::bigint AS n FROM stream_earnings' },
-        { name: 'promotions.user_id', table: 'promotions' },
-        { name: 'live_games.host_user_id', table: 'live_games', sql: 'SELECT COUNT(DISTINCT host_user_id)::bigint AS n FROM live_games' },
-        { name: 'live_game_entries.user_id', table: 'live_game_entries' },
-        { name: 'live_game_settlements.host_user_id', table: 'live_game_settlements', sql: 'SELECT COUNT(DISTINCT host_user_id)::bigint AS n FROM live_game_settlements' },
-        { name: 'user_subscriptions.user_id', table: 'user_subscriptions' },
-        { name: 'admin_audit_log.actor_user_id', table: 'admin_audit_log', sql: 'SELECT COUNT(DISTINCT actor_user_id)::bigint AS n FROM admin_audit_log' },
-        { name: 'admin_audit_log.target_id(user)', table: 'admin_audit_log', sql: "SELECT COUNT(DISTINCT target_id)::bigint AS n FROM admin_audit_log WHERE target_type = 'user'" },
-    ];
-
-    const optionalSources = [
-        { name: 'users.id', table: 'users', column: 'id' },
-        { name: 'users.user_id', table: 'users', column: 'user_id' },
-        { name: 'user_profiles.user_id', table: 'user_profiles', column: 'user_id' },
-        { name: 'profiles.user_id', table: 'profiles', column: 'user_id' },
-        { name: 'accounts.id', table: 'accounts', column: 'id' },
-        { name: 'accounts.user_id', table: 'accounts', column: 'user_id' },
-    ];
-
     const counts: Array<Record<string, unknown>> = [];
 
-    for (const src of sources) {
+    for (const src of ALL_SQL_USER_ID_SOURCES) {
         try {
-            const exists = await tableExists(db, src.table);
+            const exists = await sqlUserIdSourceExists(db, src);
             if (!exists) {
                 counts.push({ source: src.name, table: src.table, exists: false, distinctUsers: 0 });
                 continue;
             }
 
-            const sql = src.sql || `SELECT COUNT(DISTINCT user_id)::bigint AS n FROM ${src.table}`;
-            const rs = await db.raw(sql);
-            const n = Number((rs as any)?.rows?.[0]?.n || 0);
-            counts.push({ source: src.name, table: src.table, exists: true, distinctUsers: n });
-        } catch (e: any) {
-            counts.push({ source: src.name, table: src.table, exists: true, error: e?.message || String(e) });
-        }
-    }
-
-    for (const src of optionalSources) {
-        try {
-            const exists = await tableHasColumn(db, src.table, src.column);
-            if (!exists) {
-                counts.push({ source: src.name, table: src.table, exists: false, distinctUsers: 0 });
-                continue;
-            }
-            const rs = await db.raw(`SELECT COUNT(DISTINCT ${src.column})::bigint AS n FROM ${src.table}`);
+            const rs = await db.raw(src.countSql);
             const n = Number((rs as any)?.rows?.[0]?.n || 0);
             counts.push({ source: src.name, table: src.table, exists: true, distinctUsers: n });
         } catch (e: any) {
