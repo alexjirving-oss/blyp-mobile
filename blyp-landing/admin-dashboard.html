@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blyp Admin Dashboard</title>
+    <style>
+        :root {
+            --bg: #091121;
+            --panel: #121d36;
+            --panel-2: #192743;
+            --text: #e6eef8;
+            --muted: #94aac8;
+            --line: rgba(185, 210, 255, 0.2);
+            --accent: #a855f7;
+            --accent-2: #ec4899;
+            --danger: #ef4444;
+            --ok: #10b981;
+            --warn: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Inter", sans-serif;
+            background:
+                radial-gradient(circle at 0% 0%, #10345f 0%, transparent 38%),
+                radial-gradient(circle at 100% 10%, #123566 0%, transparent 40%),
+                var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .wrap {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 22px 16px 40px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            min-height: 40px;
+        }
+
+        .brand-logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 5px 12px 8px;
+            border-radius: 11px;
+            background: linear-gradient(135deg, #a855f7, #d946ef, #ec4899);
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 23px;
+            letter-spacing: 0.01em;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+            box-shadow: 0 6px 16px rgba(168, 85, 247, 0.32);
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        button,
+        input {
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        button {
+            border: none;
+            border-radius: 11px;
+            padding: 9px 14px;
+            cursor: pointer;
+            color: white;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        }
+
+        .ghost {
+            background: transparent;
+            border: 1px solid rgba(185, 210, 255, 0.35);
+            color: #e2eeff;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        @media (max-width: 960px) {
+            .grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 620px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stat {
+            background: linear-gradient(180deg, rgba(26, 42, 70, 0.82), rgba(18, 29, 54, 0.92));
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 12px;
+        }
+
+        .stat .k {
+            color: var(--muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+
+        .stat .v {
+            color: #f5fbff;
+            font-size: 24px;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .panel {
+            background: rgba(18, 29, 54, 0.9);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+
+        .panel h2 {
+            margin: 0 0 10px;
+            font-size: 18px;
+            color: #f5fbff;
+        }
+
+        .filters {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        @media (max-width: 760px) {
+            .filters {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        input {
+            width: 100%;
+            border-radius: 9px;
+            border: 1px solid rgba(185, 210, 255, 0.25);
+            background: var(--panel-2);
+            color: var(--text);
+            padding: 9px 10px;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: rgba(236, 72, 153, 0.85);
+            box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.2);
+        }
+
+        .table-wrap {
+            overflow: auto;
+            border-radius: 10px;
+            border: 1px solid rgba(185, 210, 255, 0.15);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 920px;
+        }
+
+        .post-media-cell {
+            min-width: 130px;
+        }
+
+        .post-thumb-link {
+            display: inline-block;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(185, 210, 255, 0.22);
+            background: rgba(15, 27, 49, 0.5);
+        }
+
+        .post-thumb {
+            display: block;
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            background: rgba(15, 27, 49, 0.55);
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid rgba(185, 210, 255, 0.12);
+            font-size: 12px;
+            vertical-align: top;
+        }
+
+        th {
+            color: #bdd0ec;
+            background: rgba(20, 31, 56, 0.95);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .badge {
+            display: inline-block;
+            border-radius: 9px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            border: 1px solid transparent;
+        }
+
+        .badge.ok {
+            color: #98e8ca;
+            border-color: rgba(16, 185, 129, 0.4);
+            background: rgba(16, 185, 129, 0.12);
+        }
+
+        .badge.warn {
+            color: #fcd392;
+            border-color: rgba(245, 158, 11, 0.45);
+            background: rgba(245, 158, 11, 0.12);
+        }
+
+        .badge.err {
+            color: #fecaca;
+            border-color: rgba(239, 68, 68, 0.45);
+            background: rgba(239, 68, 68, 0.12);
+        }
+
+        .row-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .tiny {
+            font-size: 11px;
+            padding: 6px 10px;
+        }
+
+        .tiny.danger {
+            background: linear-gradient(135deg, #f87171, #ef4444);
+        }
+
+        .tiny.success {
+            background: linear-gradient(135deg, #34d399, #10b981);
+        }
+
+        .status {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 8px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .status.error {
+            color: #fecaca;
+        }
+
+        .status.ok {
+            color: #9ce6cd;
+        }
+
+        .section-note {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .mono {
+            font-family: Consolas, 'Courier New', monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="topbar">
+            <div class="brand"><span class="brand-logo" aria-label="Blyp logo">Blyp</span></div>
+            <div class="actions">
+                <button id="refreshMetricsBtn" class="ghost" type="button">Refresh metrics</button>
+                <button id="refreshUsersBtn" class="ghost" type="button">Refresh users</button>
+                <button id="diagnoseUsersBtn" class="ghost" type="button">Diagnose users</button>
+                <button id="logoutBtn" class="ghost" type="button">Logout</button>
+            </div>
+        </div>
+
+        <section id="metricsGrid" class="grid"></section>
+
+        <section class="panel">
+            <h2>Users</h2>
+            <div class="filters">
+                <input id="searchInput" type="text" placeholder="Search by user id (q)" />
+                <input id="limitInput" type="number" min="1" max="100" value="25" />
+                <input id="offsetInput" type="number" min="0" value="0" />
+            </div>
+
+            <div class="actions" style="margin-bottom:10px;">
+                <button id="applyFilterBtn" type="button">Apply filters</button>
+                <button id="prevPageBtn" class="ghost" type="button">Prev page</button>
+                <button id="nextPageBtn" class="ghost" type="button">Next page</button>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Banned</th>
+                            <th>Ban reason</th>
+                            <th>Banned until</th>
+                            <th>Updated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="usersBody"></tbody>
+                </table>
+            </div>
+
+            <div id="status" class="status">Loading session ...</div>
+        </section>
+
+        <section class="panel">
+            <h2>User Posts</h2>
+            <div id="selectedUserNote" class="section-note">Select a user row to view posts.</div>
+
+            <div class="filters">
+                <input id="postSearchInput" type="text" placeholder="Search posts by id/content" />
+                <input id="postLimitInput" type="number" min="1" max="100" value="25" />
+                <input id="postOffsetInput" type="number" min="0" value="0" />
+            </div>
+
+            <div class="actions" style="margin-bottom:10px;">
+                <button id="applyPostFilterBtn" type="button">Apply post filters</button>
+                <button id="prevPostPageBtn" class="ghost" type="button">Prev posts</button>
+                <button id="nextPostPageBtn" class="ghost" type="button">Next posts</button>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Post</th>
+                            <th>Type</th>
+                            <th>Media</th>
+                            <th>Content</th>
+                            <th>Likes</th>
+                            <th>Comments</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="postsBody"></tbody>
+                </table>
+            </div>
+
+            <div id="postStatus" class="status">No user selected.</div>
+        </section>
+    </div>
+
+    <script>
+        const DEFAULT_API_BASE = 'https://blyp-live-service.onrender.com';
+
+        const el = {
+            metricsGrid: document.getElementById('metricsGrid'),
+            usersBody: document.getElementById('usersBody'),
+            status: document.getElementById('status'),
+            postStatus: document.getElementById('postStatus'),
+            searchInput: document.getElementById('searchInput'),
+            limitInput: document.getElementById('limitInput'),
+            offsetInput: document.getElementById('offsetInput'),
+            postSearchInput: document.getElementById('postSearchInput'),
+            postLimitInput: document.getElementById('postLimitInput'),
+            postOffsetInput: document.getElementById('postOffsetInput'),
+            applyFilterBtn: document.getElementById('applyFilterBtn'),
+            prevPageBtn: document.getElementById('prevPageBtn'),
+            nextPageBtn: document.getElementById('nextPageBtn'),
+            applyPostFilterBtn: document.getElementById('applyPostFilterBtn'),
+            prevPostPageBtn: document.getElementById('prevPostPageBtn'),
+            nextPostPageBtn: document.getElementById('nextPostPageBtn'),
+            refreshMetricsBtn: document.getElementById('refreshMetricsBtn'),
+            refreshUsersBtn: document.getElementById('refreshUsersBtn'),
+            diagnoseUsersBtn: document.getElementById('diagnoseUsersBtn'),
+            logoutBtn: document.getElementById('logoutBtn'),
+            selectedUserNote: document.getElementById('selectedUserNote'),
+            postsBody: document.getElementById('postsBody'),
+        };
+
+        let selectedUserId = '';
+
+        function setStatus(message, type) {
+            el.status.textContent = message;
+            el.status.className = 'status' + (type ? ' ' + type : '');
+        }
+
+        function setPostStatus(message, type) {
+            el.postStatus.textContent = message;
+            el.postStatus.className = 'status' + (type ? ' ' + type : '');
+        }
+
+        function loadSession() {
+            try {
+                const raw = localStorage.getItem('blypAdminSession');
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                if (!parsed || !parsed.sessionToken) return null;
+                return {
+                    apiBase: String(parsed.apiBase || DEFAULT_API_BASE).trim(),
+                    sessionToken: String(parsed.sessionToken).trim(),
+                    timeoutMs: Number(parsed.timeoutMs || 15000),
+                };
+            } catch {
+                return null;
+            }
+        }
+
+        function logout() {
+            try {
+                fetch(session.apiBase + '/admin/auth/logout', {
+                    method: 'POST',
+                    headers: { 'x-admin-session': session.sessionToken },
+                }).catch(() => undefined);
+            } catch { }
+            localStorage.removeItem('blypAdminSession');
+            window.location.href = '/admin-login.html';
+        }
+
+        function handleAuthExpired() {
+            try {
+                sessionStorage.setItem('blypAdminFlash', 'Session expired. Please log in again.');
+            } catch { }
+            localStorage.removeItem('blypAdminSession');
+            window.location.href = '/admin-login.html';
+        }
+
+        function isHostedOrigin() {
+            return !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || '');
+        }
+
+        function isLoopbackApiBase(apiBase) {
+            return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(String(apiBase || '').trim());
+        }
+
+        function handleInvalidApiBase() {
+            try {
+                sessionStorage.setItem('blypAdminFlash', 'Stored API base pointed to localhost and was cleared. Log in with your deployed API host.');
+            } catch { }
+            localStorage.removeItem('blypAdminSession');
+            window.location.href = '/admin-login.html';
+        }
+
+        let session = loadSession();
+        if (!session) {
+            window.location.href = '/admin-login.html';
+        }
+        if (session && isHostedOrigin() && isLoopbackApiBase(session.apiBase)) {
+            handleInvalidApiBase();
+        }
+
+        async function fetchWithTimeout(url, options, timeoutMs) {
+            const ctrl = new AbortController();
+            const id = setTimeout(() => ctrl.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: ctrl.signal });
+            } finally {
+                clearTimeout(id);
+            }
+        }
+
+        async function adminGet(path) {
+            const requestSession = loadSession();
+            if (!requestSession || !requestSession.sessionToken) {
+                handleAuthExpired();
+                throw new Error('Missing admin session');
+            }
+            const res = await fetchWithTimeout(requestSession.apiBase + path, {
+                method: 'GET',
+                headers: {
+                    'x-admin-session': requestSession.sessionToken,
+                },
+            }, requestSession.timeoutMs);
+            if (res.status === 401) {
+                handleAuthExpired();
+                throw new Error('Session expired');
+            }
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error('HTTP ' + res.status + ' ' + txt);
+            }
+            return res.json();
+        }
+
+        async function adminPost(path, body) {
+            const requestSession = loadSession();
+            if (!requestSession || !requestSession.sessionToken) {
+                handleAuthExpired();
+                throw new Error('Missing admin session');
+            }
+            const res = await fetchWithTimeout(requestSession.apiBase + path, {
+                method: 'POST',
+                headers: {
+                    'x-admin-session': requestSession.sessionToken,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(body || {}),
+            }, requestSession.timeoutMs);
+            if (res.status === 401) {
+                handleAuthExpired();
+                throw new Error('Session expired');
+            }
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error('HTTP ' + res.status + ' ' + txt);
+            }
+            return res.json();
+        }
+
+        function renderMetrics(data) {
+            const entries = [
+                ['Total users', data.totalUsers],
+                ['Banned users', data.bannedUsers],
+                ['Coin supply', data.totalCoinSupply],
+                ['Gifts 24h', data.gifts24h],
+                ['Ledger 24h', data.ledgerEntries24h],
+                ['Active subs', data.activeSubscriptions],
+            ];
+            el.metricsGrid.innerHTML = entries.map(([k, v]) => {
+                return '<div class="stat"><div class="k">' + k + '</div><div class="v">' + Number(v || 0).toLocaleString() + '</div></div>';
+            }).join('');
+
+            if (data && data.degraded) {
+                const dep = data.dependencyStatus || {};
+                const dbOk = dep.db && dep.db.ok === true;
+                const redisOk = dep.redis && dep.redis.ok === true;
+                const dbBadge = '<span class="badge ' + (dbOk ? 'ok' : 'err') + '">DB ' + (dbOk ? 'OK' : 'DOWN') + '</span>';
+                const redisBadge = '<span class="badge ' + (redisOk ? 'ok' : 'err') + '">REDIS ' + (redisOk ? 'OK' : 'DOWN') + '</span>';
+                const note = esc(data.detail || 'Metrics are currently degraded.');
+                el.metricsGrid.innerHTML += '<div class="stat"><div class="k">Metrics status</div><div class="v" style="font-size:14px;line-height:1.35;">' + dbBadge + ' ' + redisBadge + '<div style="margin-top:8px;color:#fcd392;">' + note + '</div></div></div>';
+            }
+        }
+
+        function badgeClassForBan(isBanned) {
+            return isBanned ? 'err' : 'ok';
+        }
+
+        function esc(str) {
+            return String(str || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;');
+        }
+
+        function safeHttpUrl(value) {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            return /^https?:\/\//i.test(raw) ? raw : '';
+        }
+
+        function renderUsers(data) {
+            const items = Array.isArray(data.items) ? data.items : [];
+            if (!items.length) {
+                const msg = (data && data.degraded)
+                    ? 'Users unavailable. Check DB connectivity and retry.'
+                    : 'No users found.';
+                el.usersBody.innerHTML = '<tr><td colspan="7">' + esc(msg) + '</td></tr>';
+                return;
+            }
+
+            el.usersBody.innerHTML = items.map((u) => {
+                const bannedBadge = '<span class="badge ' + badgeClassForBan(u.isBanned) + '">' + (u.isBanned ? 'BANNED' : 'ACTIVE') + '</span>';
+                const actionButtons = u.isBanned
+                    ? '<button class="tiny success" data-action="unban" data-user="' + esc(u.userId) + '">Unban</button>'
+                    : '<button class="tiny danger" data-action="ban" data-user="' + esc(u.userId) + '">Ban</button>';
+
+                const viewUserBtn = '<button class="tiny ghost" data-action="view-user" data-user="' + esc(u.userId) + '">View user</button>';
+                const userLines = [
+                    u.displayName ? ('<div style="font-weight:700;color:#f5fbff;">' + esc(u.displayName) + '</div>') : '',
+                    u.email ? ('<div style="color:#bdd0ec;">' + esc(u.email) + '</div>') : '',
+                    '<div><code>' + esc(u.userId) + '</code></div>',
+                    u.userStatus ? ('<div class="section-note" style="margin:4px 0 0;">' + esc(u.userStatus) + (u.enabled === false ? ' | disabled' : '') + '</div>') : '',
+                ].filter(Boolean).join('');
+
+                return '<tr>' +
+                    '<td>' + userLines + '</td>' +
+                    '<td>' + esc(u.role || 'user') + '</td>' +
+                    '<td>' + bannedBadge + '</td>' +
+                    '<td>' + esc(u.banReason || '-') + '</td>' +
+                    '<td>' + esc(u.bannedUntil || '-') + '</td>' +
+                    '<td>' + esc(u.updatedAt || u.createdAt || '-') + '</td>' +
+                    '<td><div class="row-actions">' + actionButtons + viewUserBtn + '</div></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        function renderUserPosts(data) {
+            const items = Array.isArray(data.items) ? data.items : [];
+            if (!selectedUserId) {
+                el.postsBody.innerHTML = '<tr><td colspan="9">Select a user to view posts.</td></tr>';
+                return;
+            }
+            if (!items.length) {
+                const msg = data && data.degraded
+                    ? (data.detail || 'Post list unavailable for this environment.')
+                    : 'No posts found for this user.';
+                el.postsBody.innerHTML = '<tr><td colspan="9">' + esc(msg) + '</td></tr>';
+                return;
+            }
+
+            el.postsBody.innerHTML = items.map((p) => {
+                const statusBadge = p.isRemoved
+                    ? '<span class="badge err">REMOVED</span>'
+                    : '<span class="badge ok">ACTIVE</span>';
+                const actionButtons = p.isRemoved
+                    ? '<button class="tiny success" data-action="restore-post" data-post="' + esc(p.postId) + '" data-user="' + esc(p.userId || selectedUserId) + '">Restore</button>'
+                    : '<button class="tiny danger" data-action="remove-post" data-post="' + esc(p.postId) + '" data-user="' + esc(p.userId || selectedUserId) + '">Remove</button>';
+                const quickButtons = p.isRemoved
+                    ? ''
+                    : [
+                        '<button class="tiny ghost" data-action="remove-post-reason" data-reason="spam" data-post="' + esc(p.postId) + '" data-user="' + esc(p.userId || selectedUserId) + '">Spam</button>',
+                        '<button class="tiny ghost" data-action="remove-post-reason" data-reason="abuse" data-post="' + esc(p.postId) + '" data-user="' + esc(p.userId || selectedUserId) + '">Abuse</button>',
+                        '<button class="tiny ghost" data-action="remove-post-reason" data-reason="nudity" data-post="' + esc(p.postId) + '" data-user="' + esc(p.userId || selectedUserId) + '">Nudity</button>',
+                    ].join('');
+                const content = p.content ? esc(p.content) : '<span style="color:#94aac8;">(no text)</span>';
+                const previewUrl = safeHttpUrl(p.thumbnailUrl || p.mediaUrl || p.videoUrl);
+                const mediaHint = safeHttpUrl(p.videoUrl || p.mediaUrl);
+                const detailLine = mediaHint ? '<div class="section-note mono" style="margin:4px 0 0;">' + esc(mediaHint) + '</div>' : '';
+                const mediaCell = previewUrl
+                    ? '<a class="post-thumb-link" href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">' +
+                        '<img class="post-thumb" src="' + esc(previewUrl) + '" alt="Post media thumbnail" loading="lazy" />' +
+                      '</a>' +
+                      '<div class="section-note" style="margin-top:4px;"><a href="' + esc(previewUrl) + '" target="_blank" rel="noopener noreferrer">Open media</a></div>'
+                    : '<span class="section-note">No media</span>';
+
+                return '<tr>' +
+                    '<td><code>' + esc(p.postId) + '</code></td>' +
+                    '<td>' + esc(p.postType || 'post') + '</td>' +
+                    '<td class="post-media-cell">' + mediaCell + '</td>' +
+                    '<td>' + content + detailLine + '</td>' +
+                    '<td>' + Number(p.likeCount || 0).toLocaleString() + '</td>' +
+                    '<td>' + Number(p.commentCount || 0).toLocaleString() + '</td>' +
+                    '<td>' + statusBadge + (p.removedReason ? '<div class="section-note" style="margin:4px 0 0;">' + esc(p.removedReason) + '</div>' : '') + '</td>' +
+                    '<td>' + esc(p.updatedAt || p.createdAt || '-') + '</td>' +
+                    '<td><div class="row-actions">' + actionButtons + quickButtons + '</div></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        async function loadMetrics() {
+            const data = await adminGet('/admin/metrics/overview');
+            renderMetrics(data);
+            return data;
+        }
+
+        async function loadUsers() {
+            const q = encodeURIComponent(String(el.searchInput.value || '').trim());
+            const limit = Math.max(1, Math.min(100, Number(el.limitInput.value || 25)));
+            const offset = Math.max(0, Number(el.offsetInput.value || 0));
+            el.limitInput.value = String(limit);
+            el.offsetInput.value = String(offset);
+
+            const data = await adminGet('/admin/users?q=' + q + '&limit=' + limit + '&offset=' + offset);
+            renderUsers(data);
+            if (data && data.degraded) {
+                const dep = data.dependencyStatus || {};
+                const dbMsg = dep.db && dep.db.error ? dep.db.error : 'unknown';
+                setStatus('Users degraded: ' + (data.detail || 'database unavailable') + ' | DB: ' + dbMsg, 'error');
+            } else {
+                setStatus('Loaded ' + (data.items ? data.items.length : 0) + ' users (total ' + Number(data.total || 0).toLocaleString() + ').', 'ok');
+            }
+            return data;
+        }
+
+        async function loadSelectedUserPosts() {
+            if (!selectedUserId) {
+                renderUserPosts({ items: [] });
+                setPostStatus('No user selected.', '');
+                return { items: [], total: 0 };
+            }
+
+            const q = encodeURIComponent(String(el.postSearchInput.value || '').trim());
+            const limit = Math.max(1, Math.min(100, Number(el.postLimitInput.value || 25)));
+            const offset = Math.max(0, Number(el.postOffsetInput.value || 0));
+            el.postLimitInput.value = String(limit);
+            el.postOffsetInput.value = String(offset);
+
+            const path = '/admin/users/' + encodeURIComponent(selectedUserId) + '/posts?q=' + q + '&limit=' + limit + '&offset=' + offset;
+            const data = await adminGet(path);
+            renderUserPosts(data);
+
+            if (data && data.degraded) {
+                setPostStatus('Post list degraded: ' + (data.detail || 'post source unavailable'), 'error');
+            } else {
+                const source = data && data.sourceTable ? (' from ' + data.sourceTable) : '';
+                setPostStatus('Loaded ' + (data.items ? data.items.length : 0) + ' posts (total ' + Number(data.total || 0).toLocaleString() + ')' + source + '.', 'ok');
+            }
+            return data;
+        }
+
+        async function selectUser(userId) {
+            selectedUserId = String(userId || '').trim();
+            el.selectedUserNote.textContent = selectedUserId
+                ? ('Selected user: ' + selectedUserId)
+                : 'Select a user row to view posts.';
+            el.postOffsetInput.value = '0';
+            await loadSelectedUserPosts();
+        }
+
+        async function diagnoseUsers() {
+            const data = await adminGet('/admin/users/sources');
+            const lines = ['User source diagnostics:'];
+            const rows = Array.isArray(data.counts) ? data.counts : [];
+            for (const row of rows) {
+                const src = String(row.source || 'unknown');
+                const exists = row.exists === true;
+                const n = Number(row.distinctUsers || 0);
+                const err = row.error ? (' error=' + String(row.error)) : '';
+                lines.push('- ' + src + ' | exists=' + exists + ' | distinctUsers=' + n + err);
+            }
+            setStatus(lines.join('\n'), 'ok');
+            return data;
+        }
+
+        async function runInitialLoad() {
+            setStatus('Loading metrics and users ...');
+            const [metricsResult, usersResult] = await Promise.allSettled([loadMetrics(), loadUsers()]);
+
+            const failures = [];
+            if (metricsResult.status === 'rejected') {
+                failures.push('metrics: ' + (metricsResult.reason && metricsResult.reason.message ? metricsResult.reason.message : String(metricsResult.reason)));
+            }
+            if (usersResult.status === 'rejected') {
+                el.usersBody.innerHTML = '<tr><td colspan="7">Users unavailable. Check DB connectivity and retry.</td></tr>';
+                failures.push('users: ' + (usersResult.reason && usersResult.reason.message ? usersResult.reason.message : String(usersResult.reason)));
+            }
+
+            if (!failures.length) {
+                setStatus('Metrics and users loaded.', 'ok');
+                return;
+            }
+
+            if (failures.length === 1) {
+                setStatus('Loaded with warnings: ' + failures[0], 'error');
+            } else {
+                setStatus('Load failed: ' + failures.join(' | '), 'error');
+            }
+        }
+
+        async function handleBan(userId) {
+            const reason = prompt('Ban reason (optional):', 'manual admin action') || '';
+            const until = prompt('Banned until (optional ISO datetime, e.g. 2026-12-31T23:59:59Z):', '') || '';
+            try {
+                setStatus('Banning ' + userId + ' ...');
+                await adminPost('/admin/users/' + encodeURIComponent(userId) + '/ban', {
+                    reason: reason || undefined,
+                    bannedUntil: until || undefined,
+                });
+                setStatus('User banned: ' + userId, 'ok');
+                await Promise.all([loadMetrics(), loadUsers()]);
+            } catch (e) {
+                setStatus('Ban failed for ' + userId + ': ' + (e && e.message ? e.message : String(e)), 'error');
+            }
+        }
+
+        async function handleUnban(userId) {
+            const reason = prompt('Unban reason (optional):', 'manual admin action') || '';
+            try {
+                setStatus('Unbanning ' + userId + ' ...');
+                await adminPost('/admin/users/' + encodeURIComponent(userId) + '/unban', {
+                    reason: reason || undefined,
+                });
+                setStatus('User unbanned: ' + userId, 'ok');
+                await Promise.all([loadMetrics(), loadUsers()]);
+            } catch (e) {
+                setStatus('Unban failed for ' + userId + ': ' + (e && e.message ? e.message : String(e)), 'error');
+            }
+        }
+
+        async function handleRemovePost(postId, userId, presetReason) {
+            const reason = prompt('Remove reason (optional):', presetReason || 'policy violation') || '';
+            try {
+                setPostStatus('Removing post ' + postId + ' ...');
+                await adminPost('/admin/posts/' + encodeURIComponent(postId) + '/remove', {
+                    reason: reason || undefined,
+                    userId: userId || selectedUserId || undefined,
+                });
+                setPostStatus('Post removed: ' + postId, 'ok');
+                await Promise.all([loadMetrics(), loadSelectedUserPosts()]);
+            } catch (e) {
+                setPostStatus('Remove failed for ' + postId + ': ' + (e && e.message ? e.message : String(e)), 'error');
+            }
+        }
+
+        async function handleRestorePost(postId, userId) {
+            const reason = prompt('Restore reason (optional):', 'manual review') || '';
+            try {
+                setPostStatus('Restoring post ' + postId + ' ...');
+                await adminPost('/admin/posts/' + encodeURIComponent(postId) + '/restore', {
+                    reason: reason || undefined,
+                    userId: userId || selectedUserId || undefined,
+                });
+                setPostStatus('Post restored: ' + postId, 'ok');
+                await Promise.all([loadMetrics(), loadSelectedUserPosts()]);
+            } catch (e) {
+                setPostStatus('Restore failed for ' + postId + ': ' + (e && e.message ? e.message : String(e)), 'error');
+            }
+        }
+
+        el.usersBody.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('button[data-action]');
+            if (!btn) return;
+            const action = btn.getAttribute('data-action');
+            const userId = btn.getAttribute('data-user');
+            if (!userId) return;
+
+            if (action === 'ban') {
+                await handleBan(userId);
+            } else if (action === 'unban') {
+                await handleUnban(userId);
+            } else if (action === 'view-user') {
+                window.location.href = '/admin-user.html?userId=' + encodeURIComponent(userId);
+            }
+        });
+
+        el.postsBody.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('button[data-action]');
+            if (!btn) return;
+            const action = btn.getAttribute('data-action');
+            const postId = btn.getAttribute('data-post');
+            const userId = btn.getAttribute('data-user');
+            if (!postId) return;
+
+            if (action === 'remove-post') {
+                await handleRemovePost(postId, userId || selectedUserId);
+            } else if (action === 'remove-post-reason') {
+                const reason = String(btn.getAttribute('data-reason') || '').trim();
+                await handleRemovePost(postId, userId || selectedUserId, reason || 'policy violation');
+            } else if (action === 'restore-post') {
+                await handleRestorePost(postId, userId || selectedUserId);
+            }
+        });
+
+        el.applyFilterBtn.addEventListener('click', () => loadUsers().catch((e) => setStatus('Filter load failed: ' + e.message, 'error')));
+        el.prevPageBtn.addEventListener('click', () => {
+            const curr = Math.max(0, Number(el.offsetInput.value || 0));
+            const limit = Math.max(1, Number(el.limitInput.value || 25));
+            el.offsetInput.value = String(Math.max(0, curr - limit));
+            loadUsers().catch((e) => setStatus('Page load failed: ' + e.message, 'error'));
+        });
+        el.nextPageBtn.addEventListener('click', () => {
+            const curr = Math.max(0, Number(el.offsetInput.value || 0));
+            const limit = Math.max(1, Number(el.limitInput.value || 25));
+            el.offsetInput.value = String(curr + limit);
+            loadUsers().catch((e) => setStatus('Page load failed: ' + e.message, 'error'));
+        });
+        el.applyPostFilterBtn.addEventListener('click', () => loadSelectedUserPosts().catch((e) => setPostStatus('Post filter load failed: ' + e.message, 'error')));
+        el.prevPostPageBtn.addEventListener('click', () => {
+            const curr = Math.max(0, Number(el.postOffsetInput.value || 0));
+            const limit = Math.max(1, Number(el.postLimitInput.value || 25));
+            el.postOffsetInput.value = String(Math.max(0, curr - limit));
+            loadSelectedUserPosts().catch((e) => setPostStatus('Post page load failed: ' + e.message, 'error'));
+        });
+        el.nextPostPageBtn.addEventListener('click', () => {
+            const curr = Math.max(0, Number(el.postOffsetInput.value || 0));
+            const limit = Math.max(1, Number(el.postLimitInput.value || 25));
+            el.postOffsetInput.value = String(curr + limit);
+            loadSelectedUserPosts().catch((e) => setPostStatus('Post page load failed: ' + e.message, 'error'));
+        });
+        el.refreshMetricsBtn.addEventListener('click', () => loadMetrics().then(() => setStatus('Metrics refreshed.', 'ok')).catch((e) => setStatus('Metrics failed: ' + e.message, 'error')));
+        el.refreshUsersBtn.addEventListener('click', () => loadUsers().catch((e) => setStatus('Users failed: ' + e.message, 'error')));
+        el.diagnoseUsersBtn.addEventListener('click', () => diagnoseUsers().catch((e) => setStatus('User diagnostics failed: ' + e.message, 'error')));
+        el.logoutBtn.addEventListener('click', logout);
+
+        runInitialLoad();
+    </script>
+</body>
+
+</html>
