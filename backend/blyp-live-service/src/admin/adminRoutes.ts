@@ -339,6 +339,16 @@ router.get('/admin/users/:userId/posts', requireAdmin, async (req: AuthedRequest
     }
 });
 
+router.get('/admin/users/sources', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        const out = await getAdminUserSourceStats();
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/sources failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
 router.get('/admin/users/:userId', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const targetUserId = String(req.params?.userId || '').trim();
@@ -529,16 +539,6 @@ router.get('/admin/metrics/overview', requireAdmin, async (_req: AuthedRequest, 
         return res.json(out);
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/metrics/overview failed');
-        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
-    }
-});
-
-router.get('/admin/users/sources', requireAdmin, async (_req: AuthedRequest, res: Response) => {
-    try {
-        const out = await getAdminUserSourceStats();
-        return res.json(out);
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/sources failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });
