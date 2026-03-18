@@ -554,9 +554,16 @@ function buildVisibleAdminUsers(sqlUsers: AdminUserRow[], directoryUsers: Direct
         sqlUsersById.set(row.userId, row);
     }
 
-    return directoryUsers
+    const mergedFromDirectory = directoryUsers
         .filter(isAppLinkedDirectoryUser)
         .map((directoryUser) => mergeUserRowWithDirectory(sqlUsersById.get(directoryUser.userId) || null, directoryUser));
+
+    const mergedIds = new Set(mergedFromDirectory.map((row) => row.userId));
+    const sqlOnlyUsers = sqlUsers
+        .filter((row) => row.userId && !mergedIds.has(row.userId))
+        .map((row) => mergeUserRowWithDirectory(row, null));
+
+    return [...mergedFromDirectory, ...sqlOnlyUsers];
 }
 
 function matchesAdminUserQuery(user: AdminUserRow, q: string): boolean {
