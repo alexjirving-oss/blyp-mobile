@@ -16,6 +16,14 @@
  */
 
 import { db, auth, storage } from '../config/firebase';
+// Unified live model constants & flags (Stage 2.1 incremental integration)
+import {
+  LIVE_STREAMS_COLLECTION,
+  SEGMENTS_SUBCOLLECTION,
+  ENABLE_LIVE_SEGMENTS_SUBCOLLECTION,
+  ENABLE_LEGACY_SEGMENTS_MAP,
+  ENABLE_LIVE_FEATURES,
+} from '../config/liveStreamModel';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { serverTimestamp, increment } from 'firebase/firestore';
@@ -23,6 +31,76 @@ import { serverTimestamp, increment } from 'firebase/firestore';
 async function uriToBlob(uri) {
   const res = await fetch(uri);
   return await res.blob();
+}
+
+// Helper: create stream document using unified collection constant.
+async function createLiveStreamDoc({ user, title, description, thumbnailUrl, serverTimestampFn }) {
+  const streamData = {
+    title: (title || 'Live Stream'),
+    description: (description || ''),
+    userId: user.uid,
+    hostId: user.uid, // future-proof explicit hostId
+    userName: (user.displayName && typeof user.displayName === 'string') ? user.displayName.trim() : 'Anonymous User',
+    userPhotoURL: (user.photoURL && typeof user.photoURL === 'string') ? user.photoURL : null,
+    thumbnailUrl: thumbnailUrl || null,
+    status: 'live',
+    segments: ENABLE_LEGACY_SEGMENTS_MAP ? {} : undefined, // TODO(stage2-live-unification): Drop legacy inline segments map field after full migration.
+    currentSegment: -1,
+    viewCount: 1,
+    likes: 0,
+    createdAt: serverTimestampFn(),
+    startedAt: serverTimestampFn(),
+    lastUpdated: serverTimestampFn(),
+    totalSegments: 0,
+    avgSegmentSize: 0,
+    streamHealth: { status: 'starting', lastSegmentTime: null, bufferHealth: 'good' }
+  };
+  const tStart = Date.now();
+  const ref = await db.collection(LIVE_STREAMS_COLLECTION).add(streamData);
+  console.log('[LIVE][createLiveStreamDoc] added', { streamId: ref.id, ms: Date.now() - tStart });
+  return { streamId: ref.id, streamData };
+}
+
+// Helper: append segment performing dual-write based on flags.
+// TODO(stage2-live-unification): Remove dual-write once all viewers consume subcollection only.
+async function appendSegment({ streamId, segmentNumber, downloadURL, latencyMs, serverTimestampFn }) {
+  const streamRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId);
+  const baseUpdate = {
+    currentSegment: segmentNumber,
+    lastSegmentUploadedAt: serverTimestampFn(),
+    totalSegments: segmentNumber + 1,
+    streamHealth: { lastUpload: serverTimestampFn(), uploadLatency: latencyMs }
+  };
+  const legacyUpdate = ENABLE_LEGACY_SEGMENTS_MAP
+    ? { [`segments.${segmentNumber}`]: { url: downloadURL, uploadedAt: serverTimestampFn(), segmentNumber } }
+    : {}; // TODO(stage2-live-unification): Delete legacy map update after migration.
+  await streamRef.update({ ...baseUpdate, ...legacyUpdate });
+  if (ENABLE_LIVE_SEGMENTS_SUBCOLLECTION) { // TODO(stage2-live-unification): Subcollection becomes sole canonical write path.
+    try {
+      await streamRef.collection(SEGMENTS_SUBCOLLECTION).doc(String(segmentNumber)).set({
+        number: segmentNumber,
+        variant: 'source',
+        url: downloadURL,
+        uploadedAt: serverTimestampFn(),
+        clientUploadLatencyMs: latencyMs,
+      });
+    } catch (e) {
+      console.warn('[LIVE][appendSegment] subcollection write failed', e?.message);
+    }
+  }
+}
+
+// Helper: end stream document.
+async function endLiveStream({ streamId, serverTimestampFn, finalSegmentCount }) {
+  const streamRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId);
+  const tStart = Date.now();
+  await streamRef.update({
+    status: 'ended',
+    endedAt: serverTimestampFn(),
+    lastUpdated: serverTimestampFn(),
+    streamHealth: { status: 'ended', endReason: 'user_ended', finalSegmentCount: finalSegmentCount || 0 }
+  });
+  console.log('[LIVE][endLiveStream] status updated', { streamId, ms: Date.now() - tStart });
 }
 
 class HLSLiveStreamService {
@@ -62,6 +140,10 @@ class HLSLiveStreamService {
    */
   async createStream({ title, description, thumbnailFile } = {}) {
     try {
+      if (!ENABLE_LIVE_FEATURES) {
+        console.warn('[LIVE] Live features disabled (createStream no-op)');
+        return { streamId: null };
+      }
       const user = auth.currentUser;
       if (!user) throw new Error('User must be logged in to stream');
       
@@ -92,37 +174,16 @@ class HLSLiveStreamService {
         }
       }
       
-      // Create stream document with production-grade validation
-      const streamData = {
-        title: validTitle || 'Live Stream',
-        description: validDescription || '',
-        userId: user.uid,
-        userName: (user.displayName && typeof user.displayName === 'string') ? user.displayName.trim() : 'Anonymous User',
-        userPhotoURL: (user.photoURL && typeof user.photoURL === 'string') ? user.photoURL : null,
+      // Delegate document creation to helper (unified model)
+      const t1Start = Date.now();
+      const { streamId } = await createLiveStreamDoc({
+        user,
+        title: validTitle,
+        description: validDescription,
         thumbnailUrl,
-        status: 'live',
-        segments: {}, // legacy inline segment map (temporary; will migrate to subcollection)
-        currentSegment: -1,
-        viewCount: 1, // Creator counts as first viewer
-        likes: 0,
-        // Removed legacy comments array; comments now stored in subcollection liveStreams/{id}/comments
-  createdAt: serverTimestamp(),
-  startedAt: serverTimestamp(),
-  lastUpdated: serverTimestamp(),
-        // TikTok-style metadata
-        totalSegments: 0,
-        avgSegmentSize: 0,
-        streamHealth: {
-          status: 'starting',
-          lastSegmentTime: null,
-          bufferHealth: 'good'
-        }
-      };
-      
-  const t1Start = Date.now();
-  const streamRef = await db.collection('liveStreams').add(streamData);
-      const streamId = streamRef.id;
-  console.log('[METRIC][createStream_addDoc_complete]', new Date().toISOString(), { streamId, elapsedMs: Date.now() - t1Start });
+        serverTimestampFn: serverTimestamp,
+      });
+      console.log('[METRIC][createStream_addDoc_complete]', new Date().toISOString(), { streamId, elapsedMs: Date.now() - t1Start });
       
       // Update user profile to mark as live
       try {
@@ -145,7 +206,7 @@ class HLSLiveStreamService {
       });
       
       console.log(`✅ Stream created: ${streamId}`);
-      return { streamId, streamData };
+      return { streamId };
       
     } catch (error) {
       console.error('❌ Error creating stream:', error);
@@ -158,6 +219,10 @@ class HLSLiveStreamService {
    */
   async uploadSegment(streamId, videoUri, segmentNumber) {
     try {
+      if (!ENABLE_LIVE_FEATURES) {
+        console.warn('[LIVE] Live features disabled (uploadSegment no-op)');
+        return null;
+      }
       // Production validation: Check all required parameters
       if (!streamId || typeof streamId !== 'string') {
         throw new Error('Invalid streamId: must be a non-empty string');
@@ -222,32 +287,22 @@ class HLSLiveStreamService {
       this.uploadQueue.delete(`${streamId}_${segmentNumber}`);
       
       // Update Firestore with new segment (TikTok-style atomic update)
-      const streamRef = db.collection('liveStreams').doc(streamId);
-      const segmentData = {
-        url: downloadURL,
-        uploadedAt: serverTimestamp(),
-        segmentNumber: segmentNumber
-      };
-      const legacyMapUpdate = this.disableLegacySegmentMap
-        ? { currentSegment: segmentNumber, lastSegmentUploadedAt: serverTimestamp(), totalSegments: segmentNumber + 1, streamHealth: { lastUpload: serverTimestamp(), uploadLatency: Date.now() } }
-        : { currentSegment: segmentNumber, [`segments.${segmentNumber}`]: segmentData, lastSegmentUploadedAt: serverTimestamp(), totalSegments: segmentNumber + 1, streamHealth: { lastUpload: serverTimestamp(), uploadLatency: Date.now() } };
-      // Write legacy map fields only if flag not disabling them (backward compatibility for viewer code).
-      await streamRef.update(legacyMapUpdate);
-      // Dual-write segment document in subcollection (vNext unified model)
-      try {
-        await streamRef.collection('segments').doc(String(segmentNumber)).set({
-          number: segmentNumber,
-          variant: 'source',
-          url: downloadURL,
-          uploadedAt: serverTimestamp(),
-          clientUploadLatencyMs: latencyMs,
-        });
-        // Opportunistic pruning (every 5 segments) to cap subcollection growth.
-        if (segmentNumber % 5 === 0) {
+      // Unified append helper centralizes dual-write behaviour.
+      await appendSegment({
+        streamId,
+        segmentNumber,
+        downloadURL,
+        latencyMs,
+        serverTimestampFn: serverTimestamp,
+      });
+      // Opportunistic pruning retained (legacy path uses helper internal; we prune separately here for simplicity)
+      if (ENABLE_LIVE_SEGMENTS_SUBCOLLECTION && segmentNumber % 5 === 0) {
+        try {
+          const streamRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId);
           await this._pruneSegmentSubcollection(streamRef, this.maxSegmentsPerStream);
+        } catch (e) {
+          console.warn('[LIVE] prune attempt failed', e?.message);
         }
-      } catch (segDocErr) {
-        console.warn('⚠️ Segment subcollection write failed (non-fatal):', segDocErr?.message);
       }
       if (segmentNumber === 0) {
         // Estimate file size from the original URI (blob not in scope here)
@@ -303,6 +358,7 @@ class HLSLiveStreamService {
         if (latest) return { ...latest, source: 'subcollection' };
       }
       // Fallback: legacy map
+      // TODO(stage2-live-unification): Remove legacy fallback after viewer confirmed on subcollection.
       const docSnap = await streamRef.get();
       if (!docSnap.exists) return null;
       const data = docSnap.data() || {};
@@ -328,6 +384,7 @@ class HLSLiveStreamService {
         return items.slice(-count).map(s => ({ ...s, source: 'subcollection' }));
       }
       // Fallback
+      // TODO(stage2-live-unification): Remove legacy map fallback window logic post-migration.
       const docSnap = await streamRef.get();
       if (!docSnap.exists) return [];
       const data = docSnap.data() || {};
@@ -489,7 +546,7 @@ class HLSLiveStreamService {
       console.log(`🧹 TikTok cleanup: removing segments older than ${cleanupThreshold}`);
       
       // Delete old segments from storage
-      for (let i = 0; i <= cleanupThreshold; i++) {
+      for (let i = 0; i <= cleanupThreshold; i++) { // TODO(stage2-live-unification): Legacy map cleanup becomes unnecessary once map removed.
         try {
           const oldSegmentRef = ref(storage, `${storagePrefix}/segment_${i}.mp4`);
           await deleteObject(oldSegmentRef);
@@ -507,7 +564,7 @@ class HLSLiveStreamService {
         updates[`segments.${i}`] = null; // Remove field
       }
       
-      if (Object.keys(updates).length > 0) {
+      if (Object.keys(updates).length > 0) { // TODO(stage2-live-unification): Remove entire updates block when legacy map removed.
         await streamRef.update(updates);
       }
       
@@ -522,25 +579,21 @@ class HLSLiveStreamService {
    */
   async endStream(streamId) {
     try {
+      if (!ENABLE_LIVE_FEATURES) {
+        console.warn('[LIVE] Live features disabled (endStream no-op)');
+        return;
+      }
       const user = auth.currentUser;
       if (!user) throw new Error('User must be logged in');
       
       console.log(`⏹️ Ending stream ${streamId}...`);
       
       // Update stream status
-      const streamRef = db.collection('liveStreams').doc(streamId);
-      const tEndStart = Date.now();
-      await streamRef.update({
-        status: 'ended',
-        endedAt: serverTimestamp(),
-        lastUpdated: serverTimestamp(),
-        streamHealth: {
-          status: 'ended',
-          endReason: 'user_ended',
-          finalSegmentCount: this.activeStreams.get(streamId)?.segmentCount || 0
-        }
+      await endLiveStream({
+        streamId,
+        serverTimestampFn: serverTimestamp,
+        finalSegmentCount: this.activeStreams.get(streamId)?.segmentCount || 0,
       });
-      console.log('[METRIC][endStream_statusUpdated]', new Date().toISOString(), { streamId, elapsedMs: Date.now() - tEndStart });
       
       // Update user profile to mark as no longer live
       try {
@@ -607,7 +660,7 @@ class HLSLiveStreamService {
    */
   async getActiveStreams(maxResults = 20) {
     try {
-  const streamsRef = db.collection('liveStreams');
+  const streamsRef = db.collection(LIVE_STREAMS_COLLECTION);
       
       // Try the complex query first (requires composite index)
       try {
@@ -704,7 +757,7 @@ class HLSLiveStreamService {
    * Subscribe to real-time stream updates (TikTok-style live updates)
    */
   subscribeToStream(streamId, callback) {
-    const streamRef = db.collection('liveStreams').doc(streamId);
+    const streamRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId);
     
     return streamRef.onSnapshot((docSnap) => {
       if (docSnap.exists) {
@@ -714,7 +767,7 @@ class HLSLiveStreamService {
           id: docSnap.id,
           ...data,
           isHealthy: this.isStreamHealthy(data),
-          latestSegmentUrl: data.segments?.[data.currentSegment]?.url,
+          latestSegmentUrl: data.segments?.[data.currentSegment]?.url, // TODO(stage2-live-unification): Use subcollection for latest segment lookups.
           bufferSegments: this.getBufferSegments(data)
         });
       } else {
@@ -789,7 +842,7 @@ class HLSLiveStreamService {
    * Subscribe to comments with TikTok-style real-time updates
    */
   subscribeToComments(streamId, callback) {
-    const commentsRef = db.collection('liveStreams').doc(streamId).collection('comments');
+    const commentsRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId).collection('comments');
     const commentsQuery = commentsRef.orderBy('timestamp', 'desc').limit(50);
     
     return commentsQuery.onSnapshot((snapshot) => {
@@ -808,7 +861,7 @@ class HLSLiveStreamService {
    * Legacy method for compatibility - now uses subcollections
    */
   subscribeToCommentsLegacy(streamId, callback) {
-    const streamRef = db.collection('liveStreams').doc(streamId);
+    const streamRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId);
     
     return streamRef.onSnapshot((docSnap) => {
       if (docSnap.exists) {
@@ -838,7 +891,7 @@ class HLSLiveStreamService {
       const user = auth.currentUser;
       if (!user) throw new Error('User must be logged in');
       
-      const streamRef = db.collection('liveStreams').doc(streamId);
+      const streamRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId);
       
       // Just increment like count (no toggle, continuous likes)
       await streamRef.update({
@@ -904,7 +957,7 @@ class HLSLiveStreamService {
       const user = auth.currentUser;
       if (!user) return false;
       
-  const likeRef = db.collection('liveStreams').doc(streamId).collection('likes').doc(user.uid);
+  const likeRef = db.collection(LIVE_STREAMS_COLLECTION).doc(streamId).collection('likes').doc(user.uid);
   const likeDoc = await likeRef.get();
   return likeDoc.exists;
     } catch (error) {
@@ -991,7 +1044,7 @@ class HLSLiveStreamService {
       const bufferEnd = currentSegment + 1;
       
       for (let i = bufferStart; i <= bufferEnd; i++) {
-        const segment = streamData.segments && streamData.segments[i];
+        const segment = streamData.segments && streamData.segments[i]; // TODO(stage2-live-unification): Replace with subcollection derived buffer.
         if (segment && typeof segment === 'object' && typeof segment.url === 'string') {
           bufferSegments.push({
             number: i,

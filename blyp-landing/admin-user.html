@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blyp Admin User</title>
+    <style>
+        :root {
+            --bg: #091121;
+            --panel: #121d36;
+            --panel-2: #192743;
+            --text: #e6eef8;
+            --muted: #94aac8;
+            --line: rgba(185, 210, 255, 0.2);
+            --accent: #a855f7;
+            --accent-2: #ec4899;
+            --danger: #ef4444;
+            --ok: #10b981;
+            --warn: #f59e0b;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Inter", sans-serif;
+            background:
+                radial-gradient(circle at 0% 0%, #10345f 0%, transparent 38%),
+                radial-gradient(circle at 100% 10%, #123566 0%, transparent 40%),
+                var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .wrap {
+            max-width: 1160px;
+            margin: 0 auto;
+            padding: 22px 16px 40px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--line);
+            flex-wrap: wrap;
+        }
+
+        .brand-logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 5px 12px 8px;
+            border-radius: 11px;
+            background: linear-gradient(135deg, #a855f7, #d946ef, #ec4899);
+            color: #fff;
+            font-weight: 800;
+            font-size: 23px;
+            letter-spacing: 0.01em;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+            box-shadow: 0 6px 16px rgba(168, 85, 247, 0.32);
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        button, input, textarea, select {
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        button {
+            border: none;
+            border-radius: 11px;
+            padding: 9px 16px;
+            cursor: pointer;
+            color: white;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            transition: opacity 0.15s, transform 0.1s, background 0.15s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        .ghost {
+            background: transparent;
+            border: 1px solid rgba(185, 210, 255, 0.35);
+            color: #e2eeff;
+        }
+
+        .ghost:hover {
+            background: rgba(185, 210, 255, 0.07);
+            opacity: 1;
+        }
+
+        .danger {
+            background: linear-gradient(135deg, #f87171, #ef4444);
+        }
+
+        .success {
+            background: linear-gradient(135deg, #34d399, #10b981);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        @media (max-width: 860px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        .panel {
+            background: rgba(18, 29, 54, 0.92);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 18px 20px;
+            margin-bottom: 14px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.22);
+        }
+
+        .panel > h2 {
+            margin: 0 0 14px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--muted);
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 10px;
+        }
+
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .profile-avatar {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            border: 1px solid rgba(185, 210, 255, 0.28);
+            background: rgba(15, 27, 49, 0.6);
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+
+        .profile-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .profile-uid {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f5fbff;
+            word-break: break-all;
+        }
+
+        .profile-meta-badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 10px;
+            border-radius: 9px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .badge-active {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-banned {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .badge-restricted {
+            background: rgba(245, 158, 11, 0.16);
+            color: #fcd34d;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .badge-verified {
+            background: rgba(217, 70, 239, 0.14);
+            color: #f5b7ff;
+            border: 1px solid rgba(217, 70, 239, 0.28);
+        }
+
+        .badge-neutral {
+            background: rgba(148, 170, 200, 0.12);
+            color: var(--muted);
+            border: 1px solid rgba(148, 170, 200, 0.2);
+        }
+
+        .kv {
+            display: grid;
+            grid-template-columns: 160px 1fr;
+            gap: 6px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            align-items: center;
+        }
+
+        .label {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .value code {
+            color: #f8fbff;
+            background: rgba(15, 27, 49, 0.65);
+            border: 1px solid rgba(185, 210, 255, 0.18);
+            padding: 3px 8px;
+            border-radius: 9px;
+            font-size: 12px;
+            display: inline-block;
+            word-break: break-all;
+        }
+
+        label {
+            display: block;
+            font-size: 11px;
+            color: var(--muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 5px;
+            margin-top: 12px;
+        }
+
+        input, textarea, select {
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid rgba(185, 210, 255, 0.22);
+            background: rgba(15, 27, 49, 0.55);
+            color: var(--text);
+            padding: 9px 12px;
+            outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            border-color: rgba(236, 72, 153, 0.75);
+            box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.14);
+        }
+
+        textarea { min-height: 110px; resize: vertical; }
+
+        .checks {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            margin-bottom: 12px;
+        }
+
+        .checks label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #d5e3f5;
+            font-size: 12px;
+            text-transform: none;
+            letter-spacing: normal;
+            font-weight: 500;
+            margin: 0;
+            padding: 6px 11px;
+            border-radius: 9px;
+            border: 1px solid rgba(185, 210, 255, 0.16);
+            background: rgba(25, 39, 67, 0.55);
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .checks label:hover {
+            border-color: rgba(236, 72, 153, 0.45);
+            background: rgba(236, 72, 153, 0.08);
+        }
+
+        .checks input[type="checkbox"] {
+            width: auto;
+            accent-color: #ec4899;
+            margin: 0;
+            padding: 0;
+        }
+
+        .state-control {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .state-option {
+            display: flex;
+        }
+
+        .state-option input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .state-chip {
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid rgba(185, 210, 255, 0.18);
+            background: rgba(25, 39, 67, 0.55);
+            color: #d5e3f5;
+            text-align: center;
+            padding: 10px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.1s;
+        }
+
+        .state-option input:checked + .state-chip {
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+        }
+
+        .state-option input:focus-visible + .state-chip {
+            box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.18);
+        }
+
+        .state-option input:checked + .state-chip.state-active {
+            border-color: rgba(16, 185, 129, 0.46);
+            background: rgba(16, 185, 129, 0.2);
+            color: #86efac;
+        }
+
+        .state-option input:checked + .state-chip.state-restricted {
+            border-color: rgba(245, 158, 11, 0.46);
+            background: rgba(245, 158, 11, 0.2);
+            color: #fde68a;
+        }
+
+        .state-option input:checked + .state-chip.state-banned {
+            border-color: rgba(239, 68, 68, 0.46);
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
+
+        .state-hint {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .role-pills {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .role-pill {
+            border-radius: 10px;
+            border: 1px solid rgba(185, 210, 255, 0.18);
+            background: rgba(25, 39, 67, 0.55);
+            color: #d5e3f5;
+            text-align: center;
+            padding: 8px 10px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .role-pill.active {
+            border-color: rgba(236, 72, 153, 0.52);
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.36), rgba(236, 72, 153, 0.24));
+            color: #fff1fb;
+            box-shadow: 0 6px 18px rgba(168, 85, 247, 0.18);
+        }
+
+        .notes-list {
+            margin-top: 10px;
+            border: 1px solid rgba(185, 210, 255, 0.15);
+            border-radius: 10px;
+            background: rgba(15, 27, 49, 0.45);
+            max-height: 160px;
+            overflow: auto;
+        }
+
+        .note-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(185, 210, 255, 0.1);
+            font-size: 12px;
+        }
+
+        .note-item:last-child {
+            border-bottom: none;
+        }
+
+        .note-meta {
+            color: var(--muted);
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .note-empty {
+            padding: 10px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .status {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            padding: 8px 12px;
+            border-radius: 10px;
+            background: rgba(15, 27, 49, 0.45);
+            border: 1px solid transparent;
+        }
+
+        .status.error {
+            color: #fca5a5;
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .status.ok {
+            color: #6ee7b7;
+            background: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .table-wrap {
+            overflow: auto;
+            border-radius: 12px;
+            border: 1px solid rgba(185, 210, 255, 0.15);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 760px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 9px 12px;
+            border-bottom: 1px solid rgba(185, 210, 255, 0.1);
+            font-size: 12px;
+            vertical-align: top;
+        }
+
+        th {
+            color: var(--muted);
+            background: rgba(20, 31, 56, 0.95);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tbody tr:hover {
+            background: rgba(185, 210, 255, 0.04);
+        }
+
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .id-doc-card {
+                background: rgba(15, 27, 49, 0.45);
+                border: 1px solid rgba(185, 210, 255, 0.15);
+                border-radius: 12px;
+                padding: 14px;
+            }
+
+            .id-doc-label {
+                font-size: 11px;
+                font-weight: 700;
+                color: var(--muted);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin-bottom: 10px;
+            }
+
+            .id-doc-placeholder {
+                width: 100%;
+                height: 80px;
+                border: 1px dashed rgba(185, 210, 255, 0.25);
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--muted);
+                font-size: 12px;
+                background: rgba(15, 27, 49, 0.3);
+            }
+
+            .id-doc-placeholder img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                border-radius: 8px;
+            }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="topbar">
+            <div class="brand-logo" aria-label="Blyp logo">Blyp</div>
+            <div class="actions">
+                <button id="backBtn" class="ghost" type="button">Back to dashboard</button>
+                <button id="refreshBtn" class="ghost" type="button">Refresh user</button>
+                <button id="logoutBtn" class="ghost" type="button">Logout</button>
+            </div>
+        </div>
+
+        <section class="panel">
+            <h2>User Profile</h2>
+            <div class="profile-header">
+                <img class="profile-avatar" id="profileImage" alt="User profile image" />
+                <div class="profile-main">
+                    <div class="profile-uid"><code id="userIdValue">-</code></div>
+                    <div class="profile-meta-badges">
+                        <span class="badge badge-neutral" id="statusBadge">-</span>
+                        <span class="badge badge-neutral" id="verificationBadge">-</span>
+                    </div>
+                </div>
+            </div>
+            <div class="kv">
+                <div class="label">Role</div>
+                <div class="value">
+                    <div class="role-pills" id="rolePills">
+                        <span class="role-pill" id="roleUser">User</span>
+                        <span class="role-pill" id="roleAdmin">Admin</span>
+                        <span class="role-pill" id="roleManager">Manager</span>
+                    </div>
+                </div>
+            </div>
+            <div class="kv"><div class="label">Account created</div><div class="value" id="createdValue">-</div></div>
+            <div class="kv"><div class="label">Updated</div><div class="value" id="updatedValue">-</div></div>
+
+            <label for="adminNoteInput">Add note</label>
+            <textarea id="adminNoteInput" placeholder="Add an internal note for this user..."></textarea>
+            <div class="actions" style="margin-top:10px;">
+                <button id="saveNoteBtn" type="button">Save note</button>
+            </div>
+            <div id="noteStatus" class="status">-</div>
+
+            <label>Notes</label>
+            <div class="notes-list" id="notesList">
+                <div class="note-empty">No notes yet.</div>
+            </div>
+
+            <div id="profileStatus" class="status">Loading user ...</div>
+        </section>
+
+        <div class="grid">
+            <section class="panel" id="userDetailsPanel">
+                <h2>User Details</h2>
+                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 24px;">
+                    <div class="kv"><div class="label">Display name</div><div class="value" id="detailDisplayName">-</div></div>
+                    <div class="kv"><div class="label">Email</div><div class="value" id="detailEmail">-</div></div>
+                    <div class="kv"><div class="label">Phone</div><div class="value" id="detailPhone">-</div></div>
+                    <div class="kv"><div class="label">Date of birth</div><div class="value" id="detailDob">-</div></div>
+                    <div class="kv"><div class="label">Address</div><div class="value" id="detailAddress">-</div></div>
+                    <div class="kv"><div class="label">City</div><div class="value" id="detailCity">-</div></div>
+                    <div class="kv"><div class="label">State / Region</div><div class="value" id="detailRegion">-</div></div>
+                    <div class="kv"><div class="label">Postcode</div><div class="value" id="detailPostcode">-</div></div>
+                    <div class="kv"><div class="label">Country</div><div class="value" id="detailCountry">-</div></div>
+                </div>
+                <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+                    <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.07em;text-transform:uppercase;margin-bottom:12px;">Identity Documents</div>
+                    <div class="grid">
+                        <div class="id-doc-card">
+                            <div class="id-doc-label">Government ID / Driver Licence</div>
+                            <div class="id-doc-placeholder" id="docDriverLicenceImg"><span>No document uploaded</span></div>
+                            <div class="kv" style="margin-top:8px;"><div class="label">ID number</div><div class="value" id="docDriverLicenceNum">-</div></div>
+                            <div class="kv"><div class="label">Expiry date</div><div class="value" id="docDriverLicenceExp">-</div></div>
+                        </div>
+                        <div class="id-doc-card">
+                            <div class="id-doc-label">Passport</div>
+                            <div class="id-doc-placeholder" id="docPassportImg"><span>No document uploaded</span></div>
+                            <div class="kv" style="margin-top:8px;"><div class="label">Passport no.</div><div class="value" id="docPassportNum">-</div></div>
+                            <div class="kv"><div class="label">Expiry date</div><div class="value" id="docPassportExp">-</div></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <section class="panel">
+                <h2>Verification + Restrictions</h2>
+                <label>Account state</label>
+                <div class="state-control" role="radiogroup" aria-label="Account state">
+                    <label class="state-option"><input id="stateActive" name="accountState" type="radio" value="active" /><span class="state-chip state-active">Active</span></label>
+                    <label class="state-option"><input id="stateRestricted" name="accountState" type="radio" value="restricted" /><span class="state-chip state-restricted">Restricted</span></label>
+                    <label class="state-option"><input id="stateBanned" name="accountState" type="radio" value="banned" /><span class="state-chip state-banned">Banned</span></label>
+                </div>
+                <div class="state-hint">Choose one moderation state for this user.</div>
+
+                <div class="checks">
+                    <label><input id="verifiedCheck" type="checkbox" /> Verified user</label>
+                    <label><input id="messagingRestrictedCheck" type="checkbox" /> Restrict messaging</label>
+                    <label><input id="liveRestrictedCheck" type="checkbox" /> Restrict live privileges</label>
+                        <label><input id="loginRestrictedCheck" type="checkbox" /> Restrict login</label>
+                </div>
+
+                <label for="restrictionReason">Restriction reason</label>
+                <input id="restrictionReason" type="text" placeholder="Policy reason" />
+                <label for="restrictionExpires">Restriction expiry (ISO datetime, optional)</label>
+                <input id="restrictionExpires" type="text" placeholder="2026-12-31T23:59:59Z" />
+
+                <div class="actions" style="margin-top:10px;">
+                    <button id="saveCapabilitiesBtn" type="button">Save capabilities</button>
+                </div>
+                <div id="capabilityStatus" class="status">-</div>
+            </section>
+
+            <section class="panel">
+                <h2>Direct Message User</h2>
+                <label for="msgSubject">Subject (optional)</label>
+                <input id="msgSubject" type="text" placeholder="Account moderation update" />
+                <label for="msgChannel">Channel</label>
+                <select id="msgChannel">
+                    <option value="in_app">In-app</option>
+                    <option value="email">Email</option>
+                </select>
+                <label for="msgBody">Message</label>
+                <textarea id="msgBody" placeholder="Write message to this user..."></textarea>
+                <div class="actions" style="margin-top:10px;">
+                    <button id="sendMsgBtn" type="button">Send message</button>
+                </div>
+                <div id="messageStatus" class="status">-</div>
+            </section>
+        </div>
+
+        <section class="panel">
+            <h2>Recent Admin Actions</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Action</th><th>Target</th><th>Metadata</th><th>Created</th></tr></thead>
+                    <tbody id="actionsBody"><tr><td colspan="4">Loading ...</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Recent Admin Messages</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ID</th><th>Channel</th><th>Status</th><th>Subject</th><th>Message</th><th>Created</th></tr></thead>
+                    <tbody id="messagesBody"><tr><td colspan="6">Loading ...</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const DEFAULT_API_BASE = 'https://blyp-live-service.onrender.com';
+
+        function esc(str) {
+            return String(str || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;');
+        }
+
+        function loadSession() {
+            try {
+                const raw = localStorage.getItem('blypAdminSession');
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                if (!parsed || !parsed.sessionToken) return null;
+                return {
+                    apiBase: String(parsed.apiBase || DEFAULT_API_BASE).trim(),
+                    sessionToken: String(parsed.sessionToken).trim(),
+                    timeoutMs: Number(parsed.timeoutMs || 8000),
+                };
+            } catch {
+                return null;
+            }
+        }
+
+        function setStatus(id, message, type) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = message;
+            el.className = 'status' + (type ? ' ' + type : '');
+        }
+
+        function requireUserId() {
+            const params = new URLSearchParams(window.location.search);
+            const userId = String(params.get('userId') || '').trim();
+            if (!userId) {
+                window.location.replace('/admin-dashboard.html');
+                throw new Error('Missing userId');
+            }
+            return userId;
+        }
+
+        const session = loadSession();
+        if (!session) {
+            window.location.replace('/admin-login.html');
+        }
+
+        const userId = requireUserId();
+
+        const dom = {
+            profileImage: document.getElementById('profileImage'),
+            userIdValue: document.getElementById('userIdValue'),
+            statusBadge: document.getElementById('statusBadge'),
+            verificationBadge: document.getElementById('verificationBadge'),
+            roleUser: document.getElementById('roleUser'),
+            roleAdmin: document.getElementById('roleAdmin'),
+            roleManager: document.getElementById('roleManager'),
+            createdValue: document.getElementById('createdValue'),
+            updatedValue: document.getElementById('updatedValue'),
+            adminNoteInput: document.getElementById('adminNoteInput'),
+            saveNoteBtn: document.getElementById('saveNoteBtn'),
+            notesList: document.getElementById('notesList'),
+            verifiedCheck: document.getElementById('verifiedCheck'),
+            stateActive: document.getElementById('stateActive'),
+            stateRestricted: document.getElementById('stateRestricted'),
+            stateBanned: document.getElementById('stateBanned'),
+            messagingRestrictedCheck: document.getElementById('messagingRestrictedCheck'),
+            liveRestrictedCheck: document.getElementById('liveRestrictedCheck'),
+            loginRestrictedCheck: document.getElementById('loginRestrictedCheck'),
+            restrictionReason: document.getElementById('restrictionReason'),
+            restrictionExpires: document.getElementById('restrictionExpires'),
+            msgSubject: document.getElementById('msgSubject'),
+            msgChannel: document.getElementById('msgChannel'),
+            msgBody: document.getElementById('msgBody'),
+            actionsBody: document.getElementById('actionsBody'),
+            messagesBody: document.getElementById('messagesBody'),
+            backBtn: document.getElementById('backBtn'),
+            refreshBtn: document.getElementById('refreshBtn'),
+            logoutBtn: document.getElementById('logoutBtn'),
+            saveCapabilitiesBtn: document.getElementById('saveCapabilitiesBtn'),
+            sendMsgBtn: document.getElementById('sendMsgBtn'),
+        };
+
+        let currentUserDetail = null;
+
+        function getSelectedAccountState() {
+            if (dom.stateBanned.checked) return 'banned';
+            if (dom.stateRestricted.checked) return 'restricted';
+            return 'active';
+        }
+
+        function setSelectedAccountState(state) {
+            dom.stateActive.checked = state === 'active';
+            dom.stateRestricted.checked = state === 'restricted';
+            dom.stateBanned.checked = state === 'banned';
+        }
+
+        function syncRestrictedStateFromCapabilityChecks() {
+                if (dom.messagingRestrictedCheck.checked || dom.liveRestrictedCheck.checked || dom.loginRestrictedCheck.checked) {
+                setSelectedAccountState('restricted');
+                return;
+            }
+            const selectedState = getSelectedAccountState();
+            if (selectedState === 'restricted') {
+                setSelectedAccountState('active');
+            }
+        }
+
+        function setRole(roleValue) {
+            const normalized = String(roleValue || 'user').toLowerCase();
+            dom.roleUser.classList.toggle('active', normalized === 'user');
+            dom.roleAdmin.classList.toggle('active', normalized === 'admin');
+            dom.roleManager.classList.toggle('active', normalized === 'manager');
+            if (!['user', 'admin', 'manager'].includes(normalized)) {
+                dom.roleUser.classList.add('active');
+            }
+        }
+
+        function notesStorageKey() {
+            return 'blypAdminNotes::' + encodeURIComponent(userId);
+        }
+
+        function loadNotes() {
+            try {
+                const raw = localStorage.getItem(notesStorageKey());
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function renderNotes() {
+            const notes = loadNotes();
+            if (!notes.length) {
+                dom.notesList.innerHTML = '<div class="note-empty">No notes yet.</div>';
+                return;
+            }
+            dom.notesList.innerHTML = notes.map((note) =>
+                '<div class="note-item">' +
+                '<div class="note-meta">' + esc(note.createdAt || '-') + '</div>' +
+                '<div>' + esc(note.text || '') + '</div>' +
+                '</div>'
+            ).join('');
+        }
+
+        function saveNote() {
+            const text = String(dom.adminNoteInput.value || '').trim();
+            if (!text) {
+                setStatus('noteStatus', 'Note cannot be empty.', 'error');
+                return;
+            }
+            const notes = loadNotes();
+            notes.unshift({
+                text,
+                createdAt: new Date().toISOString(),
+            });
+            localStorage.setItem(notesStorageKey(), JSON.stringify(notes.slice(0, 100)));
+            dom.adminNoteInput.value = '';
+            renderNotes();
+            setStatus('noteStatus', 'Note saved.', 'ok');
+        }
+
+        function resolveProfileImage(detail) {
+            const candidateFields = [
+                detail && detail.avatarUrl,
+                detail && detail.avatar,
+                detail && detail.profileImageUrl,
+                detail && detail.photoURL,
+                detail && detail.photoUrl,
+                detail && detail.imageUrl,
+                detail && detail.image,
+            ];
+            const fromData = candidateFields.find((val) => typeof val === 'string' && /^https?:\/\//i.test(val.trim()));
+            if (fromData) return fromData.trim();
+            const seed = encodeURIComponent(String(detail && (detail.userId || detail.email) || userId || 'user'));
+            return 'https://api.dicebear.com/9.x/initials/svg?seed=' + seed;
+        }
+
+        async function adminGet(path) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), Math.max(2000, session.timeoutMs));
+            try {
+                const res = await fetch(session.apiBase + path, {
+                    headers: { 'x-admin-session': session.sessionToken },
+                    signal: controller.signal,
+                });
+                const text = await res.text();
+                const json = text ? JSON.parse(text) : {};
+                if (res.status === 401) {
+                    localStorage.removeItem('blypAdminSession');
+                    sessionStorage.setItem('blypAdminFlash', 'Session expired. Please log in again.');
+                    window.location.replace('/admin-login.html');
+                    throw new Error('Unauthorized');
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + JSON.stringify(json));
+                return json;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        async function adminPost(path, body) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), Math.max(2000, session.timeoutMs));
+            try {
+                const res = await fetch(session.apiBase + path, {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/json',
+                        'x-admin-session': session.sessionToken,
+                    },
+                    body: JSON.stringify(body || {}),
+                    signal: controller.signal,
+                });
+                const text = await res.text();
+                const json = text ? JSON.parse(text) : {};
+                if (res.status === 401) {
+                    localStorage.removeItem('blypAdminSession');
+                    sessionStorage.setItem('blypAdminFlash', 'Session expired. Please log in again.');
+                    window.location.replace('/admin-login.html');
+                    throw new Error('Unauthorized');
+                }
+                if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + JSON.stringify(json));
+                return json;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        function renderDetail(d) {
+            currentUserDetail = d;
+            const resolvedUserId = d.userId || userId;
+            dom.userIdValue.textContent = resolvedUserId;
+            dom.profileImage.src = resolveProfileImage(d);
+            dom.profileImage.onerror = () => {
+                dom.profileImage.onerror = null;
+                dom.profileImage.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23172742"/><circle cx="32" cy="25" r="12" fill="%2394aac8"/><path d="M12 56c4-10 14-15 20-15s16 5 20 15" fill="%2394aac8"/></svg>';
+            };
+            setRole(d.role || 'user');
+            const state = d.isBanned ? 'banned' : (d.restrictions && d.restrictions.accountRestricted ? 'restricted' : 'active');
+            dom.statusBadge.className = 'badge ' + (state === 'banned' ? 'badge-banned' : state === 'restricted' ? 'badge-restricted' : 'badge-active');
+            dom.statusBadge.textContent = state;
+            dom.verificationBadge.className = 'badge ' + (d.verification && d.verification.isVerified ? 'badge-verified' : 'badge-neutral');
+            dom.verificationBadge.textContent = d.verification && d.verification.isVerified ? 'verified' : 'unverified';
+            dom.createdValue.textContent = d.createdAt || '—';
+            dom.updatedValue.textContent = d.updatedAt || d.createdAt || '—';
+
+            dom.verifiedCheck.checked = !!(d.verification && d.verification.isVerified);
+            setSelectedAccountState(state);
+            dom.messagingRestrictedCheck.checked = !!(d.restrictions && d.restrictions.messagingRestricted);
+            dom.liveRestrictedCheck.checked = !!(d.restrictions && d.restrictions.liveRestricted);
+                dom.loginRestrictedCheck.checked = !!(d.restrictions && d.restrictions.loginRestricted);
+            dom.restrictionReason.value = d.restrictions && d.restrictions.reason ? d.restrictions.reason : '';
+            dom.restrictionExpires.value = d.restrictions && d.restrictions.expiresAt ? d.restrictions.expiresAt : '';
+
+                // Populate user details panel
+                const _d = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = (v != null && v !== '') ? v : '-'; };
+                _d('detailDisplayName', d.displayName || d.name || d.username);
+                _d('detailEmail', d.email);
+                _d('detailPhone', d.phone || d.phoneNumber);
+                _d('detailDob', d.dateOfBirth || d.dob);
+                _d('detailAddress', d.address || d.addressLine1);
+                _d('detailCity', d.city);
+                _d('detailRegion', d.state || d.region);
+                _d('detailPostcode', d.postcode || d.zip || d.postalCode);
+                _d('detailCountry', d.country);
+                const docs = d.documents || (d.verification && d.verification.documents) || {};
+                const dlDoc = docs.driverLicence || docs.drivingLicence || {};
+                const ppDoc = docs.passport || {};
+                _d('docDriverLicenceNum', dlDoc.number || dlDoc.idNumber);
+                _d('docDriverLicenceExp', dlDoc.expiresAt || dlDoc.expiry);
+                _d('docPassportNum', ppDoc.number || ppDoc.passportNumber);
+                _d('docPassportExp', ppDoc.expiresAt || ppDoc.expiry);
+                const _setDocImg = (id, url) => { const el = document.getElementById(id); if (!el) return; el.innerHTML = url ? '<img src="' + esc(url) + '" alt="Document" />' : '<span>No document uploaded</span>'; };
+                _setDocImg('docDriverLicenceImg', dlDoc.url || dlDoc.imageUrl);
+                _setDocImg('docPassportImg', ppDoc.url || ppDoc.imageUrl);
+
+            renderNotes();
+
+            const actions = Array.isArray(d.recentActions) ? d.recentActions : [];
+            if (!actions.length) {
+                dom.actionsBody.innerHTML = '<tr><td colspan="4">No actions recorded.</td></tr>';
+            } else {
+                dom.actionsBody.innerHTML = actions.map((a) =>
+                    '<tr>' +
+                    '<td>' + esc(a.action) + '</td>' +
+                    '<td>' + esc(a.targetType) + ' / ' + esc(a.targetId) + '</td>' +
+                    '<td><code>' + esc(JSON.stringify(a.metadata || {})) + '</code></td>' +
+                    '<td>' + esc(a.createdAt || '-') + '</td>' +
+                    '</tr>'
+                ).join('');
+            }
+
+            const messages = Array.isArray(d.recentMessages) ? d.recentMessages : [];
+            if (!messages.length) {
+                dom.messagesBody.innerHTML = '<tr><td colspan="6">No admin messages sent.</td></tr>';
+            } else {
+                dom.messagesBody.innerHTML = messages.map((m) =>
+                    '<tr>' +
+                    '<td><code>' + esc(m.messageId) + '</code></td>' +
+                    '<td>' + esc(m.channel) + '</td>' +
+                    '<td>' + esc(m.status) + '</td>' +
+                    '<td>' + esc(m.subject || '-') + '</td>' +
+                    '<td>' + esc(m.body || '-') + '</td>' +
+                    '<td>' + esc(m.createdAt || '-') + '</td>' +
+                    '</tr>'
+                ).join('');
+            }
+        }
+
+        async function loadUser() {
+            setStatus('profileStatus', 'Loading user ...');
+            const d = await adminGet('/admin/users/' + encodeURIComponent(userId));
+            renderDetail(d);
+            setStatus('profileStatus', 'User loaded.', 'ok');
+        }
+
+        async function saveCapabilities() {
+            setStatus('capabilityStatus', 'Saving capabilities ...');
+            syncRestrictedStateFromCapabilityChecks();
+            const nextState = getSelectedAccountState();
+            const isCurrentlyBanned = !!(currentUserDetail && currentUserDetail.isBanned);
+            const trimmedReason = String(dom.restrictionReason.value || '').trim() || undefined;
+            const trimmedExpiry = String(dom.restrictionExpires.value || '').trim() || undefined;
+
+            if (nextState === 'banned' && !isCurrentlyBanned) {
+                await adminPost('/admin/users/' + encodeURIComponent(userId) + '/ban', {
+                    reason: trimmedReason,
+                    bannedUntil: trimmedExpiry,
+                });
+            } else if (nextState !== 'banned' && isCurrentlyBanned) {
+                await adminPost('/admin/users/' + encodeURIComponent(userId) + '/unban', {
+                    reason: trimmedReason,
+                });
+            }
+
+            await adminPost('/admin/users/' + encodeURIComponent(userId) + '/capabilities', {
+                verified: dom.verifiedCheck.checked,
+                messagingRestricted: dom.messagingRestrictedCheck.checked,
+                liveRestricted: dom.liveRestrictedCheck.checked,
+                    loginRestricted: dom.loginRestrictedCheck.checked,
+                accountRestricted: nextState === 'restricted',
+                reason: trimmedReason,
+                expiresAt: trimmedExpiry,
+            });
+            setStatus('capabilityStatus', 'Capabilities saved.', 'ok');
+            await loadUser();
+        }
+
+        async function sendMessage() {
+            const body = String(dom.msgBody.value || '').trim();
+            if (!body) {
+                setStatus('messageStatus', 'Message body is required.', 'error');
+                return;
+            }
+            setStatus('messageStatus', 'Sending message ...');
+            const out = await adminPost('/admin/users/' + encodeURIComponent(userId) + '/message', {
+                subject: String(dom.msgSubject.value || '').trim() || undefined,
+                channel: String(dom.msgChannel.value || 'in_app'),
+                message: body,
+            });
+            dom.msgBody.value = '';
+            setStatus('messageStatus', 'Message queued: ' + (out.messageId || 'ok'), 'ok');
+            await loadUser();
+        }
+
+        function logout() {
+            fetch(session.apiBase + '/admin/auth/logout', {
+                method: 'POST',
+                headers: { 'x-admin-session': session.sessionToken },
+            }).catch(() => undefined).finally(() => {
+                localStorage.removeItem('blypAdminSession');
+                window.location.replace('/admin-login.html');
+            });
+        }
+
+        dom.backBtn.addEventListener('click', () => {
+            window.location.href = '/admin-dashboard.html';
+        });
+        dom.refreshBtn.addEventListener('click', () => loadUser().catch((e) => setStatus('profileStatus', 'Refresh failed: ' + e.message, 'error')));
+        dom.logoutBtn.addEventListener('click', logout);
+        dom.saveNoteBtn.addEventListener('click', saveNote);
+        dom.saveCapabilitiesBtn.addEventListener('click', () => saveCapabilities().catch((e) => setStatus('capabilityStatus', 'Save failed: ' + e.message, 'error')));
+        dom.sendMsgBtn.addEventListener('click', () => sendMessage().catch((e) => setStatus('messageStatus', 'Send failed: ' + e.message, 'error')));
+        dom.messagingRestrictedCheck.addEventListener('change', syncRestrictedStateFromCapabilityChecks);
+        dom.liveRestrictedCheck.addEventListener('change', syncRestrictedStateFromCapabilityChecks);
+            dom.loginRestrictedCheck.addEventListener('change', syncRestrictedStateFromCapabilityChecks);
+
+        loadUser().catch((e) => setStatus('profileStatus', 'Load failed: ' + e.message, 'error'));
+    </script>
+</body>
+
+</html>
