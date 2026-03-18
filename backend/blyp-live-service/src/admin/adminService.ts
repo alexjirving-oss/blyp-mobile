@@ -439,6 +439,52 @@ async function listSqlKnownUsers(): Promise<AdminUserRow[]> {
 
     const usersRs = await db.raw(sql);
     const rows = ((usersRs as any)?.rows || []) as Array<any>;
+    if (rows.length === 0) {
+        const diagnosticSql = `
+        ${userIdsCte}
+        , sample_ids AS (
+            SELECT DISTINCT ids.user_id
+            FROM ids
+            WHERE ids.user_id IS NOT NULL
+              AND ids.user_id <> ''
+            ORDER BY ids.user_id ASC
+            LIMIT 5
+        )
+        SELECT
+            (SELECT COUNT(*)::bigint FROM ids WHERE ids.user_id IS NOT NULL AND ids.user_id <> '') AS ids_count,
+            COALESCE((SELECT ARRAY_AGG(sample_ids.user_id) FROM sample_ids), ARRAY[]::text[]) AS sample_user_ids,
+            (SELECT COUNT(*)::bigint FROM user_admin_state s JOIN sample_ids ON sample_ids.user_id = s.user_id) AS sample_state_matches
+        `;
+
+        try {
+            const diagnosticRs = await db.raw(diagnosticSql);
+            const diagnosticRow = ((diagnosticRs as any)?.rows?.[0] || {}) as Record<string, unknown>;
+            const sampleUserIds = Array.isArray(diagnosticRow.sample_user_ids)
+                ? diagnosticRow.sample_user_ids.map((v) => String(v)).slice(0, 5)
+                : [];
+            const sampleStateMatches = Number(diagnosticRow.sample_state_matches || 0);
+
+            logger.warn(
+                {
+                    zeroRows: true,
+                    idsCount: Number(diagnosticRow.ids_count || 0),
+                    sampleUserIds,
+                    sampleUserIdsHaveAdminStateMatch: sampleStateMatches > 0,
+                    sampleUserIdsAdminStateMatchCount: sampleStateMatches,
+                },
+                '[admin][users] sql known users returned zero rows'
+            );
+        } catch (e: any) {
+            logger.warn(
+                {
+                    zeroRows: true,
+                    diagnosticError: e?.message || String(e),
+                },
+                '[admin][users] sql known users zero-row diagnostic failed'
+            );
+        }
+    }
+
     return rows.map((r) => ({
         userId: String(r.user_id),
         role: String(r.role || 'user'),
