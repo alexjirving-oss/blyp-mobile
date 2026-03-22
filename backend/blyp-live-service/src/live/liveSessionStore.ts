@@ -1,6 +1,5 @@
 import { docClient } from '../aws/dynamoClient';
-import { PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { ENV } from '../config/env';
+import { PutCommand, GetCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 export type LiveStatus = 'PENDING' | 'LIVE' | 'ENDED';
 
@@ -15,7 +14,14 @@ export interface LiveSession {
   endedAt?: string;
 }
 
-const TABLE_NAME = process.env.LIVE_SESSIONS_TABLE || ENV.LIVE_SESSIONS_TABLE;
+export interface LiveSessionListItem {
+  sessionId: string;
+  status: LiveStatus;
+  hostUserId?: string;
+  createdAt?: string;
+}
+
+const TABLE_NAME = process.env.LIVE_SESSIONS_TABLE;
 
 if (!TABLE_NAME) {
   throw new Error('[config] LIVE_SESSIONS_TABLE is required');
@@ -55,4 +61,31 @@ export async function updateSessionStatus(sessionId: string, status: LiveStatus,
     ExpressionAttributeNames: exprNames,
     ConditionExpression: 'attribute_exists(sessionId)',
   }));
+}
+
+export async function listSessionsByStatus(status: LiveStatus, limit = 10): Promise<LiveSessionListItem[]> {
+  const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.trunc(limit))) : 10;
+  const res = await docClient.send(new ScanCommand({
+    TableName: TABLE_NAME,
+    FilterExpression: '#status = :status',
+    ExpressionAttributeNames: {
+      '#status': 'status',
+    },
+    ExpressionAttributeValues: {
+      ':status': status,
+    },
+    ProjectionExpression: 'sessionId, #status, hostUserId, createdAt',
+    Limit: boundedLimit,
+  }));
+
+  const items = Array.isArray(res.Items) ? (res.Items as LiveSessionListItem[]) : [];
+  return items
+    .map((item) => ({
+      sessionId: String(item.sessionId || ''),
+      status: item.status,
+      hostUserId: item.hostUserId ? String(item.hostUserId) : undefined,
+      createdAt: item.createdAt ? String(item.createdAt) : undefined,
+    }))
+    .filter((item) => item.sessionId.length > 0)
+    .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
 }

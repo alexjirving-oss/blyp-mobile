@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { CreateParticipantTokenCommand, CreateStageCommand } from '@aws-sdk/client-ivs-realtime';
 import { ivsRealtimeClient } from '../aws/ivsRealtimeClient';
-import { LiveSession, LiveStatus, createSession, getSessionById, updateSessionStatus } from './liveSessionStore';
+import { LiveSession, LiveSessionListItem, LiveStatus, createSession, getSessionById, listSessionsByStatus, updateSessionStatus } from './liveSessionStore';
 import {
   requestGuestSlot as requestGuestSlotStore,
   updateGuestState,
@@ -295,6 +295,10 @@ export async function joinLiveRealtime(
     userId: viewerUserId,
     role: 'viewer',
   };
+}
+
+export async function listActiveLiveSessions(limit?: number): Promise<LiveSessionListItem[]> {
+  return listSessionsByStatus('LIVE', limit);
 }
 
 export async function endLiveSession(sessionId: string): Promise<void> {
