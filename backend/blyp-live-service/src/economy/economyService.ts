@@ -6,6 +6,7 @@ import { getEconomyEnv } from '../config/economyEnv';
 import { EconomyError } from './economyErrors';
 import { decodeCursor, encodeCursor } from './cursor';
 import { emitGiftEvent, emitLiveGameEvent } from '../realtime/realtimeBus';
+import { logger } from '../config/logger';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
 import { logger } from '../config/logger';
 
@@ -372,9 +373,139 @@ type PromotePricing = {
   spotlight: { coins1h: number; coins24h: number; coins7d: number };
 };
 
+const ANDROID_CONSUME_ALLOWED_SKUS = new Set(['blyp.android.proof.coinpack.100']);
+
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function parseGoogleServiceAccount(raw: string): GoogleServiceAccount {
+  try {
+    const parsed = JSON.parse(raw) as GoogleServiceAccount;
+    if (!parsed?.client_email || !parsed?.private_key) {
+      throw new Error('missing_client_email_or_private_key');
+    }
+    return parsed;
+  } catch (err) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Invalid GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
+  }
+}
+
+async function getGoogleAccessToken(serviceAccount: GoogleServiceAccount): Promise<string> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/androidpublisher',
+    aud: serviceAccount.token_uri || 'https://oauth2.googleapis.com/token',
+    iat: nowSeconds,
+    exp: nowSeconds + 3600,
+  };
+
+  const assertion = jwt.sign(payload, serviceAccount.private_key, {
+    algorithm: 'RS256',
+    header: serviceAccount.private_key_id ? { alg: 'RS256', kid: serviceAccount.private_key_id } : { alg: 'RS256' },
+  });
+
+  const tokenBody = new URLSearchParams({
+    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    assertion,
+  });
+
+  const tokenRes = await fetch(serviceAccount.token_uri || 'https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenBody.toString(),
+  });
+
+  const tokenJson = (await tokenRes.json().catch(() => null)) as { access_token?: string; error?: string } | null;
+  if (!tokenRes.ok || !tokenJson?.access_token) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Google access token request failed', tokenJson ?? `HTTP_${tokenRes.status}`);
+  }
+
+  return tokenJson.access_token;
+}
+
+async function verifyGooglePlayPurchase(input: IapVerifyInput): Promise<ProviderVerifyResult> {
+  const env = getEconomyEnv();
+  const packageName = String(env.GOOGLE_PLAY_PACKAGE_NAME || '').trim();
+  const serviceAccountRaw = String(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
+
+  if (!packageName || !serviceAccountRaw) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Google Play provider credentials are not configured');
+  }
+
+  const serviceAccount = parseGoogleServiceAccount(serviceAccountRaw);
+  const accessToken = await getGoogleAccessToken(serviceAccount);
+
+  const sku = encodeURIComponent(input.sku);
+  const token = encodeURIComponent(String(input.purchaseToken || ''));
+  const purchaseUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(packageName)}/purchases/products/${sku}/tokens/${token}`;
+
+  const purchaseRes = await fetch(purchaseUrl, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (purchaseRes.status === 404) {
+    return { verified: false, providerOrderId: null, detail: 'purchase_not_found' };
+  }
+
+  const purchaseJson = (await purchaseRes.json().catch(() => null)) as {
+    purchaseState?: number;
+    orderId?: string;
+    consumptionState?: number;
+    acknowledgementState?: number;
+  } | null;
+
+  if (!purchaseRes.ok || !purchaseJson) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Google Play purchase verify request failed', purchaseJson ?? `HTTP_${purchaseRes.status}`);
+  }
+
+  const purchaseState = Number(purchaseJson.purchaseState);
+  if (purchaseState !== 0) {
+    return { verified: false, providerOrderId: purchaseJson.orderId || null, detail: `purchase_state_${purchaseState}` };
+  }
+
+  const providerOrderId = String(purchaseJson.orderId || '').trim() || String(input.storeTransactionId || '').trim() || null;
+  return { verified: true, providerOrderId, detail: 'google_verified' };
+}
+
+async function consumeGooglePlayPurchase(input: IapVerifyInput): Promise<void> {
+  const env = getEconomyEnv();
+  const packageName = String(env.GOOGLE_PLAY_PACKAGE_NAME || '').trim();
+  const serviceAccountRaw = String(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
+
+  if (!packageName || !serviceAccountRaw) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Google Play provider credentials are not configured');
+  }
+
+  const serviceAccount = parseGoogleServiceAccount(serviceAccountRaw);
+  const accessToken = await getGoogleAccessToken(serviceAccount);
+
+  const sku = encodeURIComponent(input.sku);
+  const token = encodeURIComponent(String(input.purchaseToken || ''));
+  const consumeUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(packageName)}/purchases/products/${sku}/tokens/${token}:consume`;
+
+  const consumeRes = await fetch(consumeUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (consumeRes.status === 200 || consumeRes.status === 204) {
+    return;
+  }
+
+  const consumeJson = await consumeRes.json().catch(() => null);
+  throw new EconomyError('PROVIDER_ERROR', 503, 'Google Play purchase consume request failed', consumeJson ?? `HTTP_${consumeRes.status}`);
+}
+
+async function verifyProviderPurchase(input: IapVerifyInput): Promise<ProviderVerifyResult> {
+  if (input.platform === 'ANDROID') {
+    return verifyGooglePlayPurchase(input);
+  }
+
+  throw new EconomyError('PROVIDER_ERROR', 503, 'iOS provider verification is not configured yet');
 }
 
 export async function getPromotePricing(): Promise<PromotePricing> {
@@ -791,6 +922,158 @@ export async function getWallet(userId: string) {
     gemAvailable: Number(row.gem_available),
     gemPending: Number(row.gem_pending),
   };
+}
+
+export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerifyInput): Promise<{ kind: 'ok'; response: IapVerifySuccessResponse } | { kind: 'replay'; response: IapVerifySuccessResponse }> {
+  const { db } = getEconomyInfra();
+  const androidProviderPurchaseId = input.platform === 'ANDROID'
+    ? String(input.purchaseToken || '').trim() || null
+    : null;
+
+  const result = await db.transaction(async (trx) => {
+    await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+    const existingLedger = await trx('ledger_entries')
+      .where({ user_id: userId, idempotency_key: input.idempotencyKey, entry_type: 'COIN_PURCHASE' })
+      .first();
+
+    if (existingLedger) {
+      const walletReplay = await trx('wallets').where({ user_id: userId }).first();
+      if (!walletReplay) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+      const replayResponse: IapVerifySuccessResponse = {
+        valid: true,
+        duplicatePerfId: String(existingLedger.reference_id || ''),
+        grantedCoins: Number(existingLedger.amount || 0),
+        grantedGems: 0,
+        wallet: {
+          coinBalance: Number(walletReplay.coin_balance || 0),
+          bonusCoinBalance: Number(walletReplay.bonus_coin_balance || 0),
+          gemAvailable: Number(walletReplay.gem_available || 0),
+          gemPending: Number(walletReplay.gem_pending || 0),
+        },
+      };
+
+      return { kind: 'replay' as const, response: replayResponse };
+    }
+
+    if (androidProviderPurchaseId) {
+      const existingAndroidProviderLedger = await trx('ledger_entries')
+        .where({
+          provider_purchase_id: androidProviderPurchaseId,
+          entry_type: 'COIN_PURCHASE',
+          reference_type: 'IAP',
+        })
+        .first();
+
+      if (existingAndroidProviderLedger) {
+        const walletReplay = await trx('wallets').where({ user_id: userId }).first();
+        if (!walletReplay) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+        const replayResponse: IapVerifySuccessResponse = {
+          valid: true,
+          duplicatePerfId: String(existingAndroidProviderLedger.reference_id || ''),
+          grantedCoins: Number(existingAndroidProviderLedger.amount || 0),
+          grantedGems: 0,
+          wallet: {
+            coinBalance: Number(walletReplay.coin_balance || 0),
+            bonusCoinBalance: Number(walletReplay.bonus_coin_balance || 0),
+            gemAvailable: Number(walletReplay.gem_available || 0),
+            gemPending: Number(walletReplay.gem_pending || 0),
+          },
+        };
+
+        return { kind: 'replay' as const, response: replayResponse };
+      }
+    }
+
+    const product = await trx('iap_products')
+      .where({ platform: input.platform, sku: input.sku, enabled: true })
+      .first();
+
+    if (!product) {
+      throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+    }
+
+    const verifyResult = await verifyProviderPurchase(input);
+    if (!verifyResult.verified) {
+      throw new EconomyError('VERIFICATION_FAILED', 409, 'Purchase verification failed', verifyResult.detail || 'provider_rejected');
+    }
+
+    const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+    if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+    const grantCoins = BigInt(product.coins_granted || 0);
+    if (grantCoins <= 0n) {
+      throw new EconomyError('INVALID_INPUT', 400, 'IAP product has zero coin grant');
+    }
+
+    const newCoinBalance = BigInt(wallet.coin_balance) + grantCoins;
+    const purchaseRefId = verifyResult.providerOrderId || input.storeTransactionId;
+
+    await trx('wallets')
+      .where({ user_id: userId })
+      .update({
+        coin_balance: newCoinBalance.toString(),
+        updated_at: trx.fn.now(),
+      });
+
+    await trx('ledger_entries').insert({
+      ledger_id: randomUUID(),
+      user_id: userId,
+      entry_type: 'COIN_PURCHASE',
+      currency: 'COIN',
+      amount: grantCoins.toString(),
+      status: 'POSTED',
+      reference_type: 'IAP',
+      reference_id: purchaseRefId,
+      provider_purchase_id: androidProviderPurchaseId,
+      idempotency_key: input.idempotencyKey,
+      metadata: {
+        platform: input.platform,
+        sku: input.sku,
+        purchaseToken: input.purchaseToken,
+        storeTransactionId: input.storeTransactionId,
+        providerOrderId: verifyResult.providerOrderId,
+      },
+    });
+
+    const updatedWallet = await trx('wallets').where({ user_id: userId }).first();
+    if (!updatedWallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing after purchase grant');
+
+    const response: IapVerifySuccessResponse = {
+      valid: true,
+      duplicatePerfId: null,
+      grantedCoins: Number(grantCoins),
+      grantedGems: 0,
+      wallet: {
+        coinBalance: Number(updatedWallet.coin_balance || 0),
+        bonusCoinBalance: Number(updatedWallet.bonus_coin_balance || 0),
+        gemAvailable: Number(updatedWallet.gem_available || 0),
+        gemPending: Number(updatedWallet.gem_pending || 0),
+      },
+    };
+
+    return { kind: 'ok' as const, response };
+  });
+
+  if (result.kind === 'ok' && input.platform === 'ANDROID' && input.purchaseToken && ANDROID_CONSUME_ALLOWED_SKUS.has(input.sku)) {
+    try {
+      await consumeGooglePlayPurchase(input);
+    } catch (error: any) {
+      logger.warn(
+        {
+          userId,
+          sku: input.sku,
+          storeTransactionId: input.storeTransactionId,
+          detail: error?.detail ?? error?.message ?? String(error),
+        },
+        '[economy] Android purchase grant succeeded but consume failed'
+      );
+    }
+  }
+
+  return result;
 }
 
 export async function getLedger(userId: string, rawCursor?: string, rawLimit?: number) {

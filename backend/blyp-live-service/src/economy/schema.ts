@@ -46,10 +46,13 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           status text NOT NULL,
           reference_type text,
           reference_id text,
+          provider_purchase_id text,
           idempotency_key text UNIQUE,
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
+
+        `ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_purchase_id text`,
 
         `CREATE TABLE IF NOT EXISTS iap_products (
           platform text NOT NULL,
@@ -250,8 +253,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
 
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
-        `CREATE UNIQUE INDEX IF NOT EXISTS uq_iap_receipts_platform_purchase_token ON iap_receipts (platform, purchase_token) WHERE purchase_token IS NOT NULL`,
-        `CREATE INDEX IF NOT EXISTS idx_iap_receipts_user_created ON iap_receipts (user_id, created_at DESC)`,
+        `CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_android_iap_provider_purchase ON ledger_entries (provider_purchase_id) WHERE provider_purchase_id IS NOT NULL AND entry_type = 'COIN_PURCHASE' AND reference_type = 'IAP' AND (metadata->>'platform') = 'ANDROID'`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_stream_id ON gift_events (stream_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_sender_user_id ON gift_events (sender_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_receiver_user_id ON gift_events (receiver_user_id)`,
