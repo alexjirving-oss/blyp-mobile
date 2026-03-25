@@ -8,7 +8,6 @@ import { decodeCursor, encodeCursor } from './cursor';
 import { emitGiftEvent, emitLiveGameEvent } from '../realtime/realtimeBus';
 import { logger } from '../config/logger';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
-import { logger } from '../config/logger';
 
 function nowIso() {
   return new Date().toISOString();
