@@ -6,7 +6,6 @@ import {
   createGuestToken,
   endLiveSession,
   joinLiveRealtime,
-  listActiveLiveSessions,
   requestGuestSlot,
   listGuestRequests,
   inviteGuest,
@@ -30,7 +29,7 @@ function logRedisSoftFail(tag: '[LIVE_START_REDIS_SOFT_FAIL]' | '[GUEST_JOIN_RED
 
 router.post('/live/start', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub || req.user?.username;
+    const userId = req.user?.sub;
     const attemptId = (req.headers['x-golive-attempt-id'] as string) || (req.headers['x-goLive-attempt-id'] as string) || undefined;
     if (!userId) {
       return res.status(401).json({ error: 'User not found in token' });
@@ -152,33 +151,6 @@ router.post('/live/join-realtime', async (req: AuthedRequest, res) => {
     res.status(err.message.includes('not found') ? 404 : 500).json({
       error: err.message,
     });
-  }
-});
-
-router.get('/live/sessions', async (req: AuthedRequest, res) => {
-  try {
-    const userId = req.user?.sub || req.user?.username;
-    if (!userId) {
-      return res.status(401).json({ error: 'User not found in token' });
-    }
-
-    const rawLimit = Number(req.query?.limit || 10);
-    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, Math.trunc(rawLimit))) : 10;
-    const sessions = await listActiveLiveSessions(limit);
-
-    return res.json({
-      items: sessions.map((session) => ({
-        sessionId: session.sessionId,
-        status: session.status,
-        hostUserId: session.hostUserId,
-        createdAt: session.createdAt,
-      })),
-      total: sessions.length,
-      limit,
-    });
-  } catch (err: any) {
-    logger.error({ err: err?.message || String(err) }, '[live] /api/live/sessions failed');
-    return res.status(500).json({ error: 'Failed to list live sessions', detail: err?.message || String(err) });
   }
 });
 

@@ -1,9 +1,10 @@
 import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
-import { getAdminFirestore } from '../config/firebaseAdmin';
 import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
+
+const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type AdminUserRow = {
     userId: string;
@@ -45,8 +46,6 @@ type AdminUserDetail = {
     email?: string;
     phoneNumber?: string;
     displayName?: string;
-    photoURL?: string;
-    avatarUrl?: string;
     dateOfBirth?: string;
     address?: string;
     city?: string;
@@ -138,126 +137,9 @@ function asString(value: unknown): string {
     return value.trim();
 }
 
-function toTrimmedString(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    return trimmed || null;
-}
-
-const PLACEHOLDER_NAMES = new Set(['anonymous', 'anonymous user', 'anon']);
-
-function isPlaceholderName(value: unknown): boolean {
-    const trimmed = toTrimmedString(value);
-    if (!trimmed) return true;
-    return PLACEHOLDER_NAMES.has(trimmed.replace(/^@+/, '').toLowerCase());
-}
-
-function pickBestProfileNameFromUserDoc(userDocData: any, userId: string): { username: string | null; displayName: string } {
-    const username = toTrimmedString(userDocData?.username || userDocData?.handle || userDocData?.userName);
-    const displayName = toTrimmedString(userDocData?.displayName || userDocData?.userName || userDocData?.name);
-
-    if (username && !isPlaceholderName(username) && username !== userId) {
-        return { username, displayName: username };
-    }
-
-    if (displayName && !isPlaceholderName(displayName) && displayName !== userId) {
-        return { username: null, displayName };
-    }
-
-    return { username: null, displayName: userId };
-}
-
-type AdminFirestoreUserProfile = {
-    username: string | null;
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-    createdAt: string | null;
-    updatedAt: string | null;
-};
-
-function pickIdentityFromPostDoc(postData: any, userId: string): { username: string | null; displayName: string | null; photoURL: string | null } {
-    const username = toTrimmedString(postData?.username || postData?.handle || postData?.userName);
-    const displayName = toTrimmedString(postData?.displayName || postData?.userName || postData?.userName || postData?.name);
-    const photoURL = toTrimmedString(
-        postData?.userPhotoURL || postData?.photoURL || postData?.photoUrl || postData?.avatarUrl || postData?.profileImageUrl || postData?.imageUrl
-    );
-
-    const safeUsername = username && !isPlaceholderName(username) && username !== userId ? username : null;
-    const safeDisplayName = displayName && !isPlaceholderName(displayName) && displayName !== userId ? displayName : null;
-
-    return {
-        username: safeUsername,
-        displayName: safeUsername || safeDisplayName,
-        photoURL,
-    };
-}
-
-function firestoreTimestampToIso(value: any): string | null {
-    if (!value) return null;
-    try {
-        if (typeof value?.toDate === 'function') {
-            return value.toDate().toISOString();
-        }
-        return toIso(value);
-    } catch {
-        return null;
-    }
-}
-
-async function getFirestoreUserProfile(userId: string, directoryUser: DirectoryUser | null): Promise<AdminFirestoreUserProfile | null> {
-    const firestore = getAdminFirestore();
-    if (!firestore) return null;
-
-    const candidateDocIds = Array.from(new Set([
-        userId,
-        directoryUser?.username || '',
-        directoryUser?.email || '',
-    ].map((value) => String(value || '').trim()).filter(Boolean)));
-
-    for (const docId of candidateDocIds) {
-        try {
-            const snap = await firestore.collection('users').doc(docId).get();
-            if (!snap.exists) continue;
-            const userData = snap.data() || {};
-            const picked = pickBestProfileNameFromUserDoc(userData, userId);
-            return {
-                username: picked.username,
-                displayName: picked.displayName,
-                email: toTrimmedString(userData.email),
-                photoURL: toTrimmedString(
-                    userData.photoURL || userData.photoUrl || userData.avatarUrl || userData.profileImageUrl || userData.imageUrl
-                ),
-                createdAt: firestoreTimestampToIso(userData.createdAt),
-                updatedAt: firestoreTimestampToIso(userData.updatedAt),
-            };
-        } catch (error: any) {
-            logger.warn({ err: error?.message || String(error), userId, docId }, '[admin] getAdminUserDetail: firestore user profile lookup failed');
-        }
-    }
-
-    // Fallback: some older accounts carry display identity fields on post documents.
-    try {
-        const postSnap = await firestore.collection('posts').where('userId', '==', userId).limit(1).get();
-        if (!postSnap.empty) {
-            const postData = postSnap.docs[0]?.data() || {};
-            const picked = pickIdentityFromPostDoc(postData, userId);
-            if (picked.displayName || picked.username || picked.photoURL) {
-                return {
-                    username: picked.username,
-                    displayName: picked.displayName,
-                    email: null,
-                    photoURL: picked.photoURL,
-                    createdAt: null,
-                    updatedAt: null,
-                };
-            }
-        }
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: firestore posts fallback lookup failed');
-    }
-
-    return null;
+function isCanonicalSubUserId(value: unknown): boolean {
+    const s = asString(value);
+    return COGNITO_SUB_REGEX.test(s);
 }
 
 function buildVerification(metadata: Record<string, any>): AdminVerification {
@@ -470,7 +352,7 @@ async function collectDistinctSqlUserIds(db: Knex): Promise<string[]> {
             const rows = ((rs as any)?.rows || []) as Array<Record<string, unknown>>;
             for (const row of rows) {
                 const userId = asString(row.user_id);
-                if (userId) {
+                if (userId && isCanonicalSubUserId(userId)) {
                     ids.add(userId);
                 }
             }
@@ -504,8 +386,9 @@ async function buildUserIdsCte(db: Knex): Promise<string> {
 }
 
 function mergeUserRowWithDirectory(row: AdminUserRow | null, directoryUser: DirectoryUser | null): AdminUserRow {
+    const mergedUserId = asString(row?.userId || directoryUser?.userId || '');
     return {
-        userId: row?.userId || directoryUser?.userId || '',
+        userId: mergedUserId,
         username: directoryUser?.username || row?.username || '',
         email: directoryUser?.email || row?.email || '',
         phoneNumber: directoryUser?.phoneNumber || row?.phoneNumber || '',
@@ -519,51 +402,6 @@ function mergeUserRowWithDirectory(row: AdminUserRow | null, directoryUser: Dire
         createdAt: row?.createdAt || directoryUser?.createdAt || null,
         updatedAt: row?.updatedAt || directoryUser?.updatedAt || null,
     };
-}
-
-const LINKED_DIRECTORY_STATUSES = new Set([
-    'CONFIRMED',
-    'EXTERNAL_PROVIDER',
-    'FORCE_CHANGE_PASSWORD',
-    'RESET_REQUIRED',
-]);
-
-function normalizeDirectoryStatus(value: unknown): string {
-    return asString(value).toUpperCase();
-}
-
-function isAppLinkedDirectoryUser(user: DirectoryUser): boolean {
-    if (!asString(user.userId)) {
-        return false;
-    }
-    if (user.enabled === false) {
-        return false;
-    }
-
-    const status = normalizeDirectoryStatus(user.userStatus);
-    if (!status) {
-        return true;
-    }
-
-    return LINKED_DIRECTORY_STATUSES.has(status);
-}
-
-function buildVisibleAdminUsers(sqlUsers: AdminUserRow[], directoryUsers: DirectoryUser[]): AdminUserRow[] {
-    const sqlUsersById = new Map<string, AdminUserRow>();
-    for (const row of sqlUsers) {
-        sqlUsersById.set(row.userId, row);
-    }
-
-    const mergedFromDirectory = directoryUsers
-        .filter(isAppLinkedDirectoryUser)
-        .map((directoryUser) => mergeUserRowWithDirectory(sqlUsersById.get(directoryUser.userId) || null, directoryUser));
-
-    const mergedIds = new Set(mergedFromDirectory.map((row) => row.userId));
-    const sqlOnlyUsers = sqlUsers
-        .filter((row) => row.userId && !mergedIds.has(row.userId))
-        .map((row) => mergeUserRowWithDirectory(row, null));
-
-    return [...mergedFromDirectory, ...sqlOnlyUsers];
 }
 
 function matchesAdminUserQuery(user: AdminUserRow, q: string): boolean {
@@ -669,8 +507,21 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
         listDirectoryUsers(),
     ]);
 
-    const baseVisibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
-    const merged = baseVisibleUsers
+    const byId = new Map<string, AdminUserRow>();
+    for (const row of sqlUsers) {
+        if (isCanonicalSubUserId(row.userId)) {
+            byId.set(row.userId, row);
+        }
+    }
+    for (const directoryUser of directoryUsers) {
+        if (!isCanonicalSubUserId(directoryUser.userId)) {
+            continue;
+        }
+        byId.set(directoryUser.userId, mergeUserRowWithDirectory(byId.get(directoryUser.userId) || null, directoryUser));
+    }
+
+    const merged = Array.from(byId.values())
+        .filter((user) => isCanonicalSubUserId(user.userId))
         .filter((user) => matchesAdminUserQuery(user, q))
         .sort((left, right) => {
             const leftCreated = left.createdAt ? Date.parse(left.createdAt) : 0;
@@ -855,10 +706,6 @@ function isLikelyPostTableName(tableName: string): boolean {
     return /(post|feed|timeline|story|content|moment)/i.test(tableName || '');
 }
 
-function isExcludedPostSourceTable(tableName: string): boolean {
-    return /(flag|admin|state|audit|warning|report|restriction|message|moderat)/i.test(tableName || '');
-}
-
 async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
     const rs = await db.raw(
         `
@@ -875,8 +722,7 @@ async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
             schema: String(r.table_schema || '').trim(),
             table: String(r.table_name || '').trim(),
         }))
-        .filter((r: TableRef) => r.schema && r.table)
-        .filter((r: TableRef) => !isExcludedPostSourceTable(r.table));
+        .filter((r: TableRef) => r.schema && r.table);
 
     const likely = refs.filter((r: TableRef) => isLikelyPostTableName(r.table));
     const other = refs.filter((r: TableRef) => !isLikelyPostTableName(r.table));
@@ -1047,172 +893,18 @@ async function resolvePostSource(db: Knex): Promise<{
     return null;
 }
 
-function toMillisFromUnknown(value: any): number {
-    if (!value) return 0;
-    try {
-        if (typeof value?.toDate === 'function') {
-            const d = value.toDate();
-            return d instanceof Date ? d.getTime() : 0;
-        }
-        if (value instanceof Date) return value.getTime();
-        if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-        if (typeof value === 'string') {
-            const t = Date.parse(value);
-            return Number.isFinite(t) ? t : 0;
-        }
-        if (typeof value === 'object') {
-            const seconds = Number(value.seconds ?? value._seconds ?? 0);
-            const nanos = Number(value.nanoseconds ?? value._nanoseconds ?? 0);
-            if (Number.isFinite(seconds) && seconds > 0) {
-                return seconds * 1000 + Math.floor((Number.isFinite(nanos) ? nanos : 0) / 1_000_000);
-            }
-        }
-    } catch {
-        return 0;
-    }
-    return 0;
-}
-
-function pickStringFrom(value: any): string {
-    if (typeof value === 'string') return value.trim();
-    if (Array.isArray(value)) {
-        for (const item of value) {
-            const found = pickStringFrom(item);
-            if (found) return found;
-        }
-    }
-    if (value && typeof value === 'object') {
-        const candidates = [
-            value.url,
-            value.uri,
-            value.src,
-            value.imageUrl,
-            value.videoUrl,
-            value.mediaUrl,
-            value.thumbnailUrl,
-            value.thumbnail,
-        ];
-        for (const c of candidates) {
-            const found = pickStringFrom(c);
-            if (found) return found;
-        }
-    }
-    return '';
-}
-
-async function listAdminUserPostsFromFirestore(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
-    const firestore = getAdminFirestore();
-    if (!firestore) {
+export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
+    const db = adminDb();
+    const source = await resolvePostSource(db);
+    if (!source) {
         return {
             items: [],
             total: 0,
             limit: input.limit,
             offset: input.offset,
             degraded: true,
-            detail: 'No supported SQL posts table found and Firestore admin is not configured.',
+            detail: 'No supported posts table found (searched accessible non-system SQL schemas for post-like tables with user and id columns).',
         };
-    }
-
-    const q = asString(input.q || '').toLowerCase();
-    // Keep Firestore reads bounded for admin paging to avoid loading an entire user history on each request.
-    const boundedFetchSize = Math.max(input.limit + input.offset, input.limit, 25);
-    const snap = await firestore
-        .collection('posts')
-        .where('userId', '==', input.userId)
-        .limit(boundedFetchSize)
-        .get();
-    const docs = snap.docs.map((docSnap) => {
-        const data = (docSnap.data() || {}) as Record<string, any>;
-        const content = asString(data.content || data.text || data.caption || data.description || data.title);
-        const postType = asString(data.postType || data.type || data.kind) || 'post';
-        const mediaUrl = asString(data.mediaUrl || data.imageUrl || data.image || pickStringFrom(data.media));
-        const videoUrl = asString(data.videoUrl || data.streamUrl || data.playbackUrl);
-        const thumbnailUrl = asString(data.thumbnailUrl || data.thumbUrl || data.previewUrl || data.coverUrl || data.imageUrl);
-        const createdAtRaw = data.date || data.createdAt || data.created_at || data.timestamp;
-        const updatedAtRaw = data.updatedAt || data.updated_at || createdAtRaw;
-
-        return {
-            postId: asString(data.postId || data.id) || docSnap.id,
-            userId: asString(data.userId) || input.userId,
-            content,
-            createdAt: toIso(createdAtRaw),
-            updatedAt: toIso(updatedAtRaw),
-            _createdMs: toMillisFromUnknown(createdAtRaw),
-            postType,
-            mediaUrl: mediaUrl || null,
-            videoUrl: videoUrl || null,
-            thumbnailUrl: thumbnailUrl || null,
-        };
-    });
-
-    const filtered = docs
-        .filter((d) => !q || d.content.toLowerCase().includes(q) || d.postId.toLowerCase().includes(q))
-        .sort((a, b) => b._createdMs - a._createdMs);
-
-    let total = filtered.length;
-    try {
-        const aggregate = await firestore.collection('posts').where('userId', '==', input.userId).count().get();
-        const aggregateCount = Number(aggregate.data()?.count || 0);
-        if (Number.isFinite(aggregateCount) && aggregateCount >= 0) {
-            total = aggregateCount;
-        }
-    } catch {
-        // If aggregate count isn't available, fall back to bounded fetch count.
-    }
-
-    const paged = filtered.slice(input.offset, input.offset + input.limit);
-
-    const moderationByPostId = new Map<string, { isRemoved: boolean; removedReason: string | null; removedAt: string | null }>();
-    const postIds = paged.map((p) => p.postId).filter(Boolean);
-    if (postIds.length > 0) {
-        try {
-            const rows = await adminDb()('post_admin_state')
-                .select('post_id', 'is_removed', 'removed_reason', 'removed_at')
-                .whereIn('post_id', postIds as string[]);
-            for (const row of rows as Array<any>) {
-                moderationByPostId.set(String(row.post_id), {
-                    isRemoved: asBool(row.is_removed),
-                    removedReason: asString(row.removed_reason) || null,
-                    removedAt: toIso(row.removed_at),
-                });
-            }
-        } catch {
-            // If moderation table read fails, keep posts visible with default moderation state.
-        }
-    }
-
-    const items: PostListItem[] = paged.map((p) => {
-        const m = moderationByPostId.get(p.postId);
-        return {
-            postId: p.postId,
-            userId: p.userId,
-            content: p.content,
-            createdAt: p.createdAt,
-            updatedAt: p.updatedAt,
-            postType: p.postType,
-            mediaUrl: p.mediaUrl,
-            videoUrl: p.videoUrl,
-            thumbnailUrl: p.thumbnailUrl,
-            isRemoved: m?.isRemoved === true,
-            removedReason: m?.removedReason || null,
-            removedAt: m?.removedAt || null,
-        };
-    });
-
-    return {
-        items,
-        total,
-        limit: input.limit,
-        offset: input.offset,
-        sourceTable: 'firestore.posts',
-    };
-}
-
-export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
-    const db = adminDb();
-    const source = await resolvePostSource(db);
-    if (!source) {
-        return listAdminUserPostsFromFirestore(input);
     }
 
     const q = asString(input.q || '');
@@ -1346,68 +1038,32 @@ export async function restorePostByAdmin(input: { actorUserId: string; targetPos
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
     const db = adminDb();
-    let state: any | null = null;
-    try {
-        state = await getAdminStateRow(userId);
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user_admin_state unavailable');
-    }
+    const state = await getAdminStateRow(userId);
     const metadata = parseJson(state?.metadata);
-    let directoryUser: DirectoryUser | null = null;
-    try {
-        directoryUser = await findDirectoryUser(userId);
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: directory lookup failed');
-    }
+    const directoryUser = await findDirectoryUser(userId);
 
-    let firestoreProfile: AdminFirestoreUserProfile | null = null;
-    try {
-        firestoreProfile = await getFirestoreUserProfile(userId, directoryUser);
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: firestore user profile fetch failed');
-    }
-
-    let actionsRs: any = { rows: [] };
-    let messagesRs: any = { rows: [] };
-
-    try {
-        if (await hasTable(db, 'admin_audit_log')) {
-            actionsRs = await db.raw(
-                `
-                SELECT action, target_type, target_id, metadata, created_at
-                FROM admin_audit_log
-                WHERE target_type = 'user' AND target_id = ?
-                ORDER BY created_at DESC
-                LIMIT 20
-                `,
-                [userId]
-            );
-        }
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: audit log query failed');
-    }
-
-    try {
-        if (await hasTable(db, 'admin_user_messages')) {
-            messagesRs = await db.raw(
-                `
-                SELECT message_id, channel, status, subject, body, created_at
-                FROM admin_user_messages
-                WHERE target_user_id = ?
-                ORDER BY created_at DESC
-                LIMIT 20
-                `,
-                [userId]
-            );
-        }
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user messages query failed');
-    }
-
-    const inferredEmail = firestoreProfile?.email || directoryUser?.email || (userId.includes('@') ? userId : '');
-    const inferredUsername = firestoreProfile?.username || directoryUser?.username || (inferredEmail ? inferredEmail.split('@')[0] : '');
-    const inferredDisplayName = firestoreProfile?.displayName || directoryUser?.displayName || inferredUsername || inferredEmail || userId;
-    const inferredPhotoURL = firestoreProfile?.photoURL || null;
+    const [actionsRs, messagesRs] = await Promise.all([
+        db.raw(
+            `
+            SELECT action, target_type, target_id, metadata, created_at
+            FROM admin_audit_log
+            WHERE target_type = 'user' AND target_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId]
+        ),
+        db.raw(
+            `
+            SELECT message_id, channel, status, subject, body, created_at
+            FROM admin_user_messages
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId]
+        ),
+    ]);
 
     const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
         action: asString(r.action),
@@ -1428,12 +1084,10 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
 
     return {
         userId,
-        username: inferredUsername,
-        email: inferredEmail,
+        username: directoryUser?.username || '',
+        email: directoryUser?.email || '',
         phoneNumber: directoryUser?.phoneNumber || '',
-        displayName: inferredDisplayName,
-        photoURL: inferredPhotoURL || undefined,
-        avatarUrl: inferredPhotoURL || undefined,
+        displayName: directoryUser?.displayName || '',
         dateOfBirth: directoryUser?.dateOfBirth || '',
         address: directoryUser?.address || '',
         city: directoryUser?.city || '',
@@ -1448,8 +1102,8 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         bannedUntil: toIso(state?.banned_until),
         verification: buildVerification(metadata),
         restrictions: buildRestrictions(metadata),
-        createdAt: toIso(state?.created_at) || firestoreProfile?.createdAt || directoryUser?.createdAt || null,
-        updatedAt: toIso(state?.updated_at) || firestoreProfile?.updatedAt || directoryUser?.updatedAt || null,
+        createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
+        updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
         recentActions,
         recentMessages,
     };
@@ -1531,12 +1185,11 @@ export async function queueAdminUserMessage(input: {
 
     await db.raw(
         `
-        INSERT INTO admin_user_messages (message_id, actor_user_id, target_user_id, channel, status, subject, body, metadata)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?::jsonb)
+        INSERT INTO admin_user_messages (message_id, user_id, channel, status, subject, body, metadata)
+        VALUES (?, ?, ?, 'queued', ?, ?, ?::jsonb)
         `,
         [
             messageId,
-            input.actorUserId,
             input.targetUserId,
             channel,
             asString(input.subject || '') || null,
@@ -1587,9 +1240,13 @@ export async function getEffectiveUserControls(userId: string): Promise<{
 export async function getAdminMetricsOverview(): Promise<Record<string, unknown>> {
     const infra = getEconomyInfra();
     const db = infra.db;
+    const userIdsCte = await buildUserIdsCte(db);
 
     const sql = `
+        ${userIdsCte}
     SELECT
+            (SELECT COUNT(*)::bigint FROM ids WHERE user_id IS NOT NULL AND user_id <> '') AS total_users,
+      (SELECT COUNT(*)::bigint FROM user_admin_state WHERE is_banned = true) AS banned_users,
       (SELECT COALESCE(SUM(coin_balance + bonus_coin_balance), 0)::bigint FROM wallets) AS total_coin_supply,
       (SELECT COUNT(*)::bigint FROM gift_events WHERE created_at >= NOW() - INTERVAL '24 hours') AS gifts_24h,
       (SELECT COUNT(*)::bigint FROM ledger_entries WHERE created_at >= NOW() - INTERVAL '24 hours') AS ledger_entries_24h,
@@ -1597,17 +1254,12 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
   `;
 
     try {
-        const [rs, sqlUsers, directoryUsers] = await Promise.all([
-            db.raw(sql),
-            listSqlKnownUsers(),
-            listDirectoryUsers(),
-        ]);
+        const rs = await db.raw(sql);
         const row = ((rs as any)?.rows?.[0] || {}) as Record<string, unknown>;
-        const visibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
 
         return {
-            totalUsers: visibleUsers.length,
-            bannedUsers: visibleUsers.filter((user) => user.isBanned).length,
+            totalUsers: Number(row.total_users || 0),
+            bannedUsers: Number(row.banned_users || 0),
             totalCoinSupply: Number(row.total_coin_supply || 0),
             gifts24h: Number(row.gifts_24h || 0),
             ledgerEntries24h: Number(row.ledger_entries_24h || 0),

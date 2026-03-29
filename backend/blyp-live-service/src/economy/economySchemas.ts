@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+const cognitoSubSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, 'must be a Cognito sub');
+
 export const paginationSchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -14,12 +18,21 @@ export const iapVerifySchema = z
     purchaseToken: z.string().min(1).optional(),
     receipt: z.string().min(1).optional(),
   })
+  .strict()
   .superRefine((value, ctx) => {
     if (value.platform === 'ANDROID' && !value.purchaseToken) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'purchaseToken is required for ANDROID',
+        message: 'purchaseToken is required for Android purchases',
         path: ['purchaseToken'],
+      });
+    }
+
+    if (value.platform === 'IOS' && !value.receipt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'receipt is required for iOS purchases',
+        path: ['receipt'],
       });
     }
   });
@@ -27,7 +40,7 @@ export const iapVerifySchema = z
 export const giftSendSchema = z.object({
   idempotencyKey: z.string().min(1),
   streamId: z.string().min(1),
-  receiverUserId: z.string().min(1),
+  receiverUserId: cognitoSubSchema,
   giftId: z.string().min(1),
   quantity: z.coerce.number().int().min(1).max(1000),
 });
@@ -51,13 +64,13 @@ export const liveGameFinalizeSchema = z
   .object({
     idempotencyKey: z.string().min(1),
     streamId: z.string().min(1),
-    winners: z.array(z.string().min(1)).max(100).optional(),
+    winners: z.array(cognitoSubSchema).max(100).optional(),
   })
   .strict();
 
 export const adminCreditCoinsSchema = z
   .object({
-    targetUserId: z.string().min(1),
+    targetUserId: cognitoSubSchema,
     coins: z.coerce.number().int().min(1).max(1_000_000),
     idempotencyKey: z.string().min(1),
     reason: z.string().min(1).max(200).optional(),

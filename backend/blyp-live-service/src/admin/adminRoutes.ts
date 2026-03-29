@@ -29,9 +29,15 @@ import {
 } from './adminService';
 
 const router = Router();
+const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isCanonicalSub(value: unknown): boolean {
+    return COGNITO_SUB_REGEX.test(String(value || '').trim());
+}
 
 const ADMIN_LOGIN_EMAIL = 'alex@tapaquatics.com';
 const ADMIN_LOGIN_PASSWORD = 'Caleb2022!';
+const ADMIN_ACTOR_SUB = String(process.env.ADMIN_ACTOR_SUB || '00000000-0000-4000-8000-000000000000').trim();
 const SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 
 type AdminSession = {
@@ -101,7 +107,12 @@ router.post('/admin/auth/login', async (req: AuthedRequest, res: Response) => {
             return res.status(401).json({ error: 'INVALID_CREDENTIALS', code: 'INVALID_CREDENTIALS' });
         }
 
-        const actorUserId = ADMIN_LOGIN_EMAIL;
+        if (!isCanonicalSub(ADMIN_ACTOR_SUB)) {
+            logger.error({ adminActorSub: ADMIN_ACTOR_SUB }, '[admin] ADMIN_ACTOR_SUB is not a canonical sub');
+            return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+        }
+
+        const actorUserId = ADMIN_ACTOR_SUB;
         const sessionToken = issueAdminSession(actorUserId);
         return res.json({
             ok: true,
@@ -124,161 +135,8 @@ router.post('/admin/auth/logout', requireAdmin, async (req: AuthedRequest, res: 
 });
 
 router.get('/admin/auth/me', requireAdmin, async (req: AuthedRequest, res: Response) => {
-    const actorUserId = String(req.user?.sub || ADMIN_LOGIN_EMAIL);
+    const actorUserId = String(req.user?.sub || '').trim();
     return res.json({ ok: true, actorUserId });
-});
-
-router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res: Response) => {
-    try {
-        const { db } = getEconomyInfra();
-
-        const tableRows = await db.raw(
-            `
-            SELECT
-              to_regclass('public.iap_products') IS NOT NULL AS iap_products_exists,
-              to_regclass('public.iap_receipts') IS NOT NULL AS iap_receipts_exists
-            `
-        );
-        const tableFlags = (tableRows as any)?.rows?.[0] || {};
-
-                const userIdemRows = await db.raw(
-                        `
-                        SELECT EXISTS (
-                            SELECT tc.constraint_name
-                            FROM information_schema.table_constraints tc
-                            JOIN information_schema.key_column_usage kcu
-                                ON tc.constraint_name = kcu.constraint_name
-                             AND tc.table_schema = kcu.table_schema
-                             AND tc.table_name = kcu.table_name
-                            WHERE tc.table_schema = 'public'
-                                AND tc.table_name = 'iap_receipts'
-                                AND tc.constraint_type = 'UNIQUE'
-                            GROUP BY tc.constraint_name
-                            HAVING COUNT(*) = 2
-                                 AND SUM(CASE WHEN kcu.column_name IN ('user_id', 'idempotency_key') THEN 1 ELSE 0 END) = 2
-                        ) AS ok
-                        `
-                );
-        const uniqueUserIdempotency = Boolean((userIdemRows as any)?.rows?.[0]?.ok);
-
-                const storeTxRows = await db.raw(
-                        `
-                        SELECT EXISTS (
-                            SELECT tc.constraint_name
-                            FROM information_schema.table_constraints tc
-                            JOIN information_schema.key_column_usage kcu
-                                ON tc.constraint_name = kcu.constraint_name
-                             AND tc.table_schema = kcu.table_schema
-                             AND tc.table_name = kcu.table_name
-                            WHERE tc.table_schema = 'public'
-                                AND tc.table_name = 'iap_receipts'
-                                AND tc.constraint_type = 'UNIQUE'
-                            GROUP BY tc.constraint_name
-                            HAVING COUNT(*) = 2
-                                 AND SUM(CASE WHEN kcu.column_name IN ('platform', 'store_transaction_id') THEN 1 ELSE 0 END) = 2
-                        ) AS ok
-                        `
-                );
-        const uniquePlatformStoreTransaction = Boolean((storeTxRows as any)?.rows?.[0]?.ok);
-
-                const purchaseTokenRows = await db.raw(
-                        `
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM pg_indexes
-                            WHERE schemaname = 'public'
-                                AND tablename = 'iap_receipts'
-                                AND indexname = 'uq_iap_receipts_platform_purchase_token'
-                        ) AS ok
-                        `
-                );
-        const uniquePlatformPurchaseTokenNotNull = Boolean((purchaseTokenRows as any)?.rows?.[0]?.ok);
-
-        const packageNameConfigured = Boolean(String(process.env.GOOGLE_PLAY_PACKAGE_NAME || '').trim());
-        const serviceAccountRaw = String(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
-        let serviceAccountConfigured = false;
-        if (serviceAccountRaw) {
-            try {
-                const parsed = JSON.parse(serviceAccountRaw);
-                serviceAccountConfigured = Boolean(String(parsed?.client_email || '').trim() && String(parsed?.private_key || '').trim());
-            } catch {
-                serviceAccountConfigured = false;
-            }
-        }
-
-        const providerEnvReady = packageNameConfigured && serviceAccountConfigured;
-        const schemaReady = Boolean(tableFlags.iap_products_exists)
-            && Boolean(tableFlags.iap_receipts_exists)
-            && uniqueUserIdempotency
-            && uniquePlatformStoreTransaction
-            && uniquePlatformPurchaseTokenNotNull;
-
-        return res.json({
-            schemaReady,
-            schema: {
-                iap_products: Boolean(tableFlags.iap_products_exists),
-                iap_receipts: Boolean(tableFlags.iap_receipts_exists),
-                unique_user_idempotency_key: uniqueUserIdempotency,
-                unique_platform_store_transaction_id: uniquePlatformStoreTransaction,
-                unique_platform_purchase_token_not_null: uniquePlatformPurchaseTokenNotNull,
-            },
-            providerEnv: {
-                packageNameConfigured,
-                serviceAccountConfigured,
-                ready: providerEnvReady,
-            },
-        });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/readiness failed');
-        return res.status(500).json({
-            error: 'INTERNAL',
-            code: 'INTERNAL',
-            detail: e?.message || String(e),
-        });
-    }
-});
-
-router.get('/admin/iap/receipt-probe', requireAdmin, async (req: AuthedRequest, res: Response) => {
-    try {
-        const storeTransactionId = String(req.query?.storeTransactionId || '').trim();
-        const purchaseToken = String(req.query?.purchaseToken || '').trim();
-        if (!storeTransactionId && !purchaseToken) {
-            return res.status(400).json({
-                error: 'INVALID_INPUT',
-                code: 'INVALID_INPUT',
-                detail: 'storeTransactionId or purchaseToken is required',
-            });
-        }
-
-        const { db } = getEconomyInfra();
-        const base = db('iap_receipts').select('verification_status');
-
-        if (storeTransactionId && purchaseToken) {
-            base.where(function () {
-                this.where('store_transaction_id', storeTransactionId).orWhere('purchase_token', purchaseToken);
-            });
-        } else if (storeTransactionId) {
-            base.where({ store_transaction_id: storeTransactionId });
-        } else {
-            base.where({ purchase_token: purchaseToken });
-        }
-
-        const rows = await base;
-        const totalRows = rows.length;
-        const verifiedRows = rows.filter((r: any) => String(r?.verification_status || '').toUpperCase() === 'VERIFIED').length;
-
-        return res.json({
-            storeTransactionId: storeTransactionId || null,
-            purchaseToken: purchaseToken || null,
-            totalRows,
-            verifiedRows,
-            hasAnyRow: totalRows > 0,
-            hasVerifiedRow: verifiedRows > 0,
-        });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/receipt-probe failed');
-        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail: e?.message || String(e) });
-    }
 });
 
 router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Response) => {
@@ -317,7 +175,7 @@ router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Respons
 router.get('/admin/users/:userId/posts', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const targetUserId = String(req.params?.userId || '').trim();
-        if (!targetUserId) {
+        if (!isCanonicalSub(targetUserId)) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
@@ -352,7 +210,7 @@ router.get('/admin/users/sources', requireAdmin, async (_req: AuthedRequest, res
 router.get('/admin/users/:userId', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const targetUserId = String(req.params?.userId || '').trim();
-        if (!targetUserId) {
+        if (!isCanonicalSub(targetUserId)) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
@@ -368,7 +226,7 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, async (req: Authe
     try {
         const actorUserId = String(req.user?.sub || '').trim();
         const targetUserId = String(req.params?.userId || '').trim();
-        if (!targetUserId) {
+        if (!isCanonicalSub(targetUserId)) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
@@ -402,7 +260,7 @@ router.post('/admin/users/:userId/message', requireAdmin, async (req: AuthedRequ
     try {
         const actorUserId = String(req.user?.sub || '').trim();
         const targetUserId = String(req.params?.userId || '').trim();
-        if (!targetUserId) {
+        if (!isCanonicalSub(targetUserId)) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
@@ -430,7 +288,7 @@ router.post('/admin/users/:userId/ban', requireAdmin, async (req: AuthedRequest,
     try {
         const actorUserId = String(req.user?.sub || '').trim();
         const targetUserId = String(req.params?.userId || '').trim();
-        if (!targetUserId) {
+        if (!isCanonicalSub(targetUserId)) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 
@@ -457,7 +315,7 @@ router.post('/admin/users/:userId/unban', requireAdmin, async (req: AuthedReques
     try {
         const actorUserId = String(req.user?.sub || '').trim();
         const targetUserId = String(req.params?.userId || '').trim();
-        if (!targetUserId) {
+        if (!isCanonicalSub(targetUserId)) {
             return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
         }
 

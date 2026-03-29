@@ -23,18 +23,24 @@ import {
   getSpotlightAvailability,
   getStreamSummary,
   getWallet,
-  IapVerifyError,
   joinLiveGame,
   purchasePromoteBattle,
-  verifyIapPurchase,
   sendGift,
   startLiveGame,
+  verifyIapPurchaseAndGrant,
 } from './economyService';
 import { EconomyError, toEconomyError } from './economyErrors';
 import { getEconomyInfra } from './infra';
 import { logger } from '../config/logger';
 
 const router = Router();
+const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getCanonicalSub(req: AuthedRequest): string | null {
+  const sub = String(req.user?.sub || '').trim();
+  if (!sub || !COGNITO_SUB_REGEX.test(sub)) return null;
+  return sub;
+}
 
 // All economy endpoints require auth.
 router.use(cognitoJwtMiddleware);
@@ -75,7 +81,7 @@ router.get('/promote/spotlight/availability', async (req: AuthedRequest, res) =>
 
 router.post('/promote/battle', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
 
     const parsed = promoteBattleSchema.safeParse(req.body);
@@ -95,7 +101,7 @@ router.post('/promote/battle', async (req: AuthedRequest, res) => {
 
 router.post('/promote/slot/book', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
 
     const parsed = promoteTimeSlotBookSchema.safeParse(req.body);
@@ -115,7 +121,7 @@ router.post('/promote/slot/book', async (req: AuthedRequest, res) => {
 
 router.post('/promote/spotlight/book', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
 
     const parsed = promoteSpotlightBookSchema.safeParse(req.body);
@@ -180,7 +186,7 @@ router.get('/economy/stream/:streamId/summary', async (req: AuthedRequest, res) 
 
 router.post('/gift/send', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
 
     const parsed = giftSendSchema.safeParse(req.body);
@@ -207,7 +213,7 @@ router.post('/gift/send', async (req: AuthedRequest, res) => {
 
 router.post('/economy/live-games/start', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     if (String(process.env.ECONOMY_LIVE_GAMES_ENABLED || '').trim() !== '1') {
       return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
@@ -229,7 +235,7 @@ router.post('/economy/live-games/start', async (req: AuthedRequest, res) => {
 
 router.post('/economy/live-games/join', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     if (String(process.env.ECONOMY_LIVE_GAMES_ENABLED || '').trim() !== '1') {
       return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
@@ -251,7 +257,7 @@ router.post('/economy/live-games/join', async (req: AuthedRequest, res) => {
 
 router.post('/economy/live-games/finalize', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     if (String(process.env.ECONOMY_LIVE_GAMES_ENABLED || '').trim() !== '1') {
       return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
@@ -271,33 +277,33 @@ router.post('/economy/live-games/finalize', async (req: AuthedRequest, res) => {
   }
 });
 
-router.post('/iap/verify', async (req: AuthedRequest, res) => {
+const handleIapVerify = async (req: AuthedRequest, res: any) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
 
     const parsed = iapVerifySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
 
-    const out = await verifyIapPurchase(userId, parsed.data);
-    return res.json(out);
-  } catch (e: any) {
-    if (e instanceof IapVerifyError) {
-      return res.status(e.httpStatus).json({
-        error: e.message,
-        code: e.code,
-        detail: e.detail,
-      });
+    const out = await verifyIapPurchaseAndGrant(userId, parsed.data);
+    if (out.kind === 'replay') {
+      return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
     }
 
+    return res.json(out.response);
+  } catch (e: any) {
     const err = toEconomyError(e);
-    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
-});
+};
+
+router.post('/iap/verify', handleIapVerify);
+// Backward-compatible alias while clients move to canonical /iap/verify.
+router.post('/commerce/purchase/verify', handleIapVerify);
 
 router.post('/economy/admin/credit-coins', async (req: AuthedRequest, res) => {
   try {
-    const actorUserId = req.user?.sub;
+    const actorUserId = getCanonicalSub(req);
     if (!actorUserId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
 
     // Disabled by default; must be explicitly enabled.
