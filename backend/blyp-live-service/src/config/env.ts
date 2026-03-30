@@ -64,7 +64,7 @@ export const ENV = {
   IVS_REALTIME_REGION: process.env.IVS_REALTIME_REGION || 'eu-west-1',
   
   // Cognito
-  COGNITO_USER_POOL_ID: process.env.COGNITO_USER_POOL_ID || '',
+  COGNITO_USER_POOL_ID: process.env.COGNITO_USER_POOL_ID || 'eu-west-2_ITX07Zvnt',
   
   // DynamoDB Tables
   LIVE_SESSIONS_TABLE: process.env.LIVE_SESSIONS_TABLE || 'blyp_live_sessions',
