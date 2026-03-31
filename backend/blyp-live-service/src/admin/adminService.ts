@@ -4,7 +4,8 @@ import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
 
-const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Updated to accept UUID versions 1-7 (was previously 1-5 only, which rejected UUIDv7 from Cognito)
+const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type AdminUserRow = {
     userId: string;
