@@ -5,6 +5,9 @@ import { getAdminFirestore } from '../config/firebaseAdmin';
 import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
 
+// Keep UUID-shape validation for Cognito subs while accepting observed variant nibble values.
+const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export type AdminUserRow = {
     userId: string;
     username?: string;
@@ -136,6 +139,11 @@ function asBool(value: unknown): boolean {
 function asString(value: unknown): string {
     if (typeof value !== 'string') return '';
     return value.trim();
+}
+
+function isCanonicalSubUserId(value: unknown): boolean {
+    const s = asString(value);
+    return COGNITO_SUB_REGEX.test(s);
 }
 
 function toTrimmedString(value: unknown): string | null {
@@ -470,7 +478,7 @@ async function collectDistinctSqlUserIds(db: Knex): Promise<string[]> {
             const rows = ((rs as any)?.rows || []) as Array<Record<string, unknown>>;
             for (const row of rows) {
                 const userId = asString(row.user_id);
-                if (userId) {
+                if (userId && isCanonicalSubUserId(userId)) {
                     ids.add(userId);
                 }
             }
@@ -560,7 +568,7 @@ function buildVisibleAdminUsers(sqlUsers: AdminUserRow[], directoryUsers: Direct
 
     const mergedIds = new Set(mergedFromDirectory.map((row) => row.userId));
     const sqlOnlyUsers = sqlUsers
-        .filter((row) => row.userId && !mergedIds.has(row.userId))
+        .filter((row) => row.userId && isCanonicalSubUserId(row.userId) && !mergedIds.has(row.userId))
         .map((row) => mergeUserRowWithDirectory(row, null));
 
     return [...mergedFromDirectory, ...sqlOnlyUsers];
