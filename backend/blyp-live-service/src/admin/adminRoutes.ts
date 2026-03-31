@@ -434,29 +434,4 @@ router.get('/api/live/me/admin-controls', cognitoJwtMiddleware, async (req: Auth
     }
 });
 
-// TEMPORARY DIAGNOSTIC: runtime Cognito config state (admin-only, no auth required for debug)
-router.get('/admin/diagnostics/cognito', async (req: AuthedRequest, res: Response) => {
-    try {
-        const ENV = (await import('../config/env')).default;
-        return res.json({
-            ok: true,
-            diagnostics: {
-                COGNITO_REGION: ENV.COGNITO_REGION,
-                COGNITO_USER_POOL_ID: ENV.COGNITO_USER_POOL_ID,
-                hasRegion: !!ENV.COGNITO_REGION,
-                hasPoolId: !!ENV.COGNITO_USER_POOL_ID,
-                awsProcessEnv: {
-                    AWS_REGION: process.env.AWS_REGION ? '***SET***' : '***UNSET***',
-                    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ? '***SET***' : '***UNSET***',
-                    AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ? '***SET***' : '***UNSET***',
-                    AWS_SESSION_TOKEN: process.env.AWS_SESSION_TOKEN ? '***SET***' : '***UNSET***',
-                },
-            },
-        });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/diagnostics/cognito failed');
-        return res.status(500).json({ error: 'INTERNAL', detail: e?.message });
-    }
-});
-
 export default router;
