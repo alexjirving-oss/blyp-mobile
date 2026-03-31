@@ -4,7 +4,6 @@ import {
     type UserType,
 } from '@aws-sdk/client-cognito-identity-provider';
 import ENV from '../config/env';
-import { logger } from '../config/logger';
 
 export type DirectoryUser = {
     userId: string;
@@ -32,26 +31,12 @@ let cachedRegion = '';
 function getClient(): CognitoIdentityProviderClient | null {
     const region = String(ENV.COGNITO_REGION || '').trim();
     const userPoolId = String(ENV.COGNITO_USER_POOL_ID || '').trim();
-    
-    logger.debug(
-        { region, userPoolId, hasRegion: !!region, hasPoolId: !!userPoolId },
-        '[adminCognitoDirectory] getClient() resolved env'
-    );
-    
     if (!region || !userPoolId) {
-        logger.warn(
-            { region, userPoolId },
-            '[adminCognitoDirectory] getClient() MISSING_ENV: cannot create Cognito client'
-        );
         return null;
     }
     if (!cachedClient || cachedRegion !== region) {
         cachedRegion = region;
         cachedClient = new CognitoIdentityProviderClient({ region });
-        logger.info(
-            { region },
-            '[adminCognitoDirectory] getClient() created new CognitoIdentityProviderClient'
-        );
     }
     return cachedClient;
 }
@@ -129,56 +114,27 @@ function mapUser(user: UserType): DirectoryUser {
 export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
     const client = getClient();
     const userPoolId = getPoolId();
-    
     if (!client || !userPoolId) {
-        logger.warn(
-            { hasClient: !!client, hasPoolId: !!userPoolId },
-            '[adminCognitoDirectory] listDirectoryUsers() NO_CLIENT: returning empty'
-        );
         return [];
     }
-
-    logger.info(
-        { userPoolId },
-        '[adminCognitoDirectory] listDirectoryUsers() calling ListUsersCommand'
-    );
 
     const items: DirectoryUser[] = [];
     let paginationToken: string | undefined;
 
-    try {
-        do {
-            const out = await client.send(new ListUsersCommand({
-                UserPoolId: userPoolId,
-                Limit: 60,
-                PaginationToken: paginationToken,
-            }));
-            
-            const userCount = (out.Users || []).length;
-            logger.debug(
-                { userCount, paginationToken },
-                '[adminCognitoDirectory] ListUsersCommand returned users'
-            );
-            
-            for (const user of out.Users || []) {
-                const mapped = mapUser(user);
-                if (mapped.userId) {
-                    items.push(mapped);
-                }
+    do {
+        const out = await client.send(new ListUsersCommand({
+            UserPoolId: userPoolId,
+            Limit: 60,
+            PaginationToken: paginationToken,
+        }));
+        for (const user of out.Users || []) {
+            const mapped = mapUser(user);
+            if (mapped.userId) {
+                items.push(mapped);
             }
-            paginationToken = out.PaginationToken;
-        } while (paginationToken);
-
-        logger.info(
-            { totalItems: items.length },
-            '[adminCognitoDirectory] listDirectoryUsers() completed'
-        );
-    } catch (err: any) {
-        logger.error(
-            { error: err?.message || String(err), code: err?.Code },
-            '[adminCognitoDirectory] listDirectoryUsers() COGNITO_CALL_FAILED'
-        );
-    }
+        }
+        paginationToken = out.PaginationToken;
+    } while (paginationToken);
 
     return items;
 }
