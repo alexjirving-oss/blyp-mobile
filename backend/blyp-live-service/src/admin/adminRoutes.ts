@@ -27,6 +27,7 @@ import {
     setAdminUserCapabilities,
     unbanUserByAdmin,
 } from './adminService';
+import { probeDirectoryState } from './adminCognitoDirectory';
 
 const router = Router();
 
@@ -345,6 +346,17 @@ router.get('/admin/users/sources', requireAdmin, async (_req: AuthedRequest, res
         return res.json(out);
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/sources failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/users/directory-proof', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const q = String(req.query?.q || '').trim();
+        const out = await probeDirectoryState(q);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/directory-proof failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });

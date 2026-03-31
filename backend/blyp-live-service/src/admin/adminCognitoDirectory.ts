@@ -26,6 +26,14 @@ export type DirectoryUser = {
     updatedAt: string | null;
 };
 
+export type DirectoryProbeResult = {
+    getClientSucceeded: boolean;
+    listUsersAttempted: boolean;
+    listUsersThrew: boolean;
+    directoryCount: number;
+    proofUserMatched: boolean;
+};
+
 let cachedClient: CognitoIdentityProviderClient | null = null;
 let cachedRegion = '';
 let cachedDirectoryUsers: DirectoryUser[] | null = null;
@@ -216,6 +224,79 @@ export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
     } finally {
         inFlightDirectoryUsers = null;
     }
+}
+
+export async function probeDirectoryState(proofUserQuery: string): Promise<DirectoryProbeResult> {
+    const proofQuery = String(proofUserQuery || '').trim().toLowerCase();
+    const userPoolId = getPoolId();
+    const client = getClient();
+    const getClientSucceeded = Boolean(client && userPoolId);
+
+    if (!getClientSucceeded) {
+        return {
+            getClientSucceeded: false,
+            listUsersAttempted: false,
+            listUsersThrew: false,
+            directoryCount: 0,
+            proofUserMatched: false,
+        };
+    }
+
+    const regions = getRegionCandidates(userPoolId);
+    let listUsersAttempted = false;
+    let listUsersThrew = false;
+
+    for (const region of regions) {
+        try {
+            if (!cachedClient || cachedRegion !== region) {
+                cachedRegion = region;
+                cachedClient = new CognitoIdentityProviderClient({ region });
+            }
+
+            const items: DirectoryUser[] = [];
+            let paginationToken: string | undefined;
+
+            do {
+                listUsersAttempted = true;
+                const out = await cachedClient.send(new ListUsersCommand({
+                    UserPoolId: userPoolId,
+                    Limit: 60,
+                    PaginationToken: paginationToken,
+                }));
+                for (const user of out.Users || []) {
+                    const mapped = mapUser(user);
+                    if (mapped.userId) {
+                        items.push(mapped);
+                    }
+                }
+                paginationToken = out.PaginationToken;
+            } while (paginationToken);
+
+            const proofUserMatched = proofQuery
+                ? items.some((user) => [user.userId, user.username, user.email]
+                    .filter(Boolean)
+                    .some((value) => String(value).toLowerCase() === proofQuery))
+                : false;
+
+            return {
+                getClientSucceeded: true,
+                listUsersAttempted,
+                listUsersThrew,
+                directoryCount: items.length,
+                proofUserMatched,
+            };
+        } catch {
+            listUsersThrew = true;
+        }
+    }
+
+    return {
+        getClientSucceeded: true,
+        listUsersAttempted,
+        listUsersThrew,
+        directoryCount: 0,
+        proofUserMatched: false,
+    };
 }
 
 export async function findDirectoryUser(inputUserId: string): Promise<DirectoryUser | null> {
