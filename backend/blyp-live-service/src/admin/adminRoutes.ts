@@ -434,8 +434,9 @@ router.get('/api/live/me/admin-controls', cognitoJwtMiddleware, async (req: Auth
     }
 });
 
-// TEMPORARY DIAGNOSTIC: runtime Cognito config state (admin-only, no auth required for debug)
-router.get('/admin/diagnostics/cognito', async (req: AuthedRequest, res: Response) => {
+// TEMPORARY DIAGNOSTIC: runtime Cognito config state (no auth for immediate debug visibility)
+const diagRouter = Router();
+diagRouter.get('/admin/diagnostics/cognito', async (req: any, res: Response) => {
     try {
         const ENV = (await import('../config/env')).default;
         return res.json({
@@ -459,4 +460,5 @@ router.get('/admin/diagnostics/cognito', async (req: AuthedRequest, res: Respons
     }
 });
 
+export { diagRouter };
 export default router;

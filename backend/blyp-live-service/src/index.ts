@@ -4,7 +4,7 @@ import cors from 'cors';
 import http from 'http';
 import liveRoutes from './routes/liveRoutes';
 import economyRoutes from './economy/economyRoutes';
-import adminRoutes from './admin/adminRoutes';
+import adminRoutes, { diagRouter } from './admin/adminRoutes';
 import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
 import { ensureEconomySchema } from './economy/schema';
 import { createSocketServer } from './realtime/socketServer';
@@ -71,6 +71,9 @@ app.get('/ready', async (_req, res) => {
     });
   }
 });
+
+// Mount diagnostic routes FIRST, with NO auth middleware
+app.use(diagRouter);
 
 // Admin auth surface must be mounted before economy routes because
 // economy router applies Cognito middleware at router level.
