@@ -460,5 +460,40 @@ diagRouter.get('/admin/diagnostics/cognito', async (req: any, res: Response) => 
     }
 });
 
+// TEMPORARY DIAGNOSTIC: direct Cognito ListUsers call test
+diagRouter.get('/admin/diagnostics/cognito/probe', async (req: any, res: Response) => {
+    try {
+        const { listDirectoryUsers } = await import('./adminCognitoDirectory');
+        const startTime = Date.now();
+        const users = await listDirectoryUsers();
+        const duration = Date.now() - startTime;
+        
+        logger.info(
+            { userCount: users.length, duration },
+            '[admin] /admin/diagnostics/cognito/probe listDirectoryUsers returned'
+        );
+        
+        return res.json({
+            ok: true,
+            probe: {
+                listDirectoryUsersReturned: true,
+                userCount: users.length,
+                durationMs: duration,
+                sampleUsers: users.slice(0, 3).map(u => ({ userId: u.userId, username: u.username, email: u.email })),
+            },
+        });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e), code: e?.Code }, '[admin] /admin/diagnostics/cognito/probe FAILED');
+        return res.status(500).json({
+            ok: false,
+            probe: {
+                error: e?.message || String(e),
+                code: e?.Code,
+                type: e?.constructor?.name,
+            },
+        });
+    }
+});
+
 export { diagRouter };
 export default router;
