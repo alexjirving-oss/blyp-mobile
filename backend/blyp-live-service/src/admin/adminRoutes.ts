@@ -3,36 +3,105 @@ import crypto from 'crypto';
 import { cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
 import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
 import { logger } from '../config/logger';
+import { endLiveSession } from '../live/liveService';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
+import { getDirectoryUserProof } from './adminCognitoDirectory';
 import {
+    adminBroadcastSchema,
+    adminCreditCoinsSchema,
+    adminListAuditSchema,
+    adminListLiveSchema,
+    adminListMessagesSchema,
+    adminListPostsSchema,
     adminListUserPostsSchema,
     adminListUsersSchema,
     adminQueueUserMessageSchema,
     adminSetCapabilitiesSchema,
+    adminSetFlagsSchema,
+    adminSetGiftSchema,
     banUserSchema,
     moderatePostSchema,
     unbanUserSchema,
 } from './adminSchemas';
 import {
+    broadcastAdminMessage,
+    getAdminAnalytics,
+    getAdminCatalog,
+    getFeatureFlags,
+    listRecentAdminMessages,
+    setFeatureFlags,
+    setGiftEnabled,
+} from './adminInsights';
+import {
     banUserByAdmin,
     getAdminUserDetail,
     getAdminMetricsOverview,
     getAdminUserSourceStats,
+    getAdminLiveStreams,
     getEffectiveUserControls,
+    listAdminAudit,
     listAdminUserPosts,
     listAdminUsers,
+    listAllAdminPosts,
     queueAdminUserMessage,
     removePostByAdmin,
     restorePostByAdmin,
     setAdminUserCapabilities,
     unbanUserByAdmin,
+    writeAdminAudit,
 } from './adminService';
-import { probeDirectoryState } from './adminCognitoDirectory';
+import { creditCoinsAdmin } from '../economy/economyService';
 
 const router = Router();
 
-const ADMIN_LOGIN_EMAIL = 'alex@tapaquatics.com';
-const ADMIN_LOGIN_PASSWORD = 'Caleb2022!';
+// Admin credentials MUST come from the environment — there is deliberately no
+// fallback. If ADMIN_LOGIN_EMAIL / ADMIN_LOGIN_PASSWORD are unset, admin login
+// FAILS CLOSED (every attempt is rejected) rather than defaulting to anything
+// that could be read out of the repository.
+const ADMIN_LOGIN_EMAIL = String(process.env.ADMIN_LOGIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_LOGIN_PASSWORD = String(process.env.ADMIN_LOGIN_PASSWORD || '');
+if (!ADMIN_LOGIN_EMAIL || !ADMIN_LOGIN_PASSWORD) {
+    logger.error('[admin] ADMIN_LOGIN_EMAIL/ADMIN_LOGIN_PASSWORD not set; admin console login is DISABLED until they are configured.');
+}
+
+// Allow more than one admin to sign into the console (e.g. Melody) without a full
+// per-user auth rebuild. Set ADMIN_LOGIN_ACCOUNTS in Cloud Run as either JSON
+// (`[{"email":"melody@x.com","password":"..."}]`) or a compact
+// `email:password,email2:password2` string. The primary ADMIN_LOGIN_EMAIL is
+// always included.
+function buildAdminAccounts(): Map<string, string> {
+    const accounts = new Map<string, string>();
+    if (ADMIN_LOGIN_EMAIL && ADMIN_LOGIN_PASSWORD) {
+        accounts.set(ADMIN_LOGIN_EMAIL, ADMIN_LOGIN_PASSWORD);
+    }
+
+    const raw = String(process.env.ADMIN_LOGIN_ACCOUNTS || '').trim();
+    if (!raw) return accounts;
+
+    const add = (email: unknown, password: unknown) => {
+        const e = String(email || '').trim().toLowerCase();
+        const p = String(password || '');
+        if (e && p) accounts.set(e, p);
+    };
+
+    try {
+        if (raw.startsWith('[') || raw.startsWith('{')) {
+            const parsed = JSON.parse(raw);
+            const list = Array.isArray(parsed) ? parsed : [parsed];
+            for (const item of list) add(item?.email, item?.password);
+        } else {
+            for (const pair of raw.split(',')) {
+                const idx = pair.indexOf(':');
+                if (idx > 0) add(pair.slice(0, idx), pair.slice(idx + 1));
+            }
+        }
+    } catch (e: any) {
+        logger.warn({ err: e?.message || String(e) }, '[admin] could not parse ADMIN_LOGIN_ACCOUNTS; ignoring');
+    }
+    return accounts;
+}
+
+const ADMIN_ACCOUNTS = buildAdminAccounts();
 const SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 
 type AdminSession = {
@@ -72,6 +141,22 @@ function getSessionToken(req: AuthedRequest): string {
     return '';
 }
 
+// Re-verify the logged-in admin's own password for sensitive actions (e.g.
+// crediting coins). The admin session must already be valid (requireAdmin);
+// this is a second factor of intent, not the primary auth. The password must
+// match the account that owns the current session (actorUserId), falling back to
+// the primary admin password for legacy sessions.
+function verifyAdminPassword(password: string, actorUserId?: string): boolean {
+    const provided = String(password || '');
+    if (!provided) return false;
+    const actor = String(actorUserId || '').trim().toLowerCase();
+    if (actor && ADMIN_ACCOUNTS.has(actor)) {
+        return provided === ADMIN_ACCOUNTS.get(actor);
+    }
+    // Fail closed when no primary password is configured.
+    return !!ADMIN_LOGIN_PASSWORD && provided === ADMIN_LOGIN_PASSWORD;
+}
+
 function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
     cleanupExpiredSessions();
     const token = getSessionToken(req);
@@ -94,15 +179,15 @@ router.post('/admin/auth/login', async (req: AuthedRequest, res: Response) => {
         const email = String(req.body?.email || '').trim().toLowerCase();
         const password = String(req.body?.password || '');
 
-        const isEmailOk = email === ADMIN_LOGIN_EMAIL;
-        const isPasswordOk = password === ADMIN_LOGIN_PASSWORD;
+        const expectedPassword = ADMIN_ACCOUNTS.get(email);
+        const isOk = expectedPassword != null && password === expectedPassword;
 
-        if (!isEmailOk || !isPasswordOk) {
+        if (!isOk) {
             logger.warn({ email }, '[admin] login rejected');
             return res.status(401).json({ error: 'INVALID_CREDENTIALS', code: 'INVALID_CREDENTIALS' });
         }
 
-        const actorUserId = ADMIN_LOGIN_EMAIL;
+        const actorUserId = email;
         const sessionToken = issueAdminSession(actorUserId);
         return res.json({
             ok: true,
@@ -129,159 +214,6 @@ router.get('/admin/auth/me', requireAdmin, async (req: AuthedRequest, res: Respo
     return res.json({ ok: true, actorUserId });
 });
 
-router.get('/admin/iap/readiness', requireAdmin, async (_req: AuthedRequest, res: Response) => {
-    try {
-        const { db } = getEconomyInfra();
-
-        const tableRows = await db.raw(
-            `
-            SELECT
-              to_regclass('public.iap_products') IS NOT NULL AS iap_products_exists,
-              to_regclass('public.iap_receipts') IS NOT NULL AS iap_receipts_exists
-            `
-        );
-        const tableFlags = (tableRows as any)?.rows?.[0] || {};
-
-                const userIdemRows = await db.raw(
-                        `
-                        SELECT EXISTS (
-                            SELECT tc.constraint_name
-                            FROM information_schema.table_constraints tc
-                            JOIN information_schema.key_column_usage kcu
-                                ON tc.constraint_name = kcu.constraint_name
-                             AND tc.table_schema = kcu.table_schema
-                             AND tc.table_name = kcu.table_name
-                            WHERE tc.table_schema = 'public'
-                                AND tc.table_name = 'iap_receipts'
-                                AND tc.constraint_type = 'UNIQUE'
-                            GROUP BY tc.constraint_name
-                            HAVING COUNT(*) = 2
-                                 AND SUM(CASE WHEN kcu.column_name IN ('user_id', 'idempotency_key') THEN 1 ELSE 0 END) = 2
-                        ) AS ok
-                        `
-                );
-        const uniqueUserIdempotency = Boolean((userIdemRows as any)?.rows?.[0]?.ok);
-
-                const storeTxRows = await db.raw(
-                        `
-                        SELECT EXISTS (
-                            SELECT tc.constraint_name
-                            FROM information_schema.table_constraints tc
-                            JOIN information_schema.key_column_usage kcu
-                                ON tc.constraint_name = kcu.constraint_name
-                             AND tc.table_schema = kcu.table_schema
-                             AND tc.table_name = kcu.table_name
-                            WHERE tc.table_schema = 'public'
-                                AND tc.table_name = 'iap_receipts'
-                                AND tc.constraint_type = 'UNIQUE'
-                            GROUP BY tc.constraint_name
-                            HAVING COUNT(*) = 2
-                                 AND SUM(CASE WHEN kcu.column_name IN ('platform', 'store_transaction_id') THEN 1 ELSE 0 END) = 2
-                        ) AS ok
-                        `
-                );
-        const uniquePlatformStoreTransaction = Boolean((storeTxRows as any)?.rows?.[0]?.ok);
-
-                const purchaseTokenRows = await db.raw(
-                        `
-                        SELECT EXISTS (
-                            SELECT 1
-                            FROM pg_indexes
-                            WHERE schemaname = 'public'
-                                AND tablename = 'iap_receipts'
-                                AND indexname = 'uq_iap_receipts_platform_purchase_token'
-                        ) AS ok
-                        `
-                );
-        const uniquePlatformPurchaseTokenNotNull = Boolean((purchaseTokenRows as any)?.rows?.[0]?.ok);
-
-        const packageNameConfigured = Boolean(String(process.env.GOOGLE_PLAY_PACKAGE_NAME || '').trim());
-        const serviceAccountRaw = String(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
-        let serviceAccountConfigured = false;
-        if (serviceAccountRaw) {
-            try {
-                const parsed = JSON.parse(serviceAccountRaw);
-                serviceAccountConfigured = Boolean(String(parsed?.client_email || '').trim() && String(parsed?.private_key || '').trim());
-            } catch {
-                serviceAccountConfigured = false;
-            }
-        }
-
-        const providerEnvReady = packageNameConfigured && serviceAccountConfigured;
-        const schemaReady = Boolean(tableFlags.iap_products_exists)
-            && Boolean(tableFlags.iap_receipts_exists)
-            && uniqueUserIdempotency
-            && uniquePlatformStoreTransaction
-            && uniquePlatformPurchaseTokenNotNull;
-
-        return res.json({
-            schemaReady,
-            schema: {
-                iap_products: Boolean(tableFlags.iap_products_exists),
-                iap_receipts: Boolean(tableFlags.iap_receipts_exists),
-                unique_user_idempotency_key: uniqueUserIdempotency,
-                unique_platform_store_transaction_id: uniquePlatformStoreTransaction,
-                unique_platform_purchase_token_not_null: uniquePlatformPurchaseTokenNotNull,
-            },
-            providerEnv: {
-                packageNameConfigured,
-                serviceAccountConfigured,
-                ready: providerEnvReady,
-            },
-        });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/readiness failed');
-        return res.status(500).json({
-            error: 'INTERNAL',
-            code: 'INTERNAL',
-            detail: e?.message || String(e),
-        });
-    }
-});
-
-router.get('/admin/iap/receipt-probe', requireAdmin, async (req: AuthedRequest, res: Response) => {
-    try {
-        const storeTransactionId = String(req.query?.storeTransactionId || '').trim();
-        const purchaseToken = String(req.query?.purchaseToken || '').trim();
-        if (!storeTransactionId && !purchaseToken) {
-            return res.status(400).json({
-                error: 'INVALID_INPUT',
-                code: 'INVALID_INPUT',
-                detail: 'storeTransactionId or purchaseToken is required',
-            });
-        }
-
-        const { db } = getEconomyInfra();
-        const base = db('iap_receipts').select('verification_status');
-
-        if (storeTransactionId && purchaseToken) {
-            base.where(function () {
-                this.where('store_transaction_id', storeTransactionId).orWhere('purchase_token', purchaseToken);
-            });
-        } else if (storeTransactionId) {
-            base.where({ store_transaction_id: storeTransactionId });
-        } else {
-            base.where({ purchase_token: purchaseToken });
-        }
-
-        const rows = await base;
-        const totalRows = rows.length;
-        const verifiedRows = rows.filter((r: any) => String(r?.verification_status || '').toUpperCase() === 'VERIFIED').length;
-
-        return res.json({
-            storeTransactionId: storeTransactionId || null,
-            purchaseToken: purchaseToken || null,
-            totalRows,
-            verifiedRows,
-            hasAnyRow: totalRows > 0,
-            hasVerifiedRow: verifiedRows > 0,
-        });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/iap/receipt-probe failed');
-        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail: e?.message || String(e) });
-    }
-});
-
 router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const parsed = adminListUsersSchema.safeParse(req.query);
@@ -304,6 +236,8 @@ router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Respons
             total: 0,
             limit: Number(req.query?.limit || 25),
             offset: Number(req.query?.offset || 0),
+            pageItemCount: 0,
+            resultState: 'ZERO_MATCHES',
             degraded: true,
             detail: 'Users unavailable: database/redis not ready',
             dependencyStatus: {
@@ -353,7 +287,7 @@ router.get('/admin/users/sources', requireAdmin, async (_req: AuthedRequest, res
 router.get('/admin/users/directory-proof', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const q = String(req.query?.q || '').trim();
-        const out = await probeDirectoryState(q);
+        const out = await getDirectoryUserProof(q);
         return res.json(out);
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/directory-proof failed');
@@ -491,6 +425,64 @@ router.post('/admin/users/:userId/unban', requireAdmin, async (req: AuthedReques
     }
 });
 
+router.post('/admin/users/:userId/credit-coins', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!targetUserId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminCreditCoinsSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        // Sensitive action: require the admin to re-enter their own password.
+        // Use 403 (not 401) so the web client doesn't treat a wrong password as
+        // an expired session and force a logout.
+        if (!verifyAdminPassword(parsed.data.password, actorUserId)) {
+            logger.warn({ actorUserId, targetUserId }, '[admin] credit-coins password re-auth failed');
+            return res.status(403).json({ error: 'INVALID_CREDENTIALS', code: 'INVALID_CREDENTIALS', detail: 'Incorrect admin password' });
+        }
+
+        const idempotencyKey = parsed.data.idempotencyKey || `admin-credit:${targetUserId}:${crypto.randomUUID()}`;
+
+        const result = await creditCoinsAdmin(actorUserId, {
+            targetUserId,
+            coins: parsed.data.coins,
+            idempotencyKey,
+            reason: parsed.data.reason,
+        });
+
+        await writeAdminAudit({
+            actorUserId,
+            action: 'user_coins_credited',
+            targetType: 'user',
+            targetId: targetUserId,
+            metadata: {
+                coins: parsed.data.coins,
+                reason: parsed.data.reason || null,
+                ledgerId: result.ledgerId,
+                newBalance: result.newBalance,
+                replay: result.replay,
+            },
+        }).catch(() => { /* audit is best-effort */ });
+
+        return res.json({
+            ok: true,
+            userId: targetUserId,
+            coinsCredited: result.coinsCredited,
+            newBalance: result.newBalance,
+            ledgerId: result.ledgerId,
+            replay: result.replay,
+        });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/credit-coins failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail: e?.message });
+    }
+});
+
 router.post('/admin/posts/:postId/remove', requireAdmin, async (req: AuthedRequest, res: Response) => {
     try {
         const actorUserId = String(req.user?.sub || '').trim();
@@ -545,6 +537,165 @@ router.post('/admin/posts/:postId/restore', requireAdmin, async (req: AuthedRequ
     }
 });
 
+router.get('/admin/posts', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListPostsSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await listAllAdminPosts(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/posts failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/live', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListLiveSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await getAdminLiveStreams(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/live failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+// Force-end an abusive live stream from moderation tooling.
+router.post('/admin/live/:sessionId/end', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const sessionId = String(req.params?.sessionId || '').trim();
+        if (!sessionId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: 'sessionId required' });
+        }
+        await endLiveSession(sessionId);
+        logger.warn({ sessionId, actor: req.user?.sub }, '[admin] force-ended live session');
+        return res.json({ ok: true });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/live/:sessionId/end failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/audit', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListAuditSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await listAdminAudit(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/audit failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/analytics', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        const out = await getAdminAnalytics();
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/analytics failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/comms/broadcast', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const parsed = adminBroadcastSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const out = await broadcastAdminMessage({
+            actorUserId,
+            segment: parsed.data.segment,
+            subject: parsed.data.subject || null,
+            message: parsed.data.message,
+        });
+        return res.json({ ok: true, ...out });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/comms/broadcast failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/comms/messages', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListMessagesSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const out = await listRecentAdminMessages(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/comms/messages failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/config/flags', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        const flags = await getFeatureFlags();
+        return res.json({ flags });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/config/flags GET failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/config/flags', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const parsed = adminSetFlagsSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const flags = await setFeatureFlags({ actorUserId, flags: parsed.data.flags });
+        return res.json({ ok: true, flags });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/config/flags POST failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/config/catalog', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        const out = await getAdminCatalog();
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/config/catalog failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/config/gift/:giftId', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const giftId = String(req.params?.giftId || '').trim();
+        if (!giftId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+        const parsed = adminSetGiftSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        await setGiftEnabled({ actorUserId, giftId, enabled: parsed.data.enabled });
+        return res.json({ ok: true, giftId, enabled: parsed.data.enabled });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/config/gift failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
 router.get('/admin/metrics/overview', requireAdmin, async (_req: AuthedRequest, res: Response) => {
     try {
         const out = await getAdminMetricsOverview();
@@ -570,6 +721,10 @@ router.get('/api/live/me/admin-controls', cognitoJwtMiddleware, async (req: Auth
         return res.status(200).json({
             ok: false,
             userId: String(req.user?.sub || ''),
+            isBanned: false,
+            bannedUntil: null,
+            banReason: null,
+            role: 'user',
             verification: { isVerified: false, note: '', updatedAt: null, updatedBy: null },
             restrictions: {
                 messagingRestricted: false,

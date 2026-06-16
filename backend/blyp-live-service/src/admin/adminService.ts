@@ -1,12 +1,18 @@
 import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
-import { getAdminFirestore } from '../config/firebaseAdmin';
 import { logger } from '../config/logger';
-import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
-
-// Keep UUID-shape validation for Cognito subs while accepting observed variant nibble values.
-const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[0-9a-f][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { findDirectoryUser, listDirectoryUsers, setDirectoryUserEnabled, type DirectoryUser } from './adminCognitoDirectory';
+import { invalidateBanCache } from './banGuard';
+import {
+    isFirestoreAvailable,
+    listFirestorePostsWindow,
+    listFirestoreStreams,
+    listFirestoreUserPosts,
+    syncUserRoleToFirestore,
+    type FsPost,
+    type FsStream,
+} from './firestoreAdmin';
 
 export type AdminUserRow = {
     userId: string;
@@ -48,8 +54,6 @@ type AdminUserDetail = {
     email?: string;
     phoneNumber?: string;
     displayName?: string;
-    photoURL?: string;
-    avatarUrl?: string;
     dateOfBirth?: string;
     address?: string;
     city?: string;
@@ -93,6 +97,9 @@ type PostListItem = {
     mediaUrl: string | null;
     videoUrl: string | null;
     thumbnailUrl: string | null;
+    likes: number;
+    views: number;
+    comments: number;
     isRemoved: boolean;
     removedReason: string | null;
     removedAt: string | null;
@@ -139,133 +146,6 @@ function asBool(value: unknown): boolean {
 function asString(value: unknown): string {
     if (typeof value !== 'string') return '';
     return value.trim();
-}
-
-function isCanonicalSubUserId(value: unknown): boolean {
-    const s = asString(value);
-    return COGNITO_SUB_REGEX.test(s);
-}
-
-function toTrimmedString(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    return trimmed || null;
-}
-
-const PLACEHOLDER_NAMES = new Set(['anonymous', 'anonymous user', 'anon']);
-
-function isPlaceholderName(value: unknown): boolean {
-    const trimmed = toTrimmedString(value);
-    if (!trimmed) return true;
-    return PLACEHOLDER_NAMES.has(trimmed.replace(/^@+/, '').toLowerCase());
-}
-
-function pickBestProfileNameFromUserDoc(userDocData: any, userId: string): { username: string | null; displayName: string } {
-    const username = toTrimmedString(userDocData?.username || userDocData?.handle || userDocData?.userName);
-    const displayName = toTrimmedString(userDocData?.displayName || userDocData?.userName || userDocData?.name);
-
-    if (username && !isPlaceholderName(username) && username !== userId) {
-        return { username, displayName: username };
-    }
-
-    if (displayName && !isPlaceholderName(displayName) && displayName !== userId) {
-        return { username: null, displayName };
-    }
-
-    return { username: null, displayName: userId };
-}
-
-type AdminFirestoreUserProfile = {
-    username: string | null;
-    displayName: string | null;
-    email: string | null;
-    photoURL: string | null;
-    createdAt: string | null;
-    updatedAt: string | null;
-};
-
-function pickIdentityFromPostDoc(postData: any, userId: string): { username: string | null; displayName: string | null; photoURL: string | null } {
-    const username = toTrimmedString(postData?.username || postData?.handle || postData?.userName);
-    const displayName = toTrimmedString(postData?.displayName || postData?.userName || postData?.userName || postData?.name);
-    const photoURL = toTrimmedString(
-        postData?.userPhotoURL || postData?.photoURL || postData?.photoUrl || postData?.avatarUrl || postData?.profileImageUrl || postData?.imageUrl
-    );
-
-    const safeUsername = username && !isPlaceholderName(username) && username !== userId ? username : null;
-    const safeDisplayName = displayName && !isPlaceholderName(displayName) && displayName !== userId ? displayName : null;
-
-    return {
-        username: safeUsername,
-        displayName: safeUsername || safeDisplayName,
-        photoURL,
-    };
-}
-
-function firestoreTimestampToIso(value: any): string | null {
-    if (!value) return null;
-    try {
-        if (typeof value?.toDate === 'function') {
-            return value.toDate().toISOString();
-        }
-        return toIso(value);
-    } catch {
-        return null;
-    }
-}
-
-async function getFirestoreUserProfile(userId: string, directoryUser: DirectoryUser | null): Promise<AdminFirestoreUserProfile | null> {
-    const firestore = getAdminFirestore();
-    if (!firestore) return null;
-
-    const candidateDocIds = Array.from(new Set([
-        userId,
-        directoryUser?.username || '',
-        directoryUser?.email || '',
-    ].map((value) => String(value || '').trim()).filter(Boolean)));
-
-    for (const docId of candidateDocIds) {
-        try {
-            const snap = await firestore.collection('users').doc(docId).get();
-            if (!snap.exists) continue;
-            const userData = snap.data() || {};
-            const picked = pickBestProfileNameFromUserDoc(userData, userId);
-            return {
-                username: picked.username,
-                displayName: picked.displayName,
-                email: toTrimmedString(userData.email),
-                photoURL: toTrimmedString(
-                    userData.photoURL || userData.photoUrl || userData.avatarUrl || userData.profileImageUrl || userData.imageUrl
-                ),
-                createdAt: firestoreTimestampToIso(userData.createdAt),
-                updatedAt: firestoreTimestampToIso(userData.updatedAt),
-            };
-        } catch (error: any) {
-            logger.warn({ err: error?.message || String(error), userId, docId }, '[admin] getAdminUserDetail: firestore user profile lookup failed');
-        }
-    }
-
-    // Fallback: some older accounts carry display identity fields on post documents.
-    try {
-        const postSnap = await firestore.collection('posts').where('userId', '==', userId).limit(1).get();
-        if (!postSnap.empty) {
-            const postData = postSnap.docs[0]?.data() || {};
-            const picked = pickIdentityFromPostDoc(postData, userId);
-            if (picked.displayName || picked.username || picked.photoURL) {
-                return {
-                    username: picked.username,
-                    displayName: picked.displayName,
-                    email: null,
-                    photoURL: picked.photoURL,
-                    createdAt: null,
-                    updatedAt: null,
-                };
-            }
-        }
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: firestore posts fallback lookup failed');
-    }
-
-    return null;
 }
 
 function buildVerification(metadata: Record<string, any>): AdminVerification {
@@ -478,7 +358,7 @@ async function collectDistinctSqlUserIds(db: Knex): Promise<string[]> {
             const rows = ((rs as any)?.rows || []) as Array<Record<string, unknown>>;
             for (const row of rows) {
                 const userId = asString(row.user_id);
-                if (userId && isCanonicalSubUserId(userId)) {
+                if (userId) {
                     ids.add(userId);
                 }
             }
@@ -527,51 +407,6 @@ function mergeUserRowWithDirectory(row: AdminUserRow | null, directoryUser: Dire
         createdAt: row?.createdAt || directoryUser?.createdAt || null,
         updatedAt: row?.updatedAt || directoryUser?.updatedAt || null,
     };
-}
-
-const LINKED_DIRECTORY_STATUSES = new Set([
-    'CONFIRMED',
-    'EXTERNAL_PROVIDER',
-    'FORCE_CHANGE_PASSWORD',
-    'RESET_REQUIRED',
-]);
-
-function normalizeDirectoryStatus(value: unknown): string {
-    return asString(value).toUpperCase();
-}
-
-function isAppLinkedDirectoryUser(user: DirectoryUser): boolean {
-    if (!asString(user.userId)) {
-        return false;
-    }
-    if (user.enabled === false) {
-        return false;
-    }
-
-    const status = normalizeDirectoryStatus(user.userStatus);
-    if (!status) {
-        return true;
-    }
-
-    return LINKED_DIRECTORY_STATUSES.has(status);
-}
-
-function buildVisibleAdminUsers(sqlUsers: AdminUserRow[], directoryUsers: DirectoryUser[]): AdminUserRow[] {
-    const sqlUsersById = new Map<string, AdminUserRow>();
-    for (const row of sqlUsers) {
-        sqlUsersById.set(row.userId, row);
-    }
-
-    const mergedFromDirectory = directoryUsers
-        .filter(isAppLinkedDirectoryUser)
-        .map((directoryUser) => mergeUserRowWithDirectory(sqlUsersById.get(directoryUser.userId) || null, directoryUser));
-
-    const mergedIds = new Set(mergedFromDirectory.map((row) => row.userId));
-    const sqlOnlyUsers = sqlUsers
-        .filter((row) => row.userId && isCanonicalSubUserId(row.userId) && !mergedIds.has(row.userId))
-        .map((row) => mergeUserRowWithDirectory(row, null));
-
-    return [...mergedFromDirectory, ...sqlOnlyUsers];
 }
 
 function matchesAdminUserQuery(user: AdminUserRow, q: string): boolean {
@@ -670,15 +505,32 @@ export async function getAdminUserSourceStats(): Promise<Record<string, unknown>
     };
 }
 
-export async function listAdminUsers(input: { q?: string; limit: number; offset: number }): Promise<{ items: AdminUserRow[]; total: number; limit: number; offset: number }> {
+type AdminUsersResultState = 'POPULATED' | 'ZERO_MATCHES' | 'EMPTY_PAGE';
+
+export async function listAdminUsers(input: { q?: string; limit: number; offset: number }): Promise<{
+    items: AdminUserRow[];
+    total: number;
+    limit: number;
+    offset: number;
+    pageItemCount: number;
+    resultState: AdminUsersResultState;
+    degraded: false;
+}> {
     const q = asString(input.q || '').toLowerCase();
     const [sqlUsers, directoryUsers] = await Promise.all([
         listSqlKnownUsers(),
         listDirectoryUsers(),
     ]);
 
-    const baseVisibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
-    const merged = baseVisibleUsers
+    const byId = new Map<string, AdminUserRow>();
+    for (const row of sqlUsers) {
+        byId.set(row.userId, row);
+    }
+    for (const directoryUser of directoryUsers) {
+        byId.set(directoryUser.userId, mergeUserRowWithDirectory(byId.get(directoryUser.userId) || null, directoryUser));
+    }
+
+    const merged = Array.from(byId.values())
         .filter((user) => matchesAdminUserQuery(user, q))
         .sort((left, right) => {
             const leftCreated = left.createdAt ? Date.parse(left.createdAt) : 0;
@@ -689,7 +541,23 @@ export async function listAdminUsers(input: { q?: string; limit: number; offset:
 
     const total = merged.length;
     const items = merged.slice(input.offset, input.offset + input.limit);
-    return { items, total, limit: input.limit, offset: input.offset };
+    const pageItemCount = items.length;
+    const resultState: AdminUsersResultState =
+        total === 0
+            ? 'ZERO_MATCHES'
+            : pageItemCount === 0
+                ? 'EMPTY_PAGE'
+                : 'POPULATED';
+
+    return {
+        items,
+        total,
+        limit: input.limit,
+        offset: input.offset,
+        pageItemCount,
+        resultState,
+        degraded: false,
+    };
 }
 
 async function getAdminStateRow(userId: string): Promise<any | null> {
@@ -759,6 +627,12 @@ export async function banUserByAdmin(input: {
         bannedUntil: input.bannedUntil,
     });
 
+    invalidateBanCache(input.targetUserId);
+
+    // Hard enforcement: disable the Cognito account so the user cannot sign in or
+    // refresh tokens. Best-effort — a ban is still recorded if Cognito is unreachable.
+    const cognito = await setDirectoryUserEnabled(input.targetUserId, false);
+
     await writeAdminAudit({
         actorUserId: input.actorUserId,
         action: 'user_ban',
@@ -767,6 +641,8 @@ export async function banUserByAdmin(input: {
         metadata: {
             reason: input.reason,
             bannedUntil: input.bannedUntil,
+            cognitoDisabled: cognito.ok,
+            cognitoDetail: cognito.ok ? undefined : cognito.detail,
         },
     });
 }
@@ -783,6 +659,11 @@ export async function unbanUserByAdmin(input: {
         bannedUntil: null,
     });
 
+    invalidateBanCache(input.targetUserId);
+
+    // Re-enable the Cognito account so the user can sign in again.
+    const cognito = await setDirectoryUserEnabled(input.targetUserId, true);
+
     await writeAdminAudit({
         actorUserId: input.actorUserId,
         action: 'user_unban',
@@ -790,6 +671,8 @@ export async function unbanUserByAdmin(input: {
         targetId: input.targetUserId,
         metadata: {
             reason: input.reason,
+            cognitoEnabled: cognito.ok,
+            cognitoDetail: cognito.ok ? undefined : cognito.detail,
         },
     });
 }
@@ -863,10 +746,6 @@ function isLikelyPostTableName(tableName: string): boolean {
     return /(post|feed|timeline|story|content|moment)/i.test(tableName || '');
 }
 
-function isExcludedPostSourceTable(tableName: string): boolean {
-    return /(flag|admin|state|audit|warning|report|restriction|message|moderat)/i.test(tableName || '');
-}
-
 async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
     const rs = await db.raw(
         `
@@ -883,8 +762,7 @@ async function listCandidatePostTables(db: Knex): Promise<TableRef[]> {
             schema: String(r.table_schema || '').trim(),
             table: String(r.table_name || '').trim(),
         }))
-        .filter((r: TableRef) => r.schema && r.table)
-        .filter((r: TableRef) => !isExcludedPostSourceTable(r.table));
+        .filter((r: TableRef) => r.schema && r.table);
 
     const likely = refs.filter((r: TableRef) => isLikelyPostTableName(r.table));
     const other = refs.filter((r: TableRef) => !isLikelyPostTableName(r.table));
@@ -1055,172 +933,82 @@ async function resolvePostSource(db: Knex): Promise<{
     return null;
 }
 
-function toMillisFromUnknown(value: any): number {
-    if (!value) return 0;
+type RemovedState = { isRemoved: boolean; removedReason: string | null; removedAt: string | null };
+
+async function getPostRemovedStateMap(postIds: string[]): Promise<Map<string, RemovedState>> {
+    const map = new Map<string, RemovedState>();
+    if (postIds.length === 0) return map;
+    const db = adminDb();
     try {
-        if (typeof value?.toDate === 'function') {
-            const d = value.toDate();
-            return d instanceof Date ? d.getTime() : 0;
-        }
-        if (value instanceof Date) return value.getTime();
-        if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-        if (typeof value === 'string') {
-            const t = Date.parse(value);
-            return Number.isFinite(t) ? t : 0;
-        }
-        if (typeof value === 'object') {
-            const seconds = Number(value.seconds ?? value._seconds ?? 0);
-            const nanos = Number(value.nanoseconds ?? value._nanoseconds ?? 0);
-            if (Number.isFinite(seconds) && seconds > 0) {
-                return seconds * 1000 + Math.floor((Number.isFinite(nanos) ? nanos : 0) / 1_000_000);
-            }
+        const rows = await db('post_admin_state')
+            .select('post_id', 'is_removed', 'removed_reason', 'removed_at')
+            .whereIn('post_id', postIds);
+        for (const r of rows as Array<any>) {
+            map.set(String(r.post_id), {
+                isRemoved: Boolean(r.is_removed),
+                removedReason: r.removed_reason ? String(r.removed_reason) : null,
+                removedAt: r.removed_at ? new Date(r.removed_at).toISOString() : null,
+            });
         }
     } catch {
-        return 0;
+        // Default to not-removed when moderation state is unavailable.
     }
-    return 0;
+    return map;
 }
 
-function pickStringFrom(value: any): string {
-    if (typeof value === 'string') return value.trim();
-    if (Array.isArray(value)) {
-        for (const item of value) {
-            const found = pickStringFrom(item);
-            if (found) return found;
-        }
-    }
-    if (value && typeof value === 'object') {
-        const candidates = [
-            value.url,
-            value.uri,
-            value.src,
-            value.imageUrl,
-            value.videoUrl,
-            value.mediaUrl,
-            value.thumbnailUrl,
-            value.thumbnail,
-        ];
-        for (const c of candidates) {
-            const found = pickStringFrom(c);
-            if (found) return found;
-        }
-    }
-    return '';
+function fsPostToItem(p: FsPost, removed?: RemovedState): GlobalPostItem {
+    return {
+        postId: p.postId,
+        userId: p.userId,
+        content: p.content,
+        createdAt: p.createdAt,
+        updatedAt: p.createdAt,
+        postType: p.postType,
+        mediaUrl: p.mediaUrl,
+        videoUrl: p.videoUrl,
+        thumbnailUrl: p.thumbnailUrl,
+        likes: p.likes,
+        views: p.views,
+        comments: p.comments,
+        isRemoved: removed?.isRemoved ?? false,
+        removedReason: removed?.removedReason ?? null,
+        removedAt: removed?.removedAt ?? null,
+        authorUsername: p.authorUsername,
+        authorDisplayName: p.authorDisplayName,
+    };
 }
 
-async function listAdminUserPostsFromFirestore(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
-    const firestore = getAdminFirestore();
-    if (!firestore) {
+export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
+    // Firestore is the source of truth for posts; prefer it when available.
+    if (isFirestoreAvailable()) {
+        const fsPosts = await listFirestoreUserPosts(input.userId);
+        if (fsPosts) {
+            const q = asString(input.q || '').toLowerCase();
+            const filtered = q ? fsPosts.filter((p) => p.content.toLowerCase().includes(q)) : fsPosts;
+            const removedMap = await getPostRemovedStateMap(filtered.map((p) => p.postId));
+            const total = filtered.length;
+            const page = filtered.slice(input.offset, input.offset + input.limit);
+            return {
+                items: page.map((p) => fsPostToItem(p, removedMap.get(p.postId))),
+                total,
+                limit: input.limit,
+                offset: input.offset,
+                sourceTable: 'firestore:posts',
+            };
+        }
+    }
+
+    const db = adminDb();
+    const source = await resolvePostSource(db);
+    if (!source) {
         return {
             items: [],
             total: 0,
             limit: input.limit,
             offset: input.offset,
             degraded: true,
-            detail: 'No supported SQL posts table found and Firestore admin is not configured.',
+            detail: 'No supported posts table found (searched accessible non-system SQL schemas for post-like tables with user and id columns).',
         };
-    }
-
-    const q = asString(input.q || '').toLowerCase();
-    // Keep Firestore reads bounded for admin paging to avoid loading an entire user history on each request.
-    const boundedFetchSize = Math.max(input.limit + input.offset, input.limit, 25);
-    const snap = await firestore
-        .collection('posts')
-        .where('userId', '==', input.userId)
-        .limit(boundedFetchSize)
-        .get();
-    const docs = snap.docs.map((docSnap) => {
-        const data = (docSnap.data() || {}) as Record<string, any>;
-        const content = asString(data.content || data.text || data.caption || data.description || data.title);
-        const postType = asString(data.postType || data.type || data.kind) || 'post';
-        const mediaUrl = asString(data.mediaUrl || data.imageUrl || data.image || pickStringFrom(data.media));
-        const videoUrl = asString(data.videoUrl || data.streamUrl || data.playbackUrl);
-        const thumbnailUrl = asString(data.thumbnailUrl || data.thumbUrl || data.previewUrl || data.coverUrl || data.imageUrl);
-        const createdAtRaw = data.date || data.createdAt || data.created_at || data.timestamp;
-        const updatedAtRaw = data.updatedAt || data.updated_at || createdAtRaw;
-
-        return {
-            postId: asString(data.postId || data.id) || docSnap.id,
-            userId: asString(data.userId) || input.userId,
-            content,
-            createdAt: toIso(createdAtRaw),
-            updatedAt: toIso(updatedAtRaw),
-            _createdMs: toMillisFromUnknown(createdAtRaw),
-            postType,
-            mediaUrl: mediaUrl || null,
-            videoUrl: videoUrl || null,
-            thumbnailUrl: thumbnailUrl || null,
-        };
-    });
-
-    const filtered = docs
-        .filter((d) => !q || d.content.toLowerCase().includes(q) || d.postId.toLowerCase().includes(q))
-        .sort((a, b) => b._createdMs - a._createdMs);
-
-    let total = filtered.length;
-    try {
-        const aggregate = await firestore.collection('posts').where('userId', '==', input.userId).count().get();
-        const aggregateCount = Number(aggregate.data()?.count || 0);
-        if (Number.isFinite(aggregateCount) && aggregateCount >= 0) {
-            total = aggregateCount;
-        }
-    } catch {
-        // If aggregate count isn't available, fall back to bounded fetch count.
-    }
-
-    const paged = filtered.slice(input.offset, input.offset + input.limit);
-
-    const moderationByPostId = new Map<string, { isRemoved: boolean; removedReason: string | null; removedAt: string | null }>();
-    const postIds = paged.map((p) => p.postId).filter(Boolean);
-    if (postIds.length > 0) {
-        try {
-            const rows = await adminDb()('post_admin_state')
-                .select('post_id', 'is_removed', 'removed_reason', 'removed_at')
-                .whereIn('post_id', postIds as string[]);
-            for (const row of rows as Array<any>) {
-                moderationByPostId.set(String(row.post_id), {
-                    isRemoved: asBool(row.is_removed),
-                    removedReason: asString(row.removed_reason) || null,
-                    removedAt: toIso(row.removed_at),
-                });
-            }
-        } catch {
-            // If moderation table read fails, keep posts visible with default moderation state.
-        }
-    }
-
-    const items: PostListItem[] = paged.map((p) => {
-        const m = moderationByPostId.get(p.postId);
-        return {
-            postId: p.postId,
-            userId: p.userId,
-            content: p.content,
-            createdAt: p.createdAt,
-            updatedAt: p.updatedAt,
-            postType: p.postType,
-            mediaUrl: p.mediaUrl,
-            videoUrl: p.videoUrl,
-            thumbnailUrl: p.thumbnailUrl,
-            isRemoved: m?.isRemoved === true,
-            removedReason: m?.removedReason || null,
-            removedAt: m?.removedAt || null,
-        };
-    });
-
-    return {
-        items,
-        total,
-        limit: input.limit,
-        offset: input.offset,
-        sourceTable: 'firestore.posts',
-    };
-}
-
-export async function listAdminUserPosts(input: { userId: string; q?: string; limit: number; offset: number }): Promise<{ items: PostListItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
-    const db = adminDb();
-    const source = await resolvePostSource(db);
-    if (!source) {
-        return listAdminUserPostsFromFirestore(input);
     }
 
     const q = asString(input.q || '');
@@ -1280,6 +1068,9 @@ export async function listAdminUserPosts(input: { userId: string; q?: string; li
         mediaUrl: asString(r.media_url) || null,
         videoUrl: asString(r.video_url) || null,
         thumbnailUrl: asString(r.thumbnail_url) || null,
+        likes: 0,
+        views: 0,
+        comments: 0,
         isRemoved: asBool(r.is_removed),
         removedReason: asString(r.removed_reason) || null,
         removedAt: toIso(r.removed_at),
@@ -1354,68 +1145,32 @@ export async function restorePostByAdmin(input: { actorUserId: string; targetPos
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
     const db = adminDb();
-    let state: any | null = null;
-    try {
-        state = await getAdminStateRow(userId);
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user_admin_state unavailable');
-    }
+    const state = await getAdminStateRow(userId);
     const metadata = parseJson(state?.metadata);
-    let directoryUser: DirectoryUser | null = null;
-    try {
-        directoryUser = await findDirectoryUser(userId);
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: directory lookup failed');
-    }
+    const directoryUser = await findDirectoryUser(userId);
 
-    let firestoreProfile: AdminFirestoreUserProfile | null = null;
-    try {
-        firestoreProfile = await getFirestoreUserProfile(userId, directoryUser);
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: firestore user profile fetch failed');
-    }
-
-    let actionsRs: any = { rows: [] };
-    let messagesRs: any = { rows: [] };
-
-    try {
-        if (await hasTable(db, 'admin_audit_log')) {
-            actionsRs = await db.raw(
-                `
-                SELECT action, target_type, target_id, metadata, created_at
-                FROM admin_audit_log
-                WHERE target_type = 'user' AND target_id = ?
-                ORDER BY created_at DESC
-                LIMIT 20
-                `,
-                [userId]
-            );
-        }
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: audit log query failed');
-    }
-
-    try {
-        if (await hasTable(db, 'admin_user_messages')) {
-            messagesRs = await db.raw(
-                `
-                SELECT message_id, channel, status, subject, body, created_at
-                FROM admin_user_messages
-                WHERE target_user_id = ?
-                ORDER BY created_at DESC
-                LIMIT 20
-                `,
-                [userId]
-            );
-        }
-    } catch (error: any) {
-        logger.warn({ err: error?.message || String(error), userId }, '[admin] getAdminUserDetail: user messages query failed');
-    }
-
-    const inferredEmail = firestoreProfile?.email || directoryUser?.email || (userId.includes('@') ? userId : '');
-    const inferredUsername = firestoreProfile?.username || directoryUser?.username || (inferredEmail ? inferredEmail.split('@')[0] : '');
-    const inferredDisplayName = firestoreProfile?.displayName || directoryUser?.displayName || inferredUsername || inferredEmail || userId;
-    const inferredPhotoURL = firestoreProfile?.photoURL || null;
+    const [actionsRs, messagesRs] = await Promise.all([
+        db.raw(
+            `
+            SELECT action, target_type, target_id, metadata, created_at
+            FROM admin_audit_log
+            WHERE target_type = 'user' AND target_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId]
+        ),
+        db.raw(
+            `
+            SELECT message_id, channel, status, subject, body, created_at
+            FROM admin_user_messages
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 20
+            `,
+            [userId]
+        ),
+    ]);
 
     const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
         action: asString(r.action),
@@ -1436,12 +1191,10 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
 
     return {
         userId,
-        username: inferredUsername,
-        email: inferredEmail,
+        username: directoryUser?.username || '',
+        email: directoryUser?.email || '',
         phoneNumber: directoryUser?.phoneNumber || '',
-        displayName: inferredDisplayName,
-        photoURL: inferredPhotoURL || undefined,
-        avatarUrl: inferredPhotoURL || undefined,
+        displayName: directoryUser?.displayName || '',
         dateOfBirth: directoryUser?.dateOfBirth || '',
         address: directoryUser?.address || '',
         city: directoryUser?.city || '',
@@ -1456,8 +1209,8 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         bannedUntil: toIso(state?.banned_until),
         verification: buildVerification(metadata),
         restrictions: buildRestrictions(metadata),
-        createdAt: toIso(state?.created_at) || firestoreProfile?.createdAt || directoryUser?.createdAt || null,
-        updatedAt: toIso(state?.updated_at) || firestoreProfile?.updatedAt || directoryUser?.updatedAt || null,
+        createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
+        updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
         recentActions,
         recentMessages,
     };
@@ -1479,6 +1232,8 @@ export async function setAdminUserCapabilities(input: {
     const now = new Date().toISOString();
     const state = await getAdminStateRow(input.targetUserId);
     const metadata = parseJson(state?.metadata);
+    const previousRole = asString(state?.role) || 'user';
+    const nextRole = input.role || previousRole || 'user';
 
     const nextMetadata = {
         ...metadata,
@@ -1504,13 +1259,35 @@ export async function setAdminUserCapabilities(input: {
 
     await upsertAdminState({
         userId: input.targetUserId,
-        role: input.role || asString(state?.role) || 'user',
+        role: nextRole,
         isBanned: asBool(state?.is_banned),
         banReason: asString(state?.ban_reason) || null,
         bannedUntil: toIso(state?.banned_until),
     });
 
     await writeUserMetadata(input.targetUserId, nextMetadata);
+
+    // Propagate the role to the canonical Firestore user doc so in-app admin
+    // powers (useIsAdmin -> users/{uid}.roles/isAdmin) actually take effect.
+    // Resolve the email as a fallback join key for any user whose Firestore doc
+    // id diverges from the Cognito sub. Failure here is logged, not fatal.
+    let roleSync: { ok: boolean; matchedDocs: number; detail?: string } | null = null;
+    if (input.role && nextRole !== previousRole) {
+        let targetEmail: string | null = null;
+        try {
+            const dir = await findDirectoryUser(input.targetUserId);
+            targetEmail = dir?.email || null;
+        } catch {
+            // directory lookup is best-effort
+        }
+        roleSync = await syncUserRoleToFirestore(input.targetUserId, nextRole, { email: targetEmail });
+        if (!roleSync.ok || roleSync.matchedDocs === 0) {
+            logger.warn(
+                { userId: input.targetUserId, nextRole, roleSync },
+                '[admin] role change did not update any Firestore user doc'
+            );
+        }
+    }
 
     await writeAdminAudit({
         actorUserId: input.actorUserId,
@@ -1520,6 +1297,7 @@ export async function setAdminUserCapabilities(input: {
         metadata: {
             verification: nextMetadata.verification,
             restrictions: nextMetadata.restrictions,
+            role: { previous: previousRole, next: nextRole, firestoreSync: roleSync },
         },
     });
 
@@ -1539,12 +1317,11 @@ export async function queueAdminUserMessage(input: {
 
     await db.raw(
         `
-        INSERT INTO admin_user_messages (message_id, actor_user_id, target_user_id, channel, status, subject, body, metadata)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?, ?::jsonb)
+        INSERT INTO admin_user_messages (message_id, user_id, channel, status, subject, body, metadata)
+        VALUES (?, ?, ?, 'queued', ?, ?, ?::jsonb)
         `,
         [
             messageId,
-            input.actorUserId,
             input.targetUserId,
             channel,
             asString(input.subject || '') || null,
@@ -1570,6 +1347,10 @@ export async function queueAdminUserMessage(input: {
 
 export async function getEffectiveUserControls(userId: string): Promise<{
     userId: string;
+    isBanned: boolean;
+    bannedUntil: string | null;
+    banReason: string | null;
+    role: string;
     verification: AdminVerification;
     restrictions: AdminRestrictions;
     recentMessages: Array<{
@@ -1585,6 +1366,10 @@ export async function getEffectiveUserControls(userId: string): Promise<{
     const detail = await getAdminUserDetail(userId);
     return {
         userId,
+        isBanned: detail.isBanned,
+        bannedUntil: detail.bannedUntil,
+        banReason: detail.banReason,
+        role: detail.role,
         verification: detail.verification,
         restrictions: detail.restrictions,
         recentMessages: detail.recentMessages,
@@ -1595,9 +1380,13 @@ export async function getEffectiveUserControls(userId: string): Promise<{
 export async function getAdminMetricsOverview(): Promise<Record<string, unknown>> {
     const infra = getEconomyInfra();
     const db = infra.db;
+    const userIdsCte = await buildUserIdsCte(db);
 
     const sql = `
+        ${userIdsCte}
     SELECT
+            (SELECT COUNT(*)::bigint FROM ids WHERE user_id IS NOT NULL AND user_id <> '') AS total_users,
+      (SELECT COUNT(*)::bigint FROM user_admin_state WHERE is_banned = true) AS banned_users,
       (SELECT COALESCE(SUM(coin_balance + bonus_coin_balance), 0)::bigint FROM wallets) AS total_coin_supply,
       (SELECT COUNT(*)::bigint FROM gift_events WHERE created_at >= NOW() - INTERVAL '24 hours') AS gifts_24h,
       (SELECT COUNT(*)::bigint FROM ledger_entries WHERE created_at >= NOW() - INTERVAL '24 hours') AS ledger_entries_24h,
@@ -1605,17 +1394,20 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
   `;
 
     try {
-        const [rs, sqlUsers, directoryUsers] = await Promise.all([
-            db.raw(sql),
-            listSqlKnownUsers(),
-            listDirectoryUsers(),
-        ]);
+        const rs = await db.raw(sql);
         const row = ((rs as any)?.rows?.[0] || {}) as Record<string, unknown>;
-        const visibleUsers = buildVisibleAdminUsers(sqlUsers, directoryUsers);
+
+        // The SQL `ids` CTE only sees users that appear in economy/activity tables.
+        // The real population (including users who have only ever signed up) lives in
+        // the Cognito directory, so unify both for a truthful count that matches
+        // /admin/users.
+        const totals = await countAdminUserTotals();
 
         return {
-            totalUsers: visibleUsers.length,
-            bannedUsers: visibleUsers.filter((user) => user.isBanned).length,
+            totalUsers: totals.totalUsers,
+            bannedUsers: totals.bannedUsers,
+            directoryUsers: totals.directoryUsers,
+            activeUsers: totals.activeUsers,
             totalCoinSupply: Number(row.total_coin_supply || 0),
             gifts24h: Number(row.gifts_24h || 0),
             ledgerEntries24h: Number(row.ledger_entries_24h || 0),
@@ -1644,6 +1436,322 @@ export async function getAdminMetricsOverview(): Promise<Record<string, unknown>
                 redis: redisStatus,
             },
             error: e?.message || String(e),
+        };
+    }
+}
+
+// Unified user totals across the Cognito directory and SQL activity tables.
+// Mirrors the merge in listAdminUsers so headline counts are consistent.
+export async function countAdminUserTotals(): Promise<{
+    totalUsers: number;
+    bannedUsers: number;
+    directoryUsers: number;
+    sqlUsers: number;
+    activeUsers: number;
+}> {
+    const [sqlUsers, directoryUsers] = await Promise.all([
+        listSqlKnownUsers().catch(() => [] as AdminUserRow[]),
+        listDirectoryUsers().catch(() => [] as DirectoryUser[]),
+    ]);
+
+    const byId = new Map<string, AdminUserRow>();
+    for (const row of sqlUsers) {
+        byId.set(row.userId, row);
+    }
+    for (const directoryUser of directoryUsers) {
+        byId.set(directoryUser.userId, mergeUserRowWithDirectory(byId.get(directoryUser.userId) || null, directoryUser));
+    }
+
+    const all = Array.from(byId.values());
+    const bannedUsers = all.filter((u) => u.isBanned === true).length;
+    const activeUsers = all.filter((u) => u.isBanned !== true && u.enabled !== false).length;
+
+    return {
+        totalUsers: all.length,
+        bannedUsers,
+        directoryUsers: directoryUsers.length,
+        sqlUsers: sqlUsers.length,
+        activeUsers,
+    };
+}
+
+export type GlobalPostItem = PostListItem & {
+    authorUsername: string;
+    authorDisplayName: string;
+};
+
+// Global content feed across the resolved posts table, enriched with author
+// identity from the Cognito directory and moderation state from post_admin_state.
+export async function listAllAdminPosts(input: {
+    q?: string;
+    postType?: string;
+    removed?: 'all' | 'removed' | 'live';
+    limit: number;
+    offset: number;
+}): Promise<{ items: GlobalPostItem[]; total: number; limit: number; offset: number; sourceTable?: string; degraded?: boolean; detail?: string }> {
+    // Firestore is the source of truth for posts; prefer it when available.
+    if (isFirestoreAvailable()) {
+        const fsPosts = await listFirestorePostsWindow();
+        if (fsPosts) {
+            const q = asString(input.q || '').toLowerCase();
+            const postType = asString(input.postType || '');
+            const removedMode = input.removed || 'all';
+
+            let filtered = fsPosts;
+            if (q) {
+                filtered = filtered.filter(
+                    (p) => p.content.toLowerCase().includes(q) || p.authorUsername.toLowerCase().includes(q) || p.userId.toLowerCase().includes(q)
+                );
+            }
+            if (postType) {
+                filtered = filtered.filter((p) => p.postType === postType);
+            }
+
+            const removedMap = await getPostRemovedStateMap(filtered.map((p) => p.postId));
+            let withState = filtered.map((p) => fsPostToItem(p, removedMap.get(p.postId)));
+            if (removedMode === 'removed') withState = withState.filter((p) => p.isRemoved);
+            else if (removedMode === 'live') withState = withState.filter((p) => !p.isRemoved);
+
+            const total = withState.length;
+            const page = withState.slice(input.offset, input.offset + input.limit);
+
+            // Enrich author identity from the Cognito directory (Firestore's username
+            // field is unreliable and sometimes equals the raw userId).
+            const directoryUsers = await listDirectoryUsers().catch(() => [] as DirectoryUser[]);
+            const dirById = new Map<string, DirectoryUser>();
+            for (const d of directoryUsers) dirById.set(d.userId, d);
+            for (const item of page) {
+                const d = dirById.get(item.userId);
+                if (d) {
+                    item.authorDisplayName = d.displayName || item.authorDisplayName;
+                    item.authorUsername = d.username || item.authorUsername;
+                }
+            }
+
+            return {
+                items: page,
+                total,
+                limit: input.limit,
+                offset: input.offset,
+                sourceTable: 'firestore:posts',
+            };
+        }
+    }
+
+    const db = adminDb();
+    const source = await resolvePostSource(db);
+    if (!source) {
+        return {
+            items: [],
+            total: 0,
+            limit: input.limit,
+            offset: input.offset,
+            degraded: true,
+            detail: 'No supported posts table found.',
+        };
+    }
+
+    const q = asString(input.q || '');
+    const like = `%${q}%`;
+    const removedMode = input.removed || 'all';
+    const postType = asString(input.postType || '');
+
+    const postIdExpr = `p.${quoteIdent(source.postIdCol)}`;
+    const userIdExpr = `p.${quoteIdent(source.userIdCol)}`;
+    const textExpr = source.textCol ? `COALESCE(CAST(p.${quoteIdent(source.textCol)} AS text), '')` : `''`;
+    const createdExpr = source.createdAtCol ? `p.${quoteIdent(source.createdAtCol)}` : 'NULL';
+    const updatedExpr = source.updatedAtCol ? `p.${quoteIdent(source.updatedAtCol)}` : createdExpr;
+    const postTypeExpr = source.postTypeCol ? `COALESCE(CAST(p.${quoteIdent(source.postTypeCol)} AS text), 'post')` : `'post'`;
+    const mediaUrlExpr = source.mediaUrlCol ? `NULLIF(CAST(p.${quoteIdent(source.mediaUrlCol)} AS text), '')` : 'NULL';
+    const videoUrlExpr = source.videoUrlCol ? `NULLIF(CAST(p.${quoteIdent(source.videoUrlCol)} AS text), '')` : 'NULL';
+    const thumbnailUrlExpr = source.thumbnailUrlCol ? `NULLIF(CAST(p.${quoteIdent(source.thumbnailUrlCol)} AS text), '')` : 'NULL';
+
+    const filters: string[] = [`(? = '' OR ${textExpr} ILIKE ?)`];
+    const filterParams: any[] = [q, like];
+    if (removedMode === 'removed') {
+        filters.push(`COALESCE(ps.is_removed, false) = true`);
+    } else if (removedMode === 'live') {
+        filters.push(`COALESCE(ps.is_removed, false) = false`);
+    }
+    if (postType) {
+        filters.push(`${postTypeExpr} = ?`);
+        filterParams.push(postType);
+    }
+    const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const selectSql = `
+        SELECT
+            CAST(${postIdExpr} AS text) AS post_id,
+            CAST(${userIdExpr} AS text) AS user_id,
+            ${textExpr} AS content,
+            ${createdExpr} AS created_at,
+            ${updatedExpr} AS updated_at,
+            ${postTypeExpr} AS post_type,
+            ${mediaUrlExpr} AS media_url,
+            ${videoUrlExpr} AS video_url,
+            ${thumbnailUrlExpr} AS thumbnail_url,
+            COALESCE(ps.is_removed, false) AS is_removed,
+            ps.removed_reason,
+            ps.removed_at
+        FROM ${source.qualifiedTable} p
+        LEFT JOIN post_admin_state ps ON ps.post_id = CAST(${postIdExpr} AS text)
+        ${whereSql}
+        ORDER BY ${createdExpr} DESC NULLS LAST
+        LIMIT ? OFFSET ?
+    `;
+
+    const countSql = `
+        SELECT COUNT(*)::bigint AS total
+        FROM ${source.qualifiedTable} p
+        LEFT JOIN post_admin_state ps ON ps.post_id = CAST(${postIdExpr} AS text)
+        ${whereSql}
+    `;
+
+    const [rowsRs, countRs, directoryUsers] = await Promise.all([
+        db.raw(selectSql, [...filterParams, input.limit, input.offset]),
+        db.raw(countSql, filterParams),
+        listDirectoryUsers().catch(() => [] as DirectoryUser[]),
+    ]);
+
+    const directoryById = new Map<string, DirectoryUser>();
+    for (const d of directoryUsers) directoryById.set(d.userId, d);
+
+    const rows = ((rowsRs as any)?.rows || []) as Array<any>;
+    const items: GlobalPostItem[] = rows.map((r) => {
+        const userId = String(r.user_id);
+        const author = directoryById.get(userId);
+        return {
+            postId: String(r.post_id),
+            userId,
+            content: asString(r.content),
+            createdAt: toIso(r.created_at),
+            updatedAt: toIso(r.updated_at),
+            postType: asString(r.post_type) || 'post',
+            mediaUrl: asString(r.media_url) || null,
+            videoUrl: asString(r.video_url) || null,
+            thumbnailUrl: asString(r.thumbnail_url) || null,
+            likes: 0,
+            views: 0,
+            comments: 0,
+            isRemoved: asBool(r.is_removed),
+            removedReason: asString(r.removed_reason) || null,
+            removedAt: toIso(r.removed_at),
+            authorUsername: author?.username || '',
+            authorDisplayName: author?.displayName || '',
+        };
+    });
+
+    return {
+        items,
+        total: Number((countRs as any)?.rows?.[0]?.total || 0),
+        limit: input.limit,
+        offset: input.offset,
+        sourceTable: `${source.schema}.${source.table}`,
+    };
+}
+
+export async function getAdminLiveStreams(input: { status?: 'live' | 'ended' }): Promise<{
+    items: FsStream[];
+    live: number;
+    total: number;
+    totalViewers: number;
+    degraded?: boolean;
+    detail?: string;
+}> {
+    if (!isFirestoreAvailable()) {
+        return { items: [], live: 0, total: 0, totalViewers: 0, degraded: true, detail: 'Firestore not available' };
+    }
+    const streams = await listFirestoreStreams(input.status);
+    if (!streams) {
+        return { items: [], live: 0, total: 0, totalViewers: 0, degraded: true, detail: 'Firestore read failed' };
+    }
+    // Enrich host identity from the Cognito directory.
+    const directoryUsers = await listDirectoryUsers().catch(() => [] as DirectoryUser[]);
+    const dirById = new Map<string, DirectoryUser>();
+    for (const d of directoryUsers) dirById.set(d.userId, d);
+    for (const s of streams) {
+        const d = dirById.get(s.userId);
+        if (d) {
+            s.hostDisplayName = d.displayName || s.hostDisplayName;
+            s.hostUsername = d.username || s.hostUsername;
+        }
+    }
+
+    const liveOnes = streams.filter((s) => s.status === 'live');
+    const totalViewers = liveOnes.reduce((sum, s) => sum + (s.viewerCount || 0), 0);
+    return { items: streams, live: liveOnes.length, total: streams.length, totalViewers };
+}
+
+export type AuditLogItem = {
+    id: number;
+    actorUserId: string;
+    action: string;
+    targetType: string;
+    targetId: string;
+    metadata: Record<string, unknown>;
+    createdAt: string | null;
+};
+
+// Global, cross-platform audit log feed.
+export async function listAdminAudit(input: {
+    q?: string;
+    action?: string;
+    limit: number;
+    offset: number;
+}): Promise<{ items: AuditLogItem[]; total: number; limit: number; offset: number; degraded?: boolean; detail?: string }> {
+    const db = adminDb();
+
+    try {
+        const q = asString(input.q || '');
+        const like = `%${q}%`;
+        const action = asString(input.action || '');
+
+        const filters: string[] = [`(? = '' OR actor_user_id ILIKE ? OR target_id ILIKE ?)`];
+        const params: any[] = [q, like, like];
+        if (action) {
+            filters.push(`action = ?`);
+            params.push(action);
+        }
+        const whereSql = `WHERE ${filters.join(' AND ')}`;
+
+        const [rowsRs, countRs] = await Promise.all([
+            db.raw(
+                `
+                SELECT id, actor_user_id, action, target_type, target_id, metadata, created_at
+                FROM admin_audit_log
+                ${whereSql}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                `,
+                [...params, input.limit, input.offset]
+            ),
+            db.raw(`SELECT COUNT(*)::bigint AS total FROM admin_audit_log ${whereSql}`, params),
+        ]);
+
+        const items: AuditLogItem[] = (((rowsRs as any)?.rows || []) as Array<any>).map((r) => ({
+            id: Number(r.id),
+            actorUserId: asString(r.actor_user_id),
+            action: asString(r.action),
+            targetType: asString(r.target_type),
+            targetId: asString(r.target_id),
+            metadata: parseJson(r.metadata),
+            createdAt: toIso(r.created_at),
+        }));
+
+        return {
+            items,
+            total: Number((countRs as any)?.rows?.[0]?.total || 0),
+            limit: input.limit,
+            offset: input.offset,
+        };
+    } catch (e: any) {
+        return {
+            items: [],
+            total: 0,
+            limit: input.limit,
+            offset: input.offset,
+            degraded: true,
+            detail: e?.message || String(e),
         };
     }
 }

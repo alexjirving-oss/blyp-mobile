@@ -29,8 +29,6 @@ const economyEnvSchema = z.object({
 
   GOOGLE_PLAY_PACKAGE_NAME: z.string().optional(),
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: z.string().optional(),
-  GOOGLE_PLAY_OAUTH_TOKEN_URI: z.string().optional(),
-  GOOGLE_PLAY_VERIFY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).optional(),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -39,6 +37,13 @@ const economyEnvSchema = z.object({
   // Live Games (optional; disabled unless explicitly enabled)
   ECONOMY_LIVE_GAMES_ENABLED: z.coerce.number().int().min(0).max(1).optional(),
   LIVE_GAMES_PAYOUT_MODE: z.enum(['SAFE', 'CASHOUT']).optional(),
+
+  // Matchday Live (optional; write endpoints disabled unless explicitly enabled)
+  ECONOMY_MATCHDAY_ENABLED: z.coerce.number().int().min(0).max(1).optional(),
+  MATCHDAY_UNLOCK_COINS: z.coerce.number().int().min(0).optional(),
+  MATCHDAY_ENTITLEMENT_TTL_HOURS: z.coerce.number().int().min(1).max(72).optional(),
+  MATCHDAY_PREDICTION_MIN_STAKE: z.coerce.number().int().min(1).optional(),
+  MATCHDAY_PREDICTION_MAX_STAKE: z.coerce.number().int().min(1).optional(),
 });
 
 export type EconomyEnv = z.infer<typeof economyEnvSchema>;

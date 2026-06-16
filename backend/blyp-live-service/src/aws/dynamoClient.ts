@@ -2,9 +2,8 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
 import { sanitizeHeaderValue } from '../utils/headerSanitize';
-import { ENV } from '../config/env';
 
-const region = sanitizeHeaderValue(process.env.AWS_REGION || ENV.AWS_REGION);
+const region = sanitizeHeaderValue(process.env.AWS_REGION);
 
 if (!region) {
   throw new Error('[config] AWS_REGION is required for DynamoDB client');

@@ -1,5 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import { verifyCognitoJwt } from '../auth/verifyCognitoJwt';
 import { logger } from '../config/logger';
 import { setSocketIo } from './realtimeBus';
@@ -9,6 +11,48 @@ export type SocketServer = {
   io: Server;
 };
 
+// On Cloud Run the live-service autoscales to multiple instances with no session
+// affinity. A gift POST and a viewer's websocket frequently land on DIFFERENT
+// instances, so an in-memory Socket.IO server would only deliver `gift_event` to
+// sockets connected to the SAME instance that processed the send — silently
+// dropping gift animations/host notifications for everyone else. Wiring the
+// Redis pub/sub adapter fans every emit out to all instances so gifts are
+// delivered to every connected client regardless of which instance handled them.
+function attachRedisAdapter(io: Server): void {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl || !redisUrl.trim()) {
+    logger.warn('[socket] REDIS_URL not set — running Socket.IO without a cross-instance adapter (single-instance only)');
+    return;
+  }
+
+  try {
+    // Dedicated pub/sub connections (the adapter must not share clients with the
+    // request-path Redis). Keep them resilient so a transient Redis blip never
+    // crashes the process; Socket.IO falls back to local delivery until reconnect.
+    const pubClient = new Redis(redisUrl, {
+      connectTimeout: Number(process.env.REDIS_CONNECT_TIMEOUT_MS) || 4000,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true,
+      retryStrategy: (times: number) => Math.min(2000, 250 * Math.pow(2, Math.max(0, times - 1))),
+    });
+    const subClient = pubClient.duplicate();
+
+    pubClient.on('error', (err: any) => {
+      logger.warn({ code: err?.code, message: err?.message, client: 'socket-pub' }, '[socket] redis adapter error');
+    });
+    subClient.on('error', (err: any) => {
+      logger.warn({ code: err?.code, message: err?.message, client: 'socket-sub' }, '[socket] redis adapter error');
+    });
+    pubClient.on('ready', () => logger.info('[socket] redis adapter pub client ready'));
+
+    io.adapter(createAdapter(pubClient, subClient));
+    logger.info('[socket] Socket.IO Redis adapter attached (cross-instance gift fan-out enabled)');
+  } catch (e: any) {
+    // Never let adapter wiring take down the socket server; degrade to local.
+    logger.error({ err: e?.message || String(e) }, '[socket] failed to attach Redis adapter — degrading to single-instance delivery');
+  }
+}
+
 export function createSocketServer(server: HttpServer): SocketServer {
   const io = new Server(server, {
     cors: {
@@ -16,6 +60,8 @@ export function createSocketServer(server: HttpServer): SocketServer {
       methods: ['GET', 'POST'],
     },
   });
+
+  attachRedisAdapter(io);
 
   io.use(async (socket, next) => {
     try {

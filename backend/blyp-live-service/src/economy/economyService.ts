@@ -5,374 +5,57 @@ import { getEconomyInfra } from './infra';
 import { getEconomyEnv } from '../config/economyEnv';
 import { EconomyError } from './economyErrors';
 import { decodeCursor, encodeCursor } from './cursor';
-import { emitGiftEvent, emitLiveGameEvent } from '../realtime/realtimeBus';
+import { findIapCatalogEntry } from './iapCatalog';
+import { emitGiftEvent, emitLiveGameEvent, emitGameEvent } from '../realtime/realtimeBus';
+import { applyReviveForReceiver, getRoom } from '../games/artillery/gameRoomService';
+import { getUserTeamForEarnings, mirrorTeamEarnings } from '../admin/firestoreAdmin';
+import { getSessionById } from '../live/liveSessionStore';
+import { listGuests } from '../live/guestSlotStore';
 import { logger } from '../config/logger';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
+
+// Team gift bonus rates, expressed in micro-gems per base gem so all accrual is
+// done in integers (1 gem = 1_000_000 micro). Member earns +10% of base gems,
+// the team leader earns 5% of the member's base gems.
+const MICRO_PER_GEM = 1_000_000n;
+const MEMBER_BONUS_MICRO_PER_GEM = 100_000n; // 10% => 0.10 gem per base gem
+const LEADER_BONUS_MICRO_PER_GEM = 50_000n; //  5% => 0.05 gem per base gem
 
 function nowIso() {
   return new Date().toISOString();
 }
 
-type IapVerifyErrorCode =
-  | 'INVALID_INPUT'
-  | 'SKU_DISABLED_OR_UNKNOWN'
-  | 'PURCHASE_NOT_VERIFIED'
-  | 'PROVIDER_UNAVAILABLE'
-  | 'PLATFORM_NOT_IMPLEMENTED';
+type IapVerifySuccessResponse = {
+  valid: true;
+  duplicatePerfId: string | null;
+  grantedCoins: number;
+  grantedGems: number;
+  wallet: {
+    coinBalance: number;
+    bonusCoinBalance: number;
+    gemAvailable: number;
+    gemPending: number;
+  };
+};
 
-export class IapVerifyError extends Error {
-  code: IapVerifyErrorCode;
-  httpStatus: number;
-  detail?: any;
+type GoogleServiceAccount = {
+  client_email: string;
+  private_key: string;
+  private_key_id?: string;
+  token_uri?: string;
+};
 
-  constructor(code: IapVerifyErrorCode, httpStatus: number, message: string, detail?: any) {
-    super(message);
-    this.code = code;
-    this.httpStatus = httpStatus;
-    this.detail = detail;
-  }
-}
-
-function getNodeFetch(): any {
-  const fetchFn = (globalThis as any)?.fetch;
-  if (typeof fetchFn !== 'function') {
-    throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Global fetch is unavailable for provider verification');
-  }
-  return fetchFn;
-}
-
-function parseGoogleServiceAccount(rawJson: string) {
-  try {
-    const parsed = JSON.parse(rawJson);
-    const clientEmail = String(parsed?.client_email || '').trim();
-    const privateKey = String(parsed?.private_key || '').trim();
-    const tokenUri = String(parsed?.token_uri || '').trim() || 'https://oauth2.googleapis.com/token';
-    if (!clientEmail || !privateKey) {
-      throw new Error('Missing client_email/private_key');
-    }
-    return { clientEmail, privateKey, tokenUri };
-  } catch (e: any) {
-    throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Invalid GOOGLE_PLAY_SERVICE_ACCOUNT_JSON', e?.message || String(e));
-  }
-}
-
-async function getGoogleAccessToken(serviceAccount: { clientEmail: string; privateKey: string; tokenUri: string }, timeoutMs: number) {
-  const now = Math.floor(Date.now() / 1000);
-  const assertion = jwt.sign(
-    {
-      iss: serviceAccount.clientEmail,
-      scope: 'https://www.googleapis.com/auth/androidpublisher',
-      aud: serviceAccount.tokenUri,
-      iat: now,
-      exp: now + 3600,
-    },
-    serviceAccount.privateKey,
-    { algorithm: 'RS256' }
-  );
-
-  const fetchFn = getNodeFetch();
-  const body = new URLSearchParams();
-  body.set('grant_type', 'urn:ietf:params:oauth:grant-type:jwt-bearer');
-  body.set('assertion', assertion);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const tokenRes = await fetchFn(serviceAccount.tokenUri, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-      signal: controller.signal,
-    });
-    const tokenJson = await tokenRes.json().catch(() => ({}));
-    if (!tokenRes.ok || !tokenJson?.access_token) {
-      throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Failed to obtain Google access token', {
-        httpStatus: tokenRes.status,
-        provider: tokenJson,
-      });
-    }
-    return String(tokenJson.access_token);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function verifyAndroidPurchaseWithProvider(input: IapVerifyInput) {
-  const env = getEconomyEnv();
-  const packageName = String(env.GOOGLE_PLAY_PACKAGE_NAME || '').trim();
-  const rawServiceAccount = String(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
-  const timeoutMs = Number(env.GOOGLE_PLAY_VERIFY_TIMEOUT_MS || 8000);
-
-  if (!packageName || !rawServiceAccount) {
-    throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Google Play verification is not configured');
-  }
-  if (!input.purchaseToken) {
-    throw new IapVerifyError('INVALID_INPUT', 400, 'purchaseToken is required for ANDROID');
-  }
-
-  const serviceAccount = parseGoogleServiceAccount(rawServiceAccount);
-  const accessToken = await getGoogleAccessToken(serviceAccount, timeoutMs);
-
-  const fetchFn = getNodeFetch();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const endpoint = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(
-    packageName
-  )}/purchases/products/${encodeURIComponent(input.sku)}/tokens/${encodeURIComponent(input.purchaseToken)}`;
-
-  try {
-    const verifyRes = await fetchFn(endpoint, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-      },
-      signal: controller.signal,
-    });
-
-    const verifyJson = await verifyRes.json().catch(() => ({}));
-
-    if (verifyRes.status === 404) {
-      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'Google Play purchase not found', verifyJson);
-    }
-    if (!verifyRes.ok) {
-      throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Google Play verification request failed', {
-        httpStatus: verifyRes.status,
-        provider: verifyJson,
-      });
-    }
-
-    const purchaseState = Number(verifyJson?.purchaseState);
-    if (purchaseState !== 0) {
-      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'Android purchase is not in purchased state', {
-        purchaseState,
-      });
-    }
-
-    const orderId = typeof verifyJson?.orderId === 'string' ? verifyJson.orderId.trim() : '';
-    if (orderId && orderId !== input.storeTransactionId) {
-      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'storeTransactionId does not match verified Android orderId', {
-        orderId,
-      });
-    }
-
-    return {
-      verifiedAt: nowIso(),
-      providerPayload: verifyJson,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export async function verifyIapPurchase(userId: string, input: IapVerifyInput) {
-  const { db } = getEconomyInfra();
-
-  if (!userId) {
-    throw new IapVerifyError('INVALID_INPUT', 400, 'Missing userId');
-  }
-  if (input.platform !== 'ANDROID') {
-    throw new IapVerifyError('PLATFORM_NOT_IMPLEMENTED', 501, 'Only ANDROID verification is implemented in this phase');
-  }
-  if (!input.purchaseToken) {
-    throw new IapVerifyError('INVALID_INPUT', 400, 'purchaseToken is required for ANDROID');
-  }
-
-  // Mandatory provider verification - fail closed.
-  const verification = await verifyAndroidPurchaseWithProvider(input);
-
-  const purchaseResult = await db.transaction(async (trx) => {
-    // Replay by user + idempotency key.
-    const replayByIdempotency = await trx('iap_receipts')
-      .where({ user_id: userId, idempotency_key: input.idempotencyKey })
-      .first();
-    if (replayByIdempotency && replayByIdempotency.verification_status === 'VERIFIED') {
-      const wallet = await trx('wallets').where({ user_id: userId }).first();
-      return {
-        purchaseId: String(replayByIdempotency.purchase_id),
-        replay: true,
-        platform: String(replayByIdempotency.platform),
-        sku: String(replayByIdempotency.sku),
-        grantedCoins: Number(replayByIdempotency.granted_coins || 0),
-        wallet: {
-          coinBalance: Number(wallet?.coin_balance || 0),
-          bonusCoinBalance: Number(wallet?.bonus_coin_balance || 0),
-          gemAvailable: Number(wallet?.gem_available || 0),
-          gemPending: Number(wallet?.gem_pending || 0),
-        },
-        ledgerEntryId: String(replayByIdempotency.ledger_entry_id || ''),
-        verifiedAt: new Date(replayByIdempotency.verified_at || replayByIdempotency.created_at).toISOString(),
-      };
-    }
-
-    // Store identity uniqueness: platform + storeTransactionId.
-    const existingByStoreTx = await trx('iap_receipts')
-      .where({ platform: input.platform, store_transaction_id: input.storeTransactionId })
-      .first();
-    if (existingByStoreTx) {
-      if (String(existingByStoreTx.user_id) !== userId) {
-        throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'storeTransactionId already used by another user');
-      }
-      if (existingByStoreTx.verification_status === 'VERIFIED') {
-        const wallet = await trx('wallets').where({ user_id: userId }).first();
-        return {
-          purchaseId: String(existingByStoreTx.purchase_id),
-          replay: true,
-          platform: String(existingByStoreTx.platform),
-          sku: String(existingByStoreTx.sku),
-          grantedCoins: Number(existingByStoreTx.granted_coins || 0),
-          wallet: {
-            coinBalance: Number(wallet?.coin_balance || 0),
-            bonusCoinBalance: Number(wallet?.bonus_coin_balance || 0),
-            gemAvailable: Number(wallet?.gem_available || 0),
-            gemPending: Number(wallet?.gem_pending || 0),
-          },
-          ledgerEntryId: String(existingByStoreTx.ledger_entry_id || ''),
-          verifiedAt: new Date(existingByStoreTx.verified_at || existingByStoreTx.created_at).toISOString(),
-        };
-      }
-      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'storeTransactionId already exists in non-verified state');
-    }
-
-    // Android token uniqueness: platform + purchaseToken.
-    const existingByToken = await trx('iap_receipts')
-      .where({ platform: input.platform, purchase_token: input.purchaseToken })
-      .first();
-    if (existingByToken) {
-      if (String(existingByToken.user_id) !== userId) {
-        throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'purchaseToken already used by another user');
-      }
-      if (existingByToken.verification_status === 'VERIFIED') {
-        const wallet = await trx('wallets').where({ user_id: userId }).first();
-        return {
-          purchaseId: String(existingByToken.purchase_id),
-          replay: true,
-          platform: String(existingByToken.platform),
-          sku: String(existingByToken.sku),
-          grantedCoins: Number(existingByToken.granted_coins || 0),
-          wallet: {
-            coinBalance: Number(wallet?.coin_balance || 0),
-            bonusCoinBalance: Number(wallet?.bonus_coin_balance || 0),
-            gemAvailable: Number(wallet?.gem_available || 0),
-            gemPending: Number(wallet?.gem_pending || 0),
-          },
-          ledgerEntryId: String(existingByToken.ledger_entry_id || ''),
-          verifiedAt: new Date(existingByToken.verified_at || existingByToken.created_at).toISOString(),
-        };
-      }
-      throw new IapVerifyError('PURCHASE_NOT_VERIFIED', 409, 'purchaseToken already exists in non-verified state');
-    }
-
-    const product = await trx('iap_products')
-      .where({ platform: input.platform, sku: input.sku, enabled: true })
-      .first();
-    if (!product) {
-      throw new IapVerifyError('SKU_DISABLED_OR_UNKNOWN', 409, 'SKU is disabled or unknown');
-    }
-
-    const grantedCoins = BigInt(product.coins_granted || 0);
-    if (grantedCoins <= 0n) {
-      throw new IapVerifyError('SKU_DISABLED_OR_UNKNOWN', 409, 'SKU has invalid granted coin amount');
-    }
-
-    await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
-    const walletBefore = await trx('wallets').where({ user_id: userId }).forUpdate().first();
-    if (!walletBefore) throw new IapVerifyError('PROVIDER_UNAVAILABLE', 503, 'Failed to lock wallet row');
-
-    const beforeCoinBalance = BigInt(walletBefore.coin_balance || 0);
-    const afterCoinBalance = beforeCoinBalance + grantedCoins;
-    const purchaseId = randomUUID();
-    const ledgerEntryId = randomUUID();
-
-    const metadata = {
-      platform: input.platform,
-      sku: input.sku,
-      storeTransactionId: input.storeTransactionId,
-      purchaseToken: input.purchaseToken,
-      originalIdempotencyKey: input.idempotencyKey,
-      provider: verification.providerPayload,
-    };
-
-    await trx('iap_receipts').insert({
-      purchase_id: purchaseId,
-      user_id: userId,
-      platform: input.platform,
-      sku: input.sku,
-      store_transaction_id: input.storeTransactionId,
-      purchase_token: input.purchaseToken,
-      idempotency_key: input.idempotencyKey,
-      verification_status: 'VERIFIED',
-      provider_response: verification.providerPayload,
-      granted_coins: grantedCoins.toString(),
-      ledger_entry_id: ledgerEntryId,
-      verified_at: verification.verifiedAt,
-      created_at: verification.verifiedAt,
-      updated_at: verification.verifiedAt,
-    });
-
-    await trx('ledger_entries').insert({
-      ledger_id: ledgerEntryId,
-      user_id: userId,
-      entry_type: 'IAP_PURCHASE',
-      currency: 'COIN',
-      amount: grantedCoins.toString(),
-      status: 'POSTED',
-      reference_type: 'IAP_PURCHASE',
-      reference_id: purchaseId,
-      idempotency_key: `${input.idempotencyKey}:IAP`,
-      metadata,
-    });
-
-    await trx('wallets')
-      .where({ user_id: userId })
-      .update({
-        coin_balance: afterCoinBalance.toString(),
-        updated_at: trx.fn.now(),
-      });
-
-    const walletAfter = await trx('wallets').where({ user_id: userId }).first();
-
-    return {
-      purchaseId,
-      replay: false,
-      platform: input.platform,
-      sku: input.sku,
-      grantedCoins: Number(grantedCoins),
-      wallet: {
-        coinBalance: Number(walletAfter?.coin_balance || 0),
-        bonusCoinBalance: Number(walletAfter?.bonus_coin_balance || 0),
-        gemAvailable: Number(walletAfter?.gem_available || 0),
-        gemPending: Number(walletAfter?.gem_pending || 0),
-      },
-      ledgerEntryId,
-      verifiedAt: verification.verifiedAt,
-    };
-  });
-
-  logger.info(
-    {
-      userId,
-      platform: purchaseResult.platform,
-      sku: purchaseResult.sku,
-      purchaseId: purchaseResult.purchaseId,
-      replay: purchaseResult.replay,
-      grantedCoins: purchaseResult.grantedCoins,
-    },
-    '[economy] iap verify processed'
-  );
-
-  return purchaseResult;
-}
+type ProviderVerifyResult = {
+  verified: boolean;
+  providerOrderId: string | null;
+  detail?: string;
+};
 
 type PromotePricing = {
   battle: { coins: number; durationHours: number };
   timeSlot: { per30MinCoins: number };
   spotlight: { coins1h: number; coins24h: number; coins7d: number };
 };
-
-const ANDROID_CONSUME_ALLOWED_SKUS = new Set(['blyp.android.proof.coinpack.100']);
 
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
@@ -466,37 +149,15 @@ async function verifyGooglePlayPurchase(input: IapVerifyInput): Promise<Provider
     return { verified: false, providerOrderId: purchaseJson.orderId || null, detail: `purchase_state_${purchaseState}` };
   }
 
+  // If Google reports the token as already consumed, it must have been redeemed
+  // through a path other than this ledger (our own grants short-circuit to a
+  // replay before ever calling Google). Reject to prevent re-granting.
+  if (Number(purchaseJson.consumptionState) === 1) {
+    return { verified: false, providerOrderId: purchaseJson.orderId || null, detail: 'already_consumed' };
+  }
+
   const providerOrderId = String(purchaseJson.orderId || '').trim() || String(input.storeTransactionId || '').trim() || null;
   return { verified: true, providerOrderId, detail: 'google_verified' };
-}
-
-async function consumeGooglePlayPurchase(input: IapVerifyInput): Promise<void> {
-  const env = getEconomyEnv();
-  const packageName = String(env.GOOGLE_PLAY_PACKAGE_NAME || '').trim();
-  const serviceAccountRaw = String(env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON || '').trim();
-
-  if (!packageName || !serviceAccountRaw) {
-    throw new EconomyError('PROVIDER_ERROR', 503, 'Google Play provider credentials are not configured');
-  }
-
-  const serviceAccount = parseGoogleServiceAccount(serviceAccountRaw);
-  const accessToken = await getGoogleAccessToken(serviceAccount);
-
-  const sku = encodeURIComponent(input.sku);
-  const token = encodeURIComponent(String(input.purchaseToken || ''));
-  const consumeUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${encodeURIComponent(packageName)}/purchases/products/${sku}/tokens/${token}:consume`;
-
-  const consumeRes = await fetch(consumeUrl, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (consumeRes.status === 200 || consumeRes.status === 204) {
-    return;
-  }
-
-  const consumeJson = await consumeRes.json().catch(() => null);
-  throw new EconomyError('PROVIDER_ERROR', 503, 'Google Play purchase consume request failed', consumeJson ?? `HTTP_${consumeRes.status}`);
 }
 
 async function verifyProviderPurchase(input: IapVerifyInput): Promise<ProviderVerifyResult> {
@@ -909,9 +570,44 @@ export async function getCatalog() {
 
 export async function getWallet(userId: string) {
   const { db } = getEconomyInfra();
+  const env = getEconomyEnv();
 
   const row = await db.transaction(async (trx) => {
     const wallet = await ensureWalletRow(trx, userId);
+
+    // Lazily settle matured pending gems: any PENDING gem earning older than the
+    // hold window is promoted to available. This runs on read so creators see
+    // their earnings unlock without needing a separate cron/worker.
+    const holdSeconds = Number(env.PENDING_GEMS_HOLD_SECONDS || 0);
+    if (holdSeconds > 0 && BigInt(wallet.gem_pending || 0) > 0n) {
+      const matured = await trx('ledger_entries')
+        .where({ user_id: userId, currency: 'GEM', status: 'PENDING' })
+        .andWhereRaw(`created_at <= NOW() - INTERVAL '${holdSeconds} seconds'`)
+        .select('ledger_id', 'amount');
+
+      if (matured.length > 0) {
+        let sum = 0n;
+        for (const e of matured) sum += BigInt(e.amount);
+        // Never release more than is actually pending (defensive clamp).
+        const pending = BigInt(wallet.gem_pending || 0);
+        const release = sum > pending ? pending : sum;
+        if (release > 0n) {
+          await trx('ledger_entries')
+            .whereIn('ledger_id', matured.map((e: any) => e.ledger_id))
+            .update({ status: 'POSTED' });
+          await trx('wallets')
+            .where({ user_id: userId })
+            .update({
+              gem_pending: (pending - release).toString(),
+              gem_available: (BigInt(wallet.gem_available || 0) + release).toString(),
+              updated_at: trx.fn.now(),
+            });
+          wallet.gem_pending = (pending - release).toString();
+          wallet.gem_available = (BigInt(wallet.gem_available || 0) + release).toString();
+        }
+      }
+    }
+
     return wallet;
   });
 
@@ -925,12 +621,55 @@ export async function getWallet(userId: string) {
 
 export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerifyInput): Promise<{ kind: 'ok'; response: IapVerifySuccessResponse } | { kind: 'replay'; response: IapVerifySuccessResponse }> {
   const { db } = getEconomyInfra();
-  const androidProviderPurchaseId = input.platform === 'ANDROID'
-    ? String(input.purchaseToken || '').trim() || null
-    : null;
 
-  const result = await db.transaction(async (trx) => {
+  return await db.transaction(async (trx) => {
     await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+    // Dedupe defense-in-depth:
+    // 1) Per-user idempotency key (client retries of the same attempt).
+    // 2) GLOBAL dedupe on the Google purchase token/order id, so the SAME store
+    //    purchase can never grant twice — whether replayed with a fresh
+    //    idempotency key or submitted by a different user (token reuse attack).
+    const purchaseToken = String(input.purchaseToken || '').trim();
+
+    if (purchaseToken) {
+      const existingByToken = await trx('ledger_entries')
+        .where({ entry_type: 'COIN_PURCHASE' })
+        .whereRaw("metadata->>'purchaseToken' = ?", [purchaseToken])
+        .first();
+
+      if (existingByToken) {
+        // Token already redeemed by a DIFFERENT user => reject as fraud/reuse.
+        if (String(existingByToken.user_id) !== String(userId)) {
+          throw new EconomyError(
+            'VERIFICATION_FAILED',
+            409,
+            'Purchase token already redeemed',
+            'purchase_token_reused',
+          );
+        }
+
+        // Same user re-submitting the same token => idempotent replay.
+        const walletReplay = await trx('wallets').where({ user_id: userId }).first();
+        if (!walletReplay) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+        return {
+          kind: 'replay' as const,
+          response: {
+            valid: true,
+            duplicatePerfId: String(existingByToken.reference_id || ''),
+            grantedCoins: Number(existingByToken.amount || 0),
+            grantedGems: 0,
+            wallet: {
+              coinBalance: Number(walletReplay.coin_balance || 0),
+              bonusCoinBalance: Number(walletReplay.bonus_coin_balance || 0),
+              gemAvailable: Number(walletReplay.gem_available || 0),
+              gemPending: Number(walletReplay.gem_pending || 0),
+            },
+          },
+        };
+      }
+    }
 
     const existingLedger = await trx('ledger_entries')
       .where({ user_id: userId, idempotency_key: input.idempotencyKey, entry_type: 'COIN_PURCHASE' })
@@ -956,42 +695,38 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
       return { kind: 'replay' as const, response: replayResponse };
     }
 
-    if (androidProviderPurchaseId) {
-      const existingAndroidProviderLedger = await trx('ledger_entries')
-        .where({
-          provider_purchase_id: androidProviderPurchaseId,
-          entry_type: 'COIN_PURCHASE',
-          reference_type: 'IAP',
-        })
-        .first();
-
-      if (existingAndroidProviderLedger) {
-        const walletReplay = await trx('wallets').where({ user_id: userId }).first();
-        if (!walletReplay) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
-
-        const replayResponse: IapVerifySuccessResponse = {
-          valid: true,
-          duplicatePerfId: String(existingAndroidProviderLedger.reference_id || ''),
-          grantedCoins: Number(existingAndroidProviderLedger.amount || 0),
-          grantedGems: 0,
-          wallet: {
-            coinBalance: Number(walletReplay.coin_balance || 0),
-            bonusCoinBalance: Number(walletReplay.bonus_coin_balance || 0),
-            gemAvailable: Number(walletReplay.gem_available || 0),
-            gemPending: Number(walletReplay.gem_pending || 0),
-          },
-        };
-
-        return { kind: 'replay' as const, response: replayResponse };
-      }
-    }
-
-    const product = await trx('iap_products')
+    let product = await trx('iap_products')
       .where({ platform: input.platform, sku: input.sku, enabled: true })
       .first();
 
     if (!product) {
-      throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+      // Self-heal: the iap_products row can be missing if the startup seed never
+      // ran on an older deployment. Fall back to the authoritative in-code
+      // catalog (never trust client-supplied amounts) and upsert the row so the
+      // table converges. Only known SKUs resolve; unknown SKUs still 404.
+      const catalogEntry = findIapCatalogEntry(input.platform, input.sku);
+      if (!catalogEntry) {
+        throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+      }
+
+      await trx('iap_products')
+        .insert({
+          platform: catalogEntry.platform,
+          sku: catalogEntry.sku,
+          coins_granted: catalogEntry.coinsGranted,
+          enabled: true,
+          metadata: trx.raw('?::jsonb', [JSON.stringify({ label: catalogEntry.label, priceUsd: catalogEntry.priceUsd, source: 'self_heal' })]),
+        })
+        .onConflict(['platform', 'sku'])
+        .merge({ coins_granted: catalogEntry.coinsGranted, enabled: true });
+
+      product = await trx('iap_products')
+        .where({ platform: input.platform, sku: input.sku, enabled: true })
+        .first();
+
+      if (!product) {
+        throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+      }
     }
 
     const verifyResult = await verifyProviderPurchase(input);
@@ -1026,14 +761,15 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
       status: 'POSTED',
       reference_type: 'IAP',
       reference_id: purchaseRefId,
-      provider_purchase_id: androidProviderPurchaseId,
       idempotency_key: input.idempotencyKey,
       metadata: {
         platform: input.platform,
         sku: input.sku,
-        purchaseToken: input.purchaseToken,
         storeTransactionId: input.storeTransactionId,
         providerOrderId: verifyResult.providerOrderId,
+        // Persist the store purchase token so it can be globally deduped on
+        // subsequent verify calls (see the token pre-check above).
+        ...(purchaseToken ? { purchaseToken } : {}),
       },
     });
 
@@ -1055,24 +791,134 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
 
     return { kind: 'ok' as const, response };
   });
+}
 
-  if (result.kind === 'ok' && input.platform === 'ANDROID' && input.purchaseToken && ANDROID_CONSUME_ALLOWED_SKUS.has(input.sku)) {
-    try {
-      await consumeGooglePlayPurchase(input);
-    } catch (error: any) {
-      logger.warn(
-        {
-          userId,
-          sku: input.sku,
-          storeTransactionId: input.storeTransactionId,
-          detail: error?.detail ?? error?.message ?? String(error),
-        },
-        '[economy] Android purchase grant succeeded but consume failed'
-      );
-    }
+/**
+ * Credit subscription coins into the SAME Postgres wallet the app reads and
+ * spends from. This replaces the legacy Firestore ledger credit so that
+ * Plus+Coins monthly coins are actually visible/spendable (previously they were
+ * written to a separate Firestore wallet and stranded).
+ *
+ * Idempotent per (user, idempotencyKey): the caller passes a period-scoped key
+ * (e.g. `sub-coins:<uid>:<YYYY-MM>`) so a billing period can only ever grant
+ * once, even across activate + RTDN renewal retries. The global UNIQUE index on
+ * idempotency_key is the race-proof backstop.
+ */
+export async function creditSubscriptionCoins(
+  userId: string,
+  input: { coins: number; idempotencyKey: string; sku?: string | null; source?: string | null },
+): Promise<{
+  kind: 'ok' | 'replay';
+  granted: number;
+  wallet: { coinBalance: number; bonusCoinBalance: number; gemAvailable: number; gemPending: number };
+}> {
+  const { db } = getEconomyInfra();
+
+  const coins = Math.floor(Number(input.coins || 0));
+  if (!Number.isFinite(coins) || coins <= 0) {
+    throw new EconomyError('INVALID_INPUT', 400, 'coins must be a positive integer');
+  }
+  const idempotencyKey = String(input.idempotencyKey || '').trim();
+  if (!idempotencyKey) {
+    throw new EconomyError('INVALID_INPUT', 400, 'idempotencyKey required');
   }
 
-  return result;
+  const readWallet = async (q: any) => {
+    const w = await q('wallets').where({ user_id: userId }).first();
+    return {
+      coinBalance: Number(w?.coin_balance || 0),
+      bonusCoinBalance: Number(w?.bonus_coin_balance || 0),
+      gemAvailable: Number(w?.gem_available || 0),
+      gemPending: Number(w?.gem_pending || 0),
+    };
+  };
+
+  try {
+    return await db.transaction(async (trx) => {
+      await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+      // Per-(user,key) replay guard (the UNIQUE index is the race-proof backstop).
+      const existing = await trx('ledger_entries')
+        .where({ user_id: userId, idempotency_key: idempotencyKey, entry_type: 'SUBSCRIPTION_COINS' })
+        .first();
+      if (existing) {
+        return { kind: 'replay' as const, granted: 0, wallet: await readWallet(trx) };
+      }
+
+      const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+      if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+      const grant = BigInt(coins);
+      const newCoinBalance = BigInt(wallet.coin_balance) + grant;
+
+      await trx('wallets')
+        .where({ user_id: userId })
+        .update({ coin_balance: newCoinBalance.toString(), updated_at: trx.fn.now() });
+
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: userId,
+        entry_type: 'SUBSCRIPTION_COINS',
+        currency: 'COIN',
+        amount: grant.toString(),
+        status: 'POSTED',
+        reference_type: 'SUBSCRIPTION',
+        reference_id: input.sku || null,
+        idempotency_key: idempotencyKey,
+        metadata: { source: input.source || 'subscription', sku: input.sku || null },
+      });
+
+      return { kind: 'ok' as const, granted: coins, wallet: await readWallet(trx) };
+    });
+  } catch (e: any) {
+    // Lost the idempotency race (another activate/RTDN credited the same period
+    // first): the UNIQUE(idempotency_key) constraint rejected the duplicate. The
+    // grant already happened, so report the current wallet as a replay.
+    if (e?.code === '23505') {
+      return { kind: 'replay', granted: 0, wallet: await readWallet(db) };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Account-deletion purge (GDPR/CCPA). Removes the user's personal economy data:
+ * wallet balance, subscription/entitlement rows, and per-user activity rows.
+ *
+ * The immutable financial ledger (ledger_entries, gift_events, stream/team
+ * earnings) is intentionally RETAINED for legal/accounting/fraud-prevention —
+ * consistent with the deletion policy ("we may retain limited information when
+ * required for legal, security, fraud-prevention, or compliance purposes").
+ * Anonymizing the user_id in those tables is a follow-up.
+ *
+ * Idempotent: re-running simply deletes nothing more. Never throws on a missing
+ * table (deployments may not have every optional table).
+ */
+export async function purgeUserData(userId: string): Promise<{ deleted: Record<string, number> }> {
+  const { db } = getEconomyInfra();
+  const uid = String(userId || '').trim();
+  if (!uid) throw new EconomyError('INVALID_INPUT', 400, 'userId required');
+
+  // Personal/deletable tables keyed by user_id. Financial ledgers are excluded.
+  const tables = [
+    'wallets',
+    'user_subscriptions',
+    'matchday_entitlements',
+    'matchday_predictions',
+    'live_game_entries',
+  ];
+
+  const deleted: Record<string, number> = {};
+  for (const table of tables) {
+    try {
+      const n = await db(table).where({ user_id: uid }).del();
+      deleted[table] = Number(n || 0);
+    } catch (e: any) {
+      // Missing table or no user_id column on this deployment — skip safely.
+      deleted[table] = -1;
+    }
+  }
+  return { deleted };
 }
 
 export async function getLedger(userId: string, rawCursor?: string, rawLimit?: number) {
@@ -1115,9 +961,9 @@ export async function getLedger(userId: string, rawCursor?: string, rawLimit?: n
 
   const nextCursor = rows.length === limit
     ? encodeCursor({
-      createdAt: new Date(rows[rows.length - 1].createdAt).toISOString(),
-      ledgerId: rows[rows.length - 1].ledgerId,
-    })
+        createdAt: new Date(rows[rows.length - 1].createdAt).toISOString(),
+        ledgerId: rows[rows.length - 1].ledgerId,
+      })
     : null;
 
   return { items, nextCursor };
@@ -1146,10 +992,10 @@ export async function getStreamSummary(userId: string, streamId: string) {
 
   const creator = creatorRow
     ? {
-      userId,
-      coinsReceived: Number(creatorRow.coins_received ?? 0),
-      gemsEarned: Number(creatorRow.gems_earned ?? 0),
-    }
+        userId,
+        coinsReceived: Number(creatorRow.coins_received ?? 0),
+        gemsEarned: Number(creatorRow.gems_earned ?? 0),
+      }
     : null;
 
   return {
@@ -1157,6 +1003,45 @@ export async function getStreamSummary(userId: string, streamId: string) {
     viewer,
     creator: creator ?? undefined,
   };
+}
+
+/**
+ * Live-room gift recipient guard. If `streamId` resolves to an active LIVE
+ * session, the recipient MUST be the host or a guest on that stage — the server
+ * no longer trusts the client to constrain recipients. Contexts with no live
+ * session (e.g. feed-post gifts, or ended/cleaned-up streams) are intentionally
+ * left unchanged so non-live gifting keeps working. Viewer gifting will extend
+ * the allowed set behind a feature flag in a later phase.
+ */
+async function assertValidLiveRecipient(streamId: string, receiverUserId: string): Promise<void> {
+  const session = await getSessionById(streamId);
+  if (!session || session.status !== 'LIVE') return; // not a live-room context
+  // Viewer-gifting toggle: when enabled, any user may be gifted within an active
+  // live room (we still confirmed it IS a live session above). Safe while
+  // withdrawals are OFF — gems have no cash-out. Re-gate behind anti-fraud
+  // (velocity/graph) before withdrawals are ever enabled.
+  const allowViewerGifting = /^(1|true|yes|on)$/i.test(String(process.env.ALLOW_VIEWER_GIFTING || '').trim());
+  if (allowViewerGifting) return;
+  if (receiverUserId === session.hostUserId) return;
+  const guests = await listGuests(streamId);
+  const onStage = guests.some(
+    (g) => g.userId === receiverUserId && (g.state === 'INVITED' || g.state === 'LIVE')
+  );
+  if (onStage) return;
+  // Battle participants (e.g. the opponent) aren't "guests" but are equal
+  // co-hosts on the shared stage. If an artillery match is running, treat its
+  // registered players as valid recipients so revive-gifts reach either creator.
+  if (/^(1|true|yes|on)$/i.test(String(process.env.LIVE_ARTILLERY_ENABLED || '').trim())) {
+    try {
+      const room = await getRoom(streamId);
+      if (room && (room.players['0'] === receiverUserId || room.players['1'] === receiverUserId)) {
+        return;
+      }
+    } catch {
+      // fall through to the default rejection
+    }
+  }
+  throw new EconomyError('RECEIVER_INVALID', 403, 'Recipient is not on this live stage');
 }
 
 export async function sendGift(senderUserId: string, input: { streamId: string; receiverUserId: string; giftId: string; quantity: number; idempotencyKey: string }) {
@@ -1220,17 +1105,29 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       };
     }
 
+    // Server-authoritative recipient check for live rooms. Runs only for NEW
+    // gifts (idempotent replays returned above), so a guest leaving mid-stream
+    // never breaks a legitimate retry. Non-live contexts (posts) are unaffected.
+    await assertValidLiveRecipient(streamId, receiverUserId);
+
     // 1) Validate/lock wallets
     await trx.raw('SELECT 1');
 
-    // sender wallet FOR UPDATE
+    // Ensure both wallet rows exist, then lock them in a deterministic
+    // (sorted-by-id) order. Locking in a consistent order prevents deadlocks
+    // when two users send gifts to each other concurrently.
     await trx('wallets').insert({ user_id: senderUserId }).onConflict('user_id').ignore();
-    const senderWallet = await trx('wallets').where({ user_id: senderUserId }).forUpdate().first();
-    if (!senderWallet) throw new EconomyError('INTERNAL', 500, 'Sender wallet missing');
-
-    // receiver wallet FOR UPDATE
     await trx('wallets').insert({ user_id: receiverUserId }).onConflict('user_id').ignore();
-    const receiverWallet = await trx('wallets').where({ user_id: receiverUserId }).forUpdate().first();
+
+    const [firstId, secondId] = [senderUserId, receiverUserId].sort();
+    const lockedFirst = await trx('wallets').where({ user_id: firstId }).forUpdate().first();
+    const lockedSecond = firstId === secondId
+      ? lockedFirst
+      : await trx('wallets').where({ user_id: secondId }).forUpdate().first();
+
+    const senderWallet = senderUserId === firstId ? lockedFirst : lockedSecond;
+    const receiverWallet = receiverUserId === firstId ? lockedFirst : lockedSecond;
+    if (!senderWallet) throw new EconomyError('INTERNAL', 500, 'Sender wallet missing');
     if (!receiverWallet) throw new EconomyError('INTERNAL', 500, 'Receiver wallet missing');
 
     const unitCost = BigInt(gift.coin_cost);
@@ -1430,7 +1327,221 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
   };
   emitGiftEvent(streamId, payload);
 
+  // Revive-gift hook: when the artillery battle-stage game is live and a viewer
+  // sends the `revive` gift to a creator on stage, apply a revive to that
+  // creator's team and rebroadcast the authoritative state. Best-effort and
+  // only for new sends (never on idempotent replays) so it can't double-revive.
+  if (
+    result.kind === 'success' &&
+    giftId === 'revive' &&
+    /^(1|true|yes|on)$/i.test(String(process.env.LIVE_ARTILLERY_ENABLED || '').trim())
+  ) {
+    try {
+      const room = await applyReviveForReceiver({ sessionId: streamId, receiverUserId });
+      if (room) {
+        emitGameEvent(streamId, {
+          sessionId: room.sessionId,
+          type: 'STATE',
+          version: room.version,
+          battleId: room.battleId,
+          players: room.players,
+          state: room.state,
+          revive: { receiverUserId, senderUserId },
+        });
+      }
+    } catch (e: any) {
+      logger.warn({ err: e?.message || String(e) }, '[artillery] revive-gift hook failed (non-fatal)');
+    }
+  }
+
+  // Team bonus: if the recipient is in a team, mint an extra 10% of the gems
+  // they just earned to them, and 5% to their team leader. Done after the gift
+  // commit so it never blocks or fails the core gift. Skipped on idempotent
+  // replays (no new gems were earned).
+  if (result.kind === 'success' && result.response.gemsCredited > 0) {
+    try {
+      await applyTeamGiftBonus({
+        giftEventId: result.response.giftEventId,
+        memberUserId: receiverUserId,
+        baseGems: result.response.gemsCredited,
+        coins: result.response.coinSpent,
+      });
+    } catch (e: any) {
+      logger.error(
+        { err: e?.message || String(e), giftEventId: result.response.giftEventId },
+        '[economy] applyTeamGiftBonus failed (non-fatal)'
+      );
+    }
+  }
+
   return result;
+}
+
+/**
+ * Pay out the team gift bonus for a single gift the member just received.
+ *  - member earns an extra 10% of base gems
+ *  - team leader earns 5% of base gems (skipped if the member IS the leader)
+ * Accrual is tracked in micro-gems and only whole gems are credited to wallets,
+ * with the fractional remainder carried forward (so 5% of 50 = 2.5 isn't lost —
+ * the next gift tops it up). Idempotent per giftEventId via the unique ledger key.
+ */
+async function applyTeamGiftBonus(input: {
+  giftEventId: string;
+  memberUserId: string;
+  baseGems: number;
+  coins: number;
+}): Promise<void> {
+  const { giftEventId, memberUserId } = input;
+  const baseGems = BigInt(Math.max(0, Math.floor(input.baseGems)));
+  if (baseGems <= 0n) return;
+
+  const team = await getUserTeamForEarnings(memberUserId);
+  if (!team || !team.teamId) return;
+  const leaderUserId = String(team.leaderId || '');
+  const leaderIsMember = !leaderUserId || leaderUserId === memberUserId;
+
+  const { db } = getEconomyInfra();
+  const env = getEconomyEnv();
+  const gemColumn = env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'gem_pending' : 'gem_available';
+
+  const deltas = await db.transaction(async (trx) => {
+    // Idempotency: if we already paid this gift's bonus, do nothing.
+    const already = await trx('ledger_entries')
+      .where({ idempotency_key: `team-bonus:${giftEventId}:member` })
+      .first();
+    if (already) return null;
+
+    // Upsert the accrual row and add this gift's micro-gems.
+    await trx('team_earnings')
+      .insert({
+        team_id: team.teamId,
+        member_user_id: memberUserId,
+        leader_user_id: leaderUserId || memberUserId,
+        coins_received: BigInt(Math.max(0, Math.floor(input.coins))).toString(),
+        base_gems: baseGems.toString(),
+        member_bonus_micro: (baseGems * MEMBER_BONUS_MICRO_PER_GEM).toString(),
+        leader_bonus_micro: (leaderIsMember ? 0n : baseGems * LEADER_BONUS_MICRO_PER_GEM).toString(),
+      })
+      .onConflict(['team_id', 'member_user_id'])
+      .merge({
+        leader_user_id: leaderUserId || memberUserId,
+        coins_received: trx.raw('team_earnings.coins_received + ?', [BigInt(Math.max(0, Math.floor(input.coins))).toString()]),
+        base_gems: trx.raw('team_earnings.base_gems + ?', [baseGems.toString()]),
+        member_bonus_micro: trx.raw('team_earnings.member_bonus_micro + ?', [(baseGems * MEMBER_BONUS_MICRO_PER_GEM).toString()]),
+        leader_bonus_micro: trx.raw('team_earnings.leader_bonus_micro + ?', [(leaderIsMember ? 0n : baseGems * LEADER_BONUS_MICRO_PER_GEM).toString()]),
+        updated_at: trx.fn.now(),
+      });
+
+    const row = await trx('team_earnings')
+      .where({ team_id: team.teamId, member_user_id: memberUserId })
+      .forUpdate()
+      .first();
+    if (!row) return null;
+
+    const memberMicro = BigInt(row.member_bonus_micro);
+    const memberPaid = BigInt(row.member_bonus_paid);
+    const memberWholeOwed = memberMicro / MICRO_PER_GEM;
+    const memberCredit = memberWholeOwed > memberPaid ? memberWholeOwed - memberPaid : 0n;
+
+    const leaderMicro = BigInt(row.leader_bonus_micro);
+    const leaderPaid = BigInt(row.leader_bonus_paid);
+    const leaderWholeOwed = leaderMicro / MICRO_PER_GEM;
+    const leaderCredit = !leaderIsMember && leaderWholeOwed > leaderPaid ? leaderWholeOwed - leaderPaid : 0n;
+
+    // Credit the member's wallet (whole gems) + ledger.
+    if (memberCredit > 0n) {
+      await trx('wallets').insert({ user_id: memberUserId }).onConflict('user_id').ignore();
+      await trx('wallets')
+        .where({ user_id: memberUserId })
+        .update({
+          [gemColumn]: trx.raw(`${gemColumn} + ?`, [memberCredit.toString()]),
+          lifetime_earned_gems: trx.raw('lifetime_earned_gems + ?', [memberCredit.toString()]),
+          updated_at: trx.fn.now(),
+        });
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: memberUserId,
+        entry_type: 'TEAM_BONUS_EARN',
+        currency: 'GEM',
+        amount: memberCredit.toString(),
+        status: env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED',
+        reference_type: 'GIFT_EVENT',
+        reference_id: giftEventId,
+        idempotency_key: `team-bonus:${giftEventId}:member`,
+        metadata: { teamId: team.teamId, role: 'member', baseGems: baseGems.toString() },
+      });
+    } else {
+      // Still record the marker so this gift is treated as processed (idempotent).
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: memberUserId,
+        entry_type: 'TEAM_BONUS_EARN',
+        currency: 'GEM',
+        amount: '0',
+        status: 'POSTED',
+        reference_type: 'GIFT_EVENT',
+        reference_id: giftEventId,
+        idempotency_key: `team-bonus:${giftEventId}:member`,
+        metadata: { teamId: team.teamId, role: 'member', baseGems: baseGems.toString(), carried: true },
+      });
+    }
+
+    // Credit the leader's wallet (whole gems) + ledger.
+    if (leaderCredit > 0n && leaderUserId) {
+      await trx('wallets').insert({ user_id: leaderUserId }).onConflict('user_id').ignore();
+      await trx('wallets')
+        .where({ user_id: leaderUserId })
+        .update({
+          [gemColumn]: trx.raw(`${gemColumn} + ?`, [leaderCredit.toString()]),
+          lifetime_earned_gems: trx.raw('lifetime_earned_gems + ?', [leaderCredit.toString()]),
+          updated_at: trx.fn.now(),
+        });
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: leaderUserId,
+        entry_type: 'TEAM_LEADER_BONUS',
+        currency: 'GEM',
+        amount: leaderCredit.toString(),
+        status: env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED',
+        reference_type: 'GIFT_EVENT',
+        reference_id: giftEventId,
+        idempotency_key: `team-bonus:${giftEventId}:leader`,
+        metadata: { teamId: team.teamId, role: 'leader', fromMember: memberUserId, baseGems: baseGems.toString() },
+      });
+    }
+
+    // Apply the credited whole gems to the paid counters.
+    await trx('team_earnings')
+      .where({ team_id: team.teamId, member_user_id: memberUserId })
+      .update({
+        member_bonus_paid: (memberPaid + memberCredit).toString(),
+        leader_bonus_paid: (leaderPaid + leaderCredit).toString(),
+        updated_at: trx.fn.now(),
+      });
+
+    return {
+      // For the Firestore mirror we report the PRECISE earned amounts (including
+      // fractions) so the dashboard reflects true earnings, not just whole gems.
+      baseGemsDelta: Number(baseGems),
+      memberBonusDelta: Number(baseGems) * 0.1,
+      leaderBonusDelta: leaderIsMember ? 0 : Number(baseGems) * 0.05,
+      coinsDelta: Math.max(0, Math.floor(input.coins)),
+      leaderUserId,
+    };
+  });
+
+  if (!deltas) return;
+
+  // Mirror to Firestore for the leader dashboard (best-effort, outside the txn).
+  await mirrorTeamEarnings({
+    teamId: team.teamId,
+    memberUserId,
+    leaderUserId: deltas.leaderUserId,
+    baseGemsDelta: deltas.baseGemsDelta,
+    memberBonusDelta: deltas.memberBonusDelta,
+    leaderBonusDelta: deltas.leaderBonusDelta,
+    coinsDelta: deltas.coinsDelta,
+  });
 }
 
 export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCoinsInput) {
@@ -1510,6 +1621,156 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
   });
 
   return out;
+}
+
+// ----------------------------------------------------------------------------
+// Daily reward streak
+//
+// Server-authoritative daily streak. Coins are credited to the SAME wallet the
+// app reads (`wallets[user_id]`, keyed by the Cognito sub), through the audited
+// `ledger_entries` path. "One claim per UTC day" is guaranteed by the GLOBALLY
+// UNIQUE `idempotency_key = daily:<userId>:<UTC-day>` — a replayed/concurrent
+// tap can never double-pay. Reward matches the established model:
+// base 10 + min(streak*2, 50).
+// ----------------------------------------------------------------------------
+
+const DAILY_BASE_REWARD = 10;
+const DAILY_MAX_BONUS = 50;
+
+function utcDay(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function addUtcDays(day: string, delta: number): string {
+  const [y, m, d] = day.split('-').map((n) => parseInt(n, 10));
+  return utcDay(Date.UTC(y, m - 1, d) + delta * 86_400_000);
+}
+
+function dailyRewardForStreak(streak: number): number {
+  return DAILY_BASE_REWARD + Math.min(streak * 2, DAILY_MAX_BONUS);
+}
+
+/** jsonb columns may arrive as an object (pg default) or a string; normalize. */
+function readLedgerMetadata(raw: any): Record<string, any> {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+async function readDailyStreakState(
+  q: Knex | Knex.Transaction,
+  userId: string
+): Promise<{ lastClaimDay: string | null; streak: number }> {
+  const last = await q('ledger_entries')
+    .where({ user_id: userId, entry_type: 'DAILY_REWARD' })
+    .orderBy([{ column: 'created_at', order: 'desc' }, { column: 'ledger_id', order: 'desc' }])
+    .first();
+
+  if (!last) return { lastClaimDay: null, streak: 0 };
+  const meta = readLedgerMetadata(last.metadata);
+  const lastClaimDay = typeof meta.day === 'string' ? meta.day : null;
+  const streak = Number.isFinite(Number(meta.streak)) ? Number(meta.streak) : 0;
+  return { lastClaimDay, streak };
+}
+
+export type DailyRewardPeek = {
+  ok: true;
+  streak: number;
+  claimedToday: boolean;
+  claimableReward: number;
+};
+
+export type DailyRewardClaim = {
+  ok: true;
+  alreadyClaimed: boolean;
+  streak: number;
+  reward: number;
+  balanceCoins: number;
+};
+
+/** Peek the current streak + claimable reward without mutating anything. */
+export async function peekDailyReward(userId: string): Promise<DailyRewardPeek> {
+  const { db } = getEconomyInfra();
+  const today = utcDay(Date.now());
+  const state = await readDailyStreakState(db, userId);
+  const claimedToday = state.lastClaimDay === today;
+  const nextStreak = state.lastClaimDay === addUtcDays(today, -1) ? state.streak + 1 : 1;
+  return {
+    ok: true,
+    streak: state.streak,
+    claimedToday,
+    claimableReward: claimedToday ? 0 : dailyRewardForStreak(nextStreak),
+  };
+}
+
+/** Claim today's reward. Idempotent server-side; safe to call once per tap. */
+export async function claimDailyReward(userId: string): Promise<DailyRewardClaim> {
+  const { db } = getEconomyInfra();
+  const today = utcDay(Date.now());
+  const idempotencyKey = `daily:${userId}:${today}`;
+
+  return await db.transaction(async (trx) => {
+    // Lock the wallet row FIRST so concurrent taps serialize here (rather than
+    // racing to insert duplicate idempotency keys and tripping a unique error).
+    await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+    const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+    if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+    // Idempotency: the unique key is the authority for "one claim per UTC day".
+    const existing = await trx('ledger_entries').where({ idempotency_key: idempotencyKey }).first();
+    if (existing) {
+      const meta = readLedgerMetadata(existing.metadata);
+      return {
+        ok: true as const,
+        alreadyClaimed: true,
+        streak: Number.isFinite(Number(meta.streak)) ? Number(meta.streak) : 0,
+        reward: 0,
+        balanceCoins: Number(wallet.coin_balance),
+      };
+    }
+
+    const state = await readDailyStreakState(trx, userId);
+    const newStreak = state.lastClaimDay === addUtcDays(today, -1) ? state.streak + 1 : 1;
+    const reward = dailyRewardForStreak(newStreak);
+
+    const before = BigInt(wallet.coin_balance);
+    const after = before + BigInt(reward);
+    const ledgerId = randomUUID();
+
+    await trx('ledger_entries').insert({
+      ledger_id: ledgerId,
+      user_id: userId,
+      entry_type: 'DAILY_REWARD',
+      currency: 'COIN',
+      amount: reward.toString(),
+      status: 'POSTED',
+      reference_type: 'DAILY_REWARD',
+      reference_id: today,
+      idempotency_key: idempotencyKey,
+      metadata: { source: 'daily_streak', streak: newStreak, day: today },
+    });
+
+    await trx('wallets').where({ user_id: userId }).update({
+      coin_balance: after.toString(),
+      updated_at: trx.fn.now(),
+    });
+
+    return {
+      ok: true as const,
+      alreadyClaimed: false,
+      streak: newStreak,
+      reward,
+      balanceCoins: Number(after),
+    };
+  });
 }
 
 export async function startLiveGame(hostUserId: string, input: { streamId: string; entryFeeCoins: number; idempotencyKey: string }) {
@@ -1597,13 +1858,13 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
           coinSpent: Number(BigInt(existing.coin_cost) + BigInt(existing.bonus_coin_cost)),
           state: game
             ? {
-              gameId: game.game_id,
-              streamId: game.stream_id,
-              hostUserId: game.host_user_id,
-              status: game.status,
-              entryFeeCoins: Number(game.entry_fee_coins),
-              poolCoins: Number(game.pool_coins),
-            }
+                gameId: game.game_id,
+                streamId: game.stream_id,
+                hostUserId: game.host_user_id,
+                status: game.status,
+                entryFeeCoins: Number(game.entry_fee_coins),
+                poolCoins: Number(game.pool_coins),
+              }
             : null,
         },
       };

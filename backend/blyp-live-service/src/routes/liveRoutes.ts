@@ -6,18 +6,27 @@ import {
   createGuestToken,
   endLiveSession,
   joinLiveRealtime,
-  listActiveLiveSessions,
   requestGuestSlot,
   listGuestRequests,
   inviteGuest,
   rejectGuest,
+  kickGuest,
+  muteGuest,
+  setGuestCamera,
+  hostInviteGuest,
+  addModerator,
+  removeModerator,
   getGuest,
   leaveGuest,
   heartbeatGuest,
+  startBattleStage,
+  joinBattleStage,
+  assertSessionHost,
 } from '../live/liveService';
 import { bestEffortRedisPing } from '../economy/redisBestEffort';
 import { logger } from '../config/logger';
 import { headerValueDiagnostics } from '../utils/headerSanitize';
+import { requireNotBanned } from '../admin/banGuard';
 
 const router = Router();
 
@@ -28,15 +37,15 @@ function logRedisSoftFail(tag: '[LIVE_START_REDIS_SOFT_FAIL]' | '[GUEST_JOIN_RED
   logger.warn(payload, tag);
 }
 
-router.post('/live/start', async (req: AuthedRequest, res) => {
+router.post('/live/start', requireNotBanned, async (req: AuthedRequest, res) => {
   try {
     const userId = req.user?.sub || req.user?.username;
     const attemptId = (req.headers['x-golive-attempt-id'] as string) || (req.headers['x-goLive-attempt-id'] as string) || undefined;
     if (!userId) {
       return res.status(401).json({ error: 'User not found in token' });
     }
-    const { title } = req.body || {};
-    console.log('[API][/api/live/start]', { attemptId, user: userId });
+    const { title, region } = req.body || {};
+    console.log('[API][/api/live/start]', { attemptId, user: userId, region: region || '(none)' });
 
     const route = '/api/live/start';
 
@@ -68,7 +77,7 @@ router.post('/live/start', async (req: AuthedRequest, res) => {
       });
     }
 
-    const result = await startLiveSession(userId, title || '');
+    const result = await startLiveSession(userId, title || '', typeof region === 'string' ? region : undefined);
     console.log('[LIVE_API][HOST_START]', {
       attemptId,
       hostUid: userId,
@@ -152,33 +161,6 @@ router.post('/live/join-realtime', async (req: AuthedRequest, res) => {
     res.status(err.message.includes('not found') ? 404 : 500).json({
       error: err.message,
     });
-  }
-});
-
-router.get('/live/sessions', async (req: AuthedRequest, res) => {
-  try {
-    const userId = req.user?.sub || req.user?.username;
-    if (!userId) {
-      return res.status(401).json({ error: 'User not found in token' });
-    }
-
-    const rawLimit = Number(req.query?.limit || 10);
-    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, Math.trunc(rawLimit))) : 10;
-    const sessions = await listActiveLiveSessions(limit);
-
-    return res.json({
-      items: sessions.map((session) => ({
-        sessionId: session.sessionId,
-        status: session.status,
-        hostUserId: session.hostUserId,
-        createdAt: session.createdAt,
-      })),
-      total: sessions.length,
-      limit,
-    });
-  } catch (err: any) {
-    logger.error({ err: err?.message || String(err) }, '[live] /api/live/sessions failed');
-    return res.status(500).json({ error: 'Failed to list live sessions', detail: err?.message || String(err) });
   }
 });
 
@@ -387,7 +369,7 @@ router.get('/live/guest/requests', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId required' });
     }
 
-    const requests = await listGuestRequests(sessionId);
+    const requests = await listGuestRequests(sessionId, userId);
     res.json({
       requests: requests.map((r) => ({
         userId: r.userId,
@@ -446,7 +428,7 @@ router.post('/live/guest/invite', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId and guestUserId required' });
     }
 
-    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId);
+    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId, userId);
     // For backward compatibility with client types, return a token placeholder.
     // The guest will mint their own token via /live/guest-token after they observe INVITED.
     res.json({
@@ -457,7 +439,8 @@ router.post('/live/guest/invite', async (req: AuthedRequest, res) => {
       slotIndex,
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to invite guest', detail: err.message });
+    const status = err?.code === 'FORBIDDEN' ? 403 : err?.code === 'PANEL_FULL' ? 409 : 500;
+    res.status(status).json({ error: 'Failed to invite guest', code: err?.code, detail: err.message });
   }
 });
 
@@ -475,7 +458,7 @@ router.post('/live/guest/accept', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId and guestUserId required' });
     }
 
-    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId);
+    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId, userId);
     res.json({
       token: 'INVITED',
       stageArn,
@@ -484,7 +467,8 @@ router.post('/live/guest/accept', async (req: AuthedRequest, res) => {
       slotIndex,
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to invite guest', detail: err.message });
+    const status = err?.code === 'FORBIDDEN' ? 403 : err?.code === 'PANEL_FULL' ? 409 : 500;
+    res.status(status).json({ error: 'Failed to invite guest', code: err?.code, detail: err.message });
   }
 });
 
@@ -498,18 +482,177 @@ router.post('/live/guest/reject', async (req: AuthedRequest, res) => {
     if (!sessionId || !guestUserId) {
       return res.status(400).json({ error: 'sessionId and guestUserId required' });
     }
-    await rejectGuest(sessionId, guestUserId);
+    await rejectGuest(sessionId, guestUserId, userId);
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to reject guest', detail: err.message });
+    res.status(err?.code === 'FORBIDDEN' ? 403 : 500).json({ error: 'Failed to reject guest', code: err?.code, detail: err.message });
+  }
+});
+
+// Host-only: mute/unmute a guest's mic. Body: { sessionId, guestUserId, muted }.
+router.post('/live/guest/mute', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const { sessionId, guestUserId, muted } = req.body || {};
+    if (!sessionId || !guestUserId || typeof muted !== 'boolean') {
+      return res.status(400).json({ error: 'sessionId, guestUserId and muted (boolean) required' });
+    }
+    await muteGuest(sessionId, userId, guestUserId, muted);
+    res.json({ ok: true, muted });
+  } catch (err: any) {
+    res.status(err?.code === 'FORBIDDEN' ? 403 : 500).json({ error: 'Failed to mute guest', code: err?.code, detail: err.message });
+  }
+});
+
+// Host-only: turn a guest's camera off/on. Body: { sessionId, guestUserId, cameraOff }.
+router.post('/live/guest/camera', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const { sessionId, guestUserId, cameraOff } = req.body || {};
+    if (!sessionId || !guestUserId || typeof cameraOff !== 'boolean') {
+      return res.status(400).json({ error: 'sessionId, guestUserId and cameraOff (boolean) required' });
+    }
+    await setGuestCamera(sessionId, userId, guestUserId, cameraOff);
+    res.json({ ok: true, cameraOff });
+  } catch (err: any) {
+    res.status(err?.code === 'FORBIDDEN' ? 403 : 500).json({ error: 'Failed to set guest camera', code: err?.code, detail: err.message });
+  }
+});
+
+// Host-only: invite a VIEWER (who hasn't requested) up onto the stage as a guest.
+// Body: { sessionId, guestUserId }.
+router.post('/live/guest/host-invite', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const { sessionId, guestUserId } = req.body || {};
+    if (!sessionId || !guestUserId) {
+      return res.status(400).json({ error: 'sessionId and guestUserId required' });
+    }
+    const result = await hostInviteGuest(sessionId, userId, guestUserId);
+    res.json({ ok: true, slotIndex: result.slotIndex });
+  } catch (err: any) {
+    const code = err?.code;
+    const status = code === 'FORBIDDEN' ? 403 : code === 'PANEL_FULL' ? 409 : 500;
+    res.status(status).json({ error: 'Failed to invite guest', code, detail: err.message });
+  }
+});
+
+// Host-only: appoint / revoke a moderator. Body: { sessionId, moderatorUserId }.
+router.post('/live/moderator/add', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const { sessionId, moderatorUserId } = req.body || {};
+    if (!sessionId || !moderatorUserId) {
+      return res.status(400).json({ error: 'sessionId and moderatorUserId required' });
+    }
+    await addModerator(sessionId, userId, moderatorUserId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(err?.code === 'FORBIDDEN' ? 403 : 500).json({ error: 'Failed to add moderator', code: err?.code, detail: err.message });
+  }
+});
+
+router.post('/live/moderator/remove', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const { sessionId, moderatorUserId } = req.body || {};
+    if (!sessionId || !moderatorUserId) {
+      return res.status(400).json({ error: 'sessionId and moderatorUserId required' });
+    }
+    await removeModerator(sessionId, userId, moderatorUserId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(err?.code === 'FORBIDDEN' ? 403 : 500).json({ error: 'Failed to remove moderator', code: err?.code, detail: err.message });
+  }
+});
+
+// Host or moderator: forcibly remove a guest from the stage.
+router.post('/live/guest/kick', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const { sessionId, guestUserId } = req.body || {};
+    if (!sessionId || !guestUserId) {
+      return res.status(400).json({ error: 'sessionId and guestUserId required' });
+    }
+    await kickGuest(sessionId, userId, guestUserId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(err?.code === 'FORBIDDEN' ? 403 : 500).json({ error: 'Failed to kick guest', code: err?.code, detail: err.message });
+  }
+});
+
+// Battles — start the shared stage (creator) / join it (opponent). Both are
+// equal co-hosts: no request/approve dance.
+router.post('/live/battle/start', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub || req.user?.username;
+    if (!userId) return res.status(401).json({ error: 'User not found in token' });
+    const { battleId, title, region } = req.body || {};
+    if (!battleId) return res.status(400).json({ error: 'battleId required' });
+    const result = await startBattleStage(userId, String(battleId), title || '', typeof region === 'string' ? region : undefined);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({
+      error: 'Failed to start battle stage',
+      code: err?.code ?? 'UNKNOWN_ERROR',
+      detail: err?.originalMessage ?? err?.message,
+    });
+  }
+});
+
+router.post('/live/battle/join', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'User not found in token' });
+    const { sessionId, battleId } = req.body || {};
+    if (!sessionId || !battleId) return res.status(400).json({ error: 'sessionId and battleId required' });
+    const result = await joinBattleStage(userId, String(sessionId), String(battleId));
+    res.json(result);
+  } catch (err: any) {
+    const notFound = String(err?.message || '').includes('not found');
+    res.status(notFound ? 404 : 500).json({ error: 'Failed to join battle stage', detail: err?.message });
   }
 });
 
 router.post('/live/end', async (req: AuthedRequest, res) => {
   try {
+    const userId = req.user?.sub || req.user?.username;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
     const { sessionId } = req.body || {};
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId required' });
+    }
+    // Only the host may end their own session. Admin force-end goes through the
+    // separate admin route (which calls endLiveSession directly). If the session
+    // no longer exists, treat end as idempotently successful.
+    try {
+      await assertSessionHost(sessionId, userId);
+    } catch (authErr: any) {
+      if (authErr?.code === 'FORBIDDEN') {
+        return res.status(403).json({ error: 'Only the host can end this session', code: 'FORBIDDEN' });
+      }
+      // Session not found -> nothing to end; respond ok for idempotency.
+      return res.json({ ok: true, detail: 'no active session' });
     }
     await endLiveSession(sessionId);
     res.json({ ok: true });

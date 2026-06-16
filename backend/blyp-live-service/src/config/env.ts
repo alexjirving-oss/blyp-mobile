@@ -57,15 +57,15 @@ bootSanitizeEnv();
 
 export const ENV = {
   PORT: parseInt(process.env.PORT || '4000', 10),
-  
+
   // AWS Regions
   AWS_REGION: process.env.AWS_REGION || 'eu-west-2',
   COGNITO_REGION: process.env.COGNITO_REGION || 'eu-west-2',
   IVS_REALTIME_REGION: process.env.IVS_REALTIME_REGION || 'eu-west-1',
-  
+
   // Cognito
   COGNITO_USER_POOL_ID: process.env.COGNITO_USER_POOL_ID || 'eu-west-2_ITX07Zvnt',
-  
+
   // DynamoDB Tables
   LIVE_SESSIONS_TABLE: process.env.LIVE_SESSIONS_TABLE || 'blyp_live_sessions',
   LIVE_GUESTS_TABLE: process.env.LIVE_GUESTS_TABLE || 'blyp_live_guests',

@@ -1,4 +1,7 @@
 import {
+    AdminDeleteUserCommand,
+    AdminDisableUserCommand,
+    AdminEnableUserCommand,
     CognitoIdentityProviderClient,
     ListUsersCommand,
     type UserType,
@@ -26,40 +29,20 @@ export type DirectoryUser = {
     updatedAt: string | null;
 };
 
-export type DirectoryProbeResult = {
+export type DirectoryUserProof = {
     getClientSucceeded: boolean;
     listUsersAttempted: boolean;
     listUsersThrew: boolean;
     directoryCount: number;
-    proofUserMatched: boolean;
+    proofUserMatchedBeforeFiltering: boolean;
 };
 
 let cachedClient: CognitoIdentityProviderClient | null = null;
 let cachedRegion = '';
-let cachedDirectoryUsers: DirectoryUser[] | null = null;
-let cachedDirectoryUsersAt = 0;
-let inFlightDirectoryUsers: Promise<DirectoryUser[]> | null = null;
-
-const DIRECTORY_USERS_CACHE_TTL_MS = 60_000;
-
-function poolRegionFromId(userPoolId: string): string {
-    const value = String(userPoolId || '').trim();
-    if (!value.includes('_')) return '';
-    return value.split('_')[0].trim();
-}
-
-function getRegionCandidates(userPoolId: string): string[] {
-    const candidates = [
-        poolRegionFromId(userPoolId),
-        String(ENV.COGNITO_REGION || '').trim(),
-        String(ENV.AWS_REGION || '').trim(),
-    ].filter(Boolean);
-    return Array.from(new Set(candidates));
-}
 
 function getClient(): CognitoIdentityProviderClient | null {
+    const region = String(ENV.COGNITO_REGION || '').trim();
     const userPoolId = String(ENV.COGNITO_USER_POOL_ID || '').trim();
-    const region = getRegionCandidates(userPoolId)[0] || '';
     if (!region || !userPoolId) {
         return null;
     }
@@ -140,96 +123,81 @@ function mapUser(user: UserType): DirectoryUser {
     };
 }
 
+function matchesDirectoryUserProofQuery(user: DirectoryUser, query: string): boolean {
+    const lowered = String(query || '').trim().toLowerCase();
+    if (!lowered) return false;
+
+    return [user.userId, user.username, user.email]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase() === lowered);
+}
+
 export async function listDirectoryUsers(): Promise<DirectoryUser[]> {
-    const now = Date.now();
-    if (cachedDirectoryUsers && now - cachedDirectoryUsersAt < DIRECTORY_USERS_CACHE_TTL_MS) {
-        return cachedDirectoryUsers;
-    }
-    if (inFlightDirectoryUsers) {
-        return inFlightDirectoryUsers;
-    }
-
-    inFlightDirectoryUsers = (async () => {
-    const userPoolId = getPoolId();
-    if (!userPoolId) {
-        logger.warn('[admin] Cognito directory disabled: COGNITO_USER_POOL_ID is missing');
-            cachedDirectoryUsers = [];
-            cachedDirectoryUsersAt = Date.now();
-            return [];
-    }
-
     const client = getClient();
-    if (!client) {
-        logger.warn('[admin] Cognito directory disabled: no usable region was resolved');
-            cachedDirectoryUsers = [];
-            cachedDirectoryUsersAt = Date.now();
-            return [];
-    }
-
-    const regions = getRegionCandidates(userPoolId);
-    let lastError: unknown = null;
-
-    for (const region of regions) {
-        try {
-            if (!cachedClient || cachedRegion !== region) {
-                cachedRegion = region;
-                cachedClient = new CognitoIdentityProviderClient({ region });
-            }
-
-            const items: DirectoryUser[] = [];
-            let paginationToken: string | undefined;
-
-            do {
-                const out = await cachedClient.send(new ListUsersCommand({
-                    UserPoolId: userPoolId,
-                    Limit: 60,
-                    PaginationToken: paginationToken,
-                }));
-                for (const user of out.Users || []) {
-                    const mapped = mapUser(user);
-                    if (mapped.userId) {
-                        items.push(mapped);
-                    }
-                }
-                paginationToken = out.PaginationToken;
-            } while (paginationToken);
-
-            if (region !== String(ENV.COGNITO_REGION || '').trim()) {
-                logger.info({ region }, '[admin] Cognito directory region fallback applied');
-            }
-            cachedDirectoryUsers = items;
-            cachedDirectoryUsersAt = Date.now();
-            return items;
-        } catch (error: any) {
-            lastError = error;
-            logger.warn({
-                region,
-                code: String(error?.name || ''),
-                message: String(error?.message || error),
-            }, '[admin] Cognito list users failed for region candidate');
-        }
-    }
-
-    logger.warn({
-        code: String((lastError as any)?.name || ''),
-        message: String((lastError as any)?.message || lastError),
-    }, '[admin] Cognito directory unavailable; falling back to SQL-derived users only');
-        cachedDirectoryUsers = [];
-        cachedDirectoryUsersAt = Date.now();
+    const userPoolId = getPoolId();
+    if (!client || !userPoolId) {
         return [];
-    })();
+    }
 
+    const items: DirectoryUser[] = [];
+    let paginationToken: string | undefined;
+
+    do {
+        const out = await client.send(new ListUsersCommand({
+            UserPoolId: userPoolId,
+            Limit: 60,
+            PaginationToken: paginationToken,
+        }));
+        for (const user of out.Users || []) {
+            const mapped = mapUser(user);
+            if (mapped.userId) {
+                items.push(mapped);
+            }
+        }
+        paginationToken = out.PaginationToken;
+    } while (paginationToken);
+
+    return items;
+}
+
+/**
+ * Permanently delete a Cognito user identified by their immutable `sub` (which
+ * is the app/Firebase uid). AdminDeleteUser takes a Username, so we resolve it
+ * via ListUsers(filter: sub="...") first. Returns true if deleted (or already
+ * absent), false if Cognito isn't configured or the lookup/delete failed.
+ * Used by the account-deletion worker (GDPR).
+ */
+export async function deleteCognitoUserBySub(sub: string): Promise<boolean> {
+    const client = getClient();
+    const userPoolId = getPoolId();
+    const uid = String(sub || '').trim();
+    if (!client || !userPoolId || !uid) {
+        logger.warn('[cognito] deleteCognitoUserBySub skipped (not configured or empty sub)');
+        return false;
+    }
     try {
-        return await inFlightDirectoryUsers;
-    } finally {
-        inFlightDirectoryUsers = null;
+        const out = await client.send(new ListUsersCommand({
+            UserPoolId: userPoolId,
+            Filter: `sub = "${uid}"`,
+            Limit: 1,
+        }));
+        const username = String(out.Users?.[0]?.Username || '').trim();
+        if (!username) {
+            // No matching identity — treat as already deleted.
+            return true;
+        }
+        await client.send(new AdminDeleteUserCommand({ UserPoolId: userPoolId, Username: username }));
+        logger.info({ uid }, '[cognito] deleted user identity');
+        return true;
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e), uid }, '[cognito] deleteCognitoUserBySub failed');
+        return false;
     }
 }
 
-export async function probeDirectoryState(proofUserQuery: string): Promise<DirectoryProbeResult> {
-    const proofQuery = String(proofUserQuery || '').trim().toLowerCase();
-    const userPoolId = getPoolId();
+export async function getDirectoryUserProof(query: string): Promise<DirectoryUserProof> {
     const client = getClient();
+    const userPoolId = getPoolId();
     const getClientSucceeded = Boolean(client && userPoolId);
 
     if (!getClientSucceeded) {
@@ -238,65 +206,62 @@ export async function probeDirectoryState(proofUserQuery: string): Promise<Direc
             listUsersAttempted: false,
             listUsersThrew: false,
             directoryCount: 0,
-            proofUserMatched: false,
+            proofUserMatchedBeforeFiltering: false,
         };
     }
 
-    const regions = getRegionCandidates(userPoolId);
-    let listUsersAttempted = false;
-    let listUsersThrew = false;
+    try {
+        const items = await listDirectoryUsers();
+        return {
+            getClientSucceeded: true,
+            listUsersAttempted: true,
+            listUsersThrew: false,
+            directoryCount: items.length,
+            proofUserMatchedBeforeFiltering: items.some((user) => matchesDirectoryUserProofQuery(user, query)),
+        };
+    } catch {
+        return {
+            getClientSucceeded: true,
+            listUsersAttempted: true,
+            listUsersThrew: true,
+            directoryCount: 0,
+            proofUserMatchedBeforeFiltering: false,
+        };
+    }
+}
 
-    for (const region of regions) {
-        try {
-            if (!cachedClient || cachedRegion !== region) {
-                cachedRegion = region;
-                cachedClient = new CognitoIdentityProviderClient({ region });
-            }
-
-            const items: DirectoryUser[] = [];
-            let paginationToken: string | undefined;
-
-            do {
-                listUsersAttempted = true;
-                const out = await cachedClient.send(new ListUsersCommand({
-                    UserPoolId: userPoolId,
-                    Limit: 60,
-                    PaginationToken: paginationToken,
-                }));
-                for (const user of out.Users || []) {
-                    const mapped = mapUser(user);
-                    if (mapped.userId) {
-                        items.push(mapped);
-                    }
-                }
-                paginationToken = out.PaginationToken;
-            } while (paginationToken);
-
-            const proofUserMatched = proofQuery
-                ? items.some((user) => [user.userId, user.username, user.email]
-                    .filter(Boolean)
-                    .some((value) => String(value).toLowerCase() === proofQuery))
-                : false;
-
-            return {
-                getClientSucceeded: true,
-                listUsersAttempted,
-                listUsersThrew,
-                directoryCount: items.length,
-                proofUserMatched,
-            };
-        } catch {
-            listUsersThrew = true;
-        }
+// Enable/disable a Cognito user. Disabling immediately prevents new sign-ins and
+// token refresh, which is the strongest platform-wide enforcement of a ban.
+// Cognito's AdminDisableUser needs the pool Username (not the `sub`), so we resolve
+// it from the directory first.
+export async function setDirectoryUserEnabled(inputUserId: string, enabled: boolean): Promise<{ ok: boolean; detail?: string }> {
+    const client = getClient();
+    const userPoolId = getPoolId();
+    if (!client || !userPoolId) {
+        return { ok: false, detail: 'cognito_not_configured' };
     }
 
-    return {
-        getClientSucceeded: true,
-        listUsersAttempted,
-        listUsersThrew,
-        directoryCount: 0,
-        proofUserMatched: false,
-    };
+    let username = String(inputUserId || '').trim();
+    try {
+        const user = await findDirectoryUser(inputUserId);
+        if (user?.username) username = user.username;
+    } catch {
+        // Fall back to the provided id as username.
+    }
+
+    if (!username) return { ok: false, detail: 'no_username' };
+
+    try {
+        if (enabled) {
+            await client.send(new AdminEnableUserCommand({ UserPoolId: userPoolId, Username: username }));
+        } else {
+            await client.send(new AdminDisableUserCommand({ UserPoolId: userPoolId, Username: username }));
+        }
+        return { ok: true };
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e), enabled }, '[admin] setDirectoryUserEnabled failed');
+        return { ok: false, detail: e?.message || String(e) };
+    }
 }
 
 export async function findDirectoryUser(inputUserId: string): Promise<DirectoryUser | null> {

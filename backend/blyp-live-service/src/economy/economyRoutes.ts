@@ -7,14 +7,23 @@ import {
   liveGameFinalizeSchema,
   liveGameJoinSchema,
   liveGameStartSchema,
+  matchdayPredictionPlaceSchema,
+  matchdayPredictionSettleSchema,
+  matchdayPurchaseSchema,
+  matchdayReactSchema,
   paginationSchema,
   promoteBattleSchema,
   promoteSpotlightBookSchema,
   promoteTimeSlotBookSchema,
+  battleDepositSchema,
+  battleCancelRefundSchema,
+  battleSettleSchema,
 } from './economySchemas';
+import { depositBattle, cancelRefundBattle, settleBattle } from './battleEscrowService';
 import {
   bookPromoteSpotlight,
   bookPromoteTimeSlot,
+  claimDailyReward,
   creditCoinsAdmin,
   finalizeLiveGame,
   getCatalog,
@@ -23,21 +32,33 @@ import {
   getSpotlightAvailability,
   getStreamSummary,
   getWallet,
-  IapVerifyError,
   joinLiveGame,
+  peekDailyReward,
   purchasePromoteBattle,
-  verifyIapPurchase,
   sendGift,
   startLiveGame,
+  verifyIapPurchaseAndGrant,
 } from './economyService';
+import {
+  checkMatchdayEntitlement,
+  getMatchdayLeaderboard,
+  getMatchdayPredictions,
+  getMatchdayPricing,
+  placeMatchdayPrediction,
+  purchaseMatchdayEntitlement,
+  reactMatchday,
+  settleMatchdayPredictions,
+} from './matchdayService';
 import { EconomyError, toEconomyError } from './economyErrors';
 import { getEconomyInfra } from './infra';
 import { logger } from '../config/logger';
+import { requireNotBanned } from '../admin/banGuard';
 
 const router = Router();
 
-// All economy endpoints require auth.
+// All economy endpoints require auth, and banned accounts are rejected outright.
 router.use(cognitoJwtMiddleware);
+router.use(requireNotBanned);
 
 router.get('/economy/catalog', async (_req: AuthedRequest, res) => {
   try {
@@ -142,6 +163,40 @@ router.get('/wallet', async (req: AuthedRequest, res) => {
   } catch (e: any) {
     const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+// Daily reward streak. Credits the same wallet the app reads (keyed by the
+// Cognito sub), so claimed coins are immediately reflected in /wallet.
+//   GET  -> { ok, streak, claimedToday, claimableReward }          (peek)
+//   POST -> { ok, alreadyClaimed, streak, reward, balanceCoins }   (claim)
+router.get('/economy/daily-reward', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ ok: false, reason: 'unauthenticated' });
+    const out = await peekDailyReward(userId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/daily-reward');
+    }
+    res.status(err.httpStatus).json({ ok: false, reason: 'error', detail: err.detail });
+  }
+});
+
+router.post('/economy/daily-reward/claim', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ ok: false, reason: 'unauthenticated' });
+    const out = await claimDailyReward(userId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/daily-reward/claim');
+    }
+    res.status(err.httpStatus).json({ ok: false, reason: 'error', detail: err.detail });
   }
 });
 
@@ -271,7 +326,56 @@ router.post('/economy/live-games/finalize', async (req: AuthedRequest, res) => {
   }
 });
 
-router.post('/iap/verify', async (req: AuthedRequest, res) => {
+// ----------------------------------------------------------------------------
+// Battles — coin deposit / refund / attendance settlement (all in COINS).
+// ----------------------------------------------------------------------------
+
+router.post('/economy/battle/deposit', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = battleDepositSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    const out = await depositBattle(userId, parsed.data);
+    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/battle/cancel-refund', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = battleCancelRefundSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    const out = await cancelRefundBattle(userId, parsed.data);
+    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/battle/settle', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = battleSettleSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    const out = await settleBattle(userId, parsed.data);
+    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+const handleIapVerify = async (req: AuthedRequest, res: any) => {
   try {
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
@@ -279,17 +383,164 @@ router.post('/iap/verify', async (req: AuthedRequest, res) => {
     const parsed = iapVerifySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
 
-    const out = await verifyIapPurchase(userId, parsed.data);
-    return res.json(out);
-  } catch (e: any) {
-    if (e instanceof IapVerifyError) {
-      return res.status(e.httpStatus).json({
-        error: e.message,
-        code: e.code,
-        detail: e.detail,
-      });
+    const out = await verifyIapPurchaseAndGrant(userId, parsed.data);
+    if (out.kind === 'replay') {
+      return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
     }
 
+    return res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+};
+
+router.post('/iap/verify', handleIapVerify);
+// Backward-compatible alias while clients move to canonical /iap/verify.
+router.post('/commerce/purchase/verify', handleIapVerify);
+
+const matchdayWritesEnabled = () => String(process.env.ECONOMY_MATCHDAY_ENABLED || '').trim() === '1';
+
+router.get('/economy/matchday/pricing', async (_req: AuthedRequest, res) => {
+  try {
+    res.json({ ...getMatchdayPricing(), enabled: matchdayWritesEnabled() });
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/economy/matchday/:eventId/entitlement', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const eventId = typeof req.params?.eventId === 'string' ? req.params.eventId.trim() : '';
+    if (!eventId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const out = await checkMatchdayEntitlement(userId, eventId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/matchday/purchase', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    if (!matchdayWritesEnabled()) return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
+
+    const parsed = matchdayPurchaseSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+
+    const out = await purchaseMatchdayEntitlement(userId, parsed.data);
+    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/economy/matchday/:eventId/predictions', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const eventId = typeof req.params?.eventId === 'string' ? req.params.eventId.trim() : '';
+    if (!eventId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const out = await getMatchdayPredictions(userId, eventId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/matchday/predictions/place', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    if (!matchdayWritesEnabled()) return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
+
+    const parsed = matchdayPredictionPlaceSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+
+    const out = await placeMatchdayPrediction(userId, parsed.data);
+    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/matchday/predictions/settle', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    if (!matchdayWritesEnabled()) return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
+
+    // Settlement moves real wallet balances based on a *reported* final result.
+    // The backend has no sports feed to corroborate it, so settlement is
+    // restricted to an explicit ops allowlist (defaults closed) to prevent an
+    // untrusted client from fabricating a favorable result.
+    const allowlist = String(process.env.ECONOMY_MATCHDAY_SETTLE_ALLOWLIST_SUBS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (allowlist.length === 0 || !allowlist.includes(userId)) {
+      logger.warn({ userId }, '[economy] RESTRICTED /economy/matchday/predictions/settle (not allowlisted)');
+      return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
+    }
+
+    const parsed = matchdayPredictionSettleSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+
+    const out = await settleMatchdayPredictions(userId, parsed.data);
+    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/economy/matchday/leaderboard', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const eventId = typeof req.query?.eventId === 'string' ? req.query.eventId.trim() : '';
+    const out = await getMatchdayLeaderboard(eventId || undefined);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/matchday/react', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    if (!matchdayWritesEnabled()) return res.status(403).json({ error: 'RESTRICTED', code: 'RESTRICTED' });
+
+    const parsed = matchdayReactSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+
+    // Lightweight per-user rate limit so emoji storms can't be abused (fail-open).
+    try {
+      const { redis } = getEconomyInfra();
+      const key = `economy:matchday_react:${userId}:s2`;
+      const n = await redis.incr(key);
+      if (n === 1) await redis.expire(key, 2);
+      if (n > 10) return res.status(429).json({ error: 'RATE_LIMIT', code: 'RATE_LIMIT' });
+    } catch {
+      // Redis unavailable: allow the reaction rather than blocking the room.
+    }
+
+    const out = await reactMatchday(userId, parsed.data.eventId, parsed.data.emoji);
+    res.json(out);
+  } catch (e: any) {
     const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
@@ -345,7 +596,7 @@ router.post('/economy/admin/credit-coins', async (req: AuthedRequest, res) => {
       const perDay = await redis.incrby(perDayKey, coins);
       if (perDay === coins) await redis.expire(perDayKey, 60 * 60 * 48);
       if (perDay > 1_000_000) {
-        try { await redis.decrby(perDayKey, coins); } catch { }
+        try { await redis.decrby(perDayKey, coins); } catch {}
         throw new EconomyError('RATE_LIMIT', 429, 'Daily cap exceeded');
       }
     } catch (e: any) {
