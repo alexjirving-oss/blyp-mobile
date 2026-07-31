@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, FlatList, StatusBar, Alert, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, FlatList, StatusBar, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../components/Icon';
 import BlypLogo from '../components/BlypLogo';
 import ActivityFeed from '../components/ActivityFeed';
-import FollowerBooster from '../components/FollowerBooster';
+
 import { auth, db, storage, firebaseEnabled } from '../config/firebase';
 import { signOut } from 'firebase/auth';
 import { subscribeToFollowersCount, getFollowersCount } from '../utils/followUtils';
-import { addFakeFollowers } from '../utils/boostFollowers';
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
@@ -20,10 +19,7 @@ const ProfileScreen = () => {
   const [error, setError] = useState(null);
   const [selectedTab, setSelectedTab] = useState('1');
   const [followersCount, setFollowersCount] = useState(0);
-  const [showFollowerBooster, setShowFollowerBooster] = useState(false);
-  const [developerMode, setDeveloperMode] = useState(false);
-  const [showCodeModal, setShowCodeModal] = useState(false);
-  const [codeInput, setCodeInput] = useState('');
+
   // Load profile
   useEffect(() => {
     if (!user) return;
@@ -64,16 +60,12 @@ const ProfileScreen = () => {
   }, [user, firebaseEnabled]);
 
   const handleLogout = async () => { try { await signOut(auth); } catch(e){ console.log('logout error', e.message);} };
-  const handleBoostFollowers = async () => {
-    if (!user) return;
-    Alert.alert('Boost Followers','Select amount',[{text:'Cancel',style:'cancel'},{text:'+100',onPress:async()=>{const r=await addFakeFollowers(user.uid,100); if(r.success) Alert.alert('Added 100');}},{text:'+1K',onPress:async()=>{const r=await addFakeFollowers(user.uid,1000); if(r.success) Alert.alert('Added 1K');}},{text:'+10K',onPress:async()=>{const r=await addFakeFollowers(user.uid,10000); if(r.success) Alert.alert('Added 10K');}}]);
-  };
+
   const handleDeletePost = (post) => {
     Alert.alert('Delete Post','Delete permanently?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{try{const promises=[]; if(post.videoUrl){try{promises.push(storage.refFromURL(post.videoUrl).delete());}catch{}} if(Array.isArray(post.media)){post.media.forEach(m=>{if(m.url){try{promises.push(storage.refFromURL(m.url).delete());}catch{}} if(m.thumbnail&&m.thumbnail!==m.url){try{promises.push(storage.refFromURL(m.thumbnail).delete());}catch{}}});} if(post.thumbnail && !post.media?.some(m=>m.thumbnail===post.thumbnail)){try{promises.push(storage.refFromURL(post.thumbnail).delete());}catch{}} if(promises.length) await Promise.allSettled(promises); await db.collection('posts').doc(post.id).delete();}catch(e){Alert.alert('Error deleting',e.message);}}}]);
   };
   const handlePostPress = post => navigation.navigate('MediaViewer',{ post });
   const getVideoThumbnail = post => post.thumbnail || post.media?.[0]?.thumbnail || post.media?.[0]?.url || post.videoUrl || post.imageUrl || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=400&fit=crop';
-  const handleCodeSubmit = () => { if(codeInput==='123'){ setDeveloperMode(true); setShowFollowerBooster(true); setShowCodeModal(false); setCodeInput(''); Alert.alert('Developer mode enabled'); } else { Alert.alert('Invalid code'); setCodeInput(''); } };
 
   const renderPostItem = ({ item: post }) => {
     const isVideo = post.type==='video'||post.media?.[0]?.type?.includes('video')||post.videoUrl||post.media?.[0]?.url?.includes('.mp4');
@@ -91,7 +83,6 @@ const ProfileScreen = () => {
         <View style={styles.postOverlay}>
           <Text style={styles.postTitle} numberOfLines={2}>{post.title}</Text>
           <View style={styles.postIndicators}>
-            {post.sharedTo?.length>0 && <View style={styles.sharedIndicator}><Icon name="share-outline" size={12} color="#fff" /></View>}
             {post.likes>0 && <View style={styles.likeIndicator}><Icon name="heart" size={12} color="#ff1744" /><Text style={styles.likeCount}>{post.likes}</Text></View>}
           </View>
         </View>
@@ -137,12 +128,11 @@ const ProfileScreen = () => {
       <Text style={styles.userEmail}>{user?.email}</Text>
       {userProfile?.bio ? <Text style={styles.userBio}>{userProfile.bio}</Text> : null}
       <View style={styles.statsContainer}>
-        <TouchableOpacity style={styles.statItem} onPress={()=>navigation.navigate('Followers',{userId:user.uid,type:'followers'})} onLongPress={handleBoostFollowers} delayLongPress={2000}>
+        <TouchableOpacity style={styles.statItem} onPress={()=>navigation.navigate('Followers',{userId:user.uid,type:'followers'})}>
           <Text style={styles.statNumber}>{followersCount}</Text><Text style={styles.statLabel}>Followers</Text>
         </TouchableOpacity>
         <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.length}</Text><Text style={styles.statLabel}>Posts</Text></View>
         <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.reduce((a,p)=>a+(p.likes||0),0)}</Text><Text style={styles.statLabel}>Likes</Text></View>
-        <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.reduce((a,p)=>a+(p.sharedTo?.length||0),0)}</Text><Text style={styles.statLabel}>Shared</Text></View>
       </View>
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.editButton} onPress={()=>navigation.navigate('EditProfile')}>
@@ -158,7 +148,36 @@ const ProfileScreen = () => {
       case '1': return <View style={styles.tabContent}>{renderProfileInfo()}{renderPostsGrid()}</View>;
       case '2': return <View style={styles.tabContent}><ActivityFeed navigation={navigation} /></View>;
       case '3': return <View style={styles.tabContent}><View style={styles.comingSoon}><Icon name="document-text-outline" size={64} color="#374151" /><Text style={styles.comingSoonTitle}>Drafts</Text><Text style={styles.comingSoonText}>Your saved drafts will appear here</Text></View></View>;
-      case '4': return <View style={styles.tabContent}><ScrollView style={styles.settingsContainer}><View style={styles.settingsSection}><Text style={styles.settingsSectionTitle}>Developer Options</Text><TouchableOpacity style={styles.settingsItem} onPress={()=>setShowCodeModal(true)}><View style={styles.settingsItemLeft}><Icon name="code-outline" size={24} color="#8b5cf6" /><Text style={styles.settingsItemText}>Developer Code</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity>{developerMode && <View style={styles.developerBadge}><Text style={styles.developerBadgeText}>🛠️ Developer Mode Active</Text></View>}</View><View style={styles.settingsSection}><Text style={styles.settingsSectionTitle}>Account</Text><TouchableOpacity style={styles.settingsItem}><View style={styles.settingsItemLeft}><Icon name="person-outline" size={24} color="#6b7280" /><Text style={styles.settingsItemText}>Account Information</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity><TouchableOpacity style={styles.settingsItem}><View style={styles.settingsItemLeft}><Icon name="shield-outline" size={24} color="#6b7280" /><Text style={styles.settingsItemText}>Privacy & Security</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity><TouchableOpacity style={styles.settingsItem}><View style={styles.settingsItemLeft}><Icon name="notifications-outline" size={24} color="#6b7280" /><Text style={styles.settingsItemText}>Notifications</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity></View></ScrollView></View>;
+      case '4': return (
+        <View style={styles.tabContent}>
+          <ScrollView style={styles.settingsContainer}>
+            <View style={styles.settingsSection}>
+              <Text style={styles.settingsSectionTitle}>Account</Text>
+              <TouchableOpacity style={styles.settingsItem}>
+                <View style={styles.settingsItemLeft}>
+                  <Icon name="person-outline" size={24} color="#6b7280" />
+                  <Text style={styles.settingsItemText}>Account Information</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.settingsItem}>
+                <View style={styles.settingsItemLeft}>
+                  <Icon name="shield-outline" size={24} color="#6b7280" />
+                  <Text style={styles.settingsItemText}>Privacy & Security</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.settingsItem}>
+                <View style={styles.settingsItemLeft}>
+                  <Icon name="notifications-outline" size={24} color="#6b7280" />
+                  <Text style={styles.settingsItemText}>Notifications</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      );
       default: return null;
     }
   };
@@ -168,22 +187,7 @@ const ProfileScreen = () => {
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       {renderHeader()}
       <View style={styles.content}>{renderTabContent()}</View>
-      {showFollowerBooster && <FollowerBooster visible onClose={()=>setShowFollowerBooster(false)} />}
-      <Modal animationType="fade" transparent visible={showCodeModal} onRequestClose={()=>{setShowCodeModal(false); setCodeInput('');}}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <LinearGradient colors={['#8b5cf6','#d946ef']} style={styles.modalGradient}>
-              <Text style={styles.modalTitle}>Developer Access</Text>
-              <Text style={styles.modalSubtitle}>Enter the developer code:</Text>
-              <TextInput style={styles.codeInput} value={codeInput} onChangeText={setCodeInput} placeholder="Enter code" placeholderTextColor="#9ca3af" secureTextEntry autoFocus onSubmitEditing={handleCodeSubmit} />
-              <View style={styles.modalButtons}>
-                <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={()=>{setShowCodeModal(false); setCodeInput('');}}><Text style={styles.cancelButtonText}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalButton, styles.submitButton]} onPress={handleCodeSubmit}><Text style={styles.submitButtonText}>OK</Text></TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </View>
-        </View>
-      </Modal>
+
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}><Icon name="log-out-outline" size={24} color="#ef4444" /><Text style={styles.logoutText}>Log Out</Text></TouchableOpacity>
     </SafeAreaView>
   );
@@ -237,7 +241,6 @@ const styles = StyleSheet.create({
   postOverlay:{ position:'absolute', bottom:0, left:0, right:0, backgroundColor:'rgba(0,0,0,0.7)', padding:8 },
   postTitle:{ color:'#fff', fontSize:12, fontWeight:'600', marginBottom:4 },
   postIndicators:{ flexDirection:'row', alignItems:'center', gap:8 },
-  sharedIndicator:{ backgroundColor:'rgba(0,0,0,0.5)', borderRadius:12, padding:4 },
   likeIndicator:{ flexDirection:'row', alignItems:'center', backgroundColor:'rgba(0,0,0,0.5)', borderRadius:12, padding:4, gap:4 },
   likeCount:{ color:'#fff', fontSize:10, fontWeight:'600' },
   emptyPosts:{ flex:1, justifyContent:'center', alignItems:'center', paddingVertical:80 },
@@ -251,20 +254,7 @@ const styles = StyleSheet.create({
   settingsItem:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical:16, paddingHorizontal:16, backgroundColor:'#1e293b', borderRadius:12, marginBottom:8 },
   settingsItemLeft:{ flexDirection:'row', alignItems:'center', flex:1 },
   settingsItemText:{ fontSize:16, color:'#e2e8f0', marginLeft:12, fontWeight:'500' },
-  developerBadge:{ backgroundColor:'rgba(139,92,246,0.1)', borderRadius:8, padding:12, marginTop:8, borderWidth:1, borderColor:'rgba(139,92,246,0.3)' },
-  developerBadgeText:{ color:'#8b5cf6', fontSize:14, fontWeight:'600', textAlign:'center' },
-  modalOverlay:{ flex:1, backgroundColor:'rgba(0,0,0,0.7)', justifyContent:'center', alignItems:'center' },
-  modalContainer:{ width:'85%', borderRadius:16, overflow:'hidden' },
-  modalGradient:{ padding:24, alignItems:'center' },
-  modalTitle:{ fontSize:20, fontWeight:'bold', color:'#fff', marginBottom:8, textAlign:'center' },
-  modalSubtitle:{ fontSize:16, color:'#e2e8f0', marginBottom:24, textAlign:'center' },
-  codeInput:{ width:'100%', backgroundColor:'rgba(255,255,255,0.1)', borderRadius:12, padding:16, fontSize:16, color:'#fff', textAlign:'center', marginBottom:24, borderWidth:2, borderColor:'rgba(255,255,255,0.3)' },
-  modalButtons:{ flexDirection:'row', gap:12, width:'100%' },
-  modalButton:{ flex:1, padding:14, borderRadius:12, alignItems:'center' },
-  cancelButton:{ backgroundColor:'rgba(255,255,255,0.1)', borderWidth:1, borderColor:'rgba(255,255,255,0.3)' },
-  submitButton:{ backgroundColor:'rgba(255,255,255,0.9)' },
-  cancelButtonText:{ color:'#fff', fontSize:16, fontWeight:'600' },
-  submitButtonText:{ color:'#8b5cf6', fontSize:16, fontWeight:'600' }
+
 });
 
 export default ProfileScreen;

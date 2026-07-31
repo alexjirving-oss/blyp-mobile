@@ -1,7 +1,8 @@
 import { Router, Response, NextFunction } from 'express';
-import crypto from 'crypto';
+
 import { cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
 import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
+import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import {
@@ -38,102 +39,42 @@ function isCanonicalSub(value: unknown): boolean {
     return COGNITO_SUB_REGEX.test(String(value || '').trim());
 }
 
-const ADMIN_LOGIN_EMAIL = 'alex@tapaquatics.com';
-const ADMIN_LOGIN_PASSWORD = 'Caleb2022!';
-const ADMIN_ACTOR_SUB = String(process.env.ADMIN_ACTOR_SUB || '00000000-0000-4000-8000-000000000000').trim();
-const SESSION_TTL_MS = 1000 * 60 * 60 * 8;
-
-type AdminSession = {
-    actorUserId: string;
-    expiresAt: number;
-};
-
-const adminSessions = new Map<string, AdminSession>();
-
-function cleanupExpiredSessions() {
-    const now = Date.now();
-    for (const [token, session] of adminSessions.entries()) {
-        if (session.expiresAt <= now) {
-            adminSessions.delete(token);
-        }
-    }
-}
-
-function issueAdminSession(actorUserId: string): string {
-    cleanupExpiredSessions();
-    const token = crypto.randomBytes(24).toString('hex');
-    adminSessions.set(token, {
-        actorUserId,
-        expiresAt: Date.now() + SESSION_TTL_MS,
-    });
-    return token;
-}
-
-function getSessionToken(req: AuthedRequest): string {
-    const fromHeader = String(req.headers['x-admin-session'] || '').trim();
-    const authHeader = String(req.headers.authorization || '').trim();
-
-    if (fromHeader) return fromHeader;
-    if (authHeader.toLowerCase().startsWith('bearer admin-session:')) {
-        return authHeader.slice('bearer admin-session:'.length).trim();
-    }
-    return '';
-}
+const ADMIN_ALLOWLIST_SUBS = new Set(
+    getAdminEnv().allowlistSubs.filter(isCanonicalSub),
+);
 
 function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
-    cleanupExpiredSessions();
-    const token = getSessionToken(req);
-    if (!token) {
-        return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH', detail: 'missing admin session' });
+    if (ADMIN_ALLOWLIST_SUBS.size === 0) {
+        logger.error('[admin] ADMIN_ALLOWLIST_SUBS is not configured; denying admin access');
+        return res.status(503).json({
+            error: 'ADMIN_AUTH_NOT_CONFIGURED',
+            code: 'ADMIN_AUTH_NOT_CONFIGURED',
+        });
     }
 
-    const session = adminSessions.get(token);
-    if (!session || session.expiresAt <= Date.now()) {
-        return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH', detail: 'expired or invalid admin session' });
-    }
+    return cognitoJwtMiddleware(req, res, () => {
+        const actorUserId = String(req.user?.sub || '').trim();
+        if (!isCanonicalSub(actorUserId)) {
+            return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+        }
+        if (!ADMIN_ALLOWLIST_SUBS.has(actorUserId)) {
+            logger.warn({ actorUserId }, '[admin] access denied for non-allowlisted subject');
+            return res.status(403).json({ error: 'FORBIDDEN', code: 'FORBIDDEN' });
+        }
 
-    req.user = { sub: session.actorUserId };
-
-    return next();
+        return next();
+    });
 }
 
-router.post('/admin/auth/login', async (req: AuthedRequest, res: Response) => {
-    try {
-        const email = String(req.body?.email || '').trim().toLowerCase();
-        const password = String(req.body?.password || '');
-
-        const isEmailOk = email === ADMIN_LOGIN_EMAIL;
-        const isPasswordOk = password === ADMIN_LOGIN_PASSWORD;
-
-        if (!isEmailOk || !isPasswordOk) {
-            logger.warn({ email }, '[admin] login rejected');
-            return res.status(401).json({ error: 'INVALID_CREDENTIALS', code: 'INVALID_CREDENTIALS' });
-        }
-
-        if (!isCanonicalSub(ADMIN_ACTOR_SUB)) {
-            logger.error({ adminActorSub: ADMIN_ACTOR_SUB }, '[admin] ADMIN_ACTOR_SUB is not a canonical sub');
-            return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
-        }
-
-        const actorUserId = ADMIN_ACTOR_SUB;
-        const sessionToken = issueAdminSession(actorUserId);
-        return res.json({
-            ok: true,
-            sessionToken,
-            actorUserId,
-            expiresInMs: SESSION_TTL_MS,
-        });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/auth/login failed');
-        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
-    }
+router.post('/admin/auth/login', (_req: AuthedRequest, res: Response) => {
+    return res.status(410).json({
+        error: 'ADMIN_PASSWORD_LOGIN_DISABLED',
+        code: 'ADMIN_PASSWORD_LOGIN_DISABLED',
+        detail: 'Use a verified Cognito bearer token for an allowlisted administrator.',
+    });
 });
 
-router.post('/admin/auth/logout', requireAdmin, async (req: AuthedRequest, res: Response) => {
-    const token = getSessionToken(req);
-    if (token) {
-        adminSessions.delete(token);
-    }
+router.post('/admin/auth/logout', requireAdmin, async (_req: AuthedRequest, res: Response) => {
     return res.json({ ok: true });
 });
 

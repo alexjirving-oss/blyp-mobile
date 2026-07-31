@@ -180,19 +180,6 @@ const PostPreviewScreen = () => {
             </View>
           )}
 
-          {post.sharedTo && post.sharedTo.length > 0 && (
-            <View style={styles.sharedToContainer}>
-              <Text style={styles.sharedToLabel}>Shared to:</Text>
-              <View style={styles.sharedPlatforms}>
-                {post.sharedTo.map((platform, index) => (
-                  <View key={index} style={styles.platformBadge}>
-                    <Text style={styles.platformText}>{platform}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
           {/* Actions */}
           {renderActions()}
         </View>
@@ -319,30 +306,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  sharedToContainer: {
-    marginBottom: 20,
-  },
-  sharedToLabel: {
-    color: '#9ca3af',
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  sharedPlatforms: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  platformBadge: {
-    backgroundColor: '#374151',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  platformText: {
-    color: '#d1d5db',
-    fontSize: 12,
-    fontWeight: '500',
-  },
+
   actionsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',

@@ -43,8 +43,13 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
   const [filteredCategories, setFilteredCategories] = useState([]);
 
   useEffect(() => {
-    // Only reload if we don't have categories or posts changed significantly
-    if (categories.length === 0 && posts.length > 0) {
+    if (posts.length === 0) {
+      setCategories([]);
+      setLoading(false);
+      return;
+    }
+
+    if (categories.length === 0) {
       loadCategories();
     }
   }, [posts.length]); // Only depend on posts count, not full posts array
@@ -63,15 +68,21 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
       setLoading(true);
       console.log('📂 Loading smart categories...');
       
-      // Generate AI-powered categories
-      const aiCategories = await smartListGenerator.generateCategories(posts);
-      setCategories(aiCategories);
-      
-      console.log('✅ Categories loaded:', aiCategories.length);
+            const generatedCategories = await smartListGenerator.generateCategories(posts);
+      const sourceBackedCategories = await Promise.all(
+        generatedCategories.map(async (category) => {
+          const matchingPosts = await smartListGenerator.filterPostsByCategory(posts, category);
+          return { ...category, postCount: matchingPosts.length };
+        })
+      );
+      const populatedCategories = sourceBackedCategories.filter((category) => category.postCount > 0);
+      setCategories(populatedCategories);
+
+      console.log('✅ Categories loaded:', populatedCategories.length);
     } catch (error) {
       console.error('❌ Error loading categories:', error);
-      // Load fallback categories
-      setCategories(smartListGenerator.getFallbackCategories());
+      setCategories([]);
+
     } finally {
       setLoading(false);
     }
@@ -127,7 +138,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
         
         <View style={styles.categoryFooter}>
           <Text style={styles.categoryStats}>
-            {Math.floor(Math.random() * 500 + 100)} posts
+            {category.postCount || 0} posts
           </Text>
           <Icon  name="chevron-forward" size={16} color="#ffffff90"  />
         </View>
@@ -137,9 +148,9 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>📂 Smart Categories</Text>
+      <Text style={styles.headerTitle}>Categories</Text>
       <Text style={styles.headerSubtitle}>
-        AI-curated content categories for easy discovery
+        Browse categories represented by available Blyp posts
       </Text>
       
       {/* Search Input */}
@@ -185,7 +196,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
     return (
       <View style={styles.loadingContainer}>
         <Icon  name="folder-open" size={48} color="#8b5cf6"  />
-        <Text style={styles.loadingText}>Generating smart categories...</Text>
+        <Text style={styles.loadingText}>Loading categories...</Text>
       </View>
     );
   }
@@ -197,6 +208,11 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
         renderItem={renderCategoryItem}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={renderHeader}
+        ListEmptyComponent={(
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>No source-backed categories are available yet.</Text>
+          </View>
+        )}
         numColumns={2}
         columnWrapperStyle={styles.row}
         showsVerticalScrollIndicator={false}

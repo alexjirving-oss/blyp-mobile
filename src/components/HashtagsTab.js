@@ -23,8 +23,13 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
   const [filteredPosts, setFilteredPosts] = useState([]);
 
   useEffect(() => {
-    // Only reload if we don't have hashtags or posts changed significantly
-    if (hashtagCategories.length === 0 && posts.length > 0) {
+    if (posts.length === 0) {
+      setHashtagCategories([]);
+      setLoading(false);
+      return;
+    }
+
+    if (hashtagCategories.length === 0) {
       loadHashtags();
     }
   }, [posts.length]); // Only depend on posts count, not full posts array
@@ -34,15 +39,29 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
       setLoading(true);
       console.log('🏷️ Loading smart hashtags...');
       
-      // Generate AI-powered hashtag recommendations
-      const aiHashtags = await smartListGenerator.generateHashtags(posts, userInteractions);
-      setHashtagCategories(aiHashtags);
-      
-      console.log('✅ Hashtag categories loaded:', aiHashtags.length);
+            const generatedCategories = await smartListGenerator.generateHashtags(posts, userInteractions);
+      const availableHashtags = new Set();
+      posts.forEach((post) => {
+        const text = [post.caption, post.description, post.title, post.tags]
+          .flat()
+          .filter(Boolean)
+          .join(' ');
+        (text.match(/#[\p{L}\p{N}_]+/gu) || []).forEach((tag) => availableHashtags.add(tag.toLowerCase()));
+      });
+
+      const sourceBackedCategories = generatedCategories
+        .map((category) => ({
+          ...category,
+          hashtags: category.hashtags.filter((hashtag) => availableHashtags.has(hashtag.toLowerCase())),
+        }))
+        .filter((category) => category.hashtags.length > 0);
+      setHashtagCategories(sourceBackedCategories);
+
+      console.log('✅ Hashtag categories loaded:', sourceBackedCategories.length);
     } catch (error) {
       console.error('❌ Error loading hashtags:', error);
-      // Load fallback hashtags
-      setHashtagCategories(smartListGenerator.getFallbackHashtags());
+      setHashtagCategories([]);
+
     } finally {
       setLoading(false);
     }
@@ -120,9 +139,9 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>🏷️ Smart Hashtags</Text>
+      <Text style={styles.headerTitle}>Hashtags</Text>
       <Text style={styles.headerSubtitle}>
-        AI-curated hashtag recommendations for maximum reach
+        Browse hashtags found in available Blyp posts
       </Text>
       
       {/* Search Bar */}
@@ -187,7 +206,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
     return (
       <View style={styles.loadingContainer}>
         <Icon  name="pricetag" size={48} color="#8b5cf6"  />
-        <Text style={styles.loadingText}>Generating smart hashtags...</Text>
+        <Text style={styles.loadingText}>Loading hashtags...</Text>
       </View>
     );
   }
@@ -199,6 +218,11 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
         renderItem={renderHashtagCategory}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={renderHeader}
+        ListEmptyComponent={(
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>No source-backed hashtags are available yet.</Text>
+          </View>
+        )}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl

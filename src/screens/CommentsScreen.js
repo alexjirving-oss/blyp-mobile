@@ -15,7 +15,7 @@ import {
   Animated
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { db, auth } from '../config/firebase';
+import { db, auth, firebaseEnabled } from '../config/firebase';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -25,17 +25,17 @@ const CommentsScreen = ({ route, navigation }) => {
   const [newComment, setNewComment] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [likedComments, setLikedComments] = useState(new Set());
+
   const flatListRef = useRef(null);
   const inputRef = useRef(null);
   const slideAnim = useRef(new Animated.Value(screenHeight)).current;
 
-  // Mock user data (replace with actual auth user)
-  const currentUser = {
-    id: auth.currentUser?.uid || 'user1',
-    username: auth.currentUser?.displayName || 'currentuser',
-    avatar: auth.currentUser?.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face'
-  };
+  const authenticatedUser = auth.currentUser;
+  const currentUser = authenticatedUser ? {
+    id: authenticatedUser.uid,
+    username: authenticatedUser.displayName || authenticatedUser.email || 'Blyp user',
+    avatar: authenticatedUser.photoURL || null,
+  } : null;
 
   useEffect(() => {
     // Animate screen in
@@ -49,184 +49,92 @@ const CommentsScreen = ({ route, navigation }) => {
     loadComments();
   }, [postId]);
 
-  const loadComments = () => {
-    // Mock comments data with realistic social media interactions
-    const mockComments = [
-      {
-        id: 'comment1',
-        userId: 'user2',
-        username: 'sarah_lifestyle',
-        avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=100&h=100&fit=crop&crop=face',
-        text: 'This is absolutely amazing! 🔥 Love the creativity!',
-        timestamp: new Date(Date.now() - 1000 * 60 * 15), // 15 minutes ago
-        likes: 24,
-        replies: [
-          {
-            id: 'reply1',
-            userId: 'user3',
-            username: 'creative_mind',
-            avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=100&h=100&fit=crop&crop=face',
-            text: 'Totally agree! The editing is on point 💯',
-            timestamp: new Date(Date.now() - 1000 * 60 * 10),
-            likes: 8
-          }
-        ]
-      },
-      {
-        id: 'comment2',
-        userId: 'user4',
-        username: 'photo_enthusiast',
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face',
-        text: 'Can you do a tutorial on this? Would love to learn! 🙏',
-        timestamp: new Date(Date.now() - 1000 * 60 * 25),
-        likes: 12,
-        replies: []
-      },
-      {
-        id: 'comment3',
-        userId: 'user5',
-        username: 'trendsetter_2024',
-        avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face',
-        text: 'First! 🥇 This content never disappoints',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30),
-        likes: 45,
-        replies: [
-          {
-            id: 'reply2',
-            userId: 'user6',
-            username: 'always_watching',
-            avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face',
-            text: 'Second! 😂 But yeah, quality content for sure',
-            timestamp: new Date(Date.now() - 1000 * 60 * 28),
-            likes: 15
-          },
-          {
-            id: 'reply3',
-            userId: 'user7',
-            username: 'late_to_party',
-            avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop&crop=face',
-            text: 'Third! Better late than never 😅',
-            timestamp: new Date(Date.now() - 1000 * 60 * 25),
-            likes: 6
-          }
-        ]
-      },
-      {
-        id: 'comment4',
-        userId: 'user8',
-        username: 'music_lover_99',
-        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop&crop=face',
-        text: 'What song is this? Shazam cant find it 🎵',
-        timestamp: new Date(Date.now() - 1000 * 60 * 40),
-        likes: 8,
-        replies: []
-      },
-      {
-        id: 'comment5',
-        userId: 'user9',
-        username: 'verification_squad',
-        avatar: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=100&h=100&fit=crop&crop=face',
-        text: 'This deserves way more views! Algorithm needs to push this 📈',
-        timestamp: new Date(Date.now() - 1000 * 60 * 50),
-        likes: 33,
-        replies: [
-          {
-            id: 'reply4',
-            userId: 'user10',
-            username: 'algorithm_expert',
-            avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=100&h=100&fit=crop&crop=face',
-            text: 'Engagement is everything! Keep commenting everyone 💪',
-            timestamp: new Date(Date.now() - 1000 * 60 * 45),
-            likes: 12
-          }
-        ]
-      }
-    ];
+  const loadComments = async () => {
+    if (!postId || !firebaseEnabled) {
+      setComments([]);
+      setLoading(false);
+      return;
+    }
 
-    setComments(mockComments);
-    setLoading(false);
+    try {
+      setLoading(true);
+      const snapshot = await db.collection('posts').doc(postId).collection('comments').get();
+      const records = (snapshot?.docs || []).map((doc) => {
+        const data = typeof doc.data === 'function' ? doc.data() : doc.data;
+        return {
+          id: doc.id,
+          ...data,
+          timestamp: data?.createdAt || data?.timestamp || null,
+          likes: Number(data?.likes || 0),
+          replies: [],
+        };
+      });
+      const byId = new Map(records.map((comment) => [comment.id, comment]));
+      const rootComments = [];
+
+      records.forEach((comment) => {
+        if (comment.parentId && byId.has(comment.parentId)) {
+          byId.get(comment.parentId).replies.push(comment);
+        } else {
+          rootComments.push(comment);
+        }
+      });
+
+      const toMillis = (value) => value?.toDate?.().getTime?.() || new Date(value || 0).getTime() || 0;
+      rootComments.sort((a, b) => toMillis(b.timestamp) - toMillis(a.timestamp));
+      rootComments.forEach((comment) => comment.replies.sort(
+        (a, b) => toMillis(a.timestamp) - toMillis(b.timestamp)
+      ));
+      setComments(rootComments);
+    } catch (error) {
+      console.error('Error loading comments:', error);
+      setComments([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSendComment = async () => {
-    if (!newComment.trim()) return;
-
     const commentText = newComment.trim();
-    setNewComment('');
-
-    if (replyingTo) {
-      // Handle reply
-      const newReply = {
-        id: `reply_${Date.now()}`,
-        userId: currentUser.id,
-        username: currentUser.username,
-        avatar: currentUser.avatar,
-        text: `@${replyingTo.username} ${commentText}`,
-        timestamp: new Date(),
-        likes: 0
-      };
-
-      setComments(prevComments => 
-        prevComments.map(comment => 
-          comment.id === replyingTo.commentId
-            ? { ...comment, replies: [...comment.replies, newReply] }
-            : comment
-        )
-      );
-      setReplyingTo(null);
-    } else {
-      // Handle new comment
-      const newCommentObj = {
-        id: `comment_${Date.now()}`,
-        userId: currentUser.id,
-        username: currentUser.username,
-        avatar: currentUser.avatar,
-        text: commentText,
-        timestamp: new Date(),
-        likes: 0,
-        replies: []
-      };
-
-      setComments(prevComments => [newCommentObj, ...prevComments]);
+    if (!commentText) return;
+    if (!postId) {
+      Alert.alert('Unable to comment', 'This post is unavailable.');
+      return;
+    }
+    if (!currentUser || !firebaseEnabled) {
+      Alert.alert('Sign in required', 'Sign in to publish a comment.');
+      return;
     }
 
-    // Scroll to top to show new comment
-    setTimeout(() => {
-      flatListRef.current?.scrollToOffset({ animated: true, offset: 0 });
-    }, 100);
+    try {
+      setNewComment('');
+      const parentId = replyingTo?.commentId || null;
+      await db.collection('posts').doc(postId).collection('comments').add({
+        postId,
+        parentId,
+        userId: currentUser.id,
+        username: currentUser.username,
+        avatar: currentUser.avatar,
+        text: replyingTo ? `@${replyingTo.username} ${commentText}` : commentText,
+        createdAt: new Date(),
+        likes: 0,
+      });
+      setReplyingTo(null);
+      await loadComments();
+      setTimeout(() => {
+        flatListRef.current?.scrollToOffset({ animated: true, offset: 0 });
+      }, 100);
+    } catch (error) {
+      console.error('Error publishing comment:', error);
+      setNewComment(commentText);
+      Alert.alert('Unable to comment', 'Your comment was not published. Please try again.');
+    }
   };
 
-  const handleLikeComment = (commentId, isReply = false, parentCommentId = null) => {
-    const likeKey = isReply ? `${parentCommentId}_${commentId}` : commentId;
-    const newLikedComments = new Set(likedComments);
-    
-    if (newLikedComments.has(likeKey)) {
-      newLikedComments.delete(likeKey);
-    } else {
-      newLikedComments.add(likeKey);
-    }
-    
-    setLikedComments(newLikedComments);
-
-    // Update comment likes count
-    setComments(prevComments => 
-      prevComments.map(comment => {
-        if (!isReply && comment.id === commentId) {
-          return {
-            ...comment,
-            likes: newLikedComments.has(likeKey) ? comment.likes + 1 : comment.likes - 1
-          };
-        } else if (isReply && comment.id === parentCommentId) {
-          return {
-            ...comment,
-            replies: comment.replies.map(reply => 
-              reply.id === commentId
-                ? { ...reply, likes: newLikedComments.has(likeKey) ? reply.likes + 1 : reply.likes - 1 }
-                : reply
-            )
-          };
-        }
-        return comment;
-      })
+  const handleLikeComment = () => {
+    Alert.alert(
+      'Reactions unavailable',
+      'Comment reactions will be enabled after server-side reconciliation is available.'
     );
   };
 
@@ -240,8 +148,11 @@ const CommentsScreen = ({ route, navigation }) => {
   };
 
   const formatTimestamp = (timestamp) => {
+    const date = timestamp?.toDate?.() || new Date(timestamp || 0);
+    if (Number.isNaN(date.getTime())) return '';
     const now = new Date();
-    const diff = now - timestamp;
+    const diff = now - date;
+
     const minutes = Math.floor(diff / (1000 * 60));
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -264,8 +175,7 @@ const CommentsScreen = ({ route, navigation }) => {
   };
 
   const renderReply = ({ item: reply, index }, parentComment) => {
-    const likeKey = `${parentComment.id}_${reply.id}`;
-    const isLiked = likedComments.has(likeKey);
+    const isLiked = false;
 
     return (
       <View style={styles.replyContainer}>
@@ -306,7 +216,7 @@ const CommentsScreen = ({ route, navigation }) => {
   };
 
   const renderComment = ({ item: comment, index }) => {
-    const isLiked = likedComments.has(comment.id);
+    const isLiked = false;
 
     return (
       <View style={styles.commentContainer}>
@@ -359,13 +269,13 @@ const CommentsScreen = ({ route, navigation }) => {
     <View style={styles.postSummary}>
       <View style={styles.postHeader}>
         <Image 
-          source={{ uri: postData?.user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face' }}
+          source={postData?.user?.avatar ? { uri: postData.user.avatar } : null}
           style={styles.postAvatar}
         />
         <View style={styles.postInfo}>
-          <Text style={styles.postUsername}>@{postData?.user?.username || 'creator'}</Text>
+          <Text style={styles.postUsername}>@{postData?.user?.username || 'Blyp post'}</Text>
           <Text style={styles.postDescription} numberOfLines={2}>
-            {postData?.description || postData?.caption || 'Amazing content!'}
+            {postData?.description || postData?.caption || 'No description provided.'}
           </Text>
         </View>
       </View>
@@ -405,6 +315,11 @@ const CommentsScreen = ({ route, navigation }) => {
             ListHeaderComponent={renderHeader}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.commentsList}
+            ListEmptyComponent={(
+              <Text style={styles.commentActionText}>
+                {loading ? 'Loading comments…' : 'No comments yet.'}
+              </Text>
+            )}
           />
 
           {/* Reply Preview */}
@@ -421,7 +336,7 @@ const CommentsScreen = ({ route, navigation }) => {
 
           {/* Comment Input */}
           <View style={styles.inputContainer}>
-            <Image source={{ uri: currentUser.avatar }} style={styles.inputAvatar} />
+            <Image source={currentUser?.avatar ? { uri: currentUser.avatar } : null} style={styles.inputAvatar} />
             <View style={styles.inputWrapper}>
               <TextInput
                 ref={inputRef}

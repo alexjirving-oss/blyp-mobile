@@ -1,306 +1,269 @@
-import { collection, query, where, orderBy, limit, getDocs, startAt, endAt } from 'firebase/firestore';
-import { firestore as db } from '../config/firebase';
+import { db, firebaseEnabled } from '../config/firebase';
+
+const DEFAULT_READ_LIMIT = 100;
+
+const emptyResults = (extra = {}) => ({
+  users: [],
+  posts: [],
+  hashtags: [],
+  locations: [],
+  ...extra,
+});
+
+const normalize = (value) => String(value ?? '').trim().toLowerCase();
+
+const formatCount = (value) => {
+  const count = Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 0 : 1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(count >= 10_000 ? 0 : 1)}K`;
+  return String(Math.floor(count));
+};
+
+const getSnapshotData = (snapshot) => {
+  if (!snapshot) return {};
+  if (typeof snapshot.data === 'function') return snapshot.data() || {};
+  return snapshot.data || {};
+};
+
+const getFollowerCount = (data) => {
+  if (Number.isFinite(Number(data.followersCount))) return Number(data.followersCount);
+  if (Number.isFinite(Number(data.followerCount))) return Number(data.followerCount);
+  if (Array.isArray(data.followers)) return data.followers.length;
+  return 0;
+};
+
+const getPostText = (data) => [
+  data.title,
+  data.caption,
+  data.description,
+  data.transcript,
+  Array.isArray(data.tags) ? data.tags.join(' ') : data.tags,
+].filter(Boolean).join(' ');
+
+const getPostThumbnail = (data) => (
+  data.thumbnail
+  || data.imageUrl
+  || data.media?.[0]?.thumbnail
+  || data.media?.[0]?.url
+  || null
+);
+
+const extractPostHashtags = (data) => {
+  const tags = new Set();
+  const explicitTags = Array.isArray(data.tags) ? data.tags : [];
+  explicitTags.forEach((tag) => {
+    const normalizedTag = normalize(tag).replace(/^#/, '');
+    if (normalizedTag) tags.add(normalizedTag);
+  });
+
+  const text = getPostText(data);
+  const matches = text.match(/#[\p{L}\p{N}_]+/gu) || [];
+  matches.forEach((tag) => tags.add(normalize(tag).replace(/^#/, '')));
+  return [...tags];
+};
 
 class SearchService {
   constructor() {
     this.searchHistory = [];
-    this.trendingHashtags = [
-      '#viral', '#trending', '#fyp', '#explore', '#love', '#instagood',
-      '#photooftheday', '#beautiful', '#happy', '#cute', '#tbt', '#like4like',
-      '#followme', '#nature', '#art', '#photography', '#music', '#travel'
-    ];
-    this.suggestedUsers = [
-      { id: 'user1', username: 'alex_creator', displayName: 'Alex Creator', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop', followers: '12.5K', verified: true },
-      { id: 'user2', username: 'sarah_photos', displayName: 'Sarah Photos', avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b95c?w=100&h=100&fit=crop', followers: '8.2K', verified: false },
-      { id: 'user3', username: 'mike_travel', displayName: 'Mike Travel', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop', followers: '15.1K', verified: true },
-      { id: 'user4', username: 'emma_art', displayName: 'Emma Art', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop', followers: '6.7K', verified: false },
-      { id: 'user5', username: 'david_food', displayName: 'David Food', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop', followers: '9.3K', verified: true }
-    ];
+  }
+
+  async readCollection(collectionName, limitCount = DEFAULT_READ_LIMIT) {
+    if (!firebaseEnabled) return [];
+
+    const snapshot = await db.collection(collectionName).limit(limitCount).get();
+    return (snapshot?.docs || []).map((doc) => ({
+      id: doc.id,
+      ...getSnapshotData(doc),
+    }));
   }
 
   /**
-   * Global search across all content types
+   * Search only source-backed records. Failures return an explicit empty state;
+   * they never fall back to fabricated people, posts, counts, or locations.
    */
   async globalSearch(searchTerm, filters = {}) {
+    const term = normalize(searchTerm);
+    if (term.length < 2) return this.getSearchSuggestions();
+
     try {
-      console.log('🔍 Performing global search:', { searchTerm, filters });
-      
-      if (!searchTerm || searchTerm.trim().length < 2) {
-        return this.getSearchSuggestions();
-      }
+      const results = emptyResults();
+      const limitCount = filters.limit || 20;
 
-      const results = {
-        users: [],
-        posts: [],
-        hashtags: [],
-        locations: []
-      };
-
-      // Search users
       if (!filters.type || filters.type === 'users') {
-        results.users = await this.searchUsers(searchTerm, filters.limit || 10);
+        results.users = await this.searchUsers(term, limitCount);
       }
-
-      // Search posts
       if (!filters.type || filters.type === 'posts') {
-        results.posts = await this.searchPosts(searchTerm, filters.limit || 20);
+        results.posts = await this.searchPosts(term, limitCount);
       }
-
-      // Search hashtags
       if (!filters.type || filters.type === 'hashtags') {
-        results.hashtags = await this.searchHashtags(searchTerm, filters.limit || 15);
+        results.hashtags = await this.searchHashtags(term, limitCount);
       }
-
-      // Search locations
       if (!filters.type || filters.type === 'locations') {
-        results.locations = await this.searchLocations(searchTerm, filters.limit || 10);
+        results.locations = await this.searchLocations(term, limitCount);
       }
 
-      // Add to search history
       this.addToHistory(searchTerm);
-
       return results;
     } catch (error) {
-      console.error('❌ Global search error:', error);
-      return this.getFallbackResults(searchTerm);
+      console.error('Search unavailable:', error);
+      return this.getFallbackResults();
     }
   }
 
-  /**
-   * Search for users by username or display name
-   */
   async searchUsers(searchTerm, limitCount = 10) {
+    const term = normalize(searchTerm);
+    if (!term || !firebaseEnabled) return [];
+
     try {
-      console.log('👤 Searching users:', searchTerm);
-      
-      const term = searchTerm.toLowerCase().trim();
-      
-      // Mock Firebase search - in real app, use proper Firebase queries
-      const filteredUsers = this.suggestedUsers.filter(user => 
-        user.username.toLowerCase().includes(term) ||
-        user.displayName.toLowerCase().includes(term)
-      ).slice(0, limitCount);
-
-      // Add some dynamic users based on search term
-      const dynamicUsers = this.generateDynamicUsers(term, limitCount - filteredUsers.length);
-      
-      return [...filteredUsers, ...dynamicUsers];
-    } catch (error) {
-      console.error('❌ User search error:', error);
-      return this.suggestedUsers.slice(0, limitCount);
-    }
-  }
-
-  /**
-   * Search for posts by caption or description
-   */
-  async searchPosts(searchTerm, limitCount = 20) {
-    try {
-      console.log('📝 Searching posts:', searchTerm);
-      
-      // Mock post search results
-      const mockPosts = this.generateMockPosts(searchTerm, limitCount);
-      return mockPosts;
-    } catch (error) {
-      console.error('❌ Post search error:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Search for hashtags
-   */
-  async searchHashtags(searchTerm, limitCount = 15) {
-    try {
-      console.log('🏷️ Searching hashtags:', searchTerm);
-      
-      const term = searchTerm.toLowerCase().replace('#', '');
-      
-      // Filter trending hashtags
-      const matchingTrending = this.trendingHashtags.filter(tag => 
-        tag.toLowerCase().includes(term)
-      );
-
-      // Generate related hashtags
-      const relatedTags = this.generateRelatedHashtags(term, limitCount);
-      
-      const allTags = [...matchingTrending, ...relatedTags]
+      const users = await this.readCollection('users');
+      return users
+        .filter((user) => [
+          user.username,
+          user.handle,
+          user.displayName,
+          user.name,
+        ].some((value) => normalize(value).includes(term)))
         .slice(0, limitCount)
-        .map(tag => ({
-          hashtag: tag,
-          postCount: Math.floor(Math.random() * 50000) + 1000,
-          trending: this.trendingHashtags.includes(tag)
+        .map((user) => ({
+          id: user.id,
+          username: user.username || user.handle || user.displayName || user.id,
+          displayName: user.displayName || user.name || user.username || 'Blyp user',
+          avatar: user.photoURL || user.avatar || user.avatarUrl || null,
+          followers: formatCount(getFollowerCount(user)),
+          verified: Boolean(user.verified || user.isVerified),
         }));
-
-      return allTags;
     } catch (error) {
-      console.error('❌ Hashtag search error:', error);
+      console.error('User search unavailable:', error);
       return [];
     }
   }
 
-  /**
-   * Search for locations
-   */
-  async searchLocations(searchTerm, limitCount = 10) {
+  async searchPosts(searchTerm, limitCount = 20) {
+    const term = normalize(searchTerm);
+    if (!term || !firebaseEnabled) return [];
+
     try {
-      console.log('📍 Searching locations:', searchTerm);
-      
-      // Mock location search
-      const mockLocations = [
-        { id: 1, name: 'New York, NY', postCount: 15420, type: 'city' },
-        { id: 2, name: 'Los Angeles, CA', postCount: 12350, type: 'city' },
-        { id: 3, name: 'London, UK', postCount: 9800, type: 'city' },
-        { id: 4, name: 'Paris, France', postCount: 8900, type: 'city' },
-        { id: 5, name: 'Tokyo, Japan', postCount: 11200, type: 'city' }
-      ].filter(location => 
-        location.name.toLowerCase().includes(searchTerm.toLowerCase())
-      ).slice(0, limitCount);
-
-      return mockLocations;
+      const posts = await this.readCollection('posts');
+      return posts
+        .filter((post) => normalize(getPostText(post)).includes(term))
+        .slice(0, limitCount)
+        .map((post) => ({
+          id: post.id,
+          type: post.type || (post.videoUrl ? 'video' : 'photo'),
+          thumbnail: getPostThumbnail(post),
+          caption: post.caption || post.description || post.title || '',
+          user: post.user || {
+            username: post.username || 'Blyp user',
+            avatar: post.userPhotoURL || null,
+          },
+          likes: Number(post.likes ?? post.likeCount ?? 0) || 0,
+          views: Number(post.views ?? post.viewCount ?? 0) || 0,
+        }));
     } catch (error) {
-      console.error('❌ Location search error:', error);
+      console.error('Post search unavailable:', error);
       return [];
     }
   }
 
-  /**
-   * Get search suggestions when no query provided
-   */
+  async searchHashtags(searchTerm, limitCount = 15) {
+    const term = normalize(searchTerm).replace(/^#/, '');
+    if (!term || !firebaseEnabled) return [];
+
+    try {
+      const posts = await this.readCollection('posts');
+      const counts = new Map();
+      posts.forEach((post) => {
+        extractPostHashtags(post).forEach((tag) => {
+          if (tag.includes(term)) counts.set(tag, (counts.get(tag) || 0) + 1);
+        });
+      });
+
+      return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, limitCount)
+        .map(([tag, postCount]) => ({
+          hashtag: `#${tag}`,
+          postCount,
+          trending: false,
+        }));
+    } catch (error) {
+      console.error('Hashtag search unavailable:', error);
+      return [];
+    }
+  }
+
+  async searchLocations(searchTerm, limitCount = 10) {
+    const term = normalize(searchTerm);
+    if (!term || !firebaseEnabled) return [];
+
+    try {
+      const posts = await this.readCollection('posts');
+      const locations = new Map();
+
+      posts.forEach((post) => {
+        const location = post.location;
+        const name = typeof location === 'string'
+          ? location
+          : location?.name || location?.label || post.locationName;
+        if (!name || !normalize(name).includes(term)) return;
+
+        const id = typeof location === 'object' && location?.id
+          ? String(location.id)
+          : normalize(name).replace(/[^a-z0-9]+/g, '-');
+        const current = locations.get(id) || { id, name, postCount: 0, type: location?.type || 'place' };
+        current.postCount += 1;
+        locations.set(id, current);
+      });
+
+      return [...locations.values()]
+        .sort((a, b) => b.postCount - a.postCount || a.name.localeCompare(b.name))
+        .slice(0, limitCount);
+    } catch (error) {
+      console.error('Location search unavailable:', error);
+      return [];
+    }
+  }
+
   getSearchSuggestions() {
-    return {
-      users: this.suggestedUsers.slice(0, 5),
-      posts: [],
-      hashtags: this.trendingHashtags.slice(0, 8).map(tag => ({
-        hashtag: tag,
-        postCount: Math.floor(Math.random() * 50000) + 1000,
-        trending: true
-      })),
-      locations: [],
+    return emptyResults({
       recent: this.searchHistory.slice(0, 5),
-      trending: [
-        'sunset photography',
-        'coffee art',
-        'street style',
-        'nature walks',
-        'weekend vibes'
-      ]
-    };
+      trending: [],
+      unavailable: !firebaseEnabled,
+    });
   }
 
-  /**
-   * Get fallback results when search fails
-   */
-  getFallbackResults(searchTerm) {
-    return {
-      users: this.suggestedUsers.slice(0, 3),
-      posts: [],
-      hashtags: [
-        { hashtag: `#${searchTerm.replace(/\s+/g, '')}`, postCount: 0, trending: false }
-      ],
-      locations: [],
-      error: 'Search temporarily unavailable'
-    };
+  getFallbackResults() {
+    return emptyResults({
+      recent: this.searchHistory.slice(0, 5),
+      trending: [],
+      error: 'Search temporarily unavailable',
+    });
   }
 
-  /**
-   * Generate dynamic users based on search term
-   */
-  generateDynamicUsers(term, count) {
-    const users = [];
-    for (let i = 0; i < Math.min(count, 3); i++) {
-      users.push({
-        id: `dynamic_${term}_${i}`,
-        username: `${term}_user${i + 1}`,
-        displayName: `${term.charAt(0).toUpperCase() + term.slice(1)} User ${i + 1}`,
-        avatar: `https://images.unsplash.com/photo-${1500000000000 + i}?w=100&h=100&fit=crop`,
-        followers: `${(Math.random() * 10).toFixed(1)}K`,
-        verified: Math.random() > 0.7
-      });
-    }
-    return users;
-  }
-
-  /**
-   * Generate mock posts for search results
-   */
-  generateMockPosts(searchTerm, count) {
-    const posts = [];
-    for (let i = 0; i < Math.min(count, 10); i++) {
-      posts.push({
-        id: `post_${searchTerm}_${i}`,
-        type: Math.random() > 0.5 ? 'video' : 'photo',
-        thumbnail: `https://images.unsplash.com/photo-${1500000000000 + i}?w=300&h=300&fit=crop`,
-        caption: `Amazing ${searchTerm} content! Check this out 🔥`,
-        user: {
-          username: `creator${i + 1}`,
-          avatar: `https://images.unsplash.com/photo-${1400000000000 + i}?w=50&h=50&fit=crop`
-        },
-        likes: Math.floor(Math.random() * 1000) + 50,
-        views: Math.floor(Math.random() * 10000) + 500
-      });
-    }
-    return posts;
-  }
-
-  /**
-   * Generate related hashtags
-   */
-  generateRelatedHashtags(term, count) {
-    const related = [
-      `#${term}`,
-      `#${term}life`,
-      `#${term}love`,
-      `#${term}vibes`,
-      `#daily${term}`,
-      `#${term}inspiration`,
-      `#${term}community`,
-      `#${term}art`
-    ];
-    return related.slice(0, count);
-  }
-
-  /**
-   * Add search term to history
-   */
   addToHistory(searchTerm) {
-    const term = searchTerm.trim();
+    const term = String(searchTerm ?? '').trim();
     if (!term || this.searchHistory.includes(term)) return;
-    
+
     this.searchHistory.unshift(term);
     if (this.searchHistory.length > 10) {
       this.searchHistory = this.searchHistory.slice(0, 10);
     }
   }
 
-  /**
-   * Clear search history
-   */
+  addToSearchHistory(searchTerm) {
+    this.addToHistory(searchTerm);
+  }
+
   clearHistory() {
     this.searchHistory = [];
   }
 
-  /**
-   * Get search history
-   */
   getHistory() {
-    return this.searchHistory;
+    return [...this.searchHistory];
   }
 
-  /**
-   * Get trending searches
-   */
   getTrendingSearches() {
-    return [
-      'sunset photography',
-      'coffee art',
-      'street style',
-      'nature walks',
-      'weekend vibes',
-      'urban exploration',
-      'food photography',
-      'minimalist design'
-    ];
+    return [];
   }
 }
 

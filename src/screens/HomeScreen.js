@@ -24,7 +24,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import UnifiedVideo from '../components/UnifiedVideo';
 import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker';
 import BlypLogo from '../components/BlypLogo';
-import { addTestPostsWithMultiplePhotos } from '../utils/testDataHelper';
+
 import CategoriesTab from '../components/CategoriesTab';
 import HashtagsTab from '../components/HashtagsTab';
 import WhatsAppPopularTab from '../components/WhatsAppPopularTab';
@@ -44,119 +44,7 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const DEFAULT_HEADER_HEIGHT = responsiveSize(120);
 const footerHeight = responsiveSize(88);
 
-const mockVideoData = [
-  {
-    id: 'video-1',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    user: {
-      username: '@alex_creator',
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'Amazing sunset vibes! 🌅 Perfect golden hour captured in the mountains #sunset #nature #peaceful #goldenhour',
-    likes: 1234,
-    comments: [
-      { user: 'nature_lover', text: 'Breathtaking! 😍' },
-      { user: 'photographer', text: 'What camera did you use?' },
-      { user: 'hiker_girl', text: 'Location please!' },
-    ],
-    shares: 45,
-    views: 12340,
-    music: 'Original Sound - alex_creator',
-  },
-  {
-    id: 'video-2',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    user: {
-      username: '@travel_buddy',
-      avatar: 'https://images.unsplash.com/photo-1494790108755-2616b612b47c?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'City life hits different at night ✨🏙️ The energy is unmatched! #cityvibes #nightlife #urban #travel',
-    likes: 2156,
-    comments: [
-      { user: 'city_explorer', text: 'Which city is this?' },
-      { user: 'night_owl', text: 'Love the vibes!' },
-      { user: 'urban_photographer', text: 'Amazing shots! 📸' },
-    ],
-    shares: 78,
-    views: 21560,
-    music: 'Trending - City Nights',
-  },
-  {
-    id: 'video-3',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-    user: {
-      username: '@foodie_life',
-      avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'Making the perfect pasta 🍝 Who wants the recipe? This took 3 hours but so worth it! #cooking #pasta #foodie #recipe #italian',
-    likes: 3421,
-    comments: [
-      { user: 'pasta_lover', text: 'Recipe please! 🙏' },
-      { user: 'italian_chef', text: 'Looks authentic!' },
-      { user: 'hungry_student', text: 'Making this tonight!' },
-    ],
-    shares: 156,
-    views: 34210,
-    music: 'Cooking Vibes - Chef Sounds',
-  },
-  {
-    id: 'video-4',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    user: {
-      username: '@fitness_guru',
-      avatar: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'Morning workout routine 💪 Start your day right! No equipment needed #fitness #workout #morning #health #motivation',
-    likes: 892,
-    comments: [
-      { user: 'fitness_fan', text: 'This is perfect!' },
-      { user: 'morning_person', text: 'Love the energy!' },
-    ],
-    shares: 34,
-    views: 8920,
-    music: 'Pump It Up - Workout Mix',
-  },
-  {
-    id: 'video-5',
-    type: 'video',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-    user: {
-      username: '@tech_reviewer',
-      avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face',
-    },
-    description: 'This new gadget is INSANE! 📱 Game changer for creators #tech #gadget #review #creator #innovation',
-    likes: 1567,
-    comments: [
-      { user: 'tech_enthusiast', text: 'Need this!' },
-      { user: 'creator_life', text: 'Where can I buy it?' },
-    ],
-    shares: 67,
-    views: 15670,
-    music: 'Tech Beats - Digital Sounds',
-  },
-];
 
-const randomCommentsData = [
-  { user: 'sarah_m', text: 'This is amazing! 🔥', time: '2m' },
-  { user: 'john_doe', text: 'Love the vibes ✨', time: '5m' },
-  { user: 'creative_mind', text: 'So inspiring!', time: '8m' },
-  { user: 'photo_lover', text: 'Goals! 💯', time: '12m' },
-  { user: 'daily_content', text: 'Need more like this', time: '15m' },
-  { user: 'wanderlust_soul', text: 'Perfect timing', time: '18m' },
-  { user: 'art_enthusiast', text: 'Incredible work', time: '22m' },
-  { user: 'lifestyle_blogger', text: 'Obsessed with this!', time: '25m' },
-  { user: 'travel_addict', text: 'Where is this?', time: '28m' },
-  { user: 'foodie_life', text: 'Recipe please! 🙏', time: '30m' },
-  { user: 'fitness_guru', text: 'Motivation right here', time: '35m' },
-  { user: 'tech_lover', text: 'Mind blown 🤯', time: '40m' },
-  { user: 'music_fan', text: 'What song is this?', time: '45m' },
-  { user: 'nature_lover', text: 'Absolutely beautiful', time: '1h' },
-  { user: 'creative_studio', text: 'Pure artistry', time: '1h' },
-];
 
 // === MediaCarousel (fixed) ===
 const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
@@ -251,7 +139,7 @@ const formatBalance = (balance) => {
 };
 
 const HomeScreen = ({ navigation }) => {
-  const [videos, setVideos] = useState(mockVideoData);
+  const [videos, setVideos] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [liked, setLiked] = useState({});
   const [following, setFollowing] = useState({});
@@ -334,35 +222,20 @@ const HomeScreen = ({ navigation }) => {
   }, []);
 
   const handleUserProfilePress = (user, post = null) => {
-    const userId = post?.userId || user?.userId || user?.id || user?.username || Math.random().toString(36);
-    const username = user?.username || '@user';
-    console.log('📱 HomeScreen: Navigating to user profile:', { userId, username, userObj: user });
-    navigation.navigate('UserProfile', {
-      userId: userId,
-      username: username,
-    });
+    const userId = post?.userId || user?.userId || user?.id;
+    if (!userId) {
+      Alert.alert('Profile unavailable', 'This post is not linked to a verified user record.');
+      return;
+    }
+
+    const username = user?.username || null;
+    console.log('📱 HomeScreen: Navigating to user profile:', { userId, username });
+    navigation.navigate('UserProfile', { userId, username });
   };
 
   const handlePostPress = (post) => {
     console.log('🔍 Opening media viewer for post:', post.id);
     navigation.navigate('MediaViewer', { post });
-  };
-
-  const handleAddTestPosts = async () => {
-    console.log('🧪 Adding test posts with multiple photos...');
-    try {
-      const result = await addTestPostsWithMultiplePhotos();
-      if (result.success) {
-        console.log('✅ Test posts added successfully!');
-        Alert.alert('Test Posts Added', 'Two test posts with multiple photos have been added! Switch to the "Discover" tab to see them.');
-      } else {
-        console.error('❌ Failed to add test posts:', result.error);
-        Alert.alert('Error', 'Failed to add test posts: ' + result.error);
-      }
-    } catch (error) {
-      console.error('❌ Error adding test posts:', error);
-      Alert.alert('Error', 'Failed to add test posts: ' + error.message);
-    }
   };
 
   useFocusEffect(
@@ -377,8 +250,8 @@ const HomeScreen = ({ navigation }) => {
   useEffect(() => {
     console.log('🎬 HOME: Setting up video data listener');
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
-      console.log('⚠️ HOME: Firebase disabled or db unavailable, using mockVideoData');
-      setVideos(mockVideoData);
+      console.log('⚠️ HOME: Firebase disabled or db unavailable');
+      setVideos([]);
       return;
     }
     let isInitialLoad = true;
@@ -397,12 +270,7 @@ const HomeScreen = ({ navigation }) => {
             videoDocs: videoData.length,
             sample: allDocs.slice(0, 3).map((p) => ({ id: p.id, type: p.type, videoUrl: p.videoUrl })),
           });
-          if (videoData.length > 0) {
-            setVideos(videoData);
-          } else {
-            console.log('🧪 HOME: No videos found in Firestore, using mockVideoData fallback');
-            setVideos(mockVideoData);
-          }
+          setVideos(videoData);
           if (isInitialLoad) {
             setCurrentIndex(0);
             isInitialLoad = false;
@@ -410,8 +278,7 @@ const HomeScreen = ({ navigation }) => {
           if (auth.currentUser) {
             const userId = auth.currentUser.uid;
             const likedState = {};
-            const source = videoData.length > 0 ? videoData : mockVideoData;
-            source.forEach((video) => {
+            videoData.forEach((video) => {
               likedState[video.id] = video.likedBy?.includes?.(userId) || false;
             });
             setLiked((prev) => ({ ...prev, ...likedState }));
@@ -473,8 +340,8 @@ const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
-      console.log('⚠️ HOME: Firebase disabled or db unavailable for random posts, using mock fallback');
-      setRandomPosts(mockVideoData);
+      console.log('⚠️ HOME: Firebase disabled or db unavailable for random posts');
+      setRandomPosts([]);
       setLoading(false);
       return;
     }
@@ -488,19 +355,17 @@ const HomeScreen = ({ navigation }) => {
         if (!mounted) return;
         const allPosts = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (isInitialLoad) {
-          const source = allPosts.length > 0 ? allPosts : mockVideoData;
-          const shuffled = [...source].sort(() => 0.5 - Math.random());
+          const shuffled = [...allPosts].sort(() => 0.5 - Math.random());
           setRandomPosts(shuffled);
           setLoading(false);
           isInitialLoad = false;
         } else {
-          setRandomPosts(allPosts.length > 0 ? allPosts : mockVideoData);
+          setRandomPosts(allPosts);
         }
         if (auth.currentUser) {
           const userId = auth.currentUser.uid;
           const likedState = {};
-          const source2 = allPosts.length > 0 ? allPosts : mockVideoData;
-          source2.forEach((post) => {
+          allPosts.forEach((post) => {
             likedState[post.id] = post.likedBy?.includes(userId) || false;
           });
           setLiked((prev) => ({ ...prev, ...likedState }));

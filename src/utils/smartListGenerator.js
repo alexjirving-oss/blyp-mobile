@@ -335,15 +335,35 @@ Each category should have 8-12 relevant hashtags.
     ];
   }
 
+  scorePostsByRecordedEngagement(posts = []) {
+    return posts
+      .filter((post) => post.id && !String(post.id).startsWith('video-'))
+      .map((post) => {
+        const likes = Array.isArray(post.likes) ? post.likes.length : Number(post.likes || 0);
+        const comments = Array.isArray(post.comments)
+          ? post.comments.length
+          : Number(post.commentCount || post.comments || 0);
+        const shares = Array.isArray(post.shares) ? post.shares.length : Number(post.shares || 0);
+        const views = Number(post.views || post.viewCount || 0);
+        const engagementScore = likes + (comments * 2) + (shares * 3) + (views * 0.1);
+
+        return {
+          ...post,
+          engagementScore,
+          metrics: { likes, comments, shares, views },
+        };
+      })
+      .sort((a, b) => b.engagementScore - a.engagementScore);
+  }
+
   /**
-   * Generate AI-powered popularity rankings based on engagement metrics
+   * Generate popularity rankings from recorded engagement metrics.
    */
   async generatePopularityRankings(posts) {
     try {
+      const sortedPosts = this.scorePostsByRecordedEngagement(posts);
       if (!this.model) {
-        return this.getFallbackPopularityRankings(
-          posts.filter(p => p.id && !String(p.id).startsWith('video-'))
-        );
+        return this.getFallbackPopularityRankings(sortedPosts);
       }
       const cacheKey = 'popularity';
       
@@ -356,38 +376,13 @@ Each category should have 8-12 relevant hashtags.
 
       // Check rate limit
       if (!this.rateLimiter.canMakeCall(cacheKey)) {
-        console.log('⏱️ Rate limited - using fallback popularity data');
-        return this.getFallbackPopularityData(posts);
+        console.log('⏱️ Rate limited - using recorded engagement rankings');
+        return this.getFallbackPopularityRankings(sortedPosts);
       }
 
-      console.log('🚀 AI: Analyzing content popularity...');
+      console.log('🚀 AI: Categorizing recorded content popularity...');
       this.rateLimiter.recordCall(cacheKey);
-      
-      // Calculate engagement scores for all posts
-      const scoredPosts = posts.map(post => {
-        const likes = post.likes || 0;
-        const comments = post.comments?.length || 0;
-        const shares = post.shares || 0;
-        const views = post.views || Math.floor(likes * 10); // Estimate views
-        
-        // Weighted engagement score
-        const engagementScore = (
-          likes * 1.0 +           // Likes weight
-          comments * 2.0 +       // Comments weight (higher value)
-          shares * 3.0 +         // Shares weight (highest value)
-          views * 0.1            // Views weight (lower individual value)
-        );
-        
-        return {
-          ...post,
-          engagementScore,
-          metrics: { likes, comments, shares, views }
-        };
-      });
-      
-      // Sort by engagement score
-      const sortedPosts = scoredPosts.sort((a, b) => b.engagementScore - a.engagementScore);
-      
+
       const prompt = `
 Create 4 social media popularity categories in this exact JSON format:
 {
@@ -445,9 +440,7 @@ Respond with only the JSON, nothing else.`;
         
         const result = {
           categories: data.popularityCategories,
-          rankedPosts: sortedPosts.filter(post => 
-            post.id && !post.id.startsWith('video-') // Filter out demo data from rankedPosts
-          )
+          rankedPosts: sortedPosts,
         };
         
         // Cache the result
@@ -456,16 +449,11 @@ Respond with only the JSON, nothing else.`;
       }
 
       // Fallback to manual popularity categories
-      return this.getFallbackPopularityRankings(
-        sortedPosts.filter(post => post.id && !post.id.startsWith('video-'))
-      );
+      return this.getFallbackPopularityRankings(sortedPosts);
 
     } catch (error) {
       console.error('❌ AI popularity analysis error:', error);
-      return this.getFallbackPopularityRankings(
-        posts.filter(post => post.id && !post.id.startsWith('video-'))
-             .sort((a, b) => (b.likes || 0) - (a.likes || 0))
-      );
+      return this.getFallbackPopularityRankings(this.scorePostsByRecordedEngagement(posts));
     }
   }
 
@@ -475,16 +463,9 @@ Respond with only the JSON, nothing else.`;
   filterPostsByPopularity(posts, category) {
     const minScore = category.minEngagementScore || 0;
     
-    return posts.filter(post => {
-      const likes = post.likes || 0;
-      const comments = post.comments?.length || 0;
-      const shares = post.shares || 0;
-      const views = post.views || Math.floor(likes * 10);
-      
-      const score = likes + (comments * 2) + (shares * 3) + (views * 0.1);
-      
-      return score >= minScore;
-    }).slice(0, 50); // Limit to top 50 posts per category
+    return this.scorePostsByRecordedEngagement(posts)
+      .filter((post) => post.engagementScore >= minScore)
+      .slice(0, 50); // Limit to top 50 posts per category
   }
 
   /**

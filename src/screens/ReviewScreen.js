@@ -66,13 +66,7 @@ const ReviewScreen = () => {
   const [firebaseSuspended, setFirebaseSuspended] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [voiceMemo, setVoiceMemo] = useState(null);
-  const [selectedPlatforms, setSelectedPlatforms] = useState({
-    facebook: false,
-    instagram: false,
-    tiktok: false,
-    youtube: false,
-  });
-  
+
   // AI Enhancement States
   const [isGeneratingContent, setIsGeneratingContent] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -156,10 +150,6 @@ const ReviewScreen = () => {
   // Media Viewer States
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [showMediaViewer, setShowMediaViewer] = useState(false);
-  
-  // AI Comment Generation State
-  const [isGeneratingComments, setIsGeneratingComments] = useState(false);
-  const [generatedComments, setGeneratedComments] = useState([]);
   
   // Enhanced AI Description System
   const [accumulatedVoiceInputs, setAccumulatedVoiceInputs] = useState([]);
@@ -264,13 +254,6 @@ const ReviewScreen = () => {
   const handleDiscardChanges = () => {
     setShowBackConfirmation(false);
     navigation.goBack();
-  };
-
-  const togglePlatform = (platform) => {
-    setSelectedPlatforms(prev => ({
-      ...prev,
-      [platform]: !prev[platform]
-    }));
   };
 
   // Reset AI content when mediaItems change (but don't auto-generate descriptions)
@@ -1979,7 +1962,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         likes: 0, // Add likes field
         comments: 0, // Add comments field  
         shares: 0, // Add shares field
-        sharedTo: Object.keys(selectedPlatforms).filter(k => selectedPlatforms[k]),
+        sharedTo: [],
         date: serverTimestamp(),
         likeCount: 0,
         commentCount: 0
@@ -1992,31 +1975,19 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       
       console.log('✅ Post saved successfully with ID:', docRef.id);
       
-      // Start AI comment generation immediately after upload
-      setIsUploading(false); // Stop upload overlay
-      setIsGeneratingComments(true); // Start comment generation overlay
-      
-      // Generate AI comments for the post
-      console.log('🤖 Starting AI comment generation...');
-      const aiComments = await generateAIComments(postData);
-      setGeneratedComments(aiComments);
-      
-      setTimeout(() => {
-        setIsGeneratingComments(false);
-        Toast.show({
-          type: 'success',
-          text1: 'Post created with AI comments!',
-          text2: `Generated ${aiComments.length} smart comments`,
-          position: 'bottom',
-        });
-        navigation.navigate('MainTabs', { screen: 'Home' });
-      }, 2000); // Show overlay for 2 seconds
-      
+      setIsUploading(false);
+      Toast.show({
+        type: 'success',
+        text1: 'Post created',
+        text2: 'Your post is now live.',
+        position: 'bottom',
+      });
+      navigation.navigate('MainTabs', { screen: 'Home' });
+
     } catch (error) {
       console.error('Error posting:', error);
       Alert.alert('Error', 'Failed to post. Please try again.');
       setIsUploading(false);
-      setIsGeneratingComments(false);
     }
   };
 
@@ -2130,74 +2101,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
     }
   };
 
-  // Generate AI comments for the post
-  const generateAIComments = async (postData) => {
-    try {
-      console.log('🤖 Generating AI comments for post...');
-      
-      // Simulate AI comment generation (replace with actual AI service)
-      const comments = [
-        {
-          id: 'ai-comment-1',
-          username: 'AI_Assistant',
-          text: 'Amazing content! The composition is really well done. 📸✨',
-          timestamp: new Date(),
-          isAI: true
-        },
-        {
-          id: 'ai-comment-2', 
-          username: 'ContentBot',
-          text: 'Love the creative perspective here! Great work! 🔥',
-          timestamp: new Date(),
-          isAI: true
-        },
-        {
-          id: 'ai-comment-3',
-          username: 'SmartViewer',
-          text: 'This really captures the mood perfectly. Inspiring! 💫',
-          timestamp: new Date(), 
-          isAI: true
-        }
-      ];
-      
-      // You can replace this with actual AI service call:
-      // const comments = await aiService.generatePostComments(postData);
-      
-      return comments;
-    } catch (error) {
-      console.error('❌ AI comment generation failed:', error);
-      return [];
-    }
-  };
-
   const extractHashtags = (text) => {
     const hashtagRegex = /#[\w]+/g;
     const hashtags = text.match(hashtagRegex) || [];
     return hashtags.map(tag => tag.substring(1)); // Remove the # symbol
   };
-
-  const renderPlatformButton = (platform, icon, colors) => (
-    <TouchableOpacity
-      key={platform}
-      style={[
-        styles.platformButton,
-        selectedPlatforms[platform] && { backgroundColor: colors[0] }
-      ]}
-      onPress={() => togglePlatform(platform)}
-    >
-      <Icon  
-        name={icon} 
-        size={20} 
-        color={selectedPlatforms[platform] ? 'white' : '#9ca3af'} 
-       />
-      <Text style={[
-        styles.platformText,
-        selectedPlatforms[platform] && { color: 'white' }
-      ]}>
-        {platform.charAt(0).toUpperCase() + platform.slice(1)}
-      </Text>
-    </TouchableOpacity>
-  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -2681,15 +2589,12 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           </View>
         )}
 
-        {/* Social Platforms */}
+        {/* Publication destination */}
         <View style={styles.platformsContainer}>
-          <Text style={styles.sectionTitle}>Share to (optional)</Text>
-          <View style={styles.platformsGrid}>
-            {renderPlatformButton('facebook', 'logo-facebook', ['#1877F2'])}
-            {renderPlatformButton('instagram', 'logo-instagram', ['#E4405F'])}
-            {renderPlatformButton('tiktok', 'musical-notes', ['#000000'])}
-            {renderPlatformButton('youtube', 'logo-youtube', ['#FF0000'])}
-          </View>
+          <Text style={styles.sectionTitle}>Publishing</Text>
+          <Text style={styles.actionButtonText}>
+            This post will be published to Blyp only. External sharing will become available only after a connected account returns a verified delivery receipt.
+          </Text>
         </View>
 
         {/* Bottom Spacer */}
@@ -2865,31 +2770,6 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               </View>
               <Text style={styles.aiOverlayTitle}>Uploading Your Post</Text>
               <Text style={styles.aiOverlaySubtitle}>Preparing your content...</Text>
-              <View style={styles.aiLoadingContainer}>
-                <ActivityIndicator size="large" color="white" />
-              </View>
-            </LinearGradient>
-          </View>
-        </View>
-      </Modal>
-
-      {/* AI Comment Generation Overlay */}
-      <Modal
-        visible={isGeneratingComments}
-        transparent={true}
-        animationType="fade"
-      >
-        <View style={styles.aiOverlay}>
-          <View style={styles.aiOverlayContent}>
-            <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
-              style={styles.aiOverlayGradient}
-            >
-              <View style={styles.aiIconContainer}>
-                <Icon  name="sparkles" size={48} color="white"  />
-              </View>
-              <Text style={styles.aiOverlayTitle}>Blyp AI Processing</Text>
-              <Text style={styles.aiOverlaySubtitle}>Blyp AI is now generating your post...</Text>
               <View style={styles.aiLoadingContainer}>
                 <ActivityIndicator size="large" color="white" />
               </View>
