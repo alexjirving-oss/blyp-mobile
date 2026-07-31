@@ -189,7 +189,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
-        `CREATE TABLE IF NOT EXISTS admin_audit_log (
+                `CREATE TABLE IF NOT EXISTS admin_audit_log (
           audit_id bigserial PRIMARY KEY,
           actor_user_id text NOT NULL,
           action text NOT NULL,
@@ -199,7 +199,20 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
+        `CREATE TABLE IF NOT EXISTS app_version_policy (
+          policy_key text PRIMARY KEY,
+          enabled boolean NOT NULL DEFAULT false,
+          minimum_android_version_code bigint,
+          message text NOT NULL DEFAULT 'A newer version of BLYP is required to continue.',
+          store_url text NOT NULL DEFAULT 'https://play.google.com/store/apps/details?id=com.blyp.mobile',
+          updated_by_user_id text,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK (policy_key = 'android'),
+          CHECK (minimum_android_version_code IS NULL OR minimum_android_version_code > 0)
+        )`,
+
         `CREATE TABLE IF NOT EXISTS admin_user_messages (
+
           message_id text PRIMARY KEY,
           actor_user_id text NOT NULL,
           target_user_id text NOT NULL,

@@ -5,6 +5,8 @@ import http from 'http';
 import liveRoutes from './routes/liveRoutes';
 import economyRoutes from './economy/economyRoutes';
 import adminRoutes from './admin/adminRoutes';
+import appVersionRoutes from './appVersion/appVersionRoutes';
+
 import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
 import { ensureEconomySchema } from './economy/schema';
 import { createSocketServer } from './realtime/socketServer';
@@ -71,6 +73,10 @@ app.get('/ready', async (_req, res) => {
     });
   }
 });
+
+// Public update policy is intentionally available before auth so stale clients
+// can determine whether to show an update-required screen during startup.
+app.use(appVersionRoutes);
 
 // Admin auth surface must be mounted before economy routes because
 // economy router applies Cognito middleware at router level.

@@ -17,10 +17,12 @@ import {
 import { bestEffortRedisPing } from '../economy/redisBestEffort';
 import { logger } from '../config/logger';
 import { headerValueDiagnostics } from '../utils/headerSanitize';
+import { requireSupportedAndroidVersion } from '../appVersion/appVersionPolicy';
 
 const router = Router();
 
 router.use(cognitoJwtMiddleware);
+router.use(requireSupportedAndroidVersion);
 
 function logRedisSoftFail(tag: '[LIVE_START_REDIS_SOFT_FAIL]' | '[GUEST_JOIN_REDIS_SOFT_FAIL]', payload: Record<string, unknown>) {
   // Use structured logging so Cloud Run log filters can reliably match `jsonPayload.msg`.

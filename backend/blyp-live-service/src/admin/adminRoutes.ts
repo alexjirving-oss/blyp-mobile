@@ -7,9 +7,11 @@ import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import {
     adminListUserPostsSchema,
     adminListUsersSchema,
-    adminQueueUserMessageSchema,
+        adminQueueUserMessageSchema,
+    adminSetAppVersionPolicySchema,
     adminSetCapabilitiesSchema,
     banUserSchema,
+
     moderatePostSchema,
     unbanUserSchema,
 } from './adminSchemas';
@@ -27,6 +29,7 @@ import {
     setAdminUserCapabilities,
     unbanUserByAdmin,
 } from './adminService';
+import { getAppVersionPolicy, publicAppVersionPolicy, setAppVersionPolicy } from '../appVersion/appVersionPolicy';
 
 const router = Router();
 const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -137,6 +140,40 @@ router.post('/admin/auth/logout', requireAdmin, async (req: AuthedRequest, res: 
 router.get('/admin/auth/me', requireAdmin, async (req: AuthedRequest, res: Response) => {
     const actorUserId = String(req.user?.sub || '').trim();
     return res.json({ ok: true, actorUserId });
+});
+
+router.get('/admin/config/app-version-policy', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        const policy = await getAppVersionPolicy();
+        return res.json({ policy: publicAppVersionPolicy(policy) });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] app-version-policy GET failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/config/app-version-policy', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const parsed = adminSetAppVersionPolicySchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const policy = await setAppVersionPolicy({
+            actorUserId,
+            policy: {
+                enabled: parsed.data.enabled,
+                minimumAndroidVersionCode: parsed.data.minimumAndroidVersionCode ?? null,
+                message: parsed.data.message,
+                storeUrl: parsed.data.storeUrl,
+            },
+        });
+        return res.json({ ok: true, policy: publicAppVersionPolicy(policy) });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] app-version-policy POST failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
 });
 
 router.get('/admin/users', requireAdmin, async (req: AuthedRequest, res: Response) => {

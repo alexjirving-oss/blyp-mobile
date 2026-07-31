@@ -32,6 +32,7 @@ import {
 import { EconomyError, toEconomyError } from './economyErrors';
 import { getEconomyInfra } from './infra';
 import { logger } from '../config/logger';
+import { requireSupportedAndroidVersion } from '../appVersion/appVersionPolicy';
 
 const router = Router();
 const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,8 +43,9 @@ function getCanonicalSub(req: AuthedRequest): string | null {
   return sub;
 }
 
-// All economy endpoints require auth.
+// All economy endpoints require auth and honor the configured Android update policy.
 router.use(cognitoJwtMiddleware);
+router.use(requireSupportedAndroidVersion);
 
 router.get('/economy/catalog', async (_req: AuthedRequest, res) => {
   try {

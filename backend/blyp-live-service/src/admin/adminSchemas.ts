@@ -48,3 +48,18 @@ export const adminQueueUserMessageSchema = z.object({
     channel: z.enum(['in_app', 'email']).default('in_app'),
     message: z.string().trim().min(1).max(4000),
 });
+
+export const adminSetAppVersionPolicySchema = z.object({
+    enabled: z.coerce.boolean(),
+    minimumAndroidVersionCode: z.coerce.number().int().positive().nullable().optional(),
+    message: z.string().trim().min(1).max(280).optional(),
+    storeUrl: z.string().trim().url().max(500).optional(),
+}).superRefine((value, ctx) => {
+    if (value.enabled && !value.minimumAndroidVersionCode) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['minimumAndroidVersionCode'],
+            message: 'A positive minimum Android version code is required when enforcement is enabled.',
+        });
+    }
+});
