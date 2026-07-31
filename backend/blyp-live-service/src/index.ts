@@ -8,9 +8,15 @@ import adminRoutes from './admin/adminRoutes';
 import appVersionRoutes from './appVersion/appVersionRoutes';
 
 import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
-import { ensureEconomySchema } from './economy/schema';
 import { createSocketServer } from './realtime/socketServer';
 import { logger } from './config/logger';
+import { platformRouter } from './platform/routes';
+import {
+  platformErrorHandler,
+  platformNotFound,
+  requestContextMiddleware,
+} from './platform/gatewayMiddleware';
+import { runPlatformMigrations } from './platform/migrations/runner';
 
 const port = (() => {
   const rawPort = process.env.PORT;
@@ -26,7 +32,8 @@ const port = (() => {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '1mb' }));
+app.use(requestContextMiddleware);
 
 app.get('/health', async (_req, res) => {
   // Liveness check: return 200 if the process/server is up.
@@ -85,11 +92,21 @@ app.use(adminRoutes);
 // Economy contracts (auth required inside router)
 app.use(economyRoutes);
 
+// New domain work is mounted only beneath the explicit v1 gateway contract.
+app.use('/api/v1/platform', platformRouter);
+app.use('/api/v1', platformNotFound);
+
+// Legacy live routes remain available at /api/* until their domain migrations cut over.
 app.use('/api', liveRoutes);
 
-app.use((err: any, _req: any, res: any, _next: any) => {
-  // Central error handler to avoid unhandled rejections leaking details
-  console.error('Unhandled error', err);
+app.use((err: unknown, req: any, res: any, next: any) => {
+  if (String(req.originalUrl || '').startsWith('/api/v1/')) {
+    return platformErrorHandler(err, req, res, next);
+  }
+  logger.error(
+    { err: err instanceof Error ? err.message : String(err) },
+    '[legacy_http_unhandled_error]'
+  );
   res.status(500).json({ error: 'Internal server error' });
 });
 
@@ -97,18 +114,21 @@ app.use((err: any, _req: any, res: any, _next: any) => {
 async function main() {
   const { db, redis } = getEconomyInfra();
 
-  // For local/dev bring-up we still want the service to boot (so mobile can hit /health
-  // and non-economy endpoints), even if DB/Redis aren't available.
-  // Schema bootstrap only depends on DB; do not gate it on Redis readiness.
   const [dbStatus, redisStatus] = await Promise.all([checkDb(db), checkRedis(redis)]);
-  if (dbStatus.ok) {
-    try {
-      await ensureEconomySchema(db);
-    } catch (e: any) {
-      logger.error({ err: e?.message || String(e) }, '[startup] economy schema ensure failed');
+  const allowDegradedStartup =
+    process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEGRADED_STARTUP === 'true';
+
+  if (!dbStatus.ok || !redisStatus.ok) {
+    if (!allowDegradedStartup) {
+      throw new Error(
+        `Required dependencies are unavailable (db=${dbStatus.ok}, redis=${redisStatus.ok}).`
+      );
     }
-  } else {
-    logger.warn({ db: dbStatus, redis: redisStatus }, '[startup] DB not ready; starting anyway');
+    logger.warn({ db: dbStatus, redis: redisStatus }, '[startup] degraded local startup explicitly enabled');
+  }
+
+  if (dbStatus.ok) {
+    await runPlatformMigrations(db);
   }
 
   const server = http.createServer(app);
@@ -118,7 +138,9 @@ async function main() {
     const url = `http://0.0.0.0:${port}`;
     logger.info(`✅ blyp-live-service LISTENING ${url}`);
     logger.info(`📍 /health endpoint ready`);
-    logger.info(`📍 /api/* routes ready`);
+    logger.info(`📍 /api/v1/platform/* contract ready`);
+    logger.info(`📍 /api/* legacy routes ready`);
+
     logger.info(`📍 Socket.IO ready`);
   });
 }

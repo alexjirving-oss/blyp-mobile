@@ -30,3 +30,23 @@ export function getAdminFirestore(): admin.firestore.Firestore | null {
         return null;
     }
 }
+
+export function getAdminAuth(): admin.auth.Auth | null {
+    if (!_app) {
+        _app = initApp();
+    }
+    if (!_app) return null;
+    try {
+        return _app.auth();
+    } catch {
+        return null;
+    }
+}
+
+export async function verifyFirebaseIdToken(idToken: string): Promise<admin.auth.DecodedIdToken> {
+    const auth = getAdminAuth();
+    if (!auth) {
+        throw new Error('[config] FIREBASE_SERVICE_ACCOUNT_JSON is required for legacy identity linking');
+    }
+    return auth.verifyIdToken(idToken, true);
+}

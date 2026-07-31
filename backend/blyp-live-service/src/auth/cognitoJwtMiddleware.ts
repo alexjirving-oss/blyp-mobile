@@ -1,29 +1,44 @@
-import { Request, Response, NextFunction } from 'express';
-import { verifyCognitoJwt } from './verifyCognitoJwt';
+import type { NextFunction, Response } from 'express';
+import { ApiError, PlatformRequest, sendApiError } from '../platform/apiContract';
 import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
+import { verifyCognitoJwt, VerifiedCognitoClaims } from './verifyCognitoJwt';
 
-export interface AuthedRequest extends Request {
-  user?: { sub: string; [k: string]: any };
+export interface AuthedRequest extends PlatformRequest {
+  user?: VerifiedCognitoClaims;
 }
 
-export function cognitoJwtMiddleware(req: AuthedRequest, res: Response, next: NextFunction) {
-  const authHeader = sanitizeBearerAuthorization(req.headers.authorization || '');
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match) {
-    return res.status(401).json({ error: 'Missing or invalid Authorization header' });
-  }
-  const token = match[1];
+function isConfigurationError(error: unknown) {
+  return error instanceof Error && error.message.startsWith('[config]');
+}
 
-  verifyCognitoJwt(token)
-    .then((decoded: unknown) => {
-      req.user = decoded as any;
+export function cognitoJwtMiddleware(req: PlatformRequest, res: Response, next: NextFunction) {
+  const authHeader = sanitizeBearerAuthorization(req.headers.authorization || '');
+  const match = authHeader.match(/^Bearer\s+([^\s]+)$/i);
+  if (!match) {
+    return sendApiError(
+      req,
+      res,
+      new ApiError(401, 'AUTH_REQUIRED', 'A valid Cognito access token is required.')
+    );
+  }
+
+  verifyCognitoJwt(match[1], { tokenUse: 'access' })
+    .then((claims) => {
+      req.user = claims;
       next();
     })
-    .catch((err: any) => {
-      const isMisconfig = typeof err?.message === 'string' && err.message.includes('COGNITO_REGION');
-      return res.status(isMisconfig ? 500 : 401).json({
-        error: isMisconfig ? 'Auth misconfigured' : 'Invalid token',
-        detail: err?.message,
-      });
+    .catch((error: unknown) => {
+      if (isConfigurationError(error)) {
+        return sendApiError(
+          req,
+          res,
+          new ApiError(503, 'AUTH_NOT_CONFIGURED', 'Authentication is temporarily unavailable.')
+        );
+      }
+      return sendApiError(
+        req,
+        res,
+        new ApiError(401, 'AUTH_INVALID', 'The authentication token is invalid or expired.')
+      );
     });
 }

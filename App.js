@@ -38,7 +38,7 @@ console.log('[BLYP][APP] PRELUDE?', global.__BLYP_PRELUDE__);
 // Note: Startup side-effects (pre-auth cleanup, Amplify init, Sentry, flags)
 // are deferred until after runtime is ready to avoid early WebSocket/runtime issues.
 
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -255,23 +255,27 @@ function AppStack() {
 function AppInner() {
   const [appError, setAppError] = useState(null);
   const { user, loading, error: authError } = useAuth();
-  // Prevent brief post-login bounce by keeping UI authenticated for a short window
-  const authStickyUntilRef = useRef(0);
-  const [hadUser, setHadUser] = useState(false);
-  useEffect(() => {
-    if (user) {
-      setHadUser(true);
-      authStickyUntilRef.current = Date.now() + 180000; // 3 minutes
-    }
-  }, [user]);
-  const effectiveUser = user || (hadUser && Date.now() < authStickyUntilRef.current ? {} : null);
-  // Development-only auth bypass (does NOT grant real identity). Keeps Security priority by requiring explicit env flag.
-  const devForceNoAuth = (process.env?.EXPO_PUBLIC_DEV_FORCE_NO_AUTH === '1');
-  if (devForceNoAuth && !effectiveUser) {
+  // The bypass is compile-time development-only and never grants API identity.
+  const devForceNoAuth =
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ === true &&
+    process.env?.EXPO_PUBLIC_DEV_FORCE_NO_AUTH === '1';
+  if (devForceNoAuth && !user) {
     // eslint-disable-next-line no-console
-    console.warn('[BLYP][AUTH] DEV_FORCE_NO_AUTH active – rendering app without authenticated user');
+    console.warn('[BLYP][AUTH] development-only no-auth rendering is active');
   }
-  
+
+  useEffect(() => {
+    if (!user?.sub) return undefined;
+    let active = true;
+    import('./src/config/FeatureFlags')
+      .then(({ refreshFeatureFlags }) => (active ? refreshFeatureFlags() : undefined))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [user?.sub]);
+
   // Global error handler for uncaught exceptions
   useEffect(() => {
     const errorHandler = (error) => {
@@ -340,13 +344,13 @@ function AppInner() {
     );
   }
 
-  const showApp = devForceNoAuth || effectiveUser;
+  const showApp = devForceNoAuth || user;
   return (
     <PerformanceProvider>
       <NavigationContainer>
         <StatusBar style="light" backgroundColor="#0f172a" />
         {showApp ? <AppStack /> : <AuthScreen />}
-        {devForceNoAuth && !effectiveUser && (
+        {devForceNoAuth && !user && (
           <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: '#be185d', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
             <Text style={{ color: 'white', fontSize: 12, fontWeight: '600' }}>DEV AUTH BYPASS</Text>
           </View>

@@ -10,8 +10,10 @@
     "start": "node dist/index.js",
     "worker:dev": "ts-node-dev --respawn --transpile-only src/worker.ts",
     "worker:start": "node dist/worker.js",
-    "migrate": "node -r dotenv/config ./node_modules/knex/bin/cli.js --knexfile knexfile.cjs migrate:latest",
-    "migrate:rollback": "node -r dotenv/config ./node_modules/knex/bin/cli.js --knexfile knexfile.cjs migrate:rollback",
+    "migrate": "node -r dotenv/config dist/platform/migrations/cli.js up",
+    "migrate:status": "node -r dotenv/config dist/platform/migrations/cli.js status",
+    "migrate:rollback": "node -r dotenv/config dist/platform/migrations/cli.js rollback",
+    "test:platform": "npm run build && node --test test/platform-contract.test.cjs",
     "lint": "echo 'add eslint if needed'"
   },
   "dependencies": {

@@ -83,14 +83,20 @@ export async function getSession() {
   }
 }
 
+// ID tokens carry identity claims and must not be sent to the platform API.
 export async function getIdToken() {
   const s = await getSession();
   return s?.tokens?.idToken?.toString?.() || null;
 }
 
+export async function getAccessToken() {
+  const s = await getSession();
+  return s?.tokens?.accessToken?.toString?.() || null;
+}
+
 export async function isAuthenticated() {
-  const token = await getIdToken();
-  return !!token;
+  const token = await getAccessToken();
+  return isJwtLike(token);
 }
 
 // Poll-friendly helper to validate token shape safely
