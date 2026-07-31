@@ -10,9 +10,11 @@ jest.mock('expo-splash-screen', () => ({
 }));
 
 // Provide factory mock to avoid Jest attempting to load RN internals not present in test env
-jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({
-  default: {},
-}));
+jest.mock(
+  'react-native/Libraries/Animated/NativeAnimatedHelper',
+  () => ({ default: {} }),
+  { virtual: true }
+);
 jest.mock('react-native-screens', () => ({ enableScreens: jest.fn() }));
 jest.mock('react-native', () => {
   // Provide a trimmed react-native surface avoiding TurboModules (DevMenu) resolution.
@@ -50,7 +52,11 @@ jest.mock('@react-native-community/netinfo', () => ({
 // Mock project-specific side-effect modules to simplify rendering in Jest
 jest.mock('./src/config/amplify', () => ({}));
 jest.mock('./src/config/preAuthCleanup', () => ({}));
-jest.mock('sentry-expo', () => ({ init: jest.fn(), captureException: jest.fn() }));
+jest.mock(
+  'sentry-expo',
+  () => ({ init: jest.fn(), captureException: jest.fn() }),
+  { virtual: true }
+);
 jest.mock('./src/monitoring/sentry', () => ({}));
 jest.mock('expo-device', () => ({
   brand: 'test',

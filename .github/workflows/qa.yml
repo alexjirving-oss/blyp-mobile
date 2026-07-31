@@ -1,14 +1,124 @@
-name: QA
-on: [push, pull_request]
+name: Quality and Production Integrity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  audit:
+  production-integrity:
+    name: Production Integrity and Supply Chain
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: node _reports/prod_audit_v2/run_audit.js
-      - run: node scripts/qa-gate.js
+          node-version: 20
+
+      - name: Check production integrity invariants
+        run: npm run check:production-integrity
+
+      - name: Scan tracked source for high-confidence secrets
+        run: npm run scan:secrets
+
+      - name: Enforce dependency vulnerability ratchet
+        run: npm run audit:dependencies
+
+      - name: Upload integrity reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-integrity-reports
+          path: .artifacts/production-integrity
+          if-no-files-found: warn
+          retention-days: 14
+
+  mobile-quality:
+    name: Mobile Lint and Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Lint complete mobile source tree
+        run: npm run lint
+
+      - name: Run deterministic mobile regression suite
+        run: npm run test:ci
+
+  backend-quality:
+    name: Backend Build and Platform Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend/blyp-live-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/blyp-live-service/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Run compiled platform contract tests
+        run: npm run test:platform
+
+  cross-project-typecheck:
+    name: Cross-Project Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/blyp-live-service/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend/blyp-live-service
+
+      - name: Typecheck mobile and backend contracts together
+        run: npm run typecheck

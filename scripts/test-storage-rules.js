@@ -1,72 +1,85 @@
 /**
- * Storage Security Rules Automated Tests (Task 20 partial)
- * NOTE: Firebase rules-unit-testing v3+ does not provide a rich Storage emulator assertion helper
- * akin to Firestore, so we use @firebase/rules-unit-testing with fetch to emulator REST endpoints.
- *
- * Run:
- *  1. Ensure storage emulator enabled in firebase.json and started:
- *     firebase emulators:start --only storage
- *  2. node scripts/test-storage-rules.js
+ * Strict Firebase Storage Security Rules tests.
  */
-
 const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch');
-const FormData = require('form-data');
+const {
+  initializeTestEnvironment,
+  assertFails,
+  assertSucceeds,
+} = require('@firebase/rules-unit-testing');
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-livestream';
-const STORAGE_EMULATOR_HOST = process.env.FIREBASE_STORAGE_EMULATOR_HOST || 'localhost:9199';
-
-function storageUploadUrl(bucket, objectPath, token) {
-  return `http://${STORAGE_EMULATOR_HOST}/v0/b/${encodeURIComponent(bucket)}/o?name=${encodeURIComponent(objectPath)}${token ? `&uploadType=media&token=${token}` : '&uploadType=media'}`;
-}
-
-async function upload(bucket, objectPath, contentType, bytes, authToken) {
-  const url = storageUploadUrl(bucket, objectPath, authToken);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': contentType },
-    body: bytes
-  });
-  const text = await res.text();
-  return { status: res.status, body: text };
-}
+const RULES_PATH = path.join(__dirname, '..', 'storage.rules');
 
 async function main() {
-  const bucket = `${PROJECT_ID}.appspot.com`; // emulator auto-normalizes
-  console.log('🗄  Testing storage rules against emulator bucket:', bucket);
+  const emulatorHost =
+    process.env.FIREBASE_STORAGE_EMULATOR_HOST || '127.0.0.1:9199';
+  const [host, portValue] = emulatorHost.split(':');
+  const port = Number.parseInt(portValue, 10) || 9199;
+  const bucketUrl = `gs://${PROJECT_ID}.appspot.com`;
 
-  const validMp4 = Buffer.alloc(1024, 0); // 1KB placeholder
+  const environment = await initializeTestEnvironment({
+    projectId: PROJECT_ID,
+    storage: {
+      rules: fs.readFileSync(RULES_PATH, 'utf8'),
+      host,
+      port,
+    },
+  });
 
-  async function expectAllow(promise, label) {
-    const { status, body } = await promise;
-    if (status < 300) console.log(`✅ ALLOW (${status}): ${label}`);
-    else console.error(`❌ Expected ALLOW got ${status}: ${label}\n${body}`);
+  try {
+    const ownerStorage = environment
+      .authenticatedContext('user_owner')
+      .storage(bucketUrl);
+    const viewerStorage = environment
+      .authenticatedContext('user_viewer')
+      .storage(bucketUrl);
+    const anonymousStorage = environment.unauthenticatedContext().storage(bucketUrl);
+    const validPath = 'streams/rules-stream-1/segments/seg0.mp4';
+
+    await assertSucceeds(
+      ownerStorage.ref(validPath).put(Buffer.alloc(1024), {
+        contentType: 'video/mp4',
+      })
+    );
+    console.log('PASS: authenticated video upload within the size limit is allowed');
+
+    await assertSucceeds(viewerStorage.ref(validPath).getMetadata());
+    console.log('PASS: authenticated object reads are allowed');
+
+    await assertFails(anonymousStorage.ref(validPath).getMetadata());
+    console.log('PASS: anonymous object reads are denied');
+
+    await assertFails(
+      anonymousStorage.ref('streams/rules-stream-1/segments/anonymous.mp4').put(
+        Buffer.alloc(16),
+        { contentType: 'video/mp4' }
+      )
+    );
+    console.log('PASS: anonymous object writes are denied');
+
+    await assertFails(
+      ownerStorage.ref('streams/rules-stream-1/segments/not-media.txt').put(
+        Buffer.from('not media'),
+        { contentType: 'text/plain' }
+      )
+    );
+    console.log('PASS: unsupported MIME types are denied');
+
+    await assertFails(
+      ownerStorage.ref('streams/rules-stream-1/segments/at-limit.mp4').put(
+        Buffer.alloc(25 * 1024 * 1024),
+        { contentType: 'video/mp4' }
+      )
+    );
+    console.log('PASS: objects at or above the 25 MiB limit are denied');
+  } finally {
+    await environment.cleanup();
   }
-  async function expectDeny(promise, label) {
-    const { status, body } = await promise;
-    if (status >= 400) console.log(`✅ DENY (${status}): ${label}`);
-    else console.error(`❌ Expected DENY got ${status}: ${label}`);
-  }
-
-  // Adjust paths to match rules expectation
-  const streamId = 'testStream1';
-  const base = `streams/${streamId}/segments`;
-
-  // 1. Valid segment upload (pretend authenticated) - emulator lacks full auth propagation; may need rule relaxed for emulator testing or token override.
-  await expectAllow(upload(bucket, `${base}/seg0.mp4`, 'video/mp4', validMp4), 'Valid mp4 segment upload');
-
-  // 2. Disallowed extension / MIME
-  await expectDeny(upload(bucket, `${base}/bad.txt`, 'text/plain', Buffer.from('hi')), 'Disallowed mime/text upload');
-
-  // 3. Oversized file simulation (if rule enforces size) - create > allowed size (e.g., >50MB). Here just placeholder; if rule uses size, adjust threshold.
-  const bigBuffer = Buffer.alloc(60 * 1024 * 1024, 0); // 60MB
-  await expectDeny(upload(bucket, `${base}/huge.mp4`, 'video/mp4', bigBuffer), 'Oversized mp4 segment');
-
-  // 4. Path traversal attempt (if rule prohibits extra nesting)
-  await expectDeny(upload(bucket, `streams/${streamId}/segments/nested/seg1.mp4`, 'video/mp4', validMp4), 'Nested path disallowed');
-
-  console.log('\n--- COMPLETE (Storage)');
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((error) => {
+  console.error('Storage rules tests failed:', error);
+  process.exit(1);
+});

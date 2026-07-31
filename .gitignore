@@ -23,6 +23,7 @@ web-build/
 
 # Audit/bundle outputs
 _reports/bundles/
+.artifacts/
 # Metro
 .metro-health-check*
 

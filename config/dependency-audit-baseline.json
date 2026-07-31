@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-01",
+  "policy": "No vulnerability severity count may increase. Existing findings remain release debt and must be reduced to zero through reviewed dependency upgrades.",
+  "projects": {
+    "mobile": {
+      "directory": ".",
+      "vulnerabilities": {
+        "low": 7,
+        "moderate": 39,
+        "high": 13,
+        "critical": 5,
+        "total": 64
+      }
+    },
+    "backend": {
+      "directory": "backend/blyp-live-service",
+      "vulnerabilities": {
+        "low": 1,
+        "moderate": 33,
+        "high": 9,
+        "critical": 3,
+        "total": 46
+      }
+    }
+  }
+}
