@@ -4,6 +4,7 @@ import {
   ApiError,
   asyncRoute,
   sendSuccess,
+  type ApiErrorDetails,
   type PlatformRequest,
 } from '../platform/apiContract';
 import {
@@ -11,7 +12,16 @@ import {
   requireClientVersion,
 } from '../platform/gatewayMiddleware';
 import { requireMutationIdempotency } from '../platform/idempotency';
-import { giftSendSchema, iapVerifySchema, paginationSchema } from './economySchemas';
+import { isFeatureEnabled } from '../platform/featureFlags';
+import { getEconomyInfra } from './infra';
+import {
+  giftSendSchema,
+  iapVerifySchema,
+  paginationSchema,
+  quotaReservationParamsSchema,
+  quotaReserveSchema,
+  quotaResolutionSchema,
+} from './economySchemas';
 import { toEconomyError } from './economyErrors';
 import {
   getCatalog,
@@ -20,7 +30,14 @@ import {
   sendGift,
   verifyIapPurchaseAndGrant,
 } from './economyService';
+import {
+  commitQuotaReservation,
+  getEntitlementSnapshot,
+  refundQuotaReservation,
+  reserveQuota,
+} from './entitlementService';
 
+const ENTITLEMENTS_FLAG = 'economy.entitlements_v1';
 const economyApiRouter = Router();
 
 economyApiRouter.use(requireClientVersion);
@@ -62,6 +79,27 @@ async function economyOperation<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
+const requireEntitlementApi = asyncRoute(async (req, _res, next) => {
+  const userId = canonicalUserId(req);
+  const { db } = getEconomyInfra();
+  if (!(await isFeatureEnabled(db, ENTITLEMENTS_FLAG, userId))) {
+    throw new ApiError(404, 'FEATURE_DISABLED', 'The requested entitlement contract is not available.');
+  }
+  next();
+});
+
+const quotaMutationRateLimit = createInProcessRateLimit({
+  keyPrefix: 'economy-quota-v1',
+  windowMs: 60_000,
+  maxRequests: 60,
+});
+
+function quotaValidationError(message: string, issues: ApiErrorDetails): ApiError {
+  return new ApiError(400, 'VALIDATION_FAILED', message, issues);
+}
+
+
+
 economyApiRouter.get(
   '/catalog',
   asyncRoute(async (req, res) => {
@@ -90,6 +128,102 @@ economyApiRouter.get(
       getLedger(canonicalUserId(req), parsed.data.cursor, parsed.data.limit)
     );
     return sendSuccess(req, res, { items: result.items }, { nextCursor: result.nextCursor });
+  })
+);
+
+economyApiRouter.get(
+  '/entitlements',
+  requireEntitlementApi,
+  asyncRoute(async (req, res) => {
+    const result = await economyOperation(() =>
+      getEntitlementSnapshot(canonicalUserId(req), req.context!.correlationId)
+    );
+    return sendSuccess(req, res, result);
+  })
+);
+
+economyApiRouter.post(
+  '/quota/reservations',
+  requireEntitlementApi,
+  quotaMutationRateLimit,
+  requireMutationIdempotency,
+  asyncRoute(async (req, res) => {
+    const parsed = quotaReserveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw quotaValidationError('Quota reservation request is invalid.', parsed.error.issues);
+    }
+    assertBodyIdempotencyMatchesHeader(req, parsed.data.idempotencyKey);
+    const result = await economyOperation(() =>
+      reserveQuota(canonicalUserId(req), parsed.data, req.context!.correlationId)
+    );
+    return sendSuccess(
+      req,
+      res,
+      { reservation: result.reservation, quota: result.quota, replayed: result.kind === 'replay' },
+      { status: result.kind === 'replay' ? 200 : 201 }
+    );
+  })
+);
+
+economyApiRouter.post(
+  '/quota/reservations/:reservationId/commit',
+  requireEntitlementApi,
+  quotaMutationRateLimit,
+  requireMutationIdempotency,
+  asyncRoute(async (req, res) => {
+    const params = quotaReservationParamsSchema.safeParse(req.params);
+    const body = quotaResolutionSchema.safeParse(req.body);
+    if (!params.success || !body.success) {
+      throw quotaValidationError('Quota commit request is invalid.', {
+        params: params.success ? [] : params.error.issues,
+        body: body.success ? [] : body.error.issues,
+      });
+    }
+    assertBodyIdempotencyMatchesHeader(req, body.data.idempotencyKey);
+    const result = await economyOperation(() =>
+      commitQuotaReservation(
+        canonicalUserId(req),
+        params.data.reservationId,
+        body.data,
+        req.context!.correlationId
+      )
+    );
+    return sendSuccess(req, res, {
+      reservation: result.reservation,
+      quota: result.quota,
+      replayed: result.kind === 'replay',
+    });
+  })
+);
+
+economyApiRouter.post(
+  '/quota/reservations/:reservationId/refund',
+  requireEntitlementApi,
+  quotaMutationRateLimit,
+  requireMutationIdempotency,
+  asyncRoute(async (req, res) => {
+    const params = quotaReservationParamsSchema.safeParse(req.params);
+    const body = quotaResolutionSchema.safeParse(req.body);
+    if (!params.success || !body.success) {
+      throw quotaValidationError('Quota refund request is invalid.', {
+        params: params.success ? [] : params.error.issues,
+        body: body.success ? [] : body.error.issues,
+      });
+    }
+    assertBodyIdempotencyMatchesHeader(req, body.data.idempotencyKey);
+    const result = await economyOperation(() =>
+      refundQuotaReservation(
+        canonicalUserId(req),
+        params.data.reservationId,
+        body.data,
+        req.context!.correlationId
+      )
+    );
+    return sendSuccess(req, res, {
+      reservation: result.reservation,
+      quota: result.quota,
+      replayed: result.kind === 'replay',
+    });
   })
 );
 

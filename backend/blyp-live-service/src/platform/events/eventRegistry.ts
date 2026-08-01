@@ -45,6 +45,18 @@ const trustRelationshipChangedPayload = z.object({
   controlVersion: z.number().int().positive(),
 });
 
+const quotaUsagePayload = z.object({
+  userId: z.string().min(1).max(256),
+  entitlementKey: z.string().regex(/^[a-z][a-z0-9_.-]{2,127}$/),
+  planId: z.string().min(1).max(128),
+  reservationId: z.string().uuid(),
+  quotaPeriodId: z.string().uuid(),
+  units: z.number().int().positive(),
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
+  remainingUnits: z.number().int().nonnegative(),
+});
+
 const eventSchemas = {
   'identity.linked.v1': identityLinkedPayload,
   'identity.link_revoked.v1': identityLinkRevokedPayload,
@@ -52,6 +64,10 @@ const eventSchemas = {
   'trust.consent.changed.v1': trustConsentChangedPayload,
   'trust.privacy.changed.v1': trustPrivacyChangedPayload,
   'trust.relationship.changed.v1': trustRelationshipChangedPayload,
+  'economy.quota.reserved.v1': quotaUsagePayload,
+  'economy.quota.committed.v1': quotaUsagePayload,
+  'economy.quota.refunded.v1': quotaUsagePayload,
+  'economy.quota.expired.v1': quotaUsagePayload,
 } as const;
 
 export type RegisteredEventType = keyof typeof eventSchemas;

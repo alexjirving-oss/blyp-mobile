@@ -4,6 +4,7 @@ const SERVER_KEYS = Object.freeze({
   manifestEnabled: 'live.manifest',
   playlistViewerEnabled: 'live.playlist_viewer',
   playlistExperimentId: 'live.playlist_experiment',
+  economyEntitlementsEnabled: 'economy.entitlements_v1',
 });
 
 const listeners = new Set();
@@ -12,6 +13,7 @@ let state = Object.freeze({
   manifestEnabled: false,
   playlistViewerEnabled: false,
   playlistExperimentId: null,
+  economyEntitlementsEnabled: false,
 });
 
 function notify() {
@@ -32,6 +34,10 @@ export function isManifestEnabled() {
 
 export function isPlaylistViewerEnabled() {
   return state.playlistViewerEnabled === true;
+}
+
+export function isEconomyEntitlementsEnabled() {
+  return state.economyEntitlementsEnabled === true;
 }
 
 export function getFeatureFlags() {
@@ -59,6 +65,7 @@ export async function refreshFeatureFlags() {
       playlistExperimentId: enabled(flags, SERVER_KEYS.playlistExperimentId)
         ? String(flags[SERVER_KEYS.playlistExperimentId]?.variant || 'enabled')
         : null,
+      economyEntitlementsEnabled: enabled(flags, SERVER_KEYS.economyEntitlementsEnabled),
     });
   } catch {
     // Remote configuration is security-sensitive: unavailable or malformed
@@ -68,6 +75,7 @@ export async function refreshFeatureFlags() {
       manifestEnabled: false,
       playlistViewerEnabled: false,
       playlistExperimentId: null,
+      economyEntitlementsEnabled: false,
     });
   }
   notify();
