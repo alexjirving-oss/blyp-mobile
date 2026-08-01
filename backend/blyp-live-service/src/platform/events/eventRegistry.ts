@@ -45,13 +45,51 @@ const trustRelationshipChangedPayload = z.object({
   controlVersion: z.number().int().positive(),
 });
 
+const contentProfileChangedPayload = z.object({
+  userId: z.string().min(1).max(256),
+  changeType: z.enum(['created', 'updated']),
+  version: z.number().int().positive(),
+});
+
+const contentPostCreatedPayload = z.object({
+  postId: z.string().uuid(),
+  authorUserId: z.string().min(1).max(256),
+  lifecycleState: z.enum(['draft', 'published']),
+  visibility: z.enum(['public', 'followers', 'private']),
+  version: z.number().int().positive(),
+});
+
+const contentPostUpdatedPayload = z.object({
+  postId: z.string().uuid(),
+  authorUserId: z.string().min(1).max(256),
+  changedFields: z
+    .array(z.enum(['title', 'caption', 'visibility', 'media', 'categories', 'hashtags']))
+    .min(1)
+    .max(6),
+  version: z.number().int().positive(),
+});
+
+const contentPostStateChangedPayload = z.object({
+  postId: z.string().uuid(),
+  authorUserId: z.string().min(1).max(256),
+  fromState: z.enum(['draft', 'pending_review', 'published', 'restricted', 'rejected', 'removed']),
+  toState: z.enum(['draft', 'pending_review', 'published', 'restricted', 'rejected', 'removed']),
+  reasonCode: z.string().min(1).max(64),
+  version: z.number().int().positive(),
+});
+
 const eventSchemas = {
+
   'identity.linked.v1': identityLinkedPayload,
   'identity.link_revoked.v1': identityLinkRevokedPayload,
   'platform.feature_flag.updated.v1': featureFlagUpdatedPayload,
   'trust.consent.changed.v1': trustConsentChangedPayload,
   'trust.privacy.changed.v1': trustPrivacyChangedPayload,
   'trust.relationship.changed.v1': trustRelationshipChangedPayload,
+  'content.profile.changed.v1': contentProfileChangedPayload,
+  'content.post.created.v1': contentPostCreatedPayload,
+  'content.post.updated.v1': contentPostUpdatedPayload,
+  'content.post.state_changed.v1': contentPostStateChangedPayload,
 } as const;
 
 export type RegisteredEventType = keyof typeof eventSchemas;

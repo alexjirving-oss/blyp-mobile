@@ -1,4 +1,6 @@
 import { db, firebaseEnabled } from '../config/firebase';
+import { isFeedDiscoveryV1Enabled } from '../config/FeatureFlags';
+import { searchDiscovery } from './discoveryApiService';
 
 const DEFAULT_READ_LIMIT = 100;
 
@@ -6,8 +8,10 @@ const emptyResults = (extra = {}) => ({
   users: [],
   posts: [],
   hashtags: [],
-  locations: [],
+    locations: [],
+  categories: [],
   ...extra,
+
 });
 
 const normalize = (value) => String(value ?? '').trim().toLowerCase();
@@ -81,12 +85,66 @@ class SearchService {
    * Search only source-backed records. Failures return an explicit empty state;
    * they never fall back to fabricated people, posts, counts, or locations.
    */
-  async globalSearch(searchTerm, filters = {}) {
+    async globalSearch(searchTerm, filters = {}) {
     const term = normalize(searchTerm);
     if (term.length < 2) return this.getSearchSuggestions();
 
     try {
+      if (isFeedDiscoveryV1Enabled()) {
+        const typeMap = {
+          users: 'profile',
+          posts: 'post',
+          hashtags: 'hashtag',
+          categories: 'category',
+        };
+        const response = await searchDiscovery({
+          query: term,
+          limit: filters.limit || 20,
+          types: filters.type && typeMap[filters.type] ? [typeMap[filters.type]] : undefined,
+        });
+        const results = emptyResults();
+        response.items.forEach((item) => {
+          if (item.type === 'profile' && item.profile) {
+            results.users.push({
+              id: item.profile.userId,
+              username: item.profile.username,
+              displayName: item.profile.displayName,
+              avatar: item.profile.avatarUrl || null,
+              followers: null,
+            });
+          } else if (item.type === 'post' && item.post) {
+            const media = item.post.media?.[0] || null;
+            results.posts.push({
+              id: item.post.postId,
+              type: media?.kind === 'image' ? 'photo' : media?.kind || 'text',
+              thumbnail: media?.thumbnailUrl || media?.url || null,
+              caption: item.post.caption || item.post.title || '',
+              user: {
+                username: item.post.author?.username || null,
+                avatar: item.post.author?.avatarUrl || null,
+              },
+            });
+          } else if (item.type === 'hashtag' && item.hashtag) {
+            results.hashtags.push({
+              hashtag: `#${item.hashtag.tag}`,
+              postCount: null,
+              trending: false,
+            });
+          } else if (item.type === 'category' && item.category) {
+            results.categories.push({
+              id: item.category.categoryId,
+              slug: item.category.slug,
+              name: item.category.displayName,
+              description: item.category.description,
+            });
+          }
+        });
+        this.addToHistory(searchTerm);
+        return { ...results, nextCursor: response.nextCursor };
+      }
+
       const results = emptyResults();
+
       const limitCount = filters.limit || 20;
 
       if (!filters.type || filters.type === 'users') {
