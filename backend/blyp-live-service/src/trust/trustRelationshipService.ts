@@ -278,7 +278,7 @@ export async function listRelationshipControls(
 }
 
 async function activeRelationshipRows(
-  db: Knex,
+  db: Knex | Knex.Transaction,
   actorUserId: string,
   targetUserId: string
 ): Promise<any[]> {
@@ -291,13 +291,13 @@ async function activeRelationshipRows(
     .andWhere((builder) => builder.whereNull('expires_at').orWhere('expires_at', '>', db.fn.now()));
 }
 
-export async function evaluateTrustPolicy(
+async function evaluateTrustPolicyWithConnection(
+  db: Knex | Knex.Transaction,
   actorUserId: string,
   input: PolicyDecisionInput
 ): Promise<EvaluatedTrustDecision> {
   actorUserId = assertSubject(actorUserId, 'actorUserId');
   const targetUserId = assertSubject(input.targetUserId, 'targetUserId');
-  const { db } = getEconomyInfra();
 
   const [actorProfileRow, targetProfileRow, targetPrivacyRow, relationships] = await Promise.all([
     db('trust_policy_profiles').where({ user_id: actorUserId }).first(),
@@ -348,11 +348,28 @@ export async function evaluateTrustPolicy(
   };
 }
 
-export async function requireTrustPolicy(
+function trustDecisionLockKeys(actorUserId: string, targetUserId: string): string[] {
+  return [...new Set([
+    `trust:${actorUserId}`,
+    `trust:${targetUserId}`,
+    `trust-relationship:${actorUserId}:${targetUserId}:block`,
+    `trust-relationship:${targetUserId}:${actorUserId}:block`,
+    `trust-relationship:${actorUserId}:${targetUserId}:mute`,
+    `trust-relationship:${targetUserId}:${actorUserId}:mute`,
+  ])].sort();
+}
+
+async function lockTrustDecision(
+  trx: Knex.Transaction,
   actorUserId: string,
-  input: PolicyDecisionInput
-): Promise<EvaluatedTrustDecision> {
-  const decision = await evaluateTrustPolicy(actorUserId, input);
+  targetUserId: string
+): Promise<void> {
+  for (const lockKey of trustDecisionLockKeys(actorUserId, targetUserId)) {
+    await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [lockKey]);
+  }
+}
+
+function assertAllowedTrustDecision(decision: EvaluatedTrustDecision): EvaluatedTrustDecision {
   if (!decision.allowed) {
     throw new ApiError(403, 'TRUST_POLICY_DENIED', 'The requested action is not permitted by Trust policy.', {
       capability: decision.capability,
@@ -360,7 +377,42 @@ export async function requireTrustPolicy(
       reasons: decision.reasons,
       policyProfileVersion: decision.policyProfileVersion,
       privacyVersion: decision.privacyVersion,
+      relationship: decision.relationship,
     });
   }
   return decision;
+}
+
+export async function evaluateTrustPolicy(
+  actorUserId: string,
+  input: PolicyDecisionInput
+): Promise<EvaluatedTrustDecision> {
+  const { db } = getEconomyInfra();
+  return evaluateTrustPolicyWithConnection(db, actorUserId, input);
+}
+
+export async function evaluateTrustPolicyInTransaction(
+  trx: Knex.Transaction,
+  actorUserId: string,
+  input: PolicyDecisionInput
+): Promise<EvaluatedTrustDecision> {
+  actorUserId = assertSubject(actorUserId, 'actorUserId');
+  const targetUserId = assertSubject(input.targetUserId, 'targetUserId');
+  await lockTrustDecision(trx, actorUserId, targetUserId);
+  return evaluateTrustPolicyWithConnection(trx, actorUserId, { ...input, targetUserId });
+}
+
+export async function requireTrustPolicy(
+  actorUserId: string,
+  input: PolicyDecisionInput
+): Promise<EvaluatedTrustDecision> {
+  return assertAllowedTrustDecision(await evaluateTrustPolicy(actorUserId, input));
+}
+
+export async function requireTrustPolicyInTransaction(
+  trx: Knex.Transaction,
+  actorUserId: string,
+  input: PolicyDecisionInput
+): Promise<EvaluatedTrustDecision> {
+  return assertAllowedTrustDecision(await evaluateTrustPolicyInTransaction(trx, actorUserId, input));
 }

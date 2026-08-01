@@ -16,6 +16,7 @@
     "test:platform": "npm run build && node --test test/platform-contract.test.cjs",
     "test:trust": "npm run build && node --test test/trust-policy.test.cjs",
     "test:economy": "npm run build && node --test test/economy-api-contract.test.cjs",
+    "test:trust-economy": "npm run build && node --test test/trust-economy-contract.test.cjs",
     "test:contracts": "npm run build && node --test test/*.test.cjs",
     "lint": "echo 'add eslint if needed'"
   },

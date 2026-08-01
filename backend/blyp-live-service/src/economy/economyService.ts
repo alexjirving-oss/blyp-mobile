@@ -6,6 +6,7 @@ import { getEconomyEnv } from '../config/economyEnv';
 import { EconomyError } from './economyErrors';
 import { decodeCursor, encodeCursor } from './cursor';
 import { emitGiftEvent, emitLiveGameEvent } from '../realtime/realtimeBus';
+import { requireTrustPolicyInTransaction } from '../trust/trustRelationshipService';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
 
 function nowIso() {
@@ -827,6 +828,13 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       };
     }
 
+    // New value transfer is fail-closed on the shared Trust policy. Replays return
+    // their original committed response without creating a second side effect.
+    const trustDecision = await requireTrustPolicyInTransaction(trx, senderUserId, {
+      targetUserId: receiverUserId,
+      capability: 'transact',
+    });
+
     // 1) Validate/lock wallets
     await trx.raw('SELECT 1');
 
@@ -901,6 +909,11 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       totalCostCoins: totalCostCoins.toString(),
       platformFeeCoins: platformFeeCoins.toString(),
       creatorCoins: creatorCoins.toString(),
+      trustDecision: {
+        capability: trustDecision.capability,
+        policyProfileVersion: trustDecision.policyProfileVersion,
+        privacyVersion: trustDecision.privacyVersion,
+      },
     };
 
     if (usePaid > 0n) {
