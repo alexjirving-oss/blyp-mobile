@@ -20,8 +20,9 @@ const { width } = Dimensions.get('window');
 
 const GiftSystem = ({ postId, creatorId, creatorName }) => {
   const [showGiftModal, setShowGiftModal] = useState(false);
-  const [userBalance, setUserBalance] = useState(0);
-  const [gifts] = useState(BlypCoinService.getGiftTypes());
+    const [userBalance, setUserBalance] = useState(0);
+  const [gifts, setGifts] = useState([]);
+
   const [selectedGift, setSelectedGift] = useState(null);
   const [sending, setSending] = useState(false);
   const [giftAnimation] = useState(new Animated.Value(0));
@@ -63,13 +64,35 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
   };
 
   useEffect(() => {
-    if (currentUser) {
-      // Subscribe to balance updates
-      const unsubscribe = BlypCoinService.subscribeToBalance(currentUser.uid, (balance) => {
-        setUserBalance(balance);
+    if (!currentUser) return undefined;
+
+    let active = true;
+    void BlypCoinService.getCatalog()
+      .then((catalog) => {
+        if (!active) return;
+        setGifts(
+          catalog.gifts.map((gift) => ({
+            id: gift.giftId,
+            name: gift.name,
+            cost: Number(gift.coinCost) || 0,
+            emoji: gift.assetJson?.emoji || '🎁',
+            rarity: gift.assetJson?.rarity || 'common',
+          }))
+        );
+      })
+      .catch((error) => {
+        console.error('Canonical gift catalog load failed:', error);
+        if (active) setGifts([]);
       });
-      return unsubscribe;
-    }
+
+    const unsubscribe = BlypCoinService.subscribeToBalance(currentUser.uid, (balance) => {
+      setUserBalance(balance);
+    });
+
+    return () => {
+      active = false;
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUser]);
 
   const handleSendGift = async (gift) => {
@@ -117,8 +140,10 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
     setSelectedGift(gift);
     
     try {
-      await BlypCoinService.sendGift(currentUser.uid, creatorId, gift.id, gift.cost);
-      
+      await BlypCoinService.sendGift(currentUser.uid, creatorId, gift.id, gift.cost, {
+        streamId: postId,
+      });
+
       // Trigger gift animation
       triggerGiftAnimation(gift);
       

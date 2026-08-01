@@ -4,6 +4,8 @@ import cors from 'cors';
 import http from 'http';
 import liveRoutes from './routes/liveRoutes';
 import economyRoutes from './economy/economyRoutes';
+import { economyApiRouter } from './economy/economyApiRoutes';
+
 import adminRoutes from './admin/adminRoutes';
 import appVersionRoutes from './appVersion/appVersionRoutes';
 
@@ -94,6 +96,7 @@ app.use(adminRoutes);
 app.use(economyRoutes);
 
 // New domain work is mounted only beneath the explicit v1 gateway contract.
+app.use('/api/v1/economy', economyApiRouter);
 app.use('/api/v1/platform', platformRouter);
 app.use('/api/v1/trust', trustRouter);
 app.use('/api/v1', platformNotFound);
@@ -140,6 +143,7 @@ async function main() {
     const url = `http://0.0.0.0:${port}`;
     logger.info(`✅ blyp-live-service LISTENING ${url}`);
     logger.info(`📍 /health endpoint ready`);
+    logger.info(`📍 /api/v1/economy/* contract ready`);
     logger.info(`📍 /api/v1/platform/* contract ready`);
     logger.info(`📍 /api/v1/trust/* contract ready`);
     logger.info(`📍 /api/* legacy routes ready`);
