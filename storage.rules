@@ -1,11 +1,121 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
-    match /{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-        && request.resource.size < 25 * 1024 * 1024
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isWithinSize(maxBytes) {
+      return request.resource != null
+        && request.resource.size > 0
+        && request.resource.size < maxBytes;
+    }
+
+    function isImageOrBinary() {
+      return request.resource.contentType != null
+        && request.resource.contentType.matches('image/.*|application/octet-stream');
+    }
+
+    function isVideoOrBinary() {
+      return request.resource.contentType != null
+        && request.resource.contentType.matches('video/.*|application/octet-stream');
+    }
+
+    function isMediaOrBinary() {
+      return request.resource.contentType != null
         && request.resource.contentType.matches('image/.*|video/.*|application/octet-stream');
     }
+
+    function isImageFile(fileName) {
+      return fileName.matches('.*\\.(jpg|jpeg|png|webp)');
+    }
+
+    function isPostMediaFile(fileName) {
+      return fileName.matches('(photo|video)-[0-9]+\\.(jpg|mp4)');
+    }
+
+    // Active live-stream segments: streams/{uid}/{streamId}/segment_{N}.mp4
+    match /streams/{userId}/{streamId}/{fileName} {
+      allow get: if true;
+      allow create, update: if isOwner(userId)
+        && fileName.matches('segment_[0-9]+\\.mp4')
+        && isWithinSize(10 * 1024 * 1024)
+        && isVideoOrBinary();
+      allow delete: if isOwner(userId)
+        && fileName.matches('segment_[0-9]+\\.mp4');
+    }
+
+    // Server-generated playlists and renditions remain publicly playable.
+    // Client writes are intentionally not granted for these nested paths.
+    match /streams/{userId}/{streamId}/playlists/{fileName} {
+      allow get: if fileName.matches('.*\\.m3u8');
+    }
+
+    match /streams/{userId}/{streamId}/qualities/{allPaths=**} {
+      allow get: if true;
+    }
+
+    // The stream owner may enumerate their own namespace for cleanup.
+    match /streams/{userId}/{allPaths=**} {
+      allow list: if isOwner(userId);
+    }
+
+    // Active live-stream thumbnails: streams/{uid}/thumbnail_{timestamp}.{ext}
+    match /streams/{userId}/{fileName} {
+      allow get: if true;
+      allow create, update: if isOwner(userId)
+        && fileName.matches('thumbnail_[0-9]+\\.(jpg|jpeg|png|webp)')
+        && isWithinSize(5 * 1024 * 1024)
+        && isImageOrBinary();
+      allow delete: if isOwner(userId)
+        && fileName.matches('thumbnail_[0-9]+\\.(jpg|jpeg|png|webp)');
+    }
+
+    // Current profile-image flow: users/{uid}/profile/{fileName}
+    match /users/{userId}/profile/{fileName} {
+      allow get: if true;
+      allow create, update: if isOwner(userId)
+        && isImageFile(fileName)
+        && isWithinSize(5 * 1024 * 1024)
+        && isImageOrBinary();
+      allow delete: if isOwner(userId) && isImageFile(fileName);
+    }
+
+    // Current post-thumbnail flow: users/{uid}/thumbnails/{fileName}
+    match /users/{userId}/thumbnails/{fileName} {
+      allow get: if true;
+      allow create, update: if isOwner(userId)
+        && isImageFile(fileName)
+        && isWithinSize(5 * 1024 * 1024)
+        && isImageOrBinary();
+      allow delete: if isOwner(userId) && isImageFile(fileName);
+    }
+
+    // Current post-media flow: users/{uid}/media/{photo|video}-{timestamp}.{jpg|mp4}
+    match /users/{userId}/media/{fileName} {
+      allow get: if true;
+      allow create, update: if isOwner(userId)
+        && isPostMediaFile(fileName)
+        && isWithinSize(200 * 1024 * 1024)
+        && isMediaOrBinary();
+      allow delete: if isOwner(userId) && isPostMediaFile(fileName);
+    }
+
+    // Preserve the previously deployed profile namespace for existing objects.
+    match /userProfiles/{userId}/{fileName} {
+      allow get: if true;
+      allow create, update: if isOwner(userId)
+        && isImageFile(fileName)
+        && isWithinSize(5 * 1024 * 1024)
+        && isImageOrBinary();
+      allow delete: if isOwner(userId) && isImageFile(fileName);
+    }
+
+    // Every unlisted path and every non-owner list operation is denied by default.
   }
 }
