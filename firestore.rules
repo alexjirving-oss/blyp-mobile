@@ -1,45 +1,595 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isLegacyAuthenticatedCollection(collectionName) {
-      return request.auth != null
-        && collectionName != 'wallets'
-        && collectionName != 'gems'
-        && collectionName != 'transactions'
-        && collectionName != 'ledger_entries'
-        && collectionName != 'gift_catalog'
-        && collectionName != 'gift_events'
-        && collectionName != 'iap_products';
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // The canonical economy is PostgreSQL-backed and reachable only through the
-    // authenticated backend API. Firebase Admin/servers bypass these client rules.
-    match /wallets/{document=**} {
-      allow read, write: if false;
-    }
-    match /gems/{document=**} {
-      allow read, write: if false;
-    }
-    match /transactions/{document=**} {
-      allow read, write: if false;
-    }
-    match /ledger_entries/{document=**} {
-      allow read, write: if false;
-    }
-    match /gift_catalog/{document=**} {
-      allow read, write: if false;
-    }
-    match /gift_events/{document=**} {
-      allow read, write: if false;
-    }
-    match /iap_products/{document=**} {
-      allow read, write: if false;
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Legacy authenticated access remains temporarily available to unrelated
-    // collections while their domain-specific policy migrations are delivered.
-    match /{collectionName}/{document=**} {
-      allow read, write: if isLegacyAuthenticatedCollection(collectionName);
+    function isChatParticipant(chatId) {
+      return isSignedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    function isRoomParticipant(roomId) {
+      return isSignedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(roomId)).data.participants;
+    }
+
+    function isStreamHost(streamId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/liveStreams/$(streamId)).data.hostId == request.auth.uid;
+    }
+
+    // Public application profiles. Ownership is the document ID; clients cannot
+    // inject roles, privileges, balances, subscriptions, or entitlement state.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSelf(userId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'id', 'displayName', 'username', 'email', 'photoURL', 'avatar',
+          'bio', 'location', 'website', 'status', 'isOnline', 'isLive',
+          'currentStreamId', 'createdAt', 'updatedAt', 'lastSeen', 'lastLoginAt',
+          'lastStreamStarted', 'lastStreamEnded'
+        ])
+        && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
+        && (!('id' in request.resource.data) || request.resource.data.id == userId)
+        && (!('displayName' in request.resource.data)
+          || (request.resource.data.displayName is string
+            && request.resource.data.displayName.size() <= 80))
+        && (!('username' in request.resource.data)
+          || (request.resource.data.username is string
+            && request.resource.data.username.size() <= 40))
+        && (!('bio' in request.resource.data)
+          || (request.resource.data.bio is string
+            && request.resource.data.bio.size() <= 500));
+      allow update: if isSelf(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'username', 'email', 'photoURL', 'avatar', 'bio',
+          'location', 'website', 'status', 'isOnline', 'isLive',
+          'currentStreamId', 'updatedAt', 'lastSeen', 'lastLoginAt',
+          'lastStreamStarted', 'lastStreamEnded'
+        ])
+        && (!('displayName' in request.resource.data)
+          || (request.resource.data.displayName is string
+            && request.resource.data.displayName.size() <= 80))
+        && (!('username' in request.resource.data)
+          || (request.resource.data.username is string
+            && request.resource.data.username.size() <= 40))
+        && (!('bio' in request.resource.data)
+          || (request.resource.data.bio is string
+            && request.resource.data.bio.size() <= 500));
+      allow delete: if false;
+
+      match /following/{targetId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSelf(userId)
+          && request.resource.data.keys().hasOnly(['userId', 'timestamp', 'createdAt'])
+          && request.resource.data.userId == targetId;
+        allow delete: if isSelf(userId) && resource.data.userId == targetId;
+      }
+
+      match /followers/{followerId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn()
+          && request.auth.uid == followerId
+          && request.resource.data.keys().hasOnly(['userId', 'timestamp', 'createdAt'])
+          && request.resource.data.userId == followerId;
+        allow delete: if isSignedIn()
+          && request.auth.uid == followerId
+          && resource.data.userId == followerId;
+      }
+
+      // Legacy self-stat documents are readable by their owner but client writes
+      // are denied; authoritative stream analytics are produced server-side.
+      match /liveStreamStats/{streamId} {
+        allow read: if isSelf(userId);
+        allow write: if false;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /userProfiles/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSelf(userId)
+        && request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'username', 'photoURL', 'avatar', 'bio',
+          'isLive', 'currentStreamId', 'lastStreamStarted', 'lastStreamEnded',
+          'createdAt', 'updatedAt'
+        ])
+        && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
+      allow update: if isSelf(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'username', 'photoURL', 'avatar', 'bio', 'isLive',
+          'currentStreamId', 'lastStreamStarted', 'lastStreamEnded', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    match /drafts/{draftId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'userId', 'type', 'title', 'caption', 'description', 'transcript',
+          'tags', 'mediaType', 'mediaUrl', 'thumbnailUrl', 'videoUri',
+          'imageUri', 'localUri', 'draftName', 'duration', 'orientation',
+          'aspectRatio', 'uploadProgress', 'status', 'userName', 'userAvatar',
+          'isEditing', 'originalPostId', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.type == 'draft'
+        && (!('caption' in request.resource.data)
+          || (request.resource.data.caption is string
+            && request.resource.data.caption.size() <= 5000));
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'caption', 'description', 'transcript', 'tags', 'mediaType',
+          'mediaUrl', 'thumbnailUrl', 'videoUri', 'imageUri', 'localUri',
+          'draftName', 'duration', 'orientation', 'aspectRatio',
+          'uploadProgress', 'status', 'userName', 'userAvatar', 'isEditing',
+          'originalPostId', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'userId', 'username', 'userName', 'userAvatar', 'userPhotoURL',
+          'title', 'content', 'transcript', 'description', 'caption', 'tags',
+          'mediaType', 'mediaUrl', 'videoUrl', 'imageUrl', 'thumbnailUrl',
+          'type', 'date', 'createdAt', 'updatedAt', 'timestamp', 'likes',
+          'likeCount', 'likesCount', 'comments', 'commentCount',
+          'commentsCount', 'views', 'viewCount', 'gameId', 'gameType',
+          'status', 'visibility', 'originalPostId'
+        ])
+        && (!('title' in request.resource.data)
+          || (request.resource.data.title is string
+            && request.resource.data.title.size() <= 300))
+        && (!('content' in request.resource.data)
+          || (request.resource.data.content is string
+            && request.resource.data.content.size() <= 5000))
+        && (!('caption' in request.resource.data)
+          || (request.resource.data.caption is string
+            && request.resource.data.caption.size() <= 5000))
+        && (!('likes' in request.resource.data)
+          || request.resource.data.likes == 0
+          || (request.resource.data.likes is list
+            && request.resource.data.likes.size() == 0))
+        && (!('likeCount' in request.resource.data) || request.resource.data.likeCount == 0)
+        && (!('likesCount' in request.resource.data) || request.resource.data.likesCount == 0)
+        && (!('comments' in request.resource.data)
+          || request.resource.data.comments == 0
+          || (request.resource.data.comments is list
+            && request.resource.data.comments.size() == 0))
+        && (!('commentCount' in request.resource.data) || request.resource.data.commentCount == 0)
+        && (!('commentsCount' in request.resource.data) || request.resource.data.commentsCount == 0)
+        && (!('views' in request.resource.data) || request.resource.data.views == 0)
+        && (!('viewCount' in request.resource.data) || request.resource.data.viewCount == 0);
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'content', 'transcript', 'description', 'caption', 'tags',
+          'mediaType', 'mediaUrl', 'videoUrl', 'imageUrl', 'thumbnailUrl',
+          'type', 'updatedAt', 'status', 'visibility'
+        ]);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.postId == postId
+          && request.resource.data.keys().hasOnly([
+            'postId', 'parentId', 'userId', 'username', 'userName',
+            'userAvatar', 'userPhotoURL', 'text', 'content', 'createdAt',
+            'updatedAt', 'likes', 'likeCount'
+          ])
+          && (!('text' in request.resource.data)
+            || (request.resource.data.text is string
+              && request.resource.data.text.size() > 0
+              && request.resource.data.text.size() <= 2000))
+          && (!('content' in request.resource.data)
+            || (request.resource.data.content is string
+              && request.resource.data.content.size() > 0
+              && request.resource.data.content.size() <= 2000))
+          && (!('likes' in request.resource.data) || request.resource.data.likes == 0)
+          && (!('likeCount' in request.resource.data) || request.resource.data.likeCount == 0);
+        allow update: if isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.postId == resource.data.postId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text', 'content', 'updatedAt'
+          ]);
+        allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /chats/{chatId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'participants', 'participantNames', 'participantInfo', 'createdAt',
+          'lastMessage', 'lastMessageTime', 'unreadCount', 'deleted', 'deletedAt'
+        ])
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.unreadCount is map
+        && request.resource.data.unreadCount.keys().hasOnly(request.resource.data.participants)
+        && request.resource.data.unreadCount[request.resource.data.participants[0]] == 0
+        && request.resource.data.unreadCount[request.resource.data.participants[1]] == 0;
+      allow update: if isSignedIn()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.participants == resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastMessage', 'lastMessageTime', 'unreadCount', 'deleted', 'deletedAt'
+        ])
+        && request.resource.data.unreadCount is map
+        && request.resource.data.unreadCount.keys().hasOnly(resource.data.participants)
+        && request.resource.data.unreadCount[resource.data.participants[0]] is int
+        && request.resource.data.unreadCount[resource.data.participants[0]] >= 0
+        && request.resource.data.unreadCount[resource.data.participants[1]] is int
+        && request.resource.data.unreadCount[resource.data.participants[1]] >= 0;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+        allow create: if isChatParticipant(chatId)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'text', 'senderId', 'senderName', 'senderPhotoURL', 'timestamp',
+            'status', 'type', 'mediaUrl', 'replyTo'
+          ])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 5000
+          && request.resource.data.status == 'sent';
+        allow update: if isChatParticipant(chatId)
+          && request.resource.data.senderId == resource.data.senderId
+          && (
+            (resource.data.senderId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'text', 'editedAt'
+              ]))
+            ||
+            (resource.data.senderId != request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'deliveredAt', 'readAt'
+              ])
+              && request.resource.data.status in ['delivered', 'read'])
+          );
+        allow delete: if isChatParticipant(chatId)
+          && resource.data.senderId == request.auth.uid;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /chatRooms/{roomId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'name', 'description', 'category', 'tags', 'createdBy',
+          'createdByName', 'createdAt', 'participants', 'participantCount',
+          'maxParticipants', 'isPrivate', 'password', 'isActive',
+          'lastActivity', 'lastMessage', 'lastMessageAt', 'image', 'rules'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 1
+        && request.resource.data.participants[0] == request.auth.uid
+        && request.resource.data.participantCount == 1
+        && request.resource.data.maxParticipants is int
+        && request.resource.data.maxParticipants >= 2
+        && request.resource.data.maxParticipants <= 100;
+      allow update: if isSignedIn()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (
+          (resource.data.createdBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'name', 'description', 'category', 'tags', 'participants',
+              'participantCount', 'maxParticipants', 'isPrivate', 'password',
+              'isActive', 'lastActivity', 'lastMessage', 'lastMessageAt',
+              'image', 'rules'
+            ]))
+          ||
+          (!(request.auth.uid in resource.data.participants)
+            && request.auth.uid in request.resource.data.participants
+            && request.resource.data.participants.size() == resource.data.participants.size() + 1
+            && request.resource.data.participants.hasAll(resource.data.participants)
+            && request.resource.data.participantCount == resource.data.participantCount + 1
+            && request.resource.data.participantCount <= resource.data.maxParticipants
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'participants', 'participantCount', 'lastActivity'
+            ]))
+          ||
+          (request.auth.uid in resource.data.participants
+            && !(request.auth.uid in request.resource.data.participants)
+            && resource.data.participants.size() == request.resource.data.participants.size() + 1
+            && resource.data.participants.hasAll(request.resource.data.participants)
+            && request.resource.data.participantCount == resource.data.participantCount - 1
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'participants', 'participantCount', 'lastActivity'
+            ]))
+        );
+      allow delete: if false;
+    }
+
+    match /chatMessages/{messageId} {
+      allow read: if isSignedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(resource.data.roomId)).data.participants;
+      allow create: if isSignedIn()
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'text', 'content', 'type', 'senderId', 'senderName', 'senderPhotoURL',
+          'roomId', 'timestamp', 'createdAt', 'updatedAt', 'reactions',
+          'replyTo', 'mediaUrl'
+        ])
+        && request.auth.uid in get(/databases/$(database)/documents/chatRooms/$(request.resource.data.roomId)).data.participants
+        && (!('text' in request.resource.data)
+          || (request.resource.data.text is string
+            && request.resource.data.text.size() > 0
+            && request.resource.data.text.size() <= 5000));
+      allow update: if isSignedIn()
+        && resource.data.senderId == request.auth.uid
+        && request.resource.data.senderId == resource.data.senderId
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'text', 'content', 'updatedAt', 'reactions'
+        ]);
+      allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+    }
+
+    match /liveStreams/{streamId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'title', 'description', 'userId', 'hostId', 'userName',
+          'userPhotoURL', 'thumbnailUrl', 'status', 'segments',
+          'currentSegment', 'viewCount', 'viewerCount', 'likes', 'likeCount',
+          'createdAt', 'startedAt', 'lastUpdated', 'totalSegments',
+          'avgSegmentSize', 'streamHealth', 'lastSegmentUploadedAt',
+          'endedAt', 'category', 'tags', 'quality', 'streamUrl', 'hlsUrl',
+          'playbackUrl'
+        ])
+        && request.resource.data.status == 'live'
+        && (!('viewCount' in request.resource.data) || request.resource.data.viewCount >= 0)
+        && (!('viewerCount' in request.resource.data) || request.resource.data.viewerCount >= 0)
+        && (!('likes' in request.resource.data) || request.resource.data.likes == 0)
+        && (!('likeCount' in request.resource.data) || request.resource.data.likeCount == 0);
+      allow update: if isSignedIn()
+        && resource.data.hostId == request.auth.uid
+        && request.resource.data.hostId == resource.data.hostId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'description', 'thumbnailUrl', 'status', 'segments',
+          'currentSegment', 'viewCount', 'viewerCount', 'likes', 'likeCount',
+          'lastUpdated', 'totalSegments', 'avgSegmentSize', 'streamHealth',
+          'lastSegmentUploadedAt', 'endedAt', 'category', 'tags', 'quality',
+          'streamUrl', 'hlsUrl', 'playbackUrl'
+        ]);
+      allow delete: if false;
+
+      match /segments/{segmentId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isStreamHost(streamId);
+      }
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'userId', 'userName', 'userPhotoURL', 'content', 'timestamp',
+            'likes', 'isHighlighted', 'updatedAt'
+          ])
+          && request.resource.data.content is string
+          && request.resource.data.content.size() > 0
+          && request.resource.data.content.size() <= 2000
+          && request.resource.data.likes == 0
+          && request.resource.data.isHighlighted == false;
+        allow update: if isSignedIn()
+          && request.resource.data.userId == resource.data.userId
+          && (
+            (resource.data.userId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'content', 'updatedAt'
+              ]))
+            ||
+            (isStreamHost(streamId)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'isHighlighted', 'updatedAt'
+              ]))
+          );
+        allow delete: if isSignedIn()
+          && (resource.data.userId == request.auth.uid || isStreamHost(streamId));
+      }
+
+      match /likes/{userId} {
+        allow read: if isSignedIn();
+        allow create: if isSelf(userId)
+          && request.resource.data.keys().hasOnly(['streamId', 'userId', 'likedAt'])
+          && request.resource.data.streamId == streamId
+          && request.resource.data.userId == userId;
+        allow update: if false;
+        allow delete: if isSelf(userId)
+          && resource.data.streamId == streamId
+          && resource.data.userId == userId;
+      }
+
+      // Live moderation controls require trusted server/admin authority.
+      match /controls/{document=**} {
+        allow read, write: if false;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /streams/{streamId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'hostUid', 'hostName', 'title', 'description', 'status',
+          'viewerCount', 'createdAt', 'startedAt', 'endedAt', 'updatedAt'
+        ])
+        && request.resource.data.status == 'live';
+      allow update: if isSignedIn()
+        && resource.data.hostUid == request.auth.uid
+        && request.resource.data.hostUid == resource.data.hostUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'title', 'description', 'status', 'viewerCount', 'endedAt', 'updatedAt'
+        ]);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'senderId', 'senderName', 'text', 'type', 'mediaUrl', 'timestamp'
+          ])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+        allow update: if false;
+        allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+      }
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /gameRooms/{gameId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'gameType', 'hostId', 'players', 'invitedUsers', 'status',
+          'isPrivate', 'createdAt', 'maxPlayers', 'gameState', 'currentRound',
+          'scores', 'playerData', 'winner', 'completedAt', 'startedAt'
+        ])
+        && request.resource.data.players is list
+        && request.resource.data.players.size() == 1
+        && request.resource.data.players[0] == request.auth.uid
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.maxPlayers is int
+        && request.resource.data.maxPlayers >= 2
+        && request.resource.data.maxPlayers <= 16;
+      allow update: if isSignedIn()
+        && request.resource.data.hostId == resource.data.hostId
+        && (
+          (resource.data.hostId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'players', 'invitedUsers', 'status', 'isPrivate', 'gameState',
+              'currentRound', 'scores', 'playerData', 'winner', 'completedAt',
+              'startedAt'
+            ]))
+          ||
+          (resource.data.status == 'waiting'
+            && !(request.auth.uid in resource.data.players)
+            && request.auth.uid in request.resource.data.players
+            && request.resource.data.players.size() == resource.data.players.size() + 1
+            && request.resource.data.players.hasAll(resource.data.players)
+            && request.resource.data.players.size() <= resource.data.maxPlayers
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'players', 'scores', 'playerData'
+            ])
+            && request.resource.data.scores.diff(resource.data.scores).affectedKeys().hasOnly([
+              request.auth.uid
+            ])
+            && request.resource.data.playerData.diff(resource.data.playerData).affectedKeys().hasOnly([
+              request.auth.uid
+            ]))
+        );
+      allow delete: if false;
+    }
+
+    match /reports/{reportId} {
+      allow create: if isSignedIn()
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.keys().hasOnly([
+          'targetType', 'targetId', 'reporterId', 'reasonCode', 'details',
+          'createdAt', 'status'
+        ])
+        && request.resource.data.targetType in ['user', 'post', 'stream', 'comment']
+        && request.resource.data.targetId is string
+        && request.resource.data.targetId.size() > 0
+        && request.resource.data.reasonCode is string
+        && request.resource.data.reasonCode.size() > 0
+        && request.resource.data.reasonCode.size() <= 80
+        && (!('details' in request.resource.data)
+          || (request.resource.data.details is string
+            && request.resource.data.details.size() <= 1000));
+      allow read, update, delete: if false;
+    }
+
+    match /activities/{activityId} {
+      allow read: if isSignedIn() && resource.data.targetUserId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.targetUserId == request.auth.uid
+        && request.resource.data.targetUserId == resource.data.targetUserId
+        && request.resource.data.actorId == resource.data.actorId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+      allow create, delete: if false;
+    }
+
+    // Canonical economy, telemetry, moderation, operational analytics, and
+    // legacy shared-state collections are server-only. Firebase Admin/server
+    // credentials bypass these client rules.
+    match /wallets/{document=**} { allow read, write: if false; }
+    match /gems/{document=**} { allow read, write: if false; }
+    match /transactions/{document=**} { allow read, write: if false; }
+    match /ledger_entries/{document=**} { allow read, write: if false; }
+    match /gift_catalog/{document=**} { allow read, write: if false; }
+    match /gift_events/{document=**} { allow read, write: if false; }
+    match /iap_products/{document=**} { allow read, write: if false; }
+    match /alerts/{document=**} { allow read, write: if false; }
+    match /analytics/{document=**} { allow read, write: if false; }
+    match /analyticsPurgeLog/{document=**} { allow read, write: if false; }
+    match /processingAnalytics/{document=**} { allow read, write: if false; }
+    match /streamAlerts/{document=**} { allow read, write: if false; }
+    match /streamAnalytics/{document=**} { allow read, write: if false; }
+    match /moderationQueue/{document=**} { allow read, write: if false; }
+    match /moderationActions/{document=**} { allow read, write: if false; }
+    match /games/{document=**} { allow read, write: if false; }
+    match /gameSessions/{document=**} { allow read, write: if false; }
+    match /test/{document=**} { allow read, write: if false; }
+    match /test_collection/{document=**} { allow read, write: if false; }
+
+    // No collection inherits authenticated access implicitly.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
