@@ -17,6 +17,7 @@ import {
   requestContextMiddleware,
 } from './platform/gatewayMiddleware';
 import { runPlatformMigrations } from './platform/migrations/runner';
+import { trustRouter } from './trust/trustRoutes';
 
 const port = (() => {
   const rawPort = process.env.PORT;
@@ -94,6 +95,7 @@ app.use(economyRoutes);
 
 // New domain work is mounted only beneath the explicit v1 gateway contract.
 app.use('/api/v1/platform', platformRouter);
+app.use('/api/v1/trust', trustRouter);
 app.use('/api/v1', platformNotFound);
 
 // Legacy live routes remain available at /api/* until their domain migrations cut over.
@@ -139,6 +141,7 @@ async function main() {
     logger.info(`✅ blyp-live-service LISTENING ${url}`);
     logger.info(`📍 /health endpoint ready`);
     logger.info(`📍 /api/v1/platform/* contract ready`);
+    logger.info(`📍 /api/v1/trust/* contract ready`);
     logger.info(`📍 /api/* legacy routes ready`);
 
     logger.info(`📍 Socket.IO ready`);

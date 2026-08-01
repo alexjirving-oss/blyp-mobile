@@ -14,6 +14,8 @@
     "migrate:status": "node -r dotenv/config dist/platform/migrations/cli.js status",
     "migrate:rollback": "node -r dotenv/config dist/platform/migrations/cli.js rollback",
     "test:platform": "npm run build && node --test test/platform-contract.test.cjs",
+    "test:trust": "npm run build && node --test test/trust-policy.test.cjs",
+    "test:contracts": "npm run build && node --test test/*.test.cjs",
     "lint": "echo 'add eslint if needed'"
   },
   "dependencies": {

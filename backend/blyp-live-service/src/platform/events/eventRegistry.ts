@@ -20,10 +20,38 @@ const featureFlagUpdatedPayload = z.object({
   rolloutPercentage: z.number().int().min(0).max(100),
 });
 
+const trustConsentChangedPayload = z.object({
+  userId: z.string().min(1).max(256),
+  consentStatus: z.enum(['accepted', 'withdrawn']),
+  policyVersion: z.string().min(1).max(64),
+  ageBand: z.enum(['under_13', '13_15', '16_17', '18_plus']),
+  jurisdiction: z.string().regex(/^[A-Z]{2}$/),
+  profileVersion: z.number().int().positive(),
+});
+
+const trustPrivacyChangedPayload = z.object({
+  userId: z.string().min(1).max(256),
+  settingsVersion: z.number().int().positive(),
+  changedFields: z.array(z.string().min(1).max(64)).min(1).max(8),
+});
+
+const trustRelationshipChangedPayload = z.object({
+  actorUserId: z.string().min(1).max(256),
+  targetUserId: z.string().min(1).max(256),
+  controlType: z.enum(['block', 'mute']),
+  action: z.enum(['added', 'removed']),
+  reasonCode: z.string().min(1).max(64).nullable(),
+  expiresAt: z.string().datetime().nullable(),
+  controlVersion: z.number().int().positive(),
+});
+
 const eventSchemas = {
   'identity.linked.v1': identityLinkedPayload,
   'identity.link_revoked.v1': identityLinkRevokedPayload,
   'platform.feature_flag.updated.v1': featureFlagUpdatedPayload,
+  'trust.consent.changed.v1': trustConsentChangedPayload,
+  'trust.privacy.changed.v1': trustPrivacyChangedPayload,
+  'trust.relationship.changed.v1': trustRelationshipChangedPayload,
 } as const;
 
 export type RegisteredEventType = keyof typeof eventSchemas;

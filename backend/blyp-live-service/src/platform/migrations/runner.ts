@@ -2,6 +2,7 @@ import type { Knex } from 'knex';
 import { logger } from '../../config/logger';
 import { adoptExistingSchemaMigration } from './0001AdoptExistingSchema';
 import { platformSpineMigration } from './0002PlatformSpine';
+import { trustFoundationMigration } from './0003TrustFoundation';
 import type { PlatformMigration } from './types';
 
 const LOCK_NAMESPACE = 7319;
@@ -10,6 +11,7 @@ const LOCK_ID = 20260731;
 export const platformMigrations: PlatformMigration[] = [
   adoptExistingSchemaMigration,
   platformSpineMigration,
+  trustFoundationMigration,
 ];
 
 function validateRegistry() {
