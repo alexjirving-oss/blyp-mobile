@@ -102,9 +102,34 @@ export const promoteSpotlightBookSchema = z
   })
   .strict();
 
+const entitlementKeySchema = z.string().regex(/^[a-z][a-z0-9_.-]{2,127}$/);
+const mutationIdempotencyKeySchema = z.string().min(1).max(200);
+
+export const quotaReserveSchema = z
+  .object({
+    entitlementKey: entitlementKeySchema,
+    units: z.coerce.number().int().min(1).max(1000),
+    idempotencyKey: mutationIdempotencyKeySchema,
+  })
+  .strict();
+
+export const quotaResolutionSchema = z
+  .object({
+    idempotencyKey: mutationIdempotencyKeySchema,
+  })
+  .strict();
+
+export const quotaReservationParamsSchema = z
+  .object({
+    reservationId: z.string().uuid(),
+  })
+  .strict();
+
 export type GiftSendInput = z.infer<typeof giftSendSchema>;
 export type IapVerifyInput = z.infer<typeof iapVerifySchema>;
 export type AdminCreditCoinsInput = z.infer<typeof adminCreditCoinsSchema>;
 export type PromoteBattleInput = z.infer<typeof promoteBattleSchema>;
 export type PromoteTimeSlotBookInput = z.infer<typeof promoteTimeSlotBookSchema>;
 export type PromoteSpotlightBookInput = z.infer<typeof promoteSpotlightBookSchema>;
+export type QuotaReserveInput = z.infer<typeof quotaReserveSchema>;
+export type QuotaResolutionInput = z.infer<typeof quotaResolutionSchema>;

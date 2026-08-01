@@ -4,7 +4,7 @@ import { adoptExistingSchemaMigration } from './0001AdoptExistingSchema';
 import { platformSpineMigration } from './0002PlatformSpine';
 import { trustFoundationMigration } from './0003TrustFoundation';
 import { contentFoundationMigration } from './0004ContentFoundation';
-
+import { economyEntitlementsMigration } from './0005EconomyEntitlements';
 import type { PlatformMigration } from './types';
 
 const LOCK_NAMESPACE = 7319;
@@ -15,6 +15,7 @@ export const platformMigrations: PlatformMigration[] = [
   platformSpineMigration,
   trustFoundationMigration,
   contentFoundationMigration,
+  economyEntitlementsMigration,
 ];
 
 function validateRegistry() {

@@ -121,7 +121,10 @@ test('content lifecycle events are registered and payload-validated', () => {
 
 test('content migration is ordered, constrained, and flags are disabled by default', () => {
   const ids = migrations.platformMigrations.map((migration) => migration.id);
-  assert.equal(ids.at(-1), '0004_content_foundation');
+  const contentMigrationId = '0004_content_foundation';
+  assert.equal(ids.filter((id) => id === contentMigrationId).length, 1);
+  assert.deepEqual(ids, [...ids].sort());
+  assert.ok(ids.indexOf(contentMigrationId) > ids.indexOf('0003_trust_foundation'));
   assert.equal(new Set(ids).size, ids.length);
   assert.match(migrationSource, /content_profiles/);
   assert.match(migrationSource, /content_posts/);
@@ -137,14 +140,22 @@ test('content mutations derive identity from Cognito and are idempotency-protect
   assert.doesNotMatch(routeSource, /authorUserId\s*[:=]\s*req\.body/);
   assert.match(routeSource, /isFeatureEnabled\(db, CONTENT_FLAG, userId\)/);
 
-  for (const fragment of [
-    "contentRouter.put(\n  '/profiles/me',\n  requireMutationIdempotency",
-    "contentRouter.post(\n  '/posts',",
-    "contentRouter.patch(\n  '/posts/:postId',\n  requireMutationIdempotency",
-    "contentRouter.post(\n  '/posts/:postId/publish',\n  requireMutationIdempotency",
-    "contentRouter.delete(\n  '/posts/:postId',\n  requireMutationIdempotency",
+  for (const [method, path] of [
+    ['put', '/profiles/me'],
+    ['post', '/posts'],
+    ['patch', '/posts/:postId'],
+    ['post', '/posts/:postId/publish'],
+    ['delete', '/posts/:postId'],
   ]) {
-    assert.ok(routeSource.includes(fragment), `missing idempotency protection: ${fragment}`);
+    const declaration = routeSource.match(
+      new RegExp(`contentRouter\\.${method}\\(\\s*'${path}',([\\s\\S]*?)asyncRoute`)
+    );
+    assert.ok(declaration, `missing mutation route declaration: ${method.toUpperCase()} ${path}`);
+    assert.match(
+      declaration[1],
+      /requireMutationIdempotency/,
+      `missing idempotency protection: ${method.toUpperCase()} ${path}`
+    );
   }
   assert.match(serviceSource, /requireTrustPolicyInTransaction/);
   assert.match(serviceSource, /enqueueDomainEvent/);

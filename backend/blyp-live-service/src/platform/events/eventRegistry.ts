@@ -78,8 +78,19 @@ const contentPostStateChangedPayload = z.object({
   version: z.number().int().positive(),
 });
 
-const eventSchemas = {
+const quotaUsagePayload = z.object({
+  userId: z.string().min(1).max(256),
+  entitlementKey: z.string().regex(/^[a-z][a-z0-9_.-]{2,127}$/),
+  planId: z.string().min(1).max(128),
+  reservationId: z.string().uuid(),
+  quotaPeriodId: z.string().uuid(),
+  units: z.number().int().positive(),
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
+  remainingUnits: z.number().int().nonnegative(),
+});
 
+const eventSchemas = {
   'identity.linked.v1': identityLinkedPayload,
   'identity.link_revoked.v1': identityLinkRevokedPayload,
   'platform.feature_flag.updated.v1': featureFlagUpdatedPayload,
@@ -90,6 +101,10 @@ const eventSchemas = {
   'content.post.created.v1': contentPostCreatedPayload,
   'content.post.updated.v1': contentPostUpdatedPayload,
   'content.post.state_changed.v1': contentPostStateChangedPayload,
+  'economy.quota.reserved.v1': quotaUsagePayload,
+  'economy.quota.committed.v1': quotaUsagePayload,
+  'economy.quota.refunded.v1': quotaUsagePayload,
+  'economy.quota.expired.v1': quotaUsagePayload,
 } as const;
 
 export type RegisteredEventType = keyof typeof eventSchemas;
