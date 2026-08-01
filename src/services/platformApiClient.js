@@ -152,10 +152,17 @@ export const platformApi = {
   get(path, options = {}) {
     return platformApiRequest(path, { ...options, method: 'GET' });
   },
-  post(path, body, options = {}) {
+    post(path, body, options = {}) {
     return platformApiRequest(path, { ...options, method: 'POST', body });
   },
+  put(path, body, options = {}) {
+    return platformApiRequest(path, { ...options, method: 'PUT', body });
+  },
+  patch(path, body, options = {}) {
+    return platformApiRequest(path, { ...options, method: 'PATCH', body });
+  },
   delete(path, options = {}) {
+
     return platformApiRequest(path, { ...options, method: 'DELETE' });
   },
 };

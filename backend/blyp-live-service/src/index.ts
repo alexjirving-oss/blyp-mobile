@@ -20,6 +20,8 @@ import {
 } from './platform/gatewayMiddleware';
 import { runPlatformMigrations } from './platform/migrations/runner';
 import { trustRouter } from './trust/trustRoutes';
+import { contentRouter } from './content/contentRoutes';
+import { discoveryRouter } from './content/discoveryRoutes';
 
 const port = (() => {
   const rawPort = process.env.PORT;
@@ -99,6 +101,8 @@ app.use(economyRoutes);
 app.use('/api/v1/economy', economyApiRouter);
 app.use('/api/v1/platform', platformRouter);
 app.use('/api/v1/trust', trustRouter);
+app.use('/api/v1/content', contentRouter);
+app.use('/api/v1/discovery', discoveryRouter);
 app.use('/api/v1', platformNotFound);
 
 // Legacy live routes remain available at /api/* until their domain migrations cut over.
@@ -145,7 +149,10 @@ async function main() {
     logger.info(`📍 /health endpoint ready`);
     logger.info(`📍 /api/v1/economy/* contract ready`);
     logger.info(`📍 /api/v1/platform/* contract ready`);
-    logger.info(`📍 /api/v1/trust/* contract ready`);
+        logger.info(`📍 /api/v1/trust/* contract ready`);
+    logger.info(`📍 /api/v1/content/* contract ready`);
+    logger.info(`📍 /api/v1/discovery/* contract ready`);
+
     logger.info(`📍 /api/* legacy routes ready`);
 
     logger.info(`📍 Socket.IO ready`);

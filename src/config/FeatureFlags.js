@@ -4,6 +4,8 @@ const SERVER_KEYS = Object.freeze({
   manifestEnabled: 'live.manifest',
   playlistViewerEnabled: 'live.playlist_viewer',
   playlistExperimentId: 'live.playlist_experiment',
+  contentApiV1: 'content.api_v1',
+  feedDiscoveryV1: 'feed.discovery_v1',
 });
 
 const listeners = new Set();
@@ -12,6 +14,8 @@ let state = Object.freeze({
   manifestEnabled: false,
   playlistViewerEnabled: false,
   playlistExperimentId: null,
+  contentApiV1: false,
+  feedDiscoveryV1: false,
 });
 
 function notify() {
@@ -34,7 +38,16 @@ export function isPlaylistViewerEnabled() {
   return state.playlistViewerEnabled === true;
 }
 
+export function isContentApiV1Enabled() {
+  return state.contentApiV1 === true;
+}
+
+export function isFeedDiscoveryV1Enabled() {
+  return state.feedDiscoveryV1 === true;
+}
+
 export function getFeatureFlags() {
+
   return state;
 }
 
@@ -56,9 +69,12 @@ export async function refreshFeatureFlags() {
       loaded: true,
       manifestEnabled: enabled(flags, SERVER_KEYS.manifestEnabled),
       playlistViewerEnabled: enabled(flags, SERVER_KEYS.playlistViewerEnabled),
-      playlistExperimentId: enabled(flags, SERVER_KEYS.playlistExperimentId)
+            playlistExperimentId: enabled(flags, SERVER_KEYS.playlistExperimentId)
         ? String(flags[SERVER_KEYS.playlistExperimentId]?.variant || 'enabled')
         : null,
+      contentApiV1: enabled(flags, SERVER_KEYS.contentApiV1),
+      feedDiscoveryV1: enabled(flags, SERVER_KEYS.feedDiscoveryV1),
+
     });
   } catch {
     // Remote configuration is security-sensitive: unavailable or malformed
@@ -67,8 +83,11 @@ export async function refreshFeatureFlags() {
       loaded: false,
       manifestEnabled: false,
       playlistViewerEnabled: false,
-      playlistExperimentId: null,
+            playlistExperimentId: null,
+      contentApiV1: false,
+      feedDiscoveryV1: false,
     });
+
   }
   notify();
   return state;
