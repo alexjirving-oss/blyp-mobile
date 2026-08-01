@@ -85,6 +85,13 @@ async function withMigrationLock<T>(db: Knex, operation: () => Promise<T>): Prom
   }
 }
 
+async function migrationLedgerExists(db: Knex): Promise<boolean> {
+  const result = await db.raw(`
+    SELECT to_regclass('platform_schema_migrations') IS NOT NULL AS ledger_exists
+  `);
+  return result.rows?.[0]?.ledger_exists === true;
+}
+
 async function appliedMigrationIds(db: Knex): Promise<string[]> {
   const rows = await db('platform_schema_migrations')
     .select<{ migration_id: string }[]>('migration_id')
@@ -94,14 +101,19 @@ async function appliedMigrationIds(db: Knex): Promise<string[]> {
 
 export async function getMigrationStatus(db: Knex) {
   validateRegistry();
-  await ensureMigrationLedger(db);
-  const applied = new Set(await appliedMigrationIds(db));
-  return platformMigrations.map((migration) => ({
-    id: migration.id,
-    description: migration.description,
-    applied: applied.has(migration.id),
-    reversible: migration.reversible,
-  }));
+  const ledgerExists = await migrationLedgerExists(db);
+  const applied = ledgerExists
+    ? new Set(await appliedMigrationIds(db))
+    : new Set<string>();
+  return {
+    ledgerExists,
+    migrations: platformMigrations.map((migration) => ({
+      id: migration.id,
+      description: migration.description,
+      applied: applied.has(migration.id),
+      reversible: migration.reversible,
+    })),
+  };
 }
 
 export async function runPlatformMigrations(db: Knex): Promise<void> {

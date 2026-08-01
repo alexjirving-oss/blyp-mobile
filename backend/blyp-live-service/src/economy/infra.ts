@@ -12,16 +12,23 @@ export type EconomyInfra = {
 let cachedInfra: EconomyInfra | null = null;
 let cachedBullmqRedis: Redis | null = null;
 
+function buildEconomyDb(postgresUrl: string): Knex {
+  return knex({
+    client: 'pg',
+    connection: postgresUrl,
+    pool: { min: 0, max: 10 },
+  });
+}
+
+export function createEconomyDb(): Knex {
+  return buildEconomyDb(getEconomyEnv().POSTGRES_URL);
+}
+
 export function getEconomyInfra(): EconomyInfra {
   if (cachedInfra) return cachedInfra;
 
   const env = getEconomyEnv();
-
-  const db = knex({
-    client: 'pg',
-    connection: env.POSTGRES_URL,
-    pool: { min: 0, max: 10 },
-  });
+  const db = buildEconomyDb(env.POSTGRES_URL);
 
   // Keep Redis failures from hanging request flows.
   // - Fast connect timeout
@@ -88,6 +95,13 @@ export async function checkDb(db: Knex): Promise<{ ok: boolean; error?: string }
 
 export async function checkRedis(redis: Redis): Promise<{ ok: boolean; error?: string }> {
   try {
+    if (redis.status === 'wait') {
+      await redis.connect();
+    }
+    if (redis.status !== 'ready') {
+      return { ok: false, error: `Redis is not ready (status: ${redis.status})` };
+    }
+
     const pong = await redis.ping();
     if (pong !== 'PONG') {
       return { ok: false, error: `Unexpected PING response: ${pong}` };

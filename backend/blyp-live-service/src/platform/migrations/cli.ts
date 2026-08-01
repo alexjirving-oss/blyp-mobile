@@ -1,5 +1,5 @@
 import '../../config/env';
-import { getEconomyInfra } from '../../economy/infra';
+import { createEconomyDb } from '../../economy/infra';
 import {
   getMigrationStatus,
   rollbackLastPlatformMigration,
@@ -8,7 +8,7 @@ import {
 
 async function main() {
   const command = String(process.argv[2] || 'status').toLowerCase();
-  const { db, redis } = getEconomyInfra();
+  const db = createEconomyDb();
 
   try {
     if (command === 'up') {
@@ -25,13 +25,13 @@ async function main() {
       return;
     }
     if (command === 'status') {
-      const migrations = await getMigrationStatus(db);
-      console.log(JSON.stringify({ ok: true, command: 'status', migrations }, null, 2));
+      const status = await getMigrationStatus(db);
+      console.log(JSON.stringify({ ok: true, command: 'status', ...status }, null, 2));
       return;
     }
     throw new Error(`Unknown migration command: ${command}`);
   } finally {
-    await Promise.allSettled([db.destroy(), redis.quit()]);
+    await db.destroy();
   }
 }
 
