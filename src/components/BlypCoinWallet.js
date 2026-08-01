@@ -9,11 +9,11 @@ import {
   ScrollView,
   FlatList,
   SafeAreaView,
-  Alert,
 } from 'react-native';
+
 import { LinearGradient } from 'expo-linear-gradient';
-import { doc, getDoc, getDocs } from 'firebase/firestore';
-import { auth, firestore as db } from '../config/firebase';
+import { auth } from '../config/firebase';
+
 import BlypCoinService from '../services/BlypCoinService';
 
 const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => {
@@ -21,37 +21,18 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
   const [showModal, setShowModal] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [canClaimDaily, setCanClaimDaily] = useState(false);
+
   const currentUser = auth.currentUser;
 
   useEffect(() => {
-    if (currentUser) {
-      // Subscribe to real-time balance updates
-      const unsubscribe = BlypCoinService.subscribeToBalance(currentUser.uid, (newBalance) => {
-        setBalance(newBalance);
-      });
+    if (!currentUser) return undefined;
 
-      checkDailyReward();
-      return unsubscribe;
-    }
+    const unsubscribe = BlypCoinService.subscribeToBalance(currentUser.uid, (newBalance) => {
+      setBalance(newBalance);
+    });
+
+    return unsubscribe;
   }, [currentUser]);
-
-  const checkDailyReward = async () => {
-    // Check if user can claim daily reward
-    // This is a simplified check - you'd want more robust logic
-    try {
-      const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-      if (userDoc.exists()) {
-        const lastCheckIn = userDoc.data().lastCheckIn?.toDate();
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        setCanClaimDaily(!lastCheckIn || lastCheckIn < today);
-      }
-    } catch (error) {
-      console.error('Error checking daily reward:', error);
-    }
-  };
 
   const loadTransactions = async () => {
     if (!currentUser) return;
@@ -64,22 +45,6 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
       console.error('Error loading transactions:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleClaimDailyReward = async () => {
-    if (!currentUser) return;
-    
-    try {
-      const result = await BlypCoinService.claimDailyReward(currentUser.uid);
-      Alert.alert(
-        'Daily Reward Claimed! 🎉',
-        `You earned ${result.reward} Blypcoins!\nCurrent streak: ${result.streak} days`,
-        [{ text: 'Awesome!', style: 'default' }]
-      );
-      setCanClaimDaily(false);
-    } catch (error) {
-      Alert.alert('Already Claimed', 'Come back tomorrow for your next reward!');
     }
   };
 
@@ -168,16 +133,6 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
             <Icon  name="add" size={16} color="#fff"  />
             <Text style={styles.actionText}>Buy Coins</Text>
           </TouchableOpacity>
-
-          {canClaimDaily && (
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.dailyButton]}
-              onPress={handleClaimDailyReward}
-            >
-              <Icon  name="gift" size={16} color="#fff"  />
-              <Text style={styles.actionText}>Daily Reward</Text>
-            </TouchableOpacity>
-          )}
 
           <TouchableOpacity 
             style={styles.actionButton}

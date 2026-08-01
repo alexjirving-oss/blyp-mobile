@@ -13,8 +13,11 @@
     "migrate": "node -r dotenv/config dist/platform/migrations/cli.js up",
     "migrate:status": "node -r dotenv/config dist/platform/migrations/cli.js status",
     "migrate:rollback": "node -r dotenv/config dist/platform/migrations/cli.js rollback",
-    "test:platform": "npm run build && node --test test/platform-contract.test.cjs",
+        "test:platform": "npm run build && node --test test/platform-contract.test.cjs",
+    "test:economy": "npm run build && node --test test/economy-api-contract.test.cjs",
+    "test:contracts": "npm run build && node --test test/*.test.cjs",
     "lint": "echo 'add eslint if needed'"
+
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1006.0",

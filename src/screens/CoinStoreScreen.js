@@ -13,283 +13,105 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { auth } from '../config/firebase';
-import BlypCoinService from '../services/BlypCoinService';
-import GemService from '../services/GemService';
+import {
+  getEconomyCatalog,
+  getEconomyWallet,
+  subscribeToEconomyWallet,
+} from '../services/economyApiService';
 
 const { width } = Dimensions.get('window');
 
-// Gem packages data
-const getGemPackages = () => [
-  {
-    id: 'gems_1',
-    gems: 50,
-    bonus: 0,
-    price: 0.99,
-    icon: '💎',
-    popular: false
-  },
-  {
-    id: 'gems_2',
-    gems: 120,
-    bonus: 20,
-    price: 1.99,
-    icon: '💎',
-    popular: true
-  },
-  {
-    id: 'gems_3',
-    gems: 300,
-    bonus: 80,
-    price: 4.99,
-    icon: '💎',
-    popular: false
-  },
-  {
-    id: 'gems_4',
-    gems: 650,
-    bonus: 200,
-    price: 9.99,
-    icon: '💎',
-    popular: false
-  },
-  {
-    id: 'gems_5',
-    gems: 1500,
-    bonus: 600,
-    price: 19.99,
-    icon: '💎',
-    popular: false
-  }
-];
+
 
 const CoinStoreScreen = ({ navigation }) => {
   const [balance, setBalance] = useState(0);
   const [gemBalance, setGemBalance] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState('coins'); // 'coins' or 'gems'
-  const [packages] = useState(BlypCoinService.getCoinPackages());
-  const [gemPackages] = useState(() => getGemPackages());
+  const [packages, setPackages] = useState([]);
+
   const currentUser = auth.currentUser;
 
   useEffect(() => {
-    loadBalance();
-    
-    if (!currentUser) return;
-    
-    // Subscribe to real-time balance updates
-    const unsubscribeCoin = BlypCoinService.subscribeToBalance(currentUser.uid, (newBalance) => {
-      setBalance(newBalance);
-    });
-    
-    const unsubscribeGem = GemService.subscribeToGems(currentUser.uid, (newBalance) => {
-      setGemBalance(newBalance);
-    });
+    if (!currentUser) return undefined;
 
-    return () => {
-      if (unsubscribeCoin) unsubscribeCoin();
-      if (unsubscribeGem) unsubscribeGem();
+    const loadStore = async () => {
+      try {
+        const [wallet, catalog] = await Promise.all([
+          getEconomyWallet(),
+          getEconomyCatalog(),
+        ]);
+        setBalance(wallet.spendableCoins);
+        setGemBalance(wallet.gemAvailable);
+        setPackages(catalog.coinPacks);
+      } catch (error) {
+        console.error('Error loading canonical economy store:', error);
+      }
     };
+
+    void loadStore();
+    const unsubscribe = subscribeToEconomyWallet(
+      (wallet) => {
+        setBalance(wallet.spendableCoins);
+        setGemBalance(wallet.gemAvailable);
+      },
+      {
+        onError: (error) => console.error('Canonical wallet refresh failed:', error),
+      }
+    );
+
+    return unsubscribe;
   }, [currentUser]);
 
-  const loadBalance = async () => {
-    if (currentUser) {
-      try {
-        const userBalance = await BlypCoinService.getUserBalance(currentUser.uid);
-        setBalance(userBalance);
-        
-        const userGems = await GemService.getUserGems(currentUser.uid);
-        setGemBalance(userGems);
-      } catch (error) {
-        console.error('Error loading balance:', error);
-      }
-    }
-  };
-
-  const handlePurchase = async (packageData) => {
+  const handlePurchase = (packageData) => {
     if (!currentUser) {
       Alert.alert('Error', 'Please log in to purchase Blypcoins');
       return;
     }
 
+    const metadata = packageData.metadata || {};
+    const displayPrice = metadata.displayPrice || metadata.priceLabel || null;
     Alert.alert(
-      'Purchase Blypcoins',
-      `Buy ${packageData.coins + packageData.bonus} Blypcoins for $${packageData.price}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy Now',
-          onPress: () => processPurchase(packageData)
-        }
-      ]
+      'Store checkout required',
+      `${Number(packageData.coinsGranted || 0).toLocaleString()} Blypcoins${
+        displayPrice ? ` for ${displayPrice}` : ''
+      } are available through ${packageData.platform}. No balance is granted until the store receipt is verified by Blyp.`,
+      [{ text: 'OK', style: 'default' }]
     );
-  };
-
-  const processPurchase = async (packageData) => {
-    setLoading(true);
-    try {
-      // In a real app, integrate with payment processor (Stripe, Apple Pay, etc.)
-      // For demo, we'll simulate the purchase
-      
-      const totalCoins = packageData.coins + packageData.bonus;
-      
-      await BlypCoinService.addCoins(
-        currentUser.uid,
-        totalCoins,
-        'purchase',
-        {
-          packageId: packageData.id,
-          price: packageData.price,
-          baseCoins: packageData.coins,
-          bonusCoins: packageData.bonus
-        }
-      );
-      
-      Alert.alert(
-        'Purchase Successful! 🎉',
-        `You received ${totalCoins} Blypcoins!`,
-        [{ text: 'Awesome!', style: 'default' }]
-      );
-      
-    } catch (error) {
-      console.error('Purchase error:', error);
-      Alert.alert('Purchase Failed', 'Please try again later.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGemPurchase = async (packageData) => {
-    if (!currentUser) {
-      Alert.alert('Error', 'Please log in to purchase Gems');
-      return;
-    }
-
-    Alert.alert(
-      'Purchase Gems',
-      `Buy ${packageData.gems + packageData.bonus} Gems for $${packageData.price}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy Now',
-          onPress: () => processGemPurchase(packageData)
-        }
-      ]
-    );
-  };
-
-  const processGemPurchase = async (packageData) => {
-    setLoading(true);
-    try {
-      const totalGems = packageData.gems + packageData.bonus;
-      
-      await GemService.addGems(
-        currentUser.uid,
-        totalGems,
-        'purchase'
-      );
-      
-      Alert.alert(
-        'Purchase Successful! 💎',
-        `You received ${totalGems} Gems!`,
-        [{ text: 'Awesome!', style: 'default' }]
-      );
-      
-    } catch (error) {
-      console.error('Gem purchase error:', error);
-      Alert.alert('Purchase Failed', 'Please try again later.');
-    } finally {
-      setLoading(false);
-    }
   };
 
   const renderPackage = (pkg) => {
-    const totalCoins = pkg.coins + pkg.bonus;
-    const coinValue = pkg.price / totalCoins;
-    const savings = pkg.bonus > 0 ? Math.round((pkg.bonus / pkg.coins) * 100) : 0;
+    const metadata = pkg.metadata || {};
+    const popular = metadata.popular === true;
+    const displayPrice = metadata.displayPrice || metadata.priceLabel || 'Verified store SKU';
 
     return (
       <TouchableOpacity
-        key={pkg.id}
-        style={[styles.packageCard, pkg.popular && styles.popularCard]}
+        key={`${pkg.platform}:${pkg.sku}`}
+        style={[styles.packageCard, popular && styles.popularCard]}
         onPress={() => handlePurchase(pkg)}
-        disabled={loading}
+        disabled={!pkg.enabled}
         activeOpacity={0.8}
       >
         <LinearGradient
-          colors={pkg.popular ? ['#6366f1', '#8b5cf6', '#ec4899'] : ['#1e293b', '#334155', '#475569']}
+          colors={popular ? ['#6366f1', '#8b5cf6', '#ec4899'] : ['#1e293b', '#334155', '#475569']}
           style={styles.packageGradient}
         >
-          {pkg.popular && (
+          {popular && (
             <View style={styles.popularBadge}>
               <Text style={styles.popularText}>MOST POPULAR</Text>
             </View>
           )}
-          
-          <Text style={styles.packageIcon}>{pkg.icon}</Text>
-          
-          <View style={styles.coinInfo}>
-            <Text style={styles.coinAmount}>{pkg.coins.toLocaleString()}</Text>
-            {pkg.bonus > 0 && (
-              <Text style={styles.bonusText}>+{pkg.bonus} BONUS</Text>
-            )}
-            <Text style={styles.totalCoins}>= {totalCoins.toLocaleString()} total</Text>
-          </View>
-          
-          <View style={styles.priceInfo}>
-            <Text style={styles.price}>${pkg.price}</Text>
-            <Text style={styles.pricePerCoin}>
-              ${coinValue.toFixed(3)} per coin
-            </Text>
-            {savings > 0 && (
-              <Text style={styles.savings}>Save {savings}%!</Text>
-            )}
-          </View>
-        </LinearGradient>
-      </TouchableOpacity>
-    );
-  };
 
-  const renderGemPackage = (pkg) => {
-    const totalGems = pkg.gems + pkg.bonus;
-    const gemValue = pkg.price / totalGems;
-    const savings = pkg.bonus > 0 ? Math.round((pkg.bonus / pkg.gems) * 100) : 0;
+          <Text style={styles.packageIcon}>🪙</Text>
 
-    return (
-      <TouchableOpacity
-        key={pkg.id}
-        style={[styles.packageCard, pkg.popular && styles.popularCard]}
-        onPress={() => handleGemPurchase(pkg)}
-        disabled={loading}
-        activeOpacity={0.8}
-      >
-        <LinearGradient
-          colors={pkg.popular ? ['#ec4899', '#be185d', '#9d174d'] : ['#374151', '#4b5563', '#6b7280']}
-          style={styles.packageGradient}
-        >
-          {pkg.popular && (
-            <View style={styles.popularBadge}>
-              <Text style={styles.popularText}>MOST POPULAR</Text>
-            </View>
-          )}
-          
-          <Text style={styles.packageIcon}>{pkg.icon}</Text>
-          
           <View style={styles.coinInfo}>
-            <Text style={styles.coinAmount}>{pkg.gems.toLocaleString()}</Text>
-            {pkg.bonus > 0 && (
-              <Text style={styles.bonusText}>+{pkg.bonus} BONUS</Text>
-            )}
-            <Text style={styles.totalCoins}>= {totalGems.toLocaleString()} total</Text>
+            <Text style={styles.coinAmount}>{Number(pkg.coinsGranted || 0).toLocaleString()}</Text>
+            <Text style={styles.totalCoins}>{pkg.platform} • {pkg.sku}</Text>
           </View>
-          
+
           <View style={styles.priceInfo}>
-            <Text style={styles.price}>${pkg.price}</Text>
-            <Text style={styles.pricePerCoin}>
-              ${gemValue.toFixed(3)} per gem
-            </Text>
-            {savings > 0 && (
-              <Text style={styles.savings}>Save {savings}%!</Text>
-            )}
+            <Text style={styles.price}>{displayPrice}</Text>
+            <Text style={styles.pricePerCoin}>Server-verified receipt required</Text>
           </View>
         </LinearGradient>
       </TouchableOpacity>
@@ -366,12 +188,20 @@ const CoinStoreScreen = ({ navigation }) => {
         <View style={styles.packagesSection}>
           <Text style={styles.sectionTitle}>Choose Your Package</Text>
           
-          <View style={styles.packagesGrid}>
-            {selectedTab === 'coins' 
-              ? packages.map(renderPackage)
-              : gemPackages.map(renderGemPackage)
-            }
+                    <View style={styles.packagesGrid}>
+            {selectedTab === 'coins' ? (
+              packages.length > 0 ? (
+                packages.map(renderPackage)
+              ) : (
+                <Text style={styles.infoText}>No verified coin packages are currently available.</Text>
+              )
+            ) : (
+              <Text style={styles.infoText}>
+                Gem purchases are unavailable until a server-authoritative store contract is released.
+              </Text>
+            )}
           </View>
+
         </View>
 
         {/* Features */}

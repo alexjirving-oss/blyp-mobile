@@ -1,8 +1,9 @@
 /**
  * Strict Firestore Security Rules tests.
  *
- * The current rules establish an authenticated-only baseline. Collection-level
- * ownership and field authorization remain an explicit production-release item.
+ * Server-managed economy collections are denied to all client SDK contexts.
+ * Unrelated collections retain the temporary authenticated-only baseline until
+ * their domain-specific ownership and field policies are delivered.
  */
 const fs = require('fs');
 const path = require('path');
@@ -50,10 +51,10 @@ async function main() {
         createdAt: serverTimestamp(),
       })
     );
-    console.log('PASS: authenticated user can create a document');
+    console.log('PASS: authenticated user can create a legacy-baseline document');
 
     await assertSucceeds(getDoc(doc(viewerDb, 'posts', postId)));
-    console.log('PASS: authenticated user can read an existing document');
+    console.log('PASS: authenticated user can read an existing legacy-baseline document');
 
     await assertFails(getDoc(doc(anonymousDb, 'posts', postId)));
     console.log('PASS: anonymous document reads are denied');
@@ -94,9 +95,32 @@ async function main() {
     );
     console.log('PASS: anonymous comment reads and writes are denied');
 
+    const protectedEconomyPaths = [
+      'wallets/user_owner',
+      'gems/user_owner',
+      'transactions/tx-1',
+      'ledger_entries/ledger-1',
+      'gift_catalog/gift-1',
+      'gift_events/event-1',
+      'iap_products/product-1',
+    ];
+
+    for (const protectedPath of protectedEconomyPaths) {
+      const protectedRef = doc(ownerDb, protectedPath);
+      await assertFails(getDoc(protectedRef));
+      await assertFails(
+        setDoc(protectedRef, {
+          userId: ownerId,
+          balance: 999999,
+          createdAt: serverTimestamp(),
+        })
+      );
+    }
+    console.log('PASS: authenticated clients cannot read or write server-managed economy collections');
+
     console.warn(
-      'NOTICE: Firestore remains on a legacy authenticated catch-all policy. ' +
-        'Collection-specific ownership and field rules are required before production release.'
+      'NOTICE: unrelated Firestore domains remain on a legacy authenticated catch-all policy. ' +
+        'Collection-specific ownership and field rules are still required before production release.'
     );
   } finally {
     await environment.cleanup();
