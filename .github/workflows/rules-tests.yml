@@ -31,7 +31,7 @@ jobs:
         env:
           FIREBASE_PROJECT_ID: demo-blyp-livestream
         run: |
-          firebase emulators:exec --only firestore,storage "npm run test:rules" || exit 1
+          firebase emulators:exec --only "firestore,storage" "npm run test:rules:unit" || exit 1
 
       - name: Archive Test Artifacts
         if: always()

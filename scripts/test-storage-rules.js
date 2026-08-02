@@ -1,72 +1,128 @@
 /**
- * Storage Security Rules Automated Tests (Task 20 partial)
- * NOTE: Firebase rules-unit-testing v3+ does not provide a rich Storage emulator assertion helper
- * akin to Firestore, so we use @firebase/rules-unit-testing with fetch to emulator REST endpoints.
+ * Storage security rules — fail-closed emulator tests.
  *
- * Run:
- *  1. Ensure storage emulator enabled in firebase.json and started:
- *     firebase emulators:start --only storage
- *  2. node scripts/test-storage-rules.js
+ * Prefer:
+ *   firebase emulators:exec --only storage "npm run test:rules:storage"
  */
 
 const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch');
-const FormData = require('form-data');
+const {
+  initializeTestEnvironment,
+  assertFails,
+  assertSucceeds,
+} = require('@firebase/rules-unit-testing');
+const { ref, uploadBytes, getBytes } = require('firebase/storage');
 
-const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-livestream';
-const STORAGE_EMULATOR_HOST = process.env.FIREBASE_STORAGE_EMULATOR_HOST || 'localhost:9199';
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-rules';
+const RULES_PATH = path.join(__dirname, '..', 'storage.rules');
 
-function storageUploadUrl(bucket, objectPath, token) {
-  return `http://${STORAGE_EMULATOR_HOST}/v0/b/${encodeURIComponent(bucket)}/o?name=${encodeURIComponent(objectPath)}${token ? `&uploadType=media&token=${token}` : '&uploadType=media'}`;
-}
+(async () => {
+  let failures = 0;
+  const hostString = process.env.FIREBASE_STORAGE_EMULATOR_HOST || '127.0.0.1:9199';
+  const [emHost, emPortRaw] = hostString.split(':');
+  const emPort = parseInt(emPortRaw, 10) || 9199;
 
-async function upload(bucket, objectPath, contentType, bytes, authToken) {
-  const url = storageUploadUrl(bucket, objectPath, authToken);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': contentType },
-    body: bytes
+  const env = await initializeTestEnvironment({
+    projectId: PROJECT_ID,
+    storage: {
+      rules: fs.readFileSync(RULES_PATH, 'utf8'),
+      host: emHost,
+      port: emPort,
+    },
   });
-  const text = await res.text();
-  return { status: res.status, body: text };
-}
 
-async function main() {
-  const bucket = `${PROJECT_ID}.appspot.com`; // emulator auto-normalizes
-  console.log('🗄  Testing storage rules against emulator bucket:', bucket);
+  const ownerId = 'user_owner';
+  const otherId = 'user_other';
+  const ownerStorage = env.authenticatedContext(ownerId).storage();
+  const otherStorage = env.authenticatedContext(otherId).storage();
+  const anonStorage = env.unauthenticatedContext().storage();
 
-  const validMp4 = Buffer.alloc(1024, 0); // 1KB placeholder
+  const tinyPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    'base64'
+  );
 
   async function expectAllow(promise, label) {
-    const { status, body } = await promise;
-    if (status < 300) console.log(`✅ ALLOW (${status}): ${label}`);
-    else console.error(`❌ Expected ALLOW got ${status}: ${label}\n${body}`);
+    try {
+      await assertSucceeds(promise);
+      console.log(`ALLOW: ${label}`);
+    } catch (e) {
+      failures += 1;
+      console.error(`FAIL expected ALLOW: ${label}`, e?.message || e);
+    }
   }
+
   async function expectDeny(promise, label) {
-    const { status, body } = await promise;
-    if (status >= 400) console.log(`✅ DENY (${status}): ${label}`);
-    else console.error(`❌ Expected DENY got ${status}: ${label}`);
+    try {
+      await assertFails(promise);
+      console.log(`DENY: ${label}`);
+    } catch (e) {
+      failures += 1;
+      console.error(`FAIL expected DENY: ${label}`, e?.message || e);
+    }
   }
 
-  // Adjust paths to match rules expectation
-  const streamId = 'testStream1';
-  const base = `streams/${streamId}/segments`;
+  console.log(`Connected to Storage emulator ${emHost}:${emPort}`);
 
-  // 1. Valid segment upload (pretend authenticated) - emulator lacks full auth propagation; may need rule relaxed for emulator testing or token override.
-  await expectAllow(upload(bucket, `${base}/seg0.mp4`, 'video/mp4', validMp4), 'Valid mp4 segment upload');
+  await expectAllow(
+    uploadBytes(ref(ownerStorage, `users/${ownerId}/avatar.png`), tinyPng, {
+      contentType: 'image/png',
+    }),
+    'owner uploads own user media'
+  );
 
-  // 2. Disallowed extension / MIME
-  await expectDeny(upload(bucket, `${base}/bad.txt`, 'text/plain', Buffer.from('hi')), 'Disallowed mime/text upload');
+  await expectDeny(
+    uploadBytes(ref(ownerStorage, `users/${otherId}/avatar.png`), tinyPng, {
+      contentType: 'image/png',
+    }),
+    'cannot upload into another user path'
+  );
 
-  // 3. Oversized file simulation (if rule enforces size) - create > allowed size (e.g., >50MB). Here just placeholder; if rule uses size, adjust threshold.
-  const bigBuffer = Buffer.alloc(60 * 1024 * 1024, 0); // 60MB
-  await expectDeny(upload(bucket, `${base}/huge.mp4`, 'video/mp4', bigBuffer), 'Oversized mp4 segment');
+  await expectDeny(
+    uploadBytes(ref(ownerStorage, `streams/s1/segments/seg0.mp4`), tinyPng, {
+      contentType: 'video/mp4',
+    }),
+    'streams path writes denied (FFmpeg cost containment)'
+  );
 
-  // 4. Path traversal attempt (if rule prohibits extra nesting)
-  await expectDeny(upload(bucket, `streams/${streamId}/segments/nested/seg1.mp4`, 'video/mp4', validMp4), 'Nested path disallowed');
+  await expectDeny(
+    uploadBytes(ref(ownerStorage, `users/${ownerId}/notes.txt`), Buffer.from('hi'), {
+      contentType: 'text/plain',
+    }),
+    'disallowed mime denied'
+  );
 
-  console.log('\n--- COMPLETE (Storage)');
-}
+  await expectDeny(
+    uploadBytes(ref(anonStorage, `users/${ownerId}/anon.png`), tinyPng, {
+      contentType: 'image/png',
+    }),
+    'anonymous upload denied'
+  );
 
-main().catch(e => { console.error(e); process.exit(1); });
+  // Seed then read as signed-in peer.
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await uploadBytes(ref(ctx.storage(), `users/${ownerId}/peer.png`), tinyPng, {
+      contentType: 'image/png',
+    });
+  });
+  await expectAllow(
+    getBytes(ref(otherStorage, `users/${ownerId}/peer.png`)),
+    'signed-in peer can read user media'
+  );
+  await expectDeny(
+    getBytes(ref(anonStorage, `users/${ownerId}/peer.png`)),
+    'anon cannot read user media'
+  );
+
+  await env.cleanup();
+
+  if (failures > 0) {
+    console.error(`\nStorage rules tests FAILED (${failures} assertion(s))`);
+    process.exit(1);
+  }
+  console.log('\nStorage rules tests PASSED');
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -1,11 +1,11 @@
 /**
- * Firestore Security Rules Automated Tests (Task 21)
+ * Firestore security rules — fail-closed emulator tests.
  *
- * Uses @firebase/rules-unit-testing to assert allow/deny behavior for liveStreams feature.
- * Run against emulator:
- *   1. Install dev deps: npm i -D @firebase/rules-unit-testing firebase
- *   2. Start emulator (if not auto): firebase emulators:start --only firestore
- *   3. node scripts/test-firestore-rules.js
+ * Prefer:
+ *   firebase emulators:exec --only firestore "npm run test:rules:firestore"
+ *
+ * Or with an already-running emulator:
+ *   FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 npm run test:rules:firestore
  */
 
 const fs = require('fs');
@@ -13,18 +13,22 @@ const path = require('path');
 const {
   initializeTestEnvironment,
   assertFails,
-  assertSucceeds
+  assertSucceeds,
 } = require('@firebase/rules-unit-testing');
-const { doc, setDoc, getDoc, updateDoc, collection, addDoc, serverTimestamp } = require('firebase/firestore');
+const {
+  doc,
+  setDoc,
+  getDoc,
+  updateDoc,
+  collection,
+  addDoc,
+} = require('firebase/firestore');
 
-const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-livestream';
+const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-rules';
 const RULES_PATH = path.join(__dirname, '..', 'firestore.rules');
 
-function nowTs() { return new Date(); }
-
 (async () => {
-  console.log('🔥 Initializing Firestore test environment...');
-  // Derive emulator host/port (supports FIRESTORE_EMULATOR_HOST="host:port") or defaults.
+  let failures = 0;
   const emulatorHostString = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
   const [emHost, emPortRaw] = emulatorHostString.split(':');
   const emPort = parseInt(emPortRaw, 10) || 8080;
@@ -34,108 +38,155 @@ function nowTs() { return new Date(); }
     firestore: {
       rules: fs.readFileSync(RULES_PATH, 'utf8'),
       host: emHost,
-      port: emPort
-    }
+      port: emPort,
+    },
   });
-  console.log(`✅ Connected to Firestore emulator at ${emHost}:${emPort}`);
 
   const ownerId = 'user_owner';
-  const viewerId = 'user_viewer';
+  const otherId = 'user_other';
+  const ownerDb = env.authenticatedContext(ownerId).firestore();
+  const otherDb = env.authenticatedContext(otherId).firestore();
+  const anonDb = env.unauthenticatedContext().firestore();
 
-  const ownerCtx = env.authenticatedContext(ownerId);
-  const viewerCtx = env.authenticatedContext(viewerId);
-  const anonCtx = env.unauthenticatedContext();
-
-  const ownerDb = ownerCtx.firestore();
-  const viewerDb = viewerCtx.firestore();
-  const anonDb = anonCtx.firestore();
-
-  async function shouldAllow(promise, label) {
-    try { await assertSucceeds(promise); console.log(`✅ ALLOW: ${label}`); }
-    catch (e) { console.error(`❌ Expected ALLOW but got DENY: ${label}`, e); }
-  }
-  async function shouldDeny(promise, label) {
-    try { await assertFails(promise); console.log(`✅ DENY: ${label}`); }
-    catch { console.error(`❌ Expected DENY but got ALLOW: ${label}`); }
+  async function expectAllow(promise, label) {
+    try {
+      await assertSucceeds(promise);
+      console.log(`ALLOW: ${label}`);
+    } catch (e) {
+      failures += 1;
+      console.error(`FAIL expected ALLOW: ${label}`, e?.message || e);
+    }
   }
 
-  // Collection references
-  const streamId = 'testStream1';
-  const streamRefOwner = doc(ownerDb, 'liveStreams', streamId);
+  async function expectDeny(promise, label) {
+    try {
+      await assertFails(promise);
+      console.log(`DENY: ${label}`);
+    } catch (e) {
+      failures += 1;
+      console.error(`FAIL expected DENY: ${label}`, e?.message || e);
+    }
+  }
 
-  console.log('\n--- Phase 1: Create Stream Rules ---');
-  // 1. Owner can create valid stream
-  await shouldAllow(setDoc(streamRefOwner, {
-    ownerId,
-    status: 'active',
-    type: 'public',
-    createdAt: serverTimestamp(),
-    startedAt: serverTimestamp()
-  }), 'Owner creates stream');
+  console.log(`Connected to Firestore emulator ${emHost}:${emPort}`);
 
-  // 2. Viewer cannot create a stream for another ownerId
-  await shouldDeny(setDoc(doc(viewerDb, 'liveStreams', 'streamForOwner'), {
-    ownerId,
-    status: 'active',
-    type: 'public',
-    createdAt: serverTimestamp()
-  }), 'Viewer creating stream for different ownerId');
+  // Economy — client cannot mint/spend.
+  await expectDeny(
+    setDoc(doc(ownerDb, 'wallets', ownerId), { balance: 9999 }),
+    'owner cannot write own wallet'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'gems', ownerId), { balance: 9999 }),
+    'owner cannot write own gems'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'transactions', 'txn1'), { userId: ownerId, amount: 1 }),
+    'client cannot write transactions'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'gifts', 'gift1'), { fromUserId: ownerId, toUserId: otherId }),
+    'client cannot write gifts'
+  );
 
-  // 3. Anonymous cannot create stream
-  await shouldDeny(setDoc(doc(anonDb, 'liveStreams', 'anonStream'), {
-    ownerId: 'anon', status: 'active'
-  }), 'Anonymous create stream');
+  // Seed wallet via admin context for read checks.
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'wallets', ownerId), { balance: 10 });
+  });
+  await expectAllow(getDoc(doc(ownerDb, 'wallets', ownerId)), 'owner reads own wallet');
+  await expectDeny(getDoc(doc(otherDb, 'wallets', ownerId)), 'other cannot read owner wallet');
+  await expectDeny(getDoc(doc(anonDb, 'wallets', ownerId)), 'anon cannot read wallet');
 
-  console.log('\n--- Phase 2: Field Validation ---');
-  // 4. Owner cannot add unexpected field
-  await shouldDeny(setDoc(doc(ownerDb, 'liveStreams', 'badFields'), {
-    ownerId,
-    status: 'active',
-    type: 'public',
-    createdAt: serverTimestamp(),
-    junk: true
-  }), 'Owner create with extra junk field');
+  // Privileged collections locked.
+  await expectDeny(getDoc(doc(ownerDb, 'roles', 'admin')), 'roles read denied');
+  await expectDeny(setDoc(doc(ownerDb, 'roles', 'admin'), { role: 'admin' }), 'roles write denied');
+  await expectDeny(
+    setDoc(doc(ownerDb, 'moderationQueue', 'm1'), { status: 'open' }),
+    'moderationQueue write denied'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'analytics', 'e1'), { type: 'page' }),
+    'analytics write denied'
+  );
 
-  // 5. Owner cannot mutate immutable ownerId
-  await shouldDeny(updateDoc(streamRefOwner, { ownerId: 'hijack' }), 'Mutate ownerId');
+  // Privacy requests.
+  await expectAllow(
+    setDoc(doc(ownerDb, 'privacyRequests', 'req1'), {
+      userId: ownerId,
+      type: 'export',
+      status: 'queued',
+    }),
+    'owner queues export request'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'privacyRequests', 'req2'), {
+      userId: otherId,
+      type: 'deletion',
+      status: 'queued',
+    }),
+    'cannot queue privacy request for another user'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'privacyRequests', 'req3'), {
+      userId: ownerId,
+      type: 'export',
+      status: 'done',
+    }),
+    'cannot create privacy request with non-queued status'
+  );
+  await expectDeny(
+    updateDoc(doc(ownerDb, 'privacyRequests', 'req1'), { status: 'done' }),
+    'client cannot update privacy request'
+  );
 
-  // 6. Owner allowed to update status to ended
-  await shouldAllow(updateDoc(streamRefOwner, { status: 'ended', endedAt: serverTimestamp() }), 'Owner ends stream');
+  // Fake follower mint blocked (followerId must equal auth uid).
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', otherId, 'followers', 'fake_follower_1'), {
+      createdAt: Date.now(),
+    }),
+    'cannot create fake follower under another user'
+  );
+  await expectAllow(
+    setDoc(doc(ownerDb, 'users', otherId, 'followers', ownerId), {
+      createdAt: Date.now(),
+    }),
+    'user can follow as self'
+  );
 
-  console.log('\n--- Phase 3: Subcollections ---');
-  const segmentsColl = collection(ownerDb, 'liveStreams', streamId, 'segments');
-  const likesColl = collection(ownerDb, 'liveStreams', streamId, 'likes');
+  // Own user profile updates.
+  await expectAllow(
+    setDoc(doc(ownerDb, 'users', ownerId), { displayName: 'Owner' }),
+    'owner writes own user doc'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', otherId), { displayName: 'Hijack' }),
+    'cannot write another user doc'
+  );
 
-  // 7. Owner creates segment metadata
-  await shouldAllow(addDoc(segmentsColl, {
-    ts: serverTimestamp(),
-    order: 0,
-    path: `streams/${streamId}/segments/seg0.mp4`,
-    size: 123456
-  }), 'Owner adds segment doc');
+  // Catch-all denies unknown collections (closes AUD-C002 regression).
+  await expectDeny(
+    setDoc(doc(ownerDb, 'secretVault', 'x'), { secret: true }),
+    'unknown collection write denied'
+  );
+  await expectDeny(getDoc(doc(ownerDb, 'liveStreams', 's1')), 'liveStreams read denied by default');
 
-  // 8. Viewer cannot add segment
-  await shouldDeny(addDoc(collection(viewerDb, 'liveStreams', streamId, 'segments'), {
-    ts: serverTimestamp(),
-    order: 1,
-    path: `streams/${streamId}/segments/seg1.mp4`,
-    size: 234567
-  }), 'Viewer adds segment doc');
+  // Posts: create own only.
+  await expectAllow(
+    setDoc(doc(ownerDb, 'posts', 'p1'), { userId: ownerId, text: 'hi' }),
+    'owner creates own post'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'posts', 'p2'), { userId: otherId, text: 'nope' }),
+    'cannot create post as another user'
+  );
 
-  // 9. Viewer can like (assuming rule allows) – adjust expectation if policy differs
-  await shouldAllow(addDoc(likesColl, { userId: viewerId, createdAt: serverTimestamp() }), 'Viewer likes stream');
-
-  // 10. Anonymous cannot like
-  await shouldDeny(addDoc(collection(anonDb, 'liveStreams', streamId, 'likes'), { userId: 'anon', createdAt: serverTimestamp() }), 'Anonymous like');
-
-  console.log('\n--- Phase 4: Reads ---');
-  // 11. Viewer can read liveStreams doc (public)
-  await shouldAllow(getDoc(doc(viewerDb, 'liveStreams', streamId)), 'Viewer reads stream doc');
-
-  // 12. Anonymous read permitted? Adjust depending on policy (set expected) - assume allowed
-  await shouldAllow(getDoc(doc(anonDb, 'liveStreams', streamId)), 'Anonymous reads stream doc (public)');
-
-  console.log('\n--- COMPLETE');
   await env.cleanup();
-  console.log('🧹 Environment cleaned up.');
-})();
+
+  if (failures > 0) {
+    console.error(`\nFirestore rules tests FAILED (${failures} assertion(s))`);
+    process.exit(1);
+  }
+  console.log('\nFirestore rules tests PASSED');
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
