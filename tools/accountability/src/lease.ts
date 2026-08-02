@@ -92,18 +92,24 @@ async function writeRecord(lockDirectory: string, record: TaskLeaseRecord): Prom
   const temporary = path.join(lockDirectory, `.owner-${randomUUID()}.tmp`);
   const handle = await open(temporary, 'wx');
   try {
-    await handle.writeFile(`${canonicalJson(record)}\n`, 'utf8');
-    await handle.sync();
-  } finally {
-    await handle.close();
+    try {
+      await handle.writeFile(`${canonicalJson(record)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, ownerPath);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
   }
-  await rename(temporary, ownerPath);
 }
 
 export class TaskLease {
   private timer: NodeJS.Timeout | undefined;
   private failure: Error | null = null;
   private released = false;
+  private stopping = false;
   private refreshQueue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -116,11 +122,17 @@ export class TaskLease {
   ) {}
 
   startHeartbeat(): void {
-    if (this.timer !== undefined || this.released) {
+    if (this.timer !== undefined || this.released || this.stopping) {
       return;
     }
     this.timer = setInterval(() => {
+      if (this.stopping || this.released) {
+        return;
+      }
       void this.enqueueRefresh().catch((error: unknown) => {
+        if (this.stopping || this.released) {
+          return;
+        }
         this.failure = error instanceof Error ? error : new Error(String(error));
       });
     }, this.heartbeatMs);
@@ -128,7 +140,7 @@ export class TaskLease {
   }
 
   private async refreshInternal(): Promise<void> {
-    if (this.released) {
+    if (this.released || this.stopping) {
       throw new Error('cannot refresh a released task lease');
     }
     const current = await readRecord(this.lockDirectory);
@@ -138,6 +150,9 @@ export class TaskLease {
       current.taskId !== this.record.taskId
     ) {
       throw new Error(`task lease ownership changed for ${this.record.taskId}`);
+    }
+    if (this.released || this.stopping) {
+      throw new Error('cannot refresh a released task lease');
     }
     const heartbeatAt = new Date().toISOString();
     const updated: TaskLeaseRecord = {
@@ -165,7 +180,7 @@ export class TaskLease {
     if (this.failure !== null) {
       throw new Error(`task lease heartbeat failed: ${this.failure.message}`);
     }
-    if (this.released) {
+    if (this.released || this.stopping) {
       throw new Error('task lease was released before the run finished');
     }
     if (Date.parse(this.record.expiresAt) <= Date.now()) {
@@ -181,14 +196,25 @@ export class TaskLease {
     if (this.released) {
       return;
     }
-    await this.refreshQueue;
-    this.assertHealthy();
-    const current = await readRecord(this.lockDirectory);
-    if (current.leaseToken !== this.record.leaseToken) {
-      throw new Error(`refusing to release a task lease owned by ${current.holder}`);
-    }
-    await rm(this.lockDirectory, { recursive: true, force: false });
-    this.released = true;
+    // Stop further heartbeats before draining the queue so a late interval
+    // callback cannot recreate files while the lock directory is removed.
+    this.stopping = true;
+    const operation = this.refreshQueue.then(async () => {
+      if (this.released) {
+        return;
+      }
+      if (this.failure !== null) {
+        throw new Error(`task lease heartbeat failed: ${this.failure.message}`);
+      }
+      const current = await readRecord(this.lockDirectory);
+      if (current.leaseToken !== this.record.leaseToken) {
+        throw new Error(`refusing to release a task lease owned by ${current.holder}`);
+      }
+      await rm(this.lockDirectory, { recursive: true, force: true });
+      this.released = true;
+    });
+    this.refreshQueue = operation.catch(() => undefined);
+    await operation;
   }
 }
 
