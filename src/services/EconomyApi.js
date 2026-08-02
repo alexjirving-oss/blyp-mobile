@@ -1,7 +1,12 @@
 import { getCognitoBearerToken } from './CognitoSession';
 
 function getBaseUrl() {
-  return String(process.env.EXPO_PUBLIC_LIVE_API_BASE_URL || '')
+  return String(
+    process.env.EXPO_PUBLIC_LIVE_API_BASE_URL ||
+      process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
+      process.env.EXPO_PUBLIC_API_BASE_URL ||
+      '',
+  )
     .trim()
     .replace(/\/+$/, '');
 }

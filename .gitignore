@@ -12,10 +12,14 @@ web-build/
 # Native
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.log
+android/keystore.local.properties
+android/app/keystore.local.properties
+**/keystore.local.properties
 
 # Env files (never commit secrets)
 .env

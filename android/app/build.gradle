@@ -104,15 +104,46 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Loaded from env or android/keystore.local.properties (gitignored).
+            // Never fall back to the debug keystore for release artifacts.
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Wave 2: require dedicated release credentials. Do not use debug signing.
+            def keystoreProperties = new Properties()
+            def keystorePropertiesFile = rootProject.file('keystore.local.properties')
+            if (keystorePropertiesFile.exists()) {
+                keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+            }
+
+            def releaseStoreFilePath = System.getenv('BLYP_RELEASE_STORE_FILE') ?: keystoreProperties['BLYP_RELEASE_STORE_FILE']
+            def releaseStorePassword = System.getenv('BLYP_RELEASE_STORE_PASSWORD') ?: keystoreProperties['BLYP_RELEASE_STORE_PASSWORD']
+            def releaseKeyAlias = System.getenv('BLYP_RELEASE_KEY_ALIAS') ?: keystoreProperties['BLYP_RELEASE_KEY_ALIAS']
+            def releaseKeyPassword = System.getenv('BLYP_RELEASE_KEY_PASSWORD') ?: keystoreProperties['BLYP_RELEASE_KEY_PASSWORD']
+
+            def hasReleaseCreds =
+                releaseStoreFilePath &&
+                releaseStorePassword &&
+                releaseKeyAlias &&
+                releaseKeyPassword
+
+            if (hasReleaseCreds) {
+                signingConfigs.release.storeFile file(releaseStoreFilePath)
+                signingConfigs.release.storePassword releaseStorePassword
+                signingConfigs.release.keyAlias releaseKeyAlias
+                signingConfigs.release.keyPassword releaseKeyPassword
+                signingConfig signingConfigs.release
+            } else if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) {
+                throw new GradleException(
+                    "Release signing credentials missing. Set BLYP_RELEASE_* env vars or create android/keystore.local.properties from keystore.local.properties.example. Debug keystore must not sign release builds."
+                )
+            }
+
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
