@@ -15,7 +15,9 @@
           "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
           "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
           "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
-          "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": ""
+          "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "",
+          "EXPO_PUBLIC_LIVE_SERVICE_URL": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
+          "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true"
       },
       "cache": {
         "key": "webrtc-dev-001"
@@ -36,7 +38,9 @@
         "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
         "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
         "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
-        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": ""
+        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "",
+        "EXPO_PUBLIC_LIVE_SERVICE_URL": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
+        "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true"
       }
     }
   },

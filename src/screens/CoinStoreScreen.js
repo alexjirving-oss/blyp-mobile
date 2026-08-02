@@ -105,74 +105,27 @@ const CoinStoreScreen = ({ navigation }) => {
     }
   };
 
-  const handlePurchase = async (packageData) => {
+  const notifyPurchasesDisabled = (kind) => {
+    Alert.alert(
+      'Purchases Unavailable',
+      `In-app ${kind} purchases are disabled until store receipt verification is live.`,
+    );
+  };
+
+  const handlePurchase = async (_packageData) => {
     if (!currentUser) {
       Alert.alert('Error', 'Please log in to purchase Blypcoins');
       return;
     }
-
-    Alert.alert(
-      'Purchase Blypcoins',
-      `Buy ${packageData.coins + packageData.bonus} Blypcoins for $${packageData.price}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy Now',
-          onPress: () => processPurchase(packageData)
-        }
-      ]
-    );
+    notifyPurchasesDisabled('coin');
   };
 
-  const processPurchase = async (packageData) => {
-    setLoading(true);
-    try {
-      // Wave 0 containment: simulated client purchases are disabled.
-      Alert.alert(
-        'Purchases Unavailable',
-        'In-app coin purchases are temporarily disabled until payment verification is live.',
-      );
-    } catch (error) {
-      console.error('Purchase error:', error);
-      Alert.alert('Purchase Failed', 'Please try again later.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGemPurchase = async (packageData) => {
+  const handleGemPurchase = async (_packageData) => {
     if (!currentUser) {
       Alert.alert('Error', 'Please log in to purchase Gems');
       return;
     }
-
-    Alert.alert(
-      'Purchase Gems',
-      `Buy ${packageData.gems + packageData.bonus} Gems for $${packageData.price}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy Now',
-          onPress: () => processGemPurchase(packageData)
-        }
-      ]
-    );
-  };
-
-  const processGemPurchase = async (packageData) => {
-    setLoading(true);
-    try {
-      // Wave 0 containment: simulated client gem purchases are disabled.
-      Alert.alert(
-        'Purchases Unavailable',
-        'In-app gem purchases are temporarily disabled until payment verification is live.',
-      );
-    } catch (error) {
-      console.error('Gem purchase error:', error);
-      Alert.alert('Purchase Failed', 'Please try again later.');
-    } finally {
-      setLoading(false);
-    }
+    notifyPurchasesDisabled('gem');
   };
 
   const renderPackage = (pkg) => {
@@ -317,6 +270,14 @@ const CoinStoreScreen = ({ navigation }) => {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.infoSection}>
+          <Text style={styles.infoTitle}>Purchases temporarily disabled</Text>
+          <Text style={styles.infoText}>
+            Store checkout is off until Google Play / App Store receipt verification is enabled.
+            Package cards are preview-only and cannot mint currency.
+          </Text>
+        </View>
+
         {/* Info Section */}
         <View style={styles.infoSection}>
           <LinearGradient
