@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "id": "accountability-smoke-proof",
+  "title": "Harmless accountability swarm proof",
+  "objective": "Create docs/accountability-smoke.md as a disposable candidate artifact. It must contain the heading '# Accountability Smoke Proof' and the sentence 'No product code changed.' Do not modify any other file.",
+  "baseRef": "HEAD",
+  "acceptanceCriteria": [
+    "The candidate changes exactly docs/accountability-smoke.md and no other path.",
+    "The document contains the required heading and safety sentence.",
+    "No product, configuration, dependency, deployment, authentication, billing, or infrastructure code changes."
+  ],
+  "allowedPaths": [
+    "docs/accountability-smoke.md"
+  ],
+  "forbiddenPaths": [
+    ".cursor/**",
+    ".github/**",
+    "tools/**",
+    "src/**",
+    "__tests__/**",
+    "backend/**",
+    "functions/**",
+    "android/**",
+    "ios/**",
+    "admin/**",
+    "package.json",
+    "package-lock.json",
+    "app.json",
+    "eas.json"
+  ],
+  "verification": [
+    {
+      "id": "smoke-document",
+      "runner": "node",
+      "args": [
+        "-e",
+        "const fs=require('node:fs');const p='docs/accountability-smoke.md';const s=fs.readFileSync(p,'utf8');if(!s.includes('# Accountability Smoke Proof')||!s.includes('No product code changed.'))process.exit(1);"
+      ],
+      "timeoutMs": 30000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    }
+  ],
+  "swarm": {
+    "defaultModel": "auto",
+    "maxParallelAgents": 4,
+    "maxRepairAttempts": 0,
+    "agentTimeoutMs": 600000,
+    "analysts": [
+      {
+        "id": "scope-analyst",
+        "responsibility": "Confirm the exact one-file scope from the contract and existing docs path only. Do not survey unrelated repository areas.",
+        "required": true
+      }
+    ],
+    "builders": [
+      {
+        "id": "minimal-builder",
+        "responsibility": "Create the smallest document satisfying the exact proof contract.",
+        "required": true
+      },
+      {
+        "id": "defensive-builder",
+        "responsibility": "Independently create the proof document while preserving the one-file safety boundary.",
+        "required": true
+      }
+    ],
+    "reviewers": [
+      {
+        "id": "scope-reviewer",
+        "responsibility": "Independently verify that the frozen candidate changes only the allowed documentation path.",
+        "required": true
+      },
+      {
+        "id": "content-reviewer",
+        "responsibility": "Independently verify the required content and try to falsify the safety claim.",
+        "required": true
+      }
+    ]
+  },
+  "selection": "smallest-diff"
+}

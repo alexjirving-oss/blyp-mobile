@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import path from 'node:path';
 
-import { assertSupportedNode, runAgent, validateModels } from './agent.js';
+import {
+  assertSupportedNode,
+  localSandboxEnabled,
+  runAgent,
+  validateModels,
+} from './agent.js';
 import { mapLimit } from './concurrency.js';
 import { loadContract } from './contract.js';
 import {
@@ -177,6 +182,19 @@ class AccountabilityRun {
         }
         throw error;
       }
+      if (this.lease.reclaimedRecord !== null) {
+        await this.ledger.append({
+          actor: 'controller',
+          action: 'LEASE_RECLAIMED',
+          subject: this.contract.contract.id,
+          payload: {
+            reason: this.lease.reclaimReason,
+            previousHolder: this.lease.reclaimedRecord.holder,
+            previousRunId: this.lease.reclaimedRecord.runId,
+            previousExpiresAt: this.lease.reclaimedRecord.expiresAt,
+          },
+        });
+      }
       await this.ledger.append({
         actor: 'controller',
         action: 'LEASE_ACQUIRED',
@@ -211,6 +229,9 @@ class AccountabilityRun {
         subject: this.runId,
         payload: {
           node: process.versions.node,
+          runtimePlatform: process.platform,
+          localSandboxEnabled: localSandboxEnabled(),
+          localAgentStore: 'jsonl',
           requestedModels: [...new Set(modelNames(this.contract.contract))],
           signedLedger: true,
         },

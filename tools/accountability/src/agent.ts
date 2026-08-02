@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
 import type { AgentExecution, AgentRole } from './types.js';
 
 const MINIMUM_NODE = [22, 13, 0] as const;
@@ -15,12 +19,20 @@ export interface AgentRunInput {
   runLabel: string;
 }
 
+export function localSandboxEnabled(platform = process.platform): boolean {
+  return platform !== 'win32';
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 function redact(value: string, secret: string): string {
   return secret.length === 0 ? value : value.replaceAll(secret, '[REDACTED]');
+}
+
+function progress(runLabel: string, message: string): void {
+  console.error(`[accountability] ${new Date().toISOString()} ${runLabel} ${message}`);
 }
 
 async function withTimeout<T>(
@@ -83,6 +95,7 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
   let agentId: string | null = null;
   let runId: string | null = null;
   let agent: Awaited<ReturnType<(typeof import('@cursor/sdk'))['Agent']['create']>> | undefined;
+  let storeRoot: string | null = null;
   const deadline = started + input.timeoutMs;
   const remaining = (): number => Math.max(1, deadline - Date.now());
   const timedOut = (stage: string): AgentExecution => ({
@@ -100,7 +113,13 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
   });
 
   try {
-    const { Agent } = await import('@cursor/sdk');
+    progress(
+      input.runLabel,
+      `starting model=${model} sandbox=${localSandboxEnabled() ? 'enabled' : 'unavailable'}`,
+    );
+    const { Agent, JsonlLocalAgentStore } = await import('@cursor/sdk');
+    storeRoot = await mkdtemp(path.join(os.tmpdir(), 'blyp-accountability-sdk-'));
+    const store = new JsonlLocalAgentStore(storeRoot);
     const createPromise = Agent.create({
       apiKey: input.apiKey,
       name: input.runLabel,
@@ -110,7 +129,8 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
         cwd: input.cwd,
         settingSources: [],
         autoReview: true,
-        sandboxOptions: { enabled: true },
+        sandboxOptions: { enabled: localSandboxEnabled() },
+        store,
       },
     });
     const created = await withTimeout(createPromise, remaining());
@@ -118,16 +138,20 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
       void createPromise
         .then((lateAgent) => lateAgent[Symbol.asyncDispose]())
         .catch(() => undefined);
+      progress(input.runLabel, 'timed-out during startup');
       return timedOut('startup');
     }
     agent = created;
     agentId = agent.agentId;
+    progress(input.runLabel, `agent-created agentId=${agentId}`);
     const sent = await withTimeout(agent.send(input.prompt), remaining());
     if (sent === TIMEOUT) {
+      progress(input.runLabel, `timed-out during prompt submission agentId=${agentId}`);
       return timedOut('prompt submission');
     }
     const run = sent;
     runId = run.id;
+    progress(input.runLabel, `run-started agentId=${agentId} runId=${runId}`);
 
     const outcome = await withTimeout(run.wait(), remaining());
     if (outcome === TIMEOUT) {
@@ -137,6 +161,7 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
           5_000,
         );
       }
+      progress(input.runLabel, `timed-out agentId=${agentId} runId=${runId}`);
       return {
         ...timedOut('execution'),
         usage: run.usage ?? null,
@@ -160,6 +185,10 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
       };
     }
 
+    progress(
+      input.runLabel,
+      `run-finished status=${outcome.status} agentId=${agentId} runId=${runId}`,
+    );
     return {
       roleId: input.role.id,
       agentId,
@@ -175,6 +204,7 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
         outcome.error?.message === undefined ? null : redact(outcome.error.message, input.apiKey),
     };
   } catch (error) {
+    progress(input.runLabel, `startup-error ${redact(errorMessage(error), input.apiKey)}`);
     return {
       roleId: input.role.id,
       agentId,
@@ -194,6 +224,9 @@ export async function runAgent(input: AgentRunInput): Promise<AgentExecution> {
         agent[Symbol.asyncDispose]().catch(() => undefined),
         5_000,
       );
+    }
+    if (storeRoot !== null) {
+      await rm(storeRoot, { recursive: true, force: true });
     }
   }
 }

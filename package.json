@@ -40,6 +40,7 @@
     "accountability:validate-receipt": "npm --prefix tools/accountability run start -- validate-receipt",
     "accountability:test-hooks": "python -m unittest discover -s tools/accountability/tests-python -p \"test_*.py\"",
     "accountability:acceptance": "npm run accountability:check && npm run accountability:test-hooks",
+    "accountability:smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/accountability/run-smoke.ps1",
     "qa": "node scripts/qa-gate.js",
     "postinstall": "patch-package"
   },

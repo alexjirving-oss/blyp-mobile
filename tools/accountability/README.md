@@ -69,6 +69,17 @@ npm --prefix tools/accountability run start -- run path\to\task.json --repo .
 
 The local process can run unattended from a terminal, service, self-hosted runner, or CI job. Cursor chat does not need to remain open.
 
+For a harmless live proof, run:
+
+```powershell
+npm run accountability:smoke
+```
+
+The runner securely prompts for the Cursor API key when it is not already in the process
+environment, generates an ephemeral Ed25519 signing key, permits candidates to change only
+`docs/accountability-smoke.md`, saves only the public verification key, and clears secrets when
+the process exits. It never merges or applies the candidate to the working tree.
+
 ## Results
 
 Run evidence is written under `.accountability/runs/<run-id>/` by default:
@@ -116,6 +127,13 @@ npm --prefix tools/accountability run start -- verify-ledger .accountability\run
 Hash chaining detects modification. Ed25519 signatures let reviewers verify receipts using only the public key, without receiving the private key needed to rewrite history. Keep the private key outside the repository and inaccessible to workers.
 
 Local Cursor SDK sandboxing is useful containment, but it is not equivalent to a separate operating-system identity. Run this controller on an ephemeral CI runner, container, VM, or restricted service account when workers must be isolated from host credentials.
+
+Cursor's local SDK sandbox is not supported on Windows. Windows runs therefore use disposable
+Git worktrees, controller-owned candidate freezing, strict path policy, and post-run read-only
+workspace inspection without claiming OS-level sandboxing. The signed `PREFLIGHT_PASSED` event
+records the platform and whether SDK sandboxing was enabled. Workers use isolated, disposable
+`JsonlLocalAgentStore` directories instead of SQLite, avoiding Windows WAL failures while
+keeping SDK state outside candidate worktrees.
 
 The IDE stop hook is intentionally a separate layer. It produces unsigned local-session
 receipts and fails closed, while controller run ledgers are Ed25519-signed. Local receipts prove

@@ -108,6 +108,8 @@ export class TaskLease {
   constructor(
     readonly lockDirectory: string,
     readonly record: TaskLeaseRecord,
+    readonly reclaimedRecord: TaskLeaseRecord | null,
+    readonly reclaimReason: 'expired' | 'dead-local-holder' | null,
     private readonly ttlMs: number,
     private readonly heartbeatMs: number,
   ) {}
@@ -176,6 +178,27 @@ export class TaskLease {
   }
 }
 
+function localHolderAlive(record: TaskLeaseRecord): boolean | null {
+  const [host, pidText] = record.holder.split(':', 3);
+  if (
+    host === undefined ||
+    pidText === undefined ||
+    host.toLowerCase() !== os.hostname().toLowerCase()
+  ) {
+    return null;
+  }
+  const pid = Number.parseInt(pidText, 10);
+  if (!Number.isSafeInteger(pid) || pid < 1) {
+    return null;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? false : true;
+  }
+}
+
 export async function acquireTaskLease(options: AcquireTaskLeaseOptions): Promise<TaskLease> {
   if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(options.taskId)) {
     throw new Error('task lease requires a normalized task id');
@@ -197,6 +220,8 @@ export async function acquireTaskLease(options: AcquireTaskLeaseOptions): Promis
   const leaseRoot = path.join(path.resolve(options.repository), '.accountability', 'leases');
   const lockDirectory = path.join(leaseRoot, `${options.taskId}.lock`);
   await mkdir(leaseRoot, { recursive: true });
+  let reclaimedRecord: TaskLeaseRecord | null = null;
+  let reclaimReason: 'expired' | 'dead-local-holder' | null = null;
 
   while (true) {
     try {
@@ -216,9 +241,13 @@ export async function acquireTaskLease(options: AcquireTaskLeaseOptions): Promis
           }`,
         );
       }
-      if (Date.parse(current.expiresAt) > Date.now()) {
+      const expired = Date.parse(current.expiresAt) <= Date.now();
+      const holderAlive = localHolderAlive(current);
+      if (!expired && holderAlive !== false) {
         throw new LeaseConflictError(current);
       }
+      reclaimedRecord = current;
+      reclaimReason = expired ? 'expired' : 'dead-local-holder';
       const staleDirectory = `${lockDirectory}.stale-${randomUUID()}`;
       try {
         await rename(lockDirectory, staleDirectory);
@@ -258,7 +287,14 @@ export async function acquireTaskLease(options: AcquireTaskLeaseOptions): Promis
     throw error;
   }
 
-  const lease = new TaskLease(lockDirectory, record, ttlMs, heartbeatMs);
+  const lease = new TaskLease(
+    lockDirectory,
+    record,
+    reclaimedRecord,
+    reclaimReason,
+    ttlMs,
+    heartbeatMs,
+  );
   lease.startHeartbeat();
   return lease;
 }

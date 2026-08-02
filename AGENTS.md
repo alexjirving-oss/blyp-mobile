@@ -14,6 +14,7 @@ reviewers can produce an `ACCEPTED` controller result.
 ```powershell
 npm run accountability:acceptance
 npm run accountability:verify-session
+npm run accountability:smoke
 npm run accountability:validate -- tools/accountability/contracts/example.task.json
 npm run accountability -- tools/accountability/contracts/example.task.json --repo .
 ```

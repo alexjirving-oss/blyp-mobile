@@ -25,6 +25,7 @@ export function analystPrompt(contract: LoadedContract, role: AgentRole): string
     taskContext(contract),
     '',
     'This is a READ-ONLY assignment. Inspect the repository, but do not edit, create, delete, move, format, commit, or stage files.',
+    'Keep inspection proportional to the authorized paths and acceptance criteria; do not survey unrelated areas for a narrow task.',
     'Identify concrete requirements, likely regressions, hidden assumptions, and tests that would falsify an incorrect implementation.',
     'Cite repository paths and existing behavior. Clearly separate evidence from inference.',
     'End with a concise handoff for independent builders. Your report is advisory and cannot certify a candidate.',
