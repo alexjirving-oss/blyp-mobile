@@ -190,7 +190,14 @@ const piiPattern = /(expo-location|PermissionsAndroid|\bLocation\.|expo-contacts
 const piiHits = codeFiles.filter(pth=>piiPattern.test(read(pth)||''));
 write(path.join(FIND,'pii_scan.txt'), piiHits.join('\n'));
 const envFiles = fs.readdirSync(ROOT).filter(n=>/^\.env/.test(n)); write(path.join(FIND,'env_keys.txt'), envFiles.join('\n'));
-let rulesReport=''; try { const r=read(path.join(ROOT,'firestore.rules'))||''; if (/allow\s+read,\s*write:\s*if\s*true\s*;/.test(r)) rulesReport+='DANGER: open read/write in firestore.rules\n'; if (!/request\.auth/.test(r)) rulesReport+='No request.auth checks detected.'; } catch {}
+let rulesReport=''; try {
+  const r=read(path.join(ROOT,'firestore.rules'))||'';
+  if (/allow\s+read\s*,\s*write\s*:\s*if\s*true\s*;/i.test(r)) rulesReport+='DANGER: open read/write in firestore.rules\n';
+  if (/match\s+\/\{document=\*\*\}[\s\S]{0,400}?allow\s+read\s*,\s*write\s*:\s*if\s+request\.auth\s*!=\s*null/i.test(r)) {
+    rulesReport+='DANGER: authenticated-global catch-all read/write in firestore.rules\n';
+  }
+  if (!/request\.auth/.test(r)) rulesReport+='No request.auth checks detected.';
+} catch {}
 write(path.join(FIND,'firebase_rules_report.txt'), rulesReport);
 const lifecycle = codeFiles.filter(pth=>/(TTL|expire|retention|cleanup|prune|delete)/i.test(read(pth)||''));
 write(path.join(FIND,'data_lifecycle.txt'), lifecycle.join('\n'));
@@ -274,7 +281,25 @@ metrics.performance = {
   androidBytes_rncli: aRN || 0,
   iosBytes_rncli: iRN || 0
 };
-const doctor = jread(path.join(LOGS,'expo_doctor.json'))||{}; metrics.build = { expoDoctorIssues: Array.isArray(doctor.issues)?doctor.issues.length:0 };
+const doctorRaw = read(path.join(LOGS,'expo_doctor.json'));
+const doctor = jread(path.join(LOGS,'expo_doctor.json'));
+let expoDoctorIssues = null;
+if (!doctorRaw || !String(doctorRaw).trim() || String(doctorRaw).trim() === '{}') {
+  expoDoctorIssues = null; // unknown / missing evidence
+} else if (!doctor || typeof doctor !== 'object') {
+  expoDoctorIssues = null;
+} else if (Array.isArray(doctor.issues)) {
+  expoDoctorIssues = doctor.issues.length;
+} else if (Array.isArray(doctor.failures)) {
+  expoDoctorIssues = doctor.failures.length;
+} else if (doctor.success === false || doctor.ok === false) {
+  expoDoctorIssues = 1;
+} else if (doctor.success === true || doctor.ok === true) {
+  expoDoctorIssues = 0;
+} else {
+  expoDoctorIssues = null;
+}
+metrics.build = { expoDoctorIssues };
 const secretlint = jread(path.join(FIND,'secretlint.json'))||{};
 const truffle = read(path.join(FIND,'trufflehog.json'))||'';
 const gitleaks = jread(path.join(FIND,'gitleaks.json')) || {};
@@ -305,7 +330,8 @@ const storeRisk = read(path.join(FIND,'store_policy_risks.txt'))||''; metrics.re
 const clamp = (v)=>Math.max(0,Math.min(100,Math.round(v)));
 function lerp(x, x0, x1, y0, y1){ if (x<=x0) return y0; if (x>=x1) return y1; return y0 + (y1-y0)*((x-x0)/(x1-x0)); }
 function perfScore(bytes){
-  if (!bytes || bytes<=0) return 50; // unknown
+  // Fail closed: unknown/missing bundle evidence scores 0, not a soft 50.
+  if (!bytes || bytes<=0) return 0;
   // Piecewise curve with sensitivity in 5.5–7MB band
   const MB = 1024*1024;
   if (bytes <= 4*MB) return 100;
@@ -316,7 +342,11 @@ function perfScore(bytes){
   return Math.max(20, Math.round(55 - ((bytes - 9*MB)/(5*MB))*35));
 }
 const s = {};
-s.Architecture = clamp((cycles===0?100:Math.max(20,100-20*cycles)));
+const modulesAnalyzed = Object.keys(madge).length;
+// Fail closed: no graph evidence cannot score as perfect architecture.
+s.Architecture = modulesAnalyzed > 0
+  ? clamp((cycles===0?100:Math.max(20,100-20*cycles)))
+  : 0;
 // Score against measured initial payload using Export (Hermes) for fairness, with nuanced curve.
 s.Performance = clamp(perfScore(aExpoHbc || aRN));
 // SecurityPrivacy scoring: rely on deterministic scanners (gitleaks, secretlint); grepHits is informational only
@@ -324,7 +354,10 @@ const secPenalty = ((metrics.security.secretlintFindings||0)*10 + (metrics.secur
 // Privacy penalty: focus on concrete rules misconfigurations; treat piiHits as informational
 const privPenalty = (metrics.privacy.rulesFindings*50);
 s.SecurityPrivacy = clamp(100 - (secPenalty + privPenalty));
-s.Build = clamp(100 - (metrics.build.expoDoctorIssues*15));
+// Missing Expo Doctor evidence scores 0 for Build (not a silent 100).
+s.Build = expoDoctorIssues === null
+  ? 0
+  : clamp(100 - (expoDoctorIssues*15));
 const depPenalty = (metrics.dependencies.unused*2 + metrics.dependencies.missing*20 + metrics.dependencies.high*5 + metrics.dependencies.critical*15);
 s.Dependencies = clamp(100 - depPenalty);
 s.Media = clamp(100 - (metrics.media.largeAssets*10 + metrics.media.unreferenced*2));
@@ -342,9 +375,11 @@ if(metrics.privacy.rulesFindings>0) P0.push('Firestore rules may allow unsafe ac
 if(metrics.dependencies.critical>0) P0.push('Critical dependency vulnerabilities.');
 if(((aExpoHbc||aRN)||0)>2000000) P1.push('Bundle above target (export)');
 if(metrics.dependencies.unused>10) P2.push('High unused dependency count.');
-if(metrics.build.expoDoctorIssues>0) P1.push('Expo Doctor reported issues');
+if(expoDoctorIssues === null) P0.push('Expo Doctor evidence missing/invalid.');
+else if(expoDoctorIssues>0) P1.push('Expo Doctor reported issues');
+if(modulesAnalyzed<=0) P0.push('Architecture graph evidence missing (madge empty).');
 if(!jestRun) P2.push('No Jest test run detected');
-const GO = (metrics.scores.overall>=85 && P0.length===0) ? 'GO' : 'NO-GO';
+const GO = (metrics.scores.overall>=85 && P0.length===0 && expoDoctorIssues !== null && modulesAnalyzed>0) ? 'GO' : 'NO-GO';
 write(path.join(BASE,'metrics.json'), JSON.stringify(metrics,null,2));
 const status = [
   '# Production Readiness - STATUS','',
