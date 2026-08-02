@@ -7,6 +7,19 @@ export interface AuthedRequest extends Request {
 }
 
 export function cognitoJwtMiddleware(req: AuthedRequest, res: Response, next: NextFunction) {
+  // Fail closed: never accept credentials from the query string.
+  if (
+    typeof req.query?.access_token === 'string' ||
+    typeof req.query?.id_token === 'string' ||
+    typeof req.query?.token === 'string'
+  ) {
+    return res.status(401).json({
+      error: 'Missing or invalid Authorization header',
+      code: 'QUERY_TOKEN_REJECTED',
+      detail: 'tokens must be sent in the Authorization Bearer header',
+    });
+  }
+
   const authHeader = sanitizeBearerAuthorization(req.headers.authorization || '');
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {

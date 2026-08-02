@@ -1,8 +1,10 @@
 import { Router, Response, NextFunction } from 'express';
-import { cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
-import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
+import { AuthedRequest, cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
+import { verifyCognitoJwt } from '../auth/verifyCognitoJwt';
+import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
+import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
 import {
     adminListUserPostsSchema,
     adminListUsersSchema,
@@ -37,77 +39,166 @@ function isCanonicalSub(value: unknown): boolean {
     return COGNITO_SUB_REGEX.test(String(value || '').trim());
 }
 
-// Wave 0 containment: hardcoded credential login is permanently disabled.
-// Admin access must use allowlisted Cognito identity (Wave 1), not a shared password.
-const ADMIN_LOGIN_DISABLED = true;
-
-type AdminSession = {
-    actorUserId: string;
-    expiresAt: number;
-};
-
-const adminSessions = new Map<string, AdminSession>();
-
-function cleanupExpiredSessions() {
-    const now = Date.now();
-    for (const [token, session] of adminSessions.entries()) {
-        if (session.expiresAt <= now) {
-            adminSessions.delete(token);
-        }
+function extractBearerToken(req: AuthedRequest): string {
+    // Fail closed: never accept tokens from query strings.
+    if (typeof req.query?.access_token === 'string' || typeof req.query?.id_token === 'string' || typeof req.query?.token === 'string') {
+        return '';
     }
+    const authHeader = sanitizeBearerAuthorization(req.headers.authorization || '');
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) return '';
+    const token = match[1].trim();
+    // Reject the retired in-memory admin-session scheme.
+    if (token.toLowerCase().startsWith('admin-session:')) return '';
+    return token;
 }
 
-function getSessionToken(req: AuthedRequest): string {
-    const fromHeader = String(req.headers['x-admin-session'] || '').trim();
-    const authHeader = String(req.headers.authorization || '').trim();
-
-    if (fromHeader) return fromHeader;
-    if (authHeader.toLowerCase().startsWith('bearer admin-session:')) {
-        return authHeader.slice('bearer admin-session:'.length).trim();
+async function authenticateAllowlistedAdmin(req: AuthedRequest): Promise<
+    | { ok: true; actorUserId: string }
+    | { ok: false; status: number; error: string; code: string; detail?: string }
+> {
+    if (String(req.headers['x-admin-session'] || '').trim()) {
+        return {
+            ok: false,
+            status: 401,
+            error: 'UNAUTH',
+            code: 'ADMIN_SESSION_RETIRED',
+            detail: 'x-admin-session is retired; send a Cognito Bearer token',
+        };
     }
-    return '';
-}
 
-function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
-    cleanupExpiredSessions();
-    const token = getSessionToken(req);
+    const token = extractBearerToken(req);
     if (!token) {
-        return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH', detail: 'missing admin session' });
+        return {
+            ok: false,
+            status: 401,
+            error: 'UNAUTH',
+            code: 'UNAUTH',
+            detail: 'missing Cognito Bearer token',
+        };
     }
 
-    const session = adminSessions.get(token);
-    if (!session || session.expiresAt <= Date.now()) {
-        return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH', detail: 'expired or invalid admin session' });
+    let decoded: any;
+    try {
+        decoded = await verifyCognitoJwt(token);
+    } catch (err: any) {
+        const isMisconfig = typeof err?.message === 'string' && err.message.includes('COGNITO_REGION');
+        return {
+            ok: false,
+            status: isMisconfig ? 500 : 401,
+            error: isMisconfig ? 'Auth misconfigured' : 'Invalid token',
+            code: isMisconfig ? 'AUTH_MISCONFIGURED' : 'INVALID_TOKEN',
+            detail: err?.message,
+        };
     }
 
-    req.user = { sub: session.actorUserId };
+    const tokenUse = String(decoded?.token_use || '').trim().toLowerCase();
+    if (tokenUse && tokenUse !== 'access' && tokenUse !== 'id') {
+        return {
+            ok: false,
+            status: 401,
+            error: 'UNAUTH',
+            code: 'INVALID_TOKEN_USE',
+            detail: 'admin routes require a Cognito access or id token',
+        };
+    }
 
+    const actorUserId = String(decoded?.sub || '').trim();
+    if (!isCanonicalSub(actorUserId)) {
+        return {
+            ok: false,
+            status: 401,
+            error: 'UNAUTH',
+            code: 'INVALID_SUB',
+            detail: 'token subject is not a canonical Cognito sub',
+        };
+    }
+
+    let allowlistSubs: string[] = [];
+    try {
+        allowlistSubs = getAdminEnv().allowlistSubs;
+    } catch (err: any) {
+        return {
+            ok: false,
+            status: 500,
+            error: 'INTERNAL',
+            code: 'ADMIN_ENV_INVALID',
+            detail: err?.message || String(err),
+        };
+    }
+
+    if (allowlistSubs.length === 0) {
+        logger.error('[admin] ADMIN_ALLOWLIST_SUBS is empty; refusing all admin access');
+        return {
+            ok: false,
+            status: 503,
+            error: 'ADMIN_ALLOWLIST_REQUIRED',
+            code: 'ADMIN_ALLOWLIST_REQUIRED',
+            detail: 'Set ADMIN_ALLOWLIST_SUBS to one or more Cognito subs',
+        };
+    }
+
+    if (!allowlistSubs.includes(actorUserId)) {
+        logger.warn({ actorUserId }, '[admin] cognito principal not allowlisted');
+        return {
+            ok: false,
+            status: 403,
+            error: 'FORBIDDEN',
+            code: 'ADMIN_NOT_ALLOWLISTED',
+        };
+    }
+
+    return { ok: true, actorUserId };
+}
+
+async function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
+    const auth = await authenticateAllowlistedAdmin(req);
+    if (!auth.ok) {
+        return res.status(auth.status).json({
+            error: auth.error,
+            code: auth.code,
+            detail: auth.detail,
+        });
+    }
+    req.user = { sub: auth.actorUserId };
     return next();
 }
 
-router.post('/admin/auth/login', async (_req: AuthedRequest, res: Response) => {
-    if (ADMIN_LOGIN_DISABLED) {
-        logger.warn('[admin] password login disabled (Wave 0 containment)');
+// Password login is retired. This endpoint only validates an allowlisted Cognito Bearer token.
+router.post('/admin/auth/login', async (req: AuthedRequest, res: Response) => {
+    if (req.body?.email || req.body?.password) {
+        logger.warn('[admin] rejected password login attempt');
         return res.status(503).json({
             error: 'ADMIN_LOGIN_DISABLED',
             code: 'ADMIN_LOGIN_DISABLED',
-            detail: 'Shared-password admin login is disabled. Use allowlisted Cognito admin auth.',
+            detail: 'Shared-password admin login is disabled. Send Authorization: Bearer <cognito-jwt>.',
         });
     }
-    return res.status(503).json({ error: 'ADMIN_LOGIN_DISABLED', code: 'ADMIN_LOGIN_DISABLED' });
+
+    const auth = await authenticateAllowlistedAdmin(req);
+    if (!auth.ok) {
+        return res.status(auth.status).json({
+            error: auth.error,
+            code: auth.code,
+            detail: auth.detail,
+        });
+    }
+
+    return res.json({
+        ok: true,
+        actorUserId: auth.actorUserId,
+        authMode: 'cognito-allowlist',
+    });
 });
 
-router.post('/admin/auth/logout', requireAdmin, async (req: AuthedRequest, res: Response) => {
-    const token = getSessionToken(req);
-    if (token) {
-        adminSessions.delete(token);
-    }
+router.post('/admin/auth/logout', async (_req: AuthedRequest, res: Response) => {
+    // Stateless Cognito auth: nothing to revoke server-side here.
     return res.json({ ok: true });
 });
 
 router.get('/admin/auth/me', requireAdmin, async (req: AuthedRequest, res: Response) => {
     const actorUserId = String(req.user?.sub || '').trim();
-    return res.json({ ok: true, actorUserId });
+    return res.json({ ok: true, actorUserId, authMode: 'cognito-allowlist' });
 });
 
 router.get('/admin/config/app-version-policy', requireAdmin, async (_req: AuthedRequest, res: Response) => {
