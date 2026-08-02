@@ -104,6 +104,7 @@ export class TaskLease {
   private timer: NodeJS.Timeout | undefined;
   private failure: Error | null = null;
   private released = false;
+  private refreshQueue: Promise<void> = Promise.resolve();
 
   constructor(
     readonly lockDirectory: string,
@@ -119,14 +120,14 @@ export class TaskLease {
       return;
     }
     this.timer = setInterval(() => {
-      void this.refresh().catch((error: unknown) => {
+      void this.enqueueRefresh().catch((error: unknown) => {
         this.failure = error instanceof Error ? error : new Error(String(error));
       });
     }, this.heartbeatMs);
     this.timer.unref();
   }
 
-  async refresh(): Promise<void> {
+  private async refreshInternal(): Promise<void> {
     if (this.released) {
       throw new Error('cannot refresh a released task lease');
     }
@@ -146,6 +147,18 @@ export class TaskLease {
     };
     await writeRecord(this.lockDirectory, updated);
     Object.assign(this.record, updated);
+  }
+
+  private enqueueRefresh(): Promise<void> {
+    const operation = this.refreshQueue.then(async () => {
+      await this.refreshInternal();
+    });
+    this.refreshQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  async refresh(): Promise<void> {
+    return await this.enqueueRefresh();
   }
 
   assertHealthy(): void {
@@ -168,6 +181,7 @@ export class TaskLease {
     if (this.released) {
       return;
     }
+    await this.refreshQueue;
     this.assertHealthy();
     const current = await readRecord(this.lockDirectory);
     if (current.leaseToken !== this.record.leaseToken) {
