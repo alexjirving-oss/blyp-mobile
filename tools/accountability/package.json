@@ -1,0 +1,22 @@
+{
+  "name": "@blyp/accountability-controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run build && node --test",
+    "test": "npm run check",
+    "start": "npm run build && node dist/src/cli.js"
+  },
+  "dependencies": {
+    "@cursor/sdk": "1.0.26"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "7.0.2"
+  }
+}

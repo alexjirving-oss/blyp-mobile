@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "id": "example-mobile-change",
+  "title": "Example accountable mobile change",
+  "objective": "Replace this example objective with one observable product change. State what users should experience and what must remain unchanged.",
+  "baseRef": "HEAD",
+  "acceptanceCriteria": [
+    "The requested behavior is observable through a deterministic test.",
+    "Existing mobile tests continue to pass.",
+    "No production, deployment, authentication, or billing configuration changes."
+  ],
+  "allowedPaths": ["src/**", "__tests__/**"],
+  "forbiddenPaths": [
+    "package.json",
+    "package-lock.json",
+    "jest.config.js",
+    "tsconfig.json",
+    ".github/**",
+    ".cursor/**",
+    "tools/**",
+    "scripts/**",
+    "backend/**",
+    "functions/**",
+    "android/**",
+    "ios/**"
+  ],
+  "verification": [
+    {
+      "id": "install",
+      "runner": "npm",
+      "args": ["ci"],
+      "timeoutMs": 1200000,
+      "required": true,
+      "onFailure": "BLOCKED",
+      "envAllowlist": []
+    },
+    {
+      "id": "typecheck",
+      "runner": "npm",
+      "args": ["run", "typecheck"],
+      "timeoutMs": 600000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    },
+    {
+      "id": "tests",
+      "runner": "npm",
+      "args": ["test", "--", "--runInBand"],
+      "timeoutMs": 1200000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    }
+  ],
+  "swarm": {
+    "defaultModel": "auto",
+    "maxParallelAgents": 4,
+    "maxRepairAttempts": 2,
+    "agentTimeoutMs": 2700000,
+    "analysts": [
+      {
+        "id": "requirements-analyst",
+        "responsibility": "Turn the objective into observable requirements, identify ambiguity, and map affected code without editing.",
+        "required": true
+      },
+      {
+        "id": "test-analyst",
+        "responsibility": "Design falsification tests and identify ways an implementation could appear correct while remaining broken.",
+        "required": true
+      },
+      {
+        "id": "risk-analyst",
+        "responsibility": "Identify regression, security, state-management, and platform-specific risks without editing.",
+        "required": true
+      }
+    ],
+    "builders": [
+      {
+        "id": "builder-a",
+        "responsibility": "Produce the smallest complete implementation consistent with existing architecture.",
+        "required": true
+      },
+      {
+        "id": "builder-b",
+        "responsibility": "Independently implement the contract while emphasizing defensive behavior and regression avoidance.",
+        "required": true
+      }
+    ],
+    "reviewers": [
+      {
+        "id": "correctness-reviewer",
+        "responsibility": "Try to falsify every acceptance criterion against the frozen diff and surrounding implementation.",
+        "required": true
+      },
+      {
+        "id": "regression-reviewer",
+        "responsibility": "Look for broken existing behavior, weakened tests, hidden state interactions, and unsupported claims.",
+        "required": true
+      },
+      {
+        "id": "security-reviewer",
+        "responsibility": "Look for authorization, privacy, secret-handling, injection, dependency, and unsafe-side-effect defects.",
+        "required": true
+      }
+    ]
+  },
+  "selection": "human-if-multiple"
+}

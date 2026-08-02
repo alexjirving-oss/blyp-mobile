@@ -23,6 +23,15 @@ web-build/
 
 # Audit/bundle outputs
 _reports/bundles/
+
+# Autonomous accountability run artifacts
+.accountability/
+tools/accountability/dist/
+.cursor/agent/
+.cursor/hooks/**/__pycache__/
+**/__pycache__/
+*.py[cod]
+
 # Metro
 .metro-health-check*
 

@@ -1,0 +1,83 @@
+name: Accountability Swarm
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_contract:
+        description: Committed repository-relative path to a task contract
+        required: true
+        type: string
+  repository_dispatch:
+    types:
+      - accountability_task
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accountability-${{ inputs.task_contract || github.event.client_payload.task_contract || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  swarm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TASK_CONTRACT: ${{ inputs.task_contract || github.event.client_payload.task_contract }}
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      ACCOUNTABILITY_SIGNING_PRIVATE_KEY: ${{ secrets.ACCOUNTABILITY_SIGNING_PRIVATE_KEY }}
+      EVIDENCE_ROOT: ${{ runner.temp }}/accountability-evidence
+
+    steps:
+      - name: Check out immutable task base
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/accountability/package-lock.json
+
+      - name: Validate task path
+        shell: bash
+        run: |
+          test -n "$TASK_CONTRACT"
+          contract_path="$(realpath "$TASK_CONTRACT")"
+          case "$contract_path" in
+            "$GITHUB_WORKSPACE"/*) ;;
+            *) echo "Task contract must be inside the checked-out repository"; exit 1 ;;
+          esac
+          test -f "$contract_path"
+
+      - name: Install pinned controller
+        run: npm ci --prefix tools/accountability
+
+      - name: Verify controller
+        run: npm test --prefix tools/accountability
+
+      - name: Validate task contract
+        run: npm --prefix tools/accountability run start -- validate "$TASK_CONTRACT"
+
+      - name: Run independent agent swarm
+        id: swarm
+        continue-on-error: true
+        run: npm --prefix tools/accountability run start -- run "$TASK_CONTRACT" --repo "$GITHUB_WORKSPACE" --output "$EVIDENCE_ROOT"
+
+      - name: Upload signed evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accountability-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accountability-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce controller result
+        if: always() && steps.swarm.outcome != 'success'
+        run: |
+          echo "The swarm did not produce an ACCEPTED candidate."
+          exit 1

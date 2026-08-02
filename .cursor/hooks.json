@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python .cursor/hooks/session_start.py",
+        "timeout": 15,
+        "failClosed": true
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "python .cursor/hooks/after_file_edit.py",
+        "timeout": 15,
+        "failClosed": true
+      }
+    ],
+    "stop": [
+      {
+        "command": "python .cursor/hooks/on_stop_verify.py",
+        "timeout": 1200,
+        "failClosed": true
+      }
+    ]
+  }
+}

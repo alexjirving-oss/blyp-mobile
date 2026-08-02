@@ -6,10 +6,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "moduleResolution": "bundler",
-    "types": [
-      "react",
-      "react-native"
-    ]
+    "types": ["react", "react-native"]
   },
   "exclude": [
     "node_modules",
@@ -19,6 +16,10 @@
     "backup",
     "blyp-gaming-features",
     "functions",
+    "_agent",
+    ".manus-work",
+    "diagnostics",
+    "tools/accountability",
     "_reports",
     "_reports/**",
     "scripts/**",

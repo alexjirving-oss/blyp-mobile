@@ -12,3 +12,19 @@ jobs:
       - run: npm ci
       - run: node _reports/prod_audit_v2/run_audit.js
       - run: node scripts/qa-gate.js
+
+  accountability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tools/accountability/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm ci --prefix tools/accountability
+      - run: npm test --prefix tools/accountability
+      - run: npm run accountability:test-hooks
