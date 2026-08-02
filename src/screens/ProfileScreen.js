@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, FlatList, StatusBar, Alert, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, FlatList, StatusBar, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../components/Icon';
 import BlypLogo from '../components/BlypLogo';
 import ActivityFeed from '../components/ActivityFeed';
-import FollowerBooster from '../components/FollowerBooster';
 import { auth, db, storage, firebaseEnabled } from '../config/firebase';
 import { signOut } from 'firebase/auth';
 import { subscribeToFollowersCount, getFollowersCount } from '../utils/followUtils';
-import { addFakeFollowers } from '../utils/boostFollowers';
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
@@ -20,10 +18,6 @@ const ProfileScreen = () => {
   const [error, setError] = useState(null);
   const [selectedTab, setSelectedTab] = useState('1');
   const [followersCount, setFollowersCount] = useState(0);
-  const [showFollowerBooster, setShowFollowerBooster] = useState(false);
-  const [developerMode, setDeveloperMode] = useState(false);
-  const [showCodeModal, setShowCodeModal] = useState(false);
-  const [codeInput, setCodeInput] = useState('');
   // Load profile
   useEffect(() => {
     if (!user) return;
@@ -64,15 +58,11 @@ const ProfileScreen = () => {
   }, [user, firebaseEnabled]);
 
   const handleLogout = async () => { try { await signOut(auth); } catch(e){ console.log('logout error', e.message);} };
-  const handleBoostFollowers = async () => {
-    Alert.alert('Unavailable', 'Follower boost tools are disabled.');
-  };
   const handleDeletePost = (post) => {
     Alert.alert('Delete Post','Delete permanently?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{try{const promises=[]; if(post.videoUrl){try{promises.push(storage.refFromURL(post.videoUrl).delete());}catch{}} if(Array.isArray(post.media)){post.media.forEach(m=>{if(m.url){try{promises.push(storage.refFromURL(m.url).delete());}catch{}} if(m.thumbnail&&m.thumbnail!==m.url){try{promises.push(storage.refFromURL(m.thumbnail).delete());}catch{}}});} if(post.thumbnail && !post.media?.some(m=>m.thumbnail===post.thumbnail)){try{promises.push(storage.refFromURL(post.thumbnail).delete());}catch{}} if(promises.length) await Promise.allSettled(promises); await db.collection('posts').doc(post.id).delete();}catch(e){Alert.alert('Error deleting',e.message);}}}]);
   };
   const handlePostPress = post => navigation.navigate('MediaViewer',{ post });
   const getVideoThumbnail = post => post.thumbnail || post.media?.[0]?.thumbnail || post.media?.[0]?.url || post.videoUrl || post.imageUrl || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=400&fit=crop';
-  const handleCodeSubmit = () => { Alert.alert('Unavailable', 'Developer boost tools are disabled.'); setShowCodeModal(false); setCodeInput(''); };
 
   const renderPostItem = ({ item: post }) => {
     const isVideo = post.type==='video'||post.media?.[0]?.type?.includes('video')||post.videoUrl||post.media?.[0]?.url?.includes('.mp4');
@@ -136,7 +126,7 @@ const ProfileScreen = () => {
       <Text style={styles.userEmail}>{user?.email}</Text>
       {userProfile?.bio ? <Text style={styles.userBio}>{userProfile.bio}</Text> : null}
       <View style={styles.statsContainer}>
-        <TouchableOpacity style={styles.statItem} onPress={()=>navigation.navigate('Followers',{userId:user.uid,type:'followers'})} onLongPress={handleBoostFollowers} delayLongPress={2000}>
+        <TouchableOpacity style={styles.statItem} onPress={()=>navigation.navigate('Followers',{userId:user.uid,type:'followers'})}>
           <Text style={styles.statNumber}>{followersCount}</Text><Text style={styles.statLabel}>Followers</Text>
         </TouchableOpacity>
         <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.length}</Text><Text style={styles.statLabel}>Posts</Text></View>
@@ -160,21 +150,6 @@ const ProfileScreen = () => {
       case '4': return (
         <View style={styles.tabContent}>
           <ScrollView style={styles.settingsContainer}>
-            <View style={styles.settingsSection}>
-              <Text style={styles.settingsSectionTitle}>Developer Options</Text>
-              <TouchableOpacity style={styles.settingsItem} onPress={() => setShowCodeModal(true)}>
-                <View style={styles.settingsItemLeft}>
-                  <Icon name="code-outline" size={24} color="#8b5cf6" />
-                  <Text style={styles.settingsItemText}>Developer Code</Text>
-                </View>
-                <Icon name="chevron-forward" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-              {developerMode && (
-                <View style={styles.developerBadge}>
-                  <Text style={styles.developerBadgeText}>Developer Mode Active</Text>
-                </View>
-              )}
-            </View>
             <View style={styles.settingsSection}>
               <Text style={styles.settingsSectionTitle}>Account</Text>
               <TouchableOpacity
@@ -210,22 +185,6 @@ const ProfileScreen = () => {
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       {renderHeader()}
       <View style={styles.content}>{renderTabContent()}</View>
-      {showFollowerBooster && <FollowerBooster visible onClose={()=>setShowFollowerBooster(false)} />}
-      <Modal animationType="fade" transparent visible={showCodeModal} onRequestClose={()=>{setShowCodeModal(false); setCodeInput('');}}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <LinearGradient colors={['#8b5cf6','#d946ef']} style={styles.modalGradient}>
-              <Text style={styles.modalTitle}>Developer Access</Text>
-              <Text style={styles.modalSubtitle}>Enter the developer code:</Text>
-              <TextInput style={styles.codeInput} value={codeInput} onChangeText={setCodeInput} placeholder="Enter code" placeholderTextColor="#9ca3af" secureTextEntry autoFocus onSubmitEditing={handleCodeSubmit} />
-              <View style={styles.modalButtons}>
-                <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={()=>{setShowCodeModal(false); setCodeInput('');}}><Text style={styles.cancelButtonText}>Cancel</Text></TouchableOpacity>
-                <TouchableOpacity style={[styles.modalButton, styles.submitButton]} onPress={handleCodeSubmit}><Text style={styles.submitButtonText}>OK</Text></TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </View>
-        </View>
-      </Modal>
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}><Icon name="log-out-outline" size={24} color="#ef4444" /><Text style={styles.logoutText}>Log Out</Text></TouchableOpacity>
     </SafeAreaView>
   );
