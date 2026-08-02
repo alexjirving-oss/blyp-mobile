@@ -1,7 +1,8 @@
 {
   "name": "blyp-gaming-features",
   "version": "1.0.0",
-  "description": "Gaming features for the Blyp social media app, including multiplayer functionality and game integration.",
+  "private": true,
+  "description": "ARCHIVED orphan scaffolding — not shipped. See ARCHIVED.md.",
   "main": "index.js",
   "scripts": {
     "start": "expo start",

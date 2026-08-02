@@ -1,7 +1,8 @@
 {
   "name": "blyp-multiplayer-games",
   "version": "1.0.0",
-  "description": "A collection of multiplayer games for the Blyp social media app.",
+  "private": true,
+  "description": "ARCHIVED orphan scaffolding — not shipped. See ARCHIVED.md.",
   "main": "src/index.js",
   "scripts": {
     "start": "react-native start",
