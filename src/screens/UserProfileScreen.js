@@ -130,8 +130,6 @@ const UserProfileScreen = ({ route, navigation }) => {
       });
       
       setUserPosts(posts);
-      console.log(`📱 UserProfile: Loaded ${posts.length} posts for user ${userId}`);
-      console.log('📱 UserProfile: Sample post data:', posts[0] ? posts[0] : 'No posts found');
     } catch (error) {
       console.error('Error fetching user posts:', error);
       setUserPosts([]);

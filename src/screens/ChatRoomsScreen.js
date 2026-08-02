@@ -140,7 +140,7 @@ const ChatRoomsScreen = ({ navigation }) => {
 
   const handleJoinRoom = async (room) => {
     try {
-      if (room.isPrivate && room.password) {
+      if (room.isPrivate && room.isPasswordProtected) {
         Alert.prompt(
           'Private Room',
           `Enter password for "${room.name}"`,

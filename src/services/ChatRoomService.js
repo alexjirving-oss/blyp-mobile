@@ -18,6 +18,43 @@ import {
 } from 'firebase/firestore';
 import { auth, firestore as db } from '../config/firebase';
 
+async function sha256Hex(input) {
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    const digest = await subtle.digest('SHA-256', new TextEncoder().encode(input));
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  try {
+    // Optional fallback when SubtleCrypto is unavailable.
+    // eslint-disable-next-line global-require
+    const ExpoCrypto = require('expo-crypto');
+    return ExpoCrypto.digestStringAsync(
+      ExpoCrypto.CryptoDigestAlgorithm.SHA256,
+      input
+    );
+  } catch {
+    throw new Error('Password hashing unavailable on this runtime');
+  }
+}
+
+async function hashRoomPassword({ createdBy, name, password }) {
+  return sha256Hex(`blyp-room-v1:${createdBy}:${String(name || '').trim()}:${password}`);
+}
+
+function publicRoomView(id, data) {
+  const { password, passwordHash, ...rest } = data || {};
+  return {
+    id,
+    ...rest,
+    isPasswordProtected: !!(passwordHash || password),
+    createdAt: data.createdAt?.toDate?.() || new Date(),
+    updatedAt: data.updatedAt?.toDate?.() || new Date(),
+    lastActivity: data.lastActivity?.toDate?.() || new Date(),
+  };
+}
+
 class ChatRoomService {
   constructor() {
     this.currentUser = null;
@@ -33,13 +70,26 @@ class ChatRoomService {
     if (!this.currentUser) throw new Error('User not authenticated');
 
     try {
+      const isPrivate = !!roomData.isPrivate;
+      const plainPassword = isPrivate ? String(roomData.password || '').trim() : '';
+      if (isPrivate && !plainPassword) {
+        throw new Error('Private rooms require a password');
+      }
+
       const roomDoc = {
         name: roomData.name,
         description: roomData.description || '',
         category: roomData.category || 'general',
-        isPrivate: roomData.isPrivate || false,
+        isPrivate,
         maxParticipants: roomData.maxParticipants || 50,
-        password: roomData.password || null,
+        // Never persist plaintext passwords.
+        passwordHash: plainPassword
+          ? await hashRoomPassword({
+              createdBy: this.currentUser.uid,
+              name: roomData.name,
+              password: plainPassword,
+            })
+          : null,
         createdBy: this.currentUser.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -87,17 +137,11 @@ class ChatRoomService {
 
     return onSnapshot(q, (snapshot) => {
       const rooms = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
+      snapshot.forEach((snap) => {
+        const data = snap.data();
         // Include public rooms or rooms user is a participant in
         if (!data.isPrivate || data.participants.includes(this.currentUser.uid)) {
-          rooms.push({
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt?.toDate?.() || new Date(),
-            updatedAt: data.updatedAt?.toDate?.() || new Date(),
-            lastActivity: data.lastActivity?.toDate?.() || new Date()
-          });
+          rooms.push(publicRoomView(snap.id, data));
         }
       });
 
@@ -125,15 +169,8 @@ class ChatRoomService {
 
     return onSnapshot(q, (snapshot) => {
       const rooms = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        rooms.push({
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-          updatedAt: data.updatedAt?.toDate?.() || new Date(),
-          lastActivity: data.lastActivity?.toDate?.() || new Date()
-        });
+      snapshot.forEach((snap) => {
+        rooms.push(publicRoomView(snap.id, snap.data()));
       });
 
       // Sort by last activity
@@ -159,9 +196,23 @@ class ChatRoomService {
 
       const roomData = roomDoc.data();
 
-      // Check if room is private and requires password
-      if (roomData.isPrivate && roomData.password && roomData.password !== password) {
-        throw new Error('Incorrect password');
+      // Check if room is private and requires password (hashed; legacy plaintext tolerated once).
+      if (roomData.isPrivate && (roomData.passwordHash || roomData.password)) {
+        const candidate = String(password || '');
+        let ok = false;
+        if (roomData.passwordHash) {
+          const hashed = await hashRoomPassword({
+            createdBy: roomData.createdBy,
+            name: roomData.name,
+            password: candidate,
+          });
+          ok = hashed === roomData.passwordHash;
+        } else if (roomData.password) {
+          ok = roomData.password === candidate;
+        }
+        if (!ok) {
+          throw new Error('Incorrect password');
+        }
       }
 
       // Check if room is full
@@ -321,14 +372,7 @@ class ChatRoomService {
         throw new Error('Room not found');
       }
 
-      const data = roomDoc.data();
-      return {
-        id: roomDoc.id,
-        ...data,
-        createdAt: data.createdAt?.toDate?.() || new Date(),
-        updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        lastActivity: data.lastActivity?.toDate?.() || new Date()
-      };
+      return publicRoomView(roomDoc.id, roomDoc.data());
     } catch (error) {
       console.error('Error getting room details:', error);
       throw error;
@@ -375,21 +419,14 @@ class ChatRoomService {
       const snapshot = await getDocs(q);
       const rooms = [];
       
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        const room = {
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate?.() || new Date(),
-          updatedAt: data.updatedAt?.toDate?.() || new Date(),
-          lastActivity: data.lastActivity?.toDate?.() || new Date()
-        };
+      snapshot.forEach((snap) => {
+        const room = publicRoomView(snap.id, snap.data());
 
         // Filter by search term
         const matchesSearch = !searchTerm || 
           room.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          room.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          room.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+          (room.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (room.tags || []).some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
 
         // Filter by category
         const matchesCategory = !category || room.category === category;

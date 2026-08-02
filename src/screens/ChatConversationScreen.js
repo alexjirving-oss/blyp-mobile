@@ -182,7 +182,6 @@ const ChatScreen = ({ route, navigation }) => {
         snapshot.forEach((doc) => {
           const message = doc.data();
           if (message.senderId !== currentUser?.uid && message.status === 'sent') {
-            console.log('✅ Marking message as delivered:', message.text);
             updateDoc(doc.ref, { status: 'delivered', deliveredAt: serverTimestamp() });
           }
         });
