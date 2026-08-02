@@ -19,13 +19,28 @@ function initApp(): admin.app.App | null {
     }
 }
 
-export function getAdminFirestore(): admin.firestore.Firestore | null {
+function getApp(): admin.app.App | null {
     if (!_app) {
         _app = initApp();
     }
-    if (!_app) return null;
+    return _app;
+}
+
+export function getAdminFirestore(): admin.firestore.Firestore | null {
+    const app = getApp();
+    if (!app) return null;
     try {
-        return _app.firestore();
+        return app.firestore();
+    } catch {
+        return null;
+    }
+}
+
+export function getAdminAuth(): admin.auth.Auth | null {
+    const app = getApp();
+    if (!app) return null;
+    try {
+        return app.auth();
     } catch {
         return null;
     }

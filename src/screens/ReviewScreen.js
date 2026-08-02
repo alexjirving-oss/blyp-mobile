@@ -1838,11 +1838,29 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       Alert.alert('Error', 'Please add a caption or media');
       return;
     }
-    // Ensure Firebase user BEFORE any uploads (rules require auth != null)
+    // Ensure Firebase user BEFORE any uploads (rules require auth != null).
+    // Prefer Cognito→Firebase federation (uid = Cognito sub) over anonymous.
     let fbUser = auth.currentUser;
     try {
+      const looksFederated =
+        fbUser?.uid &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          fbUser.uid,
+        );
+      if (!looksFederated) {
+        try {
+          const { ensureFirebaseFederatedSession } = require('../services/FirebaseFederation');
+          const fed = await ensureFirebaseFederatedSession();
+          if (fed?.ok) {
+            fbUser = auth.currentUser;
+          }
+        } catch (fedErr) {
+          console.warn('🔐 Federation unavailable before post:', fedErr?.message || fedErr);
+        }
+      }
+      fbUser = auth.currentUser;
       if (!fbUser) {
-        console.log('🔐 Ensuring Firebase auth (anonymous)');
+        console.log('🔐 Ensuring Firebase auth (anonymous fallback)');
         if (firebaseNative && typeof auth?.signInAnonymously === 'function') {
           const cred = await auth.signInAnonymously();
           fbUser = cred?.user || cred; // native returns user directly on some versions

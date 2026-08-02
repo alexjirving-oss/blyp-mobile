@@ -1,16 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CognitoUserPool } from 'amazon-cognito-identity-js';
 import Logger from '../utils/Logger';
 // Optional Firebase auth fallback (previous working backup used Firebase auth)
 import { auth as firebaseAuth, firebaseEnabled } from '../config/firebase';
-import awsconfig from '../aws-exports';
+import { userPool } from '../config/cognitoPool';
+import { ensureFirebaseFederatedSession } from '../services/FirebaseFederation';
 
-export const userPool = new CognitoUserPool({
-  UserPoolId: awsconfig.aws_user_pools_id,
-  ClientId: awsconfig.aws_user_pools_web_client_id,
-  Storage: AsyncStorage, // persist sessions so users stay logged in
-});
+export { userPool };
 
 // External trigger to refresh auth immediately (set by useAuth on mount)
 // Optionally accepts a CognitoUser to set immediately after auth success
@@ -163,6 +159,8 @@ export const useAuth = () => {
           }
           setUser((prev) => (prev === current ? prev : current));
           setLoading(false);
+          // Align Firebase uid with Cognito sub when a live API is configured.
+          void ensureFirebaseFederatedSession(current).catch(() => {});
         });
       } catch (e) {
         // If library throws while constructing session, nuke cached tokens and proceed unauthenticated

@@ -6,6 +6,7 @@ import liveRoutes from './routes/liveRoutes';
 import economyRoutes from './economy/economyRoutes';
 import adminRoutes from './admin/adminRoutes';
 import appVersionRoutes from './appVersion/appVersionRoutes';
+import firebaseTokenRoutes from './auth/firebaseTokenRoutes';
 
 import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
 import { ensureEconomySchema } from './economy/schema';
@@ -81,6 +82,9 @@ app.use(appVersionRoutes);
 // Admin auth surface must be mounted before economy routes because
 // economy router applies Cognito middleware at router level.
 app.use(adminRoutes);
+
+// Cognito → Firebase custom-token federation (uid = Cognito sub).
+app.use(firebaseTokenRoutes);
 
 // Economy contracts (auth required inside router)
 app.use(economyRoutes);

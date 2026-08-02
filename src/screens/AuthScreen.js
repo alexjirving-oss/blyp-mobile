@@ -17,6 +17,7 @@ import { mapAuthError } from '../lib/auth/errors';
 import BlypLogo from '../components/BlypLogo';
 import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
+import { ensureFirebaseFederatedSession } from '../services/FirebaseFederation';
 import { isSocialAuthEnabled, signInWithGoogle, signInWithFacebook } from '../services/socialAuthService';
 
 const AuthScreen = () => {
@@ -114,6 +115,10 @@ const AuthScreen = () => {
       // Lift auth state immediately if we have a CognitoUser reference
       if (context?.cognitoUser) {
         try { refreshAuthNow?.(context.cognitoUser); } catch {}
+        // Best-effort: align Firebase auth.uid with Cognito sub for Firestore rules.
+        void ensureFirebaseFederatedSession(context.cognitoUser).catch((err) => {
+          console.warn('[AUTH][FEDERATION]', err?.message || err);
+        });
       }
       // Clear signing flags
       setIsSigningIn(false);

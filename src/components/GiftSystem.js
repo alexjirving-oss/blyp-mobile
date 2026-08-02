@@ -13,8 +13,10 @@ import {
   Easing,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { auth } from '../config/firebase';
+import { auth, firestore as db } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
+import { isCanonicalCognitoSub } from '../services/CognitoSession';
+import { doc, getDoc } from 'firebase/firestore';
 
 const { width } = Dimensions.get('window');
 
@@ -112,16 +114,30 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
     );
   };
 
+  const resolveReceiverCognitoSub = async (candidateId) => {
+    const direct = String(candidateId || '').trim();
+    if (isCanonicalCognitoSub(direct)) return direct;
+    try {
+      const snap = await getDoc(doc(db, 'users', direct));
+      const mapped = String(snap.data()?.cognitoSub || '').trim();
+      if (isCanonicalCognitoSub(mapped)) return mapped;
+    } catch {}
+    return null;
+  };
+
   const processSendGift = async (gift) => {
     setSending(true);
     setSelectedGift(gift);
     
     try {
-      // Wave 1: Firestore gift mint/spend is disabled. Server gifts require a live
-      // streamId + Cognito receiver sub via EconomyApi (not Firebase uid).
+      const receiverUserId = await resolveReceiverCognitoSub(creatorId);
+      if (!receiverUserId) {
+        throw new Error('GIFT_RECEIVER_REQUIRES_COGNITO_SUB');
+      }
+      // Wave 1: server gifts require Cognito receiver sub (+ stream/catalog ids).
       await BlypCoinService.sendGift({
         streamId: postId,
-        receiverUserId: creatorId,
+        receiverUserId,
         giftId: gift.id,
         quantity: 1,
       });

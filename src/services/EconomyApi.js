@@ -1,4 +1,4 @@
-import { fetchAuthSession } from 'aws-amplify/auth';
+import { getCognitoBearerToken } from './CognitoSession';
 
 function getBaseUrl() {
   return String(process.env.EXPO_PUBLIC_LIVE_API_BASE_URL || '')
@@ -10,22 +10,12 @@ export function isLiveApiConfigured() {
   return getBaseUrl().length > 0;
 }
 
-async function getCognitoBearerToken() {
-  const session = await fetchAuthSession();
-  const access = session?.tokens?.accessToken?.toString?.();
-  const id = session?.tokens?.idToken?.toString?.();
-  const token = access || id || null;
-  if (!token) {
-    throw new Error('COGNITO_AUTH_REQUIRED');
-  }
-  return token;
-}
-
 async function economyFetch(path, options = {}) {
   const base = getBaseUrl();
   if (!base) {
     throw new Error('LIVE_API_NOT_CONFIGURED');
   }
+  // Use the CognitoUserPool session (same path as AuthScreen), not Amplify.
   const token = await getCognitoBearerToken();
   const response = await fetch(`${base}${path}`, {
     ...options,
