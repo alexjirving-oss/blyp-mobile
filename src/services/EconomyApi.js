@@ -1,22 +1,10 @@
 import { getCognitoBearerToken } from './CognitoSession';
+import { getLiveApiBaseUrl, isLiveApiConfigured } from './liveApiBase';
 
-function getBaseUrl() {
-  return String(
-    process.env.EXPO_PUBLIC_LIVE_API_BASE_URL ||
-      process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
-      process.env.EXPO_PUBLIC_API_BASE_URL ||
-      '',
-  )
-    .trim()
-    .replace(/\/+$/, '');
-}
-
-export function isLiveApiConfigured() {
-  return getBaseUrl().length > 0;
-}
+export { isLiveApiConfigured };
 
 async function economyFetch(path, options = {}) {
-  const base = getBaseUrl();
+  const base = getLiveApiBaseUrl();
   if (!base) {
     throw new Error('LIVE_API_NOT_CONFIGURED');
   }

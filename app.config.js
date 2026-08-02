@@ -12,11 +12,23 @@ module.exports = () => {
     // eslint-disable-next-line no-console
     console.warn('[BLYP][SECURITY] Gemini key not provided via env. Gemini features will be disabled.');
   }
+  const liveServiceUrl =
+    process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
+    process.env.EXPO_PUBLIC_LIVE_API_BASE_URL ||
+    process.env.EXPO_PUBLIC_API_BASE_URL ||
+    'https://blyp-live-service-innn3d7yqq-uc.a.run.app';
+
   const extra = {
     ...(fromJson.extra || {}),
     eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
     // Key value is injected at build/runtime from env; blank string in code ensures no committed secret.
     EXPO_PUBLIC_GEMINI_API_KEY: resolvedGeminiKey,
+    EXPO_PUBLIC_LIVE_SERVICE_URL: liveServiceUrl,
+    EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET:
+      process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET === '0' ||
+      String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET || '').toLowerCase() === 'false'
+        ? 'false'
+        : 'true',
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
     },

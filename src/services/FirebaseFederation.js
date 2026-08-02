@@ -2,18 +2,7 @@ import { signInWithCustomToken } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, firestore as db, firebaseEnabled } from '../config/firebase';
 import { getCognitoSessionTokens, isCanonicalCognitoSub } from './CognitoSession';
-import { isLiveApiConfigured } from './EconomyApi';
-
-function getBaseUrl() {
-  return String(
-    process.env.EXPO_PUBLIC_LIVE_API_BASE_URL ||
-      process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
-      process.env.EXPO_PUBLIC_API_BASE_URL ||
-      '',
-  )
-    .trim()
-    .replace(/\/+$/, '');
-}
+import { getLiveApiBaseUrl, isLiveApiConfigured } from './liveApiBase';
 
 let inFlight = null;
 let lastFederatedSub = null;
@@ -50,7 +39,7 @@ export async function ensureFirebaseFederatedSession(cognitoUser) {
         return { ok: true, sub, reused: true };
       }
 
-      const response = await fetch(`${getBaseUrl()}/auth/firebase-token`, {
+      const response = await fetch(`${getLiveApiBaseUrl()}/auth/firebase-token`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${bearerToken}`,

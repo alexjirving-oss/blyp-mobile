@@ -6,15 +6,35 @@ function initApp(): admin.app.App | null {
     if (admin.apps.length > 0) {
         return admin.app();
     }
+
+    const projectId =
+        process.env.FIREBASE_PROJECT_ID ||
+        process.env.GCLOUD_PROJECT ||
+        process.env.GOOGLE_CLOUD_PROJECT ||
+        'blyp-master';
+
     const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-    if (!serviceAccountJson) {
-        return null;
+    if (serviceAccountJson) {
+        try {
+            const serviceAccount = JSON.parse(serviceAccountJson) as admin.ServiceAccount;
+            return admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount),
+                projectId,
+            });
+        } catch (e) {
+            console.error('[FIREBASE_ADMIN] Failed to initialize from FIREBASE_SERVICE_ACCOUNT_JSON:', e);
+            return null;
+        }
     }
+
+    // Cloud Run / GCP fallback when a JSON key secret is not mounted.
     try {
-        const serviceAccount = JSON.parse(serviceAccountJson) as admin.ServiceAccount;
-        return admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+        return admin.initializeApp({
+            credential: admin.credential.applicationDefault(),
+            projectId,
+        });
     } catch (e) {
-        console.error('[FIREBASE_ADMIN] Failed to initialize:', e);
+        console.error('[FIREBASE_ADMIN] ADC initialize failed:', e);
         return null;
     }
 }
