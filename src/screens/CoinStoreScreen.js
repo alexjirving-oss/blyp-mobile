@@ -127,29 +127,11 @@ const CoinStoreScreen = ({ navigation }) => {
   const processPurchase = async (packageData) => {
     setLoading(true);
     try {
-      // In a real app, integrate with payment processor (Stripe, Apple Pay, etc.)
-      // For demo, we'll simulate the purchase
-      
-      const totalCoins = packageData.coins + packageData.bonus;
-      
-      await BlypCoinService.addCoins(
-        currentUser.uid,
-        totalCoins,
-        'purchase',
-        {
-          packageId: packageData.id,
-          price: packageData.price,
-          baseCoins: packageData.coins,
-          bonusCoins: packageData.bonus
-        }
-      );
-      
+      // Wave 0 containment: simulated client purchases are disabled.
       Alert.alert(
-        'Purchase Successful! 🎉',
-        `You received ${totalCoins} Blypcoins!`,
-        [{ text: 'Awesome!', style: 'default' }]
+        'Purchases Unavailable',
+        'In-app coin purchases are temporarily disabled until payment verification is live.',
       );
-      
     } catch (error) {
       console.error('Purchase error:', error);
       Alert.alert('Purchase Failed', 'Please try again later.');
@@ -180,20 +162,11 @@ const CoinStoreScreen = ({ navigation }) => {
   const processGemPurchase = async (packageData) => {
     setLoading(true);
     try {
-      const totalGems = packageData.gems + packageData.bonus;
-      
-      await GemService.addGems(
-        currentUser.uid,
-        totalGems,
-        'purchase'
-      );
-      
+      // Wave 0 containment: simulated client gem purchases are disabled.
       Alert.alert(
-        'Purchase Successful! 💎',
-        `You received ${totalGems} Gems!`,
-        [{ text: 'Awesome!', style: 'default' }]
+        'Purchases Unavailable',
+        'In-app gem purchases are temporarily disabled until payment verification is live.',
       );
-      
     } catch (error) {
       console.error('Gem purchase error:', error);
       Alert.alert('Purchase Failed', 'Please try again later.');

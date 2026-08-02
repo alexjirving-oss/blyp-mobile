@@ -56,44 +56,10 @@ class GemService {
     });
   }
 
-  static async addGems(userId, amount, reason = 'grant', metadata = {}) {
+  static async addGems(userId, amount, _reason = 'grant', _metadata = {}) {
     if (!userId || typeof amount !== 'number' || amount <= 0) throw new Error('Invalid addGems parameters');
-    const result = await runTransaction(db, async (transaction) => {
-      const gemsRef = doc(db, 'gems', userId);
-      const snap = await transaction.get(gemsRef);
-      let balance = 0;
-      let totalEarned = 0;
-      let totalSpent = 0;
-      let createdAt = serverTimestamp();
-      if (snap.exists()) {
-        const data = snap.data() || {};
-        balance = data.balance || 0;
-        totalEarned = data.totalEarned || 0;
-        totalSpent = data.totalSpent || 0;
-        createdAt = data.createdAt || createdAt;
-      }
-      const newBalance = balance + amount;
-      transaction.set(gemsRef, {
-        balance: newBalance,
-        totalEarned: totalEarned + amount,
-        totalSpent,
-        createdAt,
-        lastUpdated: serverTimestamp()
-      });
-      const txRef = doc(collection(db, 'transactions'));
-      transaction.set(txRef, {
-        userId,
-        asset: 'gem',
-        type: 'credit',
-        amount,
-        balance: newBalance,
-        reason,
-        timestamp: serverTimestamp(),
-        metadata
-      });
-      return newBalance;
-    });
-    return result;
+    // Wave 0 containment: client-side gem minting is disabled until server receipt verification exists.
+    throw new Error('CLIENT_MINT_DISABLED');
   }
 
   static async spendGems(userId, amount, reason = 'spend', metadata = {}) {

@@ -1,5 +1,4 @@
 import { Router, Response, NextFunction } from 'express';
-import crypto from 'crypto';
 import { cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
 import { AuthedRequest } from '../auth/cognitoJwtMiddleware';
 import { logger } from '../config/logger';
@@ -38,10 +37,9 @@ function isCanonicalSub(value: unknown): boolean {
     return COGNITO_SUB_REGEX.test(String(value || '').trim());
 }
 
-const ADMIN_LOGIN_EMAIL = 'alex@tapaquatics.com';
-const ADMIN_LOGIN_PASSWORD = 'Caleb2022!';
-const ADMIN_ACTOR_SUB = String(process.env.ADMIN_ACTOR_SUB || '00000000-0000-4000-8000-000000000000').trim();
-const SESSION_TTL_MS = 1000 * 60 * 60 * 8;
+// Wave 0 containment: hardcoded credential login is permanently disabled.
+// Admin access must use allowlisted Cognito identity (Wave 1), not a shared password.
+const ADMIN_LOGIN_DISABLED = true;
 
 type AdminSession = {
     actorUserId: string;
@@ -57,16 +55,6 @@ function cleanupExpiredSessions() {
             adminSessions.delete(token);
         }
     }
-}
-
-function issueAdminSession(actorUserId: string): string {
-    cleanupExpiredSessions();
-    const token = crypto.randomBytes(24).toString('hex');
-    adminSessions.set(token, {
-        actorUserId,
-        expiresAt: Date.now() + SESSION_TTL_MS,
-    });
-    return token;
 }
 
 function getSessionToken(req: AuthedRequest): string {
@@ -97,36 +85,16 @@ function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
     return next();
 }
 
-router.post('/admin/auth/login', async (req: AuthedRequest, res: Response) => {
-    try {
-        const email = String(req.body?.email || '').trim().toLowerCase();
-        const password = String(req.body?.password || '');
-
-        const isEmailOk = email === ADMIN_LOGIN_EMAIL;
-        const isPasswordOk = password === ADMIN_LOGIN_PASSWORD;
-
-        if (!isEmailOk || !isPasswordOk) {
-            logger.warn({ email }, '[admin] login rejected');
-            return res.status(401).json({ error: 'INVALID_CREDENTIALS', code: 'INVALID_CREDENTIALS' });
-        }
-
-        if (!isCanonicalSub(ADMIN_ACTOR_SUB)) {
-            logger.error({ adminActorSub: ADMIN_ACTOR_SUB }, '[admin] ADMIN_ACTOR_SUB is not a canonical sub');
-            return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
-        }
-
-        const actorUserId = ADMIN_ACTOR_SUB;
-        const sessionToken = issueAdminSession(actorUserId);
-        return res.json({
-            ok: true,
-            sessionToken,
-            actorUserId,
-            expiresInMs: SESSION_TTL_MS,
+router.post('/admin/auth/login', async (_req: AuthedRequest, res: Response) => {
+    if (ADMIN_LOGIN_DISABLED) {
+        logger.warn('[admin] password login disabled (Wave 0 containment)');
+        return res.status(503).json({
+            error: 'ADMIN_LOGIN_DISABLED',
+            code: 'ADMIN_LOGIN_DISABLED',
+            detail: 'Shared-password admin login is disabled. Use allowlisted Cognito admin auth.',
         });
-    } catch (e: any) {
-        logger.error({ err: e?.message || String(e) }, '[admin] /admin/auth/login failed');
-        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
+    return res.status(503).json({ error: 'ADMIN_LOGIN_DISABLED', code: 'ADMIN_LOGIN_DISABLED' });
 });
 
 router.post('/admin/auth/logout', requireAdmin, async (req: AuthedRequest, res: Response) => {

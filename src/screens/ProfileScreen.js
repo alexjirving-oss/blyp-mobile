@@ -65,15 +65,14 @@ const ProfileScreen = () => {
 
   const handleLogout = async () => { try { await signOut(auth); } catch(e){ console.log('logout error', e.message);} };
   const handleBoostFollowers = async () => {
-    if (!user) return;
-    Alert.alert('Boost Followers','Select amount',[{text:'Cancel',style:'cancel'},{text:'+100',onPress:async()=>{const r=await addFakeFollowers(user.uid,100); if(r.success) Alert.alert('Added 100');}},{text:'+1K',onPress:async()=>{const r=await addFakeFollowers(user.uid,1000); if(r.success) Alert.alert('Added 1K');}},{text:'+10K',onPress:async()=>{const r=await addFakeFollowers(user.uid,10000); if(r.success) Alert.alert('Added 10K');}}]);
+    Alert.alert('Unavailable', 'Follower boost tools are disabled.');
   };
   const handleDeletePost = (post) => {
     Alert.alert('Delete Post','Delete permanently?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{try{const promises=[]; if(post.videoUrl){try{promises.push(storage.refFromURL(post.videoUrl).delete());}catch{}} if(Array.isArray(post.media)){post.media.forEach(m=>{if(m.url){try{promises.push(storage.refFromURL(m.url).delete());}catch{}} if(m.thumbnail&&m.thumbnail!==m.url){try{promises.push(storage.refFromURL(m.thumbnail).delete());}catch{}}});} if(post.thumbnail && !post.media?.some(m=>m.thumbnail===post.thumbnail)){try{promises.push(storage.refFromURL(post.thumbnail).delete());}catch{}} if(promises.length) await Promise.allSettled(promises); await db.collection('posts').doc(post.id).delete();}catch(e){Alert.alert('Error deleting',e.message);}}}]);
   };
   const handlePostPress = post => navigation.navigate('MediaViewer',{ post });
   const getVideoThumbnail = post => post.thumbnail || post.media?.[0]?.thumbnail || post.media?.[0]?.url || post.videoUrl || post.imageUrl || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=400&fit=crop';
-  const handleCodeSubmit = () => { if(codeInput==='123'){ setDeveloperMode(true); setShowFollowerBooster(true); setShowCodeModal(false); setCodeInput(''); Alert.alert('Developer mode enabled'); } else { Alert.alert('Invalid code'); setCodeInput(''); } };
+  const handleCodeSubmit = () => { Alert.alert('Unavailable', 'Developer boost tools are disabled.'); setShowCodeModal(false); setCodeInput(''); };
 
   const renderPostItem = ({ item: post }) => {
     const isVideo = post.type==='video'||post.media?.[0]?.type?.includes('video')||post.videoUrl||post.media?.[0]?.url?.includes('.mp4');

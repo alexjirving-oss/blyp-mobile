@@ -26,17 +26,9 @@ class BlypCoinService {
       
       if (walletDoc.exists()) {
         return walletDoc.data().balance || 0;
-      } else {
-        // Create wallet if it doesn't exist
-        await setDoc(userWalletRef, {
-          balance: 0,
-          totalEarned: 0,
-          totalSpent: 0,
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp()
-        });
-        return 0;
       }
+      // Wave 0: clients must not create/credit wallets.
+      return 0;
     } catch (error) {
       console.error('Error getting user balance:', error);
       throw error;
@@ -60,54 +52,9 @@ class BlypCoinService {
   }
 
   // Add Blypcoins to user account (earning/purchasing)
-  static async addCoins(userId, amount, reason = 'purchase', metadata = {}) {
-    try {
-      const result = await runTransaction(db, async (transaction) => {
-        const userWalletRef = doc(db, 'wallets', userId);
-        const walletDoc = await transaction.get(userWalletRef);
-        
-        let currentBalance = 0;
-        let totalEarned = 0;
-        
-        if (walletDoc.exists()) {
-          const data = walletDoc.data();
-          currentBalance = data.balance || 0;
-          totalEarned = data.totalEarned || 0;
-        }
-        
-        const newBalance = currentBalance + amount;
-        const newTotalEarned = totalEarned + amount;
-        
-        // Update wallet
-        transaction.set(userWalletRef, {
-          balance: newBalance,
-          totalEarned: newTotalEarned,
-          totalSpent: walletDoc.exists() ? (walletDoc.data().totalSpent || 0) : 0,
-          lastUpdated: serverTimestamp(),
-          createdAt: walletDoc.exists() ? walletDoc.data().createdAt : serverTimestamp()
-        });
-        
-        // Record transaction
-        const transactionRef = doc(collection(db, 'transactions'));
-        transaction.set(transactionRef, {
-          userId,
-          type: 'credit',
-          amount,
-          reason,
-          balance: newBalance,
-          timestamp: serverTimestamp(),
-          metadata
-        });
-        
-        return newBalance;
-      });
-      
-      console.log('💰 Added', amount, 'Blypcoins to user:', userId, 'New balance:', result);
-      return result;
-    } catch (error) {
-      console.error('Error adding coins:', error);
-      throw error;
-    }
+  static async addCoins(_userId, _amount, _reason = 'purchase', _metadata = {}) {
+    // Wave 0 containment: client-side minting is disabled until server receipt verification exists.
+    throw new Error('CLIENT_MINT_DISABLED');
   }
 
   // Spend Blypcoins (for gifts, features, etc.)

@@ -224,11 +224,27 @@ export async function requestGuestSlot(sessionId: string, guestUserId: string, s
   await requestGuestSlotStore(sessionId, guestUserId, nowIso(), slotIndexRequested);
 }
 
-export async function listGuestRequests(sessionId: string) {
+export class LiveHostForbiddenError extends Error {
+  readonly code = 'FORBIDDEN_NOT_HOST';
+  constructor(message = 'Only the session host may perform this action') {
+    super(message);
+    this.name = 'LiveHostForbiddenError';
+  }
+}
+
+async function requireLiveHost(sessionId: string, actorUserId: string): Promise<LiveSession> {
   const session = await getSessionById(sessionId);
   if (!session || session.status !== 'LIVE') {
     throw new Error('Live session not found or not live');
   }
+  if (session.hostUserId !== actorUserId) {
+    throw new LiveHostForbiddenError();
+  }
+  return session;
+}
+
+export async function listGuestRequests(sessionId: string, actorUserId: string) {
+  await requireLiveHost(sessionId, actorUserId);
   return listGuestRequestsStore(sessionId);
 }
 
@@ -236,11 +252,12 @@ export async function getGuest(sessionId: string, guestUserId: string) {
   return getGuestStore(sessionId, guestUserId);
 }
 
-export async function inviteGuest(sessionId: string, guestUserId: string): Promise<{ slotIndex: number; stageArn: string }> {
-  const session = await getSessionById(sessionId);
-  if (!session || session.status !== 'LIVE') {
-    throw new Error('Live session not found or not live');
-  }
+export async function inviteGuest(
+  sessionId: string,
+  guestUserId: string,
+  actorUserId: string,
+): Promise<{ slotIndex: number; stageArn: string }> {
+  const session = await requireLiveHost(sessionId, actorUserId);
 
   const allGuests = await listGuestsStore(sessionId);
   const used = new Set<number>();
@@ -257,11 +274,12 @@ export async function inviteGuest(sessionId: string, guestUserId: string): Promi
   return { slotIndex, stageArn: session.stageArn };
 }
 
-export async function rejectGuest(sessionId: string, guestUserId: string): Promise<void> {
-  const session = await getSessionById(sessionId);
-  if (!session || session.status !== 'LIVE') {
-    throw new Error('Live session not found or not live');
-  }
+export async function rejectGuest(
+  sessionId: string,
+  guestUserId: string,
+  actorUserId: string,
+): Promise<void> {
+  await requireLiveHost(sessionId, actorUserId);
   await rejectGuestStore(sessionId, guestUserId, nowIso());
 }
 
@@ -301,7 +319,8 @@ export async function listActiveLiveSessions(limit?: number): Promise<LiveSessio
   return listSessionsByStatus('LIVE', limit);
 }
 
-export async function endLiveSession(sessionId: string): Promise<void> {
+export async function endLiveSession(sessionId: string, actorUserId: string): Promise<void> {
+  await requireLiveHost(sessionId, actorUserId);
   const endedAt = nowIso();
   await updateSessionStatus(sessionId, 'ENDED', endedAt);
 }

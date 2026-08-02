@@ -10,59 +10,9 @@ import { firestore as db } from '../config/firebase';
  * Add fake followers to boost a user's follower count
  * This creates fake follower documents in Firebase
  */
-export const addFakeFollowers = async (targetUserId, count = 1000) => {
-  try {
-    console.log(`🚀 Adding ${count} fake followers to user: ${targetUserId}`);
-    
-    const promises = [];
-    
-    for (let i = 1; i <= count; i++) {
-      const fakeFollowerId = `fake_follower_${i}_${Date.now()}`;
-      
-      // Add to target user's followers collection
-      const followerPromise = setDoc(doc(db, 'users', targetUserId, 'followers', fakeFollowerId), {
-        timestamp: new Date(),
-        userId: fakeFollowerId,
-        displayName: `Fake User ${i}`,
-        username: `fake_user_${i}`,
-        avatar: `https://images.unsplash.com/photo-${1500000000000 + (i % 100)}?w=100&h=100&fit=crop&crop=face`,
-        isBot: true // Flag to identify fake followers if needed
-      });
-      
-      promises.push(followerPromise);
-      
-      // Process in batches of 50 to avoid overwhelming Firebase
-      if (i % 50 === 0) {
-        await Promise.all(promises);
-        promises.length = 0;
-        console.log(`✅ Added ${i}/${count} fake followers...`);
-      }
-    }
-    
-    // Process remaining promises
-    if (promises.length > 0) {
-      await Promise.all(promises);
-    }
-    
-    console.log(`🎉 Successfully added ${count} fake followers to user ${targetUserId}!`);
-    
-    // Return the new follower count
-    const followersRef = collection(db, 'users', targetUserId, 'followers');
-    const snapshot = await getDocs(followersRef);
-    
-    return {
-      success: true,
-      newFollowerCount: snapshot.size,
-      addedCount: count
-    };
-    
-  } catch (error) {
-    console.error('❌ Error adding fake followers:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
+export const addFakeFollowers = async (_targetUserId, _count = 1000) => {
+  // Wave 0 containment: client fake-follower minting is disabled.
+  return { success: false, error: 'FAKE_FOLLOWERS_DISABLED' };
 };
 
 /**

@@ -13,6 +13,7 @@ import {
   getGuest,
   leaveGuest,
   heartbeatGuest,
+  LiveHostForbiddenError,
 } from '../live/liveService';
 import { bestEffortRedisPing } from '../economy/redisBestEffort';
 import { logger } from '../config/logger';
@@ -27,6 +28,13 @@ router.use(requireSupportedAndroidVersion);
 function logRedisSoftFail(tag: '[LIVE_START_REDIS_SOFT_FAIL]' | '[GUEST_JOIN_REDIS_SOFT_FAIL]', payload: Record<string, unknown>) {
   // Use structured logging so Cloud Run log filters can reliably match `jsonPayload.msg`.
   logger.warn(payload, tag);
+}
+
+function hostControlErrorStatus(err: unknown): number {
+  if (err instanceof LiveHostForbiddenError || (err as { code?: string })?.code === 'FORBIDDEN_NOT_HOST') {
+    return 403;
+  }
+  return 500;
 }
 
 router.post('/live/start', async (req: AuthedRequest, res) => {
@@ -361,7 +369,7 @@ router.get('/live/guest/requests', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId required' });
     }
 
-    const requests = await listGuestRequests(sessionId);
+    const requests = await listGuestRequests(sessionId, userId);
     res.json({
       requests: requests.map((r) => ({
         userId: r.userId,
@@ -373,7 +381,11 @@ router.get('/live/guest/requests', async (req: AuthedRequest, res) => {
       })),
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to list guest requests', detail: err.message });
+    res.status(hostControlErrorStatus(err)).json({
+      error: err?.code === 'FORBIDDEN_NOT_HOST' ? 'FORBIDDEN' : 'Failed to list guest requests',
+      code: err?.code,
+      detail: err.message,
+    });
   }
 });
 
@@ -420,7 +432,7 @@ router.post('/live/guest/invite', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId and guestUserId required' });
     }
 
-    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId);
+    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId, userId);
     // For backward compatibility with client types, return a token placeholder.
     // The guest will mint their own token via /live/guest-token after they observe INVITED.
     res.json({
@@ -431,7 +443,11 @@ router.post('/live/guest/invite', async (req: AuthedRequest, res) => {
       slotIndex,
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to invite guest', detail: err.message });
+    res.status(hostControlErrorStatus(err)).json({
+      error: err?.code === 'FORBIDDEN_NOT_HOST' ? 'FORBIDDEN' : 'Failed to invite guest',
+      code: err?.code,
+      detail: err.message,
+    });
   }
 });
 
@@ -449,7 +465,7 @@ router.post('/live/guest/accept', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId and guestUserId required' });
     }
 
-    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId);
+    const { slotIndex, stageArn } = await inviteGuest(sessionId, guestUserId, userId);
     res.json({
       token: 'INVITED',
       stageArn,
@@ -458,7 +474,11 @@ router.post('/live/guest/accept', async (req: AuthedRequest, res) => {
       slotIndex,
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to invite guest', detail: err.message });
+    res.status(hostControlErrorStatus(err)).json({
+      error: err?.code === 'FORBIDDEN_NOT_HOST' ? 'FORBIDDEN' : 'Failed to invite guest',
+      code: err?.code,
+      detail: err.message,
+    });
   }
 });
 
@@ -472,23 +492,35 @@ router.post('/live/guest/reject', async (req: AuthedRequest, res) => {
     if (!sessionId || !guestUserId) {
       return res.status(400).json({ error: 'sessionId and guestUserId required' });
     }
-    await rejectGuest(sessionId, guestUserId);
+    await rejectGuest(sessionId, guestUserId, userId);
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to reject guest', detail: err.message });
+    res.status(hostControlErrorStatus(err)).json({
+      error: err?.code === 'FORBIDDEN_NOT_HOST' ? 'FORBIDDEN' : 'Failed to reject guest',
+      code: err?.code,
+      detail: err.message,
+    });
   }
 });
 
 router.post('/live/end', async (req: AuthedRequest, res) => {
   try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
     const { sessionId } = req.body || {};
     if (!sessionId) {
       return res.status(400).json({ error: 'sessionId required' });
     }
-    await endLiveSession(sessionId);
+    await endLiveSession(sessionId, userId);
     res.json({ ok: true });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to end live session', detail: err.message });
+    res.status(hostControlErrorStatus(err)).json({
+      error: err?.code === 'FORBIDDEN_NOT_HOST' ? 'FORBIDDEN' : 'Failed to end live session',
+      code: err?.code,
+      detail: err.message,
+    });
   }
 });
 

@@ -37,7 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateThumbnails = exports.cleanupOldStreams = exports.updateStreamAnalytics = exports.processVideoSegment = void 0;
+exports.recalcModerationQueue = exports.aggregateReport = exports.purgeExpiredAnalytics = exports.generateThumbnails = exports.cleanupOldStreams = exports.updateStreamAnalytics = exports.processVideoSegment = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const storage_1 = require("@google-cloud/storage");
@@ -109,13 +109,19 @@ exports.processVideoSegment = functions
     .runWith({
     timeoutSeconds: 540,
     memory: '2GB',
-    maxInstances: 100
+    // Wave 0 containment: cap fan-out until owner-scoped uploads/quotas exist.
+    maxInstances: 2
 })
     // Use default bucket trigger (avoid hard-coding bucket name to remain compatible with firebasestorage.app domain)
     .storage.object()
     .onFinalize(async (object) => {
     var _a;
     try {
+        // Wave 0 containment: disable expensive FFmpeg processing until Storage writes are owner-scoped.
+        if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
+            console.log('🛑 processVideoSegment disabled (Wave 0 containment)');
+            return null;
+        }
         const filePath = object.name;
         const bucket = object.bucket;
         // Guard: required path & naming
@@ -566,12 +572,17 @@ async function updateProcessingAnalytics(streamId, qualityCount) {
 exports.generateThumbnails = functions
     .runWith({
     timeoutSeconds: 60,
-    memory: '1GB'
+    memory: '1GB',
+    maxInstances: 2
 })
     .storage.object()
     .onFinalize(async (object) => {
     var _a;
     try {
+        if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
+            console.log('🛑 generateThumbnails disabled (Wave 0 containment)');
+            return null;
+        }
         const filePath = object.name;
         const bucket = object.bucket;
         if (!filePath || !filePath.includes('streams/') || !filePath.includes('segment_')) {
@@ -646,4 +657,143 @@ exports.generateThumbnails = functions
     }
 });
 // Removed duplicate parseStreamPath & processVideoSegment definitions (now consolidated at top of file)
+/**
+ * Analytics Retention Purge Function
+ * Scheduled job enforcing 90-day (or configured) retention by deleting expired analytics events.
+ * Selection criteria: documents in `analytics` where `retentionExpiresAt` < now and capped per run.
+ * Safety: limits deletions to BATCH_LIMIT per invocation to avoid overload; subsequent runs continue.
+ */
+exports.purgeExpiredAnalytics = functions.pubsub
+    .schedule('every 24 hours')
+    .onRun(async () => {
+    const now = Date.now();
+    const BATCH_LIMIT = 500; // safety cap per execution
+    let deleted = 0;
+    try {
+        const snap = await db.collection('analytics')
+            .where('retentionExpiresAt', '<', now)
+            .limit(BATCH_LIMIT)
+            .get();
+        if (snap.empty) {
+            console.log('🧹 Analytics purge: no expired documents');
+            return null;
+        }
+        const batch = db.batch();
+        snap.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+        deleted = snap.size;
+        await db.collection('analyticsPurgeLog').add({
+            runAt: admin.firestore.FieldValue.serverTimestamp(),
+            deletedCount: deleted,
+            batchLimit: BATCH_LIMIT
+        });
+        console.log(`✅ Analytics purge complete. Deleted ${deleted} expired events.`);
+    }
+    catch (err) {
+        console.error('❌ Analytics purge error:', err);
+        await db.collection('analyticsPurgeLog').add({
+            runAt: admin.firestore.FieldValue.serverTimestamp(),
+            error: (err === null || err === void 0 ? void 0 : err.message) || String(err),
+            deletedCount: deleted
+        });
+    }
+    return null;
+});
+/**
+ * Report Aggregation Function
+ * Ingests new reports and upserts an aggregated moderationQueue document per target.
+ * Document key pattern: <targetType>_<targetId>
+ * Fields maintained:
+ *  - targetType, targetId
+ *  - totalReports
+ *  - reasons: { reasonCode: count }
+ *  - firstReportedAt, lastReportedAt
+ *  - openReportIds (trimmed window)
+ *  - status: 'pending_review' | 'under_review' | 'resolved'
+ * This is additive; original report docs remain unchanged.
+ */
+exports.aggregateReport = functions.firestore
+    .document('reports/{reportId}')
+    .onCreate(async (snap, context) => {
+    const data = snap.data();
+    const { targetType, targetId, reasonCode } = data;
+    if (!targetType || !targetId || !reasonCode) {
+        console.log('⚠️ Report missing required aggregation fields');
+        return null;
+    }
+    const queueDocId = `${targetType}_${targetId}`;
+    const ref = db.collection('moderationQueue').doc(queueDocId);
+    try {
+        await db.runTransaction(async (tx) => {
+            const existing = await tx.get(ref);
+            const now = admin.firestore.FieldValue.serverTimestamp();
+            if (!existing.exists) {
+                tx.set(ref, {
+                    targetType,
+                    targetId,
+                    totalReports: 1,
+                    reasons: { [reasonCode]: 1 },
+                    firstReportedAt: now,
+                    lastReportedAt: now,
+                    openReportIds: [snap.id],
+                    status: 'pending_review',
+                    priorityScore: 1 // simple initial heuristic
+                });
+            }
+            else {
+                const cur = existing.data() || {};
+                const reasons = cur.reasons || {};
+                reasons[reasonCode] = (reasons[reasonCode] || 0) + 1;
+                const openReportIds = Array.isArray(cur.openReportIds) ? [snap.id, ...cur.openReportIds].slice(0, 25) : [snap.id];
+                const totalReports = (cur.totalReports || 0) + 1;
+                // Simple priority heuristic: totalReports + distinctReasons * 0.5
+                const distinctReasons = Object.keys(reasons).length;
+                const priorityScore = totalReports + distinctReasons * 0.5;
+                tx.update(ref, {
+                    reasons,
+                    totalReports,
+                    lastReportedAt: now,
+                    openReportIds,
+                    priorityScore
+                });
+            }
+        });
+        console.log(`🛡️ Aggregated report into moderationQueue/${queueDocId}`);
+    }
+    catch (err) {
+        console.error('❌ Aggregation error:', err);
+    }
+    return null;
+});
+/**
+ * Daily Moderation Queue Priority Recalculation
+ * Recomputes priorityScore factoring aging (older unresolved targets increase score modestly).
+ */
+exports.recalcModerationQueue = functions.pubsub
+    .schedule('every 24 hours')
+    .onRun(async () => {
+    try {
+        const snap = await db.collection('moderationQueue').where('status', '==', 'pending_review').limit(500).get();
+        const batch = db.batch();
+        const nowMs = Date.now();
+        snap.docs.forEach(d => {
+            var _a, _b;
+            const cur = d.data();
+            const totalReports = cur.totalReports || 0;
+            const distinctReasons = Object.keys(cur.reasons || {}).length;
+            const lastTs = ((_b = (_a = cur.lastReportedAt) === null || _a === void 0 ? void 0 : _a.toMillis) === null || _b === void 0 ? void 0 : _b.call(_a)) || nowMs;
+            const ageHours = Math.max(0, (nowMs - lastTs) / (1000 * 60 * 60));
+            const agingFactor = Math.min(12, ageHours / 6); // up to +12 after 72h
+            const priorityScore = totalReports + distinctReasons * 0.5 + agingFactor;
+            batch.update(d.ref, { priorityScore });
+        });
+        if (snap.size > 0)
+            await batch.commit();
+        console.log(`✅ Recalculated moderationQueue priorities for ${snap.size} targets`);
+    }
+    catch (e) {
+        console.error('❌ Recalc moderation queue error', e);
+    }
+    return null;
+});
 //# sourceMappingURL=index.js.map

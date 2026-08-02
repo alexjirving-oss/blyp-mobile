@@ -83,12 +83,18 @@ export const processVideoSegment = functions
   .runWith({
     timeoutSeconds: 540,
     memory: '2GB',
-    maxInstances: 100
+    // Wave 0 containment: cap fan-out until owner-scoped uploads/quotas exist.
+    maxInstances: 2
   })
   // Use default bucket trigger (avoid hard-coding bucket name to remain compatible with firebasestorage.app domain)
   .storage.object()
   .onFinalize(async (object) => {
     try {
+      // Wave 0 containment: disable expensive FFmpeg processing until Storage writes are owner-scoped.
+      if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
+        console.log('🛑 processVideoSegment disabled (Wave 0 containment)');
+        return null;
+      }
       const filePath = object.name;
       const bucket = object.bucket;
 
@@ -624,11 +630,16 @@ async function updateProcessingAnalytics(streamId: string, qualityCount: number)
 export const generateThumbnails = functions
   .runWith({
     timeoutSeconds: 60,
-    memory: '1GB'
+    memory: '1GB',
+    maxInstances: 2
   })
   .storage.object()
   .onFinalize(async (object) => {
     try {
+      if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
+        console.log('🛑 generateThumbnails disabled (Wave 0 containment)');
+        return null;
+      }
       const filePath = object.name;
       const bucket = object.bucket;
       

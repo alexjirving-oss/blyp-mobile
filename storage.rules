@@ -1,11 +1,42 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerPath(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAllowedMedia() {
+      return request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|video/.*');
+    }
+
+    // Owner-scoped media only.
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerPath(userId) && isAllowedMedia();
+    }
+
+    // Wave 0: block client writes that fan out expensive Storage → FFmpeg workers.
+    match /streams/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /thumbnails/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerPath(userId)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Deny everything else by default.
     match /{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-        && request.resource.size < 25 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*|video/.*|application/octet-stream');
+      allow read: if isSignedIn();
+      allow write: if false;
     }
   }
 }
