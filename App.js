@@ -73,6 +73,7 @@ import ChatConversationScreen from './src/screens/ChatConversationScreen';
 import MessengerScreen from './src/screens/MessengerScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import EditProfileScreen from './src/screens/EditProfileScreen';
+import PrivacySettingsScreen from './src/screens/PrivacySettingsScreen';
 import AuthScreen from './src/screens/AuthScreen';
 const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
 // Lazy screens
@@ -228,6 +229,7 @@ function AppStack() {
         </Suspense>
       )} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} />
       <Stack.Screen name="PostPreview" component={PostPreviewScreen} />
       <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
       <Stack.Screen name="Games" children={() => (

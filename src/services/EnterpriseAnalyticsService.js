@@ -82,7 +82,7 @@ class EnterpriseAnalyticsService {
       privacy: {
         anonymizeIP: true,
         respectDNT: true,       // Do Not Track
-        consentRequired: false,
+        consentRequired: true,
         dataRetention: 90       // 90 days
       }
     };
@@ -124,9 +124,27 @@ class EnterpriseAnalyticsService {
     
     this.isTest = typeof process !== 'undefined' && process?.env && (process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID);
     this.canWrite = !!firebaseEnabled && !this.isTest;
+    this.consentGranted = false;
 
     console.log('📊 Enterprise Analytics Service initialized');
     this.initialize();
+  }
+
+  async hasConsent() {
+    try {
+      // Lazy require avoids circular init with PrivacyConsent/Sentry.
+      // eslint-disable-next-line global-require
+      const { getAnalyticsConsent, hasAnalyticsConsentSync } = require('./PrivacyConsent');
+      if (hasAnalyticsConsentSync()) {
+        this.consentGranted = true;
+        return true;
+      }
+      this.consentGranted = await getAnalyticsConsent();
+      return this.consentGranted;
+    } catch {
+      this.consentGranted = false;
+      return false;
+    }
   }
 
   /**
@@ -134,6 +152,12 @@ class EnterpriseAnalyticsService {
    */
   async initialize() {
     try {
+      const allowed = await this.hasConsent();
+      if (!allowed) {
+        console.log('📊 Analytics idle (consent not granted)');
+        return;
+      }
+
       // Gather device context
       await this.gatherDeviceContext();
       
@@ -696,6 +720,10 @@ class EnterpriseAnalyticsService {
   async flushEventBuffer() {
     if (this.eventBuffer.length === 0) return;
     if (!this.canWrite) return; // skip writes in tests/disabled mode
+    if (!(await this.hasConsent())) {
+      this.eventBuffer = [];
+      return;
+    }
     
     try {
       const batch = writeBatch(db);
@@ -727,6 +755,7 @@ class EnterpriseAnalyticsService {
   async sendEvent(event) {
     try {
       if (!this.canWrite) return; // skip writes in tests/disabled mode
+      if (!(await this.hasConsent())) return;
       await addDoc(collection(db, 'analytics'), event);
       console.log(`⚡ Critical event sent: ${event.type}`);
       

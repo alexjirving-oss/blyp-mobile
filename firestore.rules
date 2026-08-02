@@ -42,6 +42,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Privacy lifecycle requests (export/deletion). Client create only; ops process offline.
+    match /privacyRequests/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type in ['export', 'deletion']
+        && request.resource.data.status == 'queued';
+      allow update, delete: if false;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create, update: if isOwner(userId);

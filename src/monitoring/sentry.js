@@ -1,10 +1,10 @@
-// Safe, lazy Sentry initialization to avoid requiring native modules when absent
+// Safe, lazy Sentry initialization. Default: off until analytics consent is granted.
 let Sentry = null;
 let initialized = false;
+let enabled = false;
 
 function getDsn() {
   try {
-    // Prefer Expo extra if available in Dev Client / builds
     // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
     const Constants = require('expo-constants').default || require('expo-constants');
     const extra = Constants?.expoConfig?.extra || Constants?.manifest?.extra || {};
@@ -16,12 +16,20 @@ function getDsn() {
   return '';
 }
 
-function initSentryIfPossible() {
+export function setSentryEnabled(next) {
+  enabled = !!next;
+  if (!enabled) {
+    return;
+  }
+  initSentryIfPossible();
+}
+
+export function initSentryIfPossible() {
   if (initialized) return;
+  if (!enabled) return; // consent-gated
   const dsn = getDsn();
-  if (!dsn || dsn.trim() === '') return; // no-op when DSN not provided
+  if (!dsn || dsn.trim() === '') return;
   try {
-    // Require only when needed; if native bits are missing, fail gracefully
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     Sentry = require('sentry-expo');
     // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
@@ -30,9 +38,11 @@ function initSentryIfPossible() {
     const dist = Constants.expoConfig?.extra?.gitSha || undefined;
     Sentry.init({
       dsn,
-      enableInExpoDevelopment: true,
+      enableInExpoDevelopment: false,
       debug: false,
-      tracesSampleRate: 1.0,
+      // Keep sampling low even when consented.
+      tracesSampleRate: 0.05,
+      sampleRate: 0.2,
       release,
       dist,
     });
@@ -43,8 +53,18 @@ function initSentryIfPossible() {
   }
 }
 
-// Perform best-effort init on import without throwing
-try { initSentryIfPossible(); } catch {}
+// Do not auto-init on import. Consent must enable telemetry first.
+try {
+  // Warm consent cache asynchronously; still defaults to disabled.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+  const { ensureConsentLoaded, hasAnalyticsConsentSync } = require('../services/PrivacyConsent');
+  ensureConsentLoaded()
+    .then((consent) => {
+      if (consent || hasAnalyticsConsentSync()) {
+        setSentryEnabled(true);
+      }
+    })
+    .catch(() => {});
+} catch {}
 
-// Re-export a minimal API for callers that may reference Sentry
-export { Sentry, initSentryIfPossible };
+export { Sentry };

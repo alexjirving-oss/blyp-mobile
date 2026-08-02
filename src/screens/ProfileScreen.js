@@ -157,7 +157,50 @@ const ProfileScreen = () => {
       case '1': return <View style={styles.tabContent}>{renderProfileInfo()}{renderPostsGrid()}</View>;
       case '2': return <View style={styles.tabContent}><ActivityFeed navigation={navigation} /></View>;
       case '3': return <View style={styles.tabContent}><View style={styles.comingSoon}><Icon name="document-text-outline" size={64} color="#374151" /><Text style={styles.comingSoonTitle}>Drafts</Text><Text style={styles.comingSoonText}>Your saved drafts will appear here</Text></View></View>;
-      case '4': return <View style={styles.tabContent}><ScrollView style={styles.settingsContainer}><View style={styles.settingsSection}><Text style={styles.settingsSectionTitle}>Developer Options</Text><TouchableOpacity style={styles.settingsItem} onPress={()=>setShowCodeModal(true)}><View style={styles.settingsItemLeft}><Icon name="code-outline" size={24} color="#8b5cf6" /><Text style={styles.settingsItemText}>Developer Code</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity>{developerMode && <View style={styles.developerBadge}><Text style={styles.developerBadgeText}>🛠️ Developer Mode Active</Text></View>}</View><View style={styles.settingsSection}><Text style={styles.settingsSectionTitle}>Account</Text><TouchableOpacity style={styles.settingsItem}><View style={styles.settingsItemLeft}><Icon name="person-outline" size={24} color="#6b7280" /><Text style={styles.settingsItemText}>Account Information</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity><TouchableOpacity style={styles.settingsItem}><View style={styles.settingsItemLeft}><Icon name="shield-outline" size={24} color="#6b7280" /><Text style={styles.settingsItemText}>Privacy & Security</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity><TouchableOpacity style={styles.settingsItem}><View style={styles.settingsItemLeft}><Icon name="notifications-outline" size={24} color="#6b7280" /><Text style={styles.settingsItemText}>Notifications</Text></View><Icon name="chevron-forward" size={20} color="#9ca3af" /></TouchableOpacity></View></ScrollView></View>;
+      case '4': return (
+        <View style={styles.tabContent}>
+          <ScrollView style={styles.settingsContainer}>
+            <View style={styles.settingsSection}>
+              <Text style={styles.settingsSectionTitle}>Developer Options</Text>
+              <TouchableOpacity style={styles.settingsItem} onPress={() => setShowCodeModal(true)}>
+                <View style={styles.settingsItemLeft}>
+                  <Icon name="code-outline" size={24} color="#8b5cf6" />
+                  <Text style={styles.settingsItemText}>Developer Code</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+              {developerMode && (
+                <View style={styles.developerBadge}>
+                  <Text style={styles.developerBadgeText}>Developer Mode Active</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.settingsSection}>
+              <Text style={styles.settingsSectionTitle}>Account</Text>
+              <TouchableOpacity
+                style={styles.settingsItem}
+                onPress={() => navigation.navigate('EditProfile')}
+              >
+                <View style={styles.settingsItemLeft}>
+                  <Icon name="person-outline" size={24} color="#6b7280" />
+                  <Text style={styles.settingsItemText}>Account Information</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsItem}
+                onPress={() => navigation.navigate('PrivacySettings')}
+              >
+                <View style={styles.settingsItemLeft}>
+                  <Icon name="shield-outline" size={24} color="#6b7280" />
+                  <Text style={styles.settingsItemText}>Privacy & Security</Text>
+                </View>
+                <Icon name="chevron-forward" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      );
       default: return null;
     }
   };
