@@ -14,6 +14,8 @@
     "format": "prettier --write .",
     "test": "jest",
     "test:watch": "jest --watch",
+    "verify:forward": "npm run lint && npm run typecheck && npm test -- --ci --runInBand && npm --prefix backend/blyp-live-service run build && npm --prefix functions run build",
+    "verify:session": "npm run verify:forward",
     "eas-build-post-install": "node scripts/generate-aws-exports.js",
     "clean": "npx expo-doctor && npx expo install --check --fix",
     "clean-build": "Get-Process | Where-Object {$_.ProcessName -like '*node*' -or $_.ProcessName -like '*expo*' -or $_.ProcessName -like '*metro*'} | Stop-Process -Force; npm start -- --clear --reset-cache",
