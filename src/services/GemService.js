@@ -1,34 +1,30 @@
-﻿import { 
-  doc, 
+﻿import {
+  doc,
   getDoc,
-  setDoc, 
-  updateDoc, 
-  serverTimestamp,
   onSnapshot,
-  runTransaction,
-  collection
 } from 'firebase/firestore';
 import { firestore as db } from '../config/firebase';
+import { fetchServerWallet, isLiveApiConfigured } from './EconomyApi';
 
 class GemService {
   static async getUserGems(userId) {
+    if (isLiveApiConfigured()) {
+      try {
+        const wallet = await fetchServerWallet();
+        return Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+      } catch (error) {
+        console.warn('EconomyApi gem read failed; falling back to Firestore read', error?.message || error);
+      }
+    }
+
     try {
       const userGemsRef = doc(db, 'gems', userId);
       const gemsDoc = await getDoc(userGemsRef);
-      
       if (gemsDoc.exists()) {
         return gemsDoc.data().balance || 0;
-      } else {
-        const starterGems = 47;
-        await setDoc(userGemsRef, {
-          balance: starterGems,
-          totalEarned: starterGems,
-          totalSpent: 0,
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp()
-        });
-        return starterGems;
       }
+      // Wave 1: never mint starter gems from the client.
+      return 0;
     } catch (error) {
       console.error('Error getting user gems:', error);
       throw error;
@@ -43,54 +39,30 @@ class GemService {
     }
 
     const userGemsRef = doc(db, 'gems', userId);
-    
-    return onSnapshot(userGemsRef, (doc) => {
-      if (doc.exists()) {
-        callback(doc.data().balance || 0);
-      } else {
+
+    return onSnapshot(
+      userGemsRef,
+      (snap) => {
+        if (snap.exists()) {
+          callback(snap.data().balance || 0);
+        } else {
+          callback(0);
+        }
+      },
+      (error) => {
+        console.error('Error listening to gems:', error);
         callback(0);
-      }
-    }, (error) => {
-      console.error('Error listening to gems:', error);
-      callback(0);
-    });
+      },
+    );
   }
 
   static async addGems(userId, amount, _reason = 'grant', _metadata = {}) {
     if (!userId || typeof amount !== 'number' || amount <= 0) throw new Error('Invalid addGems parameters');
-    // Wave 0 containment: client-side gem minting is disabled until server receipt verification exists.
     throw new Error('CLIENT_MINT_DISABLED');
   }
 
-  static async spendGems(userId, amount, reason = 'spend', metadata = {}) {
-    if (!userId || typeof amount !== 'number' || amount <= 0) throw new Error('Invalid spendGems parameters');
-    const result = await runTransaction(db, async (transaction) => {
-      const gemsRef = doc(db, 'gems', userId);
-      const snap = await transaction.get(gemsRef);
-      if (!snap.exists()) throw new Error('Gem wallet not found');
-      const data = snap.data() || {};
-      const balance = data.balance || 0;
-      if (balance < amount) throw new Error('Insufficient gems');
-      const newBalance = balance - amount;
-      transaction.update(gemsRef, {
-        balance: newBalance,
-        totalSpent: (data.totalSpent || 0) + amount,
-        lastUpdated: serverTimestamp()
-      });
-      const txRef = doc(collection(db, 'transactions'));
-      transaction.set(txRef, {
-        userId,
-        asset: 'gem',
-        type: 'debit',
-        amount,
-        balance: newBalance,
-        reason,
-        timestamp: serverTimestamp(),
-        metadata
-      });
-      return newBalance;
-    });
-    return result;
+  static async spendGems(_userId, _amount, _reason = 'spend', _metadata = {}) {
+    throw new Error('CLIENT_SPEND_DISABLED');
   }
 }
 

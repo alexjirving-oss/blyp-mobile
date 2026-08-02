@@ -143,7 +143,7 @@ router.post('/promote/spotlight/book', async (req: AuthedRequest, res) => {
 
 router.get('/wallet', async (req: AuthedRequest, res) => {
   try {
-    const userId = req.user?.sub;
+    const userId = getCanonicalSub(req);
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const wallet = await getWallet(userId);
     res.json({ userId, ...wallet });

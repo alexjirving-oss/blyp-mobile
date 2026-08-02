@@ -117,7 +117,14 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
     setSelectedGift(gift);
     
     try {
-      await BlypCoinService.sendGift(currentUser.uid, creatorId, gift.id, gift.cost);
+      // Wave 1: Firestore gift mint/spend is disabled. Server gifts require a live
+      // streamId + Cognito receiver sub via EconomyApi (not Firebase uid).
+      await BlypCoinService.sendGift({
+        streamId: postId,
+        receiverUserId: creatorId,
+        giftId: gift.id,
+        quantity: 1,
+      });
       
       // Trigger gift animation
       triggerGiftAnimation(gift);
@@ -136,7 +143,16 @@ const GiftSystem = ({ postId, creatorId, creatorName }) => {
       
     } catch (error) {
       console.error('Error sending gift:', error);
-      Alert.alert('Error', 'Failed to send gift. Please try again.');
+      const code = error?.message || error?.code || '';
+      const message =
+        code === 'CLIENT_GIFT_DISABLED' || code === 'LIVE_API_NOT_CONFIGURED'
+          ? 'Gifts are temporarily unavailable until the live economy API is configured.'
+          : code === 'GIFT_RECEIVER_REQUIRES_COGNITO_SUB'
+            ? 'Gifts require a verified Cognito recipient identity.'
+            : code === 'GIFT_REQUIRES_STREAM_AND_CATALOG_ID'
+              ? 'Gifts can only be sent during a live session with catalog gift ids.'
+              : 'Failed to send gift. Please try again.';
+      Alert.alert('Error', message);
       setSelectedGift(null);
     } finally {
       setSending(false);

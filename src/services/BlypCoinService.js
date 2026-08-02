@@ -1,33 +1,43 @@
-import { 
-  doc, 
+import {
+  doc,
   getDoc,
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  increment, 
-  serverTimestamp,
+  getDocs,
   collection,
-  addDoc,
   query,
   where,
   orderBy,
   limit,
   onSnapshot,
-  runTransaction
 } from 'firebase/firestore';
 import { firestore as db } from '../config/firebase';
+import {
+  fetchServerWallet,
+  isLiveApiConfigured,
+  sendServerGift,
+} from './EconomyApi';
+
+const COGNITO_SUB_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class BlypCoinService {
-  // Get user's current Blypcoin balance
+  // Prefer server wallet (Cognito). Firestore is read-only fallback and never creates/credits.
   static async getUserBalance(userId) {
+    if (isLiveApiConfigured()) {
+      try {
+        const wallet = await fetchServerWallet();
+        return Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+      } catch (error) {
+        // Fall through to read-only Firestore for display when API is briefly unavailable.
+        console.warn('EconomyApi wallet read failed; falling back to Firestore read', error?.message || error);
+      }
+    }
+
     try {
       const userWalletRef = doc(db, 'wallets', userId);
       const walletDoc = await getDoc(userWalletRef);
-      
       if (walletDoc.exists()) {
         return walletDoc.data().balance || 0;
       }
-      // Wave 0: clients must not create/credit wallets.
       return 0;
     } catch (error) {
       console.error('Error getting user balance:', error);
@@ -35,192 +45,96 @@ class BlypCoinService {
     }
   }
 
-  // Subscribe to real-time balance updates
   static subscribeToBalance(userId, callback) {
     const userWalletRef = doc(db, 'wallets', userId);
-    
-    return onSnapshot(userWalletRef, (doc) => {
-      if (doc.exists()) {
-        callback(doc.data().balance || 0);
-      } else {
+
+    return onSnapshot(
+      userWalletRef,
+      (snap) => {
+        if (snap.exists()) {
+          callback(snap.data().balance || 0);
+        } else {
+          callback(0);
+        }
+      },
+      (error) => {
+        console.error('Error listening to balance:', error);
         callback(0);
-      }
-    }, (error) => {
-      console.error('Error listening to balance:', error);
-      callback(0);
-    });
+      },
+    );
   }
 
-  // Add Blypcoins to user account (earning/purchasing)
   static async addCoins(_userId, _amount, _reason = 'purchase', _metadata = {}) {
-    // Wave 0 containment: client-side minting is disabled until server receipt verification exists.
     throw new Error('CLIENT_MINT_DISABLED');
   }
 
-  // Spend Blypcoins (for gifts, features, etc.)
-  static async spendCoins(userId, amount, reason = 'purchase', metadata = {}) {
-    try {
-      const result = await runTransaction(db, async (transaction) => {
-        const userWalletRef = doc(db, 'wallets', userId);
-        const walletDoc = await transaction.get(userWalletRef);
-        
-        if (!walletDoc.exists()) {
-          throw new Error('Wallet not found');
-        }
-        
-        const data = walletDoc.data();
-        const currentBalance = data.balance || 0;
-        
-        if (currentBalance < amount) {
-          throw new Error('Insufficient balance');
-        }
-        
-        const newBalance = currentBalance - amount;
-        const totalSpent = (data.totalSpent || 0) + amount;
-        
-        // Update wallet
-        transaction.update(userWalletRef, {
-          balance: newBalance,
-          totalSpent,
-          lastUpdated: serverTimestamp()
-        });
-        
-        // Record transaction
-        const transactionRef = doc(collection(db, 'transactions'));
-        transaction.set(transactionRef, {
-          userId,
-          type: 'debit',
-          amount,
-          reason,
-          balance: newBalance,
-          timestamp: serverTimestamp(),
-          metadata
-        });
-        
-        return newBalance;
-      });
-      
-      console.log('💸 Spent', amount, 'Blypcoins for user:', userId, 'New balance:', result);
-      return result;
-    } catch (error) {
-      console.error('Error spending coins:', error);
-      throw error;
-    }
+  static async spendCoins(_userId, _amount, _reason = 'purchase', _metadata = {}) {
+    // Wave 1: coin spends must go through authenticated server economy endpoints.
+    throw new Error('CLIENT_SPEND_DISABLED');
   }
 
-  // Send gift to another user
-  static async sendGift(fromUserId, toUserId, giftType, cost) {
-    try {
-      const result = await runTransaction(db, async (transaction) => {
-        // ALL READS FIRST - Firestore transaction requirement
-        const senderWalletRef = doc(db, 'wallets', fromUserId);
-        const receiverWalletRef = doc(db, 'wallets', toUserId);
-        
-        // Read both wallets first
-        const senderWallet = await transaction.get(senderWalletRef);
-        const receiverWallet = await transaction.get(receiverWalletRef);
-        
-        // Check sender's balance
-        if (!senderWallet.exists() || (senderWallet.data().balance || 0) < cost) {
-          throw new Error('Insufficient balance');
-        }
-        
-        // NOW ALL WRITES - after all reads are complete
-        const receiverAmount = Math.floor(cost * 0.7); // 70% to receiver, 30% platform fee
-        
-        // Update sender wallet
-        const senderBalance = senderWallet.data().balance - cost;
-        transaction.update(senderWalletRef, {
-          balance: senderBalance,
-          totalSpent: (senderWallet.data().totalSpent || 0) + cost,
-          lastUpdated: serverTimestamp()
-        });
-        
-        // Update or create receiver wallet
-        
-        if (receiverWallet.exists()) {
-          transaction.update(receiverWalletRef, {
-            balance: (receiverWallet.data().balance || 0) + receiverAmount,
-            totalEarned: (receiverWallet.data().totalEarned || 0) + receiverAmount,
-            lastUpdated: serverTimestamp()
-          });
-        } else {
-          transaction.set(receiverWalletRef, {
-            balance: receiverAmount,
-            totalEarned: receiverAmount,
-            totalSpent: 0,
-            createdAt: serverTimestamp(),
-            lastUpdated: serverTimestamp()
-          });
-        }
-        
-        // Record gift transaction
-        const giftRef = doc(collection(db, 'gifts'));
-        transaction.set(giftRef, {
-          fromUserId,
-          toUserId,
-          giftType,
-          cost,
-          receiverAmount,
-          timestamp: serverTimestamp(),
-          status: 'completed'
-        });
-        
-        // Record transactions
-        const senderTransactionRef = doc(collection(db, 'transactions'));
-        transaction.set(senderTransactionRef, {
-          userId: fromUserId,
-          type: 'debit',
-          amount: cost,
-          reason: 'gift_sent',
-          balance: senderBalance,
-          timestamp: serverTimestamp(),
-          metadata: { giftType, recipient: toUserId }
-        });
-        
-        const receiverTransactionRef = doc(collection(db, 'transactions'));
-        transaction.set(receiverTransactionRef, {
-          userId: toUserId,
-          type: 'credit',
-          amount: receiverAmount,
-          reason: 'gift_received',
-          balance: (receiverWallet.exists() ? receiverWallet.data().balance : 0) + receiverAmount,
-          timestamp: serverTimestamp(),
-          metadata: { giftType, sender: fromUserId }
-        });
-        
-        return { senderBalance, receiverAmount };
+  /**
+   * Send a gift through the live-service economy API.
+   * Options (preferred): { streamId, receiverUserId, giftId, quantity, idempotencyKey }
+   * Legacy positional args are rejected because they targeted Firestore mint/spend.
+   */
+  static async sendGift(fromUserIdOrOptions, toUserId, giftType, cost) {
+    if (fromUserIdOrOptions && typeof fromUserIdOrOptions === 'object') {
+      const {
+        streamId,
+        receiverUserId,
+        giftId,
+        quantity = 1,
+        idempotencyKey,
+      } = fromUserIdOrOptions;
+
+      if (!isLiveApiConfigured()) {
+        throw new Error('LIVE_API_NOT_CONFIGURED');
+      }
+      if (!streamId || !giftId) {
+        throw new Error('GIFT_REQUIRES_STREAM_AND_CATALOG_ID');
+      }
+      if (!COGNITO_SUB_REGEX.test(String(receiverUserId || ''))) {
+        throw new Error('GIFT_RECEIVER_REQUIRES_COGNITO_SUB');
+      }
+
+      return sendServerGift({
+        streamId,
+        receiverUserId,
+        giftId,
+        quantity,
+        idempotencyKey,
       });
-      
-      console.log('🎁 Gift sent:', giftType, 'from', fromUserId, 'to', toUserId, 'cost:', cost);
-      return result;
-    } catch (error) {
-      console.error('Error sending gift:', error);
-      throw error;
     }
+
+    // Legacy Firestore gift path (Firebase uid + local gift costs) is permanently disabled.
+    void fromUserIdOrOptions;
+    void toUserId;
+    void giftType;
+    void cost;
+    throw new Error('CLIENT_GIFT_DISABLED');
   }
 
-  // Get user's transaction history
   static async getTransactionHistory(userId, limitCount = 50) {
     try {
       const q = query(
         collection(db, 'transactions'),
         where('userId', '==', userId),
         orderBy('timestamp', 'desc'),
-        limit(limitCount)
+        limit(limitCount),
       );
-      
+
       const querySnapshot = await getDocs(q);
       const transactions = [];
-      
-      querySnapshot.forEach((doc) => {
+
+      querySnapshot.forEach((snap) => {
         transactions.push({
-          id: doc.id,
-          ...doc.data(),
-          timestamp: doc.data().timestamp?.toDate() || new Date()
+          id: snap.id,
+          ...snap.data(),
+          timestamp: snap.data().timestamp?.toDate() || new Date(),
         });
       });
-      
+
       return transactions;
     } catch (error) {
       console.error('Error getting transaction history:', error);
@@ -228,105 +142,20 @@ class BlypCoinService {
     }
   }
 
-  // Daily check-in reward
-  static async claimDailyReward(userId) {
-    try {
-      const userRef = doc(db, 'users', userId);
-      const userDoc = await getDoc(userRef);
-      
-      if (!userDoc.exists()) {
-        throw new Error('User not found');
-      }
-      
-      const userData = userDoc.data();
-      const lastCheckIn = userData.lastCheckIn?.toDate();
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      // Check if already claimed today
-      if (lastCheckIn && lastCheckIn >= today) {
-        throw new Error('Daily reward already claimed');
-      }
-      
-      // Calculate streak
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-      
-      let streak = userData.checkInStreak || 0;
-      if (lastCheckIn && lastCheckIn >= yesterday) {
-        streak += 1;
-      } else {
-        streak = 1; // Reset streak
-      }
-      
-      // Calculate reward based on streak
-      const baseReward = 10;
-      const streakBonus = Math.min(streak * 2, 50); // Max 50 bonus
-      const totalReward = baseReward + streakBonus;
-      
-      // Update user check-in data
-      await updateDoc(userRef, {
-        lastCheckIn: serverTimestamp(),
-        checkInStreak: streak
-      });
-      
-      // Add coins
-      await this.addCoins(userId, totalReward, 'daily_reward', { streak, baseReward, streakBonus });
-      
-      return { reward: totalReward, streak };
-    } catch (error) {
-      console.error('Error claiming daily reward:', error);
-      throw error;
-    }
+  static async claimDailyReward(_userId) {
+    throw new Error('CLIENT_MINT_DISABLED');
   }
 
-  // Coin packages for purchase
   static getCoinPackages() {
     return [
-      {
-        id: 'small',
-        coins: 100,
-        price: 0.99,
-        bonus: 0,
-        popular: false,
-        icon: '💰'
-      },
-      {
-        id: 'medium',
-        coins: 500,
-        price: 4.99,
-        bonus: 50,
-        popular: false,
-        icon: '💎'
-      },
-      {
-        id: 'large',
-        coins: 1000,
-        price: 9.99,
-        bonus: 150,
-        popular: true,
-        icon: '💍'
-      },
-      {
-        id: 'mega',
-        coins: 2500,
-        price: 19.99,
-        bonus: 500,
-        popular: false,
-        icon: '👑'
-      },
-      {
-        id: 'ultimate',
-        coins: 5000,
-        price: 39.99,
-        bonus: 1500,
-        popular: false,
-        icon: '🔮'
-      }
+      { id: 'small', coins: 100, price: 0.99, bonus: 0, popular: false, icon: '💰' },
+      { id: 'medium', coins: 500, price: 4.99, bonus: 50, popular: false, icon: '💎' },
+      { id: 'large', coins: 1000, price: 9.99, bonus: 150, popular: true, icon: '💍' },
+      { id: 'mega', coins: 2500, price: 19.99, bonus: 500, popular: false, icon: '👑' },
+      { id: 'ultimate', coins: 5000, price: 39.99, bonus: 1500, popular: false, icon: '🔮' },
     ];
   }
 
-  // Gift types and costs
   static getGiftTypes() {
     return [
       { id: 'heart', name: 'Heart', cost: 1, emoji: '❤️', rarity: 'common' },
@@ -336,7 +165,7 @@ class BlypCoinService {
       { id: 'star', name: 'Star', cost: 15, emoji: '⭐', rarity: 'rare' },
       { id: 'diamond', name: 'Diamond', cost: 25, emoji: '💎', rarity: 'epic' },
       { id: 'crown', name: 'Crown', cost: 50, emoji: '👑', rarity: 'legendary' },
-      { id: 'rocket', name: 'Rocket', cost: 100, emoji: '🚀', rarity: 'legendary' }
+      { id: 'rocket', name: 'Rocket', cost: 100, emoji: '🚀', rarity: 'legendary' },
     ];
   }
 }
