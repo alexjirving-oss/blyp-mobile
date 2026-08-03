@@ -69,5 +69,6 @@ const styles = StyleSheet.create({
   actionBtn: { backgroundColor: '#64748b', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, marginRight: 8 },
   resolveBtn: { backgroundColor: '#ec4899' },
   actionText: { color: '#f1f5f9', fontSize: 12, fontWeight: '600' },
-  empty: { color: '#64748b', textAlign: 'center', marginTop: 30 }
+  empty: { color: '#64748b', textAlign: 'center', marginTop: 30 },
+  readOnly: { color: '#94a3b8', fontSize: 12, marginBottom: 10 },
 });

@@ -14,7 +14,7 @@ module.exports = {
     '/diagnostics/',
     '/artifacts/',
     '/_reports/',
-    '/backend/.*/dist/',
+    '/backend/',
     '/tools/accountability/',
     '/App.test.js',
   ],
@@ -26,6 +26,7 @@ module.exports = {
     '<rootDir>/diagnostics/',
     '<rootDir>/artifacts/',
     '<rootDir>/_reports/',
+    '<rootDir>/backend/',
     '<rootDir>/tools/accountability/',
   ],
 };
