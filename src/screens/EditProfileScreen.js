@@ -261,26 +261,6 @@ const EditProfileScreen = ({ navigation }) => {
           </View>
         </View>
 
-        {/* Additional Options */}
-        <View style={styles.optionsSection}>
-          <TouchableOpacity style={styles.optionItem}>
-            <Icon  name="notifications-outline" size={24} color="#d1d5db"  />
-            <Text style={styles.optionText}>Notification Settings</Text>
-            <Icon  name="chevron-forward" size={20} color="#9ca3af"  />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.optionItem}>
-            <Icon  name="shield-outline" size={24} color="#d1d5db"  />
-            <Text style={styles.optionText}>Privacy & Security</Text>
-            <Icon  name="chevron-forward" size={20} color="#9ca3af"  />
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.optionItem}>
-            <Icon  name="help-circle-outline" size={24} color="#d1d5db"  />
-            <Text style={styles.optionText}>Help & Support</Text>
-            <Icon  name="chevron-forward" size={20} color="#9ca3af"  />
-          </TouchableOpacity>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -392,28 +372,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 12,
     marginTop: 4,
-  },
-  optionsSection: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-  optionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#475569',
-  },
-  optionText: {
-    flex: 1,
-    color: '#f8fafc',
-    fontSize: 16,
-    marginLeft: 16,
   },
 });
 
