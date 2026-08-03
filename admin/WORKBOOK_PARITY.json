@@ -1,0 +1,148 @@
+{
+  "status": "passed",
+  "workbook": "C:\\Users\\Alex\\Blyp26\\_agent\\admin-workbook-20260802\\admin\\public\\BLYP_Authoritative_Product_Workbook.xlsx",
+  "adminData": "C:\\Users\\Alex\\Blyp26\\_agent\\admin-workbook-20260802\\admin\\src\\data\\workbook.ts",
+  "sheetNames": [
+    "README",
+    "Executive Summary",
+    "Feature Register",
+    "Evidence Ledger",
+    "Runtime Paths",
+    "Component Map",
+    "Production Gates",
+    "Sources & Revisions",
+    "Decisions & Changes",
+    "Lists"
+  ],
+  "checks": [
+    {
+      "name": "Feature Register parity",
+      "status": "passed",
+      "expected": 633,
+      "workbookRows": 633,
+      "adminRecords": 633,
+      "reportedStat": 633
+    },
+    {
+      "name": "Area Summary parity",
+      "status": "passed",
+      "expected": 30,
+      "workbookRows": 30,
+      "adminRecords": 30,
+      "reportedStat": 30
+    },
+    {
+      "name": "Evidence Ledger parity",
+      "status": "passed",
+      "expected": 312,
+      "workbookRows": 312,
+      "adminRecords": 312,
+      "reportedStat": 312
+    },
+    {
+      "name": "Runtime Paths parity",
+      "status": "passed",
+      "expected": 18,
+      "workbookRows": 18,
+      "adminRecords": 18,
+      "reportedStat": 18
+    },
+    {
+      "name": "Component Map parity",
+      "status": "passed",
+      "expected": 20,
+      "workbookRows": 20,
+      "adminRecords": 20,
+      "reportedStat": 20
+    },
+    {
+      "name": "Production Gates parity",
+      "status": "passed",
+      "expected": 14,
+      "workbookRows": 14,
+      "adminRecords": 14,
+      "reportedStat": 14
+    },
+    {
+      "name": "Source Register parity",
+      "status": "passed",
+      "expected": 11,
+      "workbookRows": 11,
+      "adminRecords": 11,
+      "reportedStat": 11
+    },
+    {
+      "name": "Decision Log parity",
+      "status": "passed",
+      "expected": 5,
+      "workbookRows": 5,
+      "adminRecords": 5,
+      "reportedStat": 5
+    },
+    {
+      "name": "Feature Register schema width",
+      "status": "passed",
+      "expectedColumns": 64,
+      "actualColumns": 64
+    },
+    {
+      "name": "Feature Register identifier parity and uniqueness",
+      "status": "passed",
+      "records": 633,
+      "uniqueIdentifiers": 633,
+      "workbookIdentifiers": 633,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Evidence Ledger identifier parity and uniqueness",
+      "status": "passed",
+      "records": 312,
+      "uniqueIdentifiers": 312,
+      "workbookIdentifiers": 312,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Runtime Paths identifier parity and uniqueness",
+      "status": "passed",
+      "records": 18,
+      "uniqueIdentifiers": 18,
+      "workbookIdentifiers": 18,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Component Map identifier parity and uniqueness",
+      "status": "passed",
+      "records": 20,
+      "uniqueIdentifiers": 20,
+      "workbookIdentifiers": 20,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Source Register identifier parity and uniqueness",
+      "status": "passed",
+      "records": 11,
+      "uniqueIdentifiers": 11,
+      "workbookIdentifiers": 11,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Decision Log identifier parity and uniqueness",
+      "status": "passed",
+      "records": 5,
+      "uniqueIdentifiers": 5,
+      "workbookIdentifiers": 5,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Production gate name and order parity",
+      "status": "passed",
+      "records": 14,
+      "exactOrderMatch": true
+    },
+    {
+      "name": "Audited revision lineage",
+      "status": "passed",
+      "revision": "8bc0dcb2a1da1b21368c5536aaeef829d587f316"
+    }
+  ]
+}
