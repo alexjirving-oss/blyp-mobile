@@ -21,6 +21,10 @@ services:
         value: eu-west-1
       - key: COGNITO_USER_POOL_ID
         value: eu-west-2_ITX07Zvnt
+      - key: COGNITO_APP_CLIENT_ID
+        value: 4a7r115hllaedriqsjlsa00snj
+      - key: LIVE_ARTILLERY_ENABLED
+        value: "0"
       - key: LIVE_SESSIONS_TABLE
         value: blyp_live_sessions
       - key: LIVE_GUESTS_TABLE

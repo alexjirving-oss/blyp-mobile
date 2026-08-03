@@ -7,6 +7,7 @@ type CognitoConfig = {
   userPoolId: string;
   jwksUri: string;
   issuer: string;
+  appClientIds: string[];
 };
 
 function getCognitoConfig(): CognitoConfig {
@@ -15,11 +16,26 @@ function getCognitoConfig(): CognitoConfig {
   if (!region || !userPoolId) {
     throw new Error('[config] COGNITO_REGION and COGNITO_USER_POOL_ID are required');
   }
+
+  const rawClients = [
+    process.env.COGNITO_APP_CLIENT_ID,
+    process.env.COGNITO_USER_POOL_WEB_CLIENT_ID,
+    process.env.EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID,
+  ]
+    .map((v) => sanitizeHeaderValue(v))
+    .filter(Boolean);
+
+  // Production default used by mobile EAS + aws-exports when env is unset.
+  if (rawClients.length === 0) {
+    rawClients.push('4a7r115hllaedriqsjlsa00snj');
+  }
+
   return {
     region,
     userPoolId,
     jwksUri: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well-known/jwks.json`,
     issuer: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`,
+    appClientIds: Array.from(new Set(rawClients)),
   };
 }
 
@@ -52,9 +68,27 @@ function getKey(header: any, callback: any) {
   });
 }
 
+function assertTokenClaims(decoded: any): void {
+  const { appClientIds } = getCognitoConfig();
+  const tokenUse = String(decoded?.token_use || '').trim().toLowerCase();
+  if (tokenUse !== 'access' && tokenUse !== 'id') {
+    throw new Error('INVALID_TOKEN_USE');
+  }
+
+  const clientId = String(decoded?.client_id || decoded?.aud || '').trim();
+  if (!clientId || !appClientIds.includes(clientId)) {
+    throw new Error('INVALID_TOKEN_CLIENT');
+  }
+
+  const sub = String(decoded?.sub || '').trim();
+  if (!sub) {
+    throw new Error('INVALID_TOKEN_SUB');
+  }
+}
+
 export async function verifyCognitoJwt(token: string): Promise<any> {
   const { issuer } = getCognitoConfig();
-  return await new Promise((resolve, reject) => {
+  const decoded = await new Promise<any>((resolve, reject) => {
     jwt.verify(
       token,
       getKey,
@@ -62,13 +96,16 @@ export async function verifyCognitoJwt(token: string): Promise<any> {
         algorithms: ['RS256'],
         issuer,
       },
-      (err, decoded) => {
+      (err, payload) => {
         if (err) {
           reject(err);
           return;
         }
-        resolve(decoded);
+        resolve(payload);
       }
     );
   });
+
+  assertTokenClaims(decoded);
+  return decoded;
 }

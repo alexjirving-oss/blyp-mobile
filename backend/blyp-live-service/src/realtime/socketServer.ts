@@ -19,14 +19,19 @@ export function createSocketServer(server: HttpServer): SocketServer {
 
   io.use(async (socket, next) => {
     try {
+      // Fail closed: never accept tokens from the URL query string (logs/history leakage).
+      if (typeof socket.handshake.query?.token === 'string' && socket.handshake.query.token) {
+        next(new Error('QUERY_TOKEN_REJECTED'));
+        return;
+      }
+
       const tokenFromAuth = sanitizeHeaderValue(socket.handshake.auth?.token as string | undefined);
       const tokenFromHeader = sanitizeBearerAuthorization(socket.handshake.headers?.authorization as string | undefined).replace(
         /^Bearer\s+/i,
         ''
       );
-      const tokenFromQuery = sanitizeHeaderValue(socket.handshake.query?.token as string | undefined);
 
-      const authToken = tokenFromAuth || tokenFromHeader || tokenFromQuery;
+      const authToken = tokenFromAuth || tokenFromHeader;
 
       if (!authToken) {
         next(new Error('UNAUTH'));
