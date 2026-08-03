@@ -18,8 +18,6 @@ import BlypLogo from '../components/BlypLogo';
 import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
 import { ensureFirebaseFederatedSession } from '../services/FirebaseFederation';
-import { isSocialAuthEnabled, signInWithGoogle, signInWithFacebook } from '../services/socialAuthService';
-
 const AuthScreen = () => {
   const [isLogin, setIsLogin] = useState(false);
   const [email, setEmail] = useState('');
@@ -39,8 +37,6 @@ const AuthScreen = () => {
   const [suggestReset, setSuggestReset] = useState(false);
   const [accountExists, setAccountExists] = useState(undefined); // undefined=unknown, true/false known
   const [lockoutDetected, setLockoutDetected] = useState(false);
-  const [isSocialAuthInProgress, setIsSocialAuthInProgress] = useState(false);
-
   // TODO[BLYP][UX]: Future onboarding polish:
   //  - Consider one-line tagline under logo
   //  - Optional “By continuing you agree to …” legal line at bottom of screen
@@ -377,58 +373,6 @@ const AuthScreen = () => {
           }
   };
 
-  const handleGoogleSignInPress = async () => {
-    if (!isSocialAuthEnabled()) {
-      console.log('[AUTH][SOCIAL] Social auth disabled via env or missing client IDs');
-      return;
-    }
-
-    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
-      console.log('[AUTH][SOCIAL] Ignoring Google tap while auth is busy or cooled down');
-      return;
-    }
-
-    setIsSocialAuthInProgress(true);
-    console.log('[AUTH][SOCIAL] Starting Google sign-in at', new Date().toISOString());
-
-    try {
-      const result = await signInWithGoogle();
-      console.log('[AUTH][SOCIAL] Google sign-in result', result);
-      // Future: exchange tokens with backend for Cognito federation.
-      handleAuthSuccess('google_oauth', { socialUser: result });
-    } catch (err) {
-      console.log('[AUTH][SOCIAL] Google sign-in error', { message: err?.message, code: err?.code });
-    } finally {
-      setIsSocialAuthInProgress(false);
-    }
-  };
-
-  const handleFacebookSignInPress = async () => {
-    if (!isSocialAuthEnabled()) {
-      console.log('[AUTH][SOCIAL] Social auth disabled via env or missing client IDs');
-      return;
-    }
-
-    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
-      console.log('[AUTH][SOCIAL] Ignoring Facebook tap while auth is busy or cooled down');
-      return;
-    }
-
-    setIsSocialAuthInProgress(true);
-    console.log('[AUTH][SOCIAL] Starting Facebook sign-in at', new Date().toISOString());
-
-    try {
-      const result = await signInWithFacebook();
-      console.log('[AUTH][SOCIAL] Facebook sign-in result', result);
-      // Future: exchange tokens with backend for Cognito federation.
-      handleAuthSuccess('facebook_oauth', { socialUser: result });
-    } catch (err) {
-      console.log('[AUTH][SOCIAL] Facebook sign-in error', { message: err?.message, code: err?.code });
-    } finally {
-      setIsSocialAuthInProgress(false);
-    }
-  };
-
   const handleReset = async () => {
     setLoading(true);
     // Clear any previous error and reset confirmation state
@@ -538,52 +482,6 @@ const AuthScreen = () => {
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
-          )}
-
-          {isSocialAuthEnabled() && !needsConfirm && !resetMode && (
-            <>
-              <View style={styles.socialDivider}>
-                <View style={styles.socialDividerLine} />
-                <Text style={styles.socialDividerText} allowFontScaling={false}>
-                  Or continue with
-                </Text>
-                <View style={styles.socialDividerLine} />
-              </View>
-
-              <View style={styles.socialButtonsRow}>
-                {/* TODO[BLYP][UX]: Design final copy/layout for Google/Facebook sign-in row
-                    - Confirm brand guidelines (Google / Meta)
-                    - Decide button ordering and spacing relative to email/password form
-                    - Add tracking for tap events (provider, success/failure, latency) */}
-                <TouchableOpacity
-                  style={[
-                    styles.socialButton,
-                    isSocialAuthInProgress && styles.socialButtonDisabled,
-                  ]}
-                  onPress={handleGoogleSignInPress}
-                  disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
-                  activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
-                >
-                  <Text style={styles.socialButtonText} allowFontScaling={false}>
-                    Continue with Google
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.socialButton,
-                    isSocialAuthInProgress && styles.socialButtonDisabled,
-                  ]}
-                  onPress={handleFacebookSignInPress}
-                  disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
-                  activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
-                >
-                  <Text style={styles.socialButtonText} allowFontScaling={false}>
-                    Continue with Facebook
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </>
           )}
 
           {resetMode && (

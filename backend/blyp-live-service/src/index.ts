@@ -12,6 +12,7 @@ import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
 import { ensureEconomySchema } from './economy/schema';
 import { createSocketServer } from './realtime/socketServer';
 import { logger } from './config/logger';
+import { getAdminAuth } from './config/firebaseAdmin';
 
 const port = (() => {
   const rawPort = process.env.PORT;
@@ -36,13 +37,13 @@ app.get('/health', async (_req, res) => {
     const { db, redis } = getEconomyInfra();
     const [dbStatus, redisStatus] = await Promise.all([checkDb(db), checkRedis(redis)]);
     const ready = dbStatus.ok && redisStatus.ok;
-
     res.status(200).json({
       ok: true,
       ready,
       service: 'blyp-live-service',
       db: dbStatus,
       redis: redisStatus,
+      firebaseAdmin: !!getAdminAuth(),
     });
   } catch (e: any) {
     res.status(200).json({
