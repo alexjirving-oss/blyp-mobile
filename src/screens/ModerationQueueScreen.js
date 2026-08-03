@@ -6,12 +6,10 @@ import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import useModerationQueue from '../hooks/useModerationQueue';
 import useIsAdmin from '../hooks/useIsAdmin';
-import { useAuth } from '../hooks/useCommon';
 
 export default function ModerationQueueScreen() {
   const { isAdmin, loading: roleLoading } = useIsAdmin();
-  const { items, loading, markUnderReview, resolve, refresh } = useModerationQueue({ auto: isAdmin, limit: 50 });
-  const { user } = useAuth();
+  const { items, loading, refresh } = useModerationQueue({ auto: isAdmin, limit: 50 });
 
   if (roleLoading) {
     return (<View style={styles.container}><ActivityIndicator color="#ec4899" /></View>);
@@ -32,18 +30,7 @@ export default function ModerationQueueScreen() {
         <Text style={styles.target}>{item.targetType}:{item.targetId}</Text>
         <Text style={styles.meta}>Reports: {item.totalReports} | Priority: {item.priorityScore?.toFixed?.(2) || item.priorityScore}</Text>
         <Text style={styles.reasons}>{reasons}</Text>
-        <View style={styles.actions}>
-          {item.status === 'pending_review' && (
-            <TouchableOpacity style={styles.actionBtn} onPress={() => markUnderReview(item.id, user?.uid)}>
-              <Text style={styles.actionText}>Under Review</Text>
-            </TouchableOpacity>
-          )}
-          {item.status !== 'resolved' && (
-            <TouchableOpacity style={[styles.actionBtn, styles.resolveBtn]} onPress={() => resolve(item.id, { actionType: 'action_taken' }, user?.uid)}>
-              <Text style={styles.actionText}>Resolve</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        <Text style={styles.readOnly}>Actions are server-only (client writes disabled).</Text>
       </View>
     );
   };

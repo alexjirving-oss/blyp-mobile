@@ -8,10 +8,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
-    "worker:dev": "ts-node-dev --respawn --transpile-only src/worker.ts",
-    "worker:start": "node dist/worker.js",
-    "migrate": "node -r dotenv/config ./node_modules/knex/bin/cli.js --knexfile knexfile.cjs migrate:latest",
-    "migrate:rollback": "node -r dotenv/config ./node_modules/knex/bin/cli.js --knexfile knexfile.cjs migrate:rollback",
+    "worker:dev": "node ./scripts/not-implemented.cjs worker:dev",
+    "worker:start": "node ./scripts/not-implemented.cjs worker:start",
+    "migrate": "npm run build && node dist/scripts/ensureSchemaCli.js",
+    "migrate:rollback": "node ./scripts/not-implemented.cjs migrate:rollback",
+    "test": "npm run build && node --test dist/auth/cognitoClaims.test.js",
     "lint": "echo 'add eslint if needed'"
   },
   "dependencies": {

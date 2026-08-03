@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 import { sanitizeHeaderValue } from '../utils/headerSanitize';
+import { validateCognitoClaims } from './cognitoClaims';
 
 type CognitoConfig = {
   region: string;
@@ -68,26 +69,8 @@ function getKey(header: any, callback: any) {
   });
 }
 
-function assertTokenClaims(decoded: any): void {
-  const { appClientIds } = getCognitoConfig();
-  const tokenUse = String(decoded?.token_use || '').trim().toLowerCase();
-  if (tokenUse !== 'access' && tokenUse !== 'id') {
-    throw new Error('INVALID_TOKEN_USE');
-  }
-
-  const clientId = String(decoded?.client_id || decoded?.aud || '').trim();
-  if (!clientId || !appClientIds.includes(clientId)) {
-    throw new Error('INVALID_TOKEN_CLIENT');
-  }
-
-  const sub = String(decoded?.sub || '').trim();
-  if (!sub) {
-    throw new Error('INVALID_TOKEN_SUB');
-  }
-}
-
 export async function verifyCognitoJwt(token: string): Promise<any> {
-  const { issuer } = getCognitoConfig();
+  const { issuer, appClientIds } = getCognitoConfig();
   const decoded = await new Promise<any>((resolve, reject) => {
     jwt.verify(
       token,
@@ -106,6 +89,6 @@ export async function verifyCognitoJwt(token: string): Promise<any> {
     );
   });
 
-  assertTokenClaims(decoded);
+  validateCognitoClaims(decoded, appClientIds);
   return decoded;
 }

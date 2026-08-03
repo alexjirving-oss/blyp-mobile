@@ -14,7 +14,7 @@
     "format": "prettier --write .",
     "test": "jest",
     "test:watch": "jest --watch",
-    "verify:forward": "npm run lint && npm run typecheck && npm test -- --ci --runInBand && npm --prefix backend/blyp-live-service run build && npm --prefix functions run build",
+    "verify:forward": "npm run lint && npm run typecheck && npm test -- --ci --runInBand && npm --prefix backend/blyp-live-service run test && npm --prefix functions run build",
     "verify:session": "npm run verify:forward",
     "eas-build-post-install": "node scripts/generate-aws-exports.js",
     "clean": "npx expo-doctor && npx expo install --check --fix",
