@@ -203,7 +203,11 @@ const FindPeopleScreen = ({ navigation }) => {
       }
       const res = await followUser(uid, userId);
       if (!res?.success) {
-        Alert.alert('Couldn’t follow', res?.error?.message || 'Please try again.');
+        const raw = String(res?.error?.message || '');
+        const friendly = raw.includes('404') || raw.includes('NOT_FOUND') || /ECONOMY_API/i.test(raw)
+          ? 'Follow is temporarily unavailable. Please try again in a moment.'
+          : raw.replace(/^\[ECONOMY_API\]\s*/i, '') || 'Please try again.';
+        Alert.alert('Couldn’t follow', friendly);
         return;
       }
       Alert.alert('Success', 'User followed successfully!');

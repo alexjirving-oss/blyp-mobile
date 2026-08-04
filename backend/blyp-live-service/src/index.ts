@@ -55,6 +55,27 @@ app.use(
   }),
 );
 
+// Stripe webhooks need the raw body for signature verification — mount BEFORE json parser.
+app.post(
+  '/webhooks/stripe',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { handleStripeWebhook } = require('./economy/withdrawalService');
+      const sig = req.headers['stripe-signature'];
+      const out = await handleStripeWebhook(
+        Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body || '')),
+        typeof sig === 'string' ? sig : Array.isArray(sig) ? sig[0] : undefined,
+      );
+      res.status(200).json(out);
+    } catch (e: any) {
+      const status = Number(e?.httpStatus) || 400;
+      res.status(status).json({ error: e?.message || 'webhook failed', code: e?.code });
+    }
+  },
+);
+
 // Cap request body size to blunt memory-exhaustion abuse (payloads here are small).
 app.use(express.json({ limit: '1mb' }));
 

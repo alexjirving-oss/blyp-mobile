@@ -18,6 +18,9 @@ import {
   battleDepositSchema,
   battleCancelRefundSchema,
   battleSettleSchema,
+  withdrawRequestSchema,
+  withdrawConnectOnboardSchema,
+  socialFollowSchema,
 } from './economySchemas';
 import { depositBattle, cancelRefundBattle, settleBattle } from './battleEscrowService';
 import {
@@ -39,6 +42,13 @@ import {
   startLiveGame,
   verifyIapPurchaseAndGrant,
 } from './economyService';
+import {
+  createConnectOnboardLink,
+  getConnectStatus,
+  getWithdrawEligibility,
+  requestWithdrawal,
+} from './withdrawalService';
+import { followUser, unfollowUser } from './socialFollowService';
 import {
   checkMatchdayEntitlement,
   getMatchdayLeaderboard,
@@ -613,6 +623,114 @@ router.post('/economy/admin/credit-coins', async (req: AuthedRequest, res) => {
       logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/admin/credit-coins');
     }
 
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Withdrawals (creator GEM earnings → Stripe Connect)
+// ---------------------------------------------------------------------------
+
+function emailVerifiedFromReq(req: AuthedRequest): boolean {
+  const u: any = req.user || {};
+  return u.email_verified === true || u.email_verified === 'true';
+}
+
+router.get('/withdraw/eligibility', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const out = await getWithdrawEligibility(userId, { emailVerified: emailVerifiedFromReq(req) });
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/withdraw/connect/onboard', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const parsed = withdrawConnectOnboardSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Invalid input', parsed.error.flatten());
+    }
+    const email = typeof (req.user as any)?.email === 'string' ? (req.user as any).email : undefined;
+    const out = await createConnectOnboardLink(userId, {
+      email,
+      returnUrl: parsed.data.returnUrl,
+      refreshUrl: parsed.data.refreshUrl,
+    });
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/withdraw/connect/status', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const out = await getConnectStatus(userId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/withdraw/request', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const parsed = withdrawRequestSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Invalid input', parsed.error.flatten());
+    }
+    const out = await requestWithdrawal(userId, parsed.data, {
+      emailVerified: emailVerifiedFromReq(req),
+    });
+    if (out.kind === 'replay') {
+      res.status(409).json({ code: 'IDEMPOTENT_REPLAY', ...out.response });
+      return;
+    }
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/social/follow', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const parsed = socialFollowSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Invalid input', parsed.error.flatten());
+    }
+    const out = await followUser(userId, parsed.data.targetUserId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/social/unfollow', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const parsed = socialFollowSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Invalid input', parsed.error.flatten());
+    }
+    const out = await unfollowUser(userId, parsed.data.targetUserId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
 });

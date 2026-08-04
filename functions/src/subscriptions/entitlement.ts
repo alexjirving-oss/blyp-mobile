@@ -50,8 +50,11 @@ export async function verifyPlaySubscription(
   sku: string,
   purchaseToken: string,
 ): Promise<PlayVerifyResult> {
-  const packageName = process.env.PLAY_PACKAGE_NAME;
-  if (!packageName || !sku || !purchaseToken) {
+  const packageName =
+    process.env.PLAY_PACKAGE_NAME ||
+    process.env.GOOGLE_PLAY_PACKAGE_NAME ||
+    'com.blyp.mobile';
+  if (!sku || !purchaseToken) {
     return { ok: false, reason: 'not-configured' };
   }
 

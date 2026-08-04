@@ -1,0 +1,34 @@
+/**
+ * Server-authoritative withdrawal policy (mirrors mobile src/core/WithdrawalPolicy.ts).
+ * Cash-out currency is creator GEM earnings — purchased COIN is never cashable.
+ */
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+export const WITHDRAWAL_POLICY = {
+  MIN_PAYOUT_COINS: 1000, // gems
+  MAX_SINGLE_PAYOUT_COINS: 500_000,
+  PLATFORM_FEE_PERCENT: 30,
+  HOLD_DURATION_MS: 7 * DAY,
+  CLAWBACK_WINDOW_MS: 60 * DAY,
+  MIN_ACCOUNT_AGE_MS: 30 * DAY,
+  REQUIRE_VERIFIED_EMAIL: true,
+  REQUIRE_KYC: true,
+  REQUIRE_PAYOUT_ACCOUNT: true,
+  NEW_PAYOUT_ACCOUNT_HOLD_MS: 7 * DAY,
+  MAX_OPEN_REQUESTS: 1,
+  MIN_TIME_BETWEEN_REQUESTS_MS: 24 * HOUR,
+  MAX_REQUESTS_PER_DAY: 1,
+  MAX_REQUESTS_PER_WEEK: 3,
+  DAILY_PAYOUT_CAP_COINS: 200_000,
+  WEEKLY_PAYOUT_CAP_COINS: 750_000,
+  MONTHLY_PAYOUT_CAP_COINS: 2_000_000,
+  MANUAL_REVIEW_ABOVE_COINS: 100_000,
+  BLOCK_IF_ACCOUNT_FROZEN: true,
+  BLOCK_IF_OPEN_CHARGEBACK: true,
+  ALLOW_CASHOUT_OF_SELF_FUNDED_COINS: false,
+} as const;
+
+export type WithdrawalPolicy = typeof WITHDRAWAL_POLICY;

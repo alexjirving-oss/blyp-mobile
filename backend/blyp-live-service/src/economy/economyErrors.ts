@@ -16,7 +16,10 @@ export type EconomyErrorCode =
   | 'STREAM_NOT_FOUND'
   | 'RECEIVER_INVALID'
   | 'RESTRICTED'
-  | 'BLOCKED';
+  | 'BLOCKED'
+  | 'WITHDRAWALS_DISABLED'
+  | 'WITHDRAWAL_DENIED'
+  | 'STRIPE_NOT_CONFIGURED';
 
 export class EconomyError extends Error {
   code: EconomyErrorCode;

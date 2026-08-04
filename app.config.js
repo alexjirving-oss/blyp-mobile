@@ -72,6 +72,11 @@ module.exports = () => {
     EXPO_PUBLIC_LIVE_SERVICE_URL:
       process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
       'https://blyp-live-service-innn3d7yqq-uc.a.run.app',
+    EXPO_PUBLIC_ENABLE_WITHDRAWALS:
+      process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS === '0' ||
+      String(process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS || '').toLowerCase() === 'false'
+        ? '0'
+        : '1',
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
@@ -98,7 +103,7 @@ module.exports = () => {
       bundleIdentifier: 'com.blyp.mobile',
       infoPlist: {
         NSCameraUsageDescription: 'This app needs access to camera to take photos and videos',
-        NSMicrophoneUsageDescription: 'This app needs access to microphone to record audio',
+        NSMicrophoneUsageDescription: 'This app needs access to microphone for phone calls and recording audio',
         NSPhotoLibraryUsageDescription: 'This app needs access to photo library to save and select media',
         NSLocationWhenInUseUsageDescription:
           'Blyp uses your location to find shops, restaurants, and takeaways near you.',
@@ -114,6 +119,9 @@ module.exports = () => {
       permissions: [
         'android.permission.CAMERA',
         'android.permission.RECORD_AUDIO',
+        'android.permission.BLUETOOTH',
+        'android.permission.BLUETOOTH_CONNECT',
+        'android.permission.ACCESS_WIFI_STATE',
         'android.permission.INTERNET',
         'android.permission.ACCESS_NETWORK_STATE',
         'android.permission.MODIFY_AUDIO_SETTINGS',
@@ -121,6 +129,9 @@ module.exports = () => {
         'android.permission.ACCESS_COARSE_LOCATION',
         'android.permission.ACCESS_FINE_LOCATION',
         'android.permission.POST_NOTIFICATIONS',
+        'android.permission.USE_FULL_SCREEN_INTENT',
+        'android.permission.FOREGROUND_SERVICE',
+        'android.permission.FOREGROUND_SERVICE_MICROPHONE',
         'android.permission.RECEIVE_BOOT_COMPLETED',
         // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM —
         // Play only allows that for calendar/alarm-clock core apps (Blyp is neither).
@@ -151,7 +162,7 @@ module.exports = () => {
       [
         'expo-av',
         {
-          microphonePermission: 'Allow Blyp to access your microphone to record voice memos.',
+          microphonePermission: 'Allow Blyp to access your microphone for phone calls and voice memos.',
         },
       ],
       'expo-font',
@@ -173,6 +184,9 @@ module.exports = () => {
       // Integrates the Amazon IVS iOS SDKs (Stages + Player) and Blyp's native
       // Swift/ObjC bridge so live streaming works on iOS at parity with Android.
       './plugins/withIVSiOS',
+      // In-app audio calls (LiveKit + WebRTC). Requires a native rebuild / new AAB.
+      '@livekit/react-native-expo-plugin',
+      '@config-plugins/react-native-webrtc',
     ],
     extra,
     androidNavigationBar: {

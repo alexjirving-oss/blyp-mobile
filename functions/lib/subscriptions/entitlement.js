@@ -64,8 +64,10 @@ const PLAY_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
  */
 async function verifyPlaySubscription(sku, purchaseToken) {
     var _a, _b, _c, _d, _e, _f, _g;
-    const packageName = process.env.PLAY_PACKAGE_NAME;
-    if (!packageName || !sku || !purchaseToken) {
+    const packageName = process.env.PLAY_PACKAGE_NAME ||
+        process.env.GOOGLE_PLAY_PACKAGE_NAME ||
+        'com.blyp.mobile';
+    if (!sku || !purchaseToken) {
         return { ok: false, reason: 'not-configured' };
     }
     let accessToken = null;

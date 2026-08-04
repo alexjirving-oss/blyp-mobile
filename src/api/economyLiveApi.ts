@@ -479,6 +479,68 @@ export async function battleSettle(input: { battleId: string; idempotencyKey: st
   return await callEconomyBackend<BattleSettleResponse>('/economy/battle/settle', 'POST', input);
 }
 
+export interface WithdrawEligibility {
+  enabled: boolean;
+  currency: string;
+  withdrawableGems: number;
+  gemAvailable: number;
+  gemPending: number;
+  purchasedCoinsNotCashable: number;
+  minPayoutGems: number;
+  platformFeePercent: number;
+  gemMinorUnits: number;
+  fiatCurrency: string;
+  feePreviewMinPayout: {
+    amountGems: number;
+    feeGems: number;
+    netGems: number;
+    grossMinor: number;
+    feeMinor: number;
+    netMinor: number;
+  };
+  connect: { linked: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean };
+  blockers: string[];
+  reviewReasons: string[];
+  canRequest: boolean;
+}
+
+export async function getWithdrawEligibility(): Promise<WithdrawEligibility> {
+  return await callEconomyBackend<WithdrawEligibility>('/withdraw/eligibility', 'GET');
+}
+
+export async function startWithdrawConnectOnboard(input: {
+  returnUrl?: string;
+  refreshUrl?: string;
+} = {}): Promise<{ url: string; stripeAccountId: string; expiresAt?: number }> {
+  return await callEconomyBackend('/withdraw/connect/onboard', 'POST', input);
+}
+
+export async function getWithdrawConnectStatus(): Promise<{
+  linked: boolean;
+  payoutsEnabled?: boolean;
+  detailsSubmitted?: boolean;
+  stripeAccountId?: string;
+}> {
+  return await callEconomyBackend('/withdraw/connect/status', 'GET');
+}
+
+export async function requestWithdrawGems(input: {
+  amountGems: number;
+  idempotencyKey: string;
+}): Promise<{
+  withdrawalId: string;
+  status: string;
+  amountGems: number;
+  feeGems: number;
+  netGems: number;
+  netMinor: number;
+  currency: string;
+  reasons?: string[];
+  stripeTransferId?: string;
+}> {
+  return await callEconomyBackend('/withdraw/request', 'POST', input);
+}
+
 export function makeIdempotencyKey(prefix: string = 'gift'): string {
   const randomUUID = (global as any)?.crypto?.randomUUID?.();
   if (randomUUID && typeof randomUUID === 'string') return `${prefix}:${randomUUID}`;

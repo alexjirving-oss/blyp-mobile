@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import BlueScreen from '../ui/BlueScreen';
 import Icon from '../components/Icon';
 import {

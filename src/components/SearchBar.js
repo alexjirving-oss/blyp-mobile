@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surfaceAlt,
+    backgroundColor: COLORS.surfaceAlt || COLORS.surface,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surfaceAlt,
+    backgroundColor: COLORS.surfaceAlt || COLORS.surface,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8,

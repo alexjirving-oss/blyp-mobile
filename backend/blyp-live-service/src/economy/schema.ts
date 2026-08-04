@@ -235,6 +235,42 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
+        `CREATE TABLE IF NOT EXISTS payout_accounts (
+          user_id text PRIMARY KEY,
+          stripe_account_id text NOT NULL UNIQUE,
+          payouts_enabled boolean NOT NULL DEFAULT false,
+          details_submitted boolean NOT NULL DEFAULT false,
+          charges_enabled boolean NOT NULL DEFAULT false,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS withdrawal_requests (
+          withdrawal_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          amount_gems bigint NOT NULL,
+          fee_gems bigint NOT NULL DEFAULT 0,
+          net_gems bigint NOT NULL,
+          gross_minor bigint NOT NULL,
+          fee_minor bigint NOT NULL,
+          net_minor bigint NOT NULL,
+          currency text NOT NULL DEFAULT 'gbp',
+          status text NOT NULL,
+          reasons jsonb NOT NULL DEFAULT '[]'::jsonb,
+          stripe_transfer_id text,
+          stripe_account_id text,
+          idempotency_key text NOT NULL,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          settled_at timestamptz,
+          UNIQUE (user_id, idempotency_key)
+        )`,
+
+        `CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_user ON withdrawal_requests (user_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status ON withdrawal_requests (status)`,
+
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
         // Hard guarantee that a single store purchase token can only ever be

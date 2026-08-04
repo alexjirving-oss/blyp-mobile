@@ -22,10 +22,13 @@ export function useEntitlement() {
   return ent;
 }
 
-/** Convenience: is the premium AI capability available right now? Fail-closed while loading. */
+/** Convenience: is the premium AI capability available right now?
+ * While entitlement is still loading (null), fail-open so the mic/search
+ * doesn't bounce users to Plans before their trial/Plus status arrives. */
 export function useHasAI() {
   const ent = useEntitlement();
-  return ent ? !!ent.capabilities.ai : false;
+  if (!ent) return true;
+  return !!ent.capabilities.ai;
 }
 
 export default useEntitlement;

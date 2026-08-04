@@ -69,8 +69,9 @@ export function isClientEconomyMutationAllowed(): boolean {
   return CLIENT_ECONOMY_MUTATIONS_ENABLED;
 }
 
-// Withdrawals always disabled until explicitly implemented (per business decision)
-export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', false);  // always false
+// Withdrawals: on by default once Stripe Connect backend is deployed; set
+// EXPO_PUBLIC_ENABLE_WITHDRAWALS=0 to force-hide the client CTA.
+export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', true);
 
 // Helper: determine unsafe simulation mode (client credits without server receipt)
 // In production, this should ALWAYS be false

@@ -94,9 +94,9 @@ export function getEntitlementCached() {
   return cache;
 }
 
-/** Does the user currently have the premium AI capability? Fail-open while unknown. */
+/** Does the user currently have the premium AI capability? Fail-closed while unknown. */
 export function hasAICached() {
-  return cache ? !!cache.capabilities.ai : true;
+  return cache ? !!cache.capabilities.ai : false;
 }
 
 async function bootstrapTrial(uid) {

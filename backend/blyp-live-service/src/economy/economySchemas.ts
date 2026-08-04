@@ -185,3 +185,28 @@ export type MatchdayReactInput = z.infer<typeof matchdayReactSchema>;
 export type BattleDepositInput = z.infer<typeof battleDepositSchema>;
 export type BattleCancelRefundInput = z.infer<typeof battleCancelRefundSchema>;
 export type BattleSettleInput = z.infer<typeof battleSettleSchema>;
+
+export const withdrawRequestSchema = z
+  .object({
+    amountGems: z.coerce.number().int().min(1),
+    idempotencyKey: z.string().min(1).max(120),
+  })
+  .strict();
+
+export const withdrawConnectOnboardSchema = z
+  .object({
+    returnUrl: z.string().url().optional(),
+    refreshUrl: z.string().url().optional(),
+  })
+  .strict();
+
+export type WithdrawRequestInput = z.infer<typeof withdrawRequestSchema>;
+export type WithdrawConnectOnboardInput = z.infer<typeof withdrawConnectOnboardSchema>;
+
+export const socialFollowSchema = z
+  .object({
+    targetUserId: z.string().min(1).max(128),
+  })
+  .strict();
+
+export type SocialFollowInput = z.infer<typeof socialFollowSchema>;

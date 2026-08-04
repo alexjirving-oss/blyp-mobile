@@ -1,22 +1,12 @@
 // subscriptionService.js
 //
-// The single entry point for starting a subscription checkout.
+// Android Plus / Plus+Coins checkout via Google Play Billing SUBS products.
+// Native: PlayBillingModule.launchSubscription / querySubscriptions
+// Server: blypSubscriptionActivate verifies the token and writes entitlements/{uid}.
 //
-// IMPORTANT — remaining integration (requires Play Console + native work):
-//   Digital subscriptions for Android MUST be sold through Google Play Billing
-//   (subscription / SUBS products), not card capture. The current native module
-//   (PlayBillingModule) only supports one-off consumable coin packs. To turn paid
-//   tiers fully on we need:
-//     1. Play Console: create subscription products `blyp.plus.monthly` and
-//        `blyp.plus.coins.monthly` ($4.99 / $9.99).
-//     2. Native: add SUBS support to PlayBillingModule (queryProductDetails for
-//        SUBS, launchBillingFlow, no consume), exposed as launchSubscription(sku).
-//     3. Server: verify the SUBS purchase token, write the paid tier to
-//        entitlements/{uid}, and (for plus_coins) grant 999 coins each period.
-//
-// Until then, startCheckout resolves with { ok:false, reason:'billing-pending' }
-// and the UI explains checkout is being finalised. We never silently unlock a
-// paid tier client-side — that write is server-only by Firestore rule.
+// Play Console still needs the subscription products created:
+//   blyp.plus.monthly / blyp.plus.coins.monthly
+// Until those exist, native launch returns SKU_NOT_FOUND.
 
 import { NativeModules, Platform } from 'react-native';
 import { loadEntitlement } from './entitlementService';
@@ -83,8 +73,6 @@ export async function startCheckout(planId, uid) {
     return { ok: false, reason: 'platform-not-supported' };
   }
 
-  // Native SUBS flow not wired yet (see header). Detect explicitly so this lights
-  // up automatically once launchSubscription is added to the native module.
   if (!PLAY_BILLING_MODULE?.launchSubscription) {
     return { ok: false, reason: 'billing-pending' };
   }
@@ -106,8 +94,7 @@ export async function startCheckout(planId, uid) {
 }
 
 /**
- * Restore an existing subscription (e.g. after reinstall). Requires native SUBS
- * purchase query support; until that lands this reports billing-pending.
+ * Restore an existing subscription (e.g. after reinstall).
  */
 export async function restoreSubscription(uid) {
   if (Platform.OS !== 'android') return { ok: false, reason: 'platform-not-supported' };

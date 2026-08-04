@@ -100,7 +100,8 @@ export const ECONOMICS = [
   { label: 'Gifts — share to the receiving creator', value: '70%' },
   { label: 'Sponsored slots per results page', value: 'Max 1, always labelled' },
   { label: 'Can paying outrank the top honest result?', value: 'Never' },
-  { label: 'Coins → cash withdrawal', value: 'Not redeemable for cash' },
+  { label: 'Purchased coins → cash', value: 'Not redeemable (spend-only)' },
+  { label: 'Creator gem earnings → cash', value: 'Withdraw via Stripe after hold + 30% fee' },
   { label: 'Your data sold by default', value: 'No — only ever a paid, opt-in exchange with you' },
 ];
 

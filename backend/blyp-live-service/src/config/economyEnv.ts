@@ -33,6 +33,13 @@ const economyEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PLATFORM_CURRENCY: z.string().optional(),
+  /** Pence (or cents) paid per 1 gem before platform fee. Default 1 = 1p/gem. */
+  WITHDRAW_GEM_MINOR_UNITS: z.coerce.number().int().min(1).optional(),
+  /** Alias accepted for plan naming; same as WITHDRAW_GEM_MINOR_UNITS. */
+  WITHDRAW_COIN_MINOR_UNITS: z.coerce.number().int().min(1).optional(),
+  ENABLE_WITHDRAWALS: z.coerce.number().int().min(0).max(1).optional(),
+  STRIPE_CONNECT_RETURN_URL: z.string().optional(),
+  STRIPE_CONNECT_REFRESH_URL: z.string().optional(),
 
   // Live Games (optional; disabled unless explicitly enabled)
   ECONOMY_LIVE_GAMES_ENABLED: z.coerce.number().int().min(0).max(1).optional(),
