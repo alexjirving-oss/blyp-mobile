@@ -9,8 +9,9 @@ describe('HomeScreen feed helper contract', () => {
     expect(isPlayableVideoPost({ type: 'video', videoUrl: 'https://x/v.mp4' })).toBe(true);
   });
 
-  it('isValidFeedPost requires likes', () => {
+  it('isValidFeedPost accepts videos with sound regardless of likes', () => {
     expect(isValidFeedPost({ type: 'video', videoUrl: 'https://x/v.mp4', likes: 1 })).toBe(true);
-    expect(isValidFeedPost({ type: 'video', videoUrl: 'https://x/v.mp4', likes: 0 })).toBe(false);
+    expect(isValidFeedPost({ type: 'video', videoUrl: 'https://x/v.mp4', likes: 0 })).toBe(true);
+    expect(isValidFeedPost({ type: 'image', imageUrl: 'https://x/p.jpg', likes: 5 })).toBe(false);
   });
 });
