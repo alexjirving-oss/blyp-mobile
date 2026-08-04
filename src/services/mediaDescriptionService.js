@@ -888,10 +888,15 @@ Return ONLY valid JSON.`;
         const depleted =
           status === 429 ||
           /prepayment credits are depleted|RESOURCE_EXHAUSTED|quota|rate.?limit|insufficient_quota/i.test(bodyText || '');
+        const needsPlus =
+          status === 402 ||
+          /subscription_required/i.test(bodyText || '');
         const fallback = buildFallback();
         return {
           ...fallback,
-          aiError: depleted
+          aiError: needsPlus
+            ? 'AI captions need Blyp Plus (or an active trial) — you can still write and post'
+            : depleted
             ? 'AI temporarily unavailable (quota) — you can still post with the draft caption'
             : `AI polish unavailable (HTTP ${status || 'error'}) — you can still post`,
         };

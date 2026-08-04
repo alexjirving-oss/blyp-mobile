@@ -20,8 +20,8 @@ import { COLORS } from '../styles/theme';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-const SearchScreen = ({ navigation }) => {
-  const [searchQuery, setSearchQuery] = useState('');
+const SearchScreen = ({ navigation, route }) => {
+  const [searchQuery, setSearchQuery] = useState(() => String(route?.params?.initialQuery || '').trim());
   const [searchResults, setSearchResults] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState('all');
@@ -41,6 +41,13 @@ const SearchScreen = ({ navigation }) => {
     // Load initial suggestions
     loadSuggestions();
   }, []);
+
+  useEffect(() => {
+    const incoming = String(route?.params?.initialQuery || '').trim();
+    if (incoming && incoming !== searchQuery) {
+      setSearchQuery(incoming);
+    }
+  }, [route?.params?.initialQuery]);
 
   useEffect(() => {
     if (searchQuery.length >= 2) {
@@ -172,25 +179,41 @@ const SearchScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
-  const renderPostItem = ({ item, index }) => (
-    <TouchableOpacity
-      style={[styles.postItem, { width: screenWidth / 3 - 4 }]}
-      onPress={() => navigation.navigate('Blyp', { initialQuery: searchQuery })}
-    >
-      <Image source={{ uri: item.thumbnail }} style={styles.postThumbnail} />
-      {item.type === 'video' && (
-        <View style={styles.videoIndicator}>
-          <Icon name="play" size={16} color="#fff" />
+  const renderPostItem = ({ item, index }) => {
+    const thumb =
+      item.thumbnail ||
+      item.thumbnailUrl ||
+      item.imageUrl ||
+      item.mediaUrl ||
+      item?.media?.[0]?.url ||
+      item.videoUrl ||
+      null;
+    return (
+      <TouchableOpacity
+        style={[styles.postItem, { width: screenWidth / 3 - 4 }]}
+        onPress={() => navigation.navigate('Blyp', { initialQuery: searchQuery })}
+      >
+        {thumb ? (
+          <Image source={{ uri: thumb }} style={styles.postThumbnail} />
+        ) : (
+          <View style={[styles.postThumbnail, { backgroundColor: '#1A1A1E', alignItems: 'center', justifyContent: 'center' }]}>
+            <Icon name="image-outline" size={22} color="#666" />
+          </View>
+        )}
+        {(item.type === 'video' || !!item.videoUrl) && (
+          <View style={styles.videoIndicator}>
+            <Icon name="play" size={16} color="#fff" />
+          </View>
+        )}
+        <View style={styles.postStats}>
+          <View style={styles.postStat}>
+            <Icon name="heart" size={12} color="#fff" />
+            <Text style={styles.postStatText}>{item.likes || item.likeCount || 0}</Text>
+          </View>
         </View>
-      )}
-      <View style={styles.postStats}>
-        <View style={styles.postStat}>
-          <Icon name="heart" size={12} color="#fff" />
-          <Text style={styles.postStatText}>{item.likes}</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   const renderHashtagItem = ({ item }) => (
     <TouchableOpacity
@@ -422,10 +445,11 @@ const SearchScreen = ({ navigation }) => {
 
     return (
       <FlatList
+        key={`search-${selectedTab}`}
         style={styles.resultsContainer}
         data={results}
         renderItem={renderItemForTab()}
-        keyExtractor={(item) => item.id || item.hashtag || item.name}
+        keyExtractor={(item) => String(item.id || item.hashtag || item.name || Math.random())}
         numColumns={selectedTab === 'posts' ? 3 : 1}
         showsVerticalScrollIndicator={false}
       />

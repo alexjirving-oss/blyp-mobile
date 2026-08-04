@@ -1,34 +1,97 @@
 "use strict";
 /**
- * Premium gate for the assistant. Reads the admin-written entitlements/{uid}
- * doc — the single source of truth a client can never forge — and reports
- * whether the user currently has an ACTIVE paid subscription.
+ * Premium / trial gate for AI features. Reads entitlements/{uid} — clients
+ * cannot forge paid tiers (rules + activate CF). Trial is honored while
+ * trialEndsAt is in the future.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSubscriptionState = void 0;
+exports.ensureTrialIfMissing = exports.getSubscriptionState = void 0;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("./types");
 const PAID_TIERS = new Set(['plus', 'plus_coins']);
+const STATUS_BLOCKS_PAID = new Set(['revoked', 'expired', 'on_hold', 'paused', 'inactive']);
+const TRIAL_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+function emptyState() {
+    return {
+        active: false,
+        trialing: false,
+        tier: null,
+        currentPeriodEnd: null,
+        trialEndsAt: null,
+    };
+}
+function computeFromDoc(d) {
+    const tier = typeof (d === null || d === void 0 ? void 0 : d.tier) === 'string' ? d.tier : null;
+    const status = String((d === null || d === void 0 ? void 0 : d.status) || '');
+    const periodEnd = Number((d === null || d === void 0 ? void 0 : d.currentPeriodEnd) || 0) || null;
+    const trialEndsAt = Number((d === null || d === void 0 ? void 0 : d.trialEndsAt) || 0) || null;
+    const now = Date.now();
+    const paidActive = !!tier &&
+        PAID_TIERS.has(tier) &&
+        !STATUS_BLOCKS_PAID.has(status) &&
+        periodEnd != null &&
+        periodEnd > now;
+    const trialing = !paidActive &&
+        ((status === 'trialing' && !!trialEndsAt && trialEndsAt > now) ||
+            (tier === 'trial' && !!trialEndsAt && trialEndsAt > now));
+    return {
+        active: paidActive || trialing,
+        trialing,
+        tier,
+        currentPeriodEnd: periodEnd,
+        trialEndsAt,
+    };
+}
 async function getSubscriptionState(uid) {
     const db = firebaseAdmin_1.admin.firestore();
     try {
         const snap = await db.collection(types_1.ASSISTANT_COLLECTIONS.entitlements).doc(uid).get();
         if (!snap.exists)
-            return { active: false, tier: null, currentPeriodEnd: null };
-        const d = snap.data();
-        const tier = typeof (d === null || d === void 0 ? void 0 : d.tier) === 'string' ? d.tier : null;
-        const status = String((d === null || d === void 0 ? void 0 : d.status) || '');
-        const periodEnd = Number((d === null || d === void 0 ? void 0 : d.currentPeriodEnd) || 0) || null;
-        const active = status === 'active' &&
-            !!tier &&
-            PAID_TIERS.has(tier) &&
-            (periodEnd == null || periodEnd > Date.now());
-        return { active, tier, currentPeriodEnd: periodEnd };
+            return emptyState();
+        return computeFromDoc(snap.data());
     }
     catch (_a) {
-        // Fail CLOSED here: a premium feature must not open on an infra error.
-        return { active: false, tier: null, currentPeriodEnd: null };
+        // Fail CLOSED: premium features must not open on an infra error.
+        return emptyState();
     }
 }
 exports.getSubscriptionState = getSubscriptionState;
+/**
+ * If the user has never received an entitlement doc, start the same 30-day
+ * trial the mobile client expects. Does NOT renew expired free/expired docs.
+ */
+async function ensureTrialIfMissing(uid) {
+    const db = firebaseAdmin_1.admin.firestore();
+    const ref = db.collection(types_1.ASSISTANT_COLLECTIONS.entitlements).doc(uid);
+    try {
+        const snap = await ref.get();
+        if (snap.exists)
+            return computeFromDoc(snap.data());
+        const now = Date.now();
+        const doc = {
+            tier: 'trial',
+            status: 'trialing',
+            trialStartedAt: now,
+            trialEndsAt: now + TRIAL_DAYS * DAY_MS,
+            store: null,
+            updatedAt: now,
+            source: 'geminiProxy_bootstrap',
+        };
+        // create() fails if another request won the race — re-read either way.
+        try {
+            await ref.create(doc);
+        }
+        catch (_a) {
+            const again = await ref.get();
+            if (again.exists)
+                return computeFromDoc(again.data());
+        }
+        return computeFromDoc(doc);
+    }
+    catch (_b) {
+        return emptyState();
+    }
+}
+exports.ensureTrialIfMissing = ensureTrialIfMissing;
 //# sourceMappingURL=entitlement.js.map

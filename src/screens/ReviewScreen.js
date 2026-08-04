@@ -27,7 +27,7 @@ import { db as firestore, auth, storage } from '../config/firebase';
 import { serverTimestamp } from 'firebase/firestore';
 import { firebaseNative } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
-import { useHasAI } from '../hooks/useEntitlement';
+import { useHasAI, useEntitlement } from '../hooks/useEntitlement';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { uploadMediaToStorage } from '../utils/uploadMediaToStorage';
 import Toast from 'react-native-toast-message';
@@ -47,6 +47,7 @@ const ReviewScreen = () => {
   const route = useRoute();
   const { media, type, mode, transcript, source, entryPoint } = route.params || {};
   const { user: cognitoUser, uid, isAuthenticated, authReady } = useAuth();
+  const entitlement = useEntitlement();
   const aiEntitled = useHasAI();
 
   // Premium AI conveniences (captions/hashtags/titles) gate. Core posting,
@@ -914,7 +915,13 @@ const ReviewScreen = () => {
   // upgrade it in place from a SINGLE multimodal AI call. No step-by-step
   // overlay, no artificial setTimeout delays: the post appears immediately and
   // gets better when the model returns.
-  const generateMagicPost = async (intent = '') => {
+  // opts.gate=false skips the Plus alert (used by ambient auto-start when
+  // entitlement is already known true, or silent no-ops for free tier).
+  const generateMagicPost = async (intent = '', opts = {}) => {
+    const gate = opts?.gate !== false;
+    if (gate && !requireAI()) return;
+    if (!gate && !aiEntitled) return;
+
     const cleanIntent = (intent || '').trim();
     const runId = (magicRunIdRef.current += 1);
     magicUserTookOverRef.current = false;
@@ -2223,9 +2230,9 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     }
   }, [mode, mediaItems.length]);
 
-  // Ambient Magic Path: once media is present, auto-caption without a describe gate.
-  // Skip for video-only posts — Gemini frame extract + upload contention makes
-  // compose/post feel stuck for minutes.
+  // Ambient Magic Path: once media is present, auto-caption for entitled users
+  // (photos + videos — videos use a thumbnail frame). Free users still see the
+  // explicit "Generate with AI" CTA below; we do not auto-paywall them.
   useEffect(() => {
     if (mediaItems.length === 0) return;
     if (magicAutoStartedRef.current) return;
@@ -2236,21 +2243,26 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         return;
       }
     }
-    const onlyVideo = mediaItems.every((m) => m?.type === 'video');
+    // Wait until entitlement has resolved so we don't flash AI for free users
+    // or skip it for trial users still loading.
+    if (!entitlement) return undefined;
+    if (!entitlement.capabilities?.ai) {
+      magicAutoStartedRef.current = true;
+      setOverlayAlreadyShown(true);
+      return undefined;
+    }
+
     magicAutoStartedRef.current = true;
     setOverlayAlreadyShown(true);
     setShowDescriptionMethodOverlay(false);
     setShowMultiPhotoModal(false);
-    if (onlyVideo) {
-      return undefined;
-    }
     const t = setTimeout(() => {
-      void generateMagicPost('').catch((e) => {
+      void generateMagicPost('', { gate: false }).catch((e) => {
         console.error('❌ ambient generateMagicPost failed', e);
       });
     }, 150);
     return () => clearTimeout(t);
-  }, [mediaItems.length]);
+  }, [mediaItems.length, entitlement]);
 
   const handleMediaLibraryPress = () => {
     addMediaFromLibrary().catch(error => {
@@ -2897,7 +2909,42 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
           </View>
         )}
 
-        {/* Legacy "AI Data Collected" debug panel removed — Magic Path owns captions. */}
+        {/* Primary AI entry — always visible once media is on the composer */}
+        {mediaItems.length > 0 && (
+          <View style={styles.aiPrimarySection}>
+            <TouchableOpacity
+              style={[
+                styles.aiPrimaryButton,
+                (isPolishingCaption || mediaItems.length === 0) && styles.enhanceButtonDisabled,
+              ]}
+              onPress={() => {
+                const note = (manualDescription || caption || voiceCaption || '').trim();
+                void generateMagicPost(note).catch((e) => {
+                  console.error('❌ Generate with AI failed', e);
+                });
+              }}
+              disabled={isPolishingCaption || mediaItems.length === 0}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={isPolishingCaption ? ['#666', '#666'] : ['#00D2BE', '#00A89E']}
+                style={styles.aiPrimaryGradient}
+              >
+                {isPolishingCaption ? (
+                  <ActivityIndicator size="small" color="#0A0A0C" />
+                ) : (
+                  <Icon name="sparkles" size={22} color="#0A0A0C" />
+                )}
+                <Text style={styles.aiPrimaryButtonText}>
+                  {isPolishingCaption ? 'Writing with AI…' : 'Generate with AI'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            <Text style={styles.aiPrimaryHint}>
+              Captions, title and hashtags from your media — or hold the mic and describe it.
+            </Text>
+          </View>
+        )}
 
         {/* AI Voice Description Section */}
         <View style={styles.aiVoiceSection}>
@@ -4014,6 +4061,34 @@ const styles = StyleSheet.create({
   },
   
   // AI Voice Section
+  aiPrimarySection: {
+    marginBottom: 16,
+  },
+  aiPrimaryButton: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  aiPrimaryGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+  },
+  aiPrimaryButtonText: {
+    color: '#0A0A0C',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  aiPrimaryHint: {
+    marginTop: 8,
+    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
   aiVoiceSection: {
     flexDirection: 'row',
     alignItems: 'center',

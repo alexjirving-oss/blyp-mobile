@@ -403,14 +403,15 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         }
         if (needsLocationForQuery(text) && !geo) {
           setLocationPrompt({ query: text });
-          setQueryText('');
+          // Keep spoken/typed text visible in the bar.
           return;
         }
-        setQueryText('');
-        navigation.navigate('Blyp', geo ? { initialQuery: text, geo } : { initialQuery: text });
+        // Keep the query in the bar so the user can see what was spoken/typed
+        // while Search opens. Prefer real people/posts search over the old
+        // assistant answers (those were often outdated / unhelpful).
+        navigation.navigate('Search', { initialQuery: text });
       } catch {
-        setQueryText('');
-        navigation.navigate('Blyp', { initialQuery: text });
+        navigation.navigate('Search', { initialQuery: text });
       } finally {
         setSubmitting(false);
       }
@@ -423,6 +424,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       const pending = locationPrompt?.query;
       setLocationPrompt(null);
       if (pending) {
+        // Places still open Blyp with geo so local results can use location.
         navigation.navigate('Blyp', { initialQuery: pending, geo });
       }
     },
@@ -579,10 +581,24 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       return next;
     });
     try {
-      if (isF) await unfollowUser(uid, targetId);
-      else await followUser(uid, targetId);
+      const res = isF
+        ? await unfollowUser(uid, targetId)
+        : await followUser(uid, targetId);
+      if (!res?.success) {
+        setFollowingSet((prev) => {
+          const next = new Set(prev);
+          if (isF) next.add(targetId);
+          else next.delete(targetId);
+          return next;
+        });
+      }
     } catch {
-      /* subscription will correct state */
+      setFollowingSet((prev) => {
+        const next = new Set(prev);
+        if (isF) next.add(targetId);
+        else next.delete(targetId);
+        return next;
+      });
     }
   };
 
@@ -649,7 +665,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           value={queryText}
           onChangeText={setQueryText}
           onSubmitEditing={onSubmitQuery}
-          placeholder="ask anything, or “remind me…”"
+          placeholder="Search people & posts, or “remind me…”"
           placeholderTextColor={COLORS.textMuted}
           returnKeyType="search"
           blurOnSubmit
@@ -868,10 +884,10 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                         uri={videoUri}
                         style={[styles.forYouThumb, StyleSheet.absoluteFill, !isActive && styles.forYouPreloadHidden]}
                         resizeMode="cover"
-                        shouldPlay={isActive && isScreenFocused}
+                        shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
                         isLooping
-                        isMuted={!isActive || !isScreenFocused}
-                        volume={isActive && isScreenFocused ? 1.0 : 0}
+                        isMuted={!isActive || !isScreenFocused || listening || transcribing}
+                        volume={isActive && isScreenFocused && !listening && !transcribing ? 1.0 : 0}
                       />
                     )}
                     {isVideo && !isActive && (

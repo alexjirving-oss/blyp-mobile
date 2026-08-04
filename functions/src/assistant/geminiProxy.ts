@@ -20,6 +20,7 @@ import {
   callOpenAiAsGemini,
   hasOpenAiFallback,
 } from './openaiFallback';
+import { getSubscriptionState, ensureTrialIfMissing } from './entitlement';
 
 initFirebaseAdmin();
 
@@ -119,6 +120,18 @@ export const geminiProxy = functions
       uid = decoded.uid;
     } catch {
       res.status(401).json({ error: { message: 'unauthenticated' } });
+      return;
+    }
+
+    // Premium / active-trial gate (server-authoritative). Missing docs get the
+    // same 30-day trial bootstrap the mobile client expects so AI doesn't look
+    // "disappeared" for brand-new accounts.
+    let sub = await getSubscriptionState(uid);
+    if (!sub.active) {
+      sub = await ensureTrialIfMissing(uid);
+    }
+    if (!sub.active) {
+      res.status(402).json({ error: { message: 'subscription_required' } });
       return;
     }
 

@@ -45,6 +45,7 @@ const node_fetch_1 = __importDefault(require("node-fetch"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const cors_1 = require("../http/cors");
 const openaiFallback_1 = require("./openaiFallback");
+const entitlement_1 = require("./entitlement");
 (0, firebaseAdmin_1.initFirebaseAdmin)();
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const ALLOWED_MODELS = new Set([
@@ -137,6 +138,17 @@ exports.geminiProxy = functions
     }
     catch (_b) {
         res.status(401).json({ error: { message: 'unauthenticated' } });
+        return;
+    }
+    // Premium / active-trial gate (server-authoritative). Missing docs get the
+    // same 30-day trial bootstrap the mobile client expects so AI doesn't look
+    // "disappeared" for brand-new accounts.
+    let sub = await (0, entitlement_1.getSubscriptionState)(uid);
+    if (!sub.active) {
+        sub = await (0, entitlement_1.ensureTrialIfMissing)(uid);
+    }
+    if (!sub.active) {
+        res.status(402).json({ error: { message: 'subscription_required' } });
         return;
     }
     const allowed = await checkRateLimit(uid);

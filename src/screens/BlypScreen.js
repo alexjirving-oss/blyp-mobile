@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Keyboard,
@@ -162,9 +163,12 @@ const BlypScreen = ({ navigation, route }) => {
   }, [uid]);
 
   const runSearch = useCallback(
-    async (text, geo) => {
+    async (text, geo, opts = {}) => {
       const q = String(text ?? '').trim();
       if (!q) return;
+      const keepQuery = !!opts?.keepQuery;
+      // Always show the active query in the bar (voice + typed).
+      setQuery(q);
       stopSpeaking();
 
       if (needsLocationForQuery(q) && !geo) {
@@ -180,13 +184,13 @@ const BlypScreen = ({ navigation, route }) => {
         answer: '', usedAI: false, related: [], posts: [], creators: [], web: [], sources: [],
       };
 
-      // Push an action turn (watch/battle/pick card) and reset the bar.
+      // Push an action turn (watch/battle/pick card) and reset the bar unless voice asked to keep it.
       const commitTurn = async (payload) => {
         setTurns((prev) => [
           ...prev,
           { id: `t_${Date.now()}`, query: q, ...emptyTurn, ...payload },
         ]);
-        setQuery('');
+        if (!keepQuery) setQuery('');
         try {
           const updated = await addRecentSearch(uid, q);
           if (updated) setRecent(updated.recentSearches || []);
@@ -260,7 +264,7 @@ const BlypScreen = ({ navigation, route }) => {
             ...prev,
             { id: `t_${Date.now()}`, query: q, ...emptyTurn, reminders: recs, planNote: plan.note },
           ]);
-          setQuery('');
+          if (!keepQuery) setQuery('');
           try {
             const updated = await addRecentSearch(uid, q);
             if (updated) setRecent(updated.recentSearches || []);
@@ -291,7 +295,7 @@ const BlypScreen = ({ navigation, route }) => {
             reminderReason: sched?.reason,
           },
         ]);
-        setQuery('');
+        if (!keepQuery) setQuery('');
         try {
           const updated = await addRecentSearch(uid, q);
           if (updated) setRecent(updated.recentSearches || []);
@@ -305,8 +309,9 @@ const BlypScreen = ({ navigation, route }) => {
 
       // Capture conversation history BEFORE we push this turn.
       const history = turnsRef.current.map((t) => ({ q: t.query, a: t.answer || '' }));
-      // Only spend a Gemini call when the user can actually see the answer.
-      const wantAnswer = aiEntitled && isBlypAiAvailable();
+      // Skip speculative Gemini prose answers — they were often outdated and not
+      // worth the wait. Surface real in-app posts/creators instead.
+      const wantAnswer = false;
       const turnId = `t_${Date.now()}`;
       try {
         // 1) Show real in-app results immediately — no waiting on the AI.
@@ -315,7 +320,7 @@ const BlypScreen = ({ navigation, route }) => {
           ...prev,
           { id: turnId, ...content, answer: '', usedAI: false, related: [], web: [], answering: wantAnswer },
         ]);
-        setQuery('');
+        if (!keepQuery) setQuery('');
         setLoading(false);
         setTimeout(() => scrollRef.current?.scrollTo?.({ y: 0, animated: false }), 50);
         try {
@@ -406,7 +411,7 @@ const BlypScreen = ({ navigation, route }) => {
     const geo = route?.params?.geo;
     if (q && !ranInitial.current) {
       ranInitial.current = true;
-      runSearch(q, geo);
+      runSearch(q, geo, { keepQuery: true });
     }
   }, [route?.params?.initialQuery, route?.params?.geo, runSearch]);
 
@@ -490,17 +495,23 @@ const BlypScreen = ({ navigation, route }) => {
     setTranscribing(true);
     try {
       const uri = await speechToTextService.stopRecording();
-      if (uri) {
-        const text = await geminiSpeechService.transcribeAudio(uri);
-        const clean = String(text || '').trim();
-        // Service returns bracketed error tokens like [NO_KEY] on failure.
-        if (clean && !clean.startsWith('[')) {
-          setQuery(clean);
-          await runSearch(clean);
-        }
+      if (!uri) {
+        Alert.alert('Voice', "Couldn't catch that — hold the mic a moment longer and try again.");
+        return;
       }
+      const text = await geminiSpeechService.transcribeAudio(uri);
+      const clean = String(text || '').trim();
+      // Service returns bracketed error tokens like [NO_KEY] on failure.
+      if (!clean || clean.startsWith('[')) {
+        Alert.alert('Voice', "Couldn't hear that clearly — try again.");
+        return;
+      }
+      // Put spoken text in the bar and keep it there while search runs.
+      setQuery(clean);
+      await runSearch(clean, undefined, { keepQuery: true });
     } catch (e) {
       console.warn('[BLYP] voice failed', e?.message || String(e));
+      Alert.alert('Voice', "Voice didn't work just then — try again.");
     } finally {
       setTranscribing(false);
     }
