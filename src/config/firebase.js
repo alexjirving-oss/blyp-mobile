@@ -357,7 +357,7 @@ const FUNCTIONS_BASE = (
 
 export const geminiProxyBaseUrl = `${FUNCTIONS_BASE}/geminiProxy`;
 export const geminiApiKey = 'managed-by-proxy';
-export const geminiApiUrl = `${geminiProxyBaseUrl}?model=gemini-2.5-flash`;
+export const geminiApiUrl = `${geminiProxyBaseUrl}?model=gemini-flash-latest`;
 
 /**
  * Build the headers for a proxied Gemini request, attaching the caller's Firebase

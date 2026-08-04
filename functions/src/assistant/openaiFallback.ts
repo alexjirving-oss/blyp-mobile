@@ -7,7 +7,7 @@
 import fetch from 'node-fetch';
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 
 type GeminiPart = {
   text?: string;
@@ -58,6 +58,144 @@ export function hasOpenAiFallback(): boolean {
 /** OpenAI chat.completions cannot consume Gemini audio inline parts — skip it. */
 export function canUseOpenAiForBody(body: GeminiBody | any): boolean {
   return hasOpenAiFallback() && !bodyHasAudio(body);
+}
+
+export function bodyContainsAudio(body: GeminiBody | any): boolean {
+  return bodyHasAudio(body);
+}
+
+type ExtractedAudio = { mime: string; data: string; filename: string };
+
+function mimeToFilename(mime: string): string {
+  const m = String(mime || '').toLowerCase();
+  if (m.includes('wav')) return 'audio.wav';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'audio.mp3';
+  if (m.includes('webm')) return 'audio.webm';
+  if (m.includes('ogg')) return 'audio.ogg';
+  if (m.includes('aac')) return 'audio.aac';
+  if (m.includes('caf')) return 'audio.caf';
+  // Default: iOS/Android push-to-talk recordings are usually m4a/mp4.
+  return 'audio.m4a';
+}
+
+/** Pull the first inline audio part from a Gemini-shaped body. */
+export function extractAudioFromGeminiBody(body: GeminiBody | any): ExtractedAudio | null {
+  const contents = body?.contents;
+  if (!Array.isArray(contents)) return null;
+  for (const content of contents) {
+    const parts = content?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      const inline: any = part?.inlineData || part?.inline_data;
+      const mime = String(inline?.mimeType || inline?.mime_type || '').toLowerCase();
+      const data = String(inline?.data || '').trim();
+      if (mime.startsWith('audio/') && data) {
+        return { mime, data, filename: mimeToFilename(mime) };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Whisper STT fallback for push-to-describe / voice captions.
+ * Gemini free-tier audio often 429s; Whisper keeps describe working.
+ * Returns a Gemini-shaped JSON body so mobile parsers are unchanged.
+ */
+export async function callOpenAiWhisperAsGemini(
+  geminiBody: GeminiBody | any,
+  { timeoutMs = 45000 }: { timeoutMs?: number } = {},
+): Promise<{ status: number; body: string }> {
+  const key = openaiKey();
+  if (!key) {
+    return {
+      status: 503,
+      body: JSON.stringify({ error: { message: 'openai_unavailable' } }),
+    };
+  }
+
+  const audio = extractAudioFromGeminiBody(geminiBody);
+  if (!audio) {
+    return {
+      status: 400,
+      body: JSON.stringify({ error: { message: 'openai_whisper_no_audio' } }),
+    };
+  }
+
+  let FormDataCtor: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    FormDataCtor = require('form-data');
+  } catch {
+    return {
+      status: 503,
+      body: JSON.stringify({ error: { message: 'openai_whisper_unavailable' } }),
+    };
+  }
+
+  const form = new FormDataCtor();
+  const buf = Buffer.from(audio.data, 'base64');
+  if (!buf.length) {
+    return {
+      status: 400,
+      body: JSON.stringify({ error: { message: 'openai_whisper_empty_audio' } }),
+    };
+  }
+  form.append('file', buf, {
+    filename: audio.filename,
+    contentType: audio.mime || 'audio/mp4',
+  });
+  form.append('model', String(process.env.BLYP_OPENAI_STT_MODEL || 'whisper-1').trim() || 'whisper-1');
+  form.append('response_format', 'json');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        ...form.getHeaders(),
+      },
+      signal: controller.signal as any,
+      body: form as any,
+    }).finally(() => clearTimeout(timer));
+
+    const raw = await upstream.text();
+    if (!upstream.ok) {
+      console.warn('[openaiWhisper] upstream failed', upstream.status, raw.slice(0, 200));
+      return { status: upstream.status, body: raw };
+    }
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return {
+        status: 502,
+        body: JSON.stringify({ error: { message: 'openai_whisper_bad_json' } }),
+      };
+    }
+
+    const text = String(parsed?.text || '').trim();
+    if (!text) {
+      return {
+        status: 502,
+        body: JSON.stringify({ error: { message: 'openai_whisper_empty' } }),
+      };
+    }
+
+    return {
+      status: 200,
+      body: JSON.stringify(openAiToGeminiResponse(text)),
+    };
+  } catch (e: any) {
+    console.warn('[openaiWhisper] request error', e?.message || String(e));
+    return {
+      status: 502,
+      body: JSON.stringify({ error: { message: 'openai_whisper_upstream_error' } }),
+    };
+  }
 }
 
 function partsToOpenAiContent(parts: GeminiPart[] | undefined): any {

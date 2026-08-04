@@ -139,14 +139,20 @@ class GeminiSpeechService {
         model
       });
 
-      const primaryModel = (this.apiUrl.includes(':generateContent') && this.apiUrl.split('/models/')[1]?.split(':')[0]) || 'gemini-2.5-flash';
-      const secondaryModel = 'gemini-1.5-flash';
+      const primaryModel = (this.apiUrl.includes(':generateContent') && this.apiUrl.split('/models/')[1]?.split(':')[0])
+        || (this.apiUrl.includes('model=') && this.apiUrl.split('model=')[1]?.split('&')[0])
+        || 'gemini-flash-latest';
+      // Prefer flash-latest → 1.5-flash; 2.5-flash is often the first to 429 on free tier.
+      const secondaryModel = primaryModel === 'gemini-1.5-flash' ? 'gemini-flash-latest' : 'gemini-1.5-flash';
       console.log(`🧪 Primary model: ${primaryModel} Secondary model: ${secondaryModel}`);
 
       console.log('🌐 Sending audio to Gemini for transcription...');
 
-      // Primary model: with backoff/retry so a transient 429 doesn't fail outright.
-      let response = await this.fetchModelWithRetry(primaryModel, buildPayload(primaryModel));
+      // One retry is enough — proxy already falls back to Whisper on Gemini 429.
+      let response = await this.fetchModelWithRetry(primaryModel, buildPayload(primaryModel), {
+        maxRetries: 1,
+        baseDelayMs: 1500,
+      });
       let result = null;
       let transcriptCandidate = null;
 
@@ -162,7 +168,10 @@ class GeminiSpeechService {
         const primaryStatus = response && response.ok ? 'no-transcript' : (response?.status ?? 'error');
         console.warn(`⚠️ Primary model unusable (${primaryStatus}); trying secondary model`);
         try {
-          const response2 = await this.fetchModelWithRetry(secondaryModel, buildPayload(secondaryModel));
+          const response2 = await this.fetchModelWithRetry(secondaryModel, buildPayload(secondaryModel), {
+            maxRetries: 1,
+            baseDelayMs: 1500,
+          });
           if (response2 && response2.ok) {
             result = await response2.json();
             console.log('📨 Raw Gemini response (secondary):', JSON.stringify(result).slice(0, 500));

@@ -2,12 +2,12 @@
   "version": 1,
   "id": "voice-stt-and-bg-calls-20260804",
   "title": "Voice STT + background incoming calls",
-  "objective": "Blyp home voice bar returns real transcripts/results instead of 'Couldn't hear you'. Incoming audio calls ring with full-screen notification when the app is backgrounded or killed, not only while the callee has Blyp open.",
+  "objective": "Blyp home voice bar and push-to-describe return real transcripts instead of opaque failure. Incoming audio calls ring with full-screen notification when the app is backgrounded or killed. Audio STT uses Gemini first; on Gemini 429/quota/upstream failure, OpenAI Whisper (not chat image_url mapping).",
   "baseRef": "HEAD",
   "acceptanceCriteria": [
-    "geminiProxy routes audio/STT payloads to Gemini (never OpenAI image_url mapping).",
+    "geminiProxy routes audio/STT to Gemini first; on 429/quota/upstream failure uses OpenAI Whisper and returns Gemini-shaped JSON (never chat.completions image_url mapping of audio).",
     "Android ships BlypCallMessagingService and call FCM is data-only high-priority so native IncomingCallModule can run when JS is dead.",
-    "Home voice failure messages distinguish auth/quota/empty-audio instead of a single opaque phrase.",
+    "Home voice / Review describe failure messages distinguish auth/quota/empty-audio instead of a single opaque phrase.",
     "Play AAB is built from committed sources at a new versionCode after these fixes."
   ],
   "allowedPaths": [

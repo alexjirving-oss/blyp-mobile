@@ -6,8 +6,8 @@
  * generateContent bodies; responses stay Gemini-shaped so parsers are unchanged.
  *
  * Primary: OpenAI for text/image (OPENAI_API_KEY / BLYP_OPENAI_API_KEY)
- * Audio/STT: Gemini only (OpenAI chat path cannot consume Gemini audio parts)
- * Backup: Gemini when OpenAI is missing or fails
+ * Audio/STT: Gemini first, then OpenAI Whisper on 429/quota/upstream failure
+ * Backup: Gemini when OpenAI text/image path is missing or fails
  *
  * POST (Bearer Firebase ID token)
  *   ?model=<allowlisted gemini model>  (used only for Gemini path)
@@ -29,13 +29,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -171,9 +181,8 @@ exports.geminiProxy = functions
         res.set('X-Blyp-AI-Provider', provider);
         res.send(payload);
     };
-    // OpenAI for text/image only. Audio STT must use Gemini — openaiFallback
-    // maps every inline part to image_url, which drops voice and shows up as
-    // "Couldn't hear you" on the Blyp home mic.
+    // OpenAI for text/image. Audio uses Gemini first, then Whisper on 429/quota
+    // (chat.completions cannot consume Gemini audio parts — Whisper can).
     if ((0, openaiFallback_1.canUseOpenAiForBody)(body)) {
         const primary = await (0, openaiFallback_1.callOpenAiAsGemini)(body);
         if (primary.status >= 200 && primary.status < 300) {
@@ -197,17 +206,50 @@ exports.geminiProxy = functions
         send(primary.status, primary.body, 'openai');
         return;
     }
-    if ((0, openaiFallback_1.hasOpenAiFallback)()) {
-        console.log('[geminiProxy] audio payload — Gemini path (OpenAI cannot STT this shape)', {
+    const isAudio = (0, openaiFallback_1.bodyContainsAudio)(body);
+    if (isAudio) {
+        console.log('[geminiProxy] audio payload — Gemini STT, Whisper on failure', {
             uid,
             model,
+            hasGemini: !!geminiKey,
+            hasOpenAi: (0, openaiFallback_1.hasOpenAiFallback)(),
         });
     }
-    if (!geminiKey) {
-        res.status(503).json({ error: { message: 'ai_unavailable' } });
+    if (geminiKey) {
+        const gemini = await callGemini(body, model, geminiKey);
+        if (gemini.status >= 200 && gemini.status < 300) {
+            send(gemini.status, gemini.body, 'gemini');
+            return;
+        }
+        // Push-to-describe: Gemini free-tier often 429s on audio. Fall to Whisper.
+        if (isAudio &&
+            (0, openaiFallback_1.hasOpenAiFallback)() &&
+            (0, openaiFallback_1.shouldUseOpenAiFallback)(gemini.status, gemini.body)) {
+            console.warn('[geminiProxy] Gemini STT failed; trying OpenAI Whisper', {
+                uid,
+                status: gemini.status,
+                snippet: String(gemini.body || '').slice(0, 160),
+            });
+            const whisper = await (0, openaiFallback_1.callOpenAiWhisperAsGemini)(body);
+            if (whisper.status >= 200 && whisper.status < 300) {
+                send(200, whisper.body, 'openai-whisper');
+                return;
+            }
+            console.warn('[geminiProxy] Whisper STT also failed', {
+                uid,
+                status: whisper.status,
+                snippet: String(whisper.body || '').slice(0, 160),
+            });
+        }
+        send(gemini.status, gemini.body, 'gemini');
         return;
     }
-    const gemini = await callGemini(body, model, geminiKey);
-    send(gemini.status, gemini.body, 'gemini');
+    // No Gemini key — still try Whisper for voice describe.
+    if (isAudio && (0, openaiFallback_1.hasOpenAiFallback)()) {
+        const whisper = await (0, openaiFallback_1.callOpenAiWhisperAsGemini)(body);
+        send(whisper.status, whisper.body, 'openai-whisper');
+        return;
+    }
+    res.status(503).json({ error: { message: 'ai_unavailable' } });
 });
 //# sourceMappingURL=geminiProxy.js.map
