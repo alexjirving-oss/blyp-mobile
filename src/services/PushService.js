@@ -58,6 +58,13 @@ function devicesDoc(uid, deviceId) {
   return db.collection('users').doc(uid).collection('devices').doc(deviceId);
 }
 
+/** Legacy path still allowed by older rules — dual-write until rules catch up. */
+function deviceTokensDoc(uid, deviceId) {
+  // eslint-disable-next-line global-require
+  const { db } = require('../config/firebase');
+  return db.collection('users').doc(uid).collection('deviceTokens').doc(deviceId);
+}
+
 let foregroundHandlerSet = false;
 
 /** Make foreground notifications actually show (SDK 54 surface). */
@@ -101,18 +108,16 @@ export async function ensureAndroidChannel() {
       sound: DEFAULT_SOUND,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC,
     });
+    // Sound must stay null — native IncomingCallForegroundService owns the
+    // play→2s-gap ringtone. A channel sound fights / replaces that path.
     await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
       name: 'Incoming calls',
       importance: Importance.MAX ?? 5,
       vibrationPattern: [0, 500, 200, 500, 200, 500],
       lightColor: '#00D2BE',
-      sound: DEFAULT_SOUND,
+      sound: null,
       bypassDnd: true,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC,
-      audioAttributes: {
-        usage: Notifications.AndroidAudioUsage?.NOTIFICATION_RINGTONE,
-        contentType: Notifications.AndroidAudioContentType?.SONIFICATION,
-      },
     });
   } catch {
     // ignore
@@ -157,17 +162,24 @@ export async function registerForPush(uid) {
       // ignore
     }
 
-    await devicesDoc(uid, deviceId).set(
-      {
-        pushToken: token,
-        tokenType: tokenResult?.type || Platform.OS,
-        platform: Platform.OS,
-        appVersion,
-        disabled: false,
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    );
+    const payload = {
+      pushToken: token,
+      token: token, // some older writers used `token`
+      tokenType: tokenResult?.type || Platform.OS,
+      platform: Platform.OS,
+      appVersion,
+      disabled: false,
+      updatedAt: Date.now(),
+    };
+    // Primary path the FCM sender reads.
+    await devicesDoc(uid, deviceId).set(payload, { merge: true });
+    // Dual-write: older rules only allowed deviceTokens — keep both until
+    // deployed rules cover /devices everywhere.
+    try {
+      await deviceTokensDoc(uid, deviceId).set(payload, { merge: true });
+    } catch {
+      // ignore
+    }
     console.warn('[push] device registered'); // release-visible breadcrumb
     return token;
   } catch (e) {

@@ -17,6 +17,12 @@ import com.google.firebase.messaging.RemoteMessage
  * Incoming calls → full-screen IncomingCallModule. Other pushes → tray notification.
  */
 class BlypCallMessagingService : FirebaseMessagingService() {
+  override fun onNewToken(token: String) {
+    // Token refresh is written by JS PushService on next foreground register.
+    // Keep a breadcrumb so logcat proves FCM is wired to this service.
+    android.util.Log.i("BlypCallFCM", "onNewToken len=${token.length}")
+  }
+
   override fun onMessageReceived(message: RemoteMessage) {
     val data = message.data ?: emptyMap()
     val type = (data["type"] ?: "").lowercase()
@@ -24,6 +30,7 @@ class BlypCallMessagingService : FirebaseMessagingService() {
       val callId = (data["callId"] ?: "").trim()
       if (callId.isEmpty()) return
       val callerName = (data["callerName"] ?: data["title"] ?: "Incoming call").trim()
+      android.util.Log.i("BlypCallFCM", "incoming_call callId=$callId")
       try {
         IncomingCallModule.show(
           applicationContext,

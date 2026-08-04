@@ -18,18 +18,35 @@ const PERMANENT_TOKEN_ERRORS = new Set([
 ]);
 async function loadDevices(userId) {
     const db = firebaseAdmin_1.admin.firestore();
-    const snap = await db
+    const rows = [];
+    const seen = new Set();
+    const collect = (snap) => {
+        for (const d of snap.docs) {
+            const data = d.data();
+            const token = String((data === null || data === void 0 ? void 0 : data.pushToken) || (data === null || data === void 0 ? void 0 : data.token) || '').trim();
+            if (!token || (data === null || data === void 0 ? void 0 : data.disabled) === true)
+                continue;
+            if (seen.has(token))
+                continue;
+            seen.add(token);
+            rows.push({ ref: d.ref, token });
+        }
+    };
+    // Primary: users/{uid}/devices (PushService)
+    const devicesSnap = await db
         .collection('users')
         .doc(userId)
         .collection(types_1.NOTIF_COLLECTIONS.devicesSub)
         .get();
-    const rows = [];
-    for (const d of snap.docs) {
-        const data = d.data();
-        const token = String((data === null || data === void 0 ? void 0 : data.pushToken) || (data === null || data === void 0 ? void 0 : data.token) || '').trim();
-        if (token && (data === null || data === void 0 ? void 0 : data.disabled) !== true) {
-            rows.push({ ref: d.ref, token });
-        }
+    collect(devicesSnap);
+    // Fallback: legacy deviceTokens collection (older rules / clients)
+    if (rows.length === 0) {
+        const legacySnap = await db
+            .collection('users')
+            .doc(userId)
+            .collection('deviceTokens')
+            .get();
+        collect(legacySnap);
     }
     return rows;
 }

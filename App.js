@@ -842,14 +842,20 @@ function AppInner() {
     const fbUid = firebaseAuth?.currentUser?.uid || uid || null;
     if (!fbUid) return undefined;
     let unsub = () => {};
+    // Dedup: Firestore snapshots re-fire often; re-navigating / re-ringing
+    // every tick made CallScreen feel laggy and buggy.
+    const handledCallIds = new Set();
     const openCall = (params, tries = 0) => {
       try {
         if (navigationRef?.isReady?.()) {
-          // Avoid stacking duplicate Call screens for the same callId.
           const state = navigationRef.getRootState?.();
           const routes = state?.routes || [];
           const top = routes[routes.length - 1];
           if (top?.name === 'Call' && top?.params?.callId === params.callId) return;
+          const already = routes.some(
+            (r) => r?.name === 'Call' && r?.params?.callId === params.callId,
+          );
+          if (already) return;
           navigationRef.navigate('Call', params);
           return;
         }
@@ -862,6 +868,8 @@ function AppInner() {
       unsub = callService.subscribeToIncomingCalls(fbUid, (incoming) => {
         const first = Array.isArray(incoming) && incoming.length ? incoming[0] : null;
         if (!first?.id) return;
+        if (handledCallIds.has(first.id)) return;
+        handledCallIds.add(first.id);
         try {
           // eslint-disable-next-line global-require
           const { showIncomingCallNative } = require('./src/services/incomingCallNative');

@@ -7,13 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.blyp.mobile.MainActivity
@@ -24,9 +18,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 /**
- * Full-screen + ringtone for incoming Blyp calls when the app may be
- * backgrounded / screen locked. Ringtone plays once, then a 2s gap, then
- * repeats (never seamless MediaPlayer looping).
+ * Full-screen incoming-call UI when the app may be backgrounded / locked.
+ * Ringtone lives in [IncomingCallForegroundService] so Android does not kill
+ * playback the moment FCM onMessageReceived returns.
  */
 class IncomingCallModule(private val reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
@@ -56,11 +50,6 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
   companion object {
     const val CHANNEL_ID = "blyp_calls"
     private const val NOTIF_BASE = 71001
-    /** Gap after each jingle before the next play. */
-    private const val RING_GAP_MS = 2000L
-    private var mediaPlayer: MediaPlayer? = null
-    private val ringHandler = Handler(Looper.getMainLooper())
-    private var ringReplay: Runnable? = null
 
     fun ensureChannel(context: Context) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -82,7 +71,6 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
         NotificationManager.IMPORTANCE_HIGH,
       ).apply {
         description = "Ringing for Blyp audio calls"
-        // Sound is played by MediaPlayer with an intentional 2s gap — keep channel silent.
         setSound(null, attrs)
         enableVibration(true)
         vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
@@ -92,17 +80,22 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
       mgr.createNotificationChannel(ch)
     }
 
-    fun show(context: Context, callId: String, callerName: String) {
+    fun notifIdPublic(callId: String): Int = NOTIF_BASE + (callId.hashCode() and 0x0FFF)
+
+    fun buildCallNotification(context: Context, callId: String, callerName: String): Notification {
       ensureChannel(context)
       val appCtx = context.applicationContext
-
       val openIntent = Intent(appCtx, MainActivity::class.java).apply {
         action = Intent.ACTION_VIEW
         data = android.net.Uri.parse("blyp://call/$callId")
         putExtra("callId", callId)
         putExtra("role", "callee")
         putExtra("peerName", callerName)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        addFlags(
+          Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+            Intent.FLAG_ACTIVITY_SINGLE_TOP,
+        )
       }
       val fullScreenPi = PendingIntent.getActivity(
         appCtx,
@@ -110,8 +103,7 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
         openIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
-
-      val notif = NotificationCompat.Builder(appCtx, CHANNEL_ID)
+      return NotificationCompat.Builder(appCtx, CHANNEL_ID)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle("Incoming call")
         .setContentText("$callerName is calling…")
@@ -122,107 +114,33 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
         .setAutoCancel(false)
         .setContentIntent(fullScreenPi)
         .setFullScreenIntent(fullScreenPi, true)
-        .setSound(null) // looping handled by MediaPlayer below
+        .setSound(null)
         .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
+        .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         .build()
+    }
 
-      NotificationManagerCompat.from(appCtx).notify(notifId(callId), notif)
-      startLoopingRing(appCtx)
-      vibrate(appCtx)
+    fun show(context: Context, callId: String, callerName: String) {
+      val name = callerName.ifBlank { "Incoming call" }
+      // Foreground service owns ringtone + sticky notification so a killed
+      // process keeps ringing after the FCM handler returns.
+      IncomingCallForegroundService.start(context.applicationContext, callId, name)
+      // Also post the full-screen call notif (same id as FG) for lock-screen FSI.
+      try {
+        NotificationManagerCompat.from(context.applicationContext)
+          .notify(notifIdPublic(callId), buildCallNotification(context, callId, name))
+      } catch (_: Exception) {
+      }
     }
 
     fun cancel(context: Context, callId: String) {
-      NotificationManagerCompat.from(context.applicationContext).cancel(notifId(callId))
-      stopLoopingRing(context.applicationContext)
+      IncomingCallForegroundService.stop(context.applicationContext)
+      NotificationManagerCompat.from(context.applicationContext).cancel(notifIdPublic(callId))
     }
 
     fun cancelAll(context: Context) {
+      IncomingCallForegroundService.stop(context.applicationContext)
       NotificationManagerCompat.from(context.applicationContext).cancelAll()
-      stopLoopingRing(context.applicationContext)
-    }
-
-    private fun notifId(callId: String): Int = NOTIF_BASE + (callId.hashCode() and 0x0FFF)
-
-    private fun startLoopingRing(context: Context) {
-      stopLoopingRing(context)
-      try {
-        val player = MediaPlayer.create(context, R.raw.blyp_notify) ?: return
-        player.isLooping = false
-        player.setAudioAttributes(
-          AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .build(),
-        )
-        player.setOnCompletionListener {
-          val replay = Runnable {
-            try {
-              val p = mediaPlayer ?: return@Runnable
-              p.seekTo(0)
-              p.start()
-            } catch (_: Exception) {
-              // ignore
-            }
-          }
-          ringReplay = replay
-          ringHandler.postDelayed(replay, RING_GAP_MS)
-        }
-        player.start()
-        mediaPlayer = player
-      } catch (_: Exception) {
-        // ignore
-      }
-    }
-
-    private fun stopLoopingRing(context: Context? = null) {
-      ringReplay?.let { ringHandler.removeCallbacks(it) }
-      ringReplay = null
-      try {
-        mediaPlayer?.setOnCompletionListener(null)
-      } catch (_: Exception) {
-      }
-      try {
-        mediaPlayer?.stop()
-      } catch (_: Exception) {
-      }
-      try {
-        mediaPlayer?.release()
-      } catch (_: Exception) {
-      }
-      mediaPlayer = null
-      if (context != null) {
-        try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vm = context.getSystemService(VibratorManager::class.java)
-            vm?.defaultVibrator?.cancel()
-          } else {
-            @Suppress("DEPRECATION")
-            (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.cancel()
-          }
-        } catch (_: Exception) {
-        }
-      }
-    }
-
-    private fun vibrate(context: Context) {
-      try {
-        // Finite pattern (no infinite repeat) — less battery / lag than looping forever.
-        val pattern = longArrayOf(0, 400, 1600, 400, 1600, 400, 1600)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-          val vm = context.getSystemService(VibratorManager::class.java)
-          vm?.defaultVibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
-        } else {
-          @Suppress("DEPRECATION")
-          val vib = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vib.vibrate(VibrationEffect.createWaveform(pattern, -1))
-          } else {
-            @Suppress("DEPRECATION")
-            vib.vibrate(pattern, -1)
-          }
-        }
-      } catch (_: Exception) {
-      }
     }
   }
 }

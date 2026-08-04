@@ -32,19 +32,38 @@ interface DeviceRow {
 
 async function loadDevices(userId: string): Promise<DeviceRow[]> {
   const db = admin.firestore();
-  const snap = await db
+  const rows: DeviceRow[] = [];
+  const seen = new Set<string>();
+
+  const collect = (snap: FirebaseFirestore.QuerySnapshot) => {
+    for (const d of snap.docs) {
+      const data = d.data() as any;
+      const token = String(data?.pushToken || data?.token || '').trim();
+      if (!token || data?.disabled === true) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      rows.push({ ref: d.ref, token });
+    }
+  };
+
+  // Primary: users/{uid}/devices (PushService)
+  const devicesSnap = await db
     .collection('users')
     .doc(userId)
     .collection(NOTIF_COLLECTIONS.devicesSub)
     .get();
-  const rows: DeviceRow[] = [];
-  for (const d of snap.docs) {
-    const data = d.data() as any;
-    const token = String(data?.pushToken || data?.token || '').trim();
-    if (token && data?.disabled !== true) {
-      rows.push({ ref: d.ref, token });
-    }
+  collect(devicesSnap);
+
+  // Fallback: legacy deviceTokens collection (older rules / clients)
+  if (rows.length === 0) {
+    const legacySnap = await db
+      .collection('users')
+      .doc(userId)
+      .collection('deviceTokens')
+      .get();
+    collect(legacySnap);
   }
+
   return rows;
 }
 

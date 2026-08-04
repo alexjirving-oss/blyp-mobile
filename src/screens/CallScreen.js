@@ -241,19 +241,26 @@ const CallScreen = ({ route, navigation }) => {
     initialRole === 'callee' && status === 'ringing' && !answeredRef.current;
   const isRinging = status === 'ringing';
 
-  // Ring with play → 2s silence → play (shared Blyp jingle). Cancel native
-  // lock-screen ringtone first so we never double-play.
+  // Ringtone ownership:
+  // - Callee: native IncomingCallForegroundService already ringing from FCM /
+  //   Firestore wake. Do NOT cancel+restart JS audio (that killed the ring and
+  //   made background calls feel silent/buggy).
+  // - Caller: JS play → 2s gap → play.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        await cancelIncomingCallNative(callId);
-      } catch {
-        // ignore
-      }
       if (!isRinging) {
         await stopBlypNotify(ringSoundRef.current);
         ringSoundRef.current = null;
+        try {
+          await cancelIncomingCallNative(callId);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      if (initialRole === 'callee') {
+        // Leave native FG ringtone alone while incoming.
         return;
       }
       try {
@@ -272,9 +279,8 @@ const CallScreen = ({ route, navigation }) => {
       cancelled = true;
       stopBlypNotify(ringSoundRef.current);
       ringSoundRef.current = null;
-      cancelIncomingCallNative(callId);
     };
-  }, [isRinging, callId]);
+  }, [isRinging, callId, initialRole]);
 
   const displayName = useMemo(() => {
     if (call?.callerId === uid) return call?.calleeName || peerName;
@@ -374,11 +380,20 @@ const CallScreen = ({ route, navigation }) => {
     return () => clearInterval(id);
   }, [status, call]);
 
+  const stopAllRinging = useCallback(async () => {
+    await stopBlypNotify(ringSoundRef.current);
+    ringSoundRef.current = null;
+    try {
+      await cancelIncomingCallNative(callId);
+    } catch {
+      // ignore
+    }
+  }, [callId]);
+
   const handleHangUp = useCallback(async () => {
     if (endingRef.current) return;
     endingRef.current = true;
-    await stopBlypNotify(ringSoundRef.current);
-    ringSoundRef.current = null;
+    await stopAllRinging();
     try {
       const asMissed = status === 'ringing' && initialRole === 'caller';
       await endCall(callId, uid, { asMissed });
@@ -390,13 +405,12 @@ const CallScreen = ({ route, navigation }) => {
     } catch {
       // ignore
     }
-  }, [callId, uid, status, initialRole, navigation]);
+  }, [callId, uid, status, initialRole, navigation, stopAllRinging]);
 
   const handleDecline = useCallback(async () => {
     if (endingRef.current) return;
     endingRef.current = true;
-    await stopBlypNotify(ringSoundRef.current);
-    ringSoundRef.current = null;
+    await stopAllRinging();
     try {
       await declineCall(callId, uid);
     } catch {
@@ -407,12 +421,11 @@ const CallScreen = ({ route, navigation }) => {
     } catch {
       // ignore
     }
-  }, [callId, uid, navigation]);
+  }, [callId, uid, navigation, stopAllRinging]);
 
   const handleAccept = useCallback(async () => {
     answeredRef.current = true;
-    await stopBlypNotify(ringSoundRef.current);
-    ringSoundRef.current = null;
+    await stopAllRinging();
     setMediaState('connecting');
     const res = await answerCall(callId, uid);
     if (!res.ok) {
@@ -420,7 +433,7 @@ const CallScreen = ({ route, navigation }) => {
       setMediaError(res.reason === 'mic-denied' ? 'Microphone permission required' : 'Could not answer');
       answeredRef.current = false;
     }
-  }, [callId, uid]);
+  }, [callId, uid, stopAllRinging]);
 
   const statusLabel = useMemo(() => {
     if (mediaState === 'error') return mediaError || 'Connection error';
