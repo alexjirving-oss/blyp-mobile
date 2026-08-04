@@ -17,6 +17,7 @@ const CreatePostButton = () => {
   const [hasDraft, setHasDraft] = useState(false);
   const { uid, isAuthenticated, authReady } = useAuth();
   const streamingEnabled = isLiveStreamingEnabled();
+  const canShowGoLive = streamingEnabled;
 
   const refreshDraftFlag = useCallback(async () => {
     try {
@@ -103,6 +104,12 @@ const CreatePostButton = () => {
     });
   };
 
+  const handleMenuOption = (option) => {
+    if (option === 'live') {
+      handleGoLive();
+    }
+  };
+
   return (
     <>
       <View style={styles.container}>
@@ -170,8 +177,11 @@ const CreatePostButton = () => {
                 <Text style={styles.postOptionText}>Library</Text>
               </TouchableOpacity>
 
-              {streamingEnabled ? (
-                <TouchableOpacity style={styles.postOptionButton} onPress={handleGoLive}>
+              {canShowGoLive ? (
+                <TouchableOpacity
+                  style={styles.postOptionButton}
+                  onPress={() => handleMenuOption('live')}
+                >
                   <View style={[styles.postOptionIconContainer, styles.liveIconContainer]}>
                     <Icon name="radio-outline" size={28} color="#F87171" />
                   </View>
