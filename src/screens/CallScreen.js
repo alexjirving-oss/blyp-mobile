@@ -39,61 +39,47 @@ function formatDuration(seconds) {
 
 function PulseRings({ active }) {
   const a1 = useRef(new Animated.Value(0)).current;
-  const a2 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (!active) {
       a1.setValue(0);
-      a2.setValue(0);
       return undefined;
     }
-    const loop = (anim, delay) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(delay),
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: 1800,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(anim, { toValue: 0, duration: 0, useNativeDriver: true }),
-        ]),
-      );
-    const l1 = loop(a1, 0);
-    const l2 = loop(a2, 600);
-    l1.start();
-    l2.start();
-    return () => {
-      l1.stop();
-      l2.stop();
-    };
-  }, [active, a1, a2]);
+    // Single soft pulse — dual loops were burning frames on mid-range phones.
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(a1, {
+          toValue: 1,
+          duration: 1600,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(a1, { toValue: 0, duration: 0, useNativeDriver: true }),
+        Animated.delay(400),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active, a1]);
 
   if (!active) return null;
 
-  const ring = (anim, key) => (
-    <Animated.View
-      key={key}
-      pointerEvents="none"
-      style={[
-        styles.pulseRing,
-        {
-          opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
-          transform: [
-            {
-              scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] }),
-            },
-          ],
-        },
-      ]}
-    />
-  );
-
   return (
     <View style={styles.pulseHost} pointerEvents="none">
-      {ring(a1, 'r1')}
-      {ring(a2, 'r2')}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.pulseRing,
+          {
+            opacity: a1.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] }),
+            transform: [
+              {
+                scale: a1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.45] }),
+              },
+            ],
+          },
+        ]}
+      />
     </View>
   );
 }
@@ -217,7 +203,7 @@ function LiveKitAudioRoom({ url, token, muted, speakerOn, onConnected, onDisconn
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
-          voiceIsolation: true,
+          // voiceIsolation is expensive on mid-range Androids and caused lag.
         },
         ...(publishDefaults ? { publishDefaults } : {}),
       }}
@@ -255,8 +241,8 @@ const CallScreen = ({ route, navigation }) => {
     initialRole === 'callee' && status === 'ringing' && !answeredRef.current;
   const isRinging = status === 'ringing';
 
-  // Loop the shared Blyp notify sting while the call is ringing (incoming or outgoing).
-  // Cancel any native lock-screen ringtone first to avoid double audio.
+  // Ring with play → 2s silence → play (shared Blyp jingle). Cancel native
+  // lock-screen ringtone first so we never double-play.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -344,13 +330,14 @@ const CallScreen = ({ route, navigation }) => {
     return undefined;
   }, [call, navigation]);
 
-  // Connect media once active (or immediately for caller who joins while ringing)
+  // Connect LiveKit only after the call is active. Connecting during "ringing"
+  // (old caller path) fought the ringtone audio session and made the phone UI
+  // feel unusably laggy.
   useEffect(() => {
     let cancelled = false;
-    const shouldConnect =
-      !!callId &&
-      (status === 'active' || (status === 'ringing' && initialRole === 'caller') || answeredRef.current);
-    if (!shouldConnect || tokenInfo) return undefined;
+    const shouldConnect = !!callId && status === 'active';
+    if (!shouldConnect) return undefined;
+    if (tokenInfo) return undefined;
 
     (async () => {
       setMediaState('connecting');
@@ -373,7 +360,7 @@ const CallScreen = ({ route, navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [callId, status, initialRole, tokenInfo]);
+  }, [callId, status, tokenInfo]);
 
   // Duration timer while active
   useEffect(() => {

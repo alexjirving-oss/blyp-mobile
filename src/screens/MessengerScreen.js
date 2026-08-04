@@ -48,6 +48,7 @@ import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messagi
 import { subscribeNotifications, markNotificationRead } from '../services/notificationsInboxService';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { theme as blypTheme } from '../styles/blypTheme';
+import { startCall as startAudioCall } from '../services/callService';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -1172,13 +1173,11 @@ const MessengerScreen = ({ navigation }) => {
         const startCallWithPeer = async (otherId, label, avatarUri, conversationId) => {
           if (!otherId || !uid) return;
           try {
-            // eslint-disable-next-line global-require
-            const callService = require('../services/callService');
             const myName =
               currentUser?.displayName ||
               currentUser?.username ||
               'Someone';
-            const res = await callService.startCall({
+            const res = await startAudioCall({
               callerId: uid,
               calleeId: otherId,
               conversationId: conversationId || null,
@@ -1210,7 +1209,10 @@ const MessengerScreen = ({ navigation }) => {
             data={calls}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
-            removeClippedSubviews={false}
+            initialNumToRender={12}
+            maxToRenderPerBatch={8}
+            windowSize={7}
+            removeClippedSubviews={Platform.OS === 'android'}
             contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
             renderItem={({ item }) => {
               const status = String(item.status || '').toLowerCase();
