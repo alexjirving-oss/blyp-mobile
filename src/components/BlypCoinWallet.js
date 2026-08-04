@@ -18,6 +18,7 @@ import BlypCoinService from '../services/BlypCoinService';
 import { getEconomyWallet } from '../api/economyLiveApi';
 import { useAuth } from '../hooks/useCommon';
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
+import { peekDailyReward, claimDailyReward } from '../services/streakService';
 
 const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => {
   const [balance, setBalance] = useState(0);
@@ -82,16 +83,22 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
   }, [effectiveUid, showModal, authReady, isAuthenticated]);
 
   const checkDailyReward = async () => {
-    // Check if user can claim daily reward
-    // This is a simplified check - you'd want more robust logic
     try {
       if (!effectiveUid) return;
+      if (shouldUseLiveServiceWallet()) {
+        const peek = await peekDailyReward();
+        if (peek?.ok) {
+          setCanClaimDaily(!!peek.claimableReward && !peek.claimedToday);
+          return;
+        }
+        setCanClaimDaily(false);
+        return;
+      }
       const userDoc = await getDoc(doc(db, 'users', effectiveUid));
       if (userDoc.exists()) {
         const lastCheckIn = userDoc.data().lastCheckIn?.toDate();
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
         setCanClaimDaily(!lastCheckIn || lastCheckIn < today);
       }
     } catch (error) {
@@ -117,6 +124,36 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
     if (!effectiveUid) return;
     
     try {
+      if (shouldUseLiveServiceWallet()) {
+        const result = await claimDailyReward();
+        if (!result?.ok) {
+          if (result?.reason === 'unauthenticated') {
+            Alert.alert('Sign in required', 'Please sign in to claim your daily reward.');
+            return;
+          }
+          Alert.alert('Already Claimed', 'Come back tomorrow for your next reward!');
+          return;
+        }
+        if (result.alreadyClaimed) {
+          Alert.alert('Already Claimed', 'Come back tomorrow for your next reward!');
+          setCanClaimDaily(false);
+          return;
+        }
+        const reward = Number(result.reward || result.claimableReward || 0);
+        Alert.alert(
+          'Daily Reward Claimed! 🎉',
+          `You earned ${reward} Blypcoins!\nCurrent streak: ${Number(result.streak || 0)} days`,
+          [{ text: 'Awesome!', style: 'default' }]
+        );
+        setCanClaimDaily(false);
+        if (Number.isFinite(Number(result.balanceCoins))) {
+          setBalance(Number(result.balanceCoins));
+        } else {
+          refreshLiveWalletBalance();
+        }
+        return;
+      }
+
       const result = await BlypCoinService.claimDailyReward(effectiveUid);
       Alert.alert(
         'Daily Reward Claimed! 🎉',

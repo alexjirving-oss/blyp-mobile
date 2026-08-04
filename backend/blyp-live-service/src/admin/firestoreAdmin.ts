@@ -643,3 +643,37 @@ export async function rejectTeamApplication(applicantUid: string, reason = ''): 
     return false;
   }
 }
+
+/**
+ * Mirror post/feed gift totals onto the Firestore post doc so the For You
+ * feed can show coins gifted (likes-style). Best-effort; never throws to callers.
+ */
+export async function incrementPostGiftTotals(
+  postId: string,
+  coinSpent: number,
+  giftCountDelta = 1,
+): Promise<boolean> {
+  const fs = getFirestore();
+  const id = String(postId || '').trim();
+  const coins = Math.max(0, Math.floor(Number(coinSpent) || 0));
+  const count = Math.max(0, Math.floor(Number(giftCountDelta) || 0));
+  if (!fs || !id || (coins <= 0 && count <= 0)) return false;
+  try {
+    await fs.collection('posts').doc(id).set(
+      {
+        giftCoins: FieldValue.increment(coins),
+        giftCount: FieldValue.increment(count),
+        coinsReceived: FieldValue.increment(coins),
+        giftUpdatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return true;
+  } catch (e: any) {
+    logger.error(
+      { err: e?.message || String(e), postId: id, coins },
+      '[firestore-admin] incrementPostGiftTotals failed',
+    );
+    return false;
+  }
+}

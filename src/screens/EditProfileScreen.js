@@ -523,7 +523,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   disabledInput: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     color: '#9ca3af',
   },
   characterCount: {

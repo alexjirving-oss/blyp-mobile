@@ -1392,7 +1392,7 @@ const MessengerScreen = ({ navigation }) => {
         {useSectionGradient && (
           <LinearGradient
             pointerEvents="none"
-            colors={['#0A0A0C', '#141418', '#1C1C22']}
+            colors={[T.background, T.background, T.background]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.sectionGradientBackground}

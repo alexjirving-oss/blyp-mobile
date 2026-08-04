@@ -1,18 +1,18 @@
 import { isForYouFeedPost } from '../src/utils/forYouFeedFilter';
 
 describe('forYouFeedFilter', () => {
-  it('accepts liked video posts', () => {
+  it('accepts video posts with sound (likes optional)', () => {
     expect(
       isForYouFeedPost({ type: 'video', videoUrl: 'https://x/v.mp4', likes: 2 }),
     ).toBe(true);
   });
 
-  it('rejects photos', () => {
-    expect(isForYouFeedPost({ type: 'image', imageUrl: 'https://x/p.jpg', likes: 5 })).toBe(false);
+  it('accepts zero-like videos with a playable url', () => {
+    expect(isForYouFeedPost({ type: 'video', videoUrl: 'https://x/v.mp4', likes: 0 })).toBe(true);
   });
 
-  it('rejects zero-like videos', () => {
-    expect(isForYouFeedPost({ type: 'video', videoUrl: 'https://x/v.mp4', likes: 0 })).toBe(false);
+  it('rejects photos', () => {
+    expect(isForYouFeedPost({ type: 'image', imageUrl: 'https://x/p.jpg', likes: 5 })).toBe(false);
   });
 
   it('rejects explicitly silent videos', () => {

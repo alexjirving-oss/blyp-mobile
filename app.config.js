@@ -69,6 +69,9 @@ module.exports = () => {
       String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET || '').toLowerCase() === 'false'
         ? '0'
         : '1',
+    EXPO_PUBLIC_LIVE_SERVICE_URL:
+      process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
+      'https://blyp-live-service-innn3d7yqq-uc.a.run.app',
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
@@ -119,8 +122,9 @@ module.exports = () => {
         'android.permission.ACCESS_FINE_LOCATION',
         'android.permission.POST_NOTIFICATIONS',
         'android.permission.RECEIVE_BOOT_COMPLETED',
+        // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM —
+        // Play only allows that for calendar/alarm-clock core apps (Blyp is neither).
         'android.permission.SCHEDULE_EXACT_ALARM',
-        'android.permission.USE_EXACT_ALARM',
         'android.permission.VIBRATE',
       ],
     },

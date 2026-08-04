@@ -158,7 +158,7 @@ import RoomsScreen from './src/screens/RoomsScreen';
 import RoomScreen from './src/screens/RoomScreen';
 import WebBrowserScreen from './src/screens/WebBrowserScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
-import { isOnboarded } from './src/services/userPreferencesService';
+import { isOnboarded, subscribePreferences } from './src/services/userPreferencesService';
 import CommentsScreen from './src/screens/CommentsScreen';
 import UserProfileScreen from './src/screens/UserProfileScreen';
 import FollowersScreen from './src/screens/FollowersScreen';
@@ -591,6 +591,7 @@ function AppInner() {
   const canShowApp = devForceNoAuth || !!effectiveUser || isGuest;
   useEffect(() => {
     let active = true;
+    let unsub = () => {};
     if (!canShowApp) {
       setOnboarded(null);
       return undefined;
@@ -600,6 +601,10 @@ function AppInner() {
       setOnboarded(true);
       return undefined;
     }
+    if (!uid) {
+      setOnboarded(null);
+      return undefined;
+    }
     isOnboarded(uid)
       .then((v) => {
         if (active) setOnboarded(v);
@@ -607,8 +612,14 @@ function AppInner() {
       .catch(() => {
         if (active) setOnboarded(true);
       });
+    // Late Firestore hydrate must flip the gate so returning users aren't stuck
+    // in onboarding (and a fresh 30-day trial) after a local cache miss.
+    unsub = subscribePreferences(uid, (prefs) => {
+      if (active && prefs?.onboarded) setOnboarded(true);
+    });
     return () => {
       active = false;
+      try { unsub(); } catch { /* ignore */ }
     };
   }, [canShowApp, uid, isGuest, effectiveUser]);
 

@@ -18,7 +18,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Speech from 'expo-speech';
+import {
+  resolvePreferredFemaleVoice,
+  speakWithPreferredVoice,
+  stopSpeaking as stopTts,
+} from '../services/speechVoiceService';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import BlypItModal from '../components/BlypItModal';
@@ -106,22 +110,15 @@ const BlypScreen = ({ navigation, route }) => {
   }, [turns]);
 
   useEffect(() => {
-    // Stop any in-progress read-aloud when leaving the screen.
+    // Warm the preferred female voice so the first playback isn't on the default robot.
+    void resolvePreferredFemaleVoice();
     return () => {
-      try {
-        Speech.stop();
-      } catch {
-        /* ignore */
-      }
+      stopTts();
     };
   }, []);
 
   const stopSpeaking = useCallback(() => {
-    try {
-      Speech.stop();
-    } catch {
-      /* ignore */
-    }
+    stopTts();
     setSpeakingTurnId(null);
   }, []);
 
@@ -131,16 +128,8 @@ const BlypScreen = ({ navigation, route }) => {
       .replace(/\s+/g, ' ')
       .trim();
     if (!clean) return;
-    try {
-      Speech.stop();
-    } catch {
-      /* ignore */
-    }
     setSpeakingTurnId(turnId);
-    Speech.speak(clean.slice(0, 4000), {
-      language: 'en-GB',
-      rate: 0.96,
-      pitch: 1.0,
+    void speakWithPreferredVoice(clean, {
       onDone: () => setSpeakingTurnId((cur) => (cur === turnId ? null : cur)),
       onStopped: () => setSpeakingTurnId((cur) => (cur === turnId ? null : cur)),
       onError: () => setSpeakingTurnId((cur) => (cur === turnId ? null : cur)),

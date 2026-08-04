@@ -2224,6 +2224,8 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
   }, [mode, mediaItems.length]);
 
   // Ambient Magic Path: once media is present, auto-caption without a describe gate.
+  // Skip for video-only posts — Gemini frame extract + upload contention makes
+  // compose/post feel stuck for minutes.
   useEffect(() => {
     if (mediaItems.length === 0) return;
     if (magicAutoStartedRef.current) return;
@@ -2234,10 +2236,14 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         return;
       }
     }
+    const onlyVideo = mediaItems.every((m) => m?.type === 'video');
     magicAutoStartedRef.current = true;
     setOverlayAlreadyShown(true);
     setShowDescriptionMethodOverlay(false);
     setShowMultiPhotoModal(false);
+    if (onlyVideo) {
+      return undefined;
+    }
     const t = setTimeout(() => {
       void generateMagicPost('').catch((e) => {
         console.error('❌ ambient generateMagicPost failed', e);
@@ -2279,22 +2285,23 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       localUri: mediaUri,
       storagePath: filePath,
       contentType,
+      timeoutMs: mediaType === 'video' ? 180000 : 90000,
     });
     const downloadURL = uploaded.downloadURL;
     console.log('📤 Upload complete, download URL:', downloadURL);
 
     let thumbnailUrl = null;
 
-    // Generate thumbnail for videos
+    // Generate thumbnail for videos (short budget — never block publish).
     if (mediaType === 'video') {
       try {
         console.log('🎬 Generating video thumbnail...');
         const thumbnailPromise = VideoThumbnails.getThumbnailAsync(mediaUri, {
-          time: 1000,
-          quality: 0.8,
+          time: 0,
+          quality: 0.6,
         });
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Thumbnail generation timeout')), 10000)
+          setTimeout(() => reject(new Error('Thumbnail generation timeout')), 5000)
         );
         const { uri: thumbnailUri } = await Promise.race([thumbnailPromise, timeoutPromise]);
         console.log('✅ Thumbnail generated:', thumbnailUri);
@@ -2305,6 +2312,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
           localUri: thumbnailUri,
           storagePath: thumbPath,
           contentType: 'image/jpeg',
+          timeoutMs: 30000,
         });
         thumbnailUrl = thumbUploaded.downloadURL;
         console.log('✅ Thumbnail uploaded:', thumbnailUrl);
@@ -2460,9 +2468,14 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       // Extract thumbnail URL from the primary media
       const thumbnailUrl = uploadedMedia[0]?.thumbnail;
       
-      const appUserId = fbUser?.uid || cognitoUser?.getUsername?.() || 'anonymous';
-      const displayName = fbUser?.displayName || cognitoUser?.getUsername?.() || 'Anonymous';
-      const photoURL = fbUser?.photoURL || null;
+      const appUserId = String(uid || fbUser?.uid || '').trim() || 'anonymous';
+      const displayName =
+        fbUser?.displayName ||
+        cognitoUser?.attributes?.name ||
+        cognitoUser?.attributes?.preferred_username ||
+        cognitoUser?.getUsername?.() ||
+        'Anonymous';
+      const photoURL = fbUser?.photoURL || cognitoUser?.attributes?.picture || null;
       // Freeze caption before preparing metadata
       const frozen = freezeCaption(captionState);
       setCaptionState(frozen);
@@ -2506,6 +2519,9 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         commentCount: 0,
         viewCount: 0,
         views: 0,
+        giftCoins: 0,
+        giftCount: 0,
+        coinsReceived: 0,
         // Earn-your-reach: every new post enters audition with a fair, equal start.
         reach: initialReachState(),
       };
@@ -4001,7 +4017,7 @@ const styles = StyleSheet.create({
   aiVoiceSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
@@ -4050,7 +4066,7 @@ const styles = StyleSheet.create({
 
   // Manual Description Section
   manualDescriptionSection: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
@@ -4109,7 +4125,7 @@ const styles = StyleSheet.create({
 
   // AI Content Section
   aiContentSection: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
@@ -4129,7 +4145,7 @@ const styles = StyleSheet.create({
   },
   contentToggleContainer: {
     flexDirection: 'row',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 12,
     padding: 4,
     marginBottom: 16,
@@ -4157,7 +4173,7 @@ const styles = StyleSheet.create({
     color: '#0A0A0C',
   },
   transcriptContainer: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -4201,7 +4217,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   aiDescriptionBox: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -4382,7 +4398,7 @@ const styles = StyleSheet.create({
   mediaPreview: {
     width: '100%',
     height: 300,
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
   },
   
   // Multiple Media Section
@@ -4426,7 +4442,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
   },
   mediaItemPreview: {
     width: '100%',
@@ -4441,7 +4457,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   descriptionContainer: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     padding: 4,
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
@@ -4454,7 +4470,7 @@ const styles = StyleSheet.create({
 
   // Caption Section
   captionContainer: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -4473,7 +4489,7 @@ const styles = StyleSheet.create({
   enhanceButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -4508,7 +4524,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -4539,7 +4555,7 @@ const styles = StyleSheet.create({
   platformButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
@@ -4559,7 +4575,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#27272E',
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
   },
   magicStatusChip: {
     flexDirection: 'row',
@@ -4607,7 +4623,7 @@ const styles = StyleSheet.create({
   modalContainer: {
     width: '90%',
     maxHeight: '80%',
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 24,
     overflow: 'hidden',
     elevation: 12,
@@ -4634,7 +4650,7 @@ const styles = StyleSheet.create({
   modalMediaContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
   },
   modalMediaPreview: {
     width: '100%',
@@ -4862,7 +4878,7 @@ const styles = StyleSheet.create({
   
   // Comprehensive AI Styles
   comprehensiveAiSection: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
@@ -4881,7 +4897,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   aiDataItem: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,

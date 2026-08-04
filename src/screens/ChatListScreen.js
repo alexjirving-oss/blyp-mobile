@@ -899,7 +899,7 @@ const ChatListScreen = ({ navigation }) => {
           {useSectionGradient && (
             <LinearGradient
               pointerEvents="none"
-              colors={['#0A0A0C', '#141418', '#1C1C22']}
+              colors={[COLORS.pageBackground, COLORS.pageBackground, COLORS.pageBackground]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.sectionGradientBackground}
@@ -1132,7 +1132,7 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.divider,
   },
   pinnedChat: {
-    backgroundColor: 'rgba(203, 251, 69, 0.1)',
+    backgroundColor: 'rgba(0, 210, 190, 0.12)',
   },
   avatarContainer: {
     position: 'relative',
@@ -1456,7 +1456,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   countBadge: {
-    backgroundColor: 'rgba(203, 251, 69, 0.16)',
+    backgroundColor: 'rgba(0, 210, 190, 0.16)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -1882,7 +1882,7 @@ const styles = StyleSheet.create({
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(203, 251, 69, 0.16)',
+    backgroundColor: 'rgba(0, 210, 190, 0.16)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,

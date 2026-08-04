@@ -155,14 +155,26 @@ export async function getMyJoinRequest(teamId, uid) {
 
 /** User requests to join a team. Idempotent on (teamId, uid). */
 export async function requestToJoinTeam(teamId, user, message = '') {
-  if (!teamId || !user?.uid) throw new Error('Missing team or user');
-  const ref = doc(db, 'teams', teamId, 'joinRequests', user.uid);
+  if (!teamId) throw new Error('Missing team');
+  const uid =
+    (typeof user === 'string' && user) ||
+    user?.uid ||
+    user?.attributes?.sub ||
+    user?.sub ||
+    null;
+  if (!uid) throw new Error('Please sign in to join a team.');
+  const ref = doc(db, 'teams', teamId, 'joinRequests', uid);
   await setDoc(
     ref,
     {
-      uid: user.uid,
-      displayName: user.displayName || user.username || 'Member',
-      photoURL: normPhoto(user),
+      uid,
+      displayName:
+        user?.displayName ||
+        user?.attributes?.name ||
+        user?.attributes?.preferred_username ||
+        user?.username ||
+        'Member',
+      photoURL: normPhoto(user) || user?.attributes?.picture || user?.photoURL || null,
       message: String(message || '').slice(0, 280),
       status: JOIN_STATUS.PENDING,
       createdAt: serverTimestamp(),
@@ -489,16 +501,38 @@ export async function decideAudition(auditionId, candidateUid, decision) {
 
 /** User applies to run their own team. */
 export async function applyToRunTeam(user, pitch) {
-  if (!user?.uid) throw new Error('Missing user');
+  // Cognito users often have `sub` / attributes.sub, not Firebase-style `.uid`.
+  const uid =
+    (typeof user === 'string' && user) ||
+    user?.uid ||
+    user?.attributes?.sub ||
+    user?.sub ||
+    null;
+  if (!uid) throw new Error('Please sign in to apply to run a team.');
+  try {
+    const { ensureFirebaseAuthReady } = await import('../utils/firebaseAuthHelper');
+    await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+  } catch (e) {
+    // Still attempt the write — bridge may already be ready.
+    console.warn('[teams] ensureFirebaseAuthReady:', e?.message || e);
+  }
+  const displayName =
+    user?.displayName ||
+    user?.attributes?.name ||
+    user?.attributes?.preferred_username ||
+    user?.username ||
+    (typeof user?.getUsername === 'function' ? user.getUsername() : null) ||
+    'Creator';
   await setDoc(
-    doc(db, 'teamApplications', user.uid),
+    doc(db, 'teamApplications', uid),
     {
-      uid: user.uid,
-      displayName: user.displayName || user.username || 'Creator',
-      photoURL: normPhoto(user),
+      uid,
+      displayName: String(displayName),
+      photoURL: normPhoto(user) || user?.attributes?.picture || user?.photoURL || null,
       pitch: String(pitch || '').slice(0, 1000),
       status: JOIN_STATUS.PENDING,
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     },
     { merge: true }
   );

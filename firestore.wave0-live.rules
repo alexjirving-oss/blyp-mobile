@@ -228,6 +228,89 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Bring-your-content import requests (client creates pending; worker uses Admin SDK).
+    match /socialImports/{importId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll([
+          'uid', 'platform', 'handle', 'status', 'createdAt', 'updatedAt'
+        ]);
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && resource.data.status in ['pending', 'running']
+        && request.resource.data.status == 'canceled'
+        && request.resource.data.uid == resource.data.uid;
+      allow delete: if false;
+    }
+
+    // Official creator teams (agencies). Team docs are created by admin/backend
+    // when a teamApplications entry is approved; clients manage join flow.
+    function isTeamLeader(teamId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/teams/$(teamId)).data.leaderId
+          == request.auth.uid;
+    }
+
+    match /teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create, delete: if false;
+      allow update: if isTeamLeader(teamId);
+
+      match /members/{memberId} {
+        allow read: if isSignedIn();
+        allow create, update: if isTeamLeader(teamId);
+        allow delete: if isSignedIn()
+          && (memberId == request.auth.uid || isTeamLeader(teamId));
+      }
+
+      match /joinRequests/{requestId} {
+        allow read: if isSignedIn()
+          && (requestId == request.auth.uid || isTeamLeader(teamId));
+        allow create: if isSignedIn()
+          && requestId == request.auth.uid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'pending';
+        allow update: if isTeamLeader(teamId);
+        allow delete: if false;
+      }
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.uid == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // Apply to run a team — applicant owns their application doc.
+    match /teamApplications/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow delete: if false;
+    }
+
+    match /auditions/{auditionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.aUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && (resource.data.aUid == request.auth.uid
+          || resource.data.bUid == request.auth.uid
+          || resource.data.leaderId == request.auth.uid);
+      allow delete: if false;
+    }
+
+    match /teamBattles/{battleId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.creatorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // Deny-by-default for everything else (keeps Wave 0 lockdown).
     match /{document=**} {
       allow read, write: if false;

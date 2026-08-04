@@ -92,10 +92,8 @@ class BlypCoinService {
     // When the live-service wallet is authoritative, purchase recovery/grants are
     // owned by the backend (/iap/verify). Running the legacy Firestore recovery
     // here would credit a separate balance and create a split brain — skip it.
-    const useLiveWallet = String(
-      (typeof process !== 'undefined' && process?.env?.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET) || ''
-    ).toLowerCase() === 'true';
-    if (useLiveWallet) return;
+    const { shouldUseLiveServiceWallet } = require('../utils/walletSource');
+    if (shouldUseLiveServiceWallet()) return;
     const uid = String(userId || '').trim();
     if (!uid || recoveryByUser.has(uid)) return;
 

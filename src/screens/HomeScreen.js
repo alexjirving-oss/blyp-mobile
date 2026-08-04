@@ -29,6 +29,7 @@ import HeaderWalletBalances from '../components/HeaderWalletBalances';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import FeedEmptyState from '../components/Feed/FeedEmptyState';
+import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
 import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
@@ -119,7 +120,7 @@ const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
             shouldLoad={Math.abs(currentIndex - index) <= 1}
             isLooping={true}
             isMuted={true}
-            resizeMode="contain"
+            resizeMode="cover"
           />
         </View>
       );
@@ -181,6 +182,17 @@ const formatCount = (value) => {
   return String(Math.max(0, Math.trunc(n)));
 };
 
+const getPostGiftCoins = (post) => {
+  const a = Number(post?.giftCoins);
+  const b = Number(post?.coinsReceived);
+  const c = Number(post?.giftTotalCoins);
+  return Math.max(
+    Number.isFinite(a) ? Math.trunc(a) : 0,
+    Number.isFinite(b) ? Math.trunc(b) : 0,
+    Number.isFinite(c) ? Math.trunc(c) : 0,
+  );
+};
+
 // NOTE: Per-post comment counts are now driven by real Firestore comments.
 
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
@@ -200,9 +212,12 @@ const HomeScreen = ({ navigation, route }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [liked, setLiked] = useState({});
   const [likeCounts, setLikeCounts] = useState({});
-  // postId -> intrinsic aspect ratio (width / height) reported by the player,
-  // used to top-anchor "contain" videos under the header in the For You feed.
+  // postId -> coins gifted (optimistic + snapshot).
+  const [giftCoinCounts, setGiftCoinCounts] = useState({});
+  // postId -> intrinsic aspect ratio (width / height) reported by the player.
   const [videoAspect, setVideoAspect] = useState({});
+  // Which feed video is manually paused (tap-to-pause).
+  const [pausedFeedId, setPausedFeedId] = useState(null);
   const [commentCounts, setCommentCounts] = useState({});
   const [following, setFollowing] = useState({});
   const [selectedTab, setSelectedTab] = useState('home');
@@ -679,6 +694,17 @@ const HomeScreen = ({ navigation, route }) => {
                   });
                   return next;
                 });
+                setGiftCoinCounts((prev) => {
+                  const next = { ...prev };
+                  validPosts.forEach((post) => {
+                    const server = getPostGiftCoins(post);
+                    const local = Number(prev[post.id] || 0);
+                    // Keep the higher of server vs optimistic local so a gift
+                    // just sent doesn't briefly snap back to an older snapshot.
+                    next[post.id] = Math.max(server, local);
+                  });
+                  return next;
+                });
               }
             },
             (error) => {
@@ -923,6 +949,7 @@ const HomeScreen = ({ navigation, route }) => {
     const postId = item?.id;
     if (!postId) return;
     const now = Date.now();
+    // Double-tap → like. Single-tap → pause / resume (premium player chrome).
     if (feedVideoTapRef.current.postId === postId && now - feedVideoTapRef.current.at < 320) {
       if (feedVideoTapRef.current.timer) clearTimeout(feedVideoTapRef.current.timer);
       feedVideoTapRef.current = { at: 0, postId: null, timer: null };
@@ -933,9 +960,9 @@ const HomeScreen = ({ navigation, route }) => {
     feedVideoTapRef.current = { at: now, postId, timer: null };
     feedVideoTapRef.current.timer = setTimeout(() => {
       feedVideoTapRef.current = { at: 0, postId: null, timer: null };
-      handlePostPress(item);
+      setPausedFeedId((prev) => (prev === postId ? null : postId));
     }, 300);
-  }, [handleLike, handlePostPress]);
+  }, [handleLike]);
 
   const handleFollow = async (username) => {
     if (requireAccount(navigation, 'follow creators')) return;
@@ -1101,6 +1128,7 @@ const HomeScreen = ({ navigation, route }) => {
       currentDiscoverIndexRef.current = nextIndex;
       showDescriptionForIndex(nextIndex);
       setCurrentDiscoverIndex(nextIndex);
+      setPausedFeedId(null);
     },
     [feedHeight, randomPosts?.length, showDescriptionForIndex]
   );
@@ -1228,28 +1256,11 @@ const HomeScreen = ({ navigation, route }) => {
     const availableRightSpace = screenWidth - reservedLeft - 12;
     const canPlaceDescriptionRight = availableRightSpace >= 160;
 
-    // Top-anchor "contain" videos directly under the header. Once we know the
-    // clip's intrinsic aspect we size the player to its rendered height pinned
-    // to the top of the cell, so any leftover space sits at the BOTTOM (faded
-    // into the dark theme behind the action buttons) instead of as a gap above.
+    // Full-bleed premium player: cover for portrait, smart contain for wide.
     const cellHeight = feedHeight || screenHeight;
-    const isVideoItem =
-      item.type === 'video' ||
-      mediaItems[0]?.type === 'video' ||
-      (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
-    const itemAspect = videoAspect[item.id];
-    let videoBottomGap = 0;
-    if (isVideoItem && itemAspect > 0 && cellHeight > 0) {
-      const fittedHeight = Math.round(screenWidth / itemAspect);
-      videoBottomGap = Math.max(0, cellHeight - Math.min(cellHeight, fittedHeight));
-    }
-    const videoFillStyle =
-      videoBottomGap > 0
-        ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: videoBottomGap }
-        : StyleSheet.absoluteFill;
 
     return (
-      <View style={[styles.videoContainer, { height: feedHeight || screenHeight }]}>
+      <View style={[styles.videoContainer, { height: cellHeight }]}>
         <View
           style={styles.userPillTopLeft}
           pointerEvents="box-none"
@@ -1266,14 +1277,32 @@ const HomeScreen = ({ navigation, route }) => {
               : undefined
           }
         >
-          <LinearGradient colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.15)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.userInfoHighlight}>
-            <TouchableOpacity style={styles.profileMenuBarSection} onPress={() => handleUserProfilePress(item.user, item)}>
-              <Text style={styles.profileMenuBarUsername} allowFontScaling={false} numberOfLines={1}>
+          <TouchableOpacity
+            style={styles.creatorPill}
+            activeOpacity={0.88}
+            onPress={() => handleUserProfilePress(item.user, item)}
+          >
+            <Image
+              source={{
+                uri:
+                  item.userPhotoURL ||
+                  item.user?.avatar ||
+                  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+              }}
+              style={styles.creatorAvatar}
+              resizeMethod="resize"
+            />
+            <View style={styles.creatorMeta}>
+              <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
                 @{item.userDisplayName || item.user?.displayName || item.user?.username || item.username || 'user'}
               </Text>
-              <Image source={{ uri: item.userPhotoURL || item.user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face' }} style={styles.profileMenuBarAvatar} resizeMethod="resize" />
-            </TouchableOpacity>
-          </LinearGradient>
+              {(item.title || item.captionTitle) ? (
+                <Text style={styles.creatorCaption} allowFontScaling={false} numberOfLines={1}>
+                  {item.title || item.captionTitle}
+                </Text>
+              ) : null}
+            </View>
+          </TouchableOpacity>
         </View>
 
         {hasMultipleMedia ? (
@@ -1288,21 +1317,13 @@ const HomeScreen = ({ navigation, route }) => {
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
-                {console.log('ðŸŽ¥ HOME: Rendering #4ME video item', {
-                  id: item.id,
-                  index,
-                  isFocused: isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex,
-                  videoUrl: videoUri,
-                  hasCachedUri: !!cachedUri,
-                })}
-                <EnhancedVideo
+                <PremiumFeedVideo
                   uri={videoUri}
-                  cachedUri={cachedUri}
-                  poster={item.thumbnail || item.user?.avatar}
-                  style={videoFillStyle}
-                  resizeMode="contain"
+                  poster={item.thumbnail || item.imageUrl || item.user?.avatar}
+                  style={StyleSheet.absoluteFill}
                   shouldPlay={isDiscoverItemActive(index)}
                   shouldLoad={shouldLoad}
+                  paused={pausedFeedId === item.id}
                   isLooping
                   isMuted={false}
                   onNaturalSize={(ns) => {
@@ -1315,10 +1336,7 @@ const HomeScreen = ({ navigation, route }) => {
                     );
                   }}
                   onError={(e) => {
-                    console.log('âŒ Feed Video error', { id: item.id, uri: videoUri, error: e });
-                  }}
-                  onReady={() => {
-                    console.log('ðŸŽ¥ Feed Video ready', { id: item.id, uri: videoUri, cached: !!cachedUri });
+                    console.log('[FEED] Video error', { id: item.id, uri: videoUri, error: e });
                   }}
                 />
               </TouchableOpacity>
@@ -1340,7 +1358,7 @@ const HomeScreen = ({ navigation, route }) => {
 
                     if (!hasValidImage) {
                       return (
-                        <View style={[styles.video, { backgroundColor: COLORS.backgroundLight, alignItems: 'center', justifyContent: 'center' }]}>
+                        <View style={[styles.video, { backgroundColor: COLORS.pageBackground, alignItems: 'center', justifyContent: 'center' }]}>
                           <Text style={{ color: COLORS.textDisabled, fontSize: 14 }}>Image unavailable</Text>
                         </View>
                       );
@@ -1352,73 +1370,74 @@ const HomeScreen = ({ navigation, route }) => {
                         style={styles.video}
                         resizeMode="cover"
                         resizeMethod="resize"
-                        onLoadStart={() => console.log('ðŸ“· HomeScreen: Image loading started')}
-                        onLoad={() => console.log('âœ… HomeScreen: Image loaded successfully')}
-                        onError={(error) => {
-                          console.warn('[HOME] Image failed to load', {
-                            uri: imageUri,
-                            error: error?.nativeEvent ?? null
-                          });
-                        }}
                       />
                     );
                   })()}
-                  <View style={styles.imageEnhancementOverlay} />
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={['transparent', 'rgba(10,10,12,0.45)', 'rgba(10,10,12,0.9)']}
+                    style={StyleSheet.absoluteFill}
+                  />
                 </View>
               </TouchableOpacity>
             );
           })()
         )}
 
-        {videoBottomGap > 2 && (
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.85)', '#000']}
-            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: videoBottomGap + 160 }}
-            pointerEvents="none"
-          />
-        )}
+        <View style={styles.actionRail} pointerEvents="box-none">
+          <FeedActionButton
+            onPress={() => handleLike(item.id)}
+            active={!!liked[item.id]}
+            count={likeCounts?.[item.id] ?? item.likeCount ?? item.likes ?? item.likedBy?.length ?? 0}
+          >
+            <Icon name={liked[item.id] ? 'heart' : 'heart-outline'} size={28} color={COLORS.white} />
+          </FeedActionButton>
 
-        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']} style={styles.videoOverlay} />
+          <FeedActionButton
+            onPress={() => handleOpenComments(item)}
+            count={getPostCommentCount(item)}
+          >
+            <Icon name="chatbubble" size={26} color={COLORS.white} />
+          </FeedActionButton>
 
-        <View style={[styles.profileMenuBar, { zIndex: 1000, elevation: 1000 }]} pointerEvents="box-none">
-          <View style={styles.profileMenuBarSection}>
-            <View style={{ zIndex: 1000 }}>
-              <FeedActionButton
-                onPress={() => handleLike(item.id)}
-                active={!!liked[item.id]}
-                count={likeCounts?.[item.id] ?? item.likeCount ?? item.likes ?? item.likedBy?.length ?? 0}
-              >
-                <Icon name={liked[item.id] ? 'heart' : 'heart-outline'} size={30} color={COLORS.white} />
-              </FeedActionButton>
-            </View>
+          <FeedActionButton
+            onPress={() => handleSharePost(item)}
+            count={item.shareCount ?? item.sharesCount ?? item.shares ?? 0}
+          >
+            <Icon name="share" size={26} color={COLORS.white} />
+          </FeedActionButton>
 
-            <FeedActionButton
-              onPress={() => handleOpenComments(item)}
-              count={getPostCommentCount(item)}
-            >
-              <Icon name="chatbubble" size={28} color={COLORS.white} />
-            </FeedActionButton>
+          <FeedStatBadge count={getPostViewCount(item)}>
+            <Icon name="eye-outline" size={24} color={COLORS.white} />
+          </FeedStatBadge>
 
-            <FeedActionButton
-              onPress={() => handleSharePost(item)}
-              count={item.shareCount ?? item.sharesCount ?? item.shares ?? 0}
-            >
-              <Icon name="share" size={28} color={COLORS.white} />
-            </FeedActionButton>
-
-            <FeedStatBadge count={getPostViewCount(item)}>
-              <Icon name="eye-outline" size={26} color={COLORS.white} />
-            </FeedStatBadge>
-
-            <View style={styles.actionButton}>
-              <GiftSystem
-                postId={item.id}
-                creatorId={item.uid || item.userId}
-                creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
-                triggerVariant="feed"
-              />
-            </View>
+          <View style={styles.actionButton}>
+            <GiftSystem
+              postId={item.id}
+              creatorId={item.uid || item.userId}
+              creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
+              triggerVariant="feed"
+              giftCoins={giftCoinCounts?.[item.id] ?? getPostGiftCoins(item)}
+              onGiftSent={({ postId, coinSpent }) => {
+                const id = String(postId || item.id);
+                const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
+                if (!id || spent <= 0) return;
+                setGiftCoinCounts((prev) => ({
+                  ...prev,
+                  [id]: Math.max(0, Number(prev[id] || getPostGiftCoins(item) || 0)) + spent,
+                }));
+              }}
+            />
           </View>
+
+          <TouchableOpacity
+            style={styles.expandBtn}
+            activeOpacity={0.85}
+            onPress={() => handlePostPress(item)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Icon name="open-outline" size={22} color={COLORS.white} />
+          </TouchableOpacity>
         </View>
 
         {/* Full description overlay (auto hides after 2s) */}
@@ -1427,8 +1446,8 @@ const HomeScreen = ({ navigation, route }) => {
             style={[
               styles.descriptionOverlayTop,
               canPlaceDescriptionRight
-                ? { top: pillTop, left: reservedLeft, right: 12 }
-                : { top: showDetailsTop },
+                ? { top: pillTop, left: reservedLeft, right: 72 }
+                : { top: showDetailsTop, right: 72 },
             ]}
           >
             <Text style={styles.postTitle} numberOfLines={1} allowFontScaling={false}>
@@ -1592,6 +1611,16 @@ const HomeScreen = ({ navigation, route }) => {
                 creatorId={item.uid || item.userId}
                 creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
                 triggerVariant="feed"
+                giftCoins={giftCoinCounts?.[item.id] ?? getPostGiftCoins(item)}
+                onGiftSent={({ postId, coinSpent }) => {
+                  const id = String(postId || item.id);
+                  const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
+                  if (!id || spent <= 0) return;
+                  setGiftCoinCounts((prev) => ({
+                    ...prev,
+                    [id]: Math.max(0, Number(prev[id] || getPostGiftCoins(item) || 0)) + spent,
+                  }));
+                }}
               />
             </View>
           </View>
@@ -1758,7 +1787,7 @@ const HomeScreen = ({ navigation, route }) => {
           {useSectionGradient && (
             <LinearGradient
               pointerEvents="none"
-              colors={['#0A0A0C', '#141418', '#1C1C22']}
+              colors={[COLORS.pageBackground, COLORS.pageBackground, COLORS.pageBackground]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.sectionGradientBackground}
@@ -1863,13 +1892,55 @@ const styles = StyleSheet.create({
   activeNavText: { color: 'white' },
   inactiveNavText: { color: 'rgba(255, 255, 255, 0.6)' },
   activeIndicator: { position: 'absolute', bottom: 5, left: 20, right: 20, height: 2, backgroundColor: 'white' },
-  videoContainer: { width: '100%', justifyContent: 'center', alignItems: 'center', backgroundColor: 'black', overflow: 'hidden' },
-  video: { width: '100%', height: '100%', backgroundColor: 'black' },
+  videoContainer: { width: '100%', justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.pageBackground, overflow: 'hidden' },
+  video: { width: '100%', height: '100%', backgroundColor: COLORS.pageBackground },
   videoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   bottomContent: { position: 'absolute', top: 24, left: 20, right: 80 }, // retained for other tabs (#B) but not used in #4ME now
   description: { color: 'white', fontSize: 15, lineHeight: 20, marginBottom: 8, fontWeight: '800' },
   descriptionContainerBottom: { position: 'absolute', top: 164, left: 15, right: 200, paddingHorizontal: 10 },
   profileMenuBar: { position: 'absolute', bottom: 80, left: 10, right: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', zIndex: 1000, gap: 15 },
+  actionRail: {
+    position: 'absolute',
+    right: 10,
+    bottom: 88,
+    zIndex: 1000,
+    elevation: 1000,
+    alignItems: 'center',
+    gap: 14,
+  },
+  expandBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(10,10,12,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  creatorPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    maxWidth: '100%',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,10,12,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.35)',
+  },
+  creatorAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+  },
+  creatorMeta: { flexShrink: 1, maxWidth: 180 },
+  creatorHandle: { color: COLORS.white, fontWeight: '800', fontSize: 14 },
+  creatorCaption: { color: 'rgba(255,255,255,0.72)', fontSize: 11, fontWeight: '500', marginTop: 1 },
   userInfoHighlight: { borderRadius: 9999, paddingHorizontal: 12, paddingVertical: 6 },
   userPillTopLeft: { position: 'absolute', top: 12, left: 12, zIndex: 1200, elevation: 1200, maxWidth: '72%' },
   profileMenuBarSection: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1901,34 +1972,34 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   postInfoContainer: { position: 'absolute', top: 0, left: 20, right: 20, padding: 12, backgroundColor: 'rgba(30,30,40,0.3)', borderRadius: 14 },
-  descriptionOverlayTop: { position: 'absolute', left: 16, right: 16, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(15,23,42,0.75)' },
-  descriptionInfoChip: { position: 'absolute', alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.9)' },
+  descriptionOverlayTop: { position: 'absolute', left: 16, right: 16, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(10,10,12,0.78)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  descriptionInfoChip: { position: 'absolute', alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(10,10,12,0.9)' },
   descriptionInfoChipUnderPill: {
     position: 'absolute',
     left: 12,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.9)',
+    backgroundColor: 'rgba(10,10,12,0.82)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: 'rgba(0,210,190,0.28)',
     zIndex: 1200,
     elevation: 1200,
   },
-  descriptionInfoChipText: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '500' },
+  descriptionInfoChipText: { color: COLORS.electric, fontSize: 12, fontWeight: '600' },
   postTitle: { fontWeight: '700', fontSize: 16, color: COLORS.textPrimary, marginBottom: 6 },
   postName: { fontWeight: 'bold', fontSize: 18, color: COLORS.textPrimary, marginBottom: 6, textAlign: 'center' },
   postDescription: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center' },
   minimizeButton: { position: 'absolute', top: -8, right: -8, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 15, width: 30, height: 30, justifyContent: 'center', alignItems: 'center', zIndex: 1 },
   carouselContainer: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
   carouselItemContainer: { width: Dimensions.get('window').width, height: '100%' },
-  carouselMedia: { width: Dimensions.get('window').width, height: '100%', borderRadius: 15 },
+  carouselMedia: { width: Dimensions.get('window').width, height: '100%', borderRadius: 0 },
   imageEnhancementOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 255, 255, 0.03)', pointerEvents: 'none' },
   mediaCounter: { position: 'absolute', top: 15, right: 15, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 15 },
   mediaCounterText: { color: COLORS.white, fontSize: 12, fontWeight: '600' },
   paginationDots: { position: 'absolute', bottom: 20, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   paginationDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255, 255, 255, 0.5)', marginHorizontal: 4 },
-  paginationDotActive: { backgroundColor: COLORS.white, width: 10, height: 10, borderRadius: 5 },
+  paginationDotActive: { backgroundColor: COLORS.primary, width: 10, height: 10, borderRadius: 5 },
   actionButton: { alignItems: 'center', marginHorizontal: 8 },
   actionButtonOuter: {
     alignItems: 'center',

@@ -128,6 +128,22 @@ service cloud.firestore {
         && resource.data.hostId == request.auth.uid;
     }
 
+    match /socialImports/{importId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll([
+          'uid', 'platform', 'handle', 'status', 'createdAt', 'updatedAt'
+        ]);
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && resource.data.status in ['pending', 'running']
+        && request.resource.data.status == 'canceled'
+        && request.resource.data.uid == resource.data.uid;
+      allow delete: if false;
+    }
+
     // Deny-by-default for everything else (closes universal auth write).
     match /{document=**} {
       allow read, write: if false;

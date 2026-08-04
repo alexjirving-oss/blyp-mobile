@@ -5,6 +5,7 @@ import { Alert, FlatList, Modal, RefreshControl, ScrollView, StatusBar, StyleShe
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
+import { COLORS } from '../styles/theme';
 
 const ROOM_CATEGORIES = [
   { id: 'general', name: 'General', icon: 'chatbubbles-outline', color: '#3b82f6' },
@@ -575,12 +576,12 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   header: {
     padding: 20,
     paddingTop: 0,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   backButton: {
     position: 'absolute',
@@ -624,12 +625,12 @@ const styles = StyleSheet.create({
   searchContainer: {
     paddingHorizontal: 20,
     paddingBottom: 16,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -649,7 +650,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 8,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
     marginTop: 8,
   },
   sectionHeaderLeft: {
@@ -663,7 +664,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   countBadge: {
-    backgroundColor: 'rgba(203, 251, 69, 0.16)',
+    backgroundColor: 'rgba(0, 210, 190, 0.16)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -682,7 +683,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     marginHorizontal: 20,
     marginVertical: 8,
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#374151',
@@ -705,7 +706,7 @@ const styles = StyleSheet.create({
     height: 100,
   },
   categoryFilter: {
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
     paddingBottom: 8,
   },
   categoryFilterContent: {
@@ -716,7 +717,7 @@ const styles = StyleSheet.create({
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -748,7 +749,7 @@ const styles = StyleSheet.create({
   },
   roomCardGradient: {
     padding: 20,
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
   },
   roomHeader: {
     flexDirection: 'row',
@@ -871,7 +872,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
-    backgroundColor: 'rgba(203, 251, 69, 0.1)',
+    backgroundColor: 'rgba(0, 210, 190, 0.12)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -909,7 +910,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -918,7 +919,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 8,
     paddingTop: 0,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   modalCancel: {
     fontSize: 16,
@@ -951,7 +952,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   formInput: {
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
     borderColor: '#374151',
     borderRadius: 16,
@@ -973,7 +974,7 @@ const styles = StyleSheet.create({
   categoryOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#141418',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 16,

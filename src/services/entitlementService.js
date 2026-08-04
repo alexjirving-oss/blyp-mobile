@@ -14,6 +14,7 @@
 
 import { db, firebaseEnabled } from '../config/firebase';
 import { snapExists, snapData } from '../utils/firestoreSnap';
+import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 
 export const TRIAL_DAYS = 30;
 const DAY = 86400000;
@@ -109,27 +110,42 @@ async function bootstrapTrial(uid) {
     updatedAt: now,
   };
   try {
+    await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
     await db.collection('entitlements').doc(uid).set(doc, { merge: false });
+    return doc;
   } catch (e) {
     console.warn('[entitlement] trial bootstrap failed (non-fatal)', e?.message || String(e));
+    // Don't invent a fresh countdown client-side if the write didn't stick —
+    // that restarts the 30-day trial on every login. Re-read; else free tier.
+    try {
+      const snap = await db.collection('entitlements').doc(uid).get();
+      if (snapExists(snap)) return snapData(snap);
+    } catch {
+      /* ignore */
+    }
+    return { tier: 'free', status: 'inactive', trialEndsAt: 0, updatedAt: now };
   }
-  return doc;
 }
 
 /** Load + compute the entitlement for a user, caching and notifying listeners. */
 export async function loadEntitlement(uid) {
-  const fallback = computeEffective({ tier: 'trial', trialEndsAt: Date.now() + TRIAL_DAYS * DAY });
+  const fallback = computeEffective({ tier: 'free', trialEndsAt: 0 });
   if (!firebaseEnabled || !db || typeof db.collection !== 'function' || !uid) {
     cache = fallback;
     return cache;
   }
   try {
+    try {
+      await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+    } catch {
+      /* continue — read may still work if already bridged */
+    }
     const ref = db.collection('entitlements').doc(uid);
     const snap = await ref.get();
     const data = snapExists(snap) ? snapData(snap) : await bootstrapTrial(uid);
     cache = computeEffective(data);
   } catch (e) {
-    console.warn('[entitlement] load failed, assuming full access', e?.message || String(e));
+    console.warn('[entitlement] load failed, assuming free tier', e?.message || String(e));
     cache = fallback;
   }
   listeners.forEach((l) => {

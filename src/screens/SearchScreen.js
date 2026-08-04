@@ -435,7 +435,7 @@ const SearchScreen = ({ navigation }) => {
   return (
     <BlueScreen>
       <ScreenContainer>
-        <LinearGradient colors={[COLORS.pageBackground, COLORS.backgroundLight]} style={styles.container}>
+        <LinearGradient colors={[COLORS.pageBackground, COLORS.pageBackground]} style={styles.container}>
           {renderSearchInput()}
           {renderSearchTabs()}
 
@@ -456,7 +456,7 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginRight: 12,
     borderRadius: 20,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
   },
   activeTab: {
     backgroundColor: '#00D2BE',
@@ -623,7 +623,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,

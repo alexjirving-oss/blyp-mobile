@@ -1,0 +1,188 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, StyleSheet, Animated } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import EnhancedVideo from '../EnhancedVideo';
+import Icon from '../Icon';
+import { COLORS } from '../../styles/theme';
+
+/**
+ * PremiumFeedVideo — full-bleed TikTok-style playback chrome.
+ *
+ * Portrait / square clips use `cover` (edge-to-edge). Wide landscape clips use
+ * `contain` top-anchored so letterboxing sits under the action rail, not above
+ * the frame. Includes a progress strip, pause glyph, and brand vignettes.
+ */
+export default function PremiumFeedVideo({
+  uri,
+  poster,
+  style,
+  shouldPlay = false,
+  shouldLoad = true,
+  isMuted = false,
+  isLooping = true,
+  paused = false,
+  showChrome = true,
+  onNaturalSize,
+  onError,
+  onReady,
+  onProgress,
+}) {
+  const [aspect, setAspect] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const pauseOpacity = useRef(new Animated.Value(0)).current;
+  const playing = shouldPlay && !paused;
+
+  const isWide = aspect > 1.15;
+  const resizeMode = isWide ? 'contain' : 'cover';
+
+  useEffect(() => {
+    Animated.timing(pauseOpacity, {
+      toValue: paused ? 1 : 0,
+      duration: 160,
+      useNativeDriver: true,
+    }).start();
+  }, [paused, pauseOpacity]);
+
+  const handleNaturalSize = useCallback(
+    (ns) => {
+      if (ns?.width > 0 && ns?.height > 0) {
+        const a = ns.width / ns.height;
+        if (a > 0) setAspect((prev) => (Math.abs(prev - a) < 0.001 ? prev : a));
+      }
+      onNaturalSize?.(ns);
+    },
+    [onNaturalSize],
+  );
+
+  const handleStatus = useCallback(
+    (status) => {
+      if (!status?.isLoaded) return;
+      const dur = status.durationMillis || 0;
+      const pos = status.positionMillis || 0;
+      const next = dur > 0 ? Math.min(1, Math.max(0, pos / dur)) : 0;
+      setProgress(next);
+      onProgress?.(next, status);
+    },
+    [onProgress],
+  );
+
+  const fillStyle = useMemo(() => {
+    if (!isWide || !(aspect > 0)) return StyleSheet.absoluteFill;
+    // Wide: pin to top at natural height; leftover fades below.
+    return StyleSheet.absoluteFill;
+  }, [isWide, aspect]);
+
+  return (
+    <View style={[styles.root, style]}>
+      <EnhancedVideo
+        uri={uri}
+        poster={poster}
+        style={fillStyle}
+        resizeMode={resizeMode}
+        shouldPlay={playing}
+        shouldLoad={shouldLoad}
+        isLooping={isLooping}
+        isMuted={isMuted}
+        onNaturalSize={handleNaturalSize}
+        onError={onError}
+        onReady={onReady}
+        onPlaybackStatusUpdate={handleStatus}
+      />
+
+      {showChrome && (
+        <>
+          <LinearGradient
+            pointerEvents="none"
+            colors={['rgba(10,10,12,0.55)', 'transparent', 'transparent']}
+            locations={[0, 0.22, 1]}
+            style={styles.topVignette}
+          />
+          <LinearGradient
+            pointerEvents="none"
+            colors={['transparent', 'rgba(10,10,12,0.35)', 'rgba(10,10,12,0.92)']}
+            locations={[0.35, 0.7, 1]}
+            style={styles.bottomVignette}
+          />
+          {isWide && (
+            <LinearGradient
+              pointerEvents="none"
+              colors={['transparent', 'rgba(10,10,12,0.9)', COLORS.pageBackground]}
+              style={styles.wideFade}
+            />
+          )}
+        </>
+      )}
+
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.pauseWrap, { opacity: pauseOpacity }]}
+      >
+        <View style={styles.pauseGlyph}>
+          <Icon name="play" size={36} color="#0A0A0C" />
+        </View>
+      </Animated.View>
+
+      {showChrome && (
+        <View style={styles.progressTrack} pointerEvents="none">
+          <View style={[styles.progressFill, { flex: Math.max(progress, 0.01) }]} />
+          <View style={{ flex: Math.max(1 - progress, 0.001) }} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.pageBackground,
+    overflow: 'hidden',
+  },
+  topVignette: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bottomVignette: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  wideFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '28%',
+  },
+  pauseWrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pauseGlyph: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  progressTrack: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 10,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: 2,
+  },
+});

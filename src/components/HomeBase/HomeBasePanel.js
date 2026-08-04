@@ -318,6 +318,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     async (input, geo) => {
       const text = String(input || '').trim();
       if (!text) return;
+      // Keep the spoken/typed text visible in the bar while we process.
+      setQueryText(text);
       setSubmitting(true);
       try {
         const eventWatch = await resolveEventWatch(text);
@@ -503,21 +505,28 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     setTranscribing(true);
     try {
       const uri = await speechToTextService.stopRecording();
-      if (uri) {
-        const text = await geminiSpeechService.transcribeAudio(uri);
-        const clean = String(text || '').trim();
-        // The service returns bracketed tokens (e.g. [NO_KEY]) on failure.
-        if (clean && !clean.startsWith('[')) {
-          // Spoken reminders are created in place; anything else opens Blyp.
-          handleQuery(clean);
-        }
+      if (!uri) {
+        setWatchNotice("Couldn't catch that — hold the mic a moment longer and try again.");
+        return;
       }
+      const text = await geminiSpeechService.transcribeAudio(uri);
+      const clean = String(text || '').trim();
+      // The service returns bracketed tokens (e.g. [NO_KEY]) on failure.
+      if (!clean || clean.startsWith('[')) {
+        setWatchNotice("Couldn't hear that clearly — try again.");
+        return;
+      }
+      // Always put the spoken text into the search bar first.
+      setQueryText(clean);
+      // Then run the same path as typing + submit (reminders stay here; else open Blyp).
+      await handleQuery(clean);
     } catch (e) {
       console.warn('[home] voice failed', e?.message || String(e));
+      setWatchNotice("Voice didn't work just then — try again.");
     } finally {
       setTranscribing(false);
     }
-  }, [navigation]);
+  }, [handleQuery]);
 
   // The mic LISTENS in place — it must never just navigate away.
   const onMicPress = () => {

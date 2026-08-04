@@ -30,6 +30,15 @@ const { width } = Dimensions.get('window');
 
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 
+function formatGiftCoins(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(Math.trunc(n));
+}
+
 const GiftSystem = ({
   postId,
   creatorId,
@@ -39,6 +48,8 @@ const GiftSystem = ({
   openSignal,
   navigation,
   incomingGiftEvent,
+  giftCoins = 0,
+  onGiftSent,
 }) => {
   const { uid, authReady, isAuthenticated } = useAuth();
 
@@ -464,12 +475,29 @@ const GiftSystem = ({
         const nextBalance =
           Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
         setUserBalance(nextBalance);
+        const spent = Number(out?.coinSpent || gift.cost || 0);
+        try {
+          onGiftSent?.({
+            postId: String(postId),
+            coinSpent: Number.isFinite(spent) ? spent : Number(gift.cost || 0),
+            quantity: Number(out?.gift?.quantity || 1),
+            giftId: String(gift.id),
+          });
+        } catch { /* UI callback best-effort */ }
       } else {
         if (!authReady || !isAuthenticated || !uid) throw new Error('Not signed in');
         const result = await BlypCoinService.sendGift(String(uid), String(creatorId), String(gift.id), Number(gift.cost || 0));
         const nextBalance = Number(result?.senderBalance || 0);
         setUserBalance(nextBalance);
         setWalletState({ status: 'ok', lastError: null, lastUpdatedAt: Date.now() });
+        try {
+          onGiftSent?.({
+            postId: String(postId),
+            coinSpent: Number(gift.cost || 0),
+            quantity: 1,
+            giftId: String(gift.id),
+          });
+        } catch { /* UI callback best-effort */ }
       }
 
       // Analytics instrumentation
@@ -944,7 +972,7 @@ const GiftSystem = ({
                 </View>
               </LinearGradient>
               <Text style={styles.feedTriggerLabel} allowFontScaling={false}>
-                Gift
+                {Number(giftCoins) > 0 ? formatGiftCoins(giftCoins) : 'Gift'}
               </Text>
             </View>
           </TouchableOpacity>

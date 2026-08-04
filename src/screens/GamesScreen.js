@@ -641,7 +641,7 @@ const GamesScreen = ({ navigation }) => {
           {useSectionGradient && (
             <LinearGradient
               pointerEvents="none"
-              colors={['#0A0A0C', '#141418', '#1C1C22']}
+              colors={[COLORS.pageBackground, COLORS.pageBackground, COLORS.pageBackground]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.sectionGradientBackground}

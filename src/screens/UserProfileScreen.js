@@ -23,6 +23,7 @@ import Toast from 'react-native-toast-message';
 import { responsiveFont } from '../utils/scaleUtils';
 import ScreenContainer from '../components/ScreenContainer';
 import { useAuth } from '../hooks/useCommon';
+import { COLORS } from '../styles/theme';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -554,7 +555,7 @@ const styles = StyleSheet.create({
     borderColor: '#00D2BE',
   },
   avatarFallback: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -636,7 +637,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   messageButton: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     borderRadius: 12,
     width: 48,
     height: 48,
@@ -686,7 +687,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   postThumbnailFallback: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -10,7 +10,18 @@ const LOOPBACK_HOST = ['local', 'host'].join('');
 const ECONOMY_FETCH_TIMEOUT_MS = 8000;
 
 export const resolveLiveServiceUrl = (): string => {
-  const raw = process.env.EXPO_PUBLIC_LIVE_SERVICE_URL;
+  const fromEnv = process.env.EXPO_PUBLIC_LIVE_SERVICE_URL;
+  let fromExtra = '';
+  try {
+    // Expo injects app.config.js `extra` for release builds when babel inlining
+    // of process.env is incomplete — keep both paths for production safety.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Constants = require('expo-constants')?.default || require('expo-constants');
+    fromExtra = String(Constants?.expoConfig?.extra?.EXPO_PUBLIC_LIVE_SERVICE_URL || '').trim();
+  } catch {
+    // ignore — Constants unavailable in some test/node contexts
+  }
+  const raw = (fromEnv && fromEnv.trim()) || fromExtra;
   if (raw && raw.trim()) {
     const normalized = raw.replace(/\/+$/, '');
     if (!isDevelopment && (normalized.includes(LOOPBACK_IPV4) || normalized.includes(LOOPBACK_HOST))) {

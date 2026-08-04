@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import searchService from '../services/searchService';
+import { COLORS } from '../styles/theme';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -184,7 +185,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
               { transform: [{ translateY: slideAnim }] }
             ]}
           >
-            <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.modalGradient}>
+            <LinearGradient colors={[COLORS.pageBackground, COLORS.pageBackground]} style={styles.modalGradient}>
               {/* Modal Header */}
               <View style={styles.modalHeader}>
                 <View style={styles.searchInputContainer}>
@@ -226,7 +227,7 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -260,7 +261,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8,

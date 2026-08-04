@@ -10,6 +10,7 @@ import { auth, db, storage, firebaseEnabled } from '../config/firebase';
 import { snapData } from '../utils/firestoreSnap';
 import { signOut } from 'firebase/auth';
 import { subscribeToFollowersCount, getFollowersCount } from '../utils/followUtils';
+import { COLORS } from '../styles/theme';
 
 // Posts load one page at a time. The first page is live (new posts/likes show
 // instantly); older pages are fetched on scroll so a profile shows ALL posts,
@@ -392,7 +393,7 @@ const styles = StyleSheet.create({
   menuButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerBalances: { position: 'absolute', left: 56, height: '100%', justifyContent: 'center' },
   tabContainer: { paddingHorizontal: 16, paddingBottom: 12 },
-  tabSelector: { position: 'relative', backgroundColor: '#374151', borderRadius: 9999, padding: 4, flexDirection: 'row' },
+  tabSelector: { position: 'relative', backgroundColor: COLORS.surface, borderRadius: 9999, padding: 4, flexDirection: 'row' },
   tab: { flex: 1, paddingVertical: 6, alignItems: 'center', zIndex: 2 },
   tabText: { color: '#9ca3af', fontSize: 12, fontWeight: '600' },
   activeTabText: { color: '#ffffff' },

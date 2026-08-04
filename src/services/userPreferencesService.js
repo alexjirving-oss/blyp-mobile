@@ -156,7 +156,8 @@ async function syncToRemote(uid, prefs) {
   }
 }
 
-// Pull remote prefs once and, if newer than local, adopt + emit to subscribers.
+// Pull remote prefs once and, if newer than local (or remote already completed
+// onboarding), adopt + emit to subscribers.
 async function hydrateFromRemote(uid) {
   if (!canSync(uid)) return;
   try {
@@ -166,7 +167,11 @@ async function hydrateFromRemote(uid) {
     if (!remote) return;
     const local = cache.get(uid) || clone(DEFAULT_PREFS);
     const remoteNorm = normalize(remote);
-    if ((remoteNorm.updatedAt || 0) > (local.updatedAt || 0)) {
+    // Never demote a completed account: remote onboarded wins even if clocks disagree.
+    const shouldAdopt =
+      (remoteNorm.updatedAt || 0) > (local.updatedAt || 0) ||
+      (remoteNorm.onboarded && !local.onboarded);
+    if (shouldAdopt) {
       cache.set(uid, remoteNorm);
       emit(uid, remoteNorm);
       try {
@@ -261,8 +266,25 @@ export async function completeOnboarding(uid, interests) {
     ...prev,
     interests: Array.isArray(interests) ? interests : prev.interests,
     onboarded: true,
+    updatedAt: Date.now(),
   };
-  return persist(uid, next);
+  // Auth must be ready before the Firestore mirror, otherwise reinstall/new
+  // device can't see onboarded=true and will restart the whole flow + trial.
+  if (canSync(uid)) {
+    try {
+      const { ensureFirebaseAuthReady } = await import('../utils/firebaseAuthHelper');
+      await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+    } catch (e) {
+      console.warn('[PREFS] auth not ready before onboarding sync', e?.message || String(e));
+    }
+  }
+  const stamped = await persist(uid, next);
+  try {
+    await syncToRemote(uid, stamped);
+  } catch {
+    /* already logged inside syncToRemote */
+  }
+  return stamped;
 }
 
 export async function addRecentSearch(uid, queryText) {
@@ -289,7 +311,11 @@ export async function setActivitySeen(uid) {
 
 export async function isOnboarded(uid) {
   const prefs = await getPreferences(uid);
-  return !!prefs.onboarded;
+  if (prefs.onboarded) return true;
+  // Local miss (reinstall / cleared storage): wait for Firestore before deciding.
+  await hydrateFromRemote(uid);
+  const after = cache.get(uid) || prefs;
+  return !!after.onboarded;
 }
 
 export function getEnabledPages(prefs) {

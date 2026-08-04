@@ -184,7 +184,7 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
 
   // Leaderboard-style placeholder body for Categories (EXACT PARITY)
   return (
-    <View style={[styles.container, { backgroundColor: '#141418' }]}>
+    <View style={[styles.container, { backgroundColor: COLORS.surface }]}>
       <View style={styles.comingSoon}>
         <Icon name="folder-open" size={64} color="#fff" />
         <Text style={styles.comingSoonTitle}>Categories</Text>
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 8,

@@ -61,9 +61,27 @@ const TeamsContent = ({ navigation }) => {
       Alert.alert('Tell us about your team', 'Add a short pitch so we know what your team is about.');
       return;
     }
+    if (!uid) {
+      Alert.alert('Sign in required', 'Please sign in to apply to run a team.');
+      return;
+    }
     setApplying(true);
     try {
-      await applyToRunTeam(user || { uid }, pitch.trim());
+      await applyToRunTeam(
+        {
+          uid,
+          displayName:
+            user?.attributes?.name ||
+            user?.attributes?.preferred_username ||
+            user?.username ||
+            (typeof user?.getUsername === 'function' ? user.getUsername() : null) ||
+            'Creator',
+          photoURL: user?.attributes?.picture || user?.photoURL || null,
+          attributes: user?.attributes,
+          username: user?.username,
+        },
+        pitch.trim(),
+      );
       setApplyOpen(false);
       setPitch('');
       Alert.alert('Application sent', "Thanks! We'll review your team and be in touch in your notifications.");
@@ -177,7 +195,7 @@ const TeamsContent = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: COLORS.pageBackground },
   listContent: { padding: 16, paddingBottom: 120 },
   heroRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 16 },
   heroText: { flex: 1, color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },

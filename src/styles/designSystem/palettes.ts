@@ -10,11 +10,11 @@
  * tokens (electric secondary accent, brand + accent gradients, glow colours,
  * page gradient stops, scrims, strong borders).
  *
- * Brand language:
- *   - Brand gradient: electric violet → fuchsia → hot pink (purple→pink)
- *   - Secondary accent: electric cyan/aqua (for highlights, glows, depth)
- *   - Dark mode: deep navy + violet, neon pops (TikTok / Twitch energy)
- *   - Light mode: bright, airy whites with soft violet/blue wash + saturated accents
+ * Brand language (product is dark-only in ThemeProvider):
+ *   - Brand signal: Mercedes-AMG PETRONAS teal `#00D2BE`
+ *   - Secondary accent: electric aqua/cyan `#67E8F9`
+ *   - Page chrome: editorial near-black `#0A0A0C` (never mixed grey/black roots)
+ *   - Raised surfaces: `#141418` / cards `#121216`
  */
 
 export interface ColorScheme {

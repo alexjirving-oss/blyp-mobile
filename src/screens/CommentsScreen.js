@@ -389,7 +389,7 @@ const CommentsScreen = ({ route, navigation }) => {
             { transform: [{ translateY: slideAnim }] }
           ]}
         >
-          <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.gradient}>
+          <LinearGradient colors={[COLORS.pageBackground, COLORS.pageBackground]} style={styles.gradient}>
             {/* Header */}
             <View style={styles.header}>
               <TouchableOpacity style={styles.closeButton} onPress={closeComments}>
@@ -612,7 +612,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#2a2a2a',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: COLORS.surface,
   },
   inputAvatar: {
     width: 32,
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
   },
   commentInput: {
     flex: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -655,7 +655,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderTopWidth: 1,
     borderTopColor: '#333',
   },

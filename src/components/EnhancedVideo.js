@@ -168,18 +168,12 @@ function EnhancedVideo(props) {
               props.onNaturalSize(ns);
             }
           }}
-          onPlaybackStatusUpdate={
-            __DEV__
-              ? (status) => {
-                  if (status?.isLoaded && status?.isPlaying) {
-                    // Lightweight check to avoid spam
-                  }
-                  if (status?.error) {
-                    console.warn('[EnhancedVideo] playbackStatus error', status.error);
-                  }
-                }
-              : undefined
-          }
+          onPlaybackStatusUpdate={(status) => {
+            props.onPlaybackStatusUpdate?.(status);
+            if (__DEV__ && status?.error) {
+              console.warn('[EnhancedVideo] playbackStatus error', status.error);
+            }
+          }}
         />
       )}
 
@@ -188,7 +182,7 @@ function EnhancedVideo(props) {
         <Image
           source={{ uri: posterUri }}
           style={styles.overlay}
-          resizeMode="cover"
+          resizeMode={props.resizeMode || 'cover'}
         />
       )}
 

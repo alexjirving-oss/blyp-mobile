@@ -37,7 +37,7 @@ const FeedEmptyState = ({ mode = 'loading' }) => {
                 </>
             ) : (
                 <Text style={styles.secondary} allowFontScaling={false}>
-                    Your feed is warming up.{'\n'}Follow creators or check back in a moment.
+                    New videos with sound will show up here.{'\n'}Post one, or follow creators and check back.
                 </Text>
             )}
         </View>

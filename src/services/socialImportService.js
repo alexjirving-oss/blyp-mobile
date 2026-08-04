@@ -121,6 +121,13 @@ export async function requestImport({ uid, platform = 'tiktok', handle, claimedO
     throw new Error('That doesn’t look like a valid username.');
   }
 
+  try {
+    const { ensureFirebaseAuthReady } = await import('../utils/firebaseAuthHelper');
+    await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+  } catch (e) {
+    throw new Error('Still connecting your account — try again in a moment.');
+  }
+
   const now = Date.now();
   const data = {
     uid,
@@ -138,8 +145,18 @@ export async function requestImport({ uid, platform = 'tiktok', handle, claimedO
     updatedAt: now,
   };
 
-  const ref = await db.collection('socialImports').add(data);
-  return { id: ref?.id || null };
+  try {
+    const ref = await db.collection('socialImports').add(data);
+    return { id: ref?.id || null };
+  } catch (e) {
+    const code = e?.code || e?.message || '';
+    if (String(code).includes('permission') || String(code).includes('PERMISSION')) {
+      throw new Error(
+        'Import isn’t allowed for this account yet. Update the app / wait for permissions to deploy, then try again.',
+      );
+    }
+    throw e instanceof Error ? e : new Error(String(e?.message || e));
+  }
 }
 
 /**

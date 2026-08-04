@@ -13,7 +13,7 @@ import {
   FlatList,
   ActivityIndicator,
 } from 'react-native';
-import UnifiedVideo from '../components/UnifiedVideo';
+import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
@@ -163,10 +163,15 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
 
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
+  const [giftCoinsLocal, setGiftCoinsLocal] = useState(() =>
+    Math.max(
+      Number(actualPost?.giftCoins) || 0,
+      Number(actualPost?.coinsReceived) || 0,
+    ),
+  );
   const [videoStatus, setVideoStatus] = useState({});
-  // Always show the whole frame at full width (contain) so videos are never
-  // cropped or zoomed-in — portrait and landscape both letterbox instead.
-  const [videoResizeMode, setVideoResizeMode] = useState('contain');
+  // Intrinsic video aspect (w/h) — used by PremiumFeedVideo sizing hooks.
+  const [videoAspectRatio, setVideoAspectRatio] = useState(0);
   const [showHeartAnimation, setShowHeartAnimation] = useState(false);
   const [heartAnimationKey, setHeartAnimationKey] = useState(0);
   const [commentsVisible, setCommentsVisible] = useState(false);
@@ -182,8 +187,6 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
   const isScreenFocused = useIsFocused();
   // Resolved human-readable author name (never a raw id).
   const [authorName, setAuthorName] = useState(() => pickAuthorName(actualPost));
-  // Intrinsic video aspect (w/h) so "contain" videos top-anchor like For You.
-  const [videoAspectRatio, setVideoAspectRatio] = useState(0);
   // "Show details" chip → temporary title/caption overlay (mirrors For You).
   const [showDetails, setShowDetails] = useState(false);
   const detailsTimerRef = useRef(null);
@@ -206,6 +209,13 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
   useEffect(() => {
     setIsLiked(uid ? (actualPost.likedBy?.includes(uid) || false) : false);
     setLikeCount(actualPost.likeCount || actualPost.likes || 0);
+    setGiftCoinsLocal((prev) =>
+      Math.max(
+        Number(prev) || 0,
+        Number(actualPost?.giftCoins) || 0,
+        Number(actualPost?.coinsReceived) || 0,
+      ),
+    );
   }, [actualPost, uid]);
 
   const openCreatorProfile = () => {
@@ -256,6 +266,11 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
           : (typeof data.likes === 'number' ? data.likes : (Array.isArray(data.likedBy) ? data.likedBy.length : 0));
         setLikeCount(Math.max(0, cnt || 0));
         setIsLiked(uid && Array.isArray(data.likedBy) ? data.likedBy.includes(uid) : false);
+        const giftCoins = Math.max(
+          Number(data.giftCoins) || 0,
+          Number(data.coinsReceived) || 0,
+        );
+        setGiftCoinsLocal((prev) => Math.max(Number(prev) || 0, giftCoins));
       }, () => {});
     } catch { /* ignore */ }
     return () => { cancelled = true; try { unsub && unsub(); } catch {} };
@@ -558,12 +573,8 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
     }
   };
 
-  // Every video is shown whole at full width (contain) regardless of its real
-  // dimensions, so nothing is ever cropped or zoomed-in. When the intrinsic
-  // size is known we capture the aspect ratio so the video can be top-anchored
-  // (any leftover space fades into the dark theme at the bottom, like For You).
+  // Every video fills the frame via PremiumFeedVideo (cover / smart contain).
   const handleVideoLoad = (eventOrStatus) => {
-    setVideoResizeMode('contain');
     const ns = eventOrStatus?.naturalSize;
     if (ns && ns.width > 0 && ns.height > 0) {
       const a = ns.width / ns.height;
@@ -582,53 +593,32 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
     if (detailsTimerRef.current) clearTimeout(detailsTimerRef.current);
   }, []);
 
-  // Top-anchor "contain" videos: size the player to its rendered height pinned
-  // to the top of the page so leftover space sits at the BOTTOM, faded into the
-  // dark theme behind the action buttons — identical to the For You feed.
-  const hasVideo = isVideoPost(actualPost);
-  let videoBottomGap = 0;
-  if (hasVideo && videoAspectRatio > 0 && pageHeight > 0) {
-    const fittedHeight = Math.round(screenWidth / videoAspectRatio);
-    videoBottomGap = Math.max(0, pageHeight - Math.min(pageHeight, fittedHeight));
-  }
-  const mediaFillStyle =
-    videoBottomGap > 0
-      ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: videoBottomGap }
-      : styles.media;
+  // Full-bleed premium player — no letterbox gap math.
+  const mediaFillStyle = styles.media;
 
   const renderMedia = () => {
-    console.log('🎬 Rendering media for post:', {
-      videoUrl: actualPost.videoUrl,
-      imageUrl: actualPost.imageUrl,
-      media: actualPost.media,
-      thumbnail: post.thumbnail,
-      type: post.type
-    });
-
     // Handle video content
     if (post.videoUrl) {
       const fixedUrl = fixStorageUrl(post.videoUrl);
-      console.log('📹 Rendering video from videoUrl:', fixedUrl);
       return (
-        <UnifiedVideo
-          ref={videoRef}
-          source={{ uri: fixedUrl }}
+        <PremiumFeedVideo
+          uri={fixedUrl}
+          poster={actualPost.thumbnail || actualPost.imageUrl}
           style={mediaFillStyle}
-          useNativeControls={false}
-          resizeMode={videoResizeMode}
-          shouldPlay={isActive && !paused && isScreenFocused}
-          isLooping={true}
+          shouldPlay={isActive && isScreenFocused}
+          paused={paused}
+          isLooping
           isMuted={false}
-          volume={1.0}
-          onPlaybackStatusUpdate={(status) => {
-            setVideoStatus(status);
-            if (status.error) {
-              console.error('Video playback error:', status.error);
+          onNaturalSize={(ns) => {
+            if (ns?.width > 0 && ns?.height > 0) {
+              const a = ns.width / ns.height;
+              if (a > 0) setVideoAspectRatio((prev) => (Math.abs(prev - a) < 0.001 ? prev : a));
             }
           }}
-          onLoadStart={() => console.log('Video loading started')}
-          onLoad={(status) => { console.log('Video loaded:', status); handleVideoLoad(status); }}
-          onReadyForDisplay={(e) => handleVideoLoad(e)}
+          onProgress={(_p, status) => {
+            if (status) setVideoStatus(status);
+          }}
+          onError={(error) => console.error('Video playback error:', error)}
         />
       );
     }
@@ -650,12 +640,10 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
         item.type?.includes('video') ||
         item.type?.includes('mp4') ||
         item.type?.startsWith('video/')
-      ); console.log('📱 Media breakdown:', { photos: photos.length, videos: videos.length });
-      console.log('🔍 All media types:', actualPost.media.map(item => ({ type: item.type, url: item.url?.substring(0, 50) + '...' })));
+      );
 
       // If there are multiple photos, show gallery
       if (photos.length > 1) {
-        console.log('�️ Rendering photo gallery with', photos.length, 'photos');
         return <PhotoGallery photos={photos} style={styles.media} />;
       }
 
@@ -663,42 +651,36 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
       if (videos.length > 0) {
         const firstVideo = videos[0];
         const fixedUrl = fixStorageUrl(firstVideo.url || firstVideo.uri);
-        console.log('📹 Rendering video from media array:', { original: firstVideo, fixedUrl });
         return (
-          <UnifiedVideo
-            ref={videoRef}
-            source={{ uri: fixedUrl }}
+          <PremiumFeedVideo
+            uri={fixedUrl}
+            poster={firstVideo.thumbnail || actualPost.thumbnail}
             style={mediaFillStyle}
-            useNativeControls={false}
-            resizeMode={videoResizeMode}
-            shouldPlay={isActive && !paused && isScreenFocused}
-            isLooping={true}
+            shouldPlay={isActive && isScreenFocused}
+            paused={paused}
+            isLooping
             isMuted={false}
-            volume={1.0}
-            onPlaybackStatusUpdate={(status) => {
-              setVideoStatus(status);
-              if (status.error) {
-                console.error('Video playback error:', status.error);
+            onNaturalSize={(ns) => {
+              if (ns?.width > 0 && ns?.height > 0) {
+                const a = ns.width / ns.height;
+                if (a > 0) setVideoAspectRatio((prev) => (Math.abs(prev - a) < 0.001 ? prev : a));
               }
             }}
-            onLoadStart={() => console.log('Video loading started')}
-            onLoad={(status) => { console.log('Video loaded:', status); handleVideoLoad(status); }}
-            onReadyForDisplay={(e) => handleVideoLoad(e)}
+            onProgress={(_p, status) => {
+              if (status) setVideoStatus(status);
+            }}
+            onError={(error) => console.error('Video playback error:', error)}
           />
         );
       }
 
       // Single photo
       if (photos.length === 1) {
-        console.log('🖼️ Rendering single photo:', photos[0]);
         return (
           <Image
             source={{ uri: photos[0].url || photos[0].uri }}
             style={styles.media}
             resizeMode="cover"
-            onLoadStart={() => console.log('Image loading started')}
-            onLoad={() => console.log('Image loaded successfully')}
-            onError={(error) => console.error('Image load error:', error)}
           />
         );
       }
@@ -706,30 +688,22 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
 
     // Handle single image URL
     if (actualPost.imageUrl) {
-      console.log('🖼️ Rendering image from imageUrl:', actualPost.imageUrl);
       return (
         <Image
           source={{ uri: actualPost.imageUrl }}
           style={styles.media}
           resizeMode="cover"
-          onLoadStart={() => console.log('Image loading started')}
-          onLoad={() => console.log('Image loaded successfully')}
-          onError={(error) => console.error('Image load error:', error)}
         />
       );
     }
 
     // Handle thumbnail fallback
     if (post.thumbnail) {
-      console.log('🖼️ Rendering thumbnail:', post.thumbnail);
       return (
         <Image
           source={{ uri: post.thumbnail }}
           style={styles.media}
           resizeMode="cover"
-          onLoadStart={() => console.log('Thumbnail loading started')}
-          onLoad={() => console.log('Thumbnail loaded successfully')}
-          onError={(error) => console.error('Thumbnail load error:', error)}
         />
       );
     }
@@ -738,7 +712,7 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
     return (
       <View style={styles.textOnlyMedia}>
         <LinearGradient
-          colors={['#667eea', '#764ba2']}
+          colors={[COLORS.primaryDark, COLORS.primary, COLORS.electric]}
           style={styles.textOnlyGradient}
         >
           <Text style={styles.textOnlyEmoji}>{actualPost.emoji || '📝'}</Text>
@@ -764,28 +738,6 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
         onPress={handleScreenTap}
       >
         {renderMedia()}
-
-        {/* Fade any letterbox gap below the video into the dark theme (For You). */}
-        {videoBottomGap > 2 && (
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.85)', '#000']}
-            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: videoBottomGap + 160 }}
-            pointerEvents="none"
-          />
-        )}
-
-        {/* Dark gradient overlay for better text readability */}
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']}
-          style={styles.gradientOverlay}
-        />
-
-        {/* Center play indicator shown while the user has tapped to pause. */}
-        {paused && (
-          <View style={styles.pauseIndicator} pointerEvents="none">
-            <Icon name="play" size={76} color="rgba(255,255,255,0.9)" />
-          </View>
-        )}
       </TouchableOpacity>
 
       {/* Floating Heart Animation */}
@@ -826,41 +778,32 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
         </TouchableOpacity>
 
         <View style={styles.userPillWrap} pointerEvents="box-none">
-          <LinearGradient
-            colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.15)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.userInfoHighlight}
-          >
-            <TouchableOpacity style={styles.userPillRow} onPress={openCreatorProfile} activeOpacity={0.85}>
-              <Text style={styles.userPillName} allowFontScaling={false} numberOfLines={1}>
-                @{displayName}
-              </Text>
-              <View>
-                {actualPost.user?.avatar || actualPost.userPhotoURL ? (
-                  <Image
-                    source={{ uri: actualPost.user?.avatar || actualPost.userPhotoURL }}
-                    style={styles.userPillAvatar}
-                  />
-                ) : (
-                  <LinearGradient colors={['#667eea', '#764ba2']} style={styles.userPillAvatarFallback}>
-                    <Icon name="person" size={16} color="#fff" />
-                  </LinearGradient>
-                )}
-                {!isFollowing && !isOwnPost && (
-                  <TouchableOpacity
-                    style={styles.followBadge}
-                    onPress={(e) => { e?.stopPropagation?.(); handleFollow(); }}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
-                      <Icon name="add" size={12} color="#0A0A0C" />
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </TouchableOpacity>
-          </LinearGradient>
+          <TouchableOpacity style={styles.creatorPill} onPress={openCreatorProfile} activeOpacity={0.85}>
+            {actualPost.user?.avatar || actualPost.userPhotoURL ? (
+              <Image
+                source={{ uri: actualPost.user?.avatar || actualPost.userPhotoURL }}
+                style={styles.creatorAvatar}
+              />
+            ) : (
+              <LinearGradient colors={[COLORS.primary, COLORS.electric]} style={styles.creatorAvatarFallback}>
+                <Icon name="person" size={16} color="#0A0A0C" />
+              </LinearGradient>
+            )}
+            <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
+              @{displayName}
+            </Text>
+            {!isFollowing && !isOwnPost && (
+              <TouchableOpacity
+                style={styles.followBadge}
+                onPress={(e) => { e?.stopPropagation?.(); handleFollow(); }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
+                  <Icon name="add" size={12} color="#0A0A0C" />
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity
@@ -935,6 +878,16 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
               creatorId={actualPost.uid || actualPost.userId}
               creatorName={displayName}
               triggerVariant="feed"
+              giftCoins={Math.max(
+                Number(giftCoinsLocal) || 0,
+                Number(actualPost?.giftCoins) || 0,
+                Number(actualPost?.coinsReceived) || 0,
+              )}
+              onGiftSent={({ coinSpent }) => {
+                const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
+                if (spent <= 0) return;
+                setGiftCoinsLocal((prev) => Math.max(0, Number(prev) || 0) + spent);
+              }}
             />
           </View>
         </View>
@@ -968,7 +921,7 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   mediaContainer: {
     position: 'absolute',
@@ -978,6 +931,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: COLORS.pageBackground,
   },
   media: {
     // Fill the full-screen media container exactly like the For You feed does
@@ -1073,6 +1027,38 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginHorizontal: 10,
   },
+  creatorPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '100%',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,10,12,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.35)',
+  },
+  creatorAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+  },
+  creatorAvatarFallback: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creatorHandle: {
+    color: COLORS.white,
+    fontWeight: '800',
+    fontSize: 14,
+    maxWidth: 140,
+  },
   userInfoHighlight: {
     borderRadius: 9999,
     paddingHorizontal: 12,
@@ -1102,9 +1088,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   followBadge: {
-    position: 'absolute',
-    bottom: -5,
-    right: -5,
+    marginLeft: 2,
   },
   followBadgeInner: {
     width: 18,
@@ -1123,14 +1107,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.9)',
+    backgroundColor: 'rgba(10,10,12,0.82)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: 'rgba(0,210,190,0.28)',
     zIndex: 1200,
     elevation: 1200,
   },
   descriptionInfoChipText: {
-    color: COLORS.textSecondary,
+    color: COLORS.electric,
     fontSize: 12,
     fontWeight: '500',
   },
@@ -1142,7 +1126,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 16,
-    backgroundColor: 'rgba(15,23,42,0.75)',
+    backgroundColor: 'rgba(10,10,12,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     zIndex: 1200,
     elevation: 1200,
   },
@@ -1165,18 +1151,15 @@ const styles = StyleSheet.create({
   // ----- Bottom action row (identical to For You's profileMenuBar) -----
   actionRow: {
     position: 'absolute',
-    bottom: 80,
-    left: 10,
     right: 10,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    bottom: 88,
     zIndex: 1000,
+    elevation: 1000,
   },
   actionRowInner: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    gap: 15,
+    gap: 14,
   },
   actionButtonOuter: {
     alignItems: 'center',

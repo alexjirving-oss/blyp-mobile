@@ -18,7 +18,6 @@ const OUT_ICON = path.join(ROOT, 'assets', 'icon.png');
 const OUT_ADAPTIVE = path.join(ROOT, 'assets', 'adaptive-icon.png');
 const OUT_SPLASH = path.join(ROOT, 'assets', 'splash.png');
 const OUT_PLAY_ICON = path.join(ROOT, 'assets', 'play-store', 'icon-512.png');
-const OUT_PLAY_FEATURE = path.join(ROOT, 'assets', 'play-store', 'feature-graphic-1024x500.png');
 
 const NEAR_BLACK = '#0A0A0C';
 const WHITE = '#F5F5F7';
@@ -180,26 +179,9 @@ async function writeSplashAssets() {
 
 async function writePlayStoreAssets() {
   fs.mkdirSync(path.dirname(OUT_PLAY_ICON), { recursive: true });
+  // Final listing icon only here. Feature graphic is built by make-feature-graphic.js
+  // (premium atmosphere + hero wordmark — never includes testing badges).
   await sharp(OUT_ICON).resize(512, 512, { fit: 'fill' }).png().toFile(OUT_PLAY_ICON);
-
-  const tile = await sharp(OUT_ICON).resize(308, 308, { fit: 'fill' }).png().toBuffer();
-  const featureSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500">
-    <rect width="1024" height="500" fill="${NEAR_BLACK}"/>
-    <text x="456" y="210" font-family="Arial, Helvetica, sans-serif" font-weight="800"
-      font-size="72" letter-spacing="-2" fill="${WHITE}">blyp</text>
-    <circle cx="600" cy="188" r="14" fill="${TEAL}"/>
-    <text x="456" y="276" font-family="Arial, Helvetica, sans-serif" font-weight="600"
-      font-size="30" fill="#A1A1AA">Create · Discover · Go live</text>
-    <text x="456" y="326" font-family="Arial, Helvetica, sans-serif" font-weight="500"
-      font-size="22" fill="#71717A">Internal testing</text>
-  </svg>`);
-
-  await sharp(featureSvg)
-    .composite([{ input: tile, left: 96, top: 96 }])
-    .png()
-    .toFile(OUT_PLAY_FEATURE);
-
-  // Keep SVG sources in sync with the modern tile (Play Console still wants PNG).
   fs.writeFileSync(
     path.join(ROOT, 'assets', 'play-store', 'icon-512.svg'),
     `<?xml version="1.0" encoding="UTF-8"?>
@@ -211,26 +193,7 @@ async function writePlayStoreAssets() {
 </svg>
 `,
   );
-  fs.writeFileSync(
-    path.join(ROOT, 'assets', 'play-store', 'feature-graphic-1024x500.svg'),
-    `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
-  <rect width="1024" height="500" fill="${NEAR_BLACK}"/>
-  <rect x="96" y="96" width="308" height="308" rx="68" fill="${NEAR_BLACK}" stroke="${TEAL}" stroke-width="3"/>
-  <text x="140" y="280" font-family="Arial, Helvetica, sans-serif" font-weight="800"
-    font-size="96" letter-spacing="-4" fill="${WHITE}">blyp</text>
-  <circle cx="360" cy="268" r="14" fill="${TEAL}"/>
-  <text x="456" y="210" font-family="Arial, Helvetica, sans-serif" font-weight="800"
-    font-size="88" letter-spacing="-2" fill="${WHITE}">blyp</text>
-  <circle cx="612" cy="198" r="12" fill="${TEAL}"/>
-  <text x="456" y="276" font-family="Arial, Helvetica, sans-serif" font-weight="600"
-    font-size="30" fill="#A1A1AA">Create · Discover · Go live</text>
-  <text x="456" y="326" font-family="Arial, Helvetica, sans-serif" font-weight="500"
-    font-size="22" fill="#71717A">Internal testing</text>
-</svg>
-`,
-  );
-  console.log('wrote play-store icon-512 + feature-graphic');
+  console.log('wrote play-store icon-512 (run node scripts/make-feature-graphic.js for feature graphic)');
 }
 
 (async () => {

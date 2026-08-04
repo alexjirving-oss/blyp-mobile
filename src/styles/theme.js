@@ -62,6 +62,7 @@ export const COLORS = {
   divider: 'rgba(255,255,255,0.06)',
   cardGlass: '#121216',
   surface: '#141418',
+  surfaceAlt: '#1C1C22',
 };
 
 // Common spacing values

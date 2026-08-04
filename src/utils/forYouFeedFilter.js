@@ -34,9 +34,9 @@ export function isVideoWithSoundPost(post) {
   return true;
 }
 
-/** For You surfaces: liked videos with sound only. */
+/** For You surfaces: playable videos with sound. Likes boost ranking, not eligibility. */
 export function isForYouFeedPost(post) {
-  return isVideoWithSoundPost(post) && postLikeCount(post) > 0;
+  return isVideoWithSoundPost(post);
 }
 
 export function filterForYouPosts(posts) {

@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
   borderRadius: 8,
 },
   placeholderThumbnail: {
-  backgroundColor: '#374151',
+  backgroundColor: COLORS.surface,
   justifyContent: 'center',
   alignItems: 'center',
 },

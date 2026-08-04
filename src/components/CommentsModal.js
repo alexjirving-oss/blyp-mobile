@@ -1042,7 +1042,7 @@ const styles = StyleSheet.create({
   },
   commentInput: {
     flex: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: COLORS.surfaceAlt,
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 8,

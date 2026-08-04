@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   platformBadge: {
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.surface,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,

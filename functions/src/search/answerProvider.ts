@@ -20,8 +20,10 @@ export interface AnswerResult {
 
 const MODEL = process.env.BLYP_GEMINI_MODEL || 'gemini-1.5-flash';
 
-const PROMPT = (q: string) => `You are Blyp's search assistant. For the user query, respond ONLY with strict JSON:
+const PROMPT = (q: string, nowLocal: string) => `You are Blyp's search assistant. For the user query, respond ONLY with strict JSON:
 {"answer": string, "intent": "place"|"content"|"info", "related": string[], "placeName": string|null}
+Current local date and time: ${nowLocal}.
+Treat that timestamp as "now" / "today" for any time-sensitive question. Never invent an outdated year from training data when answering about the present.
 Rules:
 - "answer": at most TWO short sentences. Plain, factual, no fluff. It is SECONDARY text under the results.
 - "intent": "place" if they likely want a specific shop/business/venue (address, phone, website). "content" if they want videos/posts/people (e.g. "funny videos", "cooking"). "info" for factual questions/topics.
@@ -52,7 +54,7 @@ export async function answerProvider(query: string): Promise<AnswerResult> {
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal as any,
       body: JSON.stringify({
-        contents: [{ parts: [{ text: PROMPT(query) }] }],
+        contents: [{ parts: [{ text: PROMPT(query, new Date().toString()) }] }],
         generationConfig: { responseMimeType: 'application/json', maxOutputTokens: 512, temperature: 0.4 },
       }),
     }).finally(() => clearTimeout(timer));

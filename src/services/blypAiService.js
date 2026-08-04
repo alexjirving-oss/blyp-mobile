@@ -152,9 +152,13 @@ async function getAnswer(queryText, context = '', history = []) {
         `\n\nUse this context to resolve references like "it", "they", "that one" in the new question.`
       : '';
 
+  const nowLocal = new Date().toString();
   const prompt = `You are Blyp's assistant — a helpful, conversational AI like ChatGPT, living inside the Blyp app. A user typed this in:
 
 "${queryText}"${convo}${grounding}
+
+Current local date and time: ${nowLocal}.
+Treat that timestamp as "now" / "today" for any time-sensitive question (dates, schedules, "what day is it", news, sports fixtures). Never invent an outdated year from training data when answering about the present.
 
 Respond ONLY with a JSON object of this exact shape:
 {"answer": "<a genuinely helpful, conversational answer>", "intent": "<one of: place | content | info>", "place": "<if intent is place, the business/place name to look up, else empty>", "related": ["<follow-up>", "<follow-up>", "<follow-up>"]}

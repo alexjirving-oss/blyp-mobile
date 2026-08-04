@@ -8,7 +8,7 @@ import { decodeCursor, encodeCursor } from './cursor';
 import { findIapCatalogEntry } from './iapCatalog';
 import { emitGiftEvent, emitLiveGameEvent, emitGameEvent } from '../realtime/realtimeBus';
 import { applyReviveForReceiver, getRoom } from '../games/artillery/gameRoomService';
-import { getUserTeamForEarnings, mirrorTeamEarnings } from '../admin/firestoreAdmin';
+import { getUserTeamForEarnings, mirrorTeamEarnings, incrementPostGiftTotals } from '../admin/firestoreAdmin';
 import { getSessionById } from '../live/liveSessionStore';
 import { listGuests } from '../live/guestSlotStore';
 import { logger } from '../config/logger';
@@ -1464,6 +1464,24 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       logger.error(
         { err: e?.message || String(e), giftEventId: result.response.giftEventId },
         '[economy] applyTeamGiftBonus failed (non-fatal)'
+      );
+    }
+  }
+
+  // Feed/post gifts: mirror coin totals onto the Firestore post so the For You
+  // UI can show gifted coins next to likes. Skip when streamId is an active
+  // LIVE session (those already use stream_earnings + live summary).
+  if (result.kind === 'success' && result.response.coinSpent > 0) {
+    try {
+      const session = await getSessionById(streamId);
+      const isLiveRoom = !!session && session.status === 'LIVE';
+      if (!isLiveRoom) {
+        await incrementPostGiftTotals(streamId, result.response.coinSpent, result.response.gift.quantity || 1);
+      }
+    } catch (e: any) {
+      logger.warn(
+        { err: e?.message || String(e), streamId, giftEventId: result.response.giftEventId },
+        '[economy] incrementPostGiftTotals failed (non-fatal)',
       );
     }
   }
