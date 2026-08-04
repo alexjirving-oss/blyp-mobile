@@ -1148,11 +1148,39 @@ function AppInner() {
           case 'call': {
             const callId = parsed.path || parsed.query?.callId || parsed.query?.id;
             if (!callId) return;
+            const action = String(parsed.query?.action || '').toLowerCase();
+            if (action === 'decline') {
+              (async () => {
+                try {
+                  // eslint-disable-next-line global-require
+                  const { cancelIncomingCallNative } = require('./src/services/incomingCallNative');
+                  await cancelIncomingCallNative(callId);
+                } catch { }
+                try {
+                  let actorUid = firebaseAuth?.currentUser?.uid || null;
+                  if (!actorUid) {
+                    try {
+                      // eslint-disable-next-line global-require
+                      const { userPool } = require('./src/hooks/useCommon');
+                      actorUid = userPool?.getCurrentUser?.()?.getUsername?.() || null;
+                    } catch { }
+                  }
+                  if (!actorUid) return;
+                  // eslint-disable-next-line global-require
+                  const callService = require('./src/services/callService');
+                  await callService.declineCall(callId, actorUid);
+                } catch (e) {
+                  console.warn('[BLYP][DEEPLINK] decline failed', e?.message || String(e));
+                }
+              })();
+              return;
+            }
             navWhenReady('Call', {
               callId,
               role: 'callee',
               peerName: parsed.query?.peerName || parsed.query?.callerName || 'Incoming call',
               callerId: parsed.query?.callerId,
+              autoAnswer: action === 'answer',
             });
             return;
           }

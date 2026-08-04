@@ -33,29 +33,43 @@ function EnhancedVideo(props) {
     };
   }, []);
 
-  // Resolve URI through cache helper — but only once this item should load.
+  // Mount remote URL immediately when in range — never wait on a full download
+  // before the player exists (that made every scroll feel like a load).
   useEffect(() => {
     let cancelled = false;
 
     if (!shouldLoad) {
-      // Drop any decoded video so memory is reclaimed when scrolled away.
       setVideoLoaded(false);
       return () => {};
     }
 
-    async function resolveUri() {
-      if (!remoteUri) {
-        setPlayableUri(null);
-        setHasError(true);
-        return;
-      }
+    if (!remoteUri) {
+      setPlayableUri(null);
+      setHasError(true);
+      return () => {};
+    }
 
+    // Progressive stream first so the first frame can appear instantly.
+    setPlayableUri((prev) => prev || remoteUri);
+    setHasError(false);
+
+    (async () => {
       try {
         const resolved = await getPlayableVideoUri(remoteUri);
-        if (!cancelled) {
-          setPlayableUri(resolved || remoteUri);
-          setHasError(false);
-        }
+        if (cancelled || !resolved) return;
+        // Prefer cache hit when available, but never clear an already-mounted
+        // remote mid-play (would remount and stutter).
+        setPlayableUri((prev) => {
+          if (!prev) return resolved;
+          if (prev === resolved) return prev;
+          // Upgrade to local file only before first frame / while not focused.
+          if (!videoLoaded && !isFocused) return resolved;
+          if (prev.startsWith('http') && resolved.startsWith('file')) {
+            // Keep streaming remote for the active clip; local is for next time.
+            return prev;
+          }
+          return prev;
+        });
       } catch (error) {
         if (!cancelled) {
           if (__DEV__) {
@@ -65,9 +79,7 @@ function EnhancedVideo(props) {
           setHasError(false);
         }
       }
-    }
-
-    resolveUri();
+    })();
 
     return () => {
       cancelled = true;
@@ -210,7 +222,7 @@ function EnhancedVideo(props) {
         />
       )}
 
-      {/* Poster while loading or when this item isn't loading yet, if available */}
+      {/* Poster under the player until first frame — no blocking spinner gate. */}
       {(!videoLoaded || !shouldLoad) && !hasError && posterUri && (
         <Image
           source={{ uri: posterUri }}
@@ -219,8 +231,8 @@ function EnhancedVideo(props) {
         />
       )}
 
-      {/* Loading spinner only while an in-range video is actually loading */}
-      {shouldLoad && !videoLoaded && !hasError && (
+      {/* Soft spinner only when we have no poster to cover the wait. */}
+      {shouldLoad && !videoLoaded && !hasError && !posterUri && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator color="#00D2BE" />
         </View>

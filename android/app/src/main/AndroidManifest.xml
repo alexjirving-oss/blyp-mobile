@@ -72,5 +72,13 @@
       android:name="com.blyp.mobile.calls.IncomingCallForegroundService"
       android:exported="false"
       android:foregroundServiceType="mediaPlayback"/>
+    <receiver
+      android:name="com.blyp.mobile.calls.IncomingCallActionReceiver"
+      android:exported="false">
+      <intent-filter>
+        <action android:name="com.blyp.mobile.calls.ACTION_ANSWER"/>
+        <action android:name="com.blyp.mobile.calls.ACTION_DECLINE"/>
+      </intent-filter>
+    </receiver>
   </application>
 </manifest>

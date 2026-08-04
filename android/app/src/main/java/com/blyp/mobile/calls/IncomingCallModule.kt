@@ -7,9 +7,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
 import com.blyp.mobile.MainActivity
 import com.blyp.mobile.R
 import com.facebook.react.bridge.Promise
@@ -18,9 +21,8 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 /**
- * Full-screen incoming-call UI when the app may be backgrounded / locked.
- * Ringtone lives in [IncomingCallForegroundService] so Android does not kill
- * playback the moment FCM onMessageReceived returns.
+ * Messenger-style incoming call: full-screen intent + Answer/Decline actions.
+ * Ringtone lives in [IncomingCallForegroundService].
  */
 class IncomingCallModule(private val reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
@@ -47,6 +49,31 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  /** Android 14+: if FSI is blocked, open the system settings page once. */
+  @ReactMethod
+  fun ensureFullScreenIntentPermission(promise: Promise) {
+    try {
+      val ctx = reactContext.applicationContext
+      if (Build.VERSION.SDK_INT < 34) {
+        promise.resolve(true)
+        return
+      }
+      val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (nm.canUseFullScreenIntent()) {
+        promise.resolve(true)
+        return
+      }
+      val intent = Intent(
+        Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+        Uri.parse("package:${ctx.packageName}"),
+      ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      ctx.startActivity(intent)
+      promise.resolve(false)
+    } catch (e: Exception) {
+      promise.reject("fsi_failed", e.message, e)
+    }
+  }
+
   companion object {
     const val CHANNEL_ID = "blyp_calls"
     private const val NOTIF_BASE = 71001
@@ -54,7 +81,6 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
     fun ensureChannel(context: Context) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
       val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-      // Recreate if an older channel had an embedded ringtone (we own playback).
       val existing = mgr.getNotificationChannel(CHANNEL_ID)
       if (existing != null && existing.sound != null) {
         mgr.deleteNotificationChannel(CHANNEL_ID)
@@ -85,12 +111,17 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
     fun buildCallNotification(context: Context, callId: String, callerName: String): Notification {
       ensureChannel(context)
       val appCtx = context.applicationContext
+      val name = callerName.ifBlank { "Incoming call" }
+
+      val openUri = Uri.parse(
+        "blyp://call/$callId?action=open&peerName=${Uri.encode(name)}",
+      )
       val openIntent = Intent(appCtx, MainActivity::class.java).apply {
         action = Intent.ACTION_VIEW
-        data = android.net.Uri.parse("blyp://call/$callId")
+        data = openUri
         putExtra("callId", callId)
         putExtra("role", "callee")
-        putExtra("peerName", callerName)
+        putExtra("peerName", name)
         addFlags(
           Intent.FLAG_ACTIVITY_NEW_TASK or
             Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -103,10 +134,40 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
         openIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
-      return NotificationCompat.Builder(appCtx, CHANNEL_ID)
+
+      val answerIntent = Intent(appCtx, IncomingCallActionReceiver::class.java).apply {
+        action = IncomingCallActionReceiver.ACTION_ANSWER
+        putExtra(IncomingCallActionReceiver.EXTRA_CALL_ID, callId)
+        putExtra(IncomingCallActionReceiver.EXTRA_CALLER_NAME, name)
+      }
+      val answerPi = PendingIntent.getBroadcast(
+        appCtx,
+        callId.hashCode() + 11,
+        answerIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+
+      val declineIntent = Intent(appCtx, IncomingCallActionReceiver::class.java).apply {
+        action = IncomingCallActionReceiver.ACTION_DECLINE
+        putExtra(IncomingCallActionReceiver.EXTRA_CALL_ID, callId)
+        putExtra(IncomingCallActionReceiver.EXTRA_CALLER_NAME, name)
+      }
+      val declinePi = PendingIntent.getBroadcast(
+        appCtx,
+        callId.hashCode() + 17,
+        declineIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+
+      val caller = Person.Builder()
+        .setName(name)
+        .setImportant(true)
+        .build()
+
+      val builder = NotificationCompat.Builder(appCtx, CHANNEL_ID)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle("Incoming call")
-        .setContentText("$callerName is calling…")
+        .setContentText("$name is calling…")
         .setPriority(NotificationCompat.PRIORITY_MAX)
         .setCategory(NotificationCompat.CATEGORY_CALL)
         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -117,15 +178,24 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
         .setSound(null)
         .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500))
         .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        .build()
+        .setTimeoutAfter(60_000L)
+
+      try {
+        builder.setStyle(
+          NotificationCompat.CallStyle.forIncomingCall(caller, declinePi, answerPi),
+        )
+      } catch (_: Exception) {
+        builder
+          .addAction(0, "Decline", declinePi)
+          .addAction(0, "Answer", answerPi)
+      }
+
+      return builder.build()
     }
 
     fun show(context: Context, callId: String, callerName: String) {
       val name = callerName.ifBlank { "Incoming call" }
-      // Foreground service owns ringtone + sticky notification so a killed
-      // process keeps ringing after the FCM handler returns.
       IncomingCallForegroundService.start(context.applicationContext, callId, name)
-      // Also post the full-screen call notif (same id as FG) for lock-screen FSI.
       try {
         NotificationManagerCompat.from(context.applicationContext)
           .notify(notifIdPublic(callId), buildCallNotification(context, callId, name))

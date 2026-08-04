@@ -30,4 +30,15 @@ export async function cancelIncomingCallNative(callId) {
   }
 }
 
-export default { showIncomingCallNative, cancelIncomingCallNative };
+/** Prompt Android 14+ full-screen intent settings when blocked (Messenger-style). */
+export async function ensureFullScreenIntentPermission() {
+  if (Platform.OS !== 'android' || !Native?.ensureFullScreenIntentPermission) return true;
+  try {
+    return await Native.ensureFullScreenIntentPermission();
+  } catch (e) {
+    console.warn('[IncomingCall] FSI prompt failed', e?.message || String(e));
+    return false;
+  }
+}
+
+export default { showIncomingCallNative, cancelIncomingCallNative, ensureFullScreenIntentPermission };

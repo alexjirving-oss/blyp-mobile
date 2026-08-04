@@ -181,6 +181,22 @@ export async function registerForPush(uid) {
       // ignore
     }
     console.warn('[push] device registered'); // release-visible breadcrumb
+    try {
+      const promptedKey = 'blyp_fsi_prompted_v1';
+      const already = await AsyncStorage.getItem(promptedKey);
+      if (already !== '1') {
+        // eslint-disable-next-line global-require
+        const { ensureFullScreenIntentPermission } = require('./incomingCallNative');
+        const ok = await ensureFullScreenIntentPermission();
+        // Only mark done if already granted OR we opened settings.
+        await AsyncStorage.setItem(promptedKey, '1');
+        if (ok === false) {
+          console.warn('[push] full-screen intent settings opened (Android 14+)');
+        }
+      }
+    } catch {
+      // ignore
+    }
     return token;
   } catch (e) {
     console.warn('[push] registration failed', e?.message || String(e));

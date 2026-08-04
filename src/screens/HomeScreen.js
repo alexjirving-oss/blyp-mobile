@@ -1247,28 +1247,31 @@ const HomeScreen = ({ navigation, route }) => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
-    const nextIndex = current + 1;
+    // Prefetch next two clips to disk so swipe feels instant.
+    const targets = [current + 1, current + 2].filter((i) => i < (list?.length || 0));
 
-    if (!list || list.length === 0 || nextIndex >= list.length) {
+    if (!list || list.length === 0 || targets.length === 0) {
       return () => {
         isMounted = false;
       };
     }
 
-    const nextItem = list[nextIndex];
-    const isVideo = nextItem?.type === 'video' || nextItem?.media?.[0]?.type?.includes('video');
-    const nextUriCandidate = fixStorageUrl(nextItem?.videoUrl || nextItem?.media?.[0]?.url);
+    targets.forEach((nextIndex) => {
+      const nextItem = list[nextIndex];
+      const isVideo = nextItem?.type === 'video' || nextItem?.media?.[0]?.type?.includes('video');
+      const nextUriCandidate = fixStorageUrl(nextItem?.videoUrl || nextItem?.media?.[0]?.url);
 
-    if (
-      isVideo &&
-      nextUriCandidate &&
-      !prefetchingRef.current[nextUriCandidate] &&
-      !prefetchedUris[nextUriCandidate]
-    ) {
-      console.log('ðŸŽžï¸ HOME: Prefetching next video:', nextIndex);
+      if (
+        !isVideo ||
+        !nextUriCandidate ||
+        prefetchingRef.current[nextUriCandidate] ||
+        prefetchedUris[nextUriCandidate]
+      ) {
+        return;
+      }
+
       prefetchingRef.current[nextUriCandidate] = true;
-
-      getPlayableVideoUri(nextUriCandidate)
+      getPlayableVideoUri(nextUriCandidate, { waitForDownload: true })
         .then((playableUri) => {
           if (!isMounted) return;
           setPrefetchedUris((prev) => {
@@ -1276,13 +1279,12 @@ const HomeScreen = ({ navigation, route }) => {
             return { ...prev, [nextUriCandidate]: playableUri };
           });
         })
-        .catch((error) => {
+        .catch(() => {
           if (isMounted) {
-            console.log('âŒ HOME: Error prefetching video:', error);
             prefetchingRef.current[nextUriCandidate] = false;
           }
         });
-    }
+    });
 
     return () => {
       isMounted = false;
@@ -1416,7 +1418,7 @@ const HomeScreen = ({ navigation, route }) => {
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
                 <PremiumFeedVideo
-                  uri={videoUri}
+                  uri={cachedUri || videoUri}
                   poster={item.thumbnail || item.imageUrl || item.user?.avatar}
                   style={StyleSheet.absoluteFill}
                   shouldPlay={isDiscoverItemActive(index)}
@@ -1804,10 +1806,10 @@ const HomeScreen = ({ navigation, route }) => {
               snapToAlignment="start"
               decelerationRate="fast"
               removeClippedSubviews
-              maxToRenderPerBatch={1}
-              windowSize={2}
-              initialNumToRender={1}
-              updateCellsBatchingPeriod={100}
+              maxToRenderPerBatch={2}
+              windowSize={5}
+              initialNumToRender={2}
+              updateCellsBatchingPeriod={50}
               getItemLayout={(data, index) => ({
                 length: feedHeight,
                 offset: feedHeight * index,

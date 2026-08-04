@@ -220,6 +220,7 @@ const CallScreen = ({ route, navigation }) => {
   const params = route?.params || {};
   const callId = String(params.callId || '');
   const initialRole = params.role === 'callee' ? 'callee' : 'caller';
+  const autoAnswer = !!params.autoAnswer;
   const peerName = String(
     params.peerName || params.otherName || params.calleeName || params.callerName || 'Blyp user',
   );
@@ -434,6 +435,19 @@ const CallScreen = ({ route, navigation }) => {
       answeredRef.current = false;
     }
   }, [callId, uid, stopAllRinging]);
+
+  // Messenger-style: Answer on the notification opens Call with autoAnswer.
+  useEffect(() => {
+    if (!autoAnswer) return undefined;
+    if (initialRole !== 'callee') return undefined;
+    if (answeredRef.current) return undefined;
+    if (status !== 'ringing') return undefined;
+    if (!uid || !callId) return undefined;
+    const t = setTimeout(() => {
+      handleAccept().catch(() => {});
+    }, 250);
+    return () => clearTimeout(t);
+  }, [autoAnswer, initialRole, status, uid, callId, handleAccept]);
 
   const statusLabel = useMemo(() => {
     if (mediaState === 'error') return mediaError || 'Connection error';
