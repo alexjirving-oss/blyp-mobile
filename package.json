@@ -17,7 +17,7 @@
     "verify:live": "node scripts/verified-forward-gate.js --live-only",
     "test:hooks": "powershell -ExecutionPolicy Bypass -File tools/agent/test-hooks.ps1",
     "test:acceptance": "powershell -ExecutionPolicy Bypass -File tools/agent/acceptance.ps1",
-    "lint": "eslint .",
+    "lint": "npx eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "test": "jest",
