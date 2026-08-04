@@ -382,6 +382,8 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("com.android.billingclient:billing-ktx:7.1.1")
+    // Explicit so BlypCallMessagingService can compile (Expo only brings this transitively).
+    implementation("com.google.firebase:firebase-messaging:24.1.1")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
