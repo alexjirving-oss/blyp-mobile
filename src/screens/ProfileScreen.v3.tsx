@@ -44,6 +44,9 @@ import {
   normalizeProfileCategories,
 } from '../utils/profileCategories';
 
+type ProfileCategory = { id: string; label: string; order: number };
+type ProfileCategoryChip = { id: string; label: string; count: number };
+
 type StatBundle = {
   followers: number;
   following: number;
@@ -809,12 +812,14 @@ const ProfileScreenV3: React.FC = () => {
   }, [onEditProfile]);
 
   const profileCategories = useMemo(
-    () => normalizeProfileCategories(profile?.profileCategories),
+    (): ProfileCategory[] =>
+      normalizeProfileCategories(profile?.profileCategories) as ProfileCategory[],
     [profile?.profileCategories],
   );
 
   const categoryChips = useMemo(
-    () => buildProfileCategoryChips(profileCategories, userPosts),
+    (): ProfileCategoryChip[] =>
+      buildProfileCategoryChips(profileCategories, userPosts) as ProfileCategoryChip[],
     [profileCategories, userPosts],
   );
 
@@ -1167,7 +1172,7 @@ const ProfileScreenV3: React.FC = () => {
                 <View style={styles.divider} />
 
                 <ProfileCategoryChips
-                  chips={categoryChips}
+                  chips={categoryChips as any}
                   selectedId={selectedCategoryId}
                   onSelect={setSelectedCategoryId}
                   showManage
@@ -1227,8 +1232,8 @@ const ProfileScreenV3: React.FC = () => {
             visible={manageCategoriesVisible}
             onClose={() => setManageCategoriesVisible(false)}
             userId={uid}
-            initialCategories={profileCategories}
-            onSaved={(next) => {
+            initialCategories={profileCategories as any}
+            onSaved={(next: ProfileCategory[]) => {
               setProfile((prev: any) => ({ ...(prev || {}), profileCategories: next }));
             }}
           />

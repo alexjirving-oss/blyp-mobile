@@ -98,7 +98,7 @@ android {
         applicationId 'com.blyp.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2026310279
+        versionCode 2026310663
         versionName "1.0.16"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
@@ -270,7 +270,7 @@ afterEvaluate {
                         'Local device release requires BLYP_ALLOW_DEBUG_SIGNED_RELEASE=1 (debug-signed APK for adb only).'
                 )
             }
-            println 'INFO: BLYP_LOCAL_DEVICE_RELEASE Ã¢â‚¬â€ assembleRelease for adb smoke (skips canonical Play gates).'
+            println 'INFO: BLYP_LOCAL_DEVICE_RELEASE ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â assembleRelease for adb smoke (skips canonical Play gates).'
             return
         }
 
@@ -283,7 +283,7 @@ afterEvaluate {
 
         // Internal EAS APK profiles are device-smoke builds, not Play-upload candidates.
         if (easBuildProfile == 'preview' || easBuildProfile == 'preview-staging') {
-            println "INFO: EAS profile '${easBuildProfile}' Ã¢â‚¬â€ skipping canonical Play release gates."
+            println "INFO: EAS profile '${easBuildProfile}' ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â skipping canonical Play release gates."
             return
         }
 

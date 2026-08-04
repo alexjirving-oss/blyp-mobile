@@ -93,7 +93,7 @@ const getGemPackages = () => [
   }
 ];
 
-const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
+const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
   const insets = useSafeAreaInsets?.() || { top: 0, bottom: 0, left: 0, right: 0 };
   const scrollRef = useRef(null);
   const packagesSectionYRef = useRef(0);
