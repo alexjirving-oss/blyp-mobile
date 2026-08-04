@@ -8,17 +8,39 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.callOpenAiAsGemini = exports.shouldUseOpenAiFallback = exports.openAiToGeminiResponse = exports.geminiBodyToOpenAiMessages = exports.hasOpenAiFallback = void 0;
+exports.callOpenAiAsGemini = exports.shouldUseOpenAiFallback = exports.openAiToGeminiResponse = exports.geminiBodyToOpenAiMessages = exports.canUseOpenAiForBody = exports.hasOpenAiFallback = void 0;
 const node_fetch_1 = __importDefault(require("node-fetch"));
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 function openaiKey() {
     return String(process.env.OPENAI_API_KEY || process.env.BLYP_OPENAI_API_KEY || '').trim();
 }
+function bodyHasAudio(body) {
+    const contents = body === null || body === void 0 ? void 0 : body.contents;
+    if (!Array.isArray(contents))
+        return false;
+    for (const content of contents) {
+        const parts = content === null || content === void 0 ? void 0 : content.parts;
+        if (!Array.isArray(parts))
+            continue;
+        for (const part of parts) {
+            const inline = (part === null || part === void 0 ? void 0 : part.inlineData) || (part === null || part === void 0 ? void 0 : part.inline_data);
+            const mime = String((inline === null || inline === void 0 ? void 0 : inline.mimeType) || (inline === null || inline === void 0 ? void 0 : inline.mime_type) || '').toLowerCase();
+            if (mime.startsWith('audio/'))
+                return true;
+        }
+    }
+    return false;
+}
 function hasOpenAiFallback() {
     return openaiKey().length > 0;
 }
 exports.hasOpenAiFallback = hasOpenAiFallback;
+/** OpenAI chat.completions cannot consume Gemini audio inline parts — skip it. */
+function canUseOpenAiForBody(body) {
+    return hasOpenAiFallback() && !bodyHasAudio(body);
+}
+exports.canUseOpenAiForBody = canUseOpenAiForBody;
 function partsToOpenAiContent(parts) {
     if (!Array.isArray(parts) || parts.length === 0)
         return '';

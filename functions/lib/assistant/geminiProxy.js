@@ -5,11 +5,12 @@
  * Keeps provider API keys server-side. Client still posts Gemini-shaped
  * generateContent bodies; responses stay Gemini-shaped so parsers are unchanged.
  *
- * Primary: OpenAI (OPENAI_API_KEY / BLYP_OPENAI_API_KEY)
- * Backup:  Gemini when OpenAI is missing or fails
+ * Primary: OpenAI for text/image (OPENAI_API_KEY / BLYP_OPENAI_API_KEY)
+ * Audio/STT: Gemini only (OpenAI chat path cannot consume Gemini audio parts)
+ * Backup: Gemini when OpenAI is missing or fails
  *
  * POST (Bearer Firebase ID token)
- *   ?model=<allowlisted gemini model>  (used only for Gemini backup path)
+ *   ?model=<allowlisted gemini model>  (used only for Gemini path)
  *   body: { contents, generationConfig, ... }
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -170,8 +171,10 @@ exports.geminiProxy = functions
         res.set('X-Blyp-AI-Provider', provider);
         res.send(payload);
     };
-    // --- Primary: OpenAI ---
-    if ((0, openaiFallback_1.hasOpenAiFallback)()) {
+    // OpenAI for text/image only. Audio STT must use Gemini — openaiFallback
+    // maps every inline part to image_url, which drops voice and shows up as
+    // "Couldn't hear you" on the Blyp home mic.
+    if ((0, openaiFallback_1.canUseOpenAiForBody)(body)) {
         const primary = await (0, openaiFallback_1.callOpenAiAsGemini)(body);
         if (primary.status >= 200 && primary.status < 300) {
             send(200, primary.body, 'openai');
@@ -188,14 +191,18 @@ exports.geminiProxy = functions
                 send(backup.status, backup.body, 'gemini');
                 return;
             }
-            // Prefer returning OpenAI's error (billing/quota) when both fail.
             send(primary.status || backup.status, primary.body || backup.body, 'openai');
             return;
         }
         send(primary.status, primary.body, 'openai');
         return;
     }
-    // --- No OpenAI key: Gemini only ---
+    if ((0, openaiFallback_1.hasOpenAiFallback)()) {
+        console.log('[geminiProxy] audio payload — Gemini path (OpenAI cannot STT this shape)', {
+            uid,
+            model,
+        });
+    }
     if (!geminiKey) {
         res.status(503).json({ error: { message: 'ai_unavailable' } });
         return;

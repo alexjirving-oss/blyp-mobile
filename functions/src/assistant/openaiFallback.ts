@@ -36,8 +36,28 @@ function openaiKey(): string {
   return String(process.env.OPENAI_API_KEY || process.env.BLYP_OPENAI_API_KEY || '').trim();
 }
 
+function bodyHasAudio(body: GeminiBody | any): boolean {
+  const contents = body?.contents;
+  if (!Array.isArray(contents)) return false;
+  for (const content of contents) {
+    const parts = content?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      const inline: any = part?.inlineData || part?.inline_data;
+      const mime = String(inline?.mimeType || inline?.mime_type || '').toLowerCase();
+      if (mime.startsWith('audio/')) return true;
+    }
+  }
+  return false;
+}
+
 export function hasOpenAiFallback(): boolean {
   return openaiKey().length > 0;
+}
+
+/** OpenAI chat.completions cannot consume Gemini audio inline parts — skip it. */
+export function canUseOpenAiForBody(body: GeminiBody | any): boolean {
+  return hasOpenAiFallback() && !bodyHasAudio(body);
 }
 
 function partsToOpenAiContent(parts: GeminiPart[] | undefined): any {

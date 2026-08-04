@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "id": "voice-stt-and-bg-calls-20260804",
+  "title": "Voice STT + background incoming calls",
+  "objective": "Blyp home voice bar returns real transcripts/results instead of 'Couldn't hear you'. Incoming audio calls ring with full-screen notification when the app is backgrounded or killed, not only while the callee has Blyp open.",
+  "baseRef": "HEAD",
+  "acceptanceCriteria": [
+    "geminiProxy routes audio/STT payloads to Gemini (never OpenAI image_url mapping).",
+    "Android ships BlypCallMessagingService and call FCM is data-only high-priority so native IncomingCallModule can run when JS is dead.",
+    "Home voice failure messages distinguish auth/quota/empty-audio instead of a single opaque phrase.",
+    "Play AAB is built from committed sources at a new versionCode after these fixes."
+  ],
+  "allowedPaths": [
+    "src/**",
+    "android/**",
+    "functions/**",
+    "__tests__/**",
+    "tools/release/**",
+    "tools/accountability/contracts/**"
+  ],
+  "forbiddenPaths": [
+    ".cursor/**",
+    ".accountability/**",
+    "tools/accountability/src/**",
+    ".github/**"
+  ],
+  "verification": [
+    {
+      "id": "functions-build",
+      "runner": "npm",
+      "args": ["--prefix", "functions", "run", "build"],
+      "timeoutMs": 300000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    }
+  ],
+  "swarm": {
+    "defaultModel": "auto",
+    "maxParallelAgents": 2,
+    "maxRepairAttempts": 1,
+    "agentTimeoutMs": 1800000,
+    "analysts": [
+      {
+        "id": "requirements-analyst",
+        "responsibility": "Confirm voice STT and background-call requirements are observable and complete.",
+        "required": true
+      }
+    ],
+    "builders": [
+      {
+        "id": "builder-a",
+        "responsibility": "Implement STT routing and native FCM call wake path.",
+        "required": true
+      }
+    ],
+    "reviewers": [
+      {
+        "id": "reviewer-a",
+        "responsibility": "Read-only review that the claimed root causes are actually fixed in the candidate.",
+        "required": true
+      }
+    ]
+  }
+}

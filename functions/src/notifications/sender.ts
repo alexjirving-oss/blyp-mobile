@@ -76,24 +76,15 @@ export async function sendToUser(userId: string, payload: SendPayload): Promise<
 
   const message: admin.messaging.MulticastMessage = isCall
     ? {
+        // DATA-ONLY + high priority so Android wakes our MessagingService when
+        // the app is backgrounded/killed. A `notification` block would be
+        // displayed by the OS without running native code (no full-screen ring).
         tokens,
         data,
         android: {
           priority: 'high',
           ttl: 60 * 1000,
           collapseKey: payload.collapseKey,
-          notification: {
-            channelId: 'blyp_calls',
-            sound: 'blyp_notify',
-            priority: 'max',
-            visibility: 'public',
-            defaultVibrateTimings: true,
-            title: payload.title,
-            body: payload.body,
-            // Sticky-ish until answered — OS may still auto-dismiss.
-            sticky: true,
-            tag: payload.collapseKey || data.callId || 'blyp_call',
-          },
         },
         apns: {
           headers: {
@@ -105,8 +96,8 @@ export async function sendToUser(userId: string, payload: SendPayload): Promise<
             aps: {
               alert: { title: payload.title, body: payload.body },
               sound: 'blyp_notify.wav',
-              // Interruption level for loud ring when possible (iOS 15+).
               'interruption-level': 'time-sensitive',
+              contentAvailable: true,
             },
             ...data,
           },

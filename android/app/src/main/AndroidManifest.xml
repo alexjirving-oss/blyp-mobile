@@ -54,5 +54,14 @@
         <action android:name="android.service.notification.NotificationListenerService"/>
       </intent-filter>
     </service>
+    <!-- Prefer our call handler over Expo's default FCM service for MESSAGING_EVENT. -->
+    <service
+      android:name="com.blyp.mobile.calls.BlypCallMessagingService"
+      android:exported="false"
+      android:directBootAware="true">
+      <intent-filter android:priority="999">
+        <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+      </intent-filter>
+    </service>
   </application>
 </manifest>

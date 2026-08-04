@@ -515,12 +515,20 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       const clean = String(text || '').trim();
       // The service returns bracketed tokens (e.g. [NO_KEY]) on failure.
       if (!clean || clean.startsWith('[')) {
-        setWatchNotice("Couldn't hear that clearly — try again.");
+        if (clean.includes('402') || clean.includes('subscription')) {
+          setWatchNotice('Voice search needs an active trial or Blyp Plus.');
+        } else if (clean.includes('NO_KEY') || clean.includes('503')) {
+          setWatchNotice('Voice is temporarily offline — type your search instead.');
+        } else if (clean.includes('READ_FAIL') || !uri) {
+          setWatchNotice("Couldn't catch that — hold the mic a moment longer and try again.");
+        } else {
+          setWatchNotice("Couldn't hear that clearly — try speaking again, or type it.");
+        }
         return;
       }
       // Always put the spoken text into the search bar first.
       setQueryText(clean);
-      // Then run the same path as typing + submit (reminders stay here; else open Blyp).
+      // Then run the same path as typing + submit (reminders stay here; else open Search).
       await handleQuery(clean);
     } catch (e) {
       console.warn('[home] voice failed', e?.message || String(e));
