@@ -196,11 +196,11 @@ const CreatePostButton = () => {
                 style={[styles.menuItem, { marginTop: 4 }]}
                 onPress={() => {
                   setShowMenu(false);
-                  navigation.navigate('ArtilleryGame');
+                  navigation.navigate('Games');
                 }}
               >
                 <View style={[styles.menuItemGradient, { backgroundColor: '#00D2BE' }]}>
-                  <Text style={[styles.menuItemTextMain, { color: COLORS.black }]}>Blyp Artillery</Text>
+                  <Text style={[styles.menuItemTextMain, { color: COLORS.black }]}>Games — Coming soon</Text>
                 </View>
               </TouchableOpacity>
             )}

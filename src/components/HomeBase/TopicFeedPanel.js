@@ -20,6 +20,7 @@ import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import { getTopicPosts } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
+import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
 
 const TopicFeedPanel = ({ navigation, label }) => {
   const [posts, setPosts] = useState([]);
@@ -44,7 +45,7 @@ const TopicFeedPanel = ({ navigation, label }) => {
     load();
   }, [load]);
 
-  const openPost = (post) => navigation.navigate('MediaViewer', { post });
+  const openPost = (post) => navigation.navigate('MediaViewer', mediaViewerParams(post, posts));
   const openBlyp = () => navigation.navigate('Blyp', { initialQuery: label });
 
   const renderItem = ({ item }) => {

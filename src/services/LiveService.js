@@ -94,8 +94,12 @@ export async function ensureUserProfile({ userId, displayName, photoURL, email, 
 
   const finalUsername = (() => {
     if (typeof username !== 'string') return null;
-    const s = username.trim();
-    return s ? s : null;
+    const s = username.trim().replace(/^@/, '');
+    if (!s) return null;
+    // Never persist Cognito opaque ids / uuids as Blyp screen names.
+    if (isPlaceholderName(s, userId)) return null;
+    if (!/^[A-Za-z0-9_.]{3,20}$/.test(s)) return null;
+    return s;
   })();
 
   const finalPhotoURL = (() => {
@@ -138,8 +142,21 @@ export async function ensureUserProfile({ userId, displayName, photoURL, email, 
     finalDisplayName = existingDisplayName;
   } else {
     const incoming = typeof displayName === 'string' ? displayName.trim() : '';
-    finalDisplayName = incoming || finalUsername || emailPrefix || userId;
+    const safeIncoming = incoming && !isPlaceholderName(incoming, userId) ? incoming : '';
+    const safeUser = finalUsername || '';
+    const safeEmail = emailPrefix && !isPlaceholderName(emailPrefix, userId) ? emailPrefix : '';
+    // Never fall back to raw uid as displayName — that made Profile show a UUID.
+    finalDisplayName = safeIncoming || safeUser || safeEmail || 'User';
   }
+
+  // Also repair an existing username that is an opaque Cognito id.
+  const existingUsernameRaw = typeof existing.username === 'string' ? existing.username.trim() : '';
+  const existingHandleRaw = typeof existing.handle === 'string' ? existing.handle.trim() : '';
+  const existingUsernameBad =
+    (existingUsernameRaw && isPlaceholderName(existingUsernameRaw, userId)) ||
+    (existingHandleRaw && isPlaceholderName(existingHandleRaw, userId));
+  // undefined = leave alone; null = clear bad value; string = set
+  const usernameToWrite = finalUsername || (existingUsernameBad ? null : undefined);
 
   // Only write when something actually changed (or the doc doesn't exist yet).
   // This avoids bumping `updatedAt` on every login, which previously churned any
@@ -151,7 +168,8 @@ export async function ensureUserProfile({ userId, displayName, photoURL, email, 
     !snapExists(snap) ||
     existing.sub !== userId ||
     existing.displayName !== finalDisplayName ||
-    (!!finalUsername && existing.username !== finalUsername) ||
+    (usernameToWrite !== undefined && existing.username !== usernameToWrite) ||
+    (usernameToWrite !== undefined && existing.handle !== usernameToWrite) ||
     (finalPhotoURL !== undefined && existing.photoURL !== finalPhotoURL) ||
     (finalEmail !== undefined && existing.email !== finalEmail) ||
     (finalBirthdate !== undefined && existing.birthdate !== finalBirthdate) ||
@@ -162,7 +180,9 @@ export async function ensureUserProfile({ userId, displayName, photoURL, email, 
       {
         sub: userId,
         displayName: finalDisplayName,
-        ...(finalUsername ? { username: finalUsername } : {}),
+        ...(usernameToWrite !== undefined
+          ? { username: usernameToWrite, handle: usernameToWrite }
+          : {}),
         ...(finalPhotoURL !== undefined ? { photoURL: finalPhotoURL } : {}),
         ...(finalEmail !== undefined ? { email: finalEmail } : {}),
         ...(finalBirthdate !== undefined ? { birthdate: finalBirthdate } : {}),

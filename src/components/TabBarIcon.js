@@ -8,6 +8,8 @@ const iconMap = {
   'game-controller': Icons.Gamepad2 || Icons.Gamepad,
   'paper-plane': Icons.Send,
   person: Icons.User,
+  chatbubbles: Icons.MessagesSquare || Icons.MessageCircle,
+  call: Icons.Phone,
 };
 
 const TabBarIcon = ({ name, color, size = 24, badge, focused = false }) => {

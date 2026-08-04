@@ -22,6 +22,7 @@ export default function PremiumFeedVideo({
   isLooping = true,
   paused = false,
   showChrome = true,
+  mediaDisplay = null,
   onNaturalSize,
   onError,
   onReady,
@@ -32,8 +33,14 @@ export default function PremiumFeedVideo({
   const pauseOpacity = useRef(new Animated.Value(0)).current;
   const playing = shouldPlay && !paused;
 
-  const isWide = aspect > 1.15;
-  const resizeMode = isWide ? 'contain' : 'cover';
+  const fitMode = mediaDisplay?.fitMode;
+  const userScale = Math.min(2.5, Math.max(1, Number(mediaDisplay?.scale) || 1));
+  const offsetX = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetX) || 0));
+  const offsetY = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetY) || 0));
+  const hasCustomFit = fitMode === 'cover' || fitMode === 'contain';
+
+  const isWide = !hasCustomFit && aspect > 1.15;
+  const resizeMode = hasCustomFit ? fitMode : isWide ? 'contain' : 'cover';
 
   useEffect(() => {
     Animated.timing(pauseOpacity, {
@@ -67,6 +74,7 @@ export default function PremiumFeedVideo({
   );
 
   const fillStyle = useMemo(() => {
+    if (hasCustomFit) return StyleSheet.absoluteFill;
     if (!isWide || !(aspect > 0)) return StyleSheet.absoluteFill;
     // Wide landscape: pin to top at natural aspect; letterbox sits below.
     return {
@@ -77,11 +85,19 @@ export default function PremiumFeedVideo({
       width: '100%',
       aspectRatio: aspect,
     };
-  }, [isWide, aspect]);
+  }, [hasCustomFit, isWide, aspect]);
+
+  const framingTransform = useMemo(() => {
+    if (!mediaDisplay) return null;
+    const tx = offsetX * 40;
+    const ty = offsetY * 40;
+    if (userScale === 1 && tx === 0 && ty === 0) return null;
+    return [{ translateX: tx }, { translateY: ty }, { scale: userScale }];
+  }, [mediaDisplay, offsetX, offsetY, userScale]);
 
   return (
     <View style={[styles.root, style]}>
-      <View style={isWide && aspect > 0 ? fillStyle : styles.videoHost}>
+      <View style={[isWide && aspect > 0 && !hasCustomFit ? fillStyle : styles.videoHost, framingTransform ? { transform: framingTransform } : null]}>
         <EnhancedVideo
           uri={uri}
           poster={poster}

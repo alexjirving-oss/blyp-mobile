@@ -18,13 +18,15 @@ import {
 import { useAuth } from '../hooks/useCommon';
 import { requireAccount } from '../services/guestSessionService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { launchAndroidPurchase, consumePurchase, getAndroidProductDetails, queryPurchases } from '../services/AndroidPlayBillingService';
+import { launchAndroidPurchase, consumePurchase, getAndroidProductDetails } from '../services/AndroidPlayBillingService';
+import { recoverPendingAndroidIapPurchases } from '../utils/recoverPendingAndroidIap';
 import {
   ENABLE_PURCHASES,
   ENABLE_WITHDRAWALS,
   isClientEconomyMutationAllowed,
   shouldUseServerValidation
 } from '../config/economyModel';
+import { emitWalletUpdated, subscribeWalletUpdated } from '../utils/walletEvents';
 
 const { width } = Dimensions.get('window');
 
@@ -207,6 +209,13 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
   };
 
   useEffect(() => {
+    return subscribeWalletUpdated((snap) => {
+      if (snap?.coins != null && Number.isFinite(snap.coins)) setBalance(snap.coins);
+      if (snap?.gems != null && Number.isFinite(snap.gems)) setGemBalance(snap.gems);
+    });
+  }, []);
+
+  useEffect(() => {
     loadBalance();
 
     if (!uid) return;
@@ -215,7 +224,7 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
       refreshLiveWallet();
       liveInterval = setInterval(() => {
         refreshLiveWallet();
-      }, 5000);
+      }, 15000);
     }
 
     return () => {
@@ -248,12 +257,8 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
     };
   }, [purchasableCoinPackages]);
 
-  // Recover any owned-but-ungranted Google Play purchases. A purchase whose
-  // backend verification failed (e.g. transient outage) stays owned and
-  // UN-consumed on the device; without this it would (a) never grant coins and
-  // (b) block re-buying the same SKU with Google's "item already owned" error.
-  // On open we re-verify each owned coin-pack purchase, then consume it. The
-  // backend dedupes on the purchase token, so this can never double-grant.
+  // Recover any owned-but-ungranted Google Play purchases. Shared helper also
+  // runs from the header on foreground so purchases credit without opening store.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     if (!ENABLE_PURCHASES) return;
@@ -262,40 +267,8 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
     let cancelled = false;
     (async () => {
       try {
-        const validSkus = new Set(
-          packages.map((p) => String(p?.sku || '').trim()).filter((s) => s.length > 0)
-        );
-        const owned = await queryPurchases();
-        if (cancelled || !Array.isArray(owned) || owned.length === 0) return;
-
-        let recoveredAny = false;
-        for (const p of owned) {
-          if (cancelled) break;
-          const sku = String(p?.productId || '').trim();
-          const token = String(p?.purchaseToken || '').trim();
-          // purchaseState 1 === PURCHASED (Google Play Billing).
-          if (!sku || !token || !validSkus.has(sku) || Number(p?.purchaseState) !== 1) continue;
-
-          try {
-            await verifyAndroidIapPurchase({
-              idempotencyKey: `iap-android:${sku}:${token}`,
-              platform: 'ANDROID',
-              sku,
-              storeTransactionId: token,
-              purchaseToken: token,
-            });
-            // Granted (or idempotent replay) — safe to consume so it can be re-bought.
-            await consumePurchase(token);
-            recoveredAny = true;
-          } catch (err) {
-            // Leave unconsumed so a later open can retry once the backend is healthy.
-            console.warn('[COIN_STORE] purchase recovery failed', sku, err?.message || String(err));
-          }
-        }
-
-        if (recoveredAny && !cancelled) {
-          await refreshLiveWallet();
-        }
+        const recovered = await recoverPendingAndroidIapPurchases();
+        if (recovered && !cancelled) await refreshLiveWallet();
       } catch (e) {
         console.warn('[COIN_STORE] purchase recovery sweep failed', e?.message || String(e));
       }
@@ -304,7 +277,7 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
     return () => {
       cancelled = true;
     };
-  }, [uid, authReady, isAuthenticated, packages]);
+  }, [uid, authReady, isAuthenticated]);
 
   useEffect(() => {
     if (!scrollToPackagesOnMount) return;
@@ -485,8 +458,11 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
 
       const wallet = verification?.wallet;
       if (wallet) {
-        setBalance(Number(wallet.coinBalance || 0) + Number(wallet.bonusCoinBalance || 0));
-        setGemBalance(Number(wallet.gemAvailable || 0) + Number(wallet.gemPending || 0));
+        const nextCoins = Number(wallet.coinBalance || 0) + Number(wallet.bonusCoinBalance || 0);
+        const nextGems = Number(wallet.gemAvailable || 0) + Number(wallet.gemPending || 0);
+        setBalance(nextCoins);
+        setGemBalance(nextGems);
+        emitWalletUpdated(wallet);
       } else {
         await refreshLiveWallet();
       }

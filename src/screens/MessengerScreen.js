@@ -48,7 +48,6 @@ import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messagi
 import { subscribeNotifications, markNotificationRead } from '../services/notificationsInboxService';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { theme as blypTheme } from '../styles/blypTheme';
-import { startCall as startAudioCall } from '../services/callService';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -433,7 +432,10 @@ const MessengerScreen = ({ navigation }) => {
       subs.push(loadChats());
       subs.push(loadFollowingUsers());
       subs.push(loadAllUsers());
-      subs.push(loadCalls());
+      // Calls tab is Coming Soon — skip live call history subscription.
+      setCalls([]);
+      setCallsLoading(false);
+      setCallsError(null);
       subs.push(loadStatuses());
       loadBalances();
     };
@@ -461,7 +463,7 @@ const MessengerScreen = ({ navigation }) => {
       console.log('ðŸ§¹ MESSENGER: Cleaning up Firebase listeners');
       subs.forEach((unsub) => { if (typeof unsub === 'function') unsub(); });
     };
-  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadCalls, loadStatuses, loadBalances]);
+  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadStatuses, loadBalances]);
 
   // Update unread count manager when total count changes
   useEffect(() => {
@@ -989,7 +991,7 @@ const MessengerScreen = ({ navigation }) => {
   const renderHeader = () => (
     <BlypHeaderFlow
       tabs={[
-        { key: 'chats', label: 'Chats' },
+        { key: 'chats', label: 'Messages' },
         { key: 'calls', label: 'Calls' },
         { key: 'notifications', label: 'Notifications' },
         { key: 'groups', label: 'Groups' },
@@ -1122,191 +1124,12 @@ const MessengerScreen = ({ navigation }) => {
         );
 
       case 'calls':
-        if (callsLoading) {
-          return (
-            <View style={styles.loadingContainer}>
-              <Icon name="time-outline" size={48} color={T.textDisabled} />
-              <Text style={styles.loadingText}>Loading calls...</Text>
-            </View>
-          );
-        }
-
-        if (callsError) {
-          return (
-            <View style={styles.emptyState}>
-              <Icon name="alert-circle-outline" size={64} color={T.textDisabled} />
-              <Text style={styles.emptyTitle}>Couldn't load calls</Text>
-              <Text style={styles.emptySubtitle}>Please try again later</Text>
-            </View>
-          );
-        }
-
-        if (!calls || calls.length === 0) {
-          return (
-            <View style={styles.emptyState}>
-              <View style={styles.callEmptyIconWrap}>
-                <Icon name="call" size={36} color={T.primary} />
-              </View>
-              <Text style={styles.emptyTitle}>No recent calls</Text>
-              <Text style={styles.emptySubtitle}>
-                Call someone from a chat, or find people to start talking
-              </Text>
-              <TouchableOpacity
-                style={styles.newChatButton}
-                onPress={() => navigation.navigate('FindPeople')}
-                activeOpacity={0.8}
-              >
-                <LinearGradient
-                  colors={[T.gradientStart, T.gradientMiddle || T.gradientEnd, T.gradientEnd]}
-                  style={styles.newChatButtonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <Icon name="call" size={20} color={T.textPrimary} style={styles.newChatIcon} />
-                  <Text style={styles.newChatButtonText}>Call someone</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          );
-        }
-
-        const startCallWithPeer = async (otherId, label, avatarUri, conversationId) => {
-          if (!otherId || !uid) return;
-          try {
-            const myName =
-              currentUser?.displayName ||
-              currentUser?.username ||
-              'Someone';
-            const res = await startAudioCall({
-              callerId: uid,
-              calleeId: otherId,
-              conversationId: conversationId || null,
-              callerName: myName,
-              calleeName: label,
-            });
-            if (!res.ok) {
-              Alert.alert(
-                'Call',
-                res.reason === 'mic-denied'
-                  ? 'Microphone permission is required for calls.'
-                  : 'Could not start call.',
-              );
-              return;
-            }
-            navigation.navigate('Call', {
-              callId: res.callId,
-              role: 'caller',
-              peerName: label,
-              peerAvatar: avatarUri || null,
-            });
-          } catch (e) {
-            Alert.alert('Call', e?.message || 'Could not start call.');
-          }
-        };
-
         return (
-          <FlatList
-            data={calls}
-            keyExtractor={(item) => item.id}
-            showsVerticalScrollIndicator={false}
-            initialNumToRender={12}
-            maxToRenderPerBatch={8}
-            windowSize={7}
-            removeClippedSubviews={Platform.OS === 'android'}
-            contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
-            renderItem={({ item }) => {
-              const status = String(item.status || '').toLowerCase();
-              const isMissed = status === 'missed';
-              const isDeclined = status === 'declined';
-              const isOutgoing = item.callerId === uid;
-              const startedAt = item.createdAt || item.startedAt;
-              const timeDate = startedAt?.toDate
-                ? startedAt.toDate()
-                : item.createdAtMs
-                  ? new Date(item.createdAtMs)
-                  : null;
-              const time = timeDate ? formatLastMessageTime(timeDate) : '';
-              const participants = Array.isArray(item.participants)
-                ? item.participants
-                : Array.isArray(item.participantIds)
-                  ? item.participantIds
-                  : [];
-              const otherId =
-                participants.find((id) => id && id !== uid) ||
-                (isOutgoing ? item.calleeId : item.callerId) ||
-                null;
-              const other = otherId ? allUsers.find((u) => u.id === otherId) : null;
-              const label =
-                other?.username ||
-                other?.displayName ||
-                (isOutgoing ? item.calleeName : item.callerName) ||
-                item.otherName ||
-                'Unknown';
-              const avatarUri = other?.photoURL || other?.avatar || null;
-              const statusLabel =
-                isMissed
-                  ? 'Missed'
-                  : isDeclined
-                    ? 'Declined'
-                    : status === 'active'
-                      ? 'In progress'
-                      : status === 'ringing'
-                        ? 'Ringing'
-                        : isOutgoing
-                          ? 'Outgoing'
-                          : 'Incoming';
-              const accent = isMissed || isDeclined ? T.error : T.primary;
-              const directionIcon = isMissed
-                ? 'call-outline'
-                : isOutgoing
-                  ? 'arrow-up'
-                  : 'arrow-down';
-
-              return (
-                <TouchableOpacity
-                  style={[
-                    styles.callRow,
-                    (isMissed || isDeclined) && styles.callRowMissed,
-                  ]}
-                  activeOpacity={0.7}
-                  onPress={() => startCallWithPeer(otherId, label, avatarUri, item.conversationId)}
-                >
-                  <View style={styles.callAvatarWrap}>
-                    <BlypAvatar
-                      uri={avatarUri}
-                      name={label}
-                      profile={other || undefined}
-                      size={50}
-                      showBadge={false}
-                    />
-                    <View style={[styles.callDirectionBadge, { backgroundColor: accent }]}>
-                      <Icon name={directionIcon} size={10} color="#0A0A0C" />
-                    </View>
-                  </View>
-                  <View style={styles.callRowBody}>
-                    <Text
-                      style={[styles.callRowTitle, (isMissed || isDeclined) && { color: T.error }]}
-                      numberOfLines={1}
-                    >
-                      {label}
-                    </Text>
-                    <Text style={styles.callRowSubtitle} numberOfLines={1}>
-                      {statusLabel}
-                      {time ? ` · ${time}` : ''}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.callBackBtn}
-                    onPress={() => startCallWithPeer(otherId, label, avatarUri, item.conversationId)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    accessibilityLabel={`Call ${label}`}
-                  >
-                    <Icon name="call" size={20} color={T.primary} />
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              );
-            }}
-          />
+          <View style={styles.comingSoon}>
+            <Icon name="call" size={48} color={T.textMuted} />
+            <Text style={styles.comingSoonTitle}>Calls</Text>
+            <Text style={styles.comingSoonText}>Coming soon</Text>
+          </View>
         );
 
       case 'groups':
@@ -1528,21 +1351,23 @@ const MessengerScreen = ({ navigation }) => {
         {renderTabContent}
       </View>
 
-      {/* Floating Action Button for Find People / Call */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: tabBarHeight + 20 }]}
-        onPress={() => {
-          navigation.navigate('FindPeople');
-        }}
-        accessibilityLabel={selectedTab === 'calls' ? 'Find someone to call' : 'Find people'}
-      >
-        <LinearGradient
-          colors={[T.gradientStart, T.gradientEnd]}
-          style={styles.fabGradient}
+      {/* Floating Action Button for Find People (hidden on Calls — Coming Soon) */}
+      {selectedTab !== 'calls' ? (
+        <TouchableOpacity
+          style={[styles.fab, { bottom: tabBarHeight + 20 }]}
+          onPress={() => {
+            navigation.navigate('FindPeople');
+          }}
+          accessibilityLabel="Find people"
         >
-          <Icon name={selectedTab === 'calls' ? 'call' : 'chatbubble'} size={24} color={T.textPrimary} />
-        </LinearGradient>
-      </TouchableOpacity>
+          <LinearGradient
+            colors={[T.gradientStart, T.gradientEnd]}
+            style={styles.fabGradient}
+          >
+            <Icon name="chatbubble" size={24} color={T.textPrimary} />
+          </LinearGradient>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Menu Overlay */}
       <Modal

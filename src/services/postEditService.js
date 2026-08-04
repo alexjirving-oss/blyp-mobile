@@ -68,4 +68,63 @@ export async function updatePostContent(postId, prevPost, fields) {
   }
 }
 
-export default { updatePostContent };
+/**
+ * Save playback framing (fit / pan / zoom) without re-auditioning reach.
+ * Does not re-encode the video — display metadata only.
+ * @param {string} postId
+ * @param {{fitMode?:'auto'|'cover'|'contain', scale?:number, offsetX?:number, offsetY?:number}} display
+ */
+export async function updatePostMediaDisplay(postId, display) {
+  if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
+    return { ok: false, reason: 'OFFLINE' };
+  }
+  if (!postId) return { ok: false, reason: 'NO_POST' };
+
+  const fitMode = ['auto', 'cover', 'contain'].includes(display?.fitMode)
+    ? display.fitMode
+    : 'auto';
+  const scale = Math.min(2.5, Math.max(1, Number(display?.scale) || 1));
+  const offsetX = Math.min(1, Math.max(-1, Number(display?.offsetX) || 0));
+  const offsetY = Math.min(1, Math.max(-1, Number(display?.offsetY) || 0));
+
+  const mediaDisplay = {
+    fitMode,
+    scale,
+    offsetX,
+    offsetY,
+    updatedAt: Date.now(),
+  };
+
+  try {
+    await db.collection('posts').doc(postId).set({ mediaDisplay, framingEditedAt: Date.now() }, { merge: true });
+    return { ok: true, mediaDisplay };
+  } catch (e) {
+    console.warn('[postEditService] mediaDisplay update failed', e?.message || String(e));
+    return { ok: false, reason: 'WRITE_FAILED' };
+  }
+}
+
+/**
+ * Assign a post to a profile category shelf (or clear it).
+ * @param {string} postId
+ * @param {string|null} categoryId
+ */
+export async function updatePostCategory(postId, categoryId) {
+  if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
+    return { ok: false, reason: 'OFFLINE' };
+  }
+  if (!postId) return { ok: false, reason: 'NO_POST' };
+  const next = categoryId ? String(categoryId).trim() : null;
+  try {
+    await db.collection('posts').doc(postId).set(
+      { categoryId: next || null, categoryEditedAt: Date.now() },
+      { merge: true },
+    );
+    return { ok: true, categoryId: next };
+  } catch (e) {
+    console.warn('[postEditService] category update failed', e?.message || String(e));
+    return { ok: false, reason: 'WRITE_FAILED' };
+  }
+}
+
+export default { updatePostContent, updatePostMediaDisplay, updatePostCategory };

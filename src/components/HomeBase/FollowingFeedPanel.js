@@ -20,6 +20,9 @@ import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import { getFollowingPosts } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
 import { subscribeToFollowingList } from '../../utils/followUtils';
+import { mediaViewerParams, isVideoPost } from '../../utils/mediaViewerPlaylist';
+import { prefetchVideoToCache } from '../../utils/videoCache';
+import { fixStorageUrl } from '../../utils/urlUtils';
 
 const FollowingFeedPanel = ({ navigation, uid }) => {
   const [following, setFollowing] = useState(new Set());
@@ -42,6 +45,14 @@ const FollowingFeedPanel = ({ navigation, uid }) => {
     setPosts(res);
     setLoading(false);
     setRefreshing(false);
+    // Light warmup: first few video URIs so MediaViewer opens warm.
+    (res || [])
+      .filter((p) => isVideoPost(p))
+      .slice(0, 3)
+      .forEach((p) => {
+        const uri = fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url);
+        if (uri) prefetchVideoToCache(uri).catch(() => {});
+      });
   }, [following]);
 
   useEffect(() => {
@@ -49,7 +60,7 @@ const FollowingFeedPanel = ({ navigation, uid }) => {
     load();
   }, [load]);
 
-  const openPost = (post) => navigation.navigate('MediaViewer', { post });
+  const openPost = (post) => navigation.navigate('MediaViewer', mediaViewerParams(post, posts));
 
   const renderItem = ({ item }) => {
     const uri = postThumbnail(item);

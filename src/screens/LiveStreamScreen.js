@@ -704,6 +704,7 @@ const LiveStreamScreen = (props) => {
   const hostZoomCurrentRef = useRef(1);
   const pinchRef = useRef(null);
   const doubleTapRef = useRef(null);
+  const singleTapRef = useRef(null);
   const animatedValue = useRef(new Animated.Value(0)).current;
 
   const isAnonymousLike = (value) => {
@@ -2347,16 +2348,23 @@ const LiveStreamScreen = (props) => {
 
         // If we don't have a streamId, don't trap the user.
         if (!summaryStreamId) return;
-        // Only confirm-trap a HOST who is actively broadcasting. Viewers and
-        // pre-live hosts leave freely (the confirm modal lives in the host tree).
-        if (isViewer || !isStreaming) return;
+
+        // Viewers / guests: leave through the summary screen (same as host end).
+        if (isViewer) {
+          e.preventDefault();
+          goToSummary();
+          return;
+        }
+
+        // Only confirm-trap a HOST who is actively broadcasting.
+        if (!isStreaming) return;
 
         e.preventDefault();
         confirmExitLive();
       });
 
       return unsub;
-    }, [navigation, confirmExitLive, commentsModalVisible, summaryStreamId, isViewer, isStreaming])
+    }, [navigation, confirmExitLive, commentsModalVisible, summaryStreamId, isViewer, isStreaming, goToSummary])
   );
 
   // Launch a floating reaction (emoji=null => heart) and record it as engagement.
@@ -2538,9 +2546,7 @@ const LiveStreamScreen = (props) => {
     setGiftOpenSignal(Date.now());
   };
 
-  // Tap a commenter to gift them directly (viewer-gifting). Self is ignored.
-  // The server authorizes the recipient (viewer-gifting flag); if it's off and
-  // the target isn't host/guest, the send is rejected and surfaced by GiftSystem.
+  // Tap a commenter to gift them (viewer-gifting). Self is ignored.
   const giftCommenter = (item) => {
     const targetId = item?.userId;
     if (!targetId) return;
@@ -2983,11 +2989,12 @@ const LiveStreamScreen = (props) => {
       <View style={styles.container}>
         <StatusBar style="light" />
 
-        {/* Bottom-anchored live chat (newest at bottom, scrolls upward). Sits
-            ABOVE the guest tray + bottom bar so it never overlaps faces/tiles. */}
+        {/* Bottom-anchored live chat. Host stacks chat ABOVE the guest tray;
+            mirror that here so the tray sits on the bottom bar — not mid-screen
+            above a fixed 28% chat band (which looked like a half-page split). */}
         <LiveChatOverlay
           messages={mergedComments}
-          bottomInset={(viewerCommentsOverlayHeight || 0) + 8}
+          bottomInset={(viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 8}
           onLayoutHeight={setViewerLiveChatHeight}
           onPressUser={onPressCommenter}
         />
@@ -2999,9 +3006,7 @@ const LiveStreamScreen = (props) => {
           guestRoster={liveGuests}
           giftTotalsByUser={giftTotalsByUser}
           style={styles.viewerVideo}
-          overlayBottomInset={
-            (viewerCommentsOverlayHeight || 0) + (viewerLiveChatHeight || 0) + 8
-          }
+          overlayBottomInset={(viewerCommentsOverlayHeight || 0) + 8}
           onGuestPagerLayout={setViewerGuestPagerHeight}
           onError={(error) => {
             console.error('âŒ Viewer playback error:', error);
@@ -3094,14 +3099,7 @@ const LiveStreamScreen = (props) => {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.liveHeaderClose}
-            onPress={() => {
-              try {
-                exitHandledRef.current = true;
-                navigation?.goBack?.();
-              } catch {
-                // ignore
-              }
-            }}
+            onPress={goToSummary}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Icon name="close" size={22} color="#fff" />
@@ -3296,7 +3294,7 @@ const LiveStreamScreen = (props) => {
                   <GestureHandlerRootView style={StyleSheet.absoluteFill}>
                     <PinchGestureHandler
                       ref={pinchRef}
-                      simultaneousHandlers={doubleTapRef}
+                      simultaneousHandlers={[doubleTapRef, singleTapRef]}
                       onGestureEvent={onHostPinchEvent}
                       onHandlerStateChange={onHostPinchStateChange}
                     >
@@ -3308,17 +3306,31 @@ const LiveStreamScreen = (props) => {
                           onActivated={flipCamera}
                         >
                           <View collapsable={false} style={StyleSheet.absoluteFill}>
-                            <NativeIVSBroadcastView
-                              key={`host-preview-${hostPreviewEpoch}`}
-                              style={StyleSheet.absoluteFill}
-                              zoom={hostZoom}
-                            />
-                            {!(ivsHostSession?.isCameraEnabled ?? true) ? (
-                              <View style={styles.hostCameraOffOverlay} pointerEvents="none">
-                                <Icon name="videocam-off" size={42} color="rgba(255,255,255,0.85)" />
-                                <Text style={styles.hostCameraOffText} allowFontScaling={false}>Camera off</Text>
+                            <TapGestureHandler
+                              ref={singleTapRef}
+                              numberOfTaps={1}
+                              waitFor={doubleTapRef}
+                              simultaneousHandlers={pinchRef}
+                              onActivated={() => triggerReaction(null)}
+                            >
+                              <View collapsable={false} style={StyleSheet.absoluteFill}>
+                                <NativeIVSBroadcastView
+                                  key={`host-preview-${hostPreviewEpoch}`}
+                                  style={StyleSheet.absoluteFill}
+                                  zoom={hostZoom}
+                                />
+                                {!(ivsHostSession?.isCameraEnabled ?? true) ? (
+                                  <View style={styles.hostCameraOffOverlay} pointerEvents="none">
+                                    {resolvedHostPhotoUrl ? (
+                                      <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.hostCameraOffAvatar} />
+                                    ) : (
+                                      <Icon name="videocam-off" size={42} color="rgba(255,255,255,0.85)" />
+                                    )}
+                                    <Text style={styles.hostCameraOffText} allowFontScaling={false}>Camera off</Text>
+                                  </View>
+                                ) : null}
                               </View>
-                            ) : null}
+                            </TapGestureHandler>
                           </View>
                         </TapGestureHandler>
                       </View>
@@ -3466,12 +3478,22 @@ const LiveStreamScreen = (props) => {
                                 }
 
                                 const p = guestBySlot.get(slotId) || null;
+                                const rosterGuest = (liveGuests || []).find(
+                                  (g) => g && (
+                                    (typeof g.slotIndex === 'number' && g.slotIndex === slotId) ||
+                                    (p?.userId && String(g.userId) === String(p.userId))
+                                  )
+                                ) || null;
+                                const guestUserId = rosterGuest?.userId || p?.userId || null;
+                                const guestPhoto = rosterGuest?.photoUrl || rosterGuest?.photoURL || null;
+                                const hostForcedCamOff = !!(guestUserId && cameraOffGuestIds?.has?.(String(guestUserId)));
+                                const remoteCamOff = !!(p?.isCameraDisabled || hostForcedCamOff);
                                 return (
                                   <View
                                     key={p?.participantId || `host-guest-slot-${slotId}`}
                                     style={hostGuestTrayMode === 'collapsed' ? styles.ivsGuestTileCollapsed : styles.ivsGuestTile}
                                   >
-                                    {p && NativeIVSRealTimeView ? (
+                                    {p && NativeIVSRealTimeView && !remoteCamOff ? (
                                       <NativeIVSRealTimeView
                                         style={styles.ivsTileVideo}
                                         sessionId={ivsHostSession.sessionId || ivsHostSession.streamId || streamId}
@@ -3481,6 +3503,14 @@ const LiveStreamScreen = (props) => {
                                         zoom={GUEST_TILE_ZOOM}
                                         testID={`ivs-host-guest-${slotId}`}
                                       />
+                                    ) : p && remoteCamOff ? (
+                                      <View style={[styles.ivsTileVideo, styles.hostGuestCamOffFill]}>
+                                        {guestPhoto ? (
+                                          <Image source={{ uri: guestPhoto }} style={styles.hostGuestCamOffAvatar} />
+                                        ) : (
+                                          <Icon name="person" size={28} color="rgba(255,255,255,0.85)" />
+                                        )}
+                                      </View>
                                     ) : slotId === firstInviteSlotId ? (
                                       <TouchableOpacity
                                         style={styles.ivsInviteTile}
@@ -4089,7 +4119,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 180,
-    zIndex: 5,
+    zIndex: 20,
   },
   ivsGuestKickButton: {
     position: 'absolute',
@@ -4228,11 +4258,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(10,10,12,0.92)',
   },
+  hostCameraOffAvatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
+    marginBottom: 10,
+  },
   hostCameraOffText: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 13,
     fontWeight: '700',
     marginTop: 8,
+  },
+  hostGuestCamOffFill: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#121214',
+  },
+  hostGuestCamOffAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   hostControlCircleActive: {
     backgroundColor: 'rgba(0,210,190,0.18)',

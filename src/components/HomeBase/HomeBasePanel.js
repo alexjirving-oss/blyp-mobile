@@ -69,7 +69,8 @@ import { followUser, unfollowUser, subscribeToFollowingList } from '../../utils/
 import { getActivity, countUnread } from '../../services/activityService';
 import { subscribeWatchHistory } from '../../services/watchHistoryService';
 import { fixStorageUrl } from '../../utils/urlUtils';
-import UnifiedVideo from '../UnifiedVideo';
+import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
+import EnhancedVideo from '../EnhancedVideo';
 
 const GENERIC_SUGGESTIONS = [
   "What's worth watching right now?",
@@ -557,7 +558,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     }
   };
 
-  const openPost = (post) => navigation.navigate('MediaViewer', { post });
+  const openPost = (post, list) =>
+    navigation.navigate('MediaViewer', mediaViewerParams(post, list));
 
   const openLive = (stream) => {
     const streamId = stream.streamId || stream.id || stream.liveId;
@@ -878,7 +880,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
               // there's never a black "refresh" flash during the swap.
               const mountVideo = (isActive || index === activeForYou + 1) && isVideo && !!videoUri;
               return (
-                <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openPost(p)}>
+                <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openPost(p, forYou)}>
                   <View>
                     {uri ? (
                       <Image source={{ uri }} style={styles.forYouThumb} resizeMode="cover" />
@@ -888,14 +890,15 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                       </View>
                     )}
                     {mountVideo && (
-                      <UnifiedVideo
+                      <EnhancedVideo
                         uri={videoUri}
+                        poster={uri}
                         style={[styles.forYouThumb, StyleSheet.absoluteFill, !isActive && styles.forYouPreloadHidden]}
                         resizeMode="cover"
+                        shouldLoad
                         shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
                         isLooping
                         isMuted={!isActive || !isScreenFocused || listening || transcribing}
-                        volume={isActive && isScreenFocused && !listening && !transcribing ? 1.0 : 0}
                       />
                     )}
                     {isVideo && !isActive && (
@@ -924,7 +927,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
             {watch.map((w) => {
               const uri = fixStorageUrl(w.thumbnail);
               return (
-                <TouchableOpacity key={w.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(w)}>
+                <TouchableOpacity key={w.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(w, watch)}>
                   <View>
                     {uri ? (
                       <Image source={{ uri }} style={styles.trendThumb} resizeMode="cover" />
@@ -991,7 +994,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
             {trending.map((p) => {
               const uri = postThumbnail(p);
               return (
-                <TouchableOpacity key={p.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(p)}>
+                <TouchableOpacity key={p.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(p, trending)}>
                   {uri ? (
                     <Image source={{ uri }} style={styles.trendThumb} resizeMode="cover" />
                   ) : (

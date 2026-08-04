@@ -18,11 +18,10 @@ import LiveReactionsHearts from '../components/live/LiveReactionsHearts';
 import GiftSystem from '../components/GiftSystem';
 import CommentsModal from '../components/CommentsModal';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
-import BlypCoinService from '../services/BlypCoinService';
-import GemService from '../services/GemService';
 import { fixStorageUrl } from '../utils/urlUtils';
 import AudioTile from '../components/AudioTile';
 import { getPlayableVideoUri } from '../utils/videoCache';
+import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import { COLORS } from '../styles/theme';
 import HeaderMenuTabs from '../components/HeaderMenuTabs';
 import HeaderWalletBalances from '../components/HeaderWalletBalances';
@@ -50,7 +49,6 @@ import {
 } from '../services/blypReachClient';
 import { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
 import { useAuth, hardLogout } from '../hooks/useCommon';
-import { getEconomyWallet } from '../api/economyLiveApi';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -79,7 +77,7 @@ const randomCommentsData = [
 ];
 
 // === MediaCarousel (fixed) ===
-const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
+const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive, prefetchedUris }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   // Use the live window width so horizontal paging stays aligned after a fold/
   // unfold (Z Fold tablet mode) instead of a width frozen at module load.
@@ -107,16 +105,17 @@ const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
       !!item.videoUrl;
 
     const mediaUri = fixStorageUrl(item.url || item.uri || item.videoUrl || item.imageUrl);
+    const cachedUri = prefetchedUris?.[mediaUri];
 
     if (isVideo) {
       return (
         <View style={[styles.carouselItemContainer, { width: winWidth }]}>
           <PremiumFeedVideo
-            uri={mediaUri}
+            uri={cachedUri || mediaUri}
             poster={item.thumbnail}
             style={StyleSheet.absoluteFill}
             shouldPlay={isDiscoverItemActive ? isDiscoverItemActive(feedIndex) && index === currentIndex : index === currentIndex}
-            shouldLoad={Math.abs(currentIndex - index) <= 1}
+            shouldLoad={Math.abs(currentIndex - index) <= 2}
             isLooping={true}
             isMuted={true}
             showChrome={false}
@@ -194,12 +193,10 @@ const getPostGiftCoins = (post) => {
 
 // NOTE: Per-post comment counts are now driven by real Firestore comments.
 
-import { shouldUseLiveServiceWallet } from '../utils/walletSource';
-
 // How many posts we pull per Firestore page. Many rows are images/silent clips
 // filtered out for For You, so we over-fetch and keep paging until we have enough
 // playable videos.
-const FEED_PAGE_SIZE = 50;
+const FEED_PAGE_SIZE = 15;
 const FEED_GATHER_TARGET = 12;
 const FEED_PREFETCH_REMAINING = 4;
 
@@ -253,8 +250,6 @@ const HomeScreen = ({ navigation, route }) => {
   const [selectedHashtags, setSelectedHashtags] = useState([]);
   const [filteredPosts, setFilteredPosts] = useState([]);
   const [heartsBurst, setHeartsBurst] = useState({ postId: null, key: 0 });
-  const [coinBalance, setCoinBalance] = useState(0);
-  const [gemBalance, setGemBalance] = useState(0);
   const [menuVisible, setMenuVisible] = useState(false);
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
@@ -269,6 +264,7 @@ const HomeScreen = ({ navigation, route }) => {
 
   const flatListRef = useRef(null);
   const prefetchingRef = useRef({});
+  const prefetchedUrisRef = useRef({});
   const likePendingRef = useRef(new Set());
   const commentScrollValue = useRef(new Animated.Value(0)).current;
   const currentDiscoverIndexRef = useRef(0);
@@ -490,7 +486,8 @@ const HomeScreen = ({ navigation, route }) => {
 
   const handlePostPress = (post) => {
     console.log('ðŸ” Opening media viewer for post:', post.id);
-    navigation.navigate('MediaViewer', { post });
+    const list = selectedTab === 'A' ? randomPosts : videos;
+    navigation.navigate('MediaViewer', mediaViewerParams(post, list));
   };
 
   const feedVideoTapRef = useRef({ at: 0, postId: null, timer: null });
@@ -528,52 +525,6 @@ const HomeScreen = ({ navigation, route }) => {
   // bandwidth and the per-change JS work on Home.
 
   useEffect(() => {
-    // Do NOT force balances to 0 while auth is still resolving — that race plus
-    // a failed/304 wallet poll permanently stuck the header at 0 after purchases.
-    if (!authReady || !isAuthenticated || !uid) {
-      return;
-    }
-
-    if (shouldUseLiveServiceWallet()) {
-      let cancelled = false;
-
-      const refresh = async () => {
-        try {
-          const wallet = await getEconomyWallet();
-          const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
-          const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
-          if (cancelled) return;
-          if (Number.isFinite(nextCoins)) setCoinBalance(nextCoins);
-          if (Number.isFinite(nextGems)) setGemBalance(nextGems);
-        } catch {
-          // ignore; keep last-known values
-        }
-      };
-
-      refresh();
-      const t = setInterval(refresh, 5000);
-      return () => {
-        cancelled = true;
-        clearInterval(t);
-      };
-    }
-
-    let isMounted = true;
-    const unsubCoins = BlypCoinService.subscribeToBalance(uid, (balance) => {
-      if (isMounted) setCoinBalance(balance);
-    });
-    const unsubGems = GemService.subscribeToGems(uid, (balance) => {
-      if (isMounted) setGemBalance(balance);
-    });
-
-    return () => {
-      isMounted = false;
-      try { unsubCoins?.(); } catch { }
-      try { unsubGems?.(); } catch { }
-    };
-  }, [uid, authReady, isAuthenticated]);
-
-  useEffect(() => {
     const t = setTimeout(() => {
       if (selectedTab === 'A') {
         setCurrentDiscoverIndex((idx) => idx);
@@ -589,6 +540,9 @@ const HomeScreen = ({ navigation, route }) => {
       setRandomPosts([]);
       setIsEmptyFeed(false);
       setLoading(false);
+      return;
+    }
+    if (!isScreenFocused || (selectedTab !== 'A' && selectedTab !== 'B')) {
       return;
     }
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
@@ -760,7 +714,7 @@ const HomeScreen = ({ navigation, route }) => {
       mounted = false;
       try { unsubscribe && unsubscribe(); } catch { }
     };
-  }, [firebaseEnabled, uid, authReady, isAuthenticated]);
+  }, [firebaseEnabled, uid, authReady, isAuthenticated, isScreenFocused, selectedTab]);
 
   // Pull-to-refresh: actually re-fetch the freshest page from Firestore (not just
   // a local reshuffle), re-rank it, and reset the pagination cursor so "load more"
@@ -1247,8 +1201,10 @@ const HomeScreen = ({ navigation, route }) => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
-    // Prefetch next two clips to disk so swipe feels instant.
-    const targets = [current + 1, current + 2].filter((i) => i < (list?.length || 0));
+    // Warm current + next four so swipe is almost always a cache hit.
+    const targets = [current, current + 1, current + 2, current + 3, current + 4].filter(
+      (i) => i >= 0 && i < (list?.length || 0),
+    );
 
     if (!list || list.length === 0 || targets.length === 0) {
       return () => {
@@ -1265,7 +1221,7 @@ const HomeScreen = ({ navigation, route }) => {
         !isVideo ||
         !nextUriCandidate ||
         prefetchingRef.current[nextUriCandidate] ||
-        prefetchedUris[nextUriCandidate]
+        prefetchedUrisRef.current[nextUriCandidate]
       ) {
         return;
       }
@@ -1274,10 +1230,22 @@ const HomeScreen = ({ navigation, route }) => {
       getPlayableVideoUri(nextUriCandidate, { waitForDownload: true })
         .then((playableUri) => {
           if (!isMounted) return;
+          prefetchedUrisRef.current = {
+            ...prefetchedUrisRef.current,
+            [nextUriCandidate]: playableUri,
+          };
           setPrefetchedUris((prev) => {
             if (prev[nextUriCandidate]) return prev;
             return { ...prev, [nextUriCandidate]: playableUri };
           });
+          const poster = nextItem?.thumbnail || nextItem?.imageUrl;
+          if (poster) {
+            try {
+              Image.prefetch(poster);
+            } catch {
+              /* ignore */
+            }
+          }
         })
         .catch(() => {
           if (isMounted) {
@@ -1289,59 +1257,9 @@ const HomeScreen = ({ navigation, route }) => {
     return () => {
       isMounted = false;
     };
-  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts, prefetchedUris]);
+  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts]);
 
-  // Warm TCP/SSL connections for next two videos in active feed
-  useEffect(() => {
-    let isMounted = true;
-    const isRandomFeed = selectedTab === 'A';
-    const list = isRandomFeed ? randomPosts : videos;
-    const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
-
-    if (!list || list.length === 0) return () => {
-      isMounted = false;
-    };
-
-    const targets = [current + 1, current + 2].filter((i) => i < list.length);
-    const activeConnections = [];
-
-    targets.forEach((i) => {
-      const item = list[i];
-      const uriCandidate = fixStorageUrl(item?.videoUrl || item?.media?.[0]?.url);
-      const isVideo = item?.type === 'video' || item?.media?.[0]?.type?.includes('video');
-
-      if (isVideo && uriCandidate && prefetchedUris[uriCandidate]) {
-        return; // Already cached locally; no need to warm HEAD request.
-      }
-
-      if (isVideo && uriCandidate) {
-        console.log('ðŸ”Œ HOME: Warming connection for video:', i);
-        const controller = new AbortController();
-        const { signal } = controller;
-        activeConnections.push(controller);
-
-        fetch(uriCandidate, {
-          method: 'HEAD',
-          signal,
-        }).catch((error) => {
-          if (isMounted && error.name !== 'AbortError') {
-            console.log('âŒ HOME: Connection warm-up failed:', error);
-          }
-        });
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      activeConnections.forEach((c) => {
-        try {
-          c.abort();
-        } catch (e) {
-          console.log('Error aborting connection:', e);
-        }
-      });
-    };
-  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts, prefetchedUris]);
+  // (HEAD connection warm removed — it competed with progressive playback.)
 
   const renderRandomPostItem = ({ item, index, feedHeight }) => {
     const mediaItems = item.media || [{ url: fixStorageUrl(item.imageUrl || item.videoUrl), type: item.type }];
@@ -1406,14 +1324,14 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
 
         {hasMultipleMedia ? (
-          <MediaCarousel media={mediaItems} style={StyleSheet.absoluteFill} feedIndex={index} isDiscoverItemActive={isDiscoverItemActive} />
+          <MediaCarousel media={mediaItems} style={StyleSheet.absoluteFill} feedIndex={index} isDiscoverItemActive={isDiscoverItemActive} prefetchedUris={prefetchedUris} />
         ) : (
           (() => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
             const cachedUri = prefetchedUris[videoUri];
-            const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 1;
+            const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 2;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
@@ -1426,6 +1344,7 @@ const HomeScreen = ({ navigation, route }) => {
                   paused={pausedFeedId === item.id}
                   isLooping
                   isMuted={false}
+                  mediaDisplay={item.mediaDisplay || null}
                   onNaturalSize={(ns) => {
                     const a = ns.width / ns.height;
                     if (!(a > 0)) return;

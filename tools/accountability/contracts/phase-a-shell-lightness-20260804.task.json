@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "phase-a-shell-lightness-20260804",
+  "title": "Phase A — shell lightness",
+  "objective": "Cold start loads only Auth + MainTabs shell; LiveKit globals deferred to Call; no zombie 5s wallet or Cognito poll; For You snapshot only while For You/Videos focused; FEED_PAGE_SIZE <= 15.",
+  "baseRef": "HEAD",
+  "acceptanceCriteria": [
+    "App.js does not call LiveKit registerGlobals at module load.",
+    "Heavy screens (LiveStream, CoinStore, Artillery, battles, rooms) are React.lazy.",
+    "HomeScreen has no 5s wallet interval for unused balances.",
+    "useCommon auth engine does not setInterval(setFromSession, 5000).",
+    "FEED_PAGE_SIZE is 15 or less."
+  ],
+  "allowedPaths": [
+    "App.js",
+    "src/screens/**",
+    "src/hooks/useCommon.js",
+    "src/components/BlypCoinWallet.js",
+    "src/components/HeaderWalletBalances.js",
+    "src/games/**",
+    "tools/accountability/contracts/phase-a-shell-lightness-20260804.task.json"
+  ],
+  "forbiddenPaths": [
+    ".cursor/**",
+    ".accountability/**",
+    "tools/accountability/**"
+  ],
+  "verification": [
+    {
+      "id": "typecheck",
+      "runner": "npm",
+      "args": ["run", "typecheck"],
+      "timeoutMs": 600000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    }
+  ],
+  "roles": {
+    "analyst": { "readOnly": true },
+    "builder": { "isolatedWorktree": true },
+    "reviewer": { "readOnly": true }
+  }
+}

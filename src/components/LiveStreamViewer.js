@@ -20,6 +20,7 @@ import {
   TouchableOpacity,
   PanResponder,
   AppState,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UnifiedVideo from './UnifiedVideo';
@@ -31,6 +32,7 @@ import {
   mirrorGuestRequest,
   clearGuestRequest,
 } from '../services/LiveService';
+import { db, firebaseEnabled } from '../config/firebase';
 import StreamSegmentsAdapter from '../services/StreamSegmentsAdapter';
 import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
 import ManifestService from '../services/ManifestService';
@@ -159,7 +161,7 @@ const IVSLiveStreamViewer = ({
   const [guestPagerMeasuredHeight, setGuestPagerMeasuredHeight] = useState(0);
   // Default hidden so a solo host is full-bleed (no empty tiles squishing the
   // video mid-screen). Auto-opens when real guests are on stage (effect below).
-  const [guestTrayMode, setGuestTrayMode] = useState('expanded'); // expanded | collapsed | hidden
+  const [guestTrayMode, setGuestTrayMode] = useState('hidden'); // expanded | collapsed | hidden
   const [suspendViewerAutoJoin, setSuspendViewerAutoJoin] = useState(false);
   // Host-applied mute on this user (when on stage as a guest). Host controls it;
   // the guest cannot self-unmute while true.
@@ -167,6 +169,12 @@ const IVSLiveStreamViewer = ({
   // Host-applied camera disable while on stage as a guest. Host owns it; the guest
   // cannot turn the camera back on themselves while true.
   const [cameraOffByHost, setCameraOffByHost] = useState(false);
+  // Guest's own media preferences (honored unless host has forced mute/cam-off).
+  const [selfMicOn, setSelfMicOn] = useState(true);
+  const [selfCamOn, setSelfCamOn] = useState(true);
+  const selfMicOnRef = useRef(true);
+  const selfCamOnRef = useRef(true);
+  const [selfPhotoUrl, setSelfPhotoUrl] = useState(null);
   // Set when the host invites this viewer up (host-initiated). Drives an accept prompt.
   const [hostInvite, setHostInvite] = useState(null);
   // Refs so the AppState listener (registered once) reads the latest enforced state.
@@ -174,7 +182,77 @@ const IVSLiveStreamViewer = ({
   const cameraOffByHostRef = useRef(false);
   mutedByHostRef.current = mutedByHost;
   cameraOffByHostRef.current = cameraOffByHost;
+  selfMicOnRef.current = selfMicOn;
+  selfCamOnRef.current = selfCamOn;
   const bgLeaveTimerRef = useRef(null);
+
+  const applyLocalMedia = useCallback(() => {
+    if (!guestModeRef.current) return;
+    const micOn = selfMicOnRef.current && !mutedByHostRef.current;
+    const camOn = selfCamOnRef.current && !cameraOffByHostRef.current;
+    try {
+      const nativeClient = getIVSNativeClient();
+      if (nativeClient && typeof nativeClient.setMicEnabled === 'function') {
+        Promise.resolve(nativeClient.setMicEnabled(micOn)).catch(() => {});
+      }
+      if (nativeClient && typeof nativeClient.setCameraEnabled === 'function') {
+        Promise.resolve(nativeClient.setCameraEnabled(camOn)).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[IVS_VIEWER][APPLY_LOCAL_MEDIA_FAILED]', e?.message || String(e));
+    }
+  }, []);
+
+  const toggleSelfMic = useCallback(() => {
+    if (!guestModeRef.current) return;
+    if (mutedByHostRef.current) {
+      Alert.alert('Mic locked', 'The host muted your microphone. They need to unmute you first.');
+      return;
+    }
+    setSelfMicOn((prev) => {
+      const next = !prev;
+      selfMicOnRef.current = next;
+      setTimeout(() => applyLocalMedia(), 0);
+      return next;
+    });
+  }, [applyLocalMedia]);
+
+  const toggleSelfCam = useCallback(() => {
+    if (!guestModeRef.current) return;
+    if (cameraOffByHostRef.current) {
+      Alert.alert('Camera locked', 'The host turned your camera off. They need to turn it back on first.');
+      return;
+    }
+    setSelfCamOn((prev) => {
+      const next = !prev;
+      selfCamOnRef.current = next;
+      setTimeout(() => applyLocalMedia(), 0);
+      return next;
+    });
+  }, [applyLocalMedia]);
+
+  // Load this user's profile photo for the cam-off avatar tile.
+  useEffect(() => {
+    if (!uid || !firebaseEnabled || !db || typeof db.collection !== 'function') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await db.collection('users').doc(uid).get();
+        const d = snap?.data?.() || {};
+        const url = d.photoURL || d.photoUrl || d.profilePicture || d.avatar || null;
+        if (!cancelled && url) setSelfPhotoUrl(String(url));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid]);
+
+  useEffect(() => {
+    if (guestMode) applyLocalMedia();
+  }, [guestMode, selfMicOn, selfCamOn, mutedByHost, cameraOffByHost, applyLocalMedia]);
 
   const guestPagerScrollRef = useRef(null);
   const ivsSessionRef = useRef(null);
@@ -184,6 +262,10 @@ const IVSLiveStreamViewer = ({
     if (!guestMode) {
       setMutedByHost(false);
       setCameraOffByHost(false);
+      setSelfMicOn(true);
+      setSelfCamOn(true);
+      selfMicOnRef.current = true;
+      selfCamOnRef.current = true;
     }
   }, [guestMode]);
 
@@ -275,13 +357,7 @@ const IVSLiveStreamViewer = ({
         // Resume the guest publish (the OS may have suspended the camera while away).
         if (guestModeRef.current) {
           try {
-            const nativeClient = getIVSNativeClient();
-            if (nativeClient && typeof nativeClient.setCameraEnabled === 'function') {
-              Promise.resolve(nativeClient.setCameraEnabled(!cameraOffByHostRef.current)).catch(() => {});
-            }
-            if (nativeClient && typeof nativeClient.setMicEnabled === 'function') {
-              Promise.resolve(nativeClient.setMicEnabled(!mutedByHostRef.current)).catch(() => {});
-            }
+            applyLocalMedia();
           } catch (e) {
             console.warn('[IVS_VIEWER][RESUME_ON_FOREGROUND_FAILED]', e?.message || String(e));
           }
@@ -295,7 +371,7 @@ const IVSLiveStreamViewer = ({
         bgLeaveTimerRef.current = null;
       }
     };
-  }, [leaveAsGuestAndCleanup]);
+  }, [leaveAsGuestAndCleanup, applyLocalMedia]);
 
   // While guest publishing, keep a heartbeat so the backend can detect stale sessions.
   useEffect(() => {
@@ -353,22 +429,24 @@ const IVSLiveStreamViewer = ({
           if (t === 'guest.muted' || t === 'guest.unmuted') {
             const shouldMute = t === 'guest.muted';
             setMutedByHost(shouldMute);
+            if (shouldMute) {
+              setSelfMicOn(false);
+              selfMicOnRef.current = false;
+            }
             try {
-              const nativeClient = getIVSNativeClient();
-              if (nativeClient && typeof nativeClient.setMicEnabled === 'function') {
-                Promise.resolve(nativeClient.setMicEnabled(!shouldMute)).catch(() => {});
-              }
+              applyLocalMedia();
             } catch (e) {
               console.warn('[IVS_VIEWER][HOST_MUTE_ENFORCE_FAILED]', e?.message || String(e));
             }
           } else if (t === 'guest.camera_off' || t === 'guest.camera_on') {
             const shouldDisable = t === 'guest.camera_off';
             setCameraOffByHost(shouldDisable);
+            if (shouldDisable) {
+              setSelfCamOn(false);
+              selfCamOnRef.current = false;
+            }
             try {
-              const nativeClient = getIVSNativeClient();
-              if (nativeClient && typeof nativeClient.setCameraEnabled === 'function') {
-                Promise.resolve(nativeClient.setCameraEnabled(!shouldDisable)).catch(() => {});
-              }
+              applyLocalMedia();
             } catch (e) {
               console.warn('[IVS_VIEWER][HOST_CAMERA_ENFORCE_FAILED]', e?.message || String(e));
             }
@@ -389,7 +467,7 @@ const IVSLiveStreamViewer = ({
       active = false;
       try { sub?.close?.(); } catch { /* ignore */ }
     };
-  }, [streamId, uid]);
+  }, [streamId, uid, applyLocalMedia]);
 
   // Accept a host-initiated invite: the host already put us in INVITED with a
   // slot, so we can go straight to publishing (no request round-trip).
@@ -1049,12 +1127,20 @@ const IVSLiveStreamViewer = ({
     // when the roster doesn't yet know this user, so it can never render worse.
     const rosterSlotByUser = new Map();
     const userBySlotIndex = new Map();
+    const photoByUserId = new Map();
     (guestRoster || []).forEach((g) => {
       if (g && g.userId && typeof g.slotIndex === 'number' && g.slotIndex >= 1) {
         rosterSlotByUser.set(String(g.userId), g.slotIndex);
         userBySlotIndex.set(g.slotIndex, String(g.userId));
       }
+      if (g && g.userId) {
+        const photo = g.photoUrl || g.photoURL || null;
+        if (photo) photoByUserId.set(String(g.userId), String(photo));
+      }
     });
+    if (uid && selfPhotoUrl) photoByUserId.set(String(uid), String(selfPhotoUrl));
+    const effectiveSelfCamOn = selfCamOn && !cameraOffByHost;
+    const effectiveSelfMicOn = selfMicOn && !mutedByHost;
     const userByParticipant = new Map();
     (ivsSession.remoteParticipants || []).forEach((p) => {
       if (p && p.participantId && p.userId) userByParticipant.set(p.participantId, String(p.userId));
@@ -1134,9 +1220,33 @@ const IVSLiveStreamViewer = ({
           {guestMode && (
             <View style={styles.guestModeBanner}>
               <Text style={styles.guestModeText}>Guest mode</Text>
-              <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
-                <Text style={styles.leaveGuestText}>Leave guest</Text>
-              </TouchableOpacity>
+              <View style={styles.guestMediaControls}>
+                <TouchableOpacity
+                  style={[styles.guestMediaBtn, (!selfMicOn || mutedByHost) && styles.guestMediaBtnOff]}
+                  onPress={toggleSelfMic}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Icon
+                    name={(!selfMicOn || mutedByHost) ? 'mic-off' : 'mic'}
+                    size={16}
+                    color="#fff"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.guestMediaBtn, (!selfCamOn || cameraOffByHost) && styles.guestMediaBtnOff]}
+                  onPress={toggleSelfCam}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Icon
+                    name={(!selfCamOn || cameraOffByHost) ? 'videocam-off' : 'videocam'}
+                    size={16}
+                    color="#fff"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
+                  <Text style={styles.leaveGuestText}>Leave guest</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -1241,6 +1351,14 @@ const IVSLiveStreamViewer = ({
                               : userBySlotIndex.get(globalSlotId) ||
                                 (stream ? userByParticipant.get(stream.participantId) : null) ||
                                 null;
+                          const isSelfTile = !!(guestMode && guestSlotId === globalSlotId);
+                          const tilePhoto =
+                            (tileUserId && photoByUserId.get(String(tileUserId))) || null;
+                          const remoteCamOff = !!(stream && stream.isCameraDisabled);
+                          const showAvatar =
+                            (isSelfTile && !effectiveSelfCamOn) || (!isSelfTile && remoteCamOff);
+                          const showMicOff =
+                            (isSelfTile && !effectiveSelfMicOn) || (!!(stream && stream.isMuted));
 
                           return (
                             <View
@@ -1248,10 +1366,12 @@ const IVSLiveStreamViewer = ({
                               style={guestTrayMode === 'collapsed' ? styles.guestTileSquareCollapsed : styles.guestTileSquare}
                             >
                               <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinStyles.guestPos} />
-                              {guestMode && guestSlotId === globalSlotId ? (
+                              {isSelfTile ? (
                                 NativeIVSBroadcastView ? (
                                   <View style={styles.tileVideoSurface}>
-                                    <NativeIVSBroadcastView zoom={GUEST_TILE_ZOOM} style={StyleSheet.absoluteFill} />
+                                    {!showAvatar ? (
+                                      <NativeIVSBroadcastView zoom={GUEST_TILE_ZOOM} style={StyleSheet.absoluteFill} />
+                                    ) : null}
                                   </View>
                                 ) : (
                                   <View style={styles.tilePlaceholder}>
@@ -1259,17 +1379,21 @@ const IVSLiveStreamViewer = ({
                                   </View>
                                 )
                               ) : stream ? (
-                                <NativeIVSRealTimeView
-                                  style={styles.realTimeView}
-                                  stageArn={stageArnForSurface}
-                                  token={tokenForSurface}
-                                  sessionId={streamId}
-                                  slotId={globalSlotId}
-                                  participantId={stream.participantId}
-                                  remoteTrackCount={ivsSession.remoteVideoTracks}
-                                  zoom={GUEST_TILE_ZOOM}
-                                  testID={`ivs-realtime-viewer-guest-${globalSlotId}`}
-                                />
+                                showAvatar ? (
+                                  <View style={[styles.tileVideoSurface, styles.camOffFill]} />
+                                ) : (
+                                  <NativeIVSRealTimeView
+                                    style={styles.realTimeView}
+                                    stageArn={stageArnForSurface}
+                                    token={tokenForSurface}
+                                    sessionId={streamId}
+                                    slotId={globalSlotId}
+                                    participantId={stream.participantId}
+                                    remoteTrackCount={ivsSession.remoteVideoTracks}
+                                    zoom={GUEST_TILE_ZOOM}
+                                    testID={`ivs-realtime-viewer-guest-${globalSlotId}`}
+                                  />
+                                )
                               ) : (
                                 globalSlotId === firstJoinSlotId ? (
                                   (() => {
@@ -1307,6 +1431,41 @@ const IVSLiveStreamViewer = ({
                                   </View>
                                 )
                               )}
+
+                              {showAvatar ? (
+                                <View style={styles.camOffAvatarOverlay} pointerEvents="none">
+                                  {tilePhoto ? (
+                                    <Image source={{ uri: tilePhoto }} style={styles.camOffAvatar} />
+                                  ) : (
+                                    <View style={styles.camOffAvatarFallback}>
+                                      <Icon name="person" size={28} color="rgba(255,255,255,0.85)" />
+                                    </View>
+                                  )}
+                                </View>
+                              ) : null}
+
+                              {showMicOff ? (
+                                <View style={styles.micOffBadge} pointerEvents="none">
+                                  <Icon name="mic-off" size={12} color="#fff" />
+                                </View>
+                              ) : null}
+
+                              {isSelfTile ? (
+                                <View style={styles.selfTileControls}>
+                                  <TouchableOpacity
+                                    style={[styles.selfTileBtn, !effectiveSelfMicOn && styles.selfTileBtnOff]}
+                                    onPress={toggleSelfMic}
+                                  >
+                                    <Icon name={effectiveSelfMicOn ? 'mic' : 'mic-off'} size={14} color="#fff" />
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[styles.selfTileBtn, !effectiveSelfCamOn && styles.selfTileBtnOff]}
+                                    onPress={toggleSelfCam}
+                                  >
+                                    <Icon name={effectiveSelfCamOn ? 'videocam' : 'videocam-off'} size={14} color="#fff" />
+                                  </TouchableOpacity>
+                                </View>
+                              ) : null}
 
                               {globalSlotId >= 2 && (
                                 <View pointerEvents="none" style={styles.slotNumberBadge}>
@@ -2228,6 +2387,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
+  guestMediaControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  guestMediaBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  guestMediaBtnOff: {
+    backgroundColor: 'rgba(251,113,133,0.55)',
+  },
   leaveGuestButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -2238,6 +2413,64 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: 12,
     fontWeight: '700',
+  },
+  camOffFill: {
+    backgroundColor: '#121214',
+  },
+  camOffAvatarOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(10,10,12,0.92)',
+    zIndex: 20,
+  },
+  camOffAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  camOffAvatarFallback: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  micOffBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    zIndex: 30,
+  },
+  selfTileControls: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 6,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    zIndex: 35,
+  },
+  selfTileBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  selfTileBtnOff: {
+    backgroundColor: 'rgba(251,113,133,0.75)',
   },
   guestErrorBanner: {
     position: 'absolute',

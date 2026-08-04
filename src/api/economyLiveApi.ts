@@ -1,4 +1,5 @@
 import { getCognitoJwtForApi } from './getCognitoJwtForApi';
+import { emitWalletUpdated } from '../utils/walletEvents';
 
 const isDevelopment = __DEV__ === true;
 
@@ -63,13 +64,19 @@ export async function callEconomyBackend<T>(
   const token = await getCognitoJwtForApi({ tokenType: 'id' });
 
   let url = `${baseUrl}${path}`;
+  const params = new URLSearchParams();
   if (method === 'GET' && Object.keys(body).length > 0) {
-    const params = new URLSearchParams();
     Object.entries(body).forEach(([k, v]) => {
       if (v !== undefined && v !== null) params.append(k, String(v));
     });
-    url = `${url}?${params.toString()}`;
   }
+  // Cache-bust wallet (and other GETs): OkHttp can still 304 empty bodies even
+  // with Cache-Control headers, which left the UI stuck at coin balance 0.
+  if (method === 'GET') {
+    params.append('_ts', String(Date.now()));
+  }
+  const qs = params.toString();
+  if (qs) url = `${url}?${qs}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ECONOMY_FETCH_TIMEOUT_MS);
@@ -91,9 +98,12 @@ export async function callEconomyBackend<T>(
         Authorization: `Bearer ${token}`,
         // Prevent OkHttp / intermediaries from serving a stale empty 304 for
         // /wallet after a purchase (balance would stick at the initial 0).
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         Pragma: 'no-cache',
+        Expires: '0',
       },
+      // RN/OkHttp: refuse HTTP cache for this request entirely when supported.
+      cache: 'no-store' as RequestCache,
       body: method === 'GET' ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
@@ -264,7 +274,13 @@ export async function getEconomyCatalog(): Promise<EconomyCatalog> {
 }
 
 export async function getEconomyWallet(): Promise<EconomyWallet> {
-  return await callEconomyBackend<EconomyWallet>('/wallet', 'GET');
+  const wallet = await callEconomyBackend<EconomyWallet>('/wallet', 'GET');
+  try {
+    emitWalletUpdated(wallet);
+  } catch {
+    /* ignore bus errors */
+  }
+  return wallet;
 }
 
 export async function sendEconomyGift(input: SendGiftInput): Promise<SendGiftResponse> {

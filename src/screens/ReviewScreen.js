@@ -27,6 +27,7 @@ import { db as firestore, auth, storage } from '../config/firebase';
 import { serverTimestamp } from 'firebase/firestore';
 import { firebaseNative } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
+import { normalizeProfileCategories } from '../utils/profileCategories';
 import { useHasAI, useEntitlement } from '../hooks/useEntitlement';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { uploadMediaToStorage } from '../utils/uploadMediaToStorage';
@@ -109,10 +110,10 @@ const ReviewScreen = () => {
     if (upper.startsWith('[ERROR:')) {
       const inner = raw.slice('[ERROR:'.length, -1); // strip [ERROR: ... ]
       const innerUpper = inner.toUpperCase();
-      if (innerUpper.includes('429') || innerUpper.includes('QUOTA')) {
+      if (innerUpper.includes('429') || innerUpper.includes('QUOTA') || innerUpper.includes('RATE_LIMIT')) {
         return {
-          title: '🎤 AI rate-limited',
-          message: 'Gemini quota/rate limit hit (HTTP 429). Try again later.',
+          title: '🎤 AI busy',
+          message: 'Voice describe hit a temporary AI limit. Wait a few seconds and try again, or type your description.',
         };
       }
       if (innerUpper.includes('403')) {
@@ -191,6 +192,8 @@ const ReviewScreen = () => {
   const [aiGeneratedCaptionState, setAiGeneratedCaptionState] = useState(null);
   const [generatedTitleState, setGeneratedTitleState] = useState(null);
   const [generatedHashtagsState, setGeneratedHashtagsState] = useState([]);
+  const [profileCategories, setProfileCategories] = useState([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [editedAfterAI, setEditedAfterAI] = useState(false);
   // AI caption variants the user can choose between (2-3 options)
   const [descriptionVariants, setDescriptionVariants] = useState([]);
@@ -227,6 +230,25 @@ const ReviewScreen = () => {
   const magicRunIdRef = useRef(0);          // invalidates stale in-flight runs
   const magicUserTookOverRef = useRef(false); // user edited/picked → don't clobber
   const magicAutoStartedRef = useRef(false); // ambient AI once per compose session
+
+  // Load this creator's profile category shelves for the compose picker.
+  useEffect(() => {
+    if (!uid || !firestore || typeof firestore.collection !== 'function') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await firestore.collection('users').doc(uid).get();
+        const data = snap?.data?.() || {};
+        if (cancelled) return;
+        setProfileCategories(normalizeProfileCategories(data.profileCategories));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid]);
 
   // Initialize original caption when transcript changes
   useEffect(() => {
@@ -2511,6 +2533,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         caption: baseCaption,
         tags: extractHashtags(baseCaption),
         hashtags: generatedHashtagsState || [],
+        categoryId: selectedCategoryId || null,
         emoji: uploadedMedia.length > 0 ? '📸' : '💭',
         media: uploadedMedia,
         type: postType, // Add post type
@@ -3289,6 +3312,37 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
               />
             </View>
           )}
+
+            {/* Profile category shelf (optional) */}
+            {profileCategories.length > 0 ? (
+              <View style={styles.hashtagContainer}>
+                <Text style={styles.hashtagLabel}>Profile category</Text>
+                <View style={styles.hashtagList}>
+                  <TouchableOpacity
+                    style={[styles.hashtagChip, !selectedCategoryId && styles.categoryChipActive]}
+                    onPress={() => setSelectedCategoryId(null)}
+                  >
+                    <Text style={[styles.hashtagText, !selectedCategoryId && styles.categoryChipTextActive]}>
+                      None
+                    </Text>
+                  </TouchableOpacity>
+                  {profileCategories.map((cat) => {
+                    const active = selectedCategoryId === cat.id;
+                    return (
+                      <TouchableOpacity
+                        key={cat.id}
+                        style={[styles.hashtagChip, active && styles.categoryChipActive]}
+                        onPress={() => setSelectedCategoryId(cat.id)}
+                      >
+                        <Text style={[styles.hashtagText, active && styles.categoryChipTextActive]}>
+                          {cat.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
 
             {/* Generated Hashtags */}
             {Array.isArray(generatedHashtags) && generatedHashtags.length > 0 && (
@@ -4441,6 +4495,12 @@ const styles = StyleSheet.create({
   },
   hashtagChip: {
     borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  categoryChipActive: {
+    backgroundColor: '#00D2BE',
   },
   hashtagGradient: {
     paddingHorizontal: 12,
@@ -4451,6 +4511,9 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
+  },
+  categoryChipTextActive: {
+    color: '#0A0A0C',
   },
   useAiButton: {
     backgroundColor: '#00D2BE',

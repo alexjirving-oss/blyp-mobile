@@ -143,19 +143,33 @@ const AuthScreen = () => {
         const sub = String(payload?.sub || '').trim();
         const emailFromToken = String(payload?.email || '').trim();
         const pictureFromToken = String(payload?.picture || '').trim();
-        const preferredUsername = String(payload?.preferred_username || payload?.['cognito:username'] || '').trim();
+        // preferred_username only — NEVER cognito:username (opaque UUID in alias pools).
+        const preferredUsernameRaw = String(payload?.preferred_username || '').trim();
         const nameFromToken = String(payload?.name || '').trim();
+        const looksOpaque = (v) =>
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || '').trim());
+        const preferredUsername =
+          preferredUsernameRaw && !looksOpaque(preferredUsernameRaw) && preferredUsernameRaw !== sub
+            ? preferredUsernameRaw
+            : '';
+        const safeNameFromToken =
+          nameFromToken && !looksOpaque(nameFromToken) && nameFromToken !== sub ? nameFromToken : '';
 
         // On signup, we have an explicit username field in the UI; store it.
         // On login, don't overwrite an existing username, but we still ensure displayName.
-        const usernameToStore = String(username || '').trim();
+        const usernameToStore = String(username || '').trim().replace(/^@/, '');
 
         const userId = sub;
         if (userId) {
           const dobParsedForProfile = parseDob(dob);
-          ensureUserProfile({
+          const screenName =
+            usernameToStore ||
+            preferredUsername ||
+            safeNameFromToken ||
+            (emailFromToken ? emailFromToken.split('@')[0] : '');
+          await ensureUserProfile({
             userId,
-            displayName: usernameToStore || preferredUsername || nameFromToken || (emailFromToken ? emailFromToken.split('@')[0] : null),
+            displayName: screenName || null,
             // Important: pass `undefined` for missing optional fields so we don't wipe existing profile data.
             photoURL: pictureFromToken || undefined,
             email: emailFromToken || undefined,
@@ -163,7 +177,7 @@ const AuthScreen = () => {
             // Persist age attestation collected at sign-up (undefined on login so we don't overwrite).
             birthdate: dobParsedForProfile.valid ? dobParsedForProfile.iso : undefined,
             ageVerified: dobParsedForProfile.valid ? true : undefined,
-          }).catch(() => { });
+          });
         }
       } catch {
         // Non-fatal: auth should still succeed even if profile write fails.
@@ -382,8 +396,15 @@ const AuthScreen = () => {
           return;
         }
 
-        const usernameNorm = String(username || '').trim();
-        const displayName = usernameNorm || (emailNorm ? emailNorm.split('@')[0] : '');
+        const usernameNorm = String(username || '').trim().replace(/^@/, '');
+        if (!/^[A-Za-z0-9_.]{3,20}$/.test(usernameNorm)) {
+          const msg = 'Choose a username (3–20 characters: letters, numbers, underscore, or dot).';
+          setLastError(msg);
+          Alert.alert('Username required', msg);
+          setLoading(false);
+          return;
+        }
+        const displayName = usernameNorm;
 
         console.log('ðŸ“ Starting signup for:', maskEmail(emailNorm), 'displayName:', displayName);
         // Cognito pools differ in two ways:
@@ -587,11 +608,13 @@ const AuthScreen = () => {
             {!isLogin && (
               <TextInput
                 style={styles.input}
-                placeholder="Display name (optional)"
+                placeholder="Username (required)"
                 placeholderTextColor="#9ca3af"
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={20}
               />
             )}
 

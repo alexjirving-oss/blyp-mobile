@@ -12,7 +12,10 @@ import {
   Animated,
   FlatList,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +27,7 @@ import PhotoGallery from '../components/PhotoGallery';
 import HeartAnimation from '../components/HeartAnimation';
 import CommentsModal from '../components/CommentsModal';
 import PostReachSheet from '../components/PostReachSheet';
+import VideoFramingSheet from '../components/VideoFramingSheet';
 import ReportModal from '../components/ReportModal';
 import GiftSystem from '../components/GiftSystem';
 import { blockUser } from '../services/BlockService';
@@ -35,6 +39,31 @@ import { followUser, unfollowUser, subscribeToFollowingList } from '../utils/fol
 import { useAuth } from '../hooks/useCommon';
 import { recordWatch } from '../services/watchHistoryService';
 import { setReachSession, reportWatch, reportEngagement, flushReachEvents, reachSummary } from '../services/blypReachClient';
+import { getPlayableVideoUri } from '../utils/videoCache';
+import { isVideoPost } from '../utils/mediaViewerPlaylist';
+import { updatePostCategory } from '../services/postEditService';
+import { normalizeProfileCategories } from '../utils/profileCategories';
+
+async function downloadRawVideo(remoteUrl) {
+  const url = fixStorageUrl(remoteUrl);
+  if (!url) throw new Error('No video URL');
+  const perm = await MediaLibrary.requestPermissionsAsync();
+  if (!perm?.granted) {
+    const err = new Error('permission-denied');
+    err.code = 'permission-denied';
+    throw err;
+  }
+  const dest = `${FileSystem.cacheDirectory}blyp_dl_${Date.now()}.mp4`;
+  const result = await FileSystem.downloadAsync(url, dest);
+  if (!result?.uri) throw new Error('Download failed');
+  await MediaLibrary.saveToLibraryAsync(result.uri);
+  try {
+    await FileSystem.deleteAsync(result.uri, { idempotent: true });
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -63,19 +92,6 @@ const pickAuthorName = (p) => {
     if (t && !looksLikeRawId(t)) return t;
   }
   return '';
-};
-
-// Detect whether a post is a video (used to build the per-creator video feed).
-const isVideoPost = (p) => {
-  if (!p) return false;
-  if (p.videoUrl) return true;
-  if (p.type === 'video') return true;
-  if (Array.isArray(p.media)) {
-    return p.media.some(
-      (m) => m?.type === 'video' || m?.type?.includes?.('video') || m?.type?.includes?.('mp4') || m?.type?.startsWith?.('video/'),
-    );
-  }
-  return false;
 };
 
 // Compact count formatter (1.2K / 3.4M) — same rules as the For You feed.
@@ -154,7 +170,16 @@ const FeedStatBadge = ({ children, count = 0 }) => (
 );
 
 // A single full-screen video/post "page" inside the vertical pager.
-const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, effectiveOwnerIds = [], followingSet, onToggleFollow }) => {
+const MediaViewerItem = ({
+  post: actualPost,
+  isActive,
+  shouldLoadVideo = true,
+  pageHeight,
+  navigation,
+  effectiveOwnerIds = [],
+  followingSet,
+  onToggleFollow,
+}) => {
   // useAuth().uid is the app's primary identity id (Cognito user id)
   const { uid, authReady, isAuthenticated } = useAuth();
 
@@ -176,7 +201,11 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
   const [heartAnimationKey, setHeartAnimationKey] = useState(0);
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [reachSheetVisible, setReachSheetVisible] = useState(false);
+  const [framingSheetVisible, setFramingSheetVisible] = useState(false);
+  const [mediaDisplay, setMediaDisplay] = useState(() => actualPost?.mediaDisplay || null);
   const [reportVisible, setReportVisible] = useState(false);
+  const [optionsVisible, setOptionsVisible] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   // Tap-to-pause: paused mirrors the user's manual toggle for this page.
   const [paused, setPaused] = useState(false);
   // Pause/mute playback when this screen loses navigation focus (e.g. the user
@@ -217,6 +246,10 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
       ),
     );
   }, [actualPost, uid]);
+
+  useEffect(() => {
+    setMediaDisplay(actualPost?.mediaDisplay || null);
+  }, [actualPost?.id, actualPost?.mediaDisplay]);
 
   const openCreatorProfile = () => {
     if (!creatorId) return;
@@ -316,113 +349,70 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
     return effectiveOwnerIds.includes(owner);
   })();
 
-  const handleOpenMenu = () => {
-    const actions = [];
-    if (canDeletePost) {
-      actions.push({
-        text: 'Your reach & edit',
-        onPress: () => setReachSheetVisible(true),
-      });
-      actions.push({
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('Delete post', 'Delete this post permanently?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Delete',
-              style: 'destructive',
-              onPress: async () => {
-                if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
-                  Alert.alert('Error', 'Delete is unavailable right now');
-                  return;
-                }
-                try {
-                  await db.collection('posts').doc(actualPost.id).delete();
-                  Toast.show({
-                    type: 'success',
-                    text1: 'Deleted',
-                    text2: 'Post deleted',
-                    position: 'bottom',
-                    visibilityTime: 1500,
-                  });
-                  navigation.goBack();
-                } catch (e) {
-                  console.error('Error deleting post:', e);
-                  Alert.alert('Error', 'Failed to delete post');
-                }
-              },
-            },
-          ]);
-        },
-      });
+  const videoDownloadUrl = (() => {
+    if (actualPost?.videoUrl) return fixStorageUrl(actualPost.videoUrl);
+    const mediaVid = (actualPost?.media || []).find(
+      (m) =>
+        m?.type === 'video' ||
+        m?.type === 'video/mp4' ||
+        String(m?.type || '').includes('video') ||
+        String(m?.type || '').includes('mp4'),
+    );
+    return fixStorageUrl(mediaVid?.url || mediaVid?.uri || null);
+  })();
+
+  const closeOptions = () => setOptionsVisible(false);
+
+  const handleDownloadVideo = async () => {
+    if (!videoDownloadUrl) {
+      Alert.alert('Download', 'No video file on this post.');
+      return;
     }
-
-    // Transparency: anyone can ask why a post reached them (Charter promise).
-    // Wire to the post's *real* reach state when available, so the explanation is
-    // grounded in this specific post's earned distribution rather than generic copy.
-    actions.push({
-      text: 'Why am I seeing this?',
-      onPress: () => {
-        const summary = reachSummary(actualPost);
-        const base =
-          'Posts earn their reach on Blyp — this one was shown to you based on how well people who saw it reacted (watch-through, likes, shares), your follows and interests, plus a small random mix so good new content can break out. Paying never buys reach.';
-        let message = base;
-        if (summary && summary.has) {
-          const lines = [
-            `This post is "${summary.label}" — shown to about ${summary.exposurePct}% of its potential audience.`,
-            summary.headline + '.',
-            `It reached you because it earned a Blyp Score of ${summary.score} from genuine engagement, not because anyone paid.`,
-          ];
-          message = lines.join('\n\n');
-        }
-        Alert.alert('Why am I seeing this?', message, [
-          { text: 'Close', style: 'cancel' },
-          { text: 'Open Transparency', onPress: () => navigation.navigate('Transparency') },
-        ]);
-      },
-    });
-
-    // Safety: anyone can report a post; non-owners can also block the author.
-    if (!canDeletePost) {
-      actions.push({
-        text: 'Report post',
-        onPress: () => setReportVisible(true),
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      await downloadRawVideo(videoDownloadUrl);
+      closeOptions();
+      Toast.show({
+        type: 'success',
+        text1: 'Saved',
+        text2: 'Video saved to your gallery',
+        position: 'bottom',
+        visibilityTime: 1800,
       });
-      const author = String(actualPost?.userId || '').trim();
-      if (author) {
-        actions.push({
-          text: 'Block this user',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert(
-              'Block user',
-              'You won’t see their posts, comments or messages, and they won’t be able to message you. You can unblock them from their profile.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Block',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await blockUser(author);
-                      Toast.show({ type: 'success', text1: 'Blocked', position: 'bottom', visibilityTime: 1500 });
-                      navigation.goBack();
-                    } catch (e) {
-                      Alert.alert('Couldn’t block', e?.message || 'Please try again.');
-                    }
-                  },
-                },
-              ]
-            );
-          },
-        });
+    } catch (e) {
+      if (e?.code === 'permission-denied' || String(e?.message || '').includes('permission')) {
+        Alert.alert('Permission needed', 'Allow photo/video access so Blyp can save the download.');
+      } else {
+        Alert.alert('Download failed', e?.message || 'Could not download this video.');
       }
+    } finally {
+      setDownloading(false);
     }
+  };
 
-    // Always include cancel so this behaves like a menu.
-    actions.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Post options', '', actions);
+  const handleOpenMenu = () => {
+    setOptionsVisible(true);
+  };
+
+  const runWhySeeing = () => {
+    closeOptions();
+    const summary = reachSummary(actualPost);
+    const base =
+      'Posts earn their reach on Blyp — this one was shown to you based on how well people who saw it reacted (watch-through, likes, shares), your follows and interests, plus a small random mix so good new content can break out. Paying never buys reach.';
+    let message = base;
+    if (summary && summary.has) {
+      const lines = [
+        `This post is "${summary.label}" — shown to about ${summary.exposurePct}% of its potential audience.`,
+        summary.headline + '.',
+        `It reached you because it earned a Blyp Score of ${summary.score} from genuine engagement, not because anyone paid.`,
+      ];
+      message = lines.join('\n\n');
+    }
+    Alert.alert('Why am I seeing this?', message, [
+      { text: 'Close', style: 'cancel' },
+      { text: 'Open Transparency', onPress: () => navigation.navigate('Transparency') },
+    ]);
   };
 
   // TikTok-style like animation
@@ -606,9 +596,11 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
           poster={actualPost.thumbnail || actualPost.imageUrl}
           style={mediaFillStyle}
           shouldPlay={isActive && isScreenFocused}
+          shouldLoad={shouldLoadVideo}
           paused={paused}
           isLooping
           isMuted={false}
+          mediaDisplay={mediaDisplay}
           onNaturalSize={(ns) => {
             if (ns?.width > 0 && ns?.height > 0) {
               const a = ns.width / ns.height;
@@ -657,9 +649,11 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
             poster={firstVideo.thumbnail || actualPost.thumbnail}
             style={mediaFillStyle}
             shouldPlay={isActive && isScreenFocused}
+            shouldLoad={shouldLoadVideo}
             paused={paused}
             isLooping
             isMuted={false}
+            mediaDisplay={mediaDisplay}
             onNaturalSize={(ns) => {
               if (ns?.width > 0 && ns?.height > 0) {
                 const a = ns.width / ns.height;
@@ -906,6 +900,14 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
         post={actualPost}
         isOwner={canDeletePost}
       />
+      <VideoFramingSheet
+        visible={framingSheetVisible}
+        onClose={() => setFramingSheetVisible(false)}
+        post={{ ...actualPost, mediaDisplay }}
+        videoUri={videoDownloadUrl}
+        poster={actualPost.thumbnail || actualPost.imageUrl}
+        onSaved={(next) => setMediaDisplay(next)}
+      />
       <ReportModal
         visible={reportVisible}
         onClose={() => setReportVisible(false)}
@@ -914,6 +916,222 @@ const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, e
         targetLabel="this post"
         reportedUserId={String(actualPost?.userId || '').trim() || undefined}
       />
+
+      <Modal
+        visible={optionsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeOptions}
+      >
+        <View style={styles.optionsRoot}>
+          <TouchableOpacity style={styles.optionsBackdrop} activeOpacity={1} onPress={closeOptions} />
+          <View style={styles.optionsSheet}>
+            <View style={styles.optionsHeader}>
+              <Text style={styles.optionsTitle}>Post options</Text>
+              <TouchableOpacity onPress={closeOptions} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Icon name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {videoDownloadUrl ? (
+              <TouchableOpacity
+                style={styles.optionsRow}
+                onPress={handleDownloadVideo}
+                disabled={downloading}
+              >
+                <Icon name="download" size={20} color="#fff" />
+                <Text style={styles.optionsRowText}>
+                  {downloading ? 'Downloading…' : 'Download video'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity style={styles.optionsRow} onPress={runWhySeeing}>
+              <Icon name="help-circle-outline" size={20} color="#fff" />
+              <Text style={styles.optionsRowText}>Why am I seeing this?</Text>
+            </TouchableOpacity>
+
+            {canDeletePost ? (
+              <>
+                {videoDownloadUrl ? (
+                  <TouchableOpacity
+                    style={styles.optionsRow}
+                    onPress={() => {
+                      closeOptions();
+                      setFramingSheetVisible(true);
+                    }}
+                  >
+                    <Icon name="crop" size={20} color="#fff" />
+                    <Text style={styles.optionsRowText}>Adjust framing</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.optionsRow}
+                  onPress={() => {
+                    closeOptions();
+                    setReachSheetVisible(true);
+                  }}
+                >
+                  <Icon name="stats-chart" size={20} color="#fff" />
+                  <Text style={styles.optionsRowText}>Your reach & edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.optionsRow}
+                  onPress={async () => {
+                    closeOptions();
+                    try {
+                      const ownerId = String(actualPost?.userId || uid || '').trim();
+                      if (!ownerId || !firebaseEnabled || !db || typeof db.collection !== 'function') {
+                        Alert.alert('Unavailable', 'Could not load your categories.');
+                        return;
+                      }
+                      const snap = await db.collection('users').doc(ownerId).get();
+                      const cats = normalizeProfileCategories(snap?.data?.()?.profileCategories);
+                      if (!cats.length) {
+                        Alert.alert(
+                          'No categories yet',
+                          'Open your Profile → Manage under the post shelves to create categories first.',
+                        );
+                        return;
+                      }
+                      Alert.alert(
+                        'Set category',
+                        'Choose a profile shelf for this post',
+                        [
+                          ...cats.map((c) => ({
+                            text: c.label,
+                            onPress: async () => {
+                              const res = await updatePostCategory(actualPost.id, c.id);
+                              if (res?.ok) {
+                                Toast.show({
+                                  type: 'success',
+                                  text1: 'Category updated',
+                                  text2: c.label,
+                                  position: 'bottom',
+                                });
+                              } else {
+                                Alert.alert('Couldn’t save', 'Please try again.');
+                              }
+                            },
+                          })),
+                          {
+                            text: 'Clear category',
+                            style: 'destructive',
+                            onPress: async () => {
+                              await updatePostCategory(actualPost.id, null);
+                              Toast.show({
+                                type: 'success',
+                                text1: 'Category cleared',
+                                position: 'bottom',
+                              });
+                            },
+                          },
+                          { text: 'Cancel', style: 'cancel' },
+                        ],
+                      );
+                    } catch (e) {
+                      Alert.alert('Couldn’t load categories', e?.message || 'Please try again.');
+                    }
+                  }}
+                >
+                  <Icon name="pricetag" size={20} color="#fff" />
+                  <Text style={styles.optionsRowText}>Set category</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.optionsRow}
+                  onPress={() => {
+                    closeOptions();
+                    Alert.alert('Delete post', 'Delete this post permanently?', [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: async () => {
+                          if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
+                            Alert.alert('Error', 'Delete is unavailable right now');
+                            return;
+                          }
+                          try {
+                            await db.collection('posts').doc(actualPost.id).delete();
+                            Toast.show({
+                              type: 'success',
+                              text1: 'Deleted',
+                              text2: 'Post deleted',
+                              position: 'bottom',
+                              visibilityTime: 1500,
+                            });
+                            navigation.goBack();
+                          } catch (e) {
+                            console.error('Error deleting post:', e);
+                            Alert.alert('Error', 'Failed to delete post');
+                          }
+                        },
+                      },
+                    ]);
+                  }}
+                >
+                  <Icon name="trash" size={20} color="#FB7185" />
+                  <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>Delete</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.optionsRow}
+                  onPress={() => {
+                    closeOptions();
+                    setReportVisible(true);
+                  }}
+                >
+                  <Icon name="flag" size={20} color="#fff" />
+                  <Text style={styles.optionsRowText}>Report post</Text>
+                </TouchableOpacity>
+                {String(actualPost?.userId || '').trim() ? (
+                  <TouchableOpacity
+                    style={styles.optionsRow}
+                    onPress={() => {
+                      closeOptions();
+                      const author = String(actualPost?.userId || '').trim();
+                      Alert.alert(
+                        'Block user',
+                        'You won’t see their posts, comments or messages, and they won’t be able to message you. You can unblock them from their profile.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Block',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await blockUser(author);
+                                Toast.show({
+                                  type: 'success',
+                                  text1: 'Blocked',
+                                  position: 'bottom',
+                                  visibilityTime: 1500,
+                                });
+                                navigation.goBack();
+                              } catch (e) {
+                                Alert.alert('Couldn’t block', e?.message || 'Please try again.');
+                              }
+                            },
+                          },
+                        ],
+                      );
+                    }}
+                  >
+                    <Icon name="ban" size={20} color="#FB7185" />
+                    <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>Block this user</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            )}
+
+            <TouchableOpacity style={[styles.optionsRow, styles.optionsCancel]} onPress={closeOptions}>
+              <Text style={styles.optionsCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1020,6 +1238,60 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backdropFilter: 'blur(10px)',
+  },
+  optionsRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  optionsBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  optionsSheet: {
+    backgroundColor: '#141418',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 28,
+  },
+  optionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  optionsTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  optionsRowText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  optionsCancel: {
+    borderBottomWidth: 0,
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  optionsCancelText: {
+    color: COLORS.primary || '#00D2BE',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    width: '100%',
   },
   // ----- Creator pill in the top row (mirrors For You's userPillTopLeft) -----
   userPillWrap: {
@@ -1295,19 +1567,17 @@ const MediaViewerScreen = ({ route, navigation }) => {
     }
     (async () => {
       try {
-        let snap;
-        try {
-          snap = await db
-            .collection('posts')
-            .where('userId', '==', creatorId)
-            .orderBy('date', 'desc')
-            .limit(50)
-            .get();
-        } catch (e) {
-          // Fallback if the composite index/order field is unavailable.
-          snap = await db.collection('posts').where('userId', '==', creatorId).limit(50).get();
-        }
+        // Prefer no orderBy — composite indexes often fail; sort client-side.
+        const snap = await db.collection('posts').where('userId', '==', creatorId).limit(80).get();
         const list = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
+        const postDateMs = (p) => {
+          const raw = p?.date ?? p?.createdAt ?? p?.timestamp ?? 0;
+          if (typeof raw?.toMillis === 'function') return raw.toMillis();
+          if (typeof raw?.seconds === 'number') return raw.seconds * 1000;
+          const n = Number(raw);
+          return Number.isFinite(n) ? n : 0;
+        };
+        list.sort((a, b) => postDateMs(b) - postDateMs(a));
         const videosOnly = list.filter((p) => isVideoPost(p) && p.id !== initialPost.id);
         if (!cancelled) setCreatorVideos(videosOnly);
       } catch (err) {
@@ -1342,6 +1612,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
       <MediaViewerItem
         post={item}
         isActive={index === activeIndex}
+        shouldLoadVideo={
+          index === activeIndex ||
+          index === activeIndex + 1 ||
+          index === activeIndex + 2 ||
+          index === activeIndex + 3
+        }
         pageHeight={pageHeight}
         navigation={navigation}
         effectiveOwnerIds={effectiveOwnerIds}
@@ -1351,6 +1627,27 @@ const MediaViewerScreen = ({ route, navigation }) => {
     ),
     [activeIndex, pageHeight, navigation, effectiveOwnerIds, followingSet, onToggleFollow],
   );
+
+  // Prefetch current + next 3 creator clips so swipe feels instant.
+  useEffect(() => {
+    const list = items || [];
+    [activeIndex, activeIndex + 1, activeIndex + 2, activeIndex + 3].forEach((i) => {
+      const post = list[i];
+      if (!post) return;
+      const uri = fixStorageUrl(post.videoUrl || post.media?.find?.((m) => String(m?.type || '').includes('video'))?.url);
+      if (uri) {
+        getPlayableVideoUri(uri, { waitForDownload: true }).catch(() => {});
+      }
+      const poster = post.thumbnail || post.imageUrl;
+      if (poster) {
+        try {
+          Image.prefetch(poster);
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+  }, [activeIndex, items]);
 
   const getItemLayout = useCallback(
     (_data, index) => ({ length: pageHeight, offset: pageHeight * index, index }),

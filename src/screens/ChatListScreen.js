@@ -176,29 +176,28 @@ const ChatListScreen = ({ navigation }) => {
     if (!walletUid) return;
     try {
       if (shouldUseLiveServiceWallet()) {
+        // Keep last-known balance while auth settles — never flash/force 0.
         if (!authReady || !isAuthenticated) {
-          setCoinBalance(0);
-          setGemBalance(0);
           return;
         }
 
         const wallet = await getEconomyWallet();
         const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
         const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
-        setCoinBalance(Number.isFinite(coins) ? coins : 0);
-        setGemBalance(Number.isFinite(gems) ? gems : 0);
+        if (Number.isFinite(coins)) setCoinBalance(coins);
+        if (Number.isFinite(gems)) setGemBalance(gems);
         return;
       }
 
       const coins = await BlypCoinService.getUserBalance(walletUid);
       const gems = await GemService.getUserGems(walletUid);
-      setCoinBalance(Number.isFinite(coins) ? coins : 0);
-      setGemBalance(Number.isFinite(gems) ? gems : 0);
+      if (Number.isFinite(coins)) setCoinBalance(coins);
+      if (Number.isFinite(gems)) setGemBalance(gems);
     } catch (error) {
       const msg = String(error?.message || error || '');
       console.warn('[BALANCES] loadBalances failed:', msg);
-      setCoinBalance(0);
-      setGemBalance(0);
+      // Keep last-known values — forcing 0 after a transient fetch failure
+      // made purchased coins appear wiped until a full restart.
     }
   };
 

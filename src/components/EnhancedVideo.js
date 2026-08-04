@@ -1,22 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
-import { getPlayableVideoUri } from '../utils/videoCache';
+import { getPlayableVideoUri, invalidateCachedVideo, prefetchVideoToCache } from '../utils/videoCache';
 
+/**
+ * Snappy + reliable playback:
+ * - Cache hit → play local file immediately (swipe feels instant).
+ * - Cache miss → show poster, try progressive stream AND download in parallel.
+ * - Many Firebase phone uploads are moov-at-end (won't stream). When download
+ *   finishes we switch to the local file if the stream hasn't painted yet, or
+ *   on stream error.
+ */
 function EnhancedVideo(props) {
   const videoRef = useRef(null);
   const [playableUri, setPlayableUri] = useState(null);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  const resolveGen = useRef(0);
+  const sourceHttpRef = useRef(null);
+  const paintedRef = useRef(false);
 
   const remoteUri = props.uri || props.videoUrl;
-  // Navigation focus AND app foreground — leaving to the phone home screen
-  // does not blur React Navigation, so without AppState audio kept playing.
   const isFocused = (props.shouldPlay ?? true) && appActive;
-  // Only resolve/download + mount the video element when the row is near the
-  // viewport. Off-screen items render just their poster (no network, no decode),
-  // which keeps scrolling fast and avoids eagerly downloading every feed video.
   const shouldLoad = props.shouldLoad ?? true;
   const posterUri = props.poster;
 
@@ -28,15 +34,15 @@ function EnhancedVideo(props) {
       try {
         sub?.remove?.();
       } catch {
-        // ignore
+        /* ignore */
       }
     };
   }, []);
 
-  // Mount remote URL immediately when in range — never wait on a full download
-  // before the player exists (that made every scroll feel like a load).
   useEffect(() => {
     let cancelled = false;
+    const gen = (resolveGen.current += 1);
+    paintedRef.current = false;
 
     if (!shouldLoad) {
       setVideoLoaded(false);
@@ -49,35 +55,52 @@ function EnhancedVideo(props) {
       return () => {};
     }
 
-    // Progressive stream first so the first frame can appear instantly.
-    setPlayableUri((prev) => prev || remoteUri);
+    const isLocal = remoteUri.startsWith('file:') || remoteUri.startsWith('content:');
+    sourceHttpRef.current =
+      remoteUri.startsWith('http://') || remoteUri.startsWith('https://') ? remoteUri : null;
+
+    if (isLocal) {
+      setPlayableUri(remoteUri);
+      setHasError(false);
+      setVideoLoaded(false);
+      return () => {};
+    }
+
+    setVideoLoaded(false);
     setHasError(false);
 
     (async () => {
       try {
-        const resolved = await getPlayableVideoUri(remoteUri);
-        if (cancelled || !resolved) return;
-        // Prefer cache hit when available, but never clear an already-mounted
-        // remote mid-play (would remount and stutter).
-        setPlayableUri((prev) => {
-          if (!prev) return resolved;
-          if (prev === resolved) return prev;
-          // Upgrade to local file only before first frame / while not focused.
-          if (!videoLoaded && !isFocused) return resolved;
-          if (prev.startsWith('http') && resolved.startsWith('file')) {
-            // Keep streaming remote for the active clip; local is for next time.
-            return prev;
-          }
-          return prev;
-        });
-      } catch (error) {
-        if (!cancelled) {
-          if (__DEV__) {
-            console.warn('[EnhancedVideo] URI resolution failed, using remote', { error });
-          }
-          setPlayableUri(remoteUri);
+        // Fast path: already on disk from prefetch.
+        const cached = await getPlayableVideoUri(remoteUri, { waitForDownload: false });
+        if (cancelled || gen !== resolveGen.current) return;
+
+        if (cached && (cached.startsWith('file:') || cached.startsWith('content:'))) {
+          setPlayableUri(cached);
+          setHasError(false);
+          return;
+        }
+
+        // Start progressive stream immediately for clips that support it.
+        setPlayableUri(remoteUri);
+
+        // Parallel full download — required for moov-at-end MP4s, and warms swipe.
+        const local = await prefetchVideoToCache(remoteUri);
+        if (cancelled || gen !== resolveGen.current) return;
+        if (!local || !(local.startsWith('file:') || local.startsWith('content:'))) return;
+
+        // Switch to local if stream never painted, or always upgrade when idle.
+        if (!paintedRef.current || !isFocused) {
+          setPlayableUri(local);
           setHasError(false);
         }
+      } catch (error) {
+        if (cancelled || gen !== resolveGen.current) return;
+        if (__DEV__) {
+          console.warn('[EnhancedVideo] URI resolution failed, using remote', { error });
+        }
+        setPlayableUri(remoteUri);
+        setHasError(false);
       }
     })();
 
@@ -86,12 +109,6 @@ function EnhancedVideo(props) {
     };
   }, [remoteUri, shouldLoad]);
 
-  // Drive play/pause from focus. Resuming after the screen/tab regains focus is
-  // the flaky case: a single declarative shouldPlay flip (or one early
-  // playAsync) often lands before the player is ready and silently no-ops,
-  // leaving the video stalled. So we imperatively apply the desired state, and
-  // when becoming focused we retry a couple of times and replay if the clip had
-  // finished.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoLoaded || hasError) return undefined;
@@ -103,8 +120,11 @@ function EnhancedVideo(props) {
       if (cancelled) return;
       try {
         if (isFocused) {
-          // Restore the caller's intended mute state on resume.
-          try { await v.setIsMutedAsync?.(props.isMuted ?? true); } catch { /* best-effort */ }
+          try {
+            await v.setIsMutedAsync?.(props.isMuted ?? true);
+          } catch {
+            /* best-effort */
+          }
           const status = (await v.getStatusAsync?.()) || null;
           if (status?.isLoaded && status.didJustFinish) {
             await v.replayAsync?.();
@@ -112,13 +132,11 @@ function EnhancedVideo(props) {
             await v.playAsync?.();
           }
         } else {
-          // Pausing is the safety-critical path. If this single command races
-          // with a heavy navigation transition (e.g. going live, which spins up
-          // the camera/encoder) it can be silently dropped on the native side,
-          // leaving the feed video playing — and AUDIBLE — behind the live
-          // screen. So we mute first (no audio can bleed even for a frame) and
-          // then pause, and we retry both below.
-          try { await v.setIsMutedAsync?.(true); } catch { /* best-effort */ }
+          try {
+            await v.setIsMutedAsync?.(true);
+          } catch {
+            /* best-effort */
+          }
           await v.pauseAsync?.();
         }
       } catch {
@@ -127,24 +145,20 @@ function EnhancedVideo(props) {
     };
 
     apply();
-    // Retry on BOTH paths to defeat the mount/focus/navigation race where the
-    // first command is dropped because the native player wasn't ready or the JS
-    // thread was busy (most acute when going live pauses the background feed).
-    timers.push(setTimeout(apply, 250));
-    timers.push(setTimeout(apply, 700));
+    timers.push(setTimeout(apply, 200));
+    timers.push(setTimeout(apply, 500));
 
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
     };
-  }, [isFocused, videoLoaded, hasError]);
+  }, [isFocused, videoLoaded, hasError, props.isMuted]);
 
   const emitNaturalSize = (raw) => {
     if (!props.onNaturalSize || !raw || !(raw.width > 0) || !(raw.height > 0)) return;
     let width = Number(raw.width);
     let height = Number(raw.height);
     const orientation = String(raw.orientation || '').toLowerCase();
-    // Some Android devices report swapped dimensions with orientation metadata.
     if (
       (orientation === 'left' || orientation === 'right') &&
       width > 0 &&
@@ -159,17 +173,10 @@ function EnhancedVideo(props) {
   };
 
   const handleLoad = (status) => {
-    if (__DEV__) {
-      console.log('[EnhancedVideo] onLoad', {
-        playableUri,
-        durationMillis: status?.durationMillis,
-        naturalSize: status?.naturalSize,
-      });
-    }
+    paintedRef.current = true;
     setVideoLoaded(true);
     setHasError(false);
     if (props.onReady) props.onReady();
-    // expo-av often reports naturalSize on load before onReadyForDisplay.
     emitNaturalSize(status?.naturalSize);
   };
 
@@ -177,15 +184,28 @@ function EnhancedVideo(props) {
     console.warn('[EnhancedVideo] onError', error);
     setHasError(true);
     setVideoLoaded(false);
+    paintedRef.current = false;
     if (props.onError) props.onError(error);
+
+    const httpSource = sourceHttpRef.current || remoteUri;
+    if (httpSource && (httpSource.startsWith('http://') || httpSource.startsWith('https://'))) {
+      const gen = resolveGen.current;
+      (async () => {
+        try {
+          await invalidateCachedVideo(playableUri);
+          await invalidateCachedVideo(httpSource);
+          const retry = await prefetchVideoToCache(httpSource);
+          if (gen !== resolveGen.current || !retry) return;
+          setPlayableUri(retry);
+          setHasError(false);
+          setVideoLoaded(false);
+        } catch {
+          /* leave error state */
+        }
+      })();
+    }
   };
 
-  // When a caller passes an absolute-fill style (the For You / full-screen
-  // feeds), the container must fill its parent exactly. Keeping the default
-  // 9:16 aspectRatio in that case fights the top/bottom insets and leaves the
-  // video bottom-anchored with a black gap above it ("justified downwards").
-  // So drop the aspectRatio fallback whenever an explicit fill is provided;
-  // other callers (e.g. fixed-height tiles) still get the 9:16 default.
   const flatStyle = StyleSheet.flatten(props.style) || {};
   const isAbsoluteFill =
     flatStyle.position === 'absolute' && flatStyle.top != null && flatStyle.bottom != null;
@@ -197,32 +217,37 @@ function EnhancedVideo(props) {
     <View style={containerStyle}>
       {shouldLoad && playableUri && (
         <UnifiedVideo
+          // Remount only when switching remote↔local (expo-av often ignores source
+          // updates). Same remote keeps one instance so stream→local is one swap, not thrash.
+          key={
+            playableUri &&
+            (String(playableUri).startsWith('file:') || String(playableUri).startsWith('content:'))
+              ? `local:${remoteUri || playableUri}`
+              : `net:${remoteUri || playableUri}`
+          }
           ref={videoRef}
           style={styles.video}
           source={{ uri: playableUri }}
-          resizeMode={props.resizeMode || "cover"}
+          resizeMode={props.resizeMode || 'cover'}
           isLooping={props.isLooping ?? true}
           isMuted={(props.isMuted ?? true) || !isFocused}
           shouldPlay={isFocused}
           onLoad={handleLoad}
           onError={handleError}
           onReadyForDisplay={(event) => {
-            if (__DEV__) {
-              console.log('[EnhancedVideo] onReadyForDisplay');
-            }
+            paintedRef.current = true;
             setVideoLoaded(true);
             emitNaturalSize(event?.naturalSize);
           }}
           onPlaybackStatusUpdate={(status) => {
             props.onPlaybackStatusUpdate?.(status);
-            if (__DEV__ && status?.error) {
-              console.warn('[EnhancedVideo] playbackStatus error', status.error);
+            if (status?.isLoaded && (status.isPlaying || status.positionMillis > 0)) {
+              paintedRef.current = true;
             }
           }}
         />
       )}
 
-      {/* Poster under the player until first frame — no blocking spinner gate. */}
       {(!videoLoaded || !shouldLoad) && !hasError && posterUri && (
         <Image
           source={{ uri: posterUri }}
@@ -231,19 +256,13 @@ function EnhancedVideo(props) {
         />
       )}
 
-      {/* Soft spinner only when we have no poster to cover the wait. */}
       {shouldLoad && !videoLoaded && !hasError && !posterUri && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator color="#00D2BE" />
         </View>
       )}
 
-      {/* Simple error overlay */}
-      {hasError && (
-        <View style={styles.errorOverlay}>
-          {/* Error indicator */}
-        </View>
-      )}
+      {hasError && <View style={styles.errorOverlay} />}
     </View>
   );
 }
@@ -255,8 +274,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'black',
     overflow: 'hidden',
   },
-  // Used when the caller supplies an absolute-fill style: fill the parent
-  // exactly (no imposed aspect ratio), so the video is never offset.
   containerFill: {
     backgroundColor: 'black',
     overflow: 'hidden',

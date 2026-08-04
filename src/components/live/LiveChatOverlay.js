@@ -75,15 +75,16 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
 
   return (
     <View
-      style={[styles.container, { bottom: bottomInset, maxHeight, height: maxHeight }]}
+      style={[styles.container, { bottom: bottomInset, maxHeight }]}
       pointerEvents="box-none"
       onLayout={(e) => {
         if (typeof onLayoutHeight === 'function') {
+          // Report real content height (not a forced empty 28% band).
           onLayoutHeight(e?.nativeEvent?.layout?.height || 0);
         }
       }}
     >
-      <View style={{ height: maxHeight, overflow: 'hidden' }}>
+      <View style={{ maxHeight, overflow: 'hidden' }}>
       <FlatList
         data={data}
         inverted

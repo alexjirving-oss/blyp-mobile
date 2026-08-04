@@ -96,6 +96,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     removeParticipantStreams,
     markFirstFrame,
     updateParticipantMuted,
+    updateParticipantCameraDisabled,
     updateParticipantRole,
     reset: resetRegistry,
   } = multiGuestRegistry;
@@ -315,6 +316,9 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
             });
             updateParticipantMuted(payload.participantId, payload.isMuted);
           }
+          if (payload.participantId && payload.isCameraDisabled !== undefined) {
+            updateParticipantCameraDisabled(payload.participantId, !!payload.isCameraDisabled);
+          }
           if (payload.participantId && payload.role) {
             const existing = participantMetaRef.current.get(payload.participantId);
             participantMetaRef.current.set(payload.participantId, {
@@ -476,6 +480,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     removeParticipantStreams,
     removeStream,
     updateParticipantMuted,
+    updateParticipantCameraDisabled,
     updateParticipantRole,
     upsertStream,
   ]);

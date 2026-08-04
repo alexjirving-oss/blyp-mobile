@@ -1,6 +1,8 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
 const VIDEO_CACHE_DIR = `${FileSystem.cacheDirectory}videos/`;
+/** Reject tiny/corrupt cache files (failed or interrupted downloads). */
+const MIN_CACHE_BYTES = 8 * 1024;
 
 /** In-flight background downloads so we don't start duplicates. */
 const inflightDownloads = new Map();
@@ -44,17 +46,44 @@ function shortUri(uri) {
   return `${uri.slice(0, 60)}...${uri.slice(-8)}`;
 }
 
+function isUsableCacheInfo(info) {
+  if (!info?.exists || !info?.isFile) return false;
+  const size = Number(info.size || 0);
+  // size can be 0 on some platforms when unknown — only reject clearly tiny files.
+  if (Number.isFinite(size) && size > 0 && size < MIN_CACHE_BYTES) return false;
+  return true;
+}
+
 async function downloadToCache(remoteUri, targetPath) {
   if (inflightDownloads.has(remoteUri)) {
     return inflightDownloads.get(remoteUri);
   }
   const job = (async () => {
     try {
+      // Avoid appending onto a corrupt partial from a previous failed download.
+      try {
+        const existing = await FileSystem.getInfoAsync(targetPath);
+        if (existing.exists) {
+          await FileSystem.deleteAsync(targetPath, { idempotent: true });
+        }
+      } catch {
+        /* ignore */
+      }
       const result = await FileSystem.downloadAsync(remoteUri, targetPath);
+      const check = await FileSystem.getInfoAsync(result.uri || targetPath);
+      if (!isUsableCacheInfo(check)) {
+        try {
+          await FileSystem.deleteAsync(targetPath, { idempotent: true });
+        } catch {
+          /* ignore */
+        }
+        throw new Error('Downloaded file too small / corrupt');
+      }
       if (__DEV__) {
         console.log('[VIDEO CACHE] downloaded', {
           from: shortUri(remoteUri),
           to: result.uri,
+          bytes: check.size,
         });
       }
       return result.uri;
@@ -67,19 +96,29 @@ async function downloadToCache(remoteUri, targetPath) {
 }
 
 /**
- * Returns a URI that expo-av can play WITHOUT waiting on a full-file download.
- * Cache hits return the local file; misses return the remote URL immediately and
- * warm the disk cache in the background (TikTok-style progressive play).
+ * Resolve a playable URI for expo-av.
+ *
+ * Many Blyp MP4s (phone camera uploads to Firebase Storage) have the moov atom
+ * at the END of the file. Progressive HTTP streaming then fails silently —
+ * poster shows, video never plays. So the reliable path is: play a complete
+ * local file whenever possible.
  *
  * @param {string} remoteUri
- * @param {{ waitForDownload?: boolean }} [opts] waitForDownload=true for prefetch
+ * @param {{ waitForDownload?: boolean }} [opts]
+ *   waitForDownload=true (default for playback): block until cached locally
+ *   waitForDownload=false: return remote immediately only for non-play probes
  */
 export async function getPlayableVideoUri(remoteUri, opts = {}) {
   if (!remoteUri || typeof remoteUri !== 'string') {
     return null;
   }
 
-  const waitForDownload = !!opts.waitForDownload;
+  if (remoteUri.startsWith('file:') || remoteUri.startsWith('content:')) {
+    return remoteUri;
+  }
+
+  // Default to download-for-play. Stream-first broke 1.0.9 for moov-at-end MP4s.
+  const waitForDownload = opts.waitForDownload !== false;
   const cacheDir = await ensureVideoCacheDir();
   const safeName = cacheFileNameForUri(remoteUri);
   const targetPath = cacheDir ? `${cacheDir}${safeName}` : null;
@@ -90,11 +129,20 @@ export async function getPlayableVideoUri(remoteUri, opts = {}) {
     }
 
     const info = await FileSystem.getInfoAsync(targetPath);
-    if (info.exists && info.isFile) {
+    if (isUsableCacheInfo(info)) {
       if (__DEV__) {
-        console.log('[VIDEO CACHE] hit', { uri: shortUri(remoteUri) });
+        console.log('[VIDEO CACHE] hit', { uri: shortUri(remoteUri), bytes: info.size });
       }
       return info.uri;
+    }
+
+    // Stale tiny/corrupt file — wipe before re-download.
+    if (info.exists) {
+      try {
+        await FileSystem.deleteAsync(targetPath, { idempotent: true });
+      } catch {
+        /* ignore */
+      }
     }
 
     if (waitForDownload) {
@@ -102,7 +150,7 @@ export async function getPlayableVideoUri(remoteUri, opts = {}) {
         return await downloadToCache(remoteUri, targetPath);
       } catch (error) {
         if (__DEV__) {
-          console.warn('[VIDEO CACHE] prefetch download failed', {
+          console.warn('[VIDEO CACHE] download failed, falling back to remote', {
             uri: shortUri(remoteUri),
             error: String(error).slice(0, 200),
           });
@@ -111,8 +159,8 @@ export async function getPlayableVideoUri(remoteUri, opts = {}) {
       }
     }
 
-    // Stream-first: play remote now; fill cache for the next visit / neighbor.
-    downloadToCache(remoteUri, targetPath).catch(() => {});
+    // Non-blocking probe: return cache hit or remote. Callers that want a warm
+    // disk copy should use prefetchVideoToCache / waitForDownload:true.
     return remoteUri;
   } catch (error) {
     if (__DEV__) {
@@ -128,4 +176,25 @@ export async function getPlayableVideoUri(remoteUri, opts = {}) {
 /** Prefetch next clips to disk so swipe-to-next is already warm. */
 export function prefetchVideoToCache(remoteUri) {
   return getPlayableVideoUri(remoteUri, { waitForDownload: true });
+}
+
+/** Drop a bad cache entry after a playback error so the next attempt re-downloads. */
+export async function invalidateCachedVideo(remoteUri) {
+  if (!remoteUri || typeof remoteUri !== 'string') return;
+  if (remoteUri.startsWith('file:') || remoteUri.startsWith('content:')) {
+    try {
+      await FileSystem.deleteAsync(remoteUri, { idempotent: true });
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  try {
+    const cacheDir = await ensureVideoCacheDir();
+    if (!cacheDir) return;
+    const targetPath = `${cacheDir}${cacheFileNameForUri(remoteUri)}`;
+    await FileSystem.deleteAsync(targetPath, { idempotent: true });
+  } catch {
+    /* ignore */
+  }
 }

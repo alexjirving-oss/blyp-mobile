@@ -25,6 +25,7 @@ import {
   sendEconomyGift,
   makeIdempotencyKey,
 } from '../api/economyLiveApi';
+import { subscribeWalletUpdated } from '../utils/walletEvents';
 
 const { width } = Dimensions.get('window');
 
@@ -271,7 +272,19 @@ const GiftSystem = ({
     loadCatalog();
     if (useLiveWallet) {
       refreshWallet();
-      return;
+      const unsub = subscribeWalletUpdated((snap) => {
+        if (snap?.coins != null && Number.isFinite(snap.coins)) {
+          setUserBalance(snap.coins);
+          setWalletState({ status: 'ok', lastError: null, lastUpdatedAt: Date.now() });
+        }
+      });
+      return () => {
+        try {
+          unsub?.();
+        } catch {
+          /* ignore */
+        }
+      };
     }
 
     // Firebase wallet mode (default app mode): mirror the same coin balance shown in the header.
@@ -396,7 +409,10 @@ const GiftSystem = ({
       return;
     }
     if (walletState?.status === 'error') {
-      Alert.alert('Login Required', 'Please sign in to send gifts.');
+      Alert.alert('Wallet unavailable', 'Couldn’t load your coin balance. Pull to refresh or reopen gifts.', [
+        { text: 'Retry', onPress: () => refreshWallet() },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
       return;
     }
 
@@ -569,8 +585,15 @@ const GiftSystem = ({
               : []),
           ]
         );
-      } else if (code === 'ACCOUNT_BANNED' || httpStatus === 403) {
+      } else if (code === 'RECEIVER_INVALID') {
+        Alert.alert(
+          'Can’t gift that person',
+          'During a live you can gift the host or guests who are on stage. Pick them from the gift button.',
+        );
+      } else if (code === 'ACCOUNT_BANNED') {
         Alert.alert('Gift unavailable', 'This account is restricted from sending gifts right now.');
+      } else if (httpStatus === 403) {
+        Alert.alert('Gift unavailable', 'This gift couldn’t be sent right now. Try gifting the host or an on-stage guest.');
       } else if (code === 'GIFT_NOT_FOUND' || httpStatus === 404) {
         Alert.alert('Gift unavailable', 'That gift is no longer available. Please pick another.');
       } else {

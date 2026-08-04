@@ -38,6 +38,7 @@ import {
   addFollowedTeam,
   removeFollowedTeam,
 } from '../../services/teamPreferencesService';
+import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
 
 const SPORTS = {
   football: {
@@ -256,7 +257,7 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
     });
   };
 
-  const openPost = (post) => navigation.navigate('MediaViewer', { post });
+  const openPost = (post) => navigation.navigate('MediaViewer', mediaViewerParams(post, posts));
   const openCreator = (u) =>
     navigation.navigate('UserProfile', { userId: u.id || u.uid, username: u.username || u.displayName || '@user' });
   const askBlyp = (q) => navigation.navigate('Blyp', { initialQuery: q || cfg.title });

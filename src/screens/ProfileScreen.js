@@ -11,6 +11,7 @@ import { snapData } from '../utils/firestoreSnap';
 import { signOut } from 'firebase/auth';
 import { subscribeToFollowersCount, getFollowersCount } from '../utils/followUtils';
 import { COLORS } from '../styles/theme';
+import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 
 // Posts load one page at a time. The first page is live (new posts/likes show
 // instantly); older pages are fetched on scroll so a profile shows ALL posts,
@@ -219,7 +220,11 @@ const ProfileScreen = () => {
     }]);
   };
 
-  const handlePostPress = post => navigation.navigate('MediaViewer', { post });
+  const handlePostPress = post =>
+    navigation.navigate(
+      'MediaViewer',
+      mediaViewerParams(post, selectedTab === 'posts' ? userPosts : likedPosts),
+    );
 
   const getPostThumbnail = post => {
     if (post.thumbnail) return post.thumbnail;

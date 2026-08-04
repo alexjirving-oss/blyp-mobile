@@ -19,6 +19,7 @@ import { getEconomyWallet } from '../api/economyLiveApi';
 import { useAuth } from '../hooks/useCommon';
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import { peekDailyReward, claimDailyReward } from '../services/streakService';
+import { subscribeWalletUpdated } from '../utils/walletEvents';
 
 const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => {
   const [balance, setBalance] = useState(0);
@@ -53,9 +54,16 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
         refreshLiveWalletBalance();
         const t = setInterval(() => {
           refreshLiveWalletBalance();
-        }, 5000);
+        }, 15000);
         checkDailyReward();
-        return () => clearInterval(t);
+        const unsubBus = subscribeWalletUpdated((snap) => {
+          if (snap?.coins != null && Number.isFinite(snap.coins)) setBalance(snap.coins);
+          if (snap?.gems != null && Number.isFinite(snap.gems)) setGemBalance(snap.gems);
+        });
+        return () => {
+          clearInterval(t);
+          unsubBus();
+        };
       }
 
       const unsubscribe = BlypCoinService.subscribeToBalance(effectiveUid, (newBalance) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Icon from '../components/Icon';
 import {
   View,
@@ -24,6 +24,13 @@ import { responsiveFont } from '../utils/scaleUtils';
 import ScreenContainer from '../components/ScreenContainer';
 import { useAuth } from '../hooks/useCommon';
 import { COLORS } from '../styles/theme';
+import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
+import ProfileCategoryChips from '../components/ProfileCategoryChips';
+import {
+  buildProfileCategoryChips,
+  filterPostsByCategory,
+  normalizeProfileCategories,
+} from '../utils/profileCategories';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -44,6 +51,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState('all');
   const postsCursorRef = useRef(null);
   const postsHasMoreRef = useRef(true);
   const loadingMorePostsRef = useRef(false);
@@ -117,6 +125,7 @@ const UserProfileScreen = ({ route, navigation }) => {
           username: userData.displayName || userData.username || username,
           displayName: userData.displayName || userData.username || username.replace('@', ''),
           bio: userData.bio || `Welcome to ${userData.displayName || username}'s profile! 🎬✨`,
+          profileCategories: normalizeProfileCategories(userData.profileCategories),
           avatar: userData.photoURL || userData.avatar || null,
           followers: 0, // Will be loaded separately with follow utils
           following: 0, // Will be loaded separately with follow utils
@@ -294,8 +303,18 @@ const UserProfileScreen = ({ route, navigation }) => {
     }
   };
 
+  const categoryChips = useMemo(
+    () => buildProfileCategoryChips(userProfile?.profileCategories, userPosts),
+    [userProfile?.profileCategories, userPosts],
+  );
+
+  const filteredPosts = useMemo(
+    () => filterPostsByCategory(userPosts, selectedCategoryId),
+    [userPosts, selectedCategoryId],
+  );
+
   const handlePostPress = (post) => {
-    navigation.navigate('MediaViewer', { post });
+    navigation.navigate('MediaViewer', mediaViewerParams(post, filteredPosts, { source: 'profile' }));
   };
 
   const formatNumber = (num) => {
@@ -393,7 +412,7 @@ const UserProfileScreen = ({ route, navigation }) => {
 
       <FlatList
         style={styles.content}
-        data={userPosts}
+        data={filteredPosts}
         renderItem={renderPostItem}
         keyExtractor={(item) => item.id}
         numColumns={3}
@@ -468,6 +487,12 @@ const UserProfileScreen = ({ route, navigation }) => {
               )}
             </View>
 
+            <ProfileCategoryChips
+              chips={categoryChips}
+              selectedId={selectedCategoryId}
+              onSelect={setSelectedCategoryId}
+            />
+
             {/* Posts Grid */}
             <Text style={[styles.sectionTitle, styles.postsSectionTitle]}>Posts</Text>
           </>
@@ -475,7 +500,9 @@ const UserProfileScreen = ({ route, navigation }) => {
         ListEmptyComponent={(
           <View style={styles.emptyPosts}>
             <Icon name="camera-outline" size={48} color="#6b7280" />
-            <Text style={styles.loadingText}>No posts yet</Text>
+            <Text style={styles.loadingText}>
+              {selectedCategoryId === 'all' ? 'No posts yet' : 'Nothing in this category'}
+            </Text>
           </View>
         )}
         ListFooterComponent={loadingMore ? (

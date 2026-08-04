@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, StatusBar, FlatList, Alert, Modal, Platform, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import ScreenContainer from '../components/ScreenContainer';
@@ -35,6 +35,14 @@ import * as firebaseCfg from '../config/firebase';
 import { primeStreamingFlag, isLiveStreamingEnabledAsync } from '../config/StreamingFeatureFlag';
 import CoinStoreScreen from './CoinStoreScreen';
 import PromoteTab from '../components/PromoteTab';
+import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
+import ProfileCategoryChips from '../components/ProfileCategoryChips';
+import ManageProfileCategoriesSheet from '../components/ManageProfileCategoriesSheet';
+import {
+  buildProfileCategoryChips,
+  filterPostsByCategory,
+  normalizeProfileCategories,
+} from '../utils/profileCategories';
 
 type StatBundle = {
   followers: number;
@@ -120,6 +128,18 @@ const looksLikeOpaqueId = (value: any): boolean => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t);
 };
 
+/** True when the user has deliberately set a public screen name (@handle). */
+const hasChosenScreenName = (profile: any, uid?: string | null): boolean => {
+  const raw = String(profile?.username || profile?.handle || '').trim();
+  const noAt = raw.startsWith('@') ? raw.slice(1) : raw;
+  const cleaned = noAt.trim();
+  if (!cleaned) return false;
+  if (looksLikeOpaqueId(cleaned)) return false;
+  if (uid && cleaned === String(uid)) return false;
+  if (/^user_/i.test(cleaned)) return false;
+  return /^[A-Za-z0-9_.]{3,20}$/.test(cleaned);
+};
+
 type ProfileTabKey = 'myProfile' | 'tab1' | 'tab2' | 'tab3';
 
 const mapHeaderTabToProfileTab = (tabLabel: string): ProfileTabKey => {
@@ -149,8 +169,11 @@ const ProfileScreenV3: React.FC = () => {
   const [userPosts, setUserPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
+  const [manageCategoriesVisible, setManageCategoriesVisible] = useState(false);
   const extracting = useRef(false);
   const lastBackfillSig = useRef<string>('');
+  const profileHydratedRef = useRef(false);
 
   // Posts pagination: a shared id->post map plus a cursor/hasMore per source
   // (own uid + optional legacy username alias). The live first page seeds the
@@ -303,25 +326,49 @@ const ProfileScreenV3: React.FC = () => {
         };
       }
 
-      // Self-heal: an older bug persisted the raw uid/UUID as displayName.
+      // Self-heal: an older bug persisted the raw uid/UUID as displayName/username.
       // If we can derive a real name (handle/username/email), repair the doc
       // so the source of truth is fixed for everyone reading it.
       try {
         const storedDn = String(basics?.displayName || '').trim();
-        const badName = storedDn && (looksLikeOpaqueId(storedDn) || storedDn === String(uid));
-        if (badName) {
-          const emailLocal = String((user as any)?.email || '').split('@')[0]?.trim() || '';
-          const repaired = [basics?.handle, basics?.username, emailLocal]
-            .map((v: any) => String(v || '').trim())
-            .find((v: string) => v && !looksLikeOpaqueId(v) && v !== String(uid));
-          if (repaired) {
-            basics = { ...basics, displayName: repaired };
-            try { await db.collection('users').doc(uid).set({ displayName: repaired }, { merge: true }); } catch { }
+        const storedUn = String(basics?.username || basics?.handle || '').trim();
+        const badName = (v: string) =>
+          !!v && (looksLikeOpaqueId(v) || v === String(uid) || /^user_/i.test(v));
+        const emailLocal = String((user as any)?.email || basics?.email || '').split('@')[0]?.trim() || '';
+        const repaired = [basics?.handle, basics?.username, emailLocal]
+          .map((v: any) => String(v || '').trim())
+          .find((v: string) => v && !badName(v));
+
+        const patch: Record<string, any> = {};
+        if (badName(storedDn) && repaired) {
+          basics = { ...basics, displayName: repaired };
+          patch.displayName = repaired;
+        }
+        if (badName(storedUn)) {
+          // Clear opaque Cognito usernames that were wrongly saved as Blyp handles.
+          if (repaired && !badName(repaired)) {
+            basics = { ...basics, username: repaired, handle: repaired };
+            patch.username = repaired;
+            patch.handle = repaired;
+          } else {
+            basics = { ...basics, username: null, handle: null };
+            patch.username = null;
+            patch.handle = null;
+            if (!patch.displayName && repaired) {
+              basics = { ...basics, displayName: repaired };
+              patch.displayName = repaired;
+            }
           }
+        }
+        if (Object.keys(patch).length) {
+          try {
+            await db.collection('users').doc(uid).set(patch, { merge: true });
+          } catch { /* non-fatal */ }
         }
       } catch { }
 
       setProfile(basics);
+      profileHydratedRef.current = true;
 
       // Followers count (each query failure isolated per A2)
       let followers: StatValue = 0;
@@ -396,6 +443,15 @@ const ProfileScreenV3: React.FC = () => {
   }, [uid, legacyUserId]);
 
   useEffect(() => { if (uid) void loadAll(); }, [uid, loadAll]);
+
+  // Refresh profile when returning to this tab (e.g. after EditProfile save).
+  useFocusEffect(
+    useCallback(() => {
+      if (!uid || isGuest) return undefined;
+      void loadAll();
+      return undefined;
+    }, [uid, isGuest, loadAll]),
+  );
 
   // Best-effort: keep older posts' denormalized author fields in sync so feed shows latest name/photo.
   useEffect(() => {
@@ -584,16 +640,18 @@ const ProfileScreenV3: React.FC = () => {
     nameCandidate((user as any)?.email?.split('@')[0]) ||
     'User';
 
-  const computedHandle =
-    profile?.handle ||
-    profile?.username ||
-    `user_${(user as any)?.uid?.slice(0, 6) || 'anon'}`;
+  const computedHandle = (() => {
+    const h = nameCandidate(profile?.handle) || nameCandidate(profile?.username);
+    return h || '';
+  })();
 
   const displayName = useMemo(() => {
     const dn = profile?.displayName?.trim?.();
     if (dn && !looksLikeOpaqueId(dn) && dn !== String(uid || '')) return dn;
     const un = profile?.username?.trim?.();
-    if (un && !looksLikeOpaqueId(un)) return un;
+    if (un && !looksLikeOpaqueId(un) && un !== String(uid || '')) return un;
+    const hn = profile?.handle?.trim?.();
+    if (hn && !looksLikeOpaqueId(hn) && hn !== String(uid || '')) return hn;
     const authName = (user as any)?.displayName?.trim?.();
     if (authName && !looksLikeOpaqueId(authName)) return authName;
     const email = (user as any)?.email?.trim?.();
@@ -601,13 +659,13 @@ const ProfileScreenV3: React.FC = () => {
     return 'User';
   }, [profile, user, uid]);
 
+  // Never show a truncated Cognito uid as @handle — that made Profile look broken
+  // after signup even when a real display name existed (or should have).
   const handleLabel = useMemo(() => {
-    const h = profile?.handle?.trim?.();
-    if (h) return h.startsWith('@') ? h : `@${h}`;
-    const username = profile?.username?.trim?.();
-    if (username) return `@${username}`;
-    if (uid) return `@${(uid as string).slice(0, 8)}`;
-    return '@user';
+    if (!hasChosenScreenName(profile, uid)) return '';
+    const raw = String(profile?.handle || profile?.username || '').trim();
+    const noAt = raw.startsWith('@') ? raw.slice(1) : raw;
+    return noAt ? `@${noAt}` : '';
   }, [profile, uid]);
 
   const avatarSource = useMemo(() => {
@@ -750,15 +808,33 @@ const ProfileScreenV3: React.FC = () => {
     ]);
   }, [onEditProfile]);
 
+  const profileCategories = useMemo(
+    () => normalizeProfileCategories(profile?.profileCategories),
+    [profile?.profileCategories],
+  );
+
+  const categoryChips = useMemo(
+    () => buildProfileCategoryChips(profileCategories, userPosts),
+    [profileCategories, userPosts],
+  );
+
+  const filteredPosts = useMemo(
+    () => filterPostsByCategory(userPosts, selectedCategoryId),
+    [userPosts, selectedCategoryId],
+  );
+
   const handlePostPress = useCallback((post: any) => {
     try {
       console.log('[PROFILE] Opening post:', post.id);
       const ownerIds = [uid, legacyUserId].filter(Boolean);
-      (nav as any).navigate('MediaViewer', { post, ownerIds, source: 'profile' });
+      (nav as any).navigate(
+        'MediaViewer',
+        mediaViewerParams(post, filteredPosts, { ownerIds, source: 'profile' }),
+      );
     } catch (e) {
       console.warn('[PROFILE][WARN] Failed to navigate to MediaViewer', e);
     }
-  }, [nav, uid, legacyUserId]);
+  }, [nav, uid, legacyUserId, filteredPosts]);
 
   const canDeletePost = useCallback((post: any) => {
     const owner = String(post?.userId || '').trim();
@@ -850,11 +926,11 @@ const ProfileScreenV3: React.FC = () => {
   // For the virtualized posts grid: pad the last row to a multiple of 3 with
   // invisible placeholders so 3-up cells never stretch on a short final row.
   const gridData = useMemo(() => {
-    const rem = userPosts.length % 3;
-    if (rem === 0) return userPosts;
+    const rem = filteredPosts.length % 3;
+    if (rem === 0) return filteredPosts;
     const pad = Array.from({ length: 3 - rem }).map((_, i) => ({ id: `__ph_${i}`, __placeholder: true }));
-    return [...userPosts, ...pad];
-  }, [userPosts]);
+    return [...filteredPosts, ...pad];
+  }, [filteredPosts]);
 
   const renderProfileGridItem = useCallback(({ item }: { item: any }) => {
     if (item?.__placeholder) return <View style={styles.postCellWrap} />;
@@ -1038,6 +1114,7 @@ const ProfileScreenV3: React.FC = () => {
           // 3), with the profile card/stats as the header. This only mounts the
           // visible rows, so large profiles scroll smoothly instead of mounting
           // hundreds of thumbnails up-front.
+          <>
           <FlatList
             style={styles.scrollView}
             data={gridData}
@@ -1089,11 +1166,19 @@ const ProfileScreenV3: React.FC = () => {
 
                 <View style={styles.divider} />
 
+                <ProfileCategoryChips
+                  chips={categoryChips}
+                  selectedId={selectedCategoryId}
+                  onSelect={setSelectedCategoryId}
+                  showManage
+                  onManage={() => setManageCategoriesVisible(true)}
+                />
+
                 <View style={styles.postsSectionHeader}>
                   <Text style={styles.postsSectionTitle}>My Posts</Text>
                   <View style={styles.postsCountBadge}>
                     <Text style={styles.postsCountText}>
-                      {Math.max(Number(typeof stats.posts === 'number' ? stats.posts : 0) || 0, userPosts.length)}
+                      {filteredPosts.length}
                     </Text>
                   </View>
                 </View>
@@ -1110,8 +1195,14 @@ const ProfileScreenV3: React.FC = () => {
                   <View style={[styles.emptyIconCircle, { width: 80, height: 80, borderRadius: 40 }]}>
                     <Icon name={"camera" as any} size={40} color={theme.colors.textMuted} style={{}} strokeWidth={undefined} />
                   </View>
-                  <Text style={styles.emptyStateTitle}>No posts yet</Text>
-                  <Text style={styles.emptyStateSubtitle}>Share your first moment with the world!</Text>
+                  <Text style={styles.emptyStateTitle}>
+                    {selectedCategoryId === 'all' ? 'No posts yet' : 'Nothing in this category'}
+                  </Text>
+                  <Text style={styles.emptyStateSubtitle}>
+                    {selectedCategoryId === 'all'
+                      ? 'Share your first moment with the world!'
+                      : 'Assign posts to this shelf when you create or edit them'}
+                  </Text>
                 </View>
               )
             )}
@@ -1132,6 +1223,16 @@ const ProfileScreenV3: React.FC = () => {
               </>
             )}
           />
+          <ManageProfileCategoriesSheet
+            visible={manageCategoriesVisible}
+            onClose={() => setManageCategoriesVisible(false)}
+            userId={uid}
+            initialCategories={profileCategories}
+            onSaved={(next) => {
+              setProfile((prev: any) => ({ ...(prev || {}), profileCategories: next }));
+            }}
+          />
+          </>
         ) : (
           <ScrollView
             style={styles.scrollView}
@@ -1950,11 +2051,11 @@ const ProfileIdentity: React.FC<{
         <View style={styles.nameSection}>
           {handleLabel ? (
             <Text style={styles.handle} numberOfLines={1}>
-              @{computedHandle}
+              {handleLabel.startsWith('@') ? handleLabel : `@${handleLabel}`}
             </Text>
           ) : (
             <TouchableOpacity onPress={onEditProfile} activeOpacity={0.7}>
-              <Text style={styles.handleAdd}>@username</Text>
+              <Text style={styles.handleAdd}>Add username</Text>
             </TouchableOpacity>
           )}
         </View>

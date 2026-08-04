@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CognitoUserPool } from 'amazon-cognito-identity-js';
 import Logger from '../utils/Logger';
@@ -695,6 +696,11 @@ function startAuthEngine() {
   // Initial load
   setFromSession();
 
+  // Refresh when the app returns to the foreground (replaces 5s polling).
+  AppState.addEventListener('change', (nextState) => {
+    if (nextState === 'active') setFromSession();
+  });
+
   // Expose external refresh trigger (for post-login callbacks)
   refreshAuthNow = async (maybeUser) => {
     if (maybeUser) {
@@ -721,9 +727,6 @@ function startAuthEngine() {
     }
     return setFromSession();
   };
-
-  // Poll to reflect background auth changes (single shared interval)
-  setInterval(setFromSession, 5000);
 }
 
 const authDebugEnabled =

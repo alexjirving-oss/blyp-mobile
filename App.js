@@ -47,15 +47,6 @@ console.log('[BLYP][APP] PRELUDE?', global.BLYP_PRELUDE);
 // ============================================================================
 import './src/config/amplify';
 
-// LiveKit WebRTC globals (audio calls). Safe no-op if native module not yet linked.
-try {
-  // eslint-disable-next-line global-require
-  const { registerGlobals } = require('@livekit/react-native');
-  if (typeof registerGlobals === 'function') registerGlobals();
-} catch {
-  // Native LiveKit not in this binary yet — CallScreen will surface a clear error.
-}
-
 // Note: Other startup side-effects (pre-auth cleanup, Sentry, flags)
 // are deferred until after runtime is ready to avoid early WebSocket/runtime issues.
 
@@ -120,9 +111,8 @@ if (firebaseNative) {
   try { messaging = require('@react-native-firebase/messaging').default(); } catch { }
 }
 
-// Import screens
+// Import screens (eager: tab roots + auth/onboarding + call/messenger/chat)
 import HomeScreen from './src/screens/HomeScreen';
-import ArtilleryGameScreen from './src/games/artillery/ArtilleryGameScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatConversationScreen from './src/screens/ChatConversationScreen';
 import MessengerScreen from './src/screens/MessengerScreen';
@@ -131,62 +121,58 @@ import CallScreen from './src/screens/CallScreen';
 // import ProfileScreen from './src/screens/ProfileScreen';
 import ProfileScreenV3 from './src/screens/ProfileScreen.v3';
 import { WalletStub, SettingsStub, MyVideosStub, PastLivesStub, LiveUnavailableStub } from './src/screens/StubScreens';
-import EditProfileScreen from './src/screens/EditProfileScreen';
-import PrivacySettingsScreen from './src/screens/PrivacySettingsScreen';
-import NotificationSettingsScreen from './src/screens/NotificationSettingsScreen';
-import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import AuthScreen from './src/screens/AuthScreen';
-const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
-// Lazy screens
-const ReviewScreen = React.lazy(() => import('./src/screens/ReviewScreen'));
-import VoiceMemoScreen from './src/screens/VoiceMemoScreen';
-import PostPreviewScreen from './src/screens/PostPreviewScreen';
-const MediaViewerScreen = React.lazy(() => import('./src/screens/MediaViewerScreen'));
-import LiveStreamScreen from './src/screens/LiveStreamScreen';
-import LiveErrorBoundary from './src/components/LiveErrorBoundary';
-import ScreenErrorBoundary from './src/components/ScreenErrorBoundary';
-import LiveSummaryScreen from './src/screens/LiveSummaryScreen';
-import SearchScreen from './src/screens/SearchScreen';
-import SearchResultsScreen from './src/screens/SearchResultsScreen';
-import BlypScreen from './src/screens/BlypScreen';
-import TransparencyScreen from './src/screens/TransparencyScreen';
-import PlansScreen from './src/screens/PlansScreen';
-import HowBlypWorksScreen from './src/screens/HowBlypWorksScreen';
-import ImportContentScreen from './src/screens/ImportContentScreen';
-import GlobalImportProgress from './src/components/GlobalImportProgress';
-import HubScreen from './src/screens/HubScreen';
-import BlypResultsScreen from './src/screens/BlypResultsScreen';
-import PagesEditorScreen from './src/screens/PagesEditorScreen';
-import SavedScreen from './src/screens/SavedScreen';
-import ActivityScreen from './src/screens/ActivityScreen';
-import YourBlypScreen from './src/screens/YourBlypScreen';
-import CreateBattleScreen from './src/screens/CreateBattleScreen';
-import BattleDetailScreen from './src/screens/BattleDetailScreen';
-import BattleLeaderboardScreen from './src/screens/BattleLeaderboardScreen';
-import BattleDiaryScreen from './src/screens/BattleDiaryScreen';
-import RoomsScreen from './src/screens/RoomsScreen';
-import RoomScreen from './src/screens/RoomScreen';
-import WebBrowserScreen from './src/screens/WebBrowserScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import { isOnboarded, subscribePreferences } from './src/services/userPreferencesService';
-import CommentsScreen from './src/screens/CommentsScreen';
-import UserProfileScreen from './src/screens/UserProfileScreen';
-import FollowersScreen from './src/screens/FollowersScreen';
-import FindPeopleScreen from './src/screens/FindPeopleScreen';
-import TeamDetailScreen from './src/screens/TeamDetailScreen';
-import MyTeamScreen from './src/screens/MyTeamScreen';
-// Gaming screens (lazy)
+import LiveErrorBoundary from './src/components/LiveErrorBoundary';
+import ScreenErrorBoundary from './src/components/ScreenErrorBoundary';
+import GlobalImportProgress from './src/components/GlobalImportProgress';
+// Lazy screens (defer heavy modules until navigated)
+const ArtilleryGameScreen = React.lazy(() => import('./src/games/artillery/ArtilleryGameScreen'));
+const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
+const ReviewScreen = React.lazy(() => import('./src/screens/ReviewScreen'));
+const VoiceMemoScreen = React.lazy(() => import('./src/screens/VoiceMemoScreen'));
+const PostPreviewScreen = React.lazy(() => import('./src/screens/PostPreviewScreen'));
+const MediaViewerScreen = React.lazy(() => import('./src/screens/MediaViewerScreen'));
+const LiveStreamScreen = React.lazy(() => import('./src/screens/LiveStreamScreen'));
+const LiveSummaryScreen = React.lazy(() => import('./src/screens/LiveSummaryScreen'));
+const SearchScreen = React.lazy(() => import('./src/screens/SearchScreen'));
+const SearchResultsScreen = React.lazy(() => import('./src/screens/SearchResultsScreen'));
+const BlypScreen = React.lazy(() => import('./src/screens/BlypScreen'));
+const TransparencyScreen = React.lazy(() => import('./src/screens/TransparencyScreen'));
+const PlansScreen = React.lazy(() => import('./src/screens/PlansScreen'));
+const HowBlypWorksScreen = React.lazy(() => import('./src/screens/HowBlypWorksScreen'));
+const ImportContentScreen = React.lazy(() => import('./src/screens/ImportContentScreen'));
+const HubScreen = React.lazy(() => import('./src/screens/HubScreen'));
+const BlypResultsScreen = React.lazy(() => import('./src/screens/BlypResultsScreen'));
+const PagesEditorScreen = React.lazy(() => import('./src/screens/PagesEditorScreen'));
+const SavedScreen = React.lazy(() => import('./src/screens/SavedScreen'));
+const ActivityScreen = React.lazy(() => import('./src/screens/ActivityScreen'));
+const YourBlypScreen = React.lazy(() => import('./src/screens/YourBlypScreen'));
+const CreateBattleScreen = React.lazy(() => import('./src/screens/CreateBattleScreen'));
+const BattleDetailScreen = React.lazy(() => import('./src/screens/BattleDetailScreen'));
+const BattleLeaderboardScreen = React.lazy(() => import('./src/screens/BattleLeaderboardScreen'));
+const BattleDiaryScreen = React.lazy(() => import('./src/screens/BattleDiaryScreen'));
+const RoomsScreen = React.lazy(() => import('./src/screens/RoomsScreen'));
+const RoomScreen = React.lazy(() => import('./src/screens/RoomScreen'));
+const WebBrowserScreen = React.lazy(() => import('./src/screens/WebBrowserScreen'));
+const CommentsScreen = React.lazy(() => import('./src/screens/CommentsScreen'));
+const UserProfileScreen = React.lazy(() => import('./src/screens/UserProfileScreen'));
+const FollowersScreen = React.lazy(() => import('./src/screens/FollowersScreen'));
+const FindPeopleScreen = React.lazy(() => import('./src/screens/FindPeopleScreen'));
+const TeamDetailScreen = React.lazy(() => import('./src/screens/TeamDetailScreen'));
+const MyTeamScreen = React.lazy(() => import('./src/screens/MyTeamScreen'));
+const EditProfileScreen = React.lazy(() => import('./src/screens/EditProfileScreen'));
+const PrivacySettingsScreen = React.lazy(() => import('./src/screens/PrivacySettingsScreen'));
+const NotificationSettingsScreen = React.lazy(() => import('./src/screens/NotificationSettingsScreen'));
+const HelpSupportScreen = React.lazy(() => import('./src/screens/HelpSupportScreen'));
+const ChatRoomsScreen = React.lazy(() => import('./src/screens/ChatRoomsScreen'));
+const ChatRoomScreen = React.lazy(() => import('./src/screens/ChatRoomScreen'));
+const CoinStoreScreen = React.lazy(() => import('./src/screens/CoinStoreScreen'));
 const GamesScreen = React.lazy(() => import('./src/screens/GamesScreen'));
 const GameRoomScreen = React.lazy(() => import('./src/screens/GameRoomScreen'));
 const ModerationQueueScreen = React.lazy(() => import('./src/screens/ModerationQueueScreen'));
-// Bridge test screen (diagnostic - lazy)
 const BridgeTestScreen = React.lazy(() => import('./src/screens/BridgeTestScreen').then(m => ({ default: m.BridgeTestScreen })));
-// Chat rooms screens
-import ChatRoomsScreen from './src/screens/ChatRoomsScreen';
-import ChatRoomScreen from './src/screens/ChatRoomScreen';
-// Blypcoin screens
-import CoinStoreScreen from './src/screens/CoinStoreScreen';
-// Matchday Live (premium football companion)
 const MatchdayRoomScreen = React.lazy(() => import('./src/screens/MatchdayRoomScreen'));
 
 // Import components and utilities
@@ -389,9 +375,9 @@ function MainTabs() {
         listeners={makeDoubleTapResetListener('Messenger')}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <TabBarIcon name="call" color={color} size={size} focused={focused} badge={unreadCount > 0 ? unreadCount : null} />
+            <TabBarIcon name="chatbubbles" color={color} size={size} focused={focused} badge={unreadCount > 0 ? unreadCount : null} />
           ),
-          tabBarLabel: 'Phone',
+          tabBarLabel: 'Messages',
         }}
       />
       <Tab.Screen
@@ -440,34 +426,120 @@ function AppStack() {
           </ScreenErrorBoundary>
         )}
       </Stack.Screen>
-      <Stack.Screen name="Blyp" component={BlypScreen} />
-      <Stack.Screen name="Transparency" component={TransparencyScreen} />
-      <Stack.Screen name="Plans" component={PlansScreen} />
-      <Stack.Screen name="HowBlypWorks" component={HowBlypWorksScreen} />
-      <Stack.Screen name="ImportContent" component={ImportContentScreen} />
-      <Stack.Screen name="Hub" component={HubScreen} />
-      <Stack.Screen name="BlypResults" component={BlypResultsScreen} />
-      <Stack.Screen name="PagesEditor" component={PagesEditorScreen} />
-      <Stack.Screen name="Saved" component={SavedScreen} />
-      <Stack.Screen name="Activity" component={ActivityScreen} />
-      <Stack.Screen name="YourBlyp" component={YourBlypScreen} />
-      <Stack.Screen name="CreateBattle" component={CreateBattleScreen} />
-      <Stack.Screen name="BattleDetail" component={BattleDetailScreen} />
-      <Stack.Screen name="BattleLeaderboard" component={BattleLeaderboardScreen} />
-      <Stack.Screen name="BattleDiary" component={BattleDiaryScreen} />
-      <Stack.Screen name="Rooms" component={RoomsScreen} />
-      <Stack.Screen name="Room" component={RoomScreen} />
-      <Stack.Screen name="WebBrowser" component={WebBrowserScreen} />
-      <Stack.Screen name="Search" component={SearchScreen} />
-      <Stack.Screen name="Comments" component={CommentsScreen} />
+      <Stack.Screen name="Blyp" children={(navProps) => (
+        <Suspense fallback={null}>
+          <BlypScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Transparency" children={(navProps) => (
+        <Suspense fallback={null}>
+          <TransparencyScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Plans" children={(navProps) => (
+        <Suspense fallback={null}>
+          <PlansScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="HowBlypWorks" children={(navProps) => (
+        <Suspense fallback={null}>
+          <HowBlypWorksScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="ImportContent" children={(navProps) => (
+        <Suspense fallback={null}>
+          <ImportContentScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Hub" children={(navProps) => (
+        <Suspense fallback={null}>
+          <HubScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="BlypResults" children={(navProps) => (
+        <Suspense fallback={null}>
+          <BlypResultsScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="PagesEditor" children={(navProps) => (
+        <Suspense fallback={null}>
+          <PagesEditorScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Saved" children={(navProps) => (
+        <Suspense fallback={null}>
+          <SavedScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Activity" children={(navProps) => (
+        <Suspense fallback={null}>
+          <ActivityScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="YourBlyp" children={(navProps) => (
+        <Suspense fallback={null}>
+          <YourBlypScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="CreateBattle" children={(navProps) => (
+        <Suspense fallback={null}>
+          <CreateBattleScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="BattleDetail" children={(navProps) => (
+        <Suspense fallback={null}>
+          <BattleDetailScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="BattleLeaderboard" children={(navProps) => (
+        <Suspense fallback={null}>
+          <BattleLeaderboardScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="BattleDiary" children={(navProps) => (
+        <Suspense fallback={null}>
+          <BattleDiaryScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Rooms" children={(navProps) => (
+        <Suspense fallback={null}>
+          <RoomsScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Room" children={(navProps) => (
+        <Suspense fallback={null}>
+          <RoomScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="WebBrowser" children={(navProps) => (
+        <Suspense fallback={null}>
+          <WebBrowserScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Search" children={(navProps) => (
+        <Suspense fallback={null}>
+          <SearchScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Comments" children={(navProps) => (
+        <Suspense fallback={null}>
+          <CommentsScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="UserProfile">
         {(navProps) => (
           <ScreenErrorBoundary label="UserProfile" onReset={() => { try { navProps.navigation.goBack(); } catch {} }}>
-            <UserProfileScreen {...navProps} />
+            <Suspense fallback={null}>
+              <UserProfileScreen {...navProps} />
+            </Suspense>
           </ScreenErrorBoundary>
         )}
       </Stack.Screen>
-      <Stack.Screen name="Followers" component={FollowersScreen} />
+      <Stack.Screen name="Followers" children={(navProps) => (
+        <Suspense fallback={null}>
+          <FollowersScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="ChatConversation">
         {(navProps) => (
           <ScreenErrorBoundary label="ChatConversation" onReset={() => { try { navProps.navigation.goBack(); } catch {} }}>
@@ -485,10 +557,26 @@ function AppStack() {
           </ScreenErrorBoundary>
         )}
       </Stack.Screen>
-      <Stack.Screen name="FindPeople" component={FindPeopleScreen} />
-      <Stack.Screen name="TeamDetail" component={TeamDetailScreen} />
-      <Stack.Screen name="MyTeam" component={MyTeamScreen} />
-      <Stack.Screen name="ArtilleryGame" component={ArtilleryGameScreen} />
+      <Stack.Screen name="FindPeople" children={(navProps) => (
+        <Suspense fallback={null}>
+          <FindPeopleScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="TeamDetail" children={(navProps) => (
+        <Suspense fallback={null}>
+          <TeamDetailScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="MyTeam" children={(navProps) => (
+        <Suspense fallback={null}>
+          <MyTeamScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="ArtilleryGame" children={(navProps) => (
+        <Suspense fallback={null}>
+          <ArtilleryGameScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="Camera" children={() => (
         <Suspense fallback={null}>
           <CameraScreen />
@@ -506,16 +594,36 @@ function AppStack() {
           </Suspense>
         </ScreenErrorBoundary>
       )} />
-      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
-      <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} />
-      <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
-      <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+      <Stack.Screen name="EditProfile" children={(navProps) => (
+        <Suspense fallback={null}>
+          <EditProfileScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="PrivacySettings" children={(navProps) => (
+        <Suspense fallback={null}>
+          <PrivacySettingsScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="NotificationSettings" children={(navProps) => (
+        <Suspense fallback={null}>
+          <NotificationSettingsScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="HelpSupport" children={(navProps) => (
+        <Suspense fallback={null}>
+          <HelpSupportScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="WalletStub" component={WalletStub} />
       <Stack.Screen name="SettingsStub" component={SettingsStub} />
       <Stack.Screen name="MyVideosStub" component={MyVideosStub} />
       <Stack.Screen name="PastLivesStub" component={PastLivesStub} />
       <Stack.Screen name="LiveUnavailableStub" component={LiveUnavailableStub} />
-      <Stack.Screen name="VoiceMemo" component={VoiceMemoScreen} />
+      <Stack.Screen name="VoiceMemo" children={(navProps) => (
+        <Suspense fallback={null}>
+          <VoiceMemoScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="LiveStreamScreen">
         {(navProps) => (
           <LiveErrorBoundary onReset={() => { try { navProps.navigation.goBack(); } catch {} }}>
@@ -527,11 +635,24 @@ function AppStack() {
       </Stack.Screen>
       <Stack.Screen
         name="LiveSummary"
-        component={LiveSummaryScreen}
         options={{ headerShown: false, gestureEnabled: false }}
-      />
-      <Stack.Screen name="PostPreview" component={PostPreviewScreen} />
-      <Stack.Screen name="SearchResults" component={SearchResultsScreen} />
+      >
+        {(navProps) => (
+          <Suspense fallback={null}>
+            <LiveSummaryScreen {...navProps} />
+          </Suspense>
+        )}
+      </Stack.Screen>
+      <Stack.Screen name="PostPreview" children={(navProps) => (
+        <Suspense fallback={null}>
+          <PostPreviewScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="SearchResults" children={(navProps) => (
+        <Suspense fallback={null}>
+          <SearchResultsScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="Games" children={() => (
         <Suspense fallback={null}>
           <GamesScreen />
@@ -542,9 +663,21 @@ function AppStack() {
           <GameRoomScreen />
         </Suspense>
       )} />
-      <Stack.Screen name="ChatRooms" component={ChatRoomsScreen} />
-      <Stack.Screen name="ChatRoom" component={ChatRoomScreen} />
-      <Stack.Screen name="CoinStore" component={CoinStoreScreen} />
+      <Stack.Screen name="ChatRooms" children={(navProps) => (
+        <Suspense fallback={null}>
+          <ChatRoomsScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="ChatRoom" children={(navProps) => (
+        <Suspense fallback={null}>
+          <ChatRoomScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="CoinStore" children={(navProps) => (
+        <Suspense fallback={null}>
+          <CoinStoreScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="MatchdayRoom" children={(navProps) => (
         <Suspense fallback={null}>
           <MatchdayRoomScreen {...navProps} />
@@ -813,19 +946,7 @@ function AppInner() {
                 otherUser: { id: data.senderId, displayName: data.senderName, username: data.senderName },
               });
             } else if ((data.type === 'incoming_call' || data.type === 'call') && data.callId) {
-              try {
-                // eslint-disable-next-line global-require
-                const { showIncomingCallNative } = require('./src/services/incomingCallNative');
-                showIncomingCallNative(data.callId, data.callerName || 'Incoming call');
-              } catch {
-                // ignore
-              }
-              routeWhenReady('Call', {
-                callId: data.callId,
-                role: 'callee',
-                peerName: data.callerName || 'Incoming call',
-                callerId: data.callerId,
-              });
+              // Calling is Coming Soon — do not open Call UI from push.
             } else if (data.type === 'team') {
               // Team join request/decision/group message → open My Team.
               routeWhenReady('MyTeam');
@@ -835,60 +956,6 @@ function AppInner() {
       } catch { }
     })();
     return () => { try { detach(); } catch { } };
-  }, [uid]);
-
-  // Foreground incoming-call watcher (Firestore ringing docs where we are callee).
-  useEffect(() => {
-    const fbUid = firebaseAuth?.currentUser?.uid || uid || null;
-    if (!fbUid) return undefined;
-    let unsub = () => {};
-    // Dedup: Firestore snapshots re-fire often; re-navigating / re-ringing
-    // every tick made CallScreen feel laggy and buggy.
-    const handledCallIds = new Set();
-    const openCall = (params, tries = 0) => {
-      try {
-        if (navigationRef?.isReady?.()) {
-          const state = navigationRef.getRootState?.();
-          const routes = state?.routes || [];
-          const top = routes[routes.length - 1];
-          if (top?.name === 'Call' && top?.params?.callId === params.callId) return;
-          const already = routes.some(
-            (r) => r?.name === 'Call' && r?.params?.callId === params.callId,
-          );
-          if (already) return;
-          navigationRef.navigate('Call', params);
-          return;
-        }
-      } catch { }
-      if (tries < 40) setTimeout(() => openCall(params, tries + 1), 400);
-    };
-    try {
-      // eslint-disable-next-line global-require
-      const callService = require('./src/services/callService');
-      unsub = callService.subscribeToIncomingCalls(fbUid, (incoming) => {
-        const first = Array.isArray(incoming) && incoming.length ? incoming[0] : null;
-        if (!first?.id) return;
-        if (handledCallIds.has(first.id)) return;
-        handledCallIds.add(first.id);
-        try {
-          // eslint-disable-next-line global-require
-          const { showIncomingCallNative } = require('./src/services/incomingCallNative');
-          showIncomingCallNative(first.id, first.callerName || 'Incoming call');
-        } catch {
-          // ignore
-        }
-        openCall({
-          callId: first.id,
-          role: 'callee',
-          peerName: first.callerName || 'Incoming call',
-          peerAvatar: null,
-          callerId: first.callerId,
-        });
-      });
-    } catch {
-      // ignore
-    }
-    return () => { try { unsub(); } catch { } };
   }, [uid]);
 
   // ============================================================================

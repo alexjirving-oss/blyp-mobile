@@ -6,6 +6,7 @@ export type StreamEntry = {
   addedAt: number;
   hasFirstFrame: boolean;
   isMuted: boolean;
+  isCameraDisabled: boolean;
   isHost: boolean;
   /** Host-assigned guest slot (1-based) carried from the IVS token attributes via
    *  native. The single source of truth that keeps host + all viewers in sync. */
@@ -18,6 +19,7 @@ type StreamUpsert = {
   addedAt?: number;
   hasFirstFrame?: boolean;
   isMuted?: boolean;
+  isCameraDisabled?: boolean;
   isHost?: boolean;
   slotIndex?: number;
 };
@@ -38,6 +40,7 @@ type MultiGuestRegistry = {
   removeParticipantStreams: (participantId: string) => void;
   markFirstFrame: (streamKey: string) => void;
   updateParticipantMuted: (participantId: string, isMuted: boolean) => void;
+  updateParticipantCameraDisabled: (participantId: string, isCameraDisabled: boolean) => void;
   updateParticipantRole: (participantId: string, role?: string) => void;
   reset: () => void;
 };
@@ -153,6 +156,7 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
         addedAt: existing?.addedAt ?? entry.addedAt ?? Date.now(),
         hasFirstFrame: entry.hasFirstFrame ?? existing?.hasFirstFrame ?? false,
         isMuted: entry.isMuted ?? existing?.isMuted ?? false,
+        isCameraDisabled: entry.isCameraDisabled ?? existing?.isCameraDisabled ?? false,
         isHost: entry.isHost ?? existing?.isHost ?? false,
         slotIndex:
           typeof entry.slotIndex === 'number' && entry.slotIndex >= 1
@@ -219,6 +223,21 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
     [scheduleRecompute]
   );
 
+  const updateParticipantCameraDisabled = useCallback(
+    (participantId: string, isCameraDisabled: boolean) => {
+      const registry = registryRef.current;
+      let changed = false;
+      Array.from(registry.entries()).forEach(([key, value]) => {
+        if (value.participantId === participantId && value.isCameraDisabled !== isCameraDisabled) {
+          registry.set(key, { ...value, isCameraDisabled });
+          changed = true;
+        }
+      });
+      if (changed) scheduleRecompute();
+    },
+    [scheduleRecompute]
+  );
+
   const updateParticipantRole = useCallback(
     (participantId: string, role?: string) => {
       if (!role) return;
@@ -257,6 +276,7 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
     removeParticipantStreams,
     markFirstFrame,
     updateParticipantMuted,
+    updateParticipantCameraDisabled,
     updateParticipantRole,
     reset,
   };
