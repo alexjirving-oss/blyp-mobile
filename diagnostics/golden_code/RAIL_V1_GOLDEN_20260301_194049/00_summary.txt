@@ -1,0 +1,3 @@
+﻿RESULT=PASS
+PACKET_DIR=C:\Users\Alex\Blyp26\diagnostics\golden_code\RAIL_V1_GOLDEN_20260301_194049
+NEXT=Use scripts under this folder as your golden deployment rail baseline.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Icon from '../components/Icon';
 import {
   View,
@@ -9,54 +9,406 @@ import {
   Dimensions,
   Alert,
   StatusBar,
-  Share,
   Animated,
-  PanGesturer,
+  FlatList,
+  ActivityIndicator,
 } from 'react-native';
 import UnifiedVideo from '../components/UnifiedVideo';
+import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
-import { db, firestore, auth, firebaseEnabled } from '../config/firebase';
+import { db, auth, firebaseEnabled } from '../config/firebase';
+import { setPostLiked } from '../services/LikeService';
+import { recordPostView, getPostViewCount } from '../services/PostViewService';
 import PhotoGallery from '../components/PhotoGallery';
 import HeartAnimation from '../components/HeartAnimation';
+import CommentsModal from '../components/CommentsModal';
+import PostReachSheet from '../components/PostReachSheet';
+import ReportModal from '../components/ReportModal';
+import GiftSystem from '../components/GiftSystem';
+import { blockUser } from '../services/BlockService';
 import { fixStorageUrl } from '../utils/urlUtils';
+import { sharePost as sharePostLink } from '../services/shareService';
+import { COLORS } from '../styles/theme';
+import { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
+import { followUser, unfollowUser, subscribeToFollowingList } from '../utils/followUtils';
+import { useAuth } from '../hooks/useCommon';
+import { recordWatch } from '../services/watchHistoryService';
+import { setReachSession, reportWatch, reportEngagement, flushReachEvents, reachSummary } from '../services/blypReachClient';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-const MediaViewerScreen = ({ route, navigation }) => {
-  const { post, postId, posts, currentIndex } = route.params;
-  
-  // Get the actual post object - handle both direct post and posts array
-  const actualPost = post || (posts && postId ? posts.find(p => p.id === postId) : null);
-  
-  if (!actualPost) {
-    navigation.goBack();
-    return null;
+// A value "looks like a raw id" (Cognito sub / UUID / opaque token) when we
+// should NOT show it as a human name. Used so the viewer never displays
+// "@96b24294-6051-70bb-..." instead of a real display name.
+const looksLikeRawId = (s) => {
+  const t = String(s || '').trim();
+  if (!t) return true;
+  if (/\s/.test(t)) return false; // contains spaces -> definitely a real name
+  // UUID-ish, e.g. 96b24294-6051-70bb-3f4c-a40185e033cf
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}/i.test(t)) return true;
+  // Long opaque, hyphen/hex-heavy token with no spaces (Cognito sub etc.)
+  if (t.length >= 20 && /[0-9]/.test(t) && /[a-f]/i.test(t) && /[-_]/.test(t)) return true;
+  return false;
+};
+
+// Pick the best human-readable name from a post's many possible fields.
+const pickAuthorName = (p) => {
+  const cands = [
+    p?.userDisplayName, p?.displayName, p?.user?.displayName,
+    p?.user?.username, p?.userName, p?.username, p?.name, p?.author,
+  ];
+  for (const c of cands) {
+    const t = typeof c === 'string' ? c.trim() : '';
+    if (t && !looksLikeRawId(t)) return t;
   }
-  
-  const [currentUser, setCurrentUser] = useState(null);
+  return '';
+};
+
+// Detect whether a post is a video (used to build the per-creator video feed).
+const isVideoPost = (p) => {
+  if (!p) return false;
+  if (p.videoUrl) return true;
+  if (p.type === 'video') return true;
+  if (Array.isArray(p.media)) {
+    return p.media.some(
+      (m) => m?.type === 'video' || m?.type?.includes?.('video') || m?.type?.includes?.('mp4') || m?.type?.startsWith?.('video/'),
+    );
+  }
+  return false;
+};
+
+// Compact count formatter (1.2K / 3.4M) — same rules as the For You feed.
+const formatCount = (value) => {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return '0';
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(Math.max(0, Math.trunc(n)));
+};
+
+// Identical to the Home "For You" FeedActionButton (teal gradient ring + dark
+// inner + gloss, count underneath) so the player reads as the same surface.
+const FeedActionButton = ({ onPress, children, active = false, count = 0 }) => (
+  <TouchableOpacity
+    style={styles.actionButtonOuter}
+    activeOpacity={0.85}
+    delayPressIn={0}
+    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+    onPress={(event) => {
+      event?.stopPropagation?.();
+      onPress?.(event);
+    }}
+  >
+    <View style={styles.actionButtonStack}>
+      <LinearGradient
+        colors={BLYP_LOGO_GRADIENT_COLORS}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.actionButtonRing}
+      >
+        {active ? (
+          <LinearGradient
+            colors={BLYP_LOGO_GRADIENT_COLORS}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.actionButtonInner}
+          >
+            <View style={styles.actionButtonGloss} pointerEvents="none" />
+            {children}
+          </LinearGradient>
+        ) : (
+          <View style={styles.actionButtonInner}>
+            <View style={styles.actionButtonGloss} pointerEvents="none" />
+            {children}
+          </View>
+        )}
+      </LinearGradient>
+      <Text style={styles.actionButtonCount} allowFontScaling={false}>
+        {formatCount(count)}
+      </Text>
+    </View>
+  </TouchableOpacity>
+);
+
+// Non-interactive stat (views) matching the action buttons — same as Home.
+const FeedStatBadge = ({ children, count = 0 }) => (
+  <View style={styles.actionButtonOuter} pointerEvents="none">
+    <View style={styles.actionButtonStack}>
+      <LinearGradient
+        colors={BLYP_LOGO_GRADIENT_COLORS}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.actionButtonRing}
+      >
+        <View style={styles.actionButtonInner}>
+          <View style={styles.actionButtonGloss} pointerEvents="none" />
+          {children}
+        </View>
+      </LinearGradient>
+      <Text style={styles.actionButtonCount} allowFontScaling={false}>
+        {formatCount(count)}
+      </Text>
+    </View>
+  </View>
+);
+
+// A single full-screen video/post "page" inside the vertical pager.
+const MediaViewerItem = ({ post: actualPost, isActive, pageHeight, navigation, effectiveOwnerIds = [], followingSet, onToggleFollow }) => {
+  // useAuth().uid is the app's primary identity id (Cognito user id)
+  const { uid, authReady, isAuthenticated } = useAuth();
+
+  // Alias kept so the (large) body below continues to reference `post`.
+  const post = actualPost;
+
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
-  const [isFollowing, setIsFollowing] = useState(false);
   const [videoStatus, setVideoStatus] = useState({});
-  const [showUI, setShowUI] = useState(true);
+  // Always show the whole frame at full width (contain) so videos are never
+  // cropped or zoomed-in — portrait and landscape both letterbox instead.
+  const [videoResizeMode, setVideoResizeMode] = useState('contain');
   const [showHeartAnimation, setShowHeartAnimation] = useState(false);
   const [heartAnimationKey, setHeartAnimationKey] = useState(0);
-  
+  const [commentsVisible, setCommentsVisible] = useState(false);
+  const [reachSheetVisible, setReachSheetVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
+  // Tap-to-pause: paused mirrors the user's manual toggle for this page.
+  const [paused, setPaused] = useState(false);
+  // Pause/mute playback when this screen loses navigation focus (e.g. the user
+  // opens a post video then goes live). Without this the unmuted video keeps
+  // playing in the background — its audio bleeds behind the live broadcast —
+  // because `isActive` only tracks the active page, not whether the screen is
+  // still on top.
+  const isScreenFocused = useIsFocused();
+  // Resolved human-readable author name (never a raw id).
+  const [authorName, setAuthorName] = useState(() => pickAuthorName(actualPost));
+  // Intrinsic video aspect (w/h) so "contain" videos top-anchor like For You.
+  const [videoAspectRatio, setVideoAspectRatio] = useState(0);
+  // "Show details" chip → temporary title/caption overlay (mirrors For You).
+  const [showDetails, setShowDetails] = useState(false);
+  const detailsTimerRef = useRef(null);
+
   // Animation refs
   const likeAnimation = useRef(new Animated.Value(1)).current;
   const heartAnimation = useRef(new Animated.Value(0)).current;
   const uiOpacity = useRef(new Animated.Value(1)).current;
+  const likePendingRef = useRef(false);
+  const videoRef = useRef(null);
+
+  const displayName = authorName || 'user';
+  // The creator this post belongs to (used for follow + profile navigation).
+  const creatorId = actualPost.userId || actualPost.uid || actualPost.user?.uid || actualPost.user?.id || null;
+  // Follow state is derived from the screen-level following set, so it persists
+  // correctly as you swipe through more of the same creator's videos.
+  const isOwnPost = !!uid && !!creatorId && creatorId === uid;
+  const isFollowing = !!creatorId && !!followingSet && followingSet.has(creatorId);
 
   useEffect(() => {
-    if (auth.currentUser) {
-      setCurrentUser(auth.currentUser);
-      setIsLiked(actualPost.likedBy?.includes(auth.currentUser.uid) || false);
-      // Check if following (you can implement this based on your user follow system)
-      setIsFollowing(false); // Replace with actual follow check
-    }
+    setIsLiked(uid ? (actualPost.likedBy?.includes(uid) || false) : false);
     setLikeCount(actualPost.likeCount || actualPost.likes || 0);
-  }, [actualPost]);
+  }, [actualPost, uid]);
+
+  const openCreatorProfile = () => {
+    if (!creatorId) return;
+    try {
+      navigation.navigate('UserProfile', { userId: creatorId, username: displayName });
+    } catch { /* ignore */ }
+  };
+
+  // A freshly-activated page (or new post) should start playing.
+  useEffect(() => { setPaused(false); }, [isActive, actualPost?.id]);
+
+  // Keep the displayed name in sync with the post, and resolve from the users
+  // collection when the post itself only carries a raw id.
+  useEffect(() => {
+    const fromPost = pickAuthorName(actualPost);
+    if (fromPost) { setAuthorName(fromPost); return undefined; }
+    const authorId = actualPost?.userId || actualPost?.uid || actualPost?.user?.uid;
+    if (!authorId || !firebaseEnabled || !db || typeof db.collection !== 'function') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await db.collection('users').doc(String(authorId)).get();
+        const data = snap && typeof snap.data === 'function' ? snap.data() : null;
+        const nm = [data?.displayName, data?.username, data?.name]
+          .map((v) => (typeof v === 'string' ? v.trim() : ''))
+          .find((v) => v && !looksLikeRawId(v));
+        if (!cancelled && nm) setAuthorName(nm);
+      } catch { /* keep fallback */ }
+    })();
+    return () => { cancelled = true; };
+  }, [actualPost?.id, actualPost?.userId]);
+
+  // Live like state: read the post doc so likes PERSIST and reflect the server,
+  // instead of trusting the (possibly stale) object we were navigated with.
+  useEffect(() => {
+    const id = actualPost?.id;
+    if (!id || !firebaseEnabled || !db || typeof db.collection !== 'function') return undefined;
+    let cancelled = false;
+    let unsub = null;
+    try {
+      unsub = db.collection('posts').doc(String(id)).onSnapshot((snap) => {
+        if (cancelled || likePendingRef.current) return; // don't fight an in-flight toggle
+        const data = snap && typeof snap.data === 'function' ? snap.data() : null;
+        if (!data) return;
+        const cnt = typeof data.likeCount === 'number'
+          ? data.likeCount
+          : (typeof data.likes === 'number' ? data.likes : (Array.isArray(data.likedBy) ? data.likedBy.length : 0));
+        setLikeCount(Math.max(0, cnt || 0));
+        setIsLiked(uid && Array.isArray(data.likedBy) ? data.likedBy.includes(uid) : false);
+      }, () => {});
+    } catch { /* ignore */ }
+    return () => { cancelled = true; try { unsub && unsub(); } catch {} };
+  }, [actualPost?.id, uid]);
+
+  // Latest playback status, read at the moment a page stops being active so we can
+  // report how much of the video was actually watched (the key merit signal).
+  const videoStatusRef = useRef({});
+  useEffect(() => {
+    videoStatusRef.current = videoStatus || {};
+  }, [videoStatus]);
+
+  // Record into "Continue watching" history when this page becomes active, and
+  // measure watch dwell + completion for earn-your-reach.
+  const watchStartRef = useRef(0);
+  useEffect(() => {
+    if (isActive && actualPost?.id) {
+      setReachSession(uid || 'anon');
+      recordWatch(uid, actualPost);
+      // A deliberate open of a post is itself a strong signal of interest.
+      reportWatch(actualPost.id, actualPost.userId || actualPost.uid, 0, undefined);
+      // Count a unique public view (deduped per user/post inside the service).
+      recordPostView(actualPost.id, uid).catch(() => {});
+      watchStartRef.current = Date.now();
+      return () => {
+        const dwellMs = watchStartRef.current ? Date.now() - watchStartRef.current : 0;
+        watchStartRef.current = 0;
+        const st = videoStatusRef.current || {};
+        const completion =
+          st.durationMillis > 0 ? Math.min(1, (st.positionMillis || 0) / st.durationMillis) : undefined;
+        if (dwellMs > 800) {
+          reportWatch(actualPost.id, actualPost.userId || actualPost.uid, dwellMs, completion);
+        }
+        flushReachEvents();
+      };
+    }
+    return undefined;
+  }, [isActive, actualPost?.id, uid]);
+
+  const canDeletePost = (() => {
+    const owner = String(actualPost?.userId || '').trim();
+    if (!owner) return false;
+    return effectiveOwnerIds.includes(owner);
+  })();
+
+  const handleOpenMenu = () => {
+    const actions = [];
+    if (canDeletePost) {
+      actions.push({
+        text: 'Your reach & edit',
+        onPress: () => setReachSheetVisible(true),
+      });
+      actions.push({
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('Delete post', 'Delete this post permanently?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Delete',
+              style: 'destructive',
+              onPress: async () => {
+                if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
+                  Alert.alert('Error', 'Delete is unavailable right now');
+                  return;
+                }
+                try {
+                  await db.collection('posts').doc(actualPost.id).delete();
+                  Toast.show({
+                    type: 'success',
+                    text1: 'Deleted',
+                    text2: 'Post deleted',
+                    position: 'bottom',
+                    visibilityTime: 1500,
+                  });
+                  navigation.goBack();
+                } catch (e) {
+                  console.error('Error deleting post:', e);
+                  Alert.alert('Error', 'Failed to delete post');
+                }
+              },
+            },
+          ]);
+        },
+      });
+    }
+
+    // Transparency: anyone can ask why a post reached them (Charter promise).
+    // Wire to the post's *real* reach state when available, so the explanation is
+    // grounded in this specific post's earned distribution rather than generic copy.
+    actions.push({
+      text: 'Why am I seeing this?',
+      onPress: () => {
+        const summary = reachSummary(actualPost);
+        const base =
+          'Posts earn their reach on Blyp — this one was shown to you based on how well people who saw it reacted (watch-through, likes, shares), your follows and interests, plus a small random mix so good new content can break out. Paying never buys reach.';
+        let message = base;
+        if (summary && summary.has) {
+          const lines = [
+            `This post is "${summary.label}" — shown to about ${summary.exposurePct}% of its potential audience.`,
+            summary.headline + '.',
+            `It reached you because it earned a Blyp Score of ${summary.score} from genuine engagement, not because anyone paid.`,
+          ];
+          message = lines.join('\n\n');
+        }
+        Alert.alert('Why am I seeing this?', message, [
+          { text: 'Close', style: 'cancel' },
+          { text: 'Open Transparency', onPress: () => navigation.navigate('Transparency') },
+        ]);
+      },
+    });
+
+    // Safety: anyone can report a post; non-owners can also block the author.
+    if (!canDeletePost) {
+      actions.push({
+        text: 'Report post',
+        onPress: () => setReportVisible(true),
+      });
+      const author = String(actualPost?.userId || '').trim();
+      if (author) {
+        actions.push({
+          text: 'Block this user',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Block user',
+              'You won’t see their posts, comments or messages, and they won’t be able to message you. You can unblock them from their profile.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Block',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await blockUser(author);
+                      Toast.show({ type: 'success', text1: 'Blocked', position: 'bottom', visibilityTime: 1500 });
+                      navigation.goBack();
+                    } catch (e) {
+                      Alert.alert('Couldn’t block', e?.message || 'Please try again.');
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        });
+      }
+    }
+
+    // Always include cancel so this behaves like a menu.
+    actions.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Post options', '', actions);
+  };
 
   // TikTok-style like animation
   const triggerLikeAnimation = () => {
@@ -92,92 +444,106 @@ const MediaViewerScreen = ({ route, navigation }) => {
   };
 
   const handleLike = async () => {
-    if (!currentUser) {
+    if (!authReady || !isAuthenticated || !uid) {
       Alert.alert('Error', 'Please log in to like posts');
       return;
     }
+
+    if (likePendingRef.current) return;
+    likePendingRef.current = true;
 
     triggerLikeAnimation();
 
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
       console.log('⚠️ MediaViewer: Firebase disabled or db unavailable, skipping like write');
+      likePendingRef.current = false;
       return;
     }
+
+    const wasLiked = isLiked;
+
+    // Optimistic update
+    setIsLiked(!wasLiked);
+    setLikeCount((prev) => (wasLiked ? prev - 1 : prev + 1));
+
     try {
-      const postRef = db.collection('posts').doc(actualPost.id);
-      const wasLiked = isLiked;
-      
-      // Optimistic update
-      setIsLiked(!wasLiked);
-      setLikeCount(prev => wasLiked ? prev - 1 : prev + 1);
-
-      if (wasLiked) {
-        await postRef.update({
-          likedBy: firestore.FieldValue.arrayRemove(currentUser.uid),
-          likeCount: firestore.FieldValue.increment(-1)
-        });
-      } else {
-        await postRef.update({
-          likedBy: firestore.FieldValue.arrayUnion(currentUser.uid),
-          likeCount: firestore.FieldValue.increment(1)
-        });
-        
-        // Trigger new heart animation for like
-        setShowHeartAnimation(true);
-        setHeartAnimationKey(prev => prev + 1);
+      const res = await setPostLiked({ postId: actualPost.id, userId: uid, like: !wasLiked });
+      if (!res?.ok) {
+        throw res?.error || new Error(res?.reason || 'LIKE_FAILED');
       }
-
+      // Reconcile optimistic state with the server's authoritative result.
+      // The transaction derives the new state from server truth, which can
+      // differ from our optimistic guess if local state was stale — without
+      // this, the heart/count can drift (the "flash off" symptom).
+      if (typeof res.liked === 'boolean') setIsLiked(res.liked);
+      if (Number.isFinite(res.count)) setLikeCount(res.count);
+      if (res.liked) {
+        setShowHeartAnimation(true);
+        setHeartAnimationKey((prev) => prev + 1);
+        reportEngagement('like', actualPost.id, actualPost.userId || actualPost.uid);
+      }
     } catch (error) {
       console.error('Error updating like:', error);
       // Revert optimistic update
       setIsLiked(wasLiked);
-      setLikeCount(prev => wasLiked ? prev + 1 : prev - 1);
+      setLikeCount((prev) => (wasLiked ? prev + 1 : prev - 1));
+    } finally {
+      likePendingRef.current = false;
     }
   };
 
   const handleFollow = async () => {
-    // Implement follow functionality
-    setIsFollowing(!isFollowing);
-    
+    if (!uid) {
+      Toast.show({ type: 'info', text1: 'Sign in to follow creators', position: 'bottom', visibilityTime: 1500 });
+      return;
+    }
+    if (!creatorId || isOwnPost) return;
+    const wasFollowing = isFollowing;
+    // Parent owns the optimistic update + Firestore write so the change persists
+    // across every page of this creator's feed.
+    onToggleFollow?.(creatorId, wasFollowing);
     Toast.show({
       type: 'success',
-      text1: isFollowing ? '➖ Unfollowed' : '➕ Following!',
-      text2: isFollowing ? 'Removed from following' : `Now following @${actualPost.username || actualPost.user?.username}`,
+      text1: wasFollowing ? 'Unfollowed' : 'Following!',
+      text2: wasFollowing ? `Removed @${displayName}` : `Now following @${displayName}`,
       position: 'bottom',
       visibilityTime: 1500,
     });
   };
 
-  // Toggle UI visibility on tap
+  // Tap anywhere on the video: double-tap to like (TikTok-style), single tap pauses.
+  const screenTapRef = useRef({ at: 0, timer: null });
   const handleScreenTap = () => {
-    const newShowUI = !showUI;
-    setShowUI(newShowUI);
-    
-    Animated.timing(uiOpacity, {
-      toValue: newShowUI ? 1 : 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
+    const now = Date.now();
+    if (now - screenTapRef.current.at < 320) {
+      if (screenTapRef.current.timer) clearTimeout(screenTapRef.current.timer);
+      screenTapRef.current = { at: 0, timer: null };
+      handleLike();
+      return;
+    }
+    screenTapRef.current.at = now;
+    if (screenTapRef.current.timer) clearTimeout(screenTapRef.current.timer);
+    screenTapRef.current.timer = setTimeout(() => {
+      screenTapRef.current = { at: 0, timer: null };
+      setPaused((prev) => {
+        const next = !prev;
+        const v = videoRef.current;
+        try {
+          if (next) v?.pauseAsync?.();
+          else v?.playAsync?.();
+        } catch { /* best-effort */ }
+        return next;
+      });
+    }, 300);
   };
 
   const handleShare = async () => {
     try {
-      const shareContent = {
-        message: `Check out this post by ${actualPost.username || actualPost.user?.username || 'someone'}: "${actualPost.caption || actualPost.description || 'Amazing content!'}" - Shared via Blyp`,
-      };
-
-      // Add media URL if available
-      if (actualPost.imageUrl) {
-        shareContent.url = actualPost.imageUrl;
-      } else if (actualPost.videoUrl) {
-        shareContent.url = actualPost.videoUrl;
-      } else if (actualPost.media && actualPost.media.length > 0) {
-        shareContent.url = actualPost.media[0].url || actualPost.media[0].uri;
-      }
-
-      const result = await Share.share(shareContent);
-      
-      if (result.action === Share.sharedAction) {
+      // Share an HTTPS blyp.world link (with the post title + thumbnail baked in)
+      // so WhatsApp/iMessage show a proper preview tile, not a raw file URL.
+      const ok = await sharePostLink({ ...actualPost, username: displayName });
+      if (ok) {
+        reportEngagement('share', actualPost.id, actualPost.userId || actualPost.uid);
         Toast.show({
           type: 'success',
           text1: '📤 Shared!',
@@ -191,6 +557,44 @@ const MediaViewerScreen = ({ route, navigation }) => {
       Alert.alert('Error', 'Failed to share post');
     }
   };
+
+  // Every video is shown whole at full width (contain) regardless of its real
+  // dimensions, so nothing is ever cropped or zoomed-in. When the intrinsic
+  // size is known we capture the aspect ratio so the video can be top-anchored
+  // (any leftover space fades into the dark theme at the bottom, like For You).
+  const handleVideoLoad = (eventOrStatus) => {
+    setVideoResizeMode('contain');
+    const ns = eventOrStatus?.naturalSize;
+    if (ns && ns.width > 0 && ns.height > 0) {
+      const a = ns.width / ns.height;
+      if (a > 0) {
+        setVideoAspectRatio((prev) => (Math.abs(prev - a) < 0.001 ? prev : a));
+      }
+    }
+  };
+
+  const handleShowDetails = () => {
+    setShowDetails(true);
+    if (detailsTimerRef.current) clearTimeout(detailsTimerRef.current);
+    detailsTimerRef.current = setTimeout(() => setShowDetails(false), 2500);
+  };
+  useEffect(() => () => {
+    if (detailsTimerRef.current) clearTimeout(detailsTimerRef.current);
+  }, []);
+
+  // Top-anchor "contain" videos: size the player to its rendered height pinned
+  // to the top of the page so leftover space sits at the BOTTOM, faded into the
+  // dark theme behind the action buttons — identical to the For You feed.
+  const hasVideo = isVideoPost(actualPost);
+  let videoBottomGap = 0;
+  if (hasVideo && videoAspectRatio > 0 && pageHeight > 0) {
+    const fittedHeight = Math.round(screenWidth / videoAspectRatio);
+    videoBottomGap = Math.max(0, pageHeight - Math.min(pageHeight, fittedHeight));
+  }
+  const mediaFillStyle =
+    videoBottomGap > 0
+      ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: videoBottomGap }
+      : styles.media;
 
   const renderMedia = () => {
     console.log('🎬 Rendering media for post:', {
@@ -207,11 +611,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
       console.log('📹 Rendering video from videoUrl:', fixedUrl);
       return (
         <UnifiedVideo
+          ref={videoRef}
           source={{ uri: fixedUrl }}
-          style={styles.media}
-          useNativeControls={true}
-          resizeMode="cover"
-          shouldPlay={true}
+          style={mediaFillStyle}
+          useNativeControls={false}
+          resizeMode={videoResizeMode}
+          shouldPlay={isActive && !paused && isScreenFocused}
           isLooping={true}
           isMuted={false}
           volume={1.0}
@@ -222,29 +627,30 @@ const MediaViewerScreen = ({ route, navigation }) => {
             }
           }}
           onLoadStart={() => console.log('Video loading started')}
-          onLoad={(status) => console.log('Video loaded:', status)}
+          onLoad={(status) => { console.log('Video loaded:', status); handleVideoLoad(status); }}
+          onReadyForDisplay={(e) => handleVideoLoad(e)}
         />
       );
     }
 
     // Handle media array (photos and videos)
     if (actualPost.media && actualPost.media.length > 0) {
-      const photos = actualPost.media.filter(item => 
-        item.type === 'photo' || 
+      const photos = actualPost.media.filter(item =>
+        item.type === 'photo' ||
         item.type === 'image' ||
         item.type === 'image/jpeg' ||
         item.type === 'image/png' ||
         item.type?.startsWith('image/') ||
         (!item.type?.includes('video') && !item.type?.includes('mp4') && !item.type?.startsWith('video/'))
       );
-      
-      const videos = actualPost.media.filter(item => 
-        item.type === 'video' || 
+
+      const videos = actualPost.media.filter(item =>
+        item.type === 'video' ||
         item.type === 'video/mp4' ||
         item.type?.includes('video') ||
         item.type?.includes('mp4') ||
         item.type?.startsWith('video/')
-      );      console.log('📱 Media breakdown:', { photos: photos.length, videos: videos.length });
+      ); console.log('📱 Media breakdown:', { photos: photos.length, videos: videos.length });
       console.log('🔍 All media types:', actualPost.media.map(item => ({ type: item.type, url: item.url?.substring(0, 50) + '...' })));
 
       // If there are multiple photos, show gallery
@@ -252,7 +658,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
         console.log('�️ Rendering photo gallery with', photos.length, 'photos');
         return <PhotoGallery photos={photos} style={styles.media} />;
       }
-      
+
       // If there's a video, show it
       if (videos.length > 0) {
         const firstVideo = videos[0];
@@ -260,11 +666,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
         console.log('📹 Rendering video from media array:', { original: firstVideo, fixedUrl });
         return (
           <UnifiedVideo
+            ref={videoRef}
             source={{ uri: fixedUrl }}
-            style={styles.media}
-            useNativeControls={true}
-            resizeMode="cover"
-            shouldPlay={true}
+            style={mediaFillStyle}
+            useNativeControls={false}
+            resizeMode={videoResizeMode}
+            shouldPlay={isActive && !paused && isScreenFocused}
             isLooping={true}
             isMuted={false}
             volume={1.0}
@@ -275,11 +682,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
               }
             }}
             onLoadStart={() => console.log('Video loading started')}
-            onLoad={(status) => console.log('Video loaded:', status)}
+            onLoad={(status) => { console.log('Video loaded:', status); handleVideoLoad(status); }}
+            onReadyForDisplay={(e) => handleVideoLoad(e)}
           />
         );
       }
-      
+
       // Single photo
       if (photos.length === 1) {
         console.log('🖼️ Rendering single photo:', photos[0]);
@@ -346,26 +754,42 @@ const MediaViewerScreen = ({ route, navigation }) => {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { height: pageHeight, width: screenWidth }]}>
       <StatusBar barStyle="light-content" backgroundColor="#000" translucent />
-      
+
       {/* Full-Screen Media Background */}
-      <TouchableOpacity 
-        style={styles.mediaContainer} 
+      <TouchableOpacity
+        style={styles.mediaContainer}
         activeOpacity={1}
         onPress={handleScreenTap}
       >
         {renderMedia()}
-        
+
+        {/* Fade any letterbox gap below the video into the dark theme (For You). */}
+        {videoBottomGap > 2 && (
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.85)', '#000']}
+            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: videoBottomGap + 160 }}
+            pointerEvents="none"
+          />
+        )}
+
         {/* Dark gradient overlay for better text readability */}
         <LinearGradient
-          colors={['transparent', 'transparent', 'rgba(0,0,0,0.4)']}
+          colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']}
           style={styles.gradientOverlay}
         />
+
+        {/* Center play indicator shown while the user has tapped to pause. */}
+        {paused && (
+          <View style={styles.pauseIndicator} pointerEvents="none">
+            <Icon name="play" size={76} color="rgba(255,255,255,0.9)" />
+          </View>
+        )}
       </TouchableOpacity>
 
       {/* Floating Heart Animation */}
-      <Animated.View 
+      <Animated.View
         style={[
           styles.floatingHeart,
           {
@@ -382,122 +806,161 @@ const MediaViewerScreen = ({ route, navigation }) => {
         ]}
         pointerEvents="none"
       >
-        <Icon  name="heart" size={80} color="#ff1744"  />
+        <Icon name="heart" size={80} color={COLORS.gradientEnd} />
       </Animated.View>
 
       {/* Multiple Hearts Animation */}
-      <HeartAnimation 
+      <HeartAnimation
         key={heartAnimationKey}
         visible={showHeartAnimation}
         onAnimationComplete={() => setShowHeartAnimation(false)}
       />
 
-      {/* Top UI Elements */}
-      <Animated.View style={[styles.topUI, { opacity: uiOpacity }]}>
-        <TouchableOpacity 
-          style={styles.backButton} 
+      {/* Top row: back button + creator pill (For You style) + options menu */}
+      <Animated.View style={[styles.topUI, { opacity: uiOpacity }]} pointerEvents="box-none">
+        <TouchableOpacity
+          style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
-          <Icon  name="arrow-back" size={28} color="#fff"  />
+          <Icon name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
-      </Animated.View>
 
-      {/* Right Side Actions (TikTok Style) */}
-      <Animated.View style={[styles.rightSidebar, { opacity: uiOpacity }]}>
-        {/* User Avatar with Follow Button */}
-        <View style={styles.avatarSection}>
-          <TouchableOpacity style={styles.avatarContainer}>
-            {actualPost.user?.avatar || actualPost.userPhotoURL ? (
-              <Image 
-                source={{ uri: actualPost.user?.avatar || actualPost.userPhotoURL }} 
-                style={styles.avatar}
-              />
-            ) : (
-              <LinearGradient
-                colors={['#667eea', '#764ba2']}
-                style={styles.defaultAvatar}
-              >
-                <Icon  name="person" size={24} color="#fff"  />
-              </LinearGradient>
-            )}
-          </TouchableOpacity>
-          
-          {!isFollowing && (
-            <TouchableOpacity 
-              style={styles.followButton}
-              onPress={handleFollow}
-            >
-              <LinearGradient
-                colors={['#ec4899', '#8b5cf6']}
-                style={styles.followGradient}
-              >
-                <Icon  name="add" size={20} color="#fff"  />
-              </LinearGradient>
+        <View style={styles.userPillWrap} pointerEvents="box-none">
+          <LinearGradient
+            colors={['rgba(0,0,0,0.55)', 'rgba(0,0,0,0.15)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.userInfoHighlight}
+          >
+            <TouchableOpacity style={styles.userPillRow} onPress={openCreatorProfile} activeOpacity={0.85}>
+              <Text style={styles.userPillName} allowFontScaling={false} numberOfLines={1}>
+                @{displayName}
+              </Text>
+              <View>
+                {actualPost.user?.avatar || actualPost.userPhotoURL ? (
+                  <Image
+                    source={{ uri: actualPost.user?.avatar || actualPost.userPhotoURL }}
+                    style={styles.userPillAvatar}
+                  />
+                ) : (
+                  <LinearGradient colors={['#667eea', '#764ba2']} style={styles.userPillAvatarFallback}>
+                    <Icon name="person" size={16} color="#fff" />
+                  </LinearGradient>
+                )}
+                {!isFollowing && !isOwnPost && (
+                  <TouchableOpacity
+                    style={styles.followBadge}
+                    onPress={(e) => { e?.stopPropagation?.(); handleFollow(); }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
+                      <Icon name="add" size={12} color="#0A0A0C" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+              </View>
             </TouchableOpacity>
-          )}
+          </LinearGradient>
         </View>
 
-        {/* Like Button */}
-        <Animated.View style={{ transform: [{ scale: likeAnimation }] }}>
-          <TouchableOpacity 
-            style={styles.sidebarButton}
-            onPress={handleLike}
-          >
-            <Icon  
-              name={isLiked ? "heart" : "heart-outline"} 
-              size={36} 
-              color={isLiked ? "#ff1744" : "#fff"} 
-             />
-            <Text style={styles.sidebarText}>
-              {likeCount > 0 ? (likeCount > 999 ? `${(likeCount/1000).toFixed(1)}K` : likeCount) : ''}
-            </Text>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* Comment Button */}
-        <TouchableOpacity style={styles.sidebarButton}>
-          <Icon  name="chatbubble-outline" size={32} color="#fff"  />
-          <Text style={styles.sidebarText}>
-            {actualPost.commentCount || actualPost.comments || ''}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Share Button */}
-        <TouchableOpacity style={styles.sidebarButton} onPress={handleShare}>
-          <Icon  name="share-outline" size={32} color="#fff"  />
-        </TouchableOpacity>
-
-        {/* More Options */}
-        <TouchableOpacity style={styles.sidebarButton}>
-          <Icon  name="ellipsis-horizontal" size={32} color="#fff"  />
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={handleOpenMenu}
+        >
+          <Icon name="more" size={26} color="#fff" />
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Bottom Content (TikTok Style) */}
-      <Animated.View style={[styles.bottomContent, { opacity: uiOpacity }]}>
-        <View style={styles.userInfo}>
-          <Text style={styles.username}>
-            @{actualPost.username || actualPost.user?.username || 'user'}
+      {/* "Show details" chip + expanded description (For You style) */}
+      {showDetails ? (
+        <View style={styles.descriptionOverlayTop}>
+          <Text style={styles.detailsTitle} numberOfLines={1} allowFontScaling={false}>
+            {actualPost.title || actualPost.captionTitle || `@${displayName}`}
           </Text>
-          <Text style={styles.caption} numberOfLines={3}>
-            {actualPost.caption || actualPost.description || actualPost.transcript || 'Amazing content! 🔥'}
-          </Text>
-          
-          {(post.hashtags || post.tags) && (
-            <Text style={styles.hashtags} numberOfLines={2}>
+          {(actualPost.caption || actualPost.description) ? (
+            <Text style={styles.detailsDescription} numberOfLines={3} allowFontScaling={false}>
+              {actualPost.caption || actualPost.description}
+            </Text>
+          ) : null}
+          {(post.hashtags || post.tags) ? (
+            <Text style={styles.detailsHashtags} numberOfLines={2} allowFontScaling={false}>
               {formatHashtags(post.hashtags || post.tags)}
             </Text>
-          )}
+          ) : null}
         </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.descriptionInfoChip}
+          onPress={handleShowDetails}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.descriptionInfoChipText} allowFontScaling={false}>Show details</Text>
+        </TouchableOpacity>
+      )}
 
-        {/* Music/Sound Info */}
-        <View style={styles.musicInfo}>
-          <Icon  name="musical-note" size={16} color="#fff" style={styles.musicIcon}  />
-          <Text style={styles.musicText} numberOfLines={1}>
-            Original Sound - {actualPost.username || actualPost.user?.username || 'user'}
-          </Text>
+      {/* Bottom action row — identical to the For You feed */}
+      <Animated.View style={[styles.actionRow, { opacity: uiOpacity }]} pointerEvents="box-none">
+        <View style={styles.actionRowInner}>
+          <Animated.View style={{ transform: [{ scale: likeAnimation }] }}>
+            <FeedActionButton
+              onPress={handleLike}
+              active={isLiked}
+              count={likeCount}
+            >
+              <Icon name={isLiked ? 'heart' : 'heart-outline'} size={30} color={COLORS.white} />
+            </FeedActionButton>
+          </Animated.View>
+
+          <FeedActionButton
+            onPress={() => setCommentsVisible(true)}
+            count={actualPost.commentCount || (Array.isArray(actualPost.comments) ? actualPost.comments.length : actualPost.comments) || 0}
+          >
+            <Icon name="chatbubble" size={28} color={COLORS.white} />
+          </FeedActionButton>
+
+          <FeedActionButton
+            onPress={handleShare}
+            count={actualPost.shareCount ?? actualPost.sharesCount ?? actualPost.shares ?? 0}
+          >
+            <Icon name="share" size={28} color={COLORS.white} />
+          </FeedActionButton>
+
+          <FeedStatBadge count={getPostViewCount(actualPost)}>
+            <Icon name="eye-outline" size={26} color={COLORS.white} />
+          </FeedStatBadge>
+
+          <View style={styles.giftSlot}>
+            <GiftSystem
+              postId={actualPost.id}
+              creatorId={actualPost.uid || actualPost.userId}
+              creatorName={displayName}
+              triggerVariant="feed"
+            />
+          </View>
         </View>
       </Animated.View>
+
+      {/* Comments Modal */}
+      <CommentsModal
+        visible={commentsVisible}
+        onClose={() => setCommentsVisible(false)}
+        postId={actualPost.id}
+        postData={actualPost}
+      />
+      <PostReachSheet
+        visible={reachSheetVisible}
+        onClose={() => setReachSheetVisible(false)}
+        post={actualPost}
+        isOwner={canDeletePost}
+      />
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        targetType="post"
+        targetId={actualPost?.id}
+        targetLabel="this post"
+        reportedUserId={String(actualPost?.userId || '').trim() || undefined}
+      />
     </View>
   );
 };
@@ -517,8 +980,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   media: {
-    width: screenWidth,
-    height: screenHeight,
+    // Fill the full-screen media container exactly like the For You feed does
+    // (absolute fill + cover). Using fixed Dimensions.get('window') values made
+    // the video mismatch the container under a translucent status bar and render
+    // zoomed-in. absoluteFill keeps it identical to the feed.
+    ...StyleSheet.absoluteFillObject,
   },
   textOnlyMedia: {
     width: screenWidth,
@@ -545,11 +1011,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 30,
   },
   gradientOverlay: {
+    // Same full-bleed readability gradient the For You feed uses.
     position: 'absolute',
-    bottom: 0,
+    top: 0,
     left: 0,
     right: 0,
-    height: screenHeight * 0.6,
+    bottom: 0,
   },
   floatingHeart: {
     position: 'absolute',
@@ -559,6 +1026,16 @@ const styles = StyleSheet.create({
     marginTop: -40,
     zIndex: 1000,
   },
+  pauseIndicator: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 90,
+  },
   topUI: {
     position: 'absolute',
     top: 0,
@@ -567,6 +1044,9 @@ const styles = StyleSheet.create({
     paddingTop: 50, // Account for status bar
     paddingHorizontal: 16,
     paddingBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     zIndex: 100,
   },
   backButton: {
@@ -578,110 +1058,358 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backdropFilter: 'blur(10px)',
   },
-  rightSidebar: {
-    position: 'absolute',
-    right: 12,
-    bottom: 120,
-    alignItems: 'center',
-    zIndex: 100,
-  },
-  avatarSection: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  avatarContainer: {
-    marginBottom: 8,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  defaultAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  menuButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  followButton: {
-    position: 'absolute',
-    bottom: -8,
-    alignSelf: 'center',
-  },
-  followGradient: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sidebarButton: {
-    alignItems: 'center',
-    marginBottom: 24,
-    padding: 8,
-  },
-  sidebarText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  bottomContent: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 80, // Leave space for right sidebar
-    paddingHorizontal: 16,
-    paddingBottom: 34, // Account for home indicator on newer iPhones
-    paddingTop: 16,
-    zIndex: 100,
-  },
-  userInfo: {
-    marginBottom: 12,
-  },
-  username: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  caption: {
-    color: '#fff',
-    fontSize: 15,
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  hashtags: {
-    color: '#64b5f6',
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '600',
-  },
-  musicInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignSelf: 'flex-start',
     backdropFilter: 'blur(10px)',
   },
-  musicIcon: {
-    marginRight: 6,
+  // ----- Creator pill in the top row (mirrors For You's userPillTopLeft) -----
+  userPillWrap: {
+    flex: 1,
+    alignItems: 'flex-start',
+    marginHorizontal: 10,
   },
-  musicText: {
-    color: '#fff',
-    fontSize: 13,
+  userInfoHighlight: {
+    borderRadius: 9999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  userPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  userPillName: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+    maxWidth: screenWidth * 0.45,
+  },
+  userPillAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  userPillAvatarFallback: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  followBadge: {
+    position: 'absolute',
+    bottom: -5,
+    right: -5,
+  },
+  followBadgeInner: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#0A0A0C',
+  },
+  // ----- "Show details" chip + expanded overlay (mirrors For You) -----
+  descriptionInfoChip: {
+    position: 'absolute',
+    top: 106,
+    left: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,42,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    zIndex: 1200,
+    elevation: 1200,
+  },
+  descriptionInfoChipText: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
     fontWeight: '500',
-    maxWidth: screenWidth * 0.6,
+  },
+  descriptionOverlayTop: {
+    position: 'absolute',
+    top: 106,
+    left: 16,
+    right: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(15,23,42,0.75)',
+    zIndex: 1200,
+    elevation: 1200,
+  },
+  detailsTitle: {
+    fontWeight: '700',
+    fontSize: 16,
+    color: COLORS.textPrimary,
+    marginBottom: 6,
+  },
+  detailsDescription: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+  },
+  detailsHashtags: {
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.gradientEnd,
+  },
+  // ----- Bottom action row (identical to For You's profileMenuBar) -----
+  actionRow: {
+    position: 'absolute',
+    bottom: 80,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  actionRowInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 15,
+  },
+  actionButtonOuter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 8,
+  },
+  actionButtonStack: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionButtonRing: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    padding: 2,
+  },
+  actionButtonInner: {
+    flex: 1,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(20,20,24,0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  actionButtonGloss: {
+    position: 'absolute',
+    top: 5,
+    left: 6,
+    right: 6,
+    height: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  actionButtonCount: {
+    marginTop: 6,
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 12,
+    fontWeight: '700',
+    includeFontPadding: false,
+    textAlign: 'center',
+  },
+  giftSlot: {
+    alignItems: 'center',
+    marginHorizontal: 8,
   },
 });
+
+// Vertical pager: opens on the tapped post and lets the user swipe down through
+// the rest of that creator's videos (TikTok-style), loaded on demand.
+const MediaViewerScreen = ({ route, navigation }) => {
+  if (!route || !route.params) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+        <Text style={{ color: 'white' }}>Invalid media viewer launch — no media provided.</Text>
+      </View>
+    );
+  }
+
+  const { post, postId, posts } = route.params;
+  const { uid } = useAuth();
+
+  const initialPost = post || (posts && postId ? posts.find((p) => p.id === postId) : null);
+
+  useEffect(() => {
+    if (!initialPost) navigation.goBack();
+  }, [initialPost, navigation]);
+
+  const [pageHeight, setPageHeight] = useState(screenHeight);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [creatorVideos, setCreatorVideos] = useState([]);
+  // Screen-level set of creators the user follows. Lives here (not per page) so
+  // following one of a creator's videos persists as you swipe to their others.
+  const [followingSet, setFollowingSet] = useState(() => new Set());
+
+  useEffect(() => {
+    if (!uid) { setFollowingSet(new Set()); return undefined; }
+    const unsub = subscribeToFollowingList(uid, (set) => setFollowingSet(set || new Set()));
+    return () => { try { unsub && unsub(); } catch {} };
+  }, [uid]);
+
+  const onToggleFollow = useCallback(
+    async (creatorId, wasFollowing) => {
+      if (!uid || !creatorId) return;
+      // Optimistic: update the shared set immediately; revert if API reports failure.
+      setFollowingSet((prev) => {
+        const next = new Set(prev);
+        if (wasFollowing) next.delete(creatorId);
+        else next.add(creatorId);
+        return next;
+      });
+      try {
+        const res = wasFollowing
+          ? await unfollowUser(uid, creatorId)
+          : await followUser(uid, creatorId);
+        if (!res?.success) {
+          setFollowingSet((prev) => {
+            const next = new Set(prev);
+            if (wasFollowing) next.add(creatorId);
+            else next.delete(creatorId);
+            return next;
+          });
+        }
+      } catch {
+        setFollowingSet((prev) => {
+          const next = new Set(prev);
+          if (wasFollowing) next.add(creatorId);
+          else next.delete(creatorId);
+          return next;
+        });
+      }
+    },
+    [uid],
+  );
+
+  const ownerIdsFromParams = Array.isArray(route?.params?.ownerIds) ? route.params.ownerIds : [];
+  const effectiveOwnerIds = useMemo(
+    () => [...ownerIdsFromParams, ...(uid ? [uid] : [])].filter(Boolean),
+    [ownerIdsFromParams, uid],
+  );
+
+  // Load the rest of this creator's videos so the viewer becomes a vertical feed.
+  useEffect(() => {
+    let cancelled = false;
+    const creatorId = initialPost?.userId || initialPost?.user?.uid;
+    // If the caller already supplied an explicit playlist, respect it.
+    if (Array.isArray(posts) && posts.length > 1) {
+      setCreatorVideos(posts);
+      return;
+    }
+    if (!creatorId || !firebaseEnabled || !db || typeof db.collection !== 'function') {
+      return;
+    }
+    (async () => {
+      try {
+        let snap;
+        try {
+          snap = await db
+            .collection('posts')
+            .where('userId', '==', creatorId)
+            .orderBy('date', 'desc')
+            .limit(50)
+            .get();
+        } catch (e) {
+          // Fallback if the composite index/order field is unavailable.
+          snap = await db.collection('posts').where('userId', '==', creatorId).limit(50).get();
+        }
+        const list = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
+        const videosOnly = list.filter((p) => isVideoPost(p) && p.id !== initialPost.id);
+        if (!cancelled) setCreatorVideos(videosOnly);
+      } catch (err) {
+        console.warn('[MediaViewer] failed to load creator feed', err?.message || err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialPost?.id, initialPost?.userId, posts]);
+
+  // The tapped video is always first; the creator's other videos follow.
+  const items = useMemo(() => {
+    if (!initialPost) return [];
+    if (Array.isArray(posts) && posts.length > 1) return posts;
+    const rest = creatorVideos.filter((p) => p.id !== initialPost.id);
+    return [initialPost, ...rest];
+  }, [initialPost, creatorVideos, posts]);
+
+  const onViewRef = useRef(({ viewableItems }) => {
+    if (viewableItems && viewableItems.length > 0) {
+      const idx = viewableItems[0].index;
+      if (typeof idx === 'number') setActiveIndex(idx);
+    }
+  });
+  const viewConfigRef = useRef({ itemVisiblePercentThreshold: 80 });
+
+  const keyExtractor = useCallback((item, index) => String(item?.id || index), []);
+
+  const renderItem = useCallback(
+    ({ item, index }) => (
+      <MediaViewerItem
+        post={item}
+        isActive={index === activeIndex}
+        pageHeight={pageHeight}
+        navigation={navigation}
+        effectiveOwnerIds={effectiveOwnerIds}
+        followingSet={followingSet}
+        onToggleFollow={onToggleFollow}
+      />
+    ),
+    [activeIndex, pageHeight, navigation, effectiveOwnerIds, followingSet, onToggleFollow],
+  );
+
+  const getItemLayout = useCallback(
+    (_data, index) => ({ length: pageHeight, offset: pageHeight * index, index }),
+    [pageHeight],
+  );
+
+  if (!initialPost) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+        <ActivityIndicator color={COLORS.gradientEnd} />
+      </View>
+    );
+  }
+
+  return (
+    <View
+      style={{ flex: 1, backgroundColor: '#000' }}
+      onLayout={(e) => {
+        const h = e.nativeEvent.layout.height;
+        if (h && Math.abs(h - pageHeight) > 1) setPageHeight(h);
+      }}
+    >
+      <FlatList
+        data={items}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        getItemLayout={getItemLayout}
+        pagingEnabled
+        showsVerticalScrollIndicator={false}
+        snapToInterval={pageHeight}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        disableIntervalMomentum
+        onViewableItemsChanged={onViewRef.current}
+        viewabilityConfig={viewConfigRef.current}
+        windowSize={3}
+        initialNumToRender={1}
+        maxToRenderPerBatch={2}
+        removeClippedSubviews
+      />
+    </View>
+  );
+};
 
 export default MediaViewerScreen;

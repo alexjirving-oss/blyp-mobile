@@ -6,12 +6,12 @@ This is a **massively scalable, enterprise-grade live streaming system** built o
 
 ### 🎯 **PRODUCTION-READY FOR MASSIVE SCALE**
 
-✅ **Millions of concurrent users**  
-✅ **Global CDN distribution**  
-✅ **Adaptive bitrate streaming (240p-1080p)**  
-✅ **Real-time analytics and monitoring**  
-✅ **99.9% uptime SLA**  
-✅ **Enterprise-grade security and compliance**  
+✅ **Millions of concurrent users**
+✅ **Global CDN distribution**
+✅ **Adaptive bitrate streaming (240p-1080p)**
+✅ **Real-time analytics and monitoring**
+✅ **99.9% uptime SLA**
+✅ **Enterprise-grade security and compliance**
 
 ---
 
@@ -171,7 +171,7 @@ npm run deploy
 # Deploy Firestore rules
 firebase deploy --only firestore:rules
 
-# Deploy storage rules  
+# Deploy storage rules
 firebase deploy --only storage
 ```
 
@@ -215,7 +215,7 @@ const results = await EnterpriseLiveStreamTester.runProductionValidation();
 
 // Results include:
 // - Basic functionality tests
-// - Performance benchmarks  
+// - Performance benchmarks
 // - Load testing (concurrent users)
 // - Quality adaptation testing
 // - Error handling validation
@@ -266,13 +266,13 @@ US-Central1 (Primary)
 ├── Firestore
 └── Cloud Storage
 
-Europe-West1 (Secondary)  
+Europe-West1 (Secondary)
 ├── Cloud Functions
 ├── Firestore (replica)
 └── Cloud Storage (CDN)
 
 Asia-Southeast1 (Secondary)
-├── Cloud Functions  
+├── Cloud Functions
 ├── Firestore (replica)
 └── Cloud Storage (CDN)
 ```
@@ -296,7 +296,7 @@ Asia-Southeast1 (Secondary)
 
 ### Compliance
 - **GDPR**: Data privacy and user consent
-- **SOC2**: Security and availability standards  
+- **SOC2**: Security and availability standards
 - **COPPA**: Child privacy protection
 - **CCPA**: California consumer privacy
 
@@ -310,7 +310,7 @@ Asia-Southeast1 (Secondary)
 // src/config/firebase.js
 export const firebaseConfig = {
   apiKey: "your-api-key",
-  authDomain: "your-project.firebaseapp.com", 
+  authDomain: "your-project.firebaseapp.com",
   projectId: "your-project-id",
   storageBucket: "your-project.appspot.com",
   messagingSenderId: "123456789",
@@ -338,7 +338,7 @@ export const config = {
   memory: '2GB',
   timeout: 540,
   maxInstances: 100,
-  
+
   transcoding: {
     qualities: [
       { name: '240p', width: 426, height: 240, bitrate: '400k' },
@@ -360,14 +360,14 @@ export const config = {
 // Create enterprise stream
 const stream = await ScalableHLSService.createStream({
   title: 'My Live Stream',
-  description: 'Stream description', 
+  description: 'Stream description',
   qualityPreference: 'auto' // or specific quality
 });
 
 // Upload video segment
 const result = await ScalableHLSService.uploadSegment(
-  streamId, 
-  videoUri, 
+  streamId,
+  videoUri,
   segmentNumber,
   metadata
 );
@@ -388,7 +388,7 @@ const unsubscribe = ScalableHLSService.subscribeToStream(
 // Track stream creation
 await EnterpriseAnalyticsService.trackStreamCreated(streamId, streamData);
 
-// Track viewer engagement  
+// Track viewer engagement
 await EnterpriseAnalyticsService.trackEngagement(streamId, 'like', data);
 
 // Track performance metrics
@@ -396,7 +396,7 @@ await EnterpriseAnalyticsService.trackStreamPerformance(streamId, metrics);
 
 // Generate analytics report
 const report = await EnterpriseAnalyticsService.generateAnalyticsReport(
-  streamId, 
+  streamId,
   '24h'
 );
 ```
@@ -427,8 +427,9 @@ const report = await EnterpriseAnalyticsService.generateAnalyticsReport(
    ```
 
 2. **Deploy App to Production**
+   > HISTORICAL ONLY - NON-CANONICAL - DO NOT USE FOR RELEASE
    ```bash
-   eas build --platform android --profile production
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
    eas submit --platform android
    ```
 

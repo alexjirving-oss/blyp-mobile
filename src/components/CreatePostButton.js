@@ -1,174 +1,199 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Icon from './Icon';
-import { TouchableOpacity, StyleSheet, Dimensions, Modal, View, Text, Alert } from 'react-native';
+import { TouchableOpacity, StyleSheet, Modal, View, Text, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../hooks/useCommon';
+import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
+import { requireAccount } from '../services/guestSessionService';
+import { COLORS } from '../styles/theme';
 
-const CreatePostButton = ({ accessibilityState }) => {
+export const COMPOSE_DRAFT_KEY = 'blyp_compose_draft_v1';
+
+const CreatePostButton = () => {
   const navigation = useNavigation();
   const [showMenu, setShowMenu] = useState(false);
-  const [showPostOptions, setShowPostOptions] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+  const { uid, isAuthenticated, authReady } = useAuth();
+  const streamingEnabled = isLiveStreamingEnabled();
+
+  const refreshDraftFlag = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(COMPOSE_DRAFT_KEY);
+      if (!raw) {
+        setHasDraft(false);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const items = Array.isArray(parsed?.mediaItems) ? parsed.mediaItems : [];
+      setHasDraft(items.length > 0 || !!(parsed?.caption && String(parsed.caption).trim()));
+    } catch {
+      setHasDraft(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showMenu) {
+      refreshDraftFlag();
+    }
+  }, [showMenu, refreshDraftFlag]);
+
+  const ensureCanCreate = (actionLabel) => {
+    if (!authReady) {
+      Alert.alert('Please wait', 'Still loading your account. Please try again in a moment.');
+      return false;
+    }
+    if (!isAuthenticated || !uid) {
+      Alert.alert(
+        'Login required',
+        `You need to be logged in to ${actionLabel}. Please log in and try again.`
+      );
+      return false;
+    }
+    return true;
+  };
 
   const handlePress = () => {
+    if (requireAccount(navigation, 'post or go live')) return;
     setShowMenu(true);
   };
 
-  const handleMenuOption = (option) => {
+  const goReview = (params) => {
     setShowMenu(false);
-    switch (option) {
-      case 'post':
-        // Show the new post options overlay instead of going directly to Review
-        setShowPostOptions(true);
-        break;
-      case 'live':
-        navigation.navigate('LiveStreamScreen', { mode: 'host' });
-        break;
+    if (!ensureCanCreate('create a post')) return;
+    console.log('[POST][ENTRY] Navigating to Review from create sheet', params);
+    navigation.navigate('Review', { entryPoint: 'plus_menu', ...params });
+  };
+
+  const handleResumeDraft = async () => {
+    if (!ensureCanCreate('resume a draft')) return;
+    try {
+      const raw = await AsyncStorage.getItem(COMPOSE_DRAFT_KEY);
+      if (!raw) {
+        setHasDraft(false);
+        return;
+      }
+      const draft = JSON.parse(raw);
+      setShowMenu(false);
+      navigation.navigate('Review', {
+        entryPoint: 'resume_draft',
+        source: draft.source || 'draft',
+        media: draft.mediaItems || [],
+        type: draft.type || 'photos',
+        transcript: draft.caption || '',
+        resumeDraft: true,
+      });
+    } catch (e) {
+      console.warn('[POST] resume draft failed', e?.message || e);
+      Alert.alert('Draft unavailable', 'Could not open your saved draft.');
     }
   };
 
-  const handlePostOption = (option) => {
-    setShowPostOptions(false);
-    switch (option) {
-      case 'takePhoto':
-        navigation.navigate('Camera');
-        break;
-      case 'takeVideo':
-        navigation.navigate('Camera');
-        break;
-      case 'voiceNote':
-        navigation.navigate('VoiceMemo');
-        break;
-      case 'myMedia':
-        navigation.navigate('Review', { mode: 'new' });
-        break;
+  const handleGoLive = () => {
+    setShowMenu(false);
+    if (!streamingEnabled) {
+      Alert.alert('Live streaming disabled', 'Live streaming is currently turned off for this build.');
+      return;
     }
+    if (!ensureCanCreate('go live')) return;
+    navigation.navigate('LiveStreamScreen', {
+      mode: 'host',
+      source: 'CreatePostButton',
+    });
   };
 
   return (
     <>
       <View style={styles.container}>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={handlePress}
-          activeOpacity={0.8}
-        >
-          <LinearGradient
-            colors={['#a855f7', '#d946ef', '#ec4899']}
-            style={styles.gradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          >
-            <Icon  name="add" size={28} color="white"  />
-          </LinearGradient>
+        <TouchableOpacity style={styles.button} onPress={handlePress} activeOpacity={0.85}>
+          <View style={styles.fab}>
+            <Icon name="add" size={30} color={COLORS.black} />
+          </View>
         </TouchableOpacity>
       </View>
 
       <Modal
         visible={showMenu}
-        transparent={true}
+        transparent
         animationType="fade"
         onRequestClose={() => setShowMenu(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalBackdrop} 
-          activeOpacity={1} 
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
           onPress={() => setShowMenu(false)}
         >
           <View style={styles.menuContainer}>
             <View style={styles.menuHandle} />
-            
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => handleMenuOption('post')}
-            >
-              <LinearGradient
-                colors={['#a855f7', '#d946ef', '#ec4899']}
-                style={styles.menuItemGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Text style={styles.menuItemTextMain}>New Post</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+            <Text style={styles.sheetTitle}>Create</Text>
 
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => handleMenuOption('live')}
-            >
-              <LinearGradient
-                colors={['#ef4444', '#dc2626', '#b91c1c']}
-                style={styles.menuItemGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <View style={styles.liveButtonContent}>
-                  <Icon  name="radio-outline" size={20} color="#ffffff"  />
-                  <Text style={styles.menuItemTextLive}>Go Live</Text>
+            {hasDraft ? (
+              <TouchableOpacity style={styles.menuItem} onPress={handleResumeDraft}>
+                <View style={[styles.menuItemGradient, styles.resumeGradient]}>
+                  <View style={styles.row}>
+                    <Icon name="document-text-outline" size={20} color={COLORS.primary} />
+                    <Text style={[styles.menuItemTextMain, styles.resumeText]}>Resume draft</Text>
+                  </View>
                 </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+              </TouchableOpacity>
+            ) : null}
 
-      {/* New Post Options Modal */}
-      <Modal
-        visible={showPostOptions}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowPostOptions(false)}
-      >
-        <TouchableOpacity 
-          style={styles.modalBackdrop} 
-          activeOpacity={1} 
-          onPress={() => setShowPostOptions(false)}
-        >
-          <View style={styles.postOptionsContainer}>
-            <View style={styles.menuHandle} />
-            
-            <Text style={styles.postOptionsTitle}>Create New Post</Text>
-            
             <View style={styles.postOptionsGrid}>
               <TouchableOpacity
                 style={styles.postOptionButton}
-                onPress={() => handlePostOption('takePhoto')}
+                onPress={() => goReview({ mode: 'photo', source: 'camera' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Icon  name="camera" size={28} color="#a855f7"  />
+                  <Icon name="camera" size={28} color="#00D2BE" />
                 </View>
-                <Text style={styles.postOptionText}>Take Photo</Text>
+                <Text style={styles.postOptionText}>Photo</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.postOptionButton}
-                onPress={() => handlePostOption('takeVideo')}
+                onPress={() => goReview({ mode: 'video', source: 'camera' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Icon  name="videocam" size={28} color="#d946ef"  />
+                  <Icon name="videocam" size={28} color="#67E8F9" />
                 </View>
-                <Text style={styles.postOptionText}>Take Video</Text>
+                <Text style={styles.postOptionText}>Video</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.postOptionButton}
-                onPress={() => handlePostOption('voiceNote')}
+                onPress={() => goReview({ mode: 'library', source: 'gallery' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Icon  name="mic" size={28} color="#ec4899"  />
+                  <Icon name="images" size={28} color="#A78BFA" />
                 </View>
-                <Text style={styles.postOptionText}>Voice Note</Text>
+                <Text style={styles.postOptionText}>Library</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.postOptionButton}
-                onPress={() => handlePostOption('myMedia')}
-              >
-                <View style={styles.postOptionIconContainer}>
-                  <Icon  name="images" size={28} color="#8b5cf6"  />
-                </View>
-                <Text style={styles.postOptionText}>My Media</Text>
-              </TouchableOpacity>
+              {streamingEnabled ? (
+                <TouchableOpacity style={styles.postOptionButton} onPress={handleGoLive}>
+                  <View style={[styles.postOptionIconContainer, styles.liveIconContainer]}>
+                    <Icon name="radio-outline" size={28} color="#F87171" />
+                  </View>
+                  <Text style={styles.postOptionText}>Go Live</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
+
+            {(__DEV__ ||
+              /^(1|true|yes|on)$/i.test(String(process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED || '').trim())) && (
+              <TouchableOpacity
+                style={[styles.menuItem, { marginTop: 4 }]}
+                onPress={() => {
+                  setShowMenu(false);
+                  navigation.navigate('ArtilleryGame');
+                }}
+              >
+                <View style={[styles.menuItemGradient, { backgroundColor: '#00D2BE' }]}>
+                  <Text style={[styles.menuItemTextMain, { color: COLORS.black }]}>Blyp Artillery</Text>
+                </View>
+              </TouchableOpacity>
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -180,24 +205,27 @@ const styles = StyleSheet.create({
   container: {
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: -20,
+    marginTop: -22,
   },
   button: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  gradient: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 28,
+  fab: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 8,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
   },
   modalBackdrop: {
     flex: 1,
@@ -205,78 +233,65 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   menuContainer: {
-    backgroundColor: '#1e293b',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingHorizontal: 16,
     paddingBottom: 32,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: COLORS.border,
   },
   menuHandle: {
-    width: 48,
-    height: 6,
-    backgroundColor: '#475569',
+    width: 40,
+    height: 5,
+    backgroundColor: COLORS.borderStrong,
     borderRadius: 3,
     alignSelf: 'center',
+    marginBottom: 12,
+  },
+  sheetTitle: {
+    color: COLORS.textPrimary || '#ffffff',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
     marginBottom: 16,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+    borderRadius: 16,
     marginBottom: 8,
-    backgroundColor: '#374151',
   },
   menuItemGradient: {
-    paddingVertical: 4,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 16,
+    alignItems: 'center',
+    width: '100%',
   },
-  menuItemText: {
-    color: '#d1d5db',
-    fontSize: 18,
-    fontWeight: '600',
-    marginLeft: 12,
+  resumeGradient: {
+    backgroundColor: '#1C1C22',
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong || '#3F3F46',
   },
-  menuItemTextMain: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: '800',
+  resumeText: {
+    color: COLORS.primary,
+    marginLeft: 8,
+    fontSize: 17,
   },
-  liveButtonContent: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  menuItemTextLive: {
-    color: '#ffffff',
+  menuItemTextMain: {
+    color: 'white',
     fontSize: 18,
-    fontWeight: '700',
-    marginLeft: 8,
-  },
-  
-  // Post Options Styles
-  postOptionsContainer: {
-    backgroundColor: '#1e293b',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  postOptionsTitle: {
-    color: '#ffffff',
-    fontSize: 22,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 24,
+    fontWeight: '800',
   },
   postOptionsGrid: {
     flexDirection: 'row',
@@ -286,27 +301,32 @@ const styles = StyleSheet.create({
   postOptionButton: {
     width: '48%',
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    backgroundColor: '#374151',
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    backgroundColor: '#1C1C22',
     borderRadius: 16,
-    marginBottom: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#27272E',
   },
   postOptionIconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#1e293b',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#0A0A0C',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
     borderWidth: 2,
-    borderColor: '#475569',
+    borderColor: '#3F3F46',
+  },
+  liveIconContainer: {
+    borderColor: '#7F1D1D',
   },
   postOptionText: {
     color: '#d1d5db',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     textAlign: 'center',
   },
 });

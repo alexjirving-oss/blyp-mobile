@@ -20,18 +20,12 @@ services:
       - key: IVS_REALTIME_REGION
         value: eu-west-1
       - key: COGNITO_USER_POOL_ID
-        value: eu-west-2_ITX07Zvnt
-      - key: COGNITO_APP_CLIENT_ID
-        value: 4a7r115hllaedriqsjlsa00snj
-      - key: LIVE_ARTILLERY_ENABLED
-        value: "0"
+        sync: false
       - key: LIVE_SESSIONS_TABLE
         value: blyp_live_sessions
       - key: LIVE_GUESTS_TABLE
         value: blyp_live_guests
       - key: ADMIN_ALLOWLIST_SUBS
-        sync: false
-      - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
       - key: POSTGRES_URL
         sync: false
@@ -49,9 +43,3 @@ services:
         value: 30
       - key: IDEMPOTENCY_TTL_SECONDS
         value: 86400
-      - key: GOOGLE_PLAY_PACKAGE_NAME
-        value: com.blyp.mobile
-      - key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
-        sync: false
-      - key: GOOGLE_PLAY_VERIFY_TIMEOUT_MS
-        value: 8000

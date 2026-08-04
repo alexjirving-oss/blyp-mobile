@@ -1,5 +1,13 @@
 import { db, auth, storage } from '../config/firebase';
 import { trackActivity } from '../utils/activityTracker';
+import { snapExists, snapData } from '../utils/firestoreSnap';
+
+/**
+ * @deprecated UNUSED legacy livestream service — not wired into the IVS path.
+ * Use `LiveService.js` (Firestore directory) and `ivsLiveApi.ts` (IVS tokens) instead.
+ * This file is retained for reference only; new code must not import it.
+ */
+console.warn('[LiveStreamService] DEPRECATED — do not import this module in new code');
 
 /**
  * Service for managing livestreaming functionality
@@ -77,12 +85,13 @@ class LiveStreamService {
       
       const streamRef = db.collection('liveStreams').doc(streamId);
       const streamDoc = await streamRef.get();
-      
-      if (!streamDoc.exists) {
+      const streamData = snapData(streamDoc);
+
+      if (!streamData) {
         throw new Error('Stream not found');
       }
       
-      if (streamDoc.data().userId !== user.uid) {
+      if (streamData.userId !== user.uid) {
         throw new Error('Only the stream creator can end the stream');
       }
       
@@ -100,8 +109,7 @@ class LiveStreamService {
         currentStreamId: null,
       }, { merge: true });
       
-      // Calculate stream duration for analytics
-      const streamData = streamDoc.data();
+      // Calculate stream duration for analytics (streamData resolved above)
       const startTime = streamData.startedAt?.toMillis?.() || 
                         streamData.startedAt?.seconds * 1000 || 
                         Date.now();
@@ -131,10 +139,12 @@ class LiveStreamService {
    */
   async getActiveStreams(maxResults = 20) {
     try {
+      const cutoff = new Date(Date.now() - 90 * 1000);
       const snapshot = await db
         .collection('liveStreams')
         .where('status', '==', 'live')
-        .orderBy('startedAt', 'desc')
+        .where('lastHeartbeatAt', '>=', cutoff)
+        .orderBy('lastHeartbeatAt', 'desc')
         .limit(maxResults)
         .get();
       return snapshot.docs.map(docSnap => ({
@@ -157,10 +167,11 @@ class LiveStreamService {
     const streamRef = db.collection('liveStreams').doc(streamId);
     
     return streamRef.onSnapshot((docSnap) => {
-      if (docSnap.exists) {
+      const data = snapData(docSnap);
+      if (data) {
         callback({
           id: docSnap.id,
-          ...docSnap.data()
+          ...data
         });
       } else {
         callback(null);
@@ -243,8 +254,8 @@ class LiveStreamService {
       
       // Get the updated document to return the new count and update peak if needed
       const updatedDoc = await streamRef.get();
-      if (updatedDoc.exists) {
-        const data = updatedDoc.data();
+      const data = snapData(updatedDoc);
+      if (data) {
         const newCount = Math.max(0, data.viewCount || 0); // Ensure never negative
         
         // Update peak viewer count if this is a new high
@@ -281,7 +292,7 @@ class LiveStreamService {
       
       // Check if user already liked
   const likeDoc = await likeRef.get();
-  const hasLiked = likeDoc.exists;
+  const hasLiked = snapExists(likeDoc);
       
       // If action matches current state, do nothing
       if ((isLiking && hasLiked) || (!isLiking && !hasLiked)) {

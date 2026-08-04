@@ -1,4 +1,10 @@
-# TODO Baseline (Automated)
+# TODO
+
+**Current product backlog:** [`docs/ops/PRODUCT_TODO.md`](docs/ops/PRODUCT_TODO.md) — live bugs, teams, admin, onboarding (Open / Parked / Done).
+
+---
+
+## Legacy baseline (Automated)
 
 Generated: 2025-10-31
 

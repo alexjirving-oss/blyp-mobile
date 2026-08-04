@@ -1,0 +1,159 @@
+// INTEGRATION EXAMPLE: How to add BridgeTestScreen to App.js
+//
+// This shows the minimal changes needed to test the bridge.
+
+import React, { useMemo, useState, useEffect } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import * as Sentry from '@sentry/react-native';
+
+// ===== IMPORT: Add this line =====
+import { BridgeTestScreen } from './src/screens/BridgeTestScreen';
+
+import { HomeScreen } from './src/screens/HomeScreen';
+import { LiveStreamScreen } from './src/screens/LiveStreamScreen';
+// ... other imports
+
+const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator();
+
+function LiveStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: true,
+        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: '#000' },
+        headerTitleStyle: { color: '#fff' },
+      }}
+    >
+      <Stack.Screen name="LiveStreamScreen" component={LiveStreamScreen} />
+      
+      {/* ===== ROUTE: Add this screen for testing ===== */}
+      <Stack.Screen 
+        name="BridgeTest"
+        component={BridgeTestScreen}
+        options={{ title: '🔬 Bridge Test' }}
+      />
+    </Stack.Navigator>
+  );
+}
+
+function HomeStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      <Stack.Screen name="HomeScreen" component={HomeScreen} />
+    </Stack.Navigator>
+  );
+}
+
+function BottomTabNavigator() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#666',
+        tabBarStyle: { backgroundColor: '#000', borderTopColor: '#333' },
+        headerShown: false,
+      }}
+    >
+      <Tab.Screen
+        name="Home"
+        component={HomeStack}
+        options={{
+          tabBarLabel: 'Home',
+          tabBarIcon: () => null,
+        }}
+      />
+      <Tab.Screen
+        name="Live"
+        component={LiveStack}
+        options={{
+          tabBarLabel: 'Live',
+          tabBarIcon: () => null,
+        }}
+      />
+      {/* ... other tabs */}
+    </Tab.Navigator>
+  );
+}
+
+export default function App() {
+  return (
+    <NavigationContainer>
+      <BottomTabNavigator />
+    </NavigationContainer>
+  );
+}
+
+// ===== USAGE: =====
+// Now you can navigate to the test screen from LiveStreamScreen:
+//
+// // In LiveStreamScreen.tsx:
+// const navigation = useNavigation();
+// 
+// <TouchableOpacity
+//   onPress={() => navigation.navigate('BridgeTest')}
+//   style={{ padding: 16, backgroundColor: '#ff6600' }}
+// >
+//   <Text style={{ color: '#fff' }}>Debug: Test Bridge</Text>
+// </TouchableOpacity>
+//
+// Or programmatically after app loads:
+// 
+// useEffect(() => {
+//   const DEBUG_MODE = true; // Set to false in production
+//   if (DEBUG_MODE && navigation) {
+//     // Auto-navigate to bridge test on app start
+//     // navigation.navigate('Live', { screen: 'BridgeTest' });
+//   }
+// }, [navigation]);
+
+// ===== LOGCAT OUTPUT TO EXPECT: =====
+// 
+// When running the bridge test, you should see:
+//
+// [Metro Console]
+// [BRIDGE_TEST] Starting bridge diagnostic...
+// [BRIDGE_TEST] ✅ IVSBroadcastModule found
+// [BRIDGE_TEST] Module methods: ["addListener","removeListeners","testBridge","startHostSession",...]
+// [BRIDGE_TEST] --- Test 1: Simple testBridge() method ---
+// [BRIDGE_TEST] testBridge called (awaiting callback)...
+// [BRIDGE_TEST] testBridge callback fired!
+// [BRIDGE_TEST] ✅ testBridge result: Bridge works!
+// [BRIDGE_TEST] --- Test 2: startHostSession() with test params ---
+// [BRIDGE_TEST] startHostSession called (awaiting callback)...
+// [BRIDGE_TEST] startHostSession callback fired!
+// [BRIDGE_TEST] ⚠️  startHostSession returned error: {message: "..."}
+// [BRIDGE_TEST] ✅ All bridge tests completed!
+// [BRIDGE_TEST] ✅✅✅ SUCCESS: Bridge is working!
+//
+// [Android Logcat]
+// $ adb logcat IVS_NATIVE:D *:S
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] addListener called for event: _didUpdateDimensions
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] **TEST BRIDGE METHOD CALLED**
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] startHostSession called: stageArn=rtmps://... tokenLength=15 sessionId=test-session-id
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] startSession() called with stageArn=rtmps://... sessionId=test-session-id
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] Creating BroadcastSession with listener
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] Calling broadcastSession.start() with endpoint=rtmps://... tokenLength=15
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] broadcastSession.start() returned
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] startSession completed successfully
+// 12-08 13:XX:XX.XXX D/IVS_NATIVE: [NATIVE] Emitting event 'IVS_BROADCAST_STATE_CHANGED' to JS
+//
+// ===== IF YOU SEE THIS: =====
+// 
+// ✅ SUCCESS: Bridge is working, JS can call native code
+//    → Problem is in startHostSession() or startSession() logic
+//
+// ❌ TIMEOUT: "testBridge callback never fired"
+//    → Bridge layer is broken, native methods can't be invoked
+//    → Run: npx expo run:android --clean
+//
+// ❌ EXCEPTION: "Exception calling testBridge"
+//    → Callback signature mismatch or React Native version issue
+//    → Check gradle versions in build.gradle

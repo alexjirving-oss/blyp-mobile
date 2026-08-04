@@ -15,32 +15,78 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { doc, getDoc, getDocs } from 'firebase/firestore';
 import { auth, firestore as db } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
+import { getEconomyWallet } from '../api/economyLiveApi';
+import { useAuth } from '../hooks/useCommon';
+import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 
 const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => {
   const [balance, setBalance] = useState(0);
+  const [gemBalance, setGemBalance] = useState(0);
   const [showModal, setShowModal] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [canClaimDaily, setCanClaimDaily] = useState(false);
-  const currentUser = auth.currentUser;
+  const { uid, isAuthenticated, authReady } = useAuth();
+  const effectiveUid = uid || auth?.currentUser?.uid || null;
+
+  const refreshLiveWalletBalance = async () => {
+    try {
+      const wallet = await getEconomyWallet();
+      const nextBalance = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+      const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+      if (Number.isFinite(nextBalance)) setBalance(nextBalance);
+      if (Number.isFinite(nextGems)) setGemBalance(nextGems);
+    } catch (e) {
+      console.warn('[WALLET] live-service wallet fetch failed', e?.message || String(e));
+    }
+  };
 
   useEffect(() => {
-    if (currentUser) {
-      // Subscribe to real-time balance updates
-      const unsubscribe = BlypCoinService.subscribeToBalance(currentUser.uid, (newBalance) => {
+    if (effectiveUid) {
+      // In IVS/live-service mode, the authoritative wallet is served by blyp-live-service.
+      // Otherwise, fall back to the legacy Firestore wallet subscription.
+      if (shouldUseLiveServiceWallet()) {
+        if (!authReady || !isAuthenticated) {
+          return;
+        }
+        refreshLiveWalletBalance();
+        const t = setInterval(() => {
+          refreshLiveWalletBalance();
+        }, 5000);
+        checkDailyReward();
+        return () => clearInterval(t);
+      }
+
+      const unsubscribe = BlypCoinService.subscribeToBalance(effectiveUid, (newBalance) => {
         setBalance(newBalance);
       });
+
+      // Legacy path: gems are not guaranteed to exist in the old wallet model.
+      // Keep gem balance at 0 unless live-service wallet is active.
+      setGemBalance(0);
 
       checkDailyReward();
       return unsubscribe;
     }
-  }, [currentUser]);
+    // No uid yet; show zeros.
+    setBalance(0);
+    setGemBalance(0);
+  }, [effectiveUid, authReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (!effectiveUid) return;
+    if (!showModal) return;
+    if (!shouldUseLiveServiceWallet()) return;
+    if (!authReady || !isAuthenticated) return;
+    refreshLiveWalletBalance();
+  }, [effectiveUid, showModal, authReady, isAuthenticated]);
 
   const checkDailyReward = async () => {
     // Check if user can claim daily reward
     // This is a simplified check - you'd want more robust logic
     try {
-      const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+      if (!effectiveUid) return;
+      const userDoc = await getDoc(doc(db, 'users', effectiveUid));
       if (userDoc.exists()) {
         const lastCheckIn = userDoc.data().lastCheckIn?.toDate();
         const today = new Date();
@@ -54,11 +100,11 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
   };
 
   const loadTransactions = async () => {
-    if (!currentUser) return;
+    if (!effectiveUid) return;
     
     setLoading(true);
     try {
-      const history = await BlypCoinService.getTransactionHistory(currentUser.uid);
+      const history = await BlypCoinService.getTransactionHistory(effectiveUid);
       setTransactions(history);
     } catch (error) {
       console.error('Error loading transactions:', error);
@@ -68,10 +114,10 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
   };
 
   const handleClaimDailyReward = async () => {
-    if (!currentUser) return;
+    if (!effectiveUid) return;
     
     try {
-      const result = await BlypCoinService.claimDailyReward(currentUser.uid);
+      const result = await BlypCoinService.claimDailyReward(effectiveUid);
       Alert.alert(
         'Daily Reward Claimed! 🎉',
         `You earned ${result.reward} Blypcoins!\nCurrent streak: ${result.streak} days`,
@@ -145,10 +191,16 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
           <View>
             <Text style={styles.walletTitle}>Blypcoin Wallet</Text>
             {showBalance && (
-              <View style={styles.balanceRow}>
-                <Text style={styles.coinEmoji}>🪙</Text>
-                <Text style={styles.balanceAmount}>{balance.toLocaleString()}</Text>
-              </View>
+              <>
+                <View style={styles.balanceRow}>
+                  <Text style={styles.coinEmoji}>🪙</Text>
+                  <Text style={styles.balanceAmount}>{balance.toLocaleString()}</Text>
+                </View>
+                <View style={[styles.balanceRow, styles.secondaryBalanceRow]}>
+                  <Text style={styles.coinEmoji}>💎</Text>
+                  <Text style={styles.balanceAmount}>{gemBalance.toLocaleString()}</Text>
+                </View>
+              </>
             )}
           </View>
           
@@ -217,6 +269,10 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
               <Text style={styles.modalCoinEmoji}>🪙</Text>
               <Text style={styles.modalBalanceAmount}>{balance.toLocaleString()}</Text>
             </View>
+            <View style={[styles.modalBalanceRow, styles.modalSecondaryBalanceRow]}>
+              <Text style={styles.modalCoinEmoji}>💎</Text>
+              <Text style={styles.modalBalanceAmount}>{gemBalance.toLocaleString()}</Text>
+            </View>
           </LinearGradient>
 
           <View style={styles.transactionsSection}>
@@ -263,6 +319,9 @@ const styles = StyleSheet.create({
   balanceRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  secondaryBalanceRow: {
+    marginTop: 4,
   },
   coinEmoji: {
     fontSize: 20,
@@ -317,7 +376,7 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -325,7 +384,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   closeButton: {
     padding: 4,
@@ -354,6 +413,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  modalSecondaryBalanceRow: {
+    marginTop: 8,
+  },
   modalCoinEmoji: {
     fontSize: 32,
     marginRight: 8,
@@ -380,10 +442,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     padding: 16,
     borderRadius: 12,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   transactionLeft: {
     flex: 1,
@@ -395,7 +459,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   transactionDate: {
-    color: '#94a3b8',
+    color: '#71717A',
     fontSize: 12,
   },
   transactionRight: {
@@ -406,19 +470,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   creditAmount: {
-    color: '#10b981',
+    color: '#34D399',
   },
   debitAmount: {
-    color: '#ef4444',
+    color: '#FB7185',
   },
   loadingText: {
-    color: '#94a3b8',
+    color: '#71717A',
     textAlign: 'center',
     fontSize: 16,
     marginTop: 40,
   },
   emptyText: {
-    color: '#94a3b8',
+    color: '#71717A',
     textAlign: 'center',
     fontSize: 16,
     marginTop: 40,

@@ -1,6 +1,14 @@
 # Blyp Mobile - React Native Social Media App
 
-A modern social media app built with React Native and Expo, featuring camera capture, voice memos, Firebase integration, and **REAL live streaming**.
+A modern social media app built with React Native and Expo, featuring camera
+capture, voice memos, AI captioning, an in-app economy, and **live streaming**.
+
+Blyp uses a dual-cloud backend: **Firebase** (Firestore, Storage, Cloud
+Functions) for social content and metadata, and **AWS** for identity (Cognito),
+live video (IVS Real-Time), and the authoritative economy/realtime service
+(a Node.js app deployed on Render). Cognito is the primary identity provider and
+is bridged to Firebase Auth via a Cloud Function so the same user id works
+across both clouds.
 
 ## 🚀 Quick Start
 
@@ -39,17 +47,18 @@ If your physical device dev client shows a project pointing at `127.0.0.1:8081` 
 
 **Having issues?** See [`TROUBLESHOOTING_GUIDE.md`](./TROUBLESHOOTING_GUIDE.md) for complete solutions.
 
-## ⭐ NEW: Production-Ready Live Streaming
+## Live Streaming (AWS IVS Real-Time)
 
-**Your app now has REAL, WORKING live streaming!** 🎉
+Live streaming is built on **AWS IVS Real-Time** (low-latency, multi-guest
+co-streaming), driven by native Android modules under
+`android/app/src/main/java/com/blyp/mobile/ivs/`. IVS stage management and
+participant token minting happen server-side in the Node.js live service
+(`backend/blyp-live-service`); the client talks to it via `src/api/ivsLiveApi.ts`.
 
-✅ **Google Play Store Ready** - Fully compliant, no issues  
-✅ **Unlimited Viewers** - Scale to millions of viewers  
-✅ **3-5 Second Latency** - Industry-standard performance  
-✅ **99.9% Reliable** - Firebase CDN-backed streaming  
-✅ **Simple & Clean** - 90% less code than old WebRTC approach  
-
-**📖 Start Here**: Read [`START-HERE.md`](./START-HERE.md) for complete setup guide!
+> Note: the streaming docs listed below (`START-HERE.md`,
+> `README-LIVESTREAM.md`, etc.) describe an earlier Firebase/HLS streaming
+> approach that has since been replaced by AWS IVS. They are retained for
+> historical context only and do not reflect the current implementation.
 
 ## 📚 Documentation
 
@@ -71,18 +80,21 @@ If your physical device dev client shows a project pointing at `127.0.0.1:8081` 
 
 ## Technology Stack
 
-- **React Native** with Expo SDK 50
-- **Firebase** (Auth, Firestore, Storage)
-- **Expo Camera** for media capture
-- **Expo AV** for audio recording and playback
+- **React Native 0.81** with **Expo SDK 54**
+- **AWS Cognito** (via AWS Amplify) - primary identity / auth
+- **Firebase** (Firestore, Storage, Cloud Functions) - social content, media, auth bridge
+- **AWS IVS Real-Time** - live video broadcasting and multi-guest co-streaming
+- **Node.js live service** (`backend/blyp-live-service`, Render) - IVS tokens, economy ledger, realtime
+- **Socket.io** - realtime gift / live-game / matchday events
+- **Google Gemini** - AI captioning and speech-to-text
+- **Expo Camera / Expo AV** for media capture and audio
 - **React Navigation** for screen navigation
-- **Linear Gradient** for modern UI effects
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - Expo CLI (`npm install -g expo-cli`)
 - Android Studio (for Android development) or Xcode (for iOS)
 - Firebase project with Auth, Firestore, and Storage enabled
@@ -173,30 +185,21 @@ src/
 
 ### Android (Google Play Store)
 
-1. **Install EAS CLI**
-   ```bash
-   npm install -g @expo/eas-cli
+1. **Use the canonical Android release path only**
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
    ```
 
-2. **Configure EAS**
+2. **Upload the frozen artifact from the generated packet**
+   - Upload `diagnostics/release_aab/CANONICAL_PLAY_AAB_<timestamp>/app-release.aab` to Google Play.
+
+3. **Optional: submit the completed build after validation**
    ```bash
-   eas build:configure
+   eas submit --platform android --profile production
    ```
 
-3. **Update app.json**
-   - Set your unique `android.package` name
-   - Update version codes and app metadata
-   - Add proper icons and splash screens
-
-4. **Build APK/AAB**
-   ```bash
-   eas build --platform android
-   ```
-
-5. **Submit to Google Play**
-   ```bash
-   eas submit --platform android
-   ```
+4. **Do not use legacy Android build routes**
+   - `eas build --platform android` is non-canonical for Blyp Android release creation.
 
 ### iOS (App Store)
 
@@ -213,23 +216,39 @@ src/
 ## Development Commands
 
 - `npm start` - Start Expo development server
-- `npm run android` - Run on Android emulator/device  
+- `npm run android` - Run on Android emulator/device
 - `npm run ios` - Run on iOS simulator/device
 - `npm run web` - Run in web browser
-- `eas build --platform android` - Build Android APK/AAB
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>` - Canonical Android Play AAB build
 - `eas build --platform ios` - Build iOS IPA
 
 ## Environment Variables
 
-Create a `.env` file with:
+Client-facing variables are read by Expo and must be prefixed with
+`EXPO_PUBLIC_`. Per-build values are defined in `eas.json`; for local dev create
+a `.env` (gitignored) with the keys you need, e.g.:
 
 ```
-FIREBASE_API_KEY=your_firebase_api_key
-FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com  
-FIREBASE_PROJECT_ID=your_project_id
-FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-GEMINI_API_KEY=your_gemini_api_key (optional)
+# AI
+EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_api_key
+
+# AWS (Cognito identity + IVS live)
+EXPO_PUBLIC_AWS_REGION=eu-west-2
+EXPO_PUBLIC_AWS_USER_POOL_ID=...
+EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID=...
+EXPO_PUBLIC_AWS_IDENTITY_POOL_ID=...
+
+# Backends
+EXPO_PUBLIC_LIVE_SERVICE_URL=https://<live-service-host>      # Node live/economy service
+EXPO_PUBLIC_FUNCTIONS_BASE_URL=https://<region>-<project>.cloudfunctions.net
+
+# Feature flags
+EXPO_PUBLIC_ENABLE_STREAMING=1
 ```
+
+Firebase web config has safe defaults baked into `src/config/firebase.js` and
+can be overridden locally via a gitignored `src/config/firebase.local.js`
+(see `src/config/firebase.local.sample.js`).
 
 ## Contributing
 

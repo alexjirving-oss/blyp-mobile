@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Icon from '../components/Icon';
 import {
   View,
@@ -10,21 +10,116 @@ import {
   Dimensions,
   StatusBar,
   ScrollView,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import UnifiedVideo from '../components/UnifiedVideo';
 import BlypLogo from '../components/BlypLogo';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
+import { COLORS } from '../styles/theme';
+import { useAuth } from '../hooks/useCommon';
+import { db, firebaseEnabled } from '../config/firebase';
+import { snapData, snapExists } from '../utils/firestoreSnap';
+import { setPostLiked } from '../services/LikeService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const PostPreviewScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { post } = route.params || {};
+  const isFocused = useIsFocused();
+  const { post: routePost, postId: routePostId } = route.params || {};
+  const [post, setPost] = useState(routePost || null);
+  const [loadingPost, setLoadingPost] = useState(Boolean(routePostId && !routePost));
   const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
   const [videoStatus, setVideoStatus] = useState({});
   const videoRef = useRef(null);
+  const likePendingRef = useRef(false);
+  const { uid, authReady, isAuthenticated } = useAuth();
+
+  const syncLikeState = useCallback((data, userId) => {
+    const count = Number(data?.likeCount ?? data?.likes ?? 0) || 0;
+    setLikeCount(count);
+    if (userId && Array.isArray(data?.likedBy)) {
+      setLiked(data.likedBy.includes(userId));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (routePost) {
+      setPost(routePost);
+      syncLikeState(routePost, uid);
+      setLoadingPost(false);
+      return undefined;
+    }
+    if (!routePostId || !firebaseEnabled || !db || typeof db.collection !== 'function') {
+      setLoadingPost(false);
+      return undefined;
+    }
+    setLoadingPost(true);
+    const unsub = db.collection('posts').doc(routePostId).onSnapshot(
+      (snap) => {
+        if (!snapExists(snap)) {
+          setPost(null);
+          setLoadingPost(false);
+          return;
+        }
+        const data = snapData(snap) || {};
+        setPost({ id: routePostId, ...data });
+        syncLikeState(data, uid);
+        setLoadingPost(false);
+      },
+      () => setLoadingPost(false)
+    );
+    return () => {
+      try {
+        unsub?.();
+      } catch { /* ignore */ }
+    };
+  }, [routePost, routePostId, uid, syncLikeState]);
+
+  const handleLike = async () => {
+    if (!authReady || !isAuthenticated || !uid) {
+      Alert.alert('Error', 'Please log in to like posts');
+      return;
+    }
+    const postId = post?.id || routePostId;
+    if (!postId) return;
+    if (likePendingRef.current) return;
+    likePendingRef.current = true;
+
+    const wasLiked = liked;
+    setLiked(!wasLiked);
+    setLikeCount((prev) => (wasLiked ? Math.max(0, prev - 1) : prev + 1));
+
+    try {
+      const res = await setPostLiked({ postId, userId: uid });
+      if (!res?.ok) {
+        throw res?.error || new Error(res?.reason || 'LIKE_FAILED');
+      }
+      if (typeof res.liked === 'boolean') setLiked(res.liked);
+      if (Number.isFinite(res.count)) setLikeCount(res.count);
+    } catch (e) {
+      setLiked(wasLiked);
+      setLikeCount((prev) => (wasLiked ? prev + 1 : Math.max(0, prev - 1)));
+      Alert.alert('Error', 'Failed to update like. Please try again.');
+      if (__DEV__) console.warn('[PostPreview] like failed', e?.message || e);
+    } finally {
+      likePendingRef.current = false;
+    }
+  };
+
+  if (loadingPost) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <ActivityIndicator size="large" color={COLORS.gradientEnd} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!post) {
     return (
@@ -38,10 +133,6 @@ const PostPreviewScreen = () => {
       </SafeAreaView>
     );
   }
-
-  const handleLike = () => {
-    setLiked(!liked);
-  };
 
   const renderMedia = () => {
     if (!post.media || post.media.length === 0) {
@@ -62,7 +153,7 @@ const PostPreviewScreen = () => {
             ref={videoRef}
             source={{ uri: media.url }}
             style={styles.video}
-            shouldPlay={true}
+            shouldPlay={isFocused}
             isLooping={true}
             isMuted={false}
             resizeMode="cover"
@@ -108,9 +199,9 @@ const PostPreviewScreen = () => {
         <Icon  
           name={liked ? "heart" : "heart-outline"} 
           size={28} 
-          color={liked ? "#ff1744" : "white"} 
+          color={liked ? COLORS.gradientEnd : "white"} 
          />
-        <Text style={styles.actionText}>{(post.likeCount || 0) + (liked ? 1 : 0)}</Text>
+        <Text style={styles.actionText}>{likeCount}</Text>
       </TouchableOpacity>
       
       <TouchableOpacity style={styles.actionButton}>
@@ -171,7 +262,7 @@ const PostPreviewScreen = () => {
               {post.tags.map((tag, index) => (
                 <LinearGradient
                   key={index}
-                  colors={['#a855f7', '#d946ef', '#ec4899']}
+                  colors={['#00D2BE', '#00D2BE', '#00A89E']}
                   style={styles.tag}
                 >
                   <Text style={styles.tagText}>#{tag.replace('#', '')}</Text>
@@ -204,7 +295,7 @@ const PostPreviewScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.pageBackground,
   },
   header: {
     flexDirection: 'row',
@@ -214,7 +305,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: 'rgba(30, 41, 59, 0.95)',
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: '#27272E',
   },
   backButton: {
     padding: 8,
@@ -266,7 +357,7 @@ const styles = StyleSheet.create({
   textOnlyContainer: {
     width: screenWidth,
     height: 200,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -315,9 +406,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   tagText: {
-    color: 'white',
+    color: '#0A0A0C',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   sharedToContainer: {
     marginBottom: 20,
@@ -348,7 +439,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingVertical: 16,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: '#27272E',
   },
   actionButton: {
     alignItems: 'center',
@@ -371,7 +462,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   backText: {
-    color: '#ec4899',
+    color: '#00D2BE',
     fontSize: 16,
   },
 });

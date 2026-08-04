@@ -1,3 +1,10 @@
+# Ignore large artifacts and build outputs
+blyp-dev-client.apk
+commandlinetools.zip
+artifacts/
+dist/
+*.apk
+*.zip
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -21,9 +28,22 @@ android/keystore.local.properties
 android/app/keystore.local.properties
 **/keystore.local.properties
 
+# Local Android signing props (contains passwords; never commit)
+android/keystore.local.properties
+
 # Env files (never commit secrets)
 .env
 .env.*
+
+# Local Firebase dev-machine override (intentionally untracked; see firebase.local.sample.js)
+src/config/firebase.local.js
+
+# Autopilot (never commit keys)
+tools/autopilot/.env.autopilot
+tools/autopilot/logs/
+
+# Cursor agent session ledger (local only)
+.cursor/agent/
 
 # Audit/bundle outputs
 _reports/bundles/
@@ -57,8 +77,27 @@ yarn-error.*
 # Backup folder
 backup/
 
+# Build-artifact dumps / decompiled APK-AAB verification scratch (never commit)
+tmp_aab_*/
+tmp_apk_*/
+tmp_aab_ver_check/
+android_backup_*/
+temp/
+coverage/
+*.aar
+*.jar
+# ...but the Gradle wrapper jar MUST stay tracked (required for Android builds)
+!android/gradle/wrapper/gradle-wrapper.jar
+# ...and the bundletool jar used by release verification scripts
+!tools/bundletool-all-*.jar
+# Accidentally-captured Windows system paths
+%ProgramData%/
+
 # Firebase
 android-service-account.json
+functions/serviceAccountKey.json
+functions/serviceAccount.json
+functions/firebase-service-account.json
 
 # VS Code
 .vscode/
@@ -90,3 +129,85 @@ amplifytools.xcconfig
 .secret-*
 **.sample
 #amplify-do-not-edit-end
+
+# Local Netlify folder
+.netlify
+
+# Local artifacts / logs
+
+audit_artifacts/
+
+# Local run/debug outputs (do not commit)
+logs/
+evidence/
+backend/blyp-live-service/logs/
+
+# Patch/diff artifacts
+*_tmp_*.diff
+*.patch
+
+file-tree.txt
+
+**/*.log
+
+**/*.jks
+**/*.keystore
+android/gradle.properties
+# Guardrails artifacts
+artifacts/
+# --- diagnostics outputs (ignore everything) ---
+/diagnostics/
+**/diagnostics/
+# --- allow ONLY canonical golden_code rails (no timestamps) ---
+!/diagnostics/golden_code/
+!/diagnostics/golden_code/RAIL_V2_1_AUTOCAPTURE_GOLDEN/
+!/diagnostics/golden_code/RAIL_V2_1_AUTOCAPTURE_GOLDEN/**
+# re-ignore all timestamped / ad-hoc golden_code folders
+/diagnostics/golden_code/*_2*
+# --- end diagnostics outputs ---
+_reports/
+.baseline.lock
+%LOG%
+**/*.log
+
+/agent
+/agent/
+
+# --- local debug captures & forensic/audit scratch (never commit) ---
+_emu_*.png
+_design_*.png
+_ui*.xml
+~$*
+# Forensic / legal / audit dossiers (generated locally)
+FORENSIC_*
+MALPRACTICE_*
+SYSTEMIC_LEGAL_*
+MASTER_FORENSIC_*
+FINAL_DOSSIER_*
+FINAL_FORENSIC_*
+Audit_Dossier_*
+BEHAVIORAL_INCONSISTENCY_*
+TWO_FACE_*
+DIAGNOSTIC_HOST_STATE.ps1
+*_PRINT_PACK_BUILD*
+# Print-pack / doc conversion scratch
+final_print_pack_build.bat
+direct_build_docx.ps1
+build_print_pack.py
+convert_html_to_docs.ps1
+scripts/forensics/
+# --- end local scratch ---
+forensic/
+__pycache__/
+_inspect*.py
+_measure_shots.py
+build_dossier*.py
+build_dossier*.py.bak*
+build_master_doc.py
+build_print*.py
+build_printable_dossier.py
+
+# Local sound experiment dumps (not for GitHub)
+assets/sounds/_src/
+logs/logcat*.txt
+

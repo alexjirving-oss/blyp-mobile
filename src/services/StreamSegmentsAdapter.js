@@ -3,6 +3,7 @@
 // Does not modify playback component yet (non-invasive incremental adoption).
 
 import { db } from '../config/firebase';
+import { snapExists } from '../utils/firestoreSnap';
 
 class StreamSegmentsAdapter {
   async getWindow(streamId, windowSize = 5) {
@@ -16,7 +17,7 @@ class StreamSegmentsAdapter {
       }
       // Fallback legacy map
       const docSnap = await streamRef.get();
-      if (!docSnap.exists) return [];
+      if (!snapExists(docSnap)) return [];
       const data = docSnap.data() || {};
       const curr = data.currentSegment;
       const out = [];

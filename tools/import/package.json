@@ -1,0 +1,16 @@
+{
+  "name": "blyp-import-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone worker that fulfils Blyp 'Bring your content' import requests.",
+  "main": "blyp_import_worker.js",
+  "scripts": {
+    "start": "node blyp_import_worker.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

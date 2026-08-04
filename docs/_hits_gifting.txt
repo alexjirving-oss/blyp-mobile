@@ -1,0 +1,544 @@
+.\src\api\economyLiveApi.ts:96:  coinBalance: number;
+.\src\api\economyLiveApi.ts:103:  giftId: string;
+.\src\api\economyLiveApi.ts:105:  coinCost: number;
+.\src\api\economyLiveApi.ts:114:  coinPacks: any[];
+.\src\api\economyLiveApi.ts:115:  gifts: EconomyCatalogGift[];
+.\src\api\economyLiveApi.ts:119:  battle: { coins: number; durationHours: number };
+.\src\api\economyLiveApi.ts:121:  spotlight: { coins1h: number; coins24h: number; coins7d: number };
+.\src\api\economyLiveApi.ts:135:  coinCost: number;
+.\src\api\economyLiveApi.ts:136:  newBalances: { coinBalance: number; bonusCoinBalance: number };
+.\src\api\economyLiveApi.ts:142:  giftId: string;
+.\src\api\economyLiveApi.ts:148:  giftEventId: string;
+.\src\api\economyLiveApi.ts:151:  coinSpent: number;
+.\src\api\economyLiveApi.ts:154:    coinBalance: number;
+.\src\api\economyLiveApi.ts:161:  gift: {
+.\src\api\economyLiveApi.ts:162:    giftId: string;
+.\src\api\economyLiveApi.ts:172:    coinSpent: number;
+.\src\api\economyLiveApi.ts:173:    giftCount: number;
+.\src\api\economyLiveApi.ts:177:    coinsReceived: number;
+.\src\api\economyLiveApi.ts:184:  coins: number;
+.\src\api\economyLiveApi.ts:191:  coinsCredited: number;
+.\src\api\economyLiveApi.ts:203:  return await callEconomyBackend<EconomyWallet>('/wallet', 'GET');
+.\src\api\economyLiveApi.ts:207:  return await callEconomyBackend<SendGiftResponse>('/gift/send', 'POST', input);
+.\src\api\economyLiveApi.ts:238:  return await callEconomyBackend<AdminCreditCoinsResponse>('/economy/admin/credit-coins', 'POST', input, options);
+.\src\api\economyLiveApi.ts:241:export function makeIdempotencyKey(prefix: string = 'gift'): string {
+.\src\types\economy.ts:5:  Purchase = 'purchase',
+.\src\types\economy.ts:6:  GiftSend = 'gift_send',
+.\src\types\economy.ts:7:  GiftReceive = 'gift_receive',
+.\src\types\economy.ts:15:export type AssetCode = 'coin' | 'gem';
+.\src\types\economy.ts:34:  flags?: string[]; // e.g., ['rapid_gifts','geo_mismatch']
+.\src\types\economy.ts:49:  giftTypeId?: string;
+.\src\types\economy.ts:50:  counterpartUserId?: string; // Other party in multi-user events (gift sender/creator)
+.\src\types\economy.ts:51:  correlationId?: string; // Groups related transactions (gift pair, refund chain)
+.\src\types\economy.ts:54:  purchase?: LedgerTransactionPurchaseMeta;
+.\src\types\live.ts:15:  giftEvents: number; // Count of gift events
+.\src\types\live.ts:26:  giftCount: number;
+.\src\types\live.ts:87:  giftTypeId: string;
+.\src\types\live.ts:88:  giftVersion: number;
+.\src\types\live.ts:89:  coinsSpent: number;
+.\src\types\live.ts:90:  coinsCredited: number;
+.\src\config\economyModel.ts:3: * Stage 2.2 ÔÇô Central definition for wallets, transactions, gifts and purchase gating.
+.\src\config\economyModel.ts:16:export const WALLETS_COLLECTION = 'wallets';
+.\src\config\economyModel.ts:18:export const GIFTS_COLLECTION = 'gifts';
+.\src\config\economyModel.ts:36:// - REQUIRE_SERVER_RECEIPT_VALIDATION: true (all purchases must be validated server-side)
+.\src\config\economyModel.ts:40:// - ALLOW_SIMULATED_CLIENT_TOPUPS: true (for testing without billing backend)
+.\src\config\economyModel.ts:53:// In dev, we allow simulated topups for testing without real billing
+.\src\config\economyModel.ts:93:// Gem wallet document (similar to coins)
+.\src\config\economyModel.ts:103:// Transaction document shape (coins + gems share collection)
+.\src\config\economyModel.ts:108:  reason: string; // e.g. purchase | gift_sent | gift_received | daily_reward | grant | spend
+.\src\config\economyModel.ts:110:  asset?: 'coin' | 'gem'; // gem service adds this
+.\src\config\economyModel.ts:117:  | 'coin_purchase'
+.\src\config\economyModel.ts:118:  | 'gem_purchase'
+.\src\config\economyModel.ts:119:  | 'gift_send'
+.\src\config\economyModel.ts:120:  | 'gift_receive'
+.\src\config\economyModel.ts:132:  relatedUserId?: string; // counterparty for gifts
+.\src\config\economyModel.ts:134:  giftType?: string;
+.\src\config\economyModel.ts:138:  idempotencyKey?: string; // future external purchase dedupe
+.\src\config\economyModel.ts:146:  purchaseToken?: string;
+.\src\config\economyModel.ts:148:  // TODO(stage3-economy-ledger): Implement stable idempotency key for external purchases.
+.\src\config\economyModel.ts:153:export function deriveWalletBalanceFromLedger(entries: LedgerEntry[]): { coins: number; gems: number } {
+.\src\config\economyModel.ts:155:  return { coins: 0, gems: 0 };
+.\src\config\economyModel.ts:162:  giftType: string;
+.\src\config\economyModel.ts:184:// TODO(stage2-economy-safety): Introduce immutable ledger + derive wallet state from aggregated transactions.
+.\src\config\economyModel.ts:186:// TODO(stage2-economy-safety): Add fraud/velocity checks for gifts & purchases.
+.\src\realtime\liveGiftSocket.ts:8:  giftEventId: string;
+.\src\realtime\liveGiftSocket.ts:9:  giftId: string;
+.\src\realtime\liveGiftSocket.ts:11:  coinSpent: number;
+.\src\realtime\liveGiftSocket.ts:44:  socket.on('gift_event', onGiftEvent as any);
+.\src\realtime\liveGiftSocket.ts:51:        socket.off('gift_event', onGiftEvent as any);
+.\src\screens\ChatListScreen.js:120:  const [coinBalance, setCoinBalance] = useState(0);
+.\src\screens\ChatListScreen.js:146:  const walletUid = authUid || currentUser?.uid || null;
+.\src\screens\ChatListScreen.js:162:    if (walletUid) {
+.\src\screens\ChatListScreen.js:178:  }, [isFocused, currentUser, selectedTab, walletUid, authReady, isAuthenticated]);
+.\src\screens\ChatListScreen.js:181:    if (!walletUid) return;
+.\src\screens\ChatListScreen.js:190:        const wallet = await getEconomyWallet();
+.\src\screens\ChatListScreen.js:191:        const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\screens\ChatListScreen.js:192:        const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\screens\ChatListScreen.js:193:        setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\ChatListScreen.js:198:      const coins = await BlypCoinService.getUserBalance(walletUid);
+.\src\screens\ChatListScreen.js:199:      const gems = await GemService.getUserGems(walletUid);
+.\src\screens\ChatListScreen.js:200:      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\ChatListScreen.js:1113:                <Text style={styles.balanceValue}>{formatBalance(coinBalance)}</Text>
+.\src\components\BlypCoinWallet.js:41:      const wallet = await getEconomyWallet();
+.\src\components\BlypCoinWallet.js:42:      const nextBalance = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\components\BlypCoinWallet.js:43:      const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\components\BlypCoinWallet.js:47:      console.warn('[WALLET] live-service wallet fetch failed', e?.message || String(e));
+.\src\components\BlypCoinWallet.js:53:      // In IVS/live-service mode, the authoritative wallet is served by blyp-live-service.
+.\src\components\BlypCoinWallet.js:54:      // Otherwise, fall back to the legacy Firestore wallet subscription.
+.\src\components\BlypCoinWallet.js:73:      // Legacy path: gems are not guaranteed to exist in the old wallet model.
+.\src\components\BlypCoinWallet.js:74:      // Keep gem balance at 0 unless live-service wallet is active.
+.\src\components\BlypCoinWallet.js:132:        `You earned ${result.reward} Blypcoins!\nCurrent streak: ${result.streak} days`,
+.\src\components\BlypCoinWallet.js:153:      purchase: 'Package Purchase',
+.\src\components\BlypCoinWallet.js:154:      gift_sent: 'Gift Sent',
+.\src\components\BlypCoinWallet.js:155:      gift_received: 'Gift Received',
+.\src\components\BlypCoinWallet.js:187:        <Text style={styles.coinEmoji}>­ƒ¬Ö</Text>
+.\src\components\BlypCoinWallet.js:197:        style={styles.walletCard}
+.\src\components\BlypCoinWallet.js:199:        <View style={styles.walletHeader}>
+.\src\components\BlypCoinWallet.js:201:            <Text style={styles.walletTitle}>Blypcoin Wallet</Text>
+.\src\components\BlypCoinWallet.js:205:                  <Text style={styles.coinEmoji}>­ƒ¬Ö</Text>
+.\src\components\BlypCoinWallet.js:209:                  <Text style={styles.coinEmoji}>­ƒÆÄ</Text>
+.\src\components\BlypCoinWallet.js:217:            style={styles.walletButton}
+.\src\components\BlypCoinWallet.js:220:            <Icon  name="wallet" size={20} color="#fff"  />
+.\src\components\BlypCoinWallet.js:224:        <View style={styles.walletActions}>
+.\src\components\BlypCoinWallet.js:238:              <Icon  name="gift" size={16} color="#fff"  />
+.\src\components\BlypCoinWallet.js:311:  walletCard: {
+.\src\components\BlypCoinWallet.js:316:  walletHeader: {
+.\src\components\BlypCoinWallet.js:322:  walletTitle: {
+.\src\components\BlypCoinWallet.js:335:  coinEmoji: {
+.\src\components\BlypCoinWallet.js:344:  walletButton: {
+.\src\components\BlypCoinWallet.js:349:  walletActions: {
+.\src\components\BuyCoinsOverlay.tsx:57:              You need {Number(requiredCoins || 0).toLocaleString()} coins. You have {Number(currentCoins || 0).toLocaleString()}.
+.\src\components\BuyCoinsOverlay.tsx:68:                  <Text style={styles.missingText}>Missing {missing.toLocaleString()} coins</Text>
+.\src\components\BuyCoinsOverlay.tsx:75:            <CoinStoreScreen navigation={navigation ?? ({} as any)} embedded initialTab="coins" scrollToPackagesOnMount />
+.\src\components\BlypCoinBooster.js:23: * Developer component to add Blypcoins to any user's balance
+.\src\components\BlypCoinBooster.js:28:  const [coinAmount, setCoinAmount] = useState('');
+.\src\components\BlypCoinBooster.js:77:    if (!coinAmount.trim() || isNaN(coinAmount) || parseInt(coinAmount) <= 0) {
+.\src\components\BlypCoinBooster.js:78:      Alert.alert('Error', 'Please enter a valid coin amount');
+.\src\components\BlypCoinBooster.js:82:    const coins = parseInt(coinAmount);
+.\src\components\BlypCoinBooster.js:83:    if (coins > 1000000) {
+.\src\components\BlypCoinBooster.js:84:      Alert.alert('Error', 'Maximum amount is 1,000,000 coins');
+.\src\components\BlypCoinBooster.js:100:        // IVS mode: credit live-service economy wallet (not legacy Firebase wallet)
+.\src\components\BlypCoinBooster.js:103:          coins,
+.\src\components\BlypCoinBooster.js:110:          `Credited ${out.coinsCredited.toLocaleString()} coins to @${userResult.userData.username}\n\n` +
+.\src\components\BlypCoinBooster.js:123:        // Default (non-IVS): legacy Firebase wallet
+.\src\components\BlypCoinBooster.js:128:          coins,
+.\src\components\BlypCoinBooster.js:137:        const newBalance = currentBalance + coins;
+.\src\components\BlypCoinBooster.js:141:          `Added ${coins.toLocaleString()} Blypcoins to @${userResult.userData.username}\n\n` +
+.\src\components\BlypCoinBooster.js:157:      console.error('Error adding coins:', error);
+.\src\components\BlypCoinBooster.js:158:      Alert.alert('ÔØî Error', error.message || 'Failed to add coins');
+.\src\components\BlypCoinBooster.js:167:        // IVS mode: show current user's live-service economy wallet.
+.\src\components\BlypCoinBooster.js:168:        const wallet = await getEconomyWallet();
+.\src\components\BlypCoinBooster.js:169:        const totalCoins = (wallet.coinBalance || 0) + (wallet.bonusCoinBalance || 0);
+.\src\components\BlypCoinBooster.js:173:          `Coins: ${totalCoins.toLocaleString()} (base ${wallet.coinBalance.toLocaleString()} + bonus ${wallet.bonusCoinBalance.toLocaleString()})\n` +
+.\src\components\BlypCoinBooster.js:174:            `Gems Available: ${wallet.gemAvailable.toLocaleString()}\n` +
+.\src\components\BlypCoinBooster.js:175:            `Gems Pending: ${wallet.gemPending.toLocaleString()}`
+.\src\components\BlypCoinBooster.js:194:        Alert.alert('­ƒÆ¦ Current Balance', `@${userResult.userData.username} has ${balance.toLocaleString()} Blypcoins`);
+.\src\components\BlypCoinBooster.js:215:          <Text style={styles.title}>­ƒÆ¦ Blypcoin Booster</Text>
+.\src\components\BlypCoinBooster.js:236:          value={coinAmount}
+.\src\screens\HomeScreen.js:203:  const [coinBalance, setCoinBalance] = useState(0);
+.\src\screens\HomeScreen.js:405:          const wallet = await getEconomyWallet();
+.\src\screens\HomeScreen.js:406:          const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\screens\HomeScreen.js:407:          const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\screens\HomeScreen.js:1386:                <Text style={styles.balanceValue}>{formatBalance(coinBalance)}</Text>
+.\src\screens\ProfileScreen.v3.tsx:89:  const [coinBalance, setCoinBalance] = useState(0);
+.\src\screens\ProfileScreen.v3.tsx:112:          const wallet = await getEconomyWallet();
+.\src\screens\ProfileScreen.v3.tsx:113:          const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\screens\ProfileScreen.v3.tsx:114:          const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\screens\ProfileScreen.v3.tsx:115:          setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\ProfileScreen.v3.tsx:119:          console.warn('[PROFILE_V3][BALANCES] live-service wallet fetch failed; falling back', e?.message || String(e));
+.\src\screens\ProfileScreen.v3.tsx:123:      const coins = await BlypCoinService.getUserBalance(uid);
+.\src\screens\ProfileScreen.v3.tsx:125:      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\ProfileScreen.v3.tsx:172:  // Ensure wallet tab shows fresh balances.
+.\src\screens\ProfileScreen.v3.tsx:508:    try { console.log('­ƒôê profile_wallet_tap', { userId: uid, source: 'profile_self' }); } catch {}
+.\src\screens\ProfileScreen.v3.tsx:821:              <Text style={styles.stateSub}>Loading your walletÔÇª</Text>
+.\src\screens\ProfileScreen.v3.tsx:836:              currentCoins={coinBalance}
+.\src\screens\ProfileScreen.v3.tsx:927:                <Text style={styles.balanceValue}>{formatCount(coinBalance)}</Text>
+.\src\screens\ProfileScreen.v3.tsx:1087:  walletCard: {
+.\src\screens\ProfileScreen.v3.tsx:1091:  walletRow: {
+.\src\screens\ProfileScreen.v3.tsx:1098:  walletIcon: {
+.\src\screens\ProfileScreen.v3.tsx:1101:  walletValue: {
+.\src\screens\ProfileScreen.v3.tsx:1736:            <Icon name={"wallet" as any} {...iconProps} color={theme.colors.textSecondary} />
+.\src\screens\ProfileScreen.v3.tsx:1761:        <Icon name={"wallet" as any} {...iconProps} color={theme.colors.textSecondary} />
+.\src\screens\LiveSummaryScreen.js:82:                <Text style={styles.row}>Coins spent: <Text style={styles.value}>{Number(viewer.coinSpent || 0)}</Text></Text>
+.\src\screens\LiveSummaryScreen.js:83:                <Text style={styles.row}>Gifts sent: <Text style={styles.value}>{Number(viewer.giftCount || 0)}</Text></Text>
+.\src\screens\LiveSummaryScreen.js:90:                <Text style={styles.row}>Coins received: <Text style={styles.value}>{Number(creator.coinsReceived || 0)}</Text></Text>
+.\src\screens\GamesScreen.js:27:  const [coinBalance, setCoinBalance] = useState(0);
+.\src\screens\GamesScreen.js:42:  const walletUid = uid || currentUser?.uid || null;
+.\src\screens\GamesScreen.js:132:    if (!walletUid) {
+.\src\screens\GamesScreen.js:145:        const wallet = await getEconomyWallet();
+.\src\screens\GamesScreen.js:146:        const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\screens\GamesScreen.js:147:        const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\screens\GamesScreen.js:148:        setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\GamesScreen.js:153:      const coins = await BlypCoinService.getUserBalance(walletUid);
+.\src\screens\GamesScreen.js:154:      const gems = await GemService.getUserGems(walletUid);
+.\src\screens\GamesScreen.js:155:      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\GamesScreen.js:167:  }, [menuVisible, walletUid, authReady, isAuthenticated]);
+.\src\screens\GamesScreen.js:695:                <Text style={styles.balanceValue}>{Number(coinBalance || 0).toLocaleString()}</Text>
+.\src\screens\StubScreens.tsx:36:  const [coinsText, setCoinsText] = useState('');
+.\src\screens\StubScreens.tsx:93:    // The server-authoritative wallet lives in Postgres (live-service).
+.\src\screens\StubScreens.tsx:94:    // This devtools action also mirrors the balance into the legacy Firestore wallet doc
+.\src\screens\StubScreens.tsx:120:        console.warn('[DEVTOOLS] failed to mirror Firestore wallet balance', e?.message || String(e));
+.\src\screens\StubScreens.tsx:158:    const coins = parseCoins(coinsText);
+.\src\screens\StubScreens.tsx:164:    if (!coins) {
+.\src\screens\StubScreens.tsx:176:        { targetUserId, coins, idempotencyKey, reason: 'devtools' },
+.\src\screens\StubScreens.tsx:184:        `Credited ${result.coinsCredited} coins to @${username}.\nUserId: ${targetUserId}\nNew balance: ${result.newBalance}`
+.\src\screens\StubScreens.tsx:189:      const baseMsg = String(e?.message || 'Failed to add coins.');
+.\src\screens\StubScreens.tsx:217:  }, [busy, cleanUsername, coinsText, findTargetUserSubByUsername, mirrorBalanceToFirestoreWallet, parseCoins, resetCreditModal, targetUsername]);
+.\src\screens\StubScreens.tsx:307:              value={coinsText}
+.\src\screens\CoinStoreScreen.js:81:const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
+.\src\screens\CoinStoreScreen.js:89:  const [selectedTab, setSelectedTab] = useState(initialTab || 'coins'); // 'coins' or 'gems'
+.\src\screens\CoinStoreScreen.js:138:      const wallet = await getEconomyWallet();
+.\src\screens\CoinStoreScreen.js:139:      const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\screens\CoinStoreScreen.js:140:      const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\screens\CoinStoreScreen.js:144:      console.warn('[COIN_STORE] live-service wallet fetch failed', e?.message || String(e));
+.\src\screens\CoinStoreScreen.js:185:    // Best-effort: switch to coins + jump to packages section.
+.\src\screens\CoinStoreScreen.js:186:    setSelectedTab('coins');
+.\src\screens\CoinStoreScreen.js:237:      // Best-effort: debit gems then credit coins, refund gems if coin credit fails.
+.\src\screens\CoinStoreScreen.js:246:        await GemService.spendGems(uid, amount, 'adjustment', { conversion: 'gem_to_coin' });
+.\src\screens\CoinStoreScreen.js:248:          await BlypCoinService.addCoins(uid, amount, 'adjustment', { conversion: 'gem_to_coin' });
+.\src\screens\CoinStoreScreen.js:250:          // refund gems if coin credit fails
+.\src\screens\CoinStoreScreen.js:251:          try { await GemService.addGems(uid, amount, 'grant', { refund: 'gem_to_coin_failed' }); } catch {}
+.\src\screens\CoinStoreScreen.js:255:        Alert.alert('Success', `Converted ${amount} gems into ${amount} coins.`);
+.\src\screens\CoinStoreScreen.js:299:    setSelectedTab('coins');
+.\src\screens\CoinStoreScreen.js:314:      Alert.alert('Error', 'Please log in to purchase Blypcoins');
+.\src\screens\CoinStoreScreen.js:319:      'Purchase Blypcoins',
+.\src\screens\CoinStoreScreen.js:320:      `Buy ${packageData.coins + packageData.bonus} Blypcoins for $${packageData.price}?`,
+.\src\screens\CoinStoreScreen.js:335:      // For demo, we simulate the purchase (unsafe path allowed only in simulation mode)
+.\src\screens\CoinStoreScreen.js:336:      // TODO(stage2-economy-safety): Replace with platform billing + server validation.
+.\src\screens\CoinStoreScreen.js:342:      const totalCoins = packageData.coins + packageData.bonus;
+.\src\screens\CoinStoreScreen.js:347:        'purchase',
+.\src\screens\CoinStoreScreen.js:351:          baseCoins: packageData.coins,
+.\src\screens\CoinStoreScreen.js:358:        `You received ${totalCoins} Blypcoins!`,
+.\src\screens\CoinStoreScreen.js:376:      Alert.alert('Error', 'Please log in to purchase Gems');
+.\src\screens\CoinStoreScreen.js:397:      // TODO(stage2-economy-safety): Replace with gem billing + server validation.
+.\src\screens\CoinStoreScreen.js:406:        'purchase'
+.\src\screens\CoinStoreScreen.js:416:      console.error('Gem purchase error:', error);
+.\src\screens\CoinStoreScreen.js:424:    const totalCoins = pkg.coins + pkg.bonus;
+.\src\screens\CoinStoreScreen.js:425:    const coinValue = pkg.price / totalCoins;
+.\src\screens\CoinStoreScreen.js:426:    const savings = pkg.bonus > 0 ? Math.round((pkg.bonus / pkg.coins) * 100) : 0;
+.\src\screens\CoinStoreScreen.js:448:          <View style={styles.coinInfo}>
+.\src\screens\CoinStoreScreen.js:449:            <Text style={styles.coinAmount}>{pkg.coins.toLocaleString()}</Text>
+.\src\screens\CoinStoreScreen.js:459:              ${coinValue.toFixed(3)} per coin
+.\src\screens\CoinStoreScreen.js:495:          <View style={styles.coinInfo}>
+.\src\screens\CoinStoreScreen.js:496:            <Text style={styles.coinAmount}>{pkg.gems.toLocaleString()}</Text>
+.\src\screens\CoinStoreScreen.js:517:  // If purchases globally disabled show info message only
+.\src\screens\CoinStoreScreen.js:637:              {selectedTab === 'coins' ? '­ƒÆí What are Blypcoins?' : '­ƒÆÄ What are Gems?'}
+.\src\screens\CoinStoreScreen.js:640:              {selectedTab === 'coins' 
+.\src\screens\CoinStoreScreen.js:641:                ? 'Send gifts to creators, unlock premium features, and show your support!'
+.\src\screens\CoinStoreScreen.js:642:                : 'Premium currency for exclusive features, rare gifts, and special perks!'
+.\src\screens\CoinStoreScreen.js:646:              <Text style={[styles.infoText, { marginTop:12, color:'#f87171' }]}>Billing verification backend missing ÔÇô purchases will fail verification when flag flipped.</Text>
+.\src\screens\CoinStoreScreen.js:648:            {/* TODO(stage3-economy-hardening): Show clearer UI messaging when billing verification required but backend URL misconfigured. */}
+.\src\screens\CoinStoreScreen.js:664:            {selectedTab === 'coins' 
+.\src\screens\CoinStoreScreen.js:674:            {selectedTab === 'coins' ? 'What You Can Do' : 'Exclusive Gem Benefits'}
+.\src\screens\CoinStoreScreen.js:678:            {selectedTab === 'coins' ? (
+.\src\screens\CoinStoreScreen.js:682:                  <Text style={styles.featureText}>Send gifts to creators</Text>
+.\src\screens\CoinStoreScreen.js:694:                  <Text style={styles.featureText}>Earn coins from gifts</Text>
+.\src\screens\CoinStoreScreen.js:701:                  <Text style={styles.featureText}>Send exclusive premium gifts</Text>
+.\src\screens\CoinStoreScreen.js:741:                  ? 'How many gems do you want to convert? (1 gem = 1 coin)'
+.\src\screens\CoinStoreScreen.js:820:  coinEmoji: {
+.\src\screens\CoinStoreScreen.js:1073:  coinInfo: {
+.\src\screens\CoinStoreScreen.js:1077:  coinAmount: {
+.\src\screens\MessengerScreen.js:88:  const [coinBalance, setCoinBalance] = useState(0);
+.\src\screens\MessengerScreen.js:126:      const walletEnabled =
+.\src\screens\MessengerScreen.js:130:      const allowLiveWallet = walletEnabled === '1' || walletEnabled === 'true';
+.\src\screens\MessengerScreen.js:139:        const wallet = await getEconomyWallet();
+.\src\screens\MessengerScreen.js:140:        const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\screens\MessengerScreen.js:141:        const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\screens\MessengerScreen.js:142:        setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\MessengerScreen.js:147:      const coins = await BlypCoinService.getUserBalance(uid);
+.\src\screens\MessengerScreen.js:149:      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+.\src\screens\MessengerScreen.js:1295:                <Text style={styles.balanceValue}>{formatBalance(coinBalance)}</Text>
+.\src\screens\LiveStreamScreen.js:354:  const [giftOpenSignal, setGiftOpenSignal] = useState(0);
+.\src\screens\LiveStreamScreen.js:944:  // IVS mode: subscribe to gift events via Socket.IO (authoritative live-service economy)
+.\src\screens\LiveStreamScreen.js:2183:          openSignal={giftOpenSignal}
+.\src\screens\LiveStreamScreen.js:2701:              openSignal={giftOpenSignal}
+.\src\services\GemService.js:26:// Stage 3.1: Gem purchase verification bridge
+.\src\services\GemService.js:27:// TODO(stage3-economy-hardening): Wire real productId & purchaseToken for gems.
+.\src\services\GemService.js:28:async function verifyGemPurchase(purchasePayload) {
+.\src\services\GemService.js:31:  const { userId, amount, metadata } = purchasePayload || {};
+.\src\services\GemService.js:33:  const purchaseToken = metadata?.purchaseToken;
+.\src\services\GemService.js:34:  const result = await verifyPlayStorePurchase({ productId, purchaseToken, userId });
+.\src\services\GemService.js:37:      type: 'economy_purchase_verification_failed',
+.\src\services\GemService.js:127:    if (reason === 'purchase' && !ENABLE_PURCHASES) {
+.\src\services\GemService.js:128:      console.warn('[ECONOMY] Gem purchases disabled via ENABLE_PURCHASES flag');
+.\src\services\GemService.js:131:    if (reason === 'purchase' && !ALLOW_SIMULATED_CLIENT_TOPUPS && !REQUIRE_SERVER_RECEIPT_VALIDATION) {
+.\src\services\GemService.js:135:    if (reason === 'purchase') {
+.\src\services\GemService.js:138:        console.warn('[ECONOMY] Gem purchase verification failed');
+.\src\services\GemService.js:166:        ledgerType: reason === 'purchase' ? 'gem_purchase' : 'adjustment',
+.\src\services\GemService.js:173:        source: reason === 'purchase' ? 'store' : 'admin'
+.\src\services\GemService.js:185:      if (!snap.exists()) throw new Error('Gem wallet not found');
+.\src\services\GemService.js:197:        ledgerType: reason === 'gift_send' ? 'gift_send' : 'adjustment',
+.\src\services\LedgerService.ts:27:    type: entry.txType || (ledgerType === 'gift_send' || ledgerType === 'adjustment' ? 'debit' : 'credit'),
+.\src\services\LedgerService.ts:30:    asset: currency === 'COIN' ? 'coin' : currency === 'GEM' ? 'gem' : undefined,
+.\src\services\LedgerService.ts:36:    giftType: entry.giftType,
+.\src\services\LedgerService.ts:45:// Append using an existing Firestore transaction for atomic wallet+ledger updates.
+.\src\services\LedgerService.ts:62:    asset: currency === 'COIN' ? 'coin' : currency === 'GEM' ? 'gem' : undefined,
+.\src\services\LedgerService.ts:68:    giftType: entry.giftType,
+.\src\services\LedgerService.ts:74:// TODO(stage3-economy-ledger): Enforce idempotencyKey for external purchases (avoid double-credit).
+.\src\services\BlypCoinService.js:36:// TODO(stage3-economy-hardening): Wire real productId & purchaseToken from platform billing integration.
+.\src\services\BlypCoinService.js:37:async function verifyPurchaseWithServer(purchasePayload) {
+.\src\services\BlypCoinService.js:47:  const { userId, amount, metadata } = purchasePayload || {};
+.\src\services\BlypCoinService.js:49:  const purchaseToken = metadata?.purchaseToken; // likely undefined until integrated
+.\src\services\BlypCoinService.js:50:  const result = await verifyPlayStorePurchase({ productId, purchaseToken, userId });
+.\src\services\BlypCoinService.js:53:      type: 'economy_purchase_verification_failed',
+.\src\services\BlypCoinService.js:55:      asset: 'coin',
+.\src\services\BlypCoinService.js:67:  // Get user's current Blypcoin balance
+.\src\services\BlypCoinService.js:72:      const walletDoc = await getDoc(userWalletRef);
+.\src\services\BlypCoinService.js:74:      if (walletDoc.exists()) {
+.\src\services\BlypCoinService.js:75:        return walletDoc.data().balance || 0;
+.\src\services\BlypCoinService.js:77:        // Create wallet if it doesn't exist
+.\src\services\BlypCoinService.js:139:  // Add Blypcoins to user account (earning/purchasing)
+.\src\services\BlypCoinService.js:140:  static async addCoins(userId, amount, reason = 'purchase', metadata = {}) {
+.\src\services\BlypCoinService.js:141:    // Guard purchases globally
+.\src\services\BlypCoinService.js:142:    if (reason === 'purchase' && !ENABLE_PURCHASES) {
+.\src\services\BlypCoinService.js:146:    if (reason === 'purchase' && !ALLOW_SIMULATED_CLIENT_TOPUPS && !REQUIRE_SERVER_RECEIPT_VALIDATION) {
+.\src\services\BlypCoinService.js:150:    if (reason === 'purchase') {
+.\src\services\BlypCoinService.js:160:        const walletDoc = await transaction.get(userWalletRef);
+.\src\services\BlypCoinService.js:165:        if (walletDoc.exists()) {
+.\src\services\BlypCoinService.js:166:          const data = walletDoc.data();
+.\src\services\BlypCoinService.js:174:        // Update wallet
+.\src\services\BlypCoinService.js:178:          totalSpent: walletDoc.exists() ? (walletDoc.data().totalSpent || 0) : 0,
+.\src\services\BlypCoinService.js:180:          createdAt: walletDoc.exists() ? walletDoc.data().createdAt : serverTimestamp()
+.\src\services\BlypCoinService.js:186:          ledgerType: reason === 'purchase' ? 'coin_purchase' : (reason === 'daily_reward' ? 'daily_reward' : 'adjustment'),
+.\src\services\BlypCoinService.js:193:          source: reason === 'purchase' ? 'store' : 'admin'
+.\src\services\BlypCoinService.js:199:      console.log('­ƒÆ¦ Added', amount, 'Blypcoins to user:', userId, 'New balance:', result);
+.\src\services\BlypCoinService.js:202:      console.error('Error adding coins:', error);
+.\src\services\BlypCoinService.js:207:  // Spend Blypcoins (for gifts, features, etc.)
+.\src\services\BlypCoinService.js:208:  static async spendCoins(userId, amount, reason = 'purchase', metadata = {}) {
+.\src\services\BlypCoinService.js:212:        const walletDoc = await transaction.get(userWalletRef);
+.\src\services\BlypCoinService.js:214:        if (!walletDoc.exists()) {
+.\src\services\BlypCoinService.js:218:        const data = walletDoc.data();
+.\src\services\BlypCoinService.js:228:        // Update wallet
+.\src\services\BlypCoinService.js:238:          ledgerType: reason === 'gift_send' ? 'gift_send' : 'adjustment',
+.\src\services\BlypCoinService.js:251:      console.log('­ƒÆ© Spent', amount, 'Blypcoins for user:', userId, 'New balance:', result);
+.\src\services\BlypCoinService.js:254:      console.error('Error spending coins:', error);
+.\src\services\BlypCoinService.js:259:  // Send gift to another user
+.\src\services\BlypCoinService.js:260:  static async sendGift(fromUserId, toUserId, giftType, cost) {
+.\src\services\BlypCoinService.js:267:        // Read both wallets first
+.\src\services\BlypCoinService.js:279:        // Update sender wallet
+.\src\services\BlypCoinService.js:287:        // Update or create receiver wallet
+.\src\services\BlypCoinService.js:305:        // Record gift transaction
+.\src\services\BlypCoinService.js:306:        const giftRef = doc(collection(db, GIFTS_COLLECTION));
+.\src\services\BlypCoinService.js:307:        transaction.set(giftRef, {
+.\src\services\BlypCoinService.js:310:          giftType,
+.\src\services\BlypCoinService.js:320:          ledgerType: 'gift_send',
+.\src\services\BlypCoinService.js:325:          reason: 'gift_sent',
+.\src\services\BlypCoinService.js:327:          metadata: { giftType, recipient: toUserId },
+.\src\services\BlypCoinService.js:332:          ledgerType: 'gift_receive',
+.\src\services\BlypCoinService.js:337:          reason: 'gift_received',
+.\src\services\BlypCoinService.js:339:          metadata: { giftType, sender: fromUserId },
+.\src\services\BlypCoinService.js:346:      console.log('­ƒÄü Gift sent:', giftType, 'from', fromUserId, 'to', toUserId, 'cost:', cost);
+.\src\services\BlypCoinService.js:349:      console.error('Error sending gift:', error);
+.\src\services\BlypCoinService.js:424:      // Add coins
+.\src\services\BlypCoinService.js:434:  // Coin packages for purchase
+.\src\services\BlypCoinService.js:439:        coins: 100,
+.\src\services\BlypCoinService.js:447:        coins: 500,
+.\src\services\BlypCoinService.js:455:        coins: 1000,
+.\src\services\BlypCoinService.js:463:        coins: 2500,
+.\src\services\BlypCoinService.js:471:        coins: 5000,
+.\src\services\BlypCoinService.js:495:// TODO(stage2-economy-safety): Enforce server-side validation for all purchase reasons.
+.\src\components\PromoteTab.tsx:14:  battle: { coins: number; durationHours: number };
+.\src\components\PromoteTab.tsx:16:  spotlight: { coins1h: number; coins24h: number; coins7d: number };
+.\src\components\PromoteTab.tsx:90:  const battleCoins = pricing?.battle?.coins ?? 100;
+.\src\components\PromoteTab.tsx:103:    Alert.alert('Got a Battle?', `Promote for ${battleCoins} coins?`, [
+.\src\components\PromoteTab.tsx:111:            const next = Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
+.\src\components\PromoteTab.tsx:175:      const next = Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
+.\src\components\PromoteTab.tsx:188:    if (spotDuration === '1h') return Number(pricing?.spotlight?.coins1h ?? 500);
+.\src\components\PromoteTab.tsx:189:    if (spotDuration === '24h') return Number(pricing?.spotlight?.coins24h ?? 5000);
+.\src\components\PromoteTab.tsx:190:    return Number(pricing?.spotlight?.coins7d ?? 25000);
+.\src\components\PromoteTab.tsx:240:      const next = Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
+.\src\components\PromoteTab.tsx:255:      <Text style={styles.headerSub}>Boost your content with coins.</Text>
+.\src\components\PromoteTab.tsx:258:        <Text style={styles.balanceLabel}>Your coins</Text>
+.\src\components\PromoteTab.tsx:268:            <Text style={styles.cardDesc}>Boost your battle for {battleCoins} coins.</Text>
+.\src\components\PromoteTab.tsx:276:            <Text style={styles.cardMeta}>From {Number(pricing?.timeSlot?.per30MinCoins ?? 250).toLocaleString()} coins / 30 min</Text>
+.\src\components\PromoteTab.tsx:285:              1h {Number(pricing?.spotlight?.coins1h ?? 500).toLocaleString()} ÔÇó 24h {Number(pricing?.spotlight?.coins24h ?? 5000).toLocaleString()} ÔÇó 7d {Number(pricing?.spotlight?.coins7d ?? 25000).toLocaleString()}
+.\src\components\PromoteTab.tsx:340:            <Text style={styles.costText}>Cost: {timeSlotCost.toLocaleString()} coins</Text>
+.\src\components\PromoteTab.tsx:400:            <Text style={styles.costText}>Cost: {spotlightCost.toLocaleString()} coins</Text>
+.\src\components\Icon.js:66:  gift: 'Gift',
+.\src\components\Icon.js:90:  wallet: 'Wallet',
+.\src\services\BillingVerificationService.ts:3: * Stage 3.1 ÔÇô Client-side HTTP bridge to backend purchase verification endpoint.
+.\src\services\BillingVerificationService.ts:15:  productId?: string; // TODO(stage3-economy-hardening): Wire actual product identifiers from billing flow.
+.\src\services\BillingVerificationService.ts:16:  purchaseToken?: string; // TODO(stage3-economy-hardening): Provide real purchase token from Play Billing SDK.
+.\src\services\BillingVerificationService.ts:23:export async function verifyPlayStorePurchase({ productId, purchaseToken, userId }: PlayStoreVerifyParams): Promise<BillingVerificationResult> {
+.\src\services\BillingVerificationService.ts:33:      body: JSON.stringify({ provider: 'google', productId, purchaseToken, userId })
+.\src\services\BillingVerificationService.ts:57:// TODO(stage3-economy-hardening): Extend billing verification service to support Apple receipts and richer error codes.
+.\src\components\HeaderWalletBalances.js:17:  const [coins, setCoins] = useState(0);
+.\src\components\HeaderWalletBalances.js:38:          const wallet = await getEconomyWallet();
+.\src\components\HeaderWalletBalances.js:39:          const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\components\HeaderWalletBalances.js:40:          const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+.\src\components\HeaderWalletBalances.js:47:            console.warn('[HEADER_WALLET] live-service wallet fetch failed', e?.message || String(e));
+.\src\components\HeaderWalletBalances.js:81:        <Text style={styles.value} allowFontScaling={false}>{coins.toLocaleString()}</Text>
+.\src\components\GiftSystem.js:57:  const [walletUserId, setWalletUserId] = useState(null);
+.\src\components\GiftSystem.js:58:  const [walletState, setWalletState] = useState({
+.\src\components\GiftSystem.js:63:  const [gifts, setGifts] = useState(() => BlypCoinService.getGiftTypes());
+.\src\components\GiftSystem.js:66:  const [giftAnimation] = useState(new Animated.Value(0));
+.\src\components\GiftSystem.js:69:  const giftShimmer = useRef(new Animated.Value(0)).current;
+.\src\components\GiftSystem.js:70:  const giftPulse = useRef(new Animated.Value(0)).current;
+.\src\components\GiftSystem.js:90:  const walletRefreshInFlightRef = useRef(false);
+.\src\components\GiftSystem.js:105:        giftShimmer.stopAnimation();
+.\src\components\GiftSystem.js:106:        giftPulse.stopAnimation();
+.\src\components\GiftSystem.js:113:    giftShimmer.setValue(0);
+.\src\components\GiftSystem.js:114:    giftPulse.setValue(0);
+.\src\components\GiftSystem.js:118:        Animated.timing(giftShimmer, {
+.\src\components\GiftSystem.js:124:        Animated.timing(giftShimmer, {
+.\src\components\GiftSystem.js:135:        Animated.timing(giftPulse, {
+.\src\components\GiftSystem.js:141:        Animated.timing(giftPulse, {
+.\src\components\GiftSystem.js:161:  }, [showGiftModal, giftPulse, giftShimmer]);
+.\src\components\GiftSystem.js:164:    if (walletRefreshInFlightRef.current) return;
+.\src\components\GiftSystem.js:165:    walletRefreshInFlightRef.current = true;
+.\src\components\GiftSystem.js:168:      // If we already have a known-good wallet, don't flicker back to "loading".
+.\src\components\GiftSystem.js:172:      const wallet = await getEconomyWallet();
+.\src\components\GiftSystem.js:173:      const authedUserId = typeof wallet?.userId === 'string' ? wallet.userId : null;
+.\src\components\GiftSystem.js:175:      const nextBalance = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+.\src\components\GiftSystem.js:199:        console.warn('[GIFT_SYSTEM] wallet fetch blocked by auth', msg);
+.\src\components\GiftSystem.js:206:        walletRefreshInFlightRef.current = false;
+.\src\components\GiftSystem.js:210:      console.warn('[GIFT_SYSTEM] wallet fetch failed', msg);
+.\src\components\GiftSystem.js:213:      walletRefreshInFlightRef.current = false;
+.\src\components\GiftSystem.js:220:      const mapped = (catalog?.gifts || [])
+.\src\components\GiftSystem.js:228:            id: String(g.giftId),
+.\src\components\GiftSystem.js:229:            name: String(g.name || g.giftId),
+.\src\components\GiftSystem.js:230:            cost: Number(g.coinCost || 0),
+.\src\components\GiftSystem.js:266:    // When the modal opens, load catalog + refresh wallet so the UI is accurate.
+.\src\components\GiftSystem.js:273:    // Firebase wallet mode (default app mode): mirror the same coin balance shown in the header.
+.\src\components\GiftSystem.js:294:    // While the modal is open, keep the balance fresh in case it changes (admin credit, gifting, etc.).
+.\src\components\GiftSystem.js:306:    const lastError = walletState?.lastError;
+.\src\components\GiftSystem.js:308:      walletState?.status === 'ok'
+.\src\components\GiftSystem.js:310:        : walletState?.status === 'loading'
+.\src\components\GiftSystem.js:322:    const giftId = incomingGiftEvent?.giftId;
+.\src\components\GiftSystem.js:323:    if (!giftId) return;
+.\src\components\GiftSystem.js:325:    // Try to animate using the matched catalog item; fallback to generic gift.
+.\src\components\GiftSystem.js:326:    const match = gifts?.find?.((g) => g?.id === giftId);
+.\src\components\GiftSystem.js:329:        id: giftId,
+.\src\components\GiftSystem.js:330:        name: giftId,
+.\src\components\GiftSystem.js:338:  const handleSendGift = async (gift) => {
+.\src\components\GiftSystem.js:341:        Alert.alert('Login Required', 'Please sign in to send gifts.');
+.\src\components\GiftSystem.js:345:      // Prevent self-gifting (Firebase mode uses Firebase uids)
+.\src\components\GiftSystem.js:347:        Alert.alert('Cannot Send Gift', 'You cannot send gifts to yourself');
+.\src\components\GiftSystem.js:351:      if (userBalance < gift.cost) {
+.\src\components\GiftSystem.js:354:          `You need ${gift.cost} Blypcoins to send this gift. Your balance: ${userBalance}`,
+.\src\components\GiftSystem.js:379:        `Send ${gift.name} ${gift.emoji} to ${getCreatorName()} for ${gift.cost} Blypcoins?`,
+.\src\components\GiftSystem.js:380:        [{ text: 'Cancel', style: 'cancel' }, { text: 'Send Gift', onPress: () => processSendGift(gift) }]
+.\src\components\GiftSystem.js:387:    if (walletState?.status === 'loading' || walletState?.status === 'idle') {
+.\src\components\GiftSystem.js:388:      Alert.alert('Just a sec', 'Loading your walletÔÇª');
+.\src\components\GiftSystem.js:392:    if (walletState?.status === 'error') {
+.\src\components\GiftSystem.js:393:      Alert.alert('Login Required', 'Please sign in to send gifts.');
+.\src\components\GiftSystem.js:397:    // Prevent self-gifting using the authenticated Cognito userId (server-authoritative).
+.\src\components\GiftSystem.js:398:    if (walletUserId && String(walletUserId) === String(creatorId)) {
+.\src\components\GiftSystem.js:399:      Alert.alert('Cannot Send Gift', 'You cannot send gifts to yourself');
+.\src\components\GiftSystem.js:403:    if (userBalance < gift.cost) {
+.\src\components\GiftSystem.js:406:        `You need ${gift.cost} Blypcoins to send this gift. Your balance: ${userBalance}`,
+.\src\components\GiftSystem.js:431:      `Send ${gift.name} ${gift.emoji} to ${getCreatorName()} for ${gift.cost} Blypcoins?`,
+.\src\components\GiftSystem.js:436:          onPress: () => processSendGift(gift)
+.\src\components\GiftSystem.js:442:  const processSendGift = async (gift) => {
+.\src\components\GiftSystem.js:444:    setSelectedGift(gift);
+.\src\components\GiftSystem.js:451:          giftId: String(gift.id),
+.\src\components\GiftSystem.js:453:          idempotencyKey: makeIdempotencyKey('gift'),
+.\src\components\GiftSystem.js:458:          Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
+.\src\components\GiftSystem.js:462:        const result = await BlypCoinService.sendGift(String(uid), String(creatorId), String(gift.id), Number(gift.cost || 0));
+.\src\components\GiftSystem.js:470:        type: 'economy_gift_send',
+.\src\components\GiftSystem.js:473:        gift: {
+.\src\components\GiftSystem.js:474:          giftType: gift.id,
+.\src\components\GiftSystem.js:475:          cost: gift.cost,
+.\src\components\GiftSystem.js:476:          rarity: gift.rarity
+.\src\components\GiftSystem.js:484:          source: 'gift_modal'
+.\src\components\GiftSystem.js:489:      // Trigger gift animation
+.\src\components\GiftSystem.js:490:      triggerGiftAnimation(gift);
+.\src\components\GiftSystem.js:499:          `You sent ${gift.name} ${gift.emoji} to ${getCreatorName()}!`,
+.\src\components\GiftSystem.js:505:      console.error('Error sending gift:', error);
+.\src\components\GiftSystem.js:507:        type: 'economy_gift_error',
+.\src\components\GiftSystem.js:511:        gift: { giftType: gift.id, cost: gift.cost },
+.\src\components\GiftSystem.js:518:        Alert.alert('Login Required', 'Please sign in to send gifts.');
+.\src\components\GiftSystem.js:542:          Alert.alert('Error', 'Failed to send gift. Please try again.');
+.\src\components\GiftSystem.js:551:  const triggerGiftAnimation = (gift) => {
+.\src\components\GiftSystem.js:552:    if (gift.name === 'Heart' || gift.emoji === 'ÔØñ´©Å') {
+.\src\components\GiftSystem.js:555:      // Regular gift animation for other gifts
+.\src\components\GiftSystem.js:557:        Animated.timing(giftAnimation, {
+.\src\components\GiftSystem.js:562:        Animated.timing(giftAnimation, {
+.\src\components\GiftSystem.js:760:  const renderGift = (gift) => {
+.\src\components\GiftSystem.js:761:    const rarity = String(gift?.rarity || 'common');
+.\src\components\GiftSystem.js:763:    const shimmerTranslate = giftShimmer.interpolate({
+.\src\components\GiftSystem.js:767:    const premiumGlowOpacity = giftPulse.interpolate({
+.\src\components\GiftSystem.js:776:    const isSelected = selectedGift?.id === gift.id;
+.\src\components\GiftSystem.js:780:        key={gift.id}
+.\src\components\GiftSystem.js:781:        style={[styles.giftItem, isSelected && styles.selectedGift]}
+.\src\components\GiftSystem.js:782:        onPress={() => setSelectedGift(gift)}
+.\src\components\GiftSystem.js:790:          style={styles.giftOuterFrame}
+.\src\components\GiftSystem.js:792:          <View style={[styles.giftInnerFrame, isPremium && { shadowColor: glowColor }]}>
+.\src\components\GiftSystem.js:797:              style={styles.giftGradient}
+.\src\components\GiftSystem.js:800:              <View style={styles.giftArtPanel}>
+.\src\components\GiftSystem.js:805:                  style={styles.giftArtBackdrop}
+.\src\components\GiftSystem.js:812:                      styles.giftGlow,
+.\src\components\GiftSystem.js:821:                <View style={[styles.giftArtOrb, { backgroundColor: glowColor }]} pointerEvents="none" />
+.\src\components\GiftSystem.js:822:                <View style={styles.giftArtOrb2} pointerEvents="none" />
+.\src\components\GiftSystem.js:827:                    styles.giftFoilSweep,
+.\src\components\GiftSystem.js:835:                <View style={styles.giftGloss} pointerEvents="none" />
+.\src\components\GiftSystem.js:837:                <View style={styles.giftEmojiWrap}>
+.\src\components\GiftSystem.js:838:                  <Text style={styles.giftEmoji}>{gift.emoji}</Text>
+.\src\components\GiftSystem.js:843:              <View style={styles.giftTileMeta}>
+.\src\components\GiftSystem.js:844:                <Text style={styles.giftName} numberOfLines={1}>
+.\src\components\GiftSystem.js:845:                  {gift.name}
+.\src\components\GiftSystem.js:847:                <View style={styles.giftPriceRow}>
+.\src\components\GiftSystem.js:848:                  <Text style={styles.coinIcon}>­ƒ¬Ö</Text>
+.\src\components\GiftSystem.js:849:                  <Text style={styles.costText}>{gift.cost}</Text>
+.\src\components\GiftSystem.js:856:                  style={styles.giftSendWrap}
+.\src\components\GiftSystem.js:858:                  disabled={sending || userBalance < gift.cost}
+.\src\components\GiftSystem.js:859:                  onPress={() => handleSendGift(gift)}
+.\src\components\GiftSystem.js:865:                    style={styles.giftSendButton}
+.\src\components\GiftSystem.js:867:                    <Text style={styles.giftSendText}>{sending ? 'SendingÔÇª' : 'Send'}</Text>
+.\src\components\GiftSystem.js:872:              {userBalance < gift.cost && (
+.\src\components\GiftSystem.js:903:                  <Icon name="gift" size={26} color={COLORS.white} />
+.\src\components\GiftSystem.js:913:            style={styles.giftButton}
+.\src\components\GiftSystem.js:919:              style={styles.giftButtonGradient}
+.\src\components\GiftSystem.js:921:              <Icon  name="gift" size={16} color="#fff"  />
+.\src\components\GiftSystem.js:922:              <Text style={styles.giftButtonText}>Gift</Text>
+.\src\components\GiftSystem.js:932:            styles.giftAnimationOverlay,
+.\src\components\GiftSystem.js:934:              opacity: giftAnimation,
+.\src\components\GiftSystem.js:937:                  scale: giftAnimation.interpolate({
+.\src\components\GiftSystem.js:1036:                    {walletState?.status === 'ok' || walletState?.lastUpdatedAt
+.\src\components\GiftSystem.js:1038:                      : walletState?.status === 'loading'
+.\src\components\GiftSystem.js:1053:              style={styles.giftsContainer}
+.\src\components\GiftSystem.js:1055:              contentContainerStyle={styles.giftsContent}
+.\src\components\GiftSystem.js:1057:              <View style={styles.giftsGrid}>
+.\src\components\GiftSystem.js:1058:                {[...(gifts || [])]
+.\src\components\GiftSystem.js:1068:                ­ƒÆí Creators receive 70% of gift value in Blypcoins
+.\src\components\GiftSystem.js:1079:  giftButton: {
+.\src\components\GiftSystem.js:1083:  giftButtonGradient: {
+.\src\components\GiftSystem.js:1090:  giftButtonText: {
+.\src\components\GiftSystem.js:1134:  giftAnimationOverlay: {
+.\src\components\GiftSystem.js:1205:  giftsContainer: {
+.\src\components\GiftSystem.js:1209:  giftsContent: {
+.\src\components\GiftSystem.js:1212:  giftsGrid: {
+.\src\components\GiftSystem.js:1217:  giftItem: {
+.\src\components\GiftSystem.js:1228:  giftOuterFrame: {
+.\src\components\GiftSystem.js:1233:  giftInnerFrame: {
+.\src\components\GiftSystem.js:1244:  giftGradient: {
+.\src\components\GiftSystem.js:1251:  giftRarityChip: {
+.\src\components\GiftSystem.js:1263:  giftRarityChipPremium: {
+.\src\components\GiftSystem.js:1266:  giftRarityText: {
+.\src\components\GiftSystem.js:1273:  giftGlow: {
+.\src\components\GiftSystem.js:1282:  giftArtPanel: {
+.\src\components\GiftSystem.js:1293:  giftArtBackdrop: {
+.\src\components\GiftSystem.js:1300:  giftArtOrb: {
+.\src\components\GiftSystem.js:1309:  giftArtOrb2: {
+.\src\components\GiftSystem.js:1319:  giftArtStripe: {
+.\src\components\GiftSystem.js:1328:  giftGloss: {
+.\src\components\GiftSystem.js:1337:  giftFoilSweep: {
+.\src\components\GiftSystem.js:1345:  giftSparkleTL: {
+.\src\components\GiftSystem.js:1353:  giftSparkleBR: {
+.\src\components\GiftSystem.js:1361:  giftEmojiWrap: {
+.\src\components\GiftSystem.js:1371:  giftEmoji: {
+.\src\components\GiftSystem.js:1374:  giftTileMeta: {
+.\src\components\GiftSystem.js:1379:  giftPriceRow: {
+.\src\components\GiftSystem.js:1391:  giftNamePlate: {
+.\src\components\GiftSystem.js:1404:  giftName: {
+.\src\components\GiftSystem.js:1411:  giftSendWrap: {
+.\src\components\GiftSystem.js:1417:  giftSendButton: {
+.\src\components\GiftSystem.js:1423:  giftSendText: {
+.\src\components\GiftSystem.js:1429:  giftPriceBadge: {
+.\src\components\GiftSystem.js:1445:  coinIcon: {
+.\src\components\live\LiveBottomBar.js:31:          <Icon name="gift" size={22} color="#fff" />
+.\src\components\live\LiveBottomBar.tsx:38:          <Icon name="gift" size={22} color="#fff" style={{}} strokeWidth={undefined} />
+.\src\components\DailyRewards.js:100:        `You earned ${result.reward} Blypcoins!\n\nStreak: ${result.streak} days\n\n` +
+.\src\components\DailyRewards.js:149:            <Icon  name="gift" size={20} color="#fff"  />
+.\src\components\DailyRewards.js:184:                <Text style={styles.coinLabel}>Blypcoins</Text>
+.\src\components\DailyRewards.js:317:  coinLabel: {

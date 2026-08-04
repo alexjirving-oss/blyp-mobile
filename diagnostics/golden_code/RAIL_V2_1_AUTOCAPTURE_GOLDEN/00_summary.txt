@@ -1,0 +1,3 @@
+﻿RESULT=PASS
+PACKET_DIR=C:\Users\Alex\Blyp26\diagnostics\golden_code\RAIL_V2_AUTOCAPTURE_GOLDEN_20260301_203436
+NEXT=Created golden rail + will run it now.

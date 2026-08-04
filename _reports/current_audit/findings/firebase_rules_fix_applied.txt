@@ -1,2 +1,0 @@
-Replaced allow-all with authenticated rules (local). Review & deploy via Firebase if acceptable.
-

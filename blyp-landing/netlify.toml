@@ -1,0 +1,76 @@
+# Netlify configuration for Blyp landing page
+# This is a static HTML site - no build process needed
+
+[build]
+  # No build command - pure static files
+  command = ""
+  # Publish the current directory
+  publish = "."
+
+# Serverless functions (share preview / OpenGraph cards)
+[functions]
+  directory = "netlify/functions"
+
+# Optional: Configure custom headers for better security and caching
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Redirect the old domain (blyplive.com) -> new domain (blyp.world).
+# These must be first so any request hitting the old host is sent on before
+# other rules run. They only take effect once blyplive.com (and www) are added
+# as domain aliases on this Netlify site with DNS pointed at Netlify.
+[[redirects]]
+  from = "https://blyplive.com/*"
+  to = "https://blyp.world/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://www.blyplive.com/*"
+  to = "https://blyp.world/:splat"
+  status = 301
+  force = true
+
+# Per-post share preview -> serverless OpenGraph function (must precede the
+# catch-all below so chat-app crawlers get the meta tags).
+[[redirects]]
+  from = "/p/*"
+  to = "/.netlify/functions/share"
+  status = 200
+
+# Clean URLs for static pages
+[[redirects]]
+  from = "/delete-account"
+  to = "/delete-account.html"
+  status = 200
+
+[[redirects]]
+  from = "/delete-account/"
+  to = "/delete-account.html"
+  status = 200
+
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+# Optional: 404 fallback to index (in case someone tries wrong paths)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 404

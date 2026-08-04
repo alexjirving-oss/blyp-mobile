@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import * as MediaLibrary from 'expo-media-library';
 import * as Device from 'expo-device';
 import * as ImagePicker from 'expo-image-picker';
+import { COLORS } from '../styles/theme';
 
 const CameraScreen = () => {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -699,7 +700,7 @@ const styles = StyleSheet.create({
   },
   permissionContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.pageBackground,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
@@ -719,14 +720,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   permissionButton: {
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
     marginTop: 16,
   },
   permissionButtonText: {
-    color: '#ffffff',
+    color: '#0A0A0C',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -920,13 +921,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   doneButton: {
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#00D2BE',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 25,
   },
   doneButtonText: {
-    color: 'white',
+    color: '#0A0A0C',
     fontSize: 16,
     fontWeight: 'bold',
   },

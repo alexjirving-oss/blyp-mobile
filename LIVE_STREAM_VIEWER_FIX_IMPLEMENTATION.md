@@ -1,5 +1,9 @@
 # Live Stream Viewer Fix - Implementation Guide
 
+HISTORICAL ONLY
+NON-CANONICAL
+DO NOT USE FOR RELEASE
+
 ## Problem Solved
 Fixed the critical issue where **viewers see "Waiting for video segments..." instead of the streamer's camera feed**. The root cause was in `LiveStreamViewer_PRODUCTION.js` using broken `getBufferSegments` logic instead of direct segment access.
 
@@ -70,7 +74,7 @@ const runDiagnostics = async () => {
    - [ ] No console errors about segments
 
 ### Production APK Testing
-1. Build APK: `eas build --platform android`
+1. Build APK: `eas build --platform android` (HISTORICAL / NON-CANONICAL / DO NOT USE FOR RELEASE)
 2. Install on device and test:
    - [ ] Camera feed loads correctly
    - [ ] Performance is smooth

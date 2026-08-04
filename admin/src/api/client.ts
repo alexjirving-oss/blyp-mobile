@@ -1,15 +1,20 @@
 // API client for the Blyp admin console.
-// Talks to the blyp-live-service admin endpoints on Cloud Run.
+// Talks to the blyp-live-service admin endpoints on Cloud Run with Cognito Bearer tokens.
+
+import { CognitoMfaRequiredError, cognitoPasswordSignIn, type CognitoTokens } from "../auth/cognito";
 
 const DEFAULT_API_BASE = "https://blyp-live-service-innn3d7yqq-uc.a.run.app";
-const SESSION_KEY = "blypAdminSessionV2";
+const SESSION_KEY = "blypAdminSessionV3";
 
 export interface AdminSession {
   apiBase: string;
-  sessionToken: string;
+  /** Cognito ID token (Bearer). */
+  idToken: string;
   actorUserId: string;
   expiresAt: number;
 }
+
+export { CognitoMfaRequiredError };
 
 export function getApiBase(): string {
   const s = loadSession();
@@ -21,7 +26,7 @@ export function loadSession(): AdminSession | null {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AdminSession;
-    if (!parsed?.sessionToken) return null;
+    if (!parsed?.idToken) return null;
     if (parsed.expiresAt && parsed.expiresAt <= Date.now()) return null;
     return parsed;
   } catch {
@@ -35,6 +40,11 @@ export function saveSession(session: AdminSession): void {
 
 export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY);
+  try {
+    localStorage.removeItem("blypAdminSessionV2");
+  } catch {
+    /* ignore */
+  }
 }
 
 export class ApiError extends Error {
@@ -55,27 +65,60 @@ async function withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 2000
   }
 }
 
-export async function login(email: string, password: string, apiBase = DEFAULT_API_BASE): Promise<AdminSession> {
+async function exchangeAdminSession(
+  tokens: CognitoTokens,
+  apiBase: string
+): Promise<AdminSession> {
   const res = await withTimeout((signal) =>
     fetch(apiBase + "/admin/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      headers: {
+        Authorization: `Bearer ${tokens.idToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
       signal,
     })
   );
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(res.status, data?.code || data?.error || `Login failed (${res.status})`);
+    throw new ApiError(
+      res.status,
+      data?.detail || data?.code || data?.error || `Login failed (${res.status})`
+    );
   }
+
   const session: AdminSession = {
     apiBase,
-    sessionToken: String(data.sessionToken),
-    actorUserId: String(data.actorUserId || email),
-    expiresAt: Date.now() + Number(data.expiresInMs || 8 * 60 * 60 * 1000),
+    idToken: tokens.idToken,
+    actorUserId: String(data.actorUserId || tokens.sub),
+    expiresAt: tokens.expiresAt,
   };
   saveSession(session);
   return session;
+}
+
+/** Cognito email/password → allowlisted admin session (Bearer ID token). */
+export async function login(
+  email: string,
+  password: string,
+  apiBase = DEFAULT_API_BASE
+): Promise<AdminSession> {
+  const tokens = await cognitoPasswordSignIn(email, password);
+  return exchangeAdminSession(tokens, apiBase);
+}
+
+/**
+ * Complete an MFA challenge started by login().
+ * Pass the completeMfa fn from CognitoMfaRequiredError.
+ */
+export async function completeMfaLogin(
+  completeMfa: (otpCode: string) => Promise<CognitoTokens>,
+  otpCode: string,
+  apiBase = DEFAULT_API_BASE
+): Promise<AdminSession> {
+  const tokens = await completeMfa(otpCode);
+  return exchangeAdminSession(tokens, apiBase);
 }
 
 function onAuthExpired() {
@@ -93,7 +136,7 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
     fetch(session.apiBase + path, {
       method,
       headers: {
-        "x-admin-session": session.sessionToken,
+        Authorization: `Bearer ${session.idToken}`,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,

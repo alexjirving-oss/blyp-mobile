@@ -6,26 +6,34 @@
     "skipLibCheck": true,
     "noEmit": true,
     "moduleResolution": "bundler",
-    "types": ["react", "react-native"]
+    "types": [
+      "react",
+      "react-native",
+      "jest"
+    ]
   },
   "exclude": [
     "node_modules",
     "android",
     "ios",
+    "admin",
+    "admin/**",
+    "amplify",
+    "amplify/**",
+    "diagnostics",
+    "diagnostics/**",
+    "artifacts",
+    "artifacts/**",
     "#1",
     "backup",
     "blyp-gaming-features",
-    "blyp-multiplayer-games",
     "functions",
-    "admin",
-    "backend",
-    "_agent",
-    ".manus-work",
-    "diagnostics",
-    "tools/accountability",
     "_reports",
     "_reports/**",
     "scripts/**",
-    "**/*.d.ts"
+    "backend",
+    "backend/**",
+    "tools/accountability",
+    "tools/accountability/**"
   ]
 }

@@ -5,8 +5,21 @@ import { getEconomyInfra } from './infra';
 import { getEconomyEnv } from '../config/economyEnv';
 import { EconomyError } from './economyErrors';
 import { decodeCursor, encodeCursor } from './cursor';
-import { emitGiftEvent, emitLiveGameEvent } from '../realtime/realtimeBus';
+import { findIapCatalogEntry } from './iapCatalog';
+import { emitGiftEvent, emitLiveGameEvent, emitGameEvent } from '../realtime/realtimeBus';
+import { applyReviveForReceiver, getRoom } from '../games/artillery/gameRoomService';
+import { getUserTeamForEarnings, mirrorTeamEarnings } from '../admin/firestoreAdmin';
+import { getSessionById } from '../live/liveSessionStore';
+import { listGuests } from '../live/guestSlotStore';
+import { logger } from '../config/logger';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
+
+// Team gift bonus rates, expressed in micro-gems per base gem so all accrual is
+// done in integers (1 gem = 1_000_000 micro). Member earns +10% of base gems,
+// the team leader earns 5% of the member's base gems.
+const MICRO_PER_GEM = 1_000_000n;
+const MEMBER_BONUS_MICRO_PER_GEM = 100_000n; // 10% => 0.10 gem per base gem
+const LEADER_BONUS_MICRO_PER_GEM = 50_000n; //  5% => 0.05 gem per base gem
 
 function nowIso() {
   return new Date().toISOString();
@@ -47,16 +60,6 @@ type PromotePricing = {
 function clampInt(n: number, min: number, max: number) {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.floor(n)));
-}
-
-const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function assertCanonicalSubUserId(value: unknown, field: string): string {
-  const userId = String(value || '').trim();
-  if (!COGNITO_SUB_REGEX.test(userId)) {
-    throw new EconomyError('INVALID_INPUT', 400, `${field} must be a Cognito sub`, { field, value: userId || null });
-  }
-  return userId;
 }
 
 function parseGoogleServiceAccount(raw: string): GoogleServiceAccount {
@@ -146,16 +149,117 @@ async function verifyGooglePlayPurchase(input: IapVerifyInput): Promise<Provider
     return { verified: false, providerOrderId: purchaseJson.orderId || null, detail: `purchase_state_${purchaseState}` };
   }
 
+  // If Google reports the token as already consumed, it must have been redeemed
+  // through a path other than this ledger (our own grants short-circuit to a
+  // replay before ever calling Google). Reject to prevent re-granting.
+  if (Number(purchaseJson.consumptionState) === 1) {
+    return { verified: false, providerOrderId: purchaseJson.orderId || null, detail: 'already_consumed' };
+  }
+
   const providerOrderId = String(purchaseJson.orderId || '').trim() || String(input.storeTransactionId || '').trim() || null;
   return { verified: true, providerOrderId, detail: 'google_verified' };
+}
+
+async function verifyAppleAppStorePurchase(input: IapVerifyInput): Promise<ProviderVerifyResult> {
+  const env = getEconomyEnv();
+  const bundleId = String(env.APPLE_BUNDLE_ID || '').trim();
+  const issuerId = String(env.APPLE_ISSUER_ID || '').trim();
+  const keyId = String(env.APPLE_KEY_ID || '').trim();
+  const privateKey = String(env.APPLE_PRIVATE_KEY_P8 || '').trim().replace(/\\n/g, '\n');
+
+  if (!bundleId || !issuerId || !keyId || !privateKey) {
+    throw new EconomyError(
+      'PROVIDER_ERROR',
+      503,
+      'Apple IAP credentials not configured (APPLE_BUNDLE_ID / APPLE_ISSUER_ID / APPLE_KEY_ID / APPLE_PRIVATE_KEY_P8)'
+    );
+  }
+
+  const transactionId = String(input.storeTransactionId || input.purchaseToken || '').trim();
+  if (!transactionId) {
+    return { verified: false, providerOrderId: null, detail: 'missing_transaction_id' };
+  }
+
+  // App Store Server API JWT (ES256).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
+  const now = Math.floor(Date.now() / 1000);
+  const token = jwt.sign(
+    {
+      iss: issuerId,
+      iat: now,
+      exp: now + 20 * 60,
+      aud: 'appstoreconnect-v1',
+      bid: bundleId,
+    },
+    privateKey,
+    { algorithm: 'ES256', keyid: keyId }
+  );
+
+  const url = `https://api.storekit.itunes.apple.com/inApps/v1/transactions/${encodeURIComponent(transactionId)}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  // Sandbox fallback
+  const finalRes =
+    res.status === 404 || res.status === 401
+      ? await fetch(
+          `https://api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/${encodeURIComponent(transactionId)}`,
+          { method: 'GET', headers: { Authorization: `Bearer ${token}` } }
+        )
+      : res;
+
+  if (finalRes.status === 404) {
+    return { verified: false, providerOrderId: null, detail: 'purchase_not_found' };
+  }
+
+  const body = (await finalRes.json().catch(() => null)) as { signedTransactionInfo?: string } | null;
+  if (!finalRes.ok || !body?.signedTransactionInfo) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Apple transaction lookup failed', body ?? `HTTP_${finalRes.status}`);
+  }
+
+  // Decode JWS payload (middle segment) without full cert chain verify —
+  // transport was authenticated to Apple; productId must still match SKU.
+  const parts = String(body.signedTransactionInfo).split('.');
+  if (parts.length < 2) {
+    return { verified: false, providerOrderId: null, detail: 'bad_signed_transaction' };
+  }
+  const payloadJson = Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+  let payload: { productId?: string; transactionId?: string; bundleId?: string; revocationDate?: number } = {};
+  try {
+    payload = JSON.parse(payloadJson);
+  } catch {
+    return { verified: false, providerOrderId: null, detail: 'bad_transaction_payload' };
+  }
+
+  if (payload.revocationDate) {
+    return { verified: false, providerOrderId: payload.transactionId || null, detail: 'revoked' };
+  }
+  if (payload.bundleId && payload.bundleId !== bundleId) {
+    return { verified: false, providerOrderId: payload.transactionId || null, detail: 'bundle_mismatch' };
+  }
+  if (String(payload.productId || '') !== String(input.sku || '')) {
+    return { verified: false, providerOrderId: payload.transactionId || null, detail: 'sku_mismatch' };
+  }
+
+  return {
+    verified: true,
+    providerOrderId: String(payload.transactionId || transactionId),
+    detail: 'apple_verified',
+  };
 }
 
 async function verifyProviderPurchase(input: IapVerifyInput): Promise<ProviderVerifyResult> {
   if (input.platform === 'ANDROID') {
     return verifyGooglePlayPurchase(input);
   }
+  if (input.platform === 'IOS') {
+    return verifyAppleAppStorePurchase(input);
+  }
 
-  throw new EconomyError('PROVIDER_ERROR', 503, 'iOS provider verification is not configured yet');
+  throw new EconomyError('PROVIDER_ERROR', 503, `Unsupported IAP platform: ${input.platform}`);
 }
 
 export async function getPromotePricing(): Promise<PromotePricing> {
@@ -306,7 +410,6 @@ export async function getSpotlightAvailability(durationKey: '1h' | '24h' | '7d')
 }
 
 export async function purchasePromoteBattle(userId: string, input: PromoteBattleInput) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
   const pricing = await getPromotePricing();
   const coins = BigInt(pricing.battle.coins);
@@ -371,7 +474,6 @@ export async function purchasePromoteBattle(userId: string, input: PromoteBattle
 }
 
 export async function bookPromoteTimeSlot(userId: string, input: PromoteTimeSlotBookInput) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
   const pricing = await getPromotePricing();
   const { idempotencyKey, startsAt, durationMinutes, note } = input;
@@ -444,7 +546,6 @@ export async function bookPromoteTimeSlot(userId: string, input: PromoteTimeSlot
 }
 
 export async function bookPromoteSpotlight(userId: string, input: PromoteSpotlightBookInput) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
   const pricing = await getPromotePricing();
   const { idempotencyKey, startsAt, durationKey, note } = input;
@@ -562,11 +663,45 @@ export async function getCatalog() {
 }
 
 export async function getWallet(userId: string) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
+  const env = getEconomyEnv();
 
   const row = await db.transaction(async (trx) => {
     const wallet = await ensureWalletRow(trx, userId);
+
+    // Lazily settle matured pending gems: any PENDING gem earning older than the
+    // hold window is promoted to available. This runs on read so creators see
+    // their earnings unlock without needing a separate cron/worker.
+    const holdSeconds = Number(env.PENDING_GEMS_HOLD_SECONDS || 0);
+    if (holdSeconds > 0 && BigInt(wallet.gem_pending || 0) > 0n) {
+      const matured = await trx('ledger_entries')
+        .where({ user_id: userId, currency: 'GEM', status: 'PENDING' })
+        .andWhereRaw(`created_at <= NOW() - INTERVAL '${holdSeconds} seconds'`)
+        .select('ledger_id', 'amount');
+
+      if (matured.length > 0) {
+        let sum = 0n;
+        for (const e of matured) sum += BigInt(e.amount);
+        // Never release more than is actually pending (defensive clamp).
+        const pending = BigInt(wallet.gem_pending || 0);
+        const release = sum > pending ? pending : sum;
+        if (release > 0n) {
+          await trx('ledger_entries')
+            .whereIn('ledger_id', matured.map((e: any) => e.ledger_id))
+            .update({ status: 'POSTED' });
+          await trx('wallets')
+            .where({ user_id: userId })
+            .update({
+              gem_pending: (pending - release).toString(),
+              gem_available: (BigInt(wallet.gem_available || 0) + release).toString(),
+              updated_at: trx.fn.now(),
+            });
+          wallet.gem_pending = (pending - release).toString();
+          wallet.gem_available = (BigInt(wallet.gem_available || 0) + release).toString();
+        }
+      }
+    }
+
     return wallet;
   });
 
@@ -579,11 +714,56 @@ export async function getWallet(userId: string) {
 }
 
 export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerifyInput): Promise<{ kind: 'ok'; response: IapVerifySuccessResponse } | { kind: 'replay'; response: IapVerifySuccessResponse }> {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
 
   return await db.transaction(async (trx) => {
     await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+    // Dedupe defense-in-depth:
+    // 1) Per-user idempotency key (client retries of the same attempt).
+    // 2) GLOBAL dedupe on the Google purchase token/order id, so the SAME store
+    //    purchase can never grant twice — whether replayed with a fresh
+    //    idempotency key or submitted by a different user (token reuse attack).
+    const purchaseToken = String(input.purchaseToken || '').trim();
+
+    if (purchaseToken) {
+      const existingByToken = await trx('ledger_entries')
+        .where({ entry_type: 'COIN_PURCHASE' })
+        .whereRaw("metadata->>'purchaseToken' = ?", [purchaseToken])
+        .first();
+
+      if (existingByToken) {
+        // Token already redeemed by a DIFFERENT user => reject as fraud/reuse.
+        if (String(existingByToken.user_id) !== String(userId)) {
+          throw new EconomyError(
+            'VERIFICATION_FAILED',
+            409,
+            'Purchase token already redeemed',
+            'purchase_token_reused',
+          );
+        }
+
+        // Same user re-submitting the same token => idempotent replay.
+        const walletReplay = await trx('wallets').where({ user_id: userId }).first();
+        if (!walletReplay) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+        return {
+          kind: 'replay' as const,
+          response: {
+            valid: true,
+            duplicatePerfId: String(existingByToken.reference_id || ''),
+            grantedCoins: Number(existingByToken.amount || 0),
+            grantedGems: 0,
+            wallet: {
+              coinBalance: Number(walletReplay.coin_balance || 0),
+              bonusCoinBalance: Number(walletReplay.bonus_coin_balance || 0),
+              gemAvailable: Number(walletReplay.gem_available || 0),
+              gemPending: Number(walletReplay.gem_pending || 0),
+            },
+          },
+        };
+      }
+    }
 
     const existingLedger = await trx('ledger_entries')
       .where({ user_id: userId, idempotency_key: input.idempotencyKey, entry_type: 'COIN_PURCHASE' })
@@ -609,12 +789,38 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
       return { kind: 'replay' as const, response: replayResponse };
     }
 
-    const product = await trx('iap_products')
+    let product = await trx('iap_products')
       .where({ platform: input.platform, sku: input.sku, enabled: true })
       .first();
 
     if (!product) {
-      throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+      // Self-heal: the iap_products row can be missing if the startup seed never
+      // ran on an older deployment. Fall back to the authoritative in-code
+      // catalog (never trust client-supplied amounts) and upsert the row so the
+      // table converges. Only known SKUs resolve; unknown SKUs still 404.
+      const catalogEntry = findIapCatalogEntry(input.platform, input.sku);
+      if (!catalogEntry) {
+        throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+      }
+
+      await trx('iap_products')
+        .insert({
+          platform: catalogEntry.platform,
+          sku: catalogEntry.sku,
+          coins_granted: catalogEntry.coinsGranted,
+          enabled: true,
+          metadata: trx.raw('?::jsonb', [JSON.stringify({ label: catalogEntry.label, priceUsd: catalogEntry.priceUsd, source: 'self_heal' })]),
+        })
+        .onConflict(['platform', 'sku'])
+        .merge({ coins_granted: catalogEntry.coinsGranted, enabled: true });
+
+      product = await trx('iap_products')
+        .where({ platform: input.platform, sku: input.sku, enabled: true })
+        .first();
+
+      if (!product) {
+        throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
+      }
     }
 
     const verifyResult = await verifyProviderPurchase(input);
@@ -655,6 +861,9 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
         sku: input.sku,
         storeTransactionId: input.storeTransactionId,
         providerOrderId: verifyResult.providerOrderId,
+        // Persist the store purchase token so it can be globally deduped on
+        // subsequent verify calls (see the token pre-check above).
+        ...(purchaseToken ? { purchaseToken } : {}),
       },
     });
 
@@ -678,8 +887,135 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
   });
 }
 
+/**
+ * Credit subscription coins into the SAME Postgres wallet the app reads and
+ * spends from. This replaces the legacy Firestore ledger credit so that
+ * Plus+Coins monthly coins are actually visible/spendable (previously they were
+ * written to a separate Firestore wallet and stranded).
+ *
+ * Idempotent per (user, idempotencyKey): the caller passes a period-scoped key
+ * (e.g. `sub-coins:<uid>:<YYYY-MM>`) so a billing period can only ever grant
+ * once, even across activate + RTDN renewal retries. The global UNIQUE index on
+ * idempotency_key is the race-proof backstop.
+ */
+export async function creditSubscriptionCoins(
+  userId: string,
+  input: { coins: number; idempotencyKey: string; sku?: string | null; source?: string | null },
+): Promise<{
+  kind: 'ok' | 'replay';
+  granted: number;
+  wallet: { coinBalance: number; bonusCoinBalance: number; gemAvailable: number; gemPending: number };
+}> {
+  const { db } = getEconomyInfra();
+
+  const coins = Math.floor(Number(input.coins || 0));
+  if (!Number.isFinite(coins) || coins <= 0) {
+    throw new EconomyError('INVALID_INPUT', 400, 'coins must be a positive integer');
+  }
+  const idempotencyKey = String(input.idempotencyKey || '').trim();
+  if (!idempotencyKey) {
+    throw new EconomyError('INVALID_INPUT', 400, 'idempotencyKey required');
+  }
+
+  const readWallet = async (q: any) => {
+    const w = await q('wallets').where({ user_id: userId }).first();
+    return {
+      coinBalance: Number(w?.coin_balance || 0),
+      bonusCoinBalance: Number(w?.bonus_coin_balance || 0),
+      gemAvailable: Number(w?.gem_available || 0),
+      gemPending: Number(w?.gem_pending || 0),
+    };
+  };
+
+  try {
+    return await db.transaction(async (trx) => {
+      await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+      // Per-(user,key) replay guard (the UNIQUE index is the race-proof backstop).
+      const existing = await trx('ledger_entries')
+        .where({ user_id: userId, idempotency_key: idempotencyKey, entry_type: 'SUBSCRIPTION_COINS' })
+        .first();
+      if (existing) {
+        return { kind: 'replay' as const, granted: 0, wallet: await readWallet(trx) };
+      }
+
+      const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+      if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+      const grant = BigInt(coins);
+      const newCoinBalance = BigInt(wallet.coin_balance) + grant;
+
+      await trx('wallets')
+        .where({ user_id: userId })
+        .update({ coin_balance: newCoinBalance.toString(), updated_at: trx.fn.now() });
+
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: userId,
+        entry_type: 'SUBSCRIPTION_COINS',
+        currency: 'COIN',
+        amount: grant.toString(),
+        status: 'POSTED',
+        reference_type: 'SUBSCRIPTION',
+        reference_id: input.sku || null,
+        idempotency_key: idempotencyKey,
+        metadata: { source: input.source || 'subscription', sku: input.sku || null },
+      });
+
+      return { kind: 'ok' as const, granted: coins, wallet: await readWallet(trx) };
+    });
+  } catch (e: any) {
+    // Lost the idempotency race (another activate/RTDN credited the same period
+    // first): the UNIQUE(idempotency_key) constraint rejected the duplicate. The
+    // grant already happened, so report the current wallet as a replay.
+    if (e?.code === '23505') {
+      return { kind: 'replay', granted: 0, wallet: await readWallet(db) };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Account-deletion purge (GDPR/CCPA). Removes the user's personal economy data:
+ * wallet balance, subscription/entitlement rows, and per-user activity rows.
+ *
+ * The immutable financial ledger (ledger_entries, gift_events, stream/team
+ * earnings) is intentionally RETAINED for legal/accounting/fraud-prevention —
+ * consistent with the deletion policy ("we may retain limited information when
+ * required for legal, security, fraud-prevention, or compliance purposes").
+ * Anonymizing the user_id in those tables is a follow-up.
+ *
+ * Idempotent: re-running simply deletes nothing more. Never throws on a missing
+ * table (deployments may not have every optional table).
+ */
+export async function purgeUserData(userId: string): Promise<{ deleted: Record<string, number> }> {
+  const { db } = getEconomyInfra();
+  const uid = String(userId || '').trim();
+  if (!uid) throw new EconomyError('INVALID_INPUT', 400, 'userId required');
+
+  // Personal/deletable tables keyed by user_id. Financial ledgers are excluded.
+  const tables = [
+    'wallets',
+    'user_subscriptions',
+    'matchday_entitlements',
+    'matchday_predictions',
+    'live_game_entries',
+  ];
+
+  const deleted: Record<string, number> = {};
+  for (const table of tables) {
+    try {
+      const n = await db(table).where({ user_id: uid }).del();
+      deleted[table] = Number(n || 0);
+    } catch (e: any) {
+      // Missing table or no user_id column on this deployment — skip safely.
+      deleted[table] = -1;
+    }
+  }
+  return { deleted };
+}
+
 export async function getLedger(userId: string, rawCursor?: string, rawLimit?: number) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
 
   const limit = Math.max(1, Math.min(100, rawLimit ?? 20));
@@ -719,16 +1055,15 @@ export async function getLedger(userId: string, rawCursor?: string, rawLimit?: n
 
   const nextCursor = rows.length === limit
     ? encodeCursor({
-      createdAt: new Date(rows[rows.length - 1].createdAt).toISOString(),
-      ledgerId: rows[rows.length - 1].ledgerId,
-    })
+        createdAt: new Date(rows[rows.length - 1].createdAt).toISOString(),
+        ledgerId: rows[rows.length - 1].ledgerId,
+      })
     : null;
 
   return { items, nextCursor };
 }
 
 export async function getStreamSummary(userId: string, streamId: string) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
 
   // Viewer spend (current user as sender)
@@ -751,10 +1086,10 @@ export async function getStreamSummary(userId: string, streamId: string) {
 
   const creator = creatorRow
     ? {
-      userId,
-      coinsReceived: Number(creatorRow.coins_received ?? 0),
-      gemsEarned: Number(creatorRow.gems_earned ?? 0),
-    }
+        userId,
+        coinsReceived: Number(creatorRow.coins_received ?? 0),
+        gemsEarned: Number(creatorRow.gems_earned ?? 0),
+      }
     : null;
 
   return {
@@ -764,13 +1099,50 @@ export async function getStreamSummary(userId: string, streamId: string) {
   };
 }
 
+/**
+ * Live-room gift recipient guard. If `streamId` resolves to an active LIVE
+ * session, the recipient MUST be the host or a guest on that stage — the server
+ * no longer trusts the client to constrain recipients. Contexts with no live
+ * session (e.g. feed-post gifts, or ended/cleaned-up streams) are intentionally
+ * left unchanged so non-live gifting keeps working. Viewer gifting will extend
+ * the allowed set behind a feature flag in a later phase.
+ */
+async function assertValidLiveRecipient(streamId: string, receiverUserId: string): Promise<void> {
+  const session = await getSessionById(streamId);
+  if (!session || session.status !== 'LIVE') return; // not a live-room context
+  // Viewer-gifting toggle: when enabled, any user may be gifted within an active
+  // live room (we still confirmed it IS a live session above). Safe while
+  // withdrawals are OFF — gems have no cash-out. Re-gate behind anti-fraud
+  // (velocity/graph) before withdrawals are ever enabled.
+  const allowViewerGifting = /^(1|true|yes|on)$/i.test(String(process.env.ALLOW_VIEWER_GIFTING || '').trim());
+  if (allowViewerGifting) return;
+  if (receiverUserId === session.hostUserId) return;
+  const guests = await listGuests(streamId);
+  const onStage = guests.some(
+    (g) => g.userId === receiverUserId && (g.state === 'INVITED' || g.state === 'LIVE')
+  );
+  if (onStage) return;
+  // Battle participants (e.g. the opponent) aren't "guests" but are equal
+  // co-hosts on the shared stage. If an artillery match is running, treat its
+  // registered players as valid recipients so revive-gifts reach either creator.
+  if (/^(1|true|yes|on)$/i.test(String(process.env.LIVE_ARTILLERY_ENABLED || '').trim())) {
+    try {
+      const room = await getRoom(streamId);
+      if (room && (room.players['0'] === receiverUserId || room.players['1'] === receiverUserId)) {
+        return;
+      }
+    } catch {
+      // fall through to the default rejection
+    }
+  }
+  throw new EconomyError('RECEIVER_INVALID', 403, 'Recipient is not on this live stage');
+}
+
 export async function sendGift(senderUserId: string, input: { streamId: string; receiverUserId: string; giftId: string; quantity: number; idempotencyKey: string }) {
-  senderUserId = assertCanonicalSubUserId(senderUserId, 'senderUserId');
   const { db } = getEconomyInfra();
   const env = getEconomyEnv();
 
-  const { streamId, giftId, quantity, idempotencyKey } = input;
-  const receiverUserId = assertCanonicalSubUserId(input.receiverUserId, 'receiverUserId');
+  const { streamId, receiverUserId, giftId, quantity, idempotencyKey } = input;
   if (receiverUserId === senderUserId) {
     throw new EconomyError('RECEIVER_INVALID', 404, 'receiverUserId invalid');
   }
@@ -827,17 +1199,29 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       };
     }
 
+    // Server-authoritative recipient check for live rooms. Runs only for NEW
+    // gifts (idempotent replays returned above), so a guest leaving mid-stream
+    // never breaks a legitimate retry. Non-live contexts (posts) are unaffected.
+    await assertValidLiveRecipient(streamId, receiverUserId);
+
     // 1) Validate/lock wallets
     await trx.raw('SELECT 1');
 
-    // sender wallet FOR UPDATE
+    // Ensure both wallet rows exist, then lock them in a deterministic
+    // (sorted-by-id) order. Locking in a consistent order prevents deadlocks
+    // when two users send gifts to each other concurrently.
     await trx('wallets').insert({ user_id: senderUserId }).onConflict('user_id').ignore();
-    const senderWallet = await trx('wallets').where({ user_id: senderUserId }).forUpdate().first();
-    if (!senderWallet) throw new EconomyError('INTERNAL', 500, 'Sender wallet missing');
-
-    // receiver wallet FOR UPDATE
     await trx('wallets').insert({ user_id: receiverUserId }).onConflict('user_id').ignore();
-    const receiverWallet = await trx('wallets').where({ user_id: receiverUserId }).forUpdate().first();
+
+    const [firstId, secondId] = [senderUserId, receiverUserId].sort();
+    const lockedFirst = await trx('wallets').where({ user_id: firstId }).forUpdate().first();
+    const lockedSecond = firstId === secondId
+      ? lockedFirst
+      : await trx('wallets').where({ user_id: secondId }).forUpdate().first();
+
+    const senderWallet = senderUserId === firstId ? lockedFirst : lockedSecond;
+    const receiverWallet = receiverUserId === firstId ? lockedFirst : lockedSecond;
+    if (!senderWallet) throw new EconomyError('INTERNAL', 500, 'Sender wallet missing');
     if (!receiverWallet) throw new EconomyError('INTERNAL', 500, 'Receiver wallet missing');
 
     const unitCost = BigInt(gift.coin_cost);
@@ -1037,16 +1421,228 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
   };
   emitGiftEvent(streamId, payload);
 
+  // Revive-gift hook: when the artillery battle-stage game is live and a viewer
+  // sends the `revive` gift to a creator on stage, apply a revive to that
+  // creator's team and rebroadcast the authoritative state. Best-effort and
+  // only for new sends (never on idempotent replays) so it can't double-revive.
+  if (
+    result.kind === 'success' &&
+    giftId === 'revive' &&
+    /^(1|true|yes|on)$/i.test(String(process.env.LIVE_ARTILLERY_ENABLED || '').trim())
+  ) {
+    try {
+      const room = await applyReviveForReceiver({ sessionId: streamId, receiverUserId });
+      if (room) {
+        emitGameEvent(streamId, {
+          sessionId: room.sessionId,
+          type: 'STATE',
+          version: room.version,
+          battleId: room.battleId,
+          players: room.players,
+          state: room.state,
+          revive: { receiverUserId, senderUserId },
+        });
+      }
+    } catch (e: any) {
+      logger.warn({ err: e?.message || String(e) }, '[artillery] revive-gift hook failed (non-fatal)');
+    }
+  }
+
+  // Team bonus: if the recipient is in a team, mint an extra 10% of the gems
+  // they just earned to them, and 5% to their team leader. Done after the gift
+  // commit so it never blocks or fails the core gift. Skipped on idempotent
+  // replays (no new gems were earned).
+  if (result.kind === 'success' && result.response.gemsCredited > 0) {
+    try {
+      await applyTeamGiftBonus({
+        giftEventId: result.response.giftEventId,
+        memberUserId: receiverUserId,
+        baseGems: result.response.gemsCredited,
+        coins: result.response.coinSpent,
+      });
+    } catch (e: any) {
+      logger.error(
+        { err: e?.message || String(e), giftEventId: result.response.giftEventId },
+        '[economy] applyTeamGiftBonus failed (non-fatal)'
+      );
+    }
+  }
+
   return result;
 }
 
+/**
+ * Pay out the team gift bonus for a single gift the member just received.
+ *  - member earns an extra 10% of base gems
+ *  - team leader earns 5% of base gems (skipped if the member IS the leader)
+ * Accrual is tracked in micro-gems and only whole gems are credited to wallets,
+ * with the fractional remainder carried forward (so 5% of 50 = 2.5 isn't lost —
+ * the next gift tops it up). Idempotent per giftEventId via the unique ledger key.
+ */
+async function applyTeamGiftBonus(input: {
+  giftEventId: string;
+  memberUserId: string;
+  baseGems: number;
+  coins: number;
+}): Promise<void> {
+  const { giftEventId, memberUserId } = input;
+  const baseGems = BigInt(Math.max(0, Math.floor(input.baseGems)));
+  if (baseGems <= 0n) return;
+
+  const team = await getUserTeamForEarnings(memberUserId);
+  if (!team || !team.teamId) return;
+  const leaderUserId = String(team.leaderId || '');
+  const leaderIsMember = !leaderUserId || leaderUserId === memberUserId;
+
+  const { db } = getEconomyInfra();
+  const env = getEconomyEnv();
+  const gemColumn = env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'gem_pending' : 'gem_available';
+
+  const deltas = await db.transaction(async (trx) => {
+    // Idempotency: if we already paid this gift's bonus, do nothing.
+    const already = await trx('ledger_entries')
+      .where({ idempotency_key: `team-bonus:${giftEventId}:member` })
+      .first();
+    if (already) return null;
+
+    // Upsert the accrual row and add this gift's micro-gems.
+    await trx('team_earnings')
+      .insert({
+        team_id: team.teamId,
+        member_user_id: memberUserId,
+        leader_user_id: leaderUserId || memberUserId,
+        coins_received: BigInt(Math.max(0, Math.floor(input.coins))).toString(),
+        base_gems: baseGems.toString(),
+        member_bonus_micro: (baseGems * MEMBER_BONUS_MICRO_PER_GEM).toString(),
+        leader_bonus_micro: (leaderIsMember ? 0n : baseGems * LEADER_BONUS_MICRO_PER_GEM).toString(),
+      })
+      .onConflict(['team_id', 'member_user_id'])
+      .merge({
+        leader_user_id: leaderUserId || memberUserId,
+        coins_received: trx.raw('team_earnings.coins_received + ?', [BigInt(Math.max(0, Math.floor(input.coins))).toString()]),
+        base_gems: trx.raw('team_earnings.base_gems + ?', [baseGems.toString()]),
+        member_bonus_micro: trx.raw('team_earnings.member_bonus_micro + ?', [(baseGems * MEMBER_BONUS_MICRO_PER_GEM).toString()]),
+        leader_bonus_micro: trx.raw('team_earnings.leader_bonus_micro + ?', [(leaderIsMember ? 0n : baseGems * LEADER_BONUS_MICRO_PER_GEM).toString()]),
+        updated_at: trx.fn.now(),
+      });
+
+    const row = await trx('team_earnings')
+      .where({ team_id: team.teamId, member_user_id: memberUserId })
+      .forUpdate()
+      .first();
+    if (!row) return null;
+
+    const memberMicro = BigInt(row.member_bonus_micro);
+    const memberPaid = BigInt(row.member_bonus_paid);
+    const memberWholeOwed = memberMicro / MICRO_PER_GEM;
+    const memberCredit = memberWholeOwed > memberPaid ? memberWholeOwed - memberPaid : 0n;
+
+    const leaderMicro = BigInt(row.leader_bonus_micro);
+    const leaderPaid = BigInt(row.leader_bonus_paid);
+    const leaderWholeOwed = leaderMicro / MICRO_PER_GEM;
+    const leaderCredit = !leaderIsMember && leaderWholeOwed > leaderPaid ? leaderWholeOwed - leaderPaid : 0n;
+
+    // Credit the member's wallet (whole gems) + ledger.
+    if (memberCredit > 0n) {
+      await trx('wallets').insert({ user_id: memberUserId }).onConflict('user_id').ignore();
+      await trx('wallets')
+        .where({ user_id: memberUserId })
+        .update({
+          [gemColumn]: trx.raw(`${gemColumn} + ?`, [memberCredit.toString()]),
+          lifetime_earned_gems: trx.raw('lifetime_earned_gems + ?', [memberCredit.toString()]),
+          updated_at: trx.fn.now(),
+        });
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: memberUserId,
+        entry_type: 'TEAM_BONUS_EARN',
+        currency: 'GEM',
+        amount: memberCredit.toString(),
+        status: env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED',
+        reference_type: 'GIFT_EVENT',
+        reference_id: giftEventId,
+        idempotency_key: `team-bonus:${giftEventId}:member`,
+        metadata: { teamId: team.teamId, role: 'member', baseGems: baseGems.toString() },
+      });
+    } else {
+      // Still record the marker so this gift is treated as processed (idempotent).
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: memberUserId,
+        entry_type: 'TEAM_BONUS_EARN',
+        currency: 'GEM',
+        amount: '0',
+        status: 'POSTED',
+        reference_type: 'GIFT_EVENT',
+        reference_id: giftEventId,
+        idempotency_key: `team-bonus:${giftEventId}:member`,
+        metadata: { teamId: team.teamId, role: 'member', baseGems: baseGems.toString(), carried: true },
+      });
+    }
+
+    // Credit the leader's wallet (whole gems) + ledger.
+    if (leaderCredit > 0n && leaderUserId) {
+      await trx('wallets').insert({ user_id: leaderUserId }).onConflict('user_id').ignore();
+      await trx('wallets')
+        .where({ user_id: leaderUserId })
+        .update({
+          [gemColumn]: trx.raw(`${gemColumn} + ?`, [leaderCredit.toString()]),
+          lifetime_earned_gems: trx.raw('lifetime_earned_gems + ?', [leaderCredit.toString()]),
+          updated_at: trx.fn.now(),
+        });
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: leaderUserId,
+        entry_type: 'TEAM_LEADER_BONUS',
+        currency: 'GEM',
+        amount: leaderCredit.toString(),
+        status: env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED',
+        reference_type: 'GIFT_EVENT',
+        reference_id: giftEventId,
+        idempotency_key: `team-bonus:${giftEventId}:leader`,
+        metadata: { teamId: team.teamId, role: 'leader', fromMember: memberUserId, baseGems: baseGems.toString() },
+      });
+    }
+
+    // Apply the credited whole gems to the paid counters.
+    await trx('team_earnings')
+      .where({ team_id: team.teamId, member_user_id: memberUserId })
+      .update({
+        member_bonus_paid: (memberPaid + memberCredit).toString(),
+        leader_bonus_paid: (leaderPaid + leaderCredit).toString(),
+        updated_at: trx.fn.now(),
+      });
+
+    return {
+      // For the Firestore mirror we report the PRECISE earned amounts (including
+      // fractions) so the dashboard reflects true earnings, not just whole gems.
+      baseGemsDelta: Number(baseGems),
+      memberBonusDelta: Number(baseGems) * 0.1,
+      leaderBonusDelta: leaderIsMember ? 0 : Number(baseGems) * 0.05,
+      coinsDelta: Math.max(0, Math.floor(input.coins)),
+      leaderUserId,
+    };
+  });
+
+  if (!deltas) return;
+
+  // Mirror to Firestore for the leader dashboard (best-effort, outside the txn).
+  await mirrorTeamEarnings({
+    teamId: team.teamId,
+    memberUserId,
+    leaderUserId: deltas.leaderUserId,
+    baseGemsDelta: deltas.baseGemsDelta,
+    memberBonusDelta: deltas.memberBonusDelta,
+    leaderBonusDelta: deltas.leaderBonusDelta,
+    coinsDelta: deltas.coinsDelta,
+  });
+}
+
 export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCoinsInput) {
-  actorUserId = assertCanonicalSubUserId(actorUserId, 'actorUserId');
   const { db } = getEconomyInfra();
   const createdAt = nowIso();
 
-  const { coins, idempotencyKey, reason } = input;
-  const targetUserId = assertCanonicalSubUserId(input.targetUserId, 'targetUserId');
+  const { targetUserId, coins, idempotencyKey, reason } = input;
 
   const out = await db.transaction(async (trx) => {
     // Idempotency replay: per-target user + idempotency key.
@@ -1121,8 +1717,157 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
   return out;
 }
 
+// ----------------------------------------------------------------------------
+// Daily reward streak
+//
+// Server-authoritative daily streak. Coins are credited to the SAME wallet the
+// app reads (`wallets[user_id]`, keyed by the Cognito sub), through the audited
+// `ledger_entries` path. "One claim per UTC day" is guaranteed by the GLOBALLY
+// UNIQUE `idempotency_key = daily:<userId>:<UTC-day>` — a replayed/concurrent
+// tap can never double-pay. Reward matches the established model:
+// base 10 + min(streak*2, 50).
+// ----------------------------------------------------------------------------
+
+const DAILY_BASE_REWARD = 10;
+const DAILY_MAX_BONUS = 50;
+
+function utcDay(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function addUtcDays(day: string, delta: number): string {
+  const [y, m, d] = day.split('-').map((n) => parseInt(n, 10));
+  return utcDay(Date.UTC(y, m - 1, d) + delta * 86_400_000);
+}
+
+function dailyRewardForStreak(streak: number): number {
+  return DAILY_BASE_REWARD + Math.min(streak * 2, DAILY_MAX_BONUS);
+}
+
+/** jsonb columns may arrive as an object (pg default) or a string; normalize. */
+function readLedgerMetadata(raw: any): Record<string, any> {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+async function readDailyStreakState(
+  q: Knex | Knex.Transaction,
+  userId: string
+): Promise<{ lastClaimDay: string | null; streak: number }> {
+  const last = await q('ledger_entries')
+    .where({ user_id: userId, entry_type: 'DAILY_REWARD' })
+    .orderBy([{ column: 'created_at', order: 'desc' }, { column: 'ledger_id', order: 'desc' }])
+    .first();
+
+  if (!last) return { lastClaimDay: null, streak: 0 };
+  const meta = readLedgerMetadata(last.metadata);
+  const lastClaimDay = typeof meta.day === 'string' ? meta.day : null;
+  const streak = Number.isFinite(Number(meta.streak)) ? Number(meta.streak) : 0;
+  return { lastClaimDay, streak };
+}
+
+export type DailyRewardPeek = {
+  ok: true;
+  streak: number;
+  claimedToday: boolean;
+  claimableReward: number;
+};
+
+export type DailyRewardClaim = {
+  ok: true;
+  alreadyClaimed: boolean;
+  streak: number;
+  reward: number;
+  balanceCoins: number;
+};
+
+/** Peek the current streak + claimable reward without mutating anything. */
+export async function peekDailyReward(userId: string): Promise<DailyRewardPeek> {
+  const { db } = getEconomyInfra();
+  const today = utcDay(Date.now());
+  const state = await readDailyStreakState(db, userId);
+  const claimedToday = state.lastClaimDay === today;
+  const nextStreak = state.lastClaimDay === addUtcDays(today, -1) ? state.streak + 1 : 1;
+  return {
+    ok: true,
+    streak: state.streak,
+    claimedToday,
+    claimableReward: claimedToday ? 0 : dailyRewardForStreak(nextStreak),
+  };
+}
+
+/** Claim today's reward. Idempotent server-side; safe to call once per tap. */
+export async function claimDailyReward(userId: string): Promise<DailyRewardClaim> {
+  const { db } = getEconomyInfra();
+  const today = utcDay(Date.now());
+  const idempotencyKey = `daily:${userId}:${today}`;
+
+  return await db.transaction(async (trx) => {
+    // Lock the wallet row FIRST so concurrent taps serialize here (rather than
+    // racing to insert duplicate idempotency keys and tripping a unique error).
+    await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+    const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+    if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+    // Idempotency: the unique key is the authority for "one claim per UTC day".
+    const existing = await trx('ledger_entries').where({ idempotency_key: idempotencyKey }).first();
+    if (existing) {
+      const meta = readLedgerMetadata(existing.metadata);
+      return {
+        ok: true as const,
+        alreadyClaimed: true,
+        streak: Number.isFinite(Number(meta.streak)) ? Number(meta.streak) : 0,
+        reward: 0,
+        balanceCoins: Number(wallet.coin_balance),
+      };
+    }
+
+    const state = await readDailyStreakState(trx, userId);
+    const newStreak = state.lastClaimDay === addUtcDays(today, -1) ? state.streak + 1 : 1;
+    const reward = dailyRewardForStreak(newStreak);
+
+    const before = BigInt(wallet.coin_balance);
+    const after = before + BigInt(reward);
+    const ledgerId = randomUUID();
+
+    await trx('ledger_entries').insert({
+      ledger_id: ledgerId,
+      user_id: userId,
+      entry_type: 'DAILY_REWARD',
+      currency: 'COIN',
+      amount: reward.toString(),
+      status: 'POSTED',
+      reference_type: 'DAILY_REWARD',
+      reference_id: today,
+      idempotency_key: idempotencyKey,
+      metadata: { source: 'daily_streak', streak: newStreak, day: today },
+    });
+
+    await trx('wallets').where({ user_id: userId }).update({
+      coin_balance: after.toString(),
+      updated_at: trx.fn.now(),
+    });
+
+    return {
+      ok: true as const,
+      alreadyClaimed: false,
+      streak: newStreak,
+      reward,
+      balanceCoins: Number(after),
+    };
+  });
+}
+
 export async function startLiveGame(hostUserId: string, input: { streamId: string; entryFeeCoins: number; idempotencyKey: string }) {
-  hostUserId = assertCanonicalSubUserId(hostUserId, 'hostUserId');
   const { db } = getEconomyInfra();
 
   const { streamId, entryFeeCoins, idempotencyKey } = input;
@@ -1191,7 +1936,6 @@ export async function startLiveGame(hostUserId: string, input: { streamId: strin
 }
 
 export async function joinLiveGame(userId: string, input: { streamId: string; idempotencyKey: string }) {
-  userId = assertCanonicalSubUserId(userId, 'userId');
   const { db } = getEconomyInfra();
   const { streamId, idempotencyKey } = input;
 
@@ -1208,13 +1952,13 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
           coinSpent: Number(BigInt(existing.coin_cost) + BigInt(existing.bonus_coin_cost)),
           state: game
             ? {
-              gameId: game.game_id,
-              streamId: game.stream_id,
-              hostUserId: game.host_user_id,
-              status: game.status,
-              entryFeeCoins: Number(game.entry_fee_coins),
-              poolCoins: Number(game.pool_coins),
-            }
+                gameId: game.game_id,
+                streamId: game.stream_id,
+                hostUserId: game.host_user_id,
+                status: game.status,
+                entryFeeCoins: Number(game.entry_fee_coins),
+                poolCoins: Number(game.pool_coins),
+              }
             : null,
         },
       };
@@ -1326,10 +2070,8 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
 }
 
 export async function finalizeLiveGame(hostUserId: string, input: { streamId: string; winners?: string[]; idempotencyKey: string }) {
-  hostUserId = assertCanonicalSubUserId(hostUserId, 'hostUserId');
   const { db } = getEconomyInfra();
-  const { streamId, idempotencyKey } = input;
-  const winners = (input.winners || []).map((winnerId, idx) => assertCanonicalSubUserId(winnerId, `winners[${idx}]`));
+  const { streamId, winners, idempotencyKey } = input;
 
   const mode = String(process.env.LIVE_GAMES_PAYOUT_MODE || 'SAFE').toUpperCase();
   const payoutCurrency = mode === 'CASHOUT' ? 'COIN' : 'BONUS_COIN';

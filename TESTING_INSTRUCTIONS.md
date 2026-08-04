@@ -1,5 +1,9 @@
 # 🧪 Live Stream Fix Testing Guide
 
+HISTORICAL ONLY
+NON-CANONICAL
+DO NOT USE FOR RELEASE
+
 ## What We Fixed
 **Problem**: Viewers see "Waiting for video segments..." instead of streamer's camera feed
 **Root Cause**: `LiveStreamViewer_PRODUCTION.js` used broken `getBufferSegments()` method
@@ -46,7 +50,7 @@ console.log('Broken method (should fail):', testSegments.getBufferSegments?.(0) 
 
 Once manual testing passes:
 
-1. **Build APK**: `eas build --platform android --profile preview`
+1. **Build APK**: `eas build --platform android --profile preview` (TEST/PREVIEW ONLY / NON-CANONICAL / DO NOT USE FOR RELEASE)
 2. **Install on device**: Download and test APK
 3. **Verify**: Same streaming functionality works in production build
 

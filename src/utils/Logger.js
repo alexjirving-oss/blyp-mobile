@@ -9,8 +9,22 @@ const LogLevel = {
   DEBUG: 3,
 };
 
-// Current log level (change this to control verbosity)
-const currentLogLevel = isDev ? LogLevel.DEBUG : LogLevel.ERROR;
+function normalizeLogLevel(raw) {
+  const v = String(raw || '').trim().toLowerCase();
+  if (!v) return null;
+  if (['0', 'error'].includes(v)) return LogLevel.ERROR;
+  if (['1', 'warn', 'warning'].includes(v)) return LogLevel.WARN;
+  if (['2', 'info'].includes(v)) return LogLevel.INFO;
+  if (['3', 'debug'].includes(v)) return LogLevel.DEBUG;
+  return null;
+}
+
+// Current log level (dev default is WARN to avoid lag from excessive console output)
+const configured = normalizeLogLevel(process?.env?.EXPO_PUBLIC_LOG_LEVEL);
+const currentLogLevel = isDev ? (configured ?? LogLevel.WARN) : LogLevel.ERROR;
+
+const traceEnabled =
+  isDev && ['1', 'true', 'yes'].includes(String(process?.env?.EXPO_PUBLIC_LOG_TRACE || '').toLowerCase());
 
 // Colored emojis for different log types
 const LogEmojis = {
@@ -39,7 +53,7 @@ class Logger {
 
   static error(category, message, ...args) {
     this.log(LogLevel.ERROR, category, message, ...args);
-    if (isDev) console.trace();
+    if (traceEnabled) console.trace();
   }
 
   static warn(category, message, ...args) {

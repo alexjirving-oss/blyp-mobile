@@ -1,22 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
+import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  StatusBar,
-  Alert,
-  Dimensions,
-} from 'react-native';
+import BlypLogo, { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
+import { Alert, Dimensions, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { auth } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
+import { COLORS } from '../styles/theme';
+import { getEconomyWallet, verifyAndroidIapPurchase } from '../api/economyLiveApi';
+import { useAuth } from '../hooks/useCommon';
+import { requireAccount } from '../services/guestSessionService';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { launchAndroidPurchase, consumePurchase, getAndroidProductDetails, queryPurchases } from '../services/AndroidPlayBillingService';
+import {
+  ENABLE_PURCHASES,
+  isClientEconomyMutationAllowed,
+  shouldUseServerValidation
+} from '../config/economyModel';
 
 const { width } = Dimensions.get('window');
+
+const ECONOMY_MUTATION_BLOCKED_BASE = Object.freeze({
+  ok: false,
+  blocked: true,
+  code: 'ECONOMY_MUTATIONS_BLOCKED',
+  reason: 'CLIENT_ECONOMY_MUTATIONS_DISABLED'
+});
+
+function getBlockedEconomyMutationResult(operation) {
+  console.warn(`[ECONOMY][BLOCKED] ${operation}: EXPO_PUBLIC_ECONOMY_MUTATIONS_ENABLED is not enabled`);
+  return {
+    ...ECONOMY_MUTATION_BLOCKED_BASE,
+    operation
+  };
+}
+
+function isBlockedEconomyMutationResult(value) {
+  return !!(value && value.blocked === true && value.code === 'ECONOMY_MUTATIONS_BLOCKED');
+}
 
 // Gem packages data
 const getGemPackages = () => [
@@ -25,7 +46,7 @@ const getGemPackages = () => [
     gems: 50,
     bonus: 0,
     price: 0.99,
-    icon: '💎',
+    icon: '\uD83D\uDC8E',
     popular: false
   },
   {
@@ -33,7 +54,7 @@ const getGemPackages = () => [
     gems: 120,
     bonus: 20,
     price: 1.99,
-    icon: '💎',
+    icon: '\uD83D\uDC8E',
     popular: true
   },
   {
@@ -41,7 +62,7 @@ const getGemPackages = () => [
     gems: 300,
     bonus: 80,
     price: 4.99,
-    icon: '💎',
+    icon: '\uD83D\uDC8E',
     popular: false
   },
   {
@@ -49,7 +70,7 @@ const getGemPackages = () => [
     gems: 650,
     bonus: 200,
     price: 9.99,
-    icon: '💎',
+    icon: '\uD83D\uDC8E',
     popular: false
   },
   {
@@ -57,81 +78,364 @@ const getGemPackages = () => [
     gems: 1500,
     bonus: 600,
     price: 19.99,
-    icon: '💎',
+    icon: '\uD83D\uDC8E',
     popular: false
   }
 ];
 
-const CoinStoreScreen = ({ navigation }) => {
+const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
+  const insets = useSafeAreaInsets?.() || { top: 0, bottom: 0, left: 0, right: 0 };
+  const scrollRef = useRef(null);
+  const packagesSectionYRef = useRef(0);
+
   const [balance, setBalance] = useState(0);
   const [gemBalance, setGemBalance] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [selectedTab, setSelectedTab] = useState('coins'); // 'coins' or 'gems'
+  const [selectedTab, setSelectedTab] = useState(initialTab || 'coins'); // 'coins' or 'gems'
   const [packages] = useState(BlypCoinService.getCoinPackages());
   const [gemPackages] = useState(() => getGemPackages());
-  const currentUser = auth.currentUser;
+  const purchasableCoinPackages = useMemo(() => {
+    // Real IAP is Android-only for now — don't offer tappable packs on iOS.
+    if (Platform.OS !== 'android') return [];
+    const enabled = packages.filter((pkg) => String(pkg?.sku || '').trim().length > 0);
+    return enabled.length > 0 ? enabled : packages;
+  }, [packages]);
+  const { uid, authReady, isAuthenticated } = useAuth();
+
+  // Localized Play Store prices keyed by sku (e.g. "£0.99"). Falls back to the
+  // static USD price when unavailable (non-Android, store offline, etc.).
+  const [localizedPrices, setLocalizedPrices] = useState({});
+
+  const [overlayType, setOverlayType] = useState(null); // 'convert' | 'withdraw' | null
+  const [overlayAmount, setOverlayAmount] = useState('');
+  const [overlayError, setOverlayError] = useState('');
+  const headerTopPadding = useMemo(() => {
+    if (embedded) return 12;
+    return Math.max(12, (insets?.top || 0) + 12);
+  }, [embedded, insets]);
+
+  const closeOverlay = () => {
+    setOverlayType(null);
+    setOverlayAmount('');
+    setOverlayError('');
+  };
+
+  const openConvertOverlay = () => {
+    if (!uid) {
+      Alert.alert('Error', 'Please log in first');
+      return;
+    }
+    setOverlayType('convert');
+    setOverlayAmount('');
+    setOverlayError('');
+  };
+
+  const openWithdrawOverlay = () => {
+    if (!uid) {
+      Alert.alert('Error', 'Please log in first');
+      return;
+    }
+    Alert.alert('Unavailable', 'Withdrawals are currently disabled.');
+  };
+
+  const refreshLiveWallet = async () => {
+    try {
+      const wallet = await getEconomyWallet();
+      const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+      const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+      if (Number.isFinite(nextCoins)) setBalance(nextCoins);
+      if (Number.isFinite(nextGems)) setGemBalance(nextGems);
+    } catch (e) {
+      console.warn('[COIN_STORE] live-service wallet fetch failed', e?.message || String(e));
+    }
+  };
 
   useEffect(() => {
     loadBalance();
-    
-    if (!currentUser) return;
-    
-    // Subscribe to real-time balance updates
-    const unsubscribeCoin = BlypCoinService.subscribeToBalance(currentUser.uid, (newBalance) => {
-      setBalance(newBalance);
-    });
-    
-    const unsubscribeGem = GemService.subscribeToGems(currentUser.uid, (newBalance) => {
-      setGemBalance(newBalance);
-    });
+
+    if (!uid) return;
+    let liveInterval = null;
+    if (authReady && isAuthenticated) {
+      refreshLiveWallet();
+      liveInterval = setInterval(() => {
+        refreshLiveWallet();
+      }, 5000);
+    }
 
     return () => {
-      if (unsubscribeCoin) unsubscribeCoin();
-      if (unsubscribeGem) unsubscribeGem();
+      if (liveInterval) clearInterval(liveInterval);
     };
-  }, [currentUser]);
+  }, [uid, authReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const skus = purchasableCoinPackages
+          .map((p) => String(p?.sku || '').trim())
+          .filter((s) => s.length > 0);
+        if (skus.length === 0) return;
+        const details = await getAndroidProductDetails(skus);
+        if (cancelled || !Array.isArray(details) || details.length === 0) return;
+        const map = {};
+        details.forEach((d) => {
+          if (d?.sku && d?.formattedPrice) map[d.sku] = d.formattedPrice;
+        });
+        if (Object.keys(map).length > 0) setLocalizedPrices(map);
+      } catch (e) {
+        console.warn('[COIN_STORE] localized price fetch failed', e?.message || String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [purchasableCoinPackages]);
+
+  // Recover any owned-but-ungranted Google Play purchases. A purchase whose
+  // backend verification failed (e.g. transient outage) stays owned and
+  // UN-consumed on the device; without this it would (a) never grant coins and
+  // (b) block re-buying the same SKU with Google's "item already owned" error.
+  // On open we re-verify each owned coin-pack purchase, then consume it. The
+  // backend dedupes on the purchase token, so this can never double-grant.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (!ENABLE_PURCHASES) return;
+    if (!uid || !authReady || !isAuthenticated) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const validSkus = new Set(
+          packages.map((p) => String(p?.sku || '').trim()).filter((s) => s.length > 0)
+        );
+        const owned = await queryPurchases();
+        if (cancelled || !Array.isArray(owned) || owned.length === 0) return;
+
+        let recoveredAny = false;
+        for (const p of owned) {
+          if (cancelled) break;
+          const sku = String(p?.productId || '').trim();
+          const token = String(p?.purchaseToken || '').trim();
+          // purchaseState 1 === PURCHASED (Google Play Billing).
+          if (!sku || !token || !validSkus.has(sku) || Number(p?.purchaseState) !== 1) continue;
+
+          try {
+            await verifyAndroidIapPurchase({
+              idempotencyKey: `iap-android:${sku}:${token}`,
+              platform: 'ANDROID',
+              sku,
+              storeTransactionId: token,
+              purchaseToken: token,
+            });
+            // Granted (or idempotent replay) — safe to consume so it can be re-bought.
+            await consumePurchase(token);
+            recoveredAny = true;
+          } catch (err) {
+            // Leave unconsumed so a later open can retry once the backend is healthy.
+            console.warn('[COIN_STORE] purchase recovery failed', sku, err?.message || String(err));
+          }
+        }
+
+        if (recoveredAny && !cancelled) {
+          await refreshLiveWallet();
+        }
+      } catch (e) {
+        console.warn('[COIN_STORE] purchase recovery sweep failed', e?.message || String(e));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, authReady, isAuthenticated, packages]);
+
+  useEffect(() => {
+    if (!scrollToPackagesOnMount) return;
+    // Best-effort: switch to coins + jump to packages section.
+    setSelectedTab('coins');
+    setTimeout(() => {
+      try {
+        scrollRef.current?.scrollTo?.({ y: packagesSectionYRef.current || 0, animated: true });
+      } catch { }
+    }, 80);
+  }, [scrollToPackagesOnMount]);
 
   const loadBalance = async () => {
-    if (currentUser) {
+    if (uid) {
       try {
-        const userBalance = await BlypCoinService.getUserBalance(currentUser.uid);
-        setBalance(userBalance);
-        
-        const userGems = await GemService.getUserGems(currentUser.uid);
-        setGemBalance(userGems);
+        if (!authReady || !isAuthenticated) {
+          setBalance(0);
+          setGemBalance(0);
+          return;
+        }
+        await refreshLiveWallet();
       } catch (error) {
-        console.error('Error loading balance:', error);
+        console.warn('[COIN_STORE] Error loading balance:', error?.message || String(error));
       }
     }
   };
 
-  const notifyPurchasesDisabled = (kind) => {
-    Alert.alert(
-      'Purchases Unavailable',
-      `In-app ${kind} purchases are disabled until store receipt verification is live.`,
-    );
+  const submitOverlay = async () => {
+    if (!uid) {
+      setOverlayError('Please log in first.');
+      return;
+    }
+
+    const amount = parseInt(String(overlayAmount || '').replace(/[^0-9]/g, ''), 10);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setOverlayError('Enter a valid amount.');
+      return;
+    }
+
+    if (overlayType === 'withdraw') {
+      setOverlayError('Withdrawals are currently disabled.');
+      return;
+    }
+
+    if (overlayType === 'convert') {
+      if (!isClientEconomyMutationAllowed()) {
+        const blocked = getBlockedEconomyMutationResult('convertGemToCoin');
+        setOverlayError('Economy mutations are currently disabled.');
+        return blocked;
+      }
+
+      if (amount > gemBalance) {
+        setOverlayError('You do not have that many gems.');
+        return;
+      }
+
+      setOverlayError('Conversion is not available in live-service mode yet.');
+      return;
+    }
+
   };
 
-  const handlePurchase = async (_packageData) => {
-    if (!currentUser) {
+  const handleBuyMoreCoins = () => {
+    setSelectedTab('coins');
+    // Scroll to packages section (best-effort)
+    setTimeout(() => {
+      try {
+        scrollRef.current?.scrollTo?.({ y: packagesSectionYRef.current || 0, animated: true });
+      } catch { }
+    }, 50);
+  };
+
+  const handlePurchase = async (packageData) => {
+    if (requireAccount(navigation, 'buy Blypcoins')) return;
+    if (!ENABLE_PURCHASES) {
+      Alert.alert('Purchases Disabled', 'Purchases are currently unavailable.');
+      return;
+    }
+    if (!uid) {
       Alert.alert('Error', 'Please log in to purchase Blypcoins');
       return;
     }
-    notifyPurchasesDisabled('coin');
-  };
 
-  const handleGemPurchase = async (_packageData) => {
-    if (!currentUser) {
-      Alert.alert('Error', 'Please log in to purchase Gems');
+    if (Platform.OS !== 'android') {
+      Alert.alert('Unavailable', 'Real purchases are currently enabled for Android only.');
       return;
     }
-    notifyPurchasesDisabled('gem');
+
+    if (!String(packageData?.sku || '').trim()) {
+      Alert.alert('Unavailable', 'This package is not available for purchase right now.');
+      return;
+    }
+
+    const confirmPrice = localizedPrices[packageData.sku] || `$${packageData.price}`;
+    Alert.alert(
+      'Purchase Blypcoins',
+      `Buy ${packageData.coins + packageData.bonus} Blypcoins for ${confirmPrice}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Buy Now',
+          onPress: () => processPurchase(packageData)
+        }
+      ]
+    );
+  };
+
+  const processPurchase = async (packageData) => {
+    if (Platform.OS !== 'android') {
+      Alert.alert('Unavailable', 'Real purchases are currently enabled for Android only.');
+      return;
+    }
+
+    const sku = String(packageData?.sku || '').trim();
+    if (!sku) {
+      Alert.alert('Unavailable', 'This package is not available for purchase right now.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const purchase = await launchAndroidPurchase(sku);
+      if (!purchase.ok) {
+        if (purchase.reason === 'user-cancelled') {
+          return;
+        }
+        const msg = purchase.reason === 'billing-module-unavailable'
+          ? 'Google Play billing is unavailable in this app build.'
+          : String(purchase.reason || 'Purchase could not be started.');
+        Alert.alert('Purchase Unavailable', msg);
+        return;
+      }
+      const verification = await verifyAndroidIapPurchase({
+        idempotencyKey: purchase.idempotencyKey,
+        platform: 'ANDROID',
+        sku: purchase.sku,
+        storeTransactionId: purchase.storeTransactionId,
+        purchaseToken: purchase.purchaseToken,
+      });
+
+      // Consume the Play purchase now that the backend has verified + granted it.
+      // Coin packs are consumable, so the user must be able to buy them again.
+      // The backend dedupes on the purchase token, so a consume failure here can
+      // never cause a double-grant on a later recovery/retry.
+      try {
+        await consumePurchase(purchase.purchaseToken);
+      } catch (consumeErr) {
+        console.warn('[COIN_STORE] consume after verify failed', consumeErr?.message || String(consumeErr));
+      }
+
+      const wallet = verification?.wallet;
+      if (wallet) {
+        setBalance(Number(wallet.coinBalance || 0) + Number(wallet.bonusCoinBalance || 0));
+        setGemBalance(Number(wallet.gemAvailable || 0) + Number(wallet.gemPending || 0));
+      } else {
+        await refreshLiveWallet();
+      }
+
+      Alert.alert(
+        'Purchase Successful',
+        `Google Play purchase verified. ${Number(verification?.grantedCoins || 0)} coins applied by backend.`,
+        [{ text: 'Awesome!', style: 'default' }]
+      );
+
+    } catch (error) {
+      console.error('Purchase error:', error);
+      const backendCode = String(error?.code || '').trim();
+      if (backendCode === 'PROVIDER_ERROR') {
+        Alert.alert('Purchase Pending Setup', 'Purchase launch succeeded, but provider verification is not configured for this environment.');
+        return;
+      }
+      const detailText = String(error?.detail?.message || error?.detail || error?.message || '').trim();
+      Alert.alert('Purchase Failed', detailText || 'Google Play purchase could not be verified.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGemPurchase = async () => {
+    Alert.alert('Unavailable', 'Gem purchases are currently disabled.');
   };
 
   const renderPackage = (pkg) => {
     const totalCoins = pkg.coins + pkg.bonus;
     const coinValue = pkg.price / totalCoins;
     const savings = pkg.bonus > 0 ? Math.round((pkg.bonus / pkg.coins) * 100) : 0;
+    const displayPrice = localizedPrices[pkg.sku] || `$${pkg.price}`;
 
     return (
       <TouchableOpacity
@@ -142,7 +446,7 @@ const CoinStoreScreen = ({ navigation }) => {
         activeOpacity={0.8}
       >
         <LinearGradient
-          colors={pkg.popular ? ['#6366f1', '#8b5cf6', '#ec4899'] : ['#1e293b', '#334155', '#475569']}
+          colors={['#141418', '#1C1C22', '#27272E']}
           style={styles.packageGradient}
         >
           {pkg.popular && (
@@ -150,9 +454,9 @@ const CoinStoreScreen = ({ navigation }) => {
               <Text style={styles.popularText}>MOST POPULAR</Text>
             </View>
           )}
-          
+
           <Text style={styles.packageIcon}>{pkg.icon}</Text>
-          
+
           <View style={styles.coinInfo}>
             <Text style={styles.coinAmount}>{pkg.coins.toLocaleString()}</Text>
             {pkg.bonus > 0 && (
@@ -160,12 +464,9 @@ const CoinStoreScreen = ({ navigation }) => {
             )}
             <Text style={styles.totalCoins}>= {totalCoins.toLocaleString()} total</Text>
           </View>
-          
+
           <View style={styles.priceInfo}>
-            <Text style={styles.price}>${pkg.price}</Text>
-            <Text style={styles.pricePerCoin}>
-              ${coinValue.toFixed(3)} per coin
-            </Text>
+            <Text style={styles.price}>{displayPrice}</Text>
             {savings > 0 && (
               <Text style={styles.savings}>Save {savings}%!</Text>
             )}
@@ -189,7 +490,7 @@ const CoinStoreScreen = ({ navigation }) => {
         activeOpacity={0.8}
       >
         <LinearGradient
-          colors={pkg.popular ? ['#ec4899', '#be185d', '#9d174d'] : ['#374151', '#4b5563', '#6b7280']}
+          colors={['#141418', '#1C1C22', '#27272E']}
           style={styles.packageGradient}
         >
           {pkg.popular && (
@@ -197,9 +498,9 @@ const CoinStoreScreen = ({ navigation }) => {
               <Text style={styles.popularText}>MOST POPULAR</Text>
             </View>
           )}
-          
+
           <Text style={styles.packageIcon}>{pkg.icon}</Text>
-          
+
           <View style={styles.coinInfo}>
             <Text style={styles.coinAmount}>{pkg.gems.toLocaleString()}</Text>
             {pkg.bonus > 0 && (
@@ -207,7 +508,7 @@ const CoinStoreScreen = ({ navigation }) => {
             )}
             <Text style={styles.totalCoins}>= {totalGems.toLocaleString()} total</Text>
           </View>
-          
+
           <View style={styles.priceInfo}>
             <Text style={styles.price}>${pkg.price}</Text>
             <Text style={styles.pricePerCoin}>
@@ -222,151 +523,258 @@ const CoinStoreScreen = ({ navigation }) => {
     );
   };
 
+  // If purchases globally disabled show info message only
+  if (!ENABLE_PURCHASES) {
+    return (
+      <ScreenContainer noSafeArea={true} style={styles.screenContainer}>
+        <View style={styles.container}>
+          {!embedded ? (
+            <>
+              <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" />
+              <View style={[styles.header, { paddingTop: headerTopPadding }]}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => navigation.goBack()}
+                >
+                  <Icon name="arrow-back" size={24} color="#fff" />
+                </TouchableOpacity>
+                <View style={styles.headerCenter}>
+                  <BlypLogo useGradientBackground={true} />
+                </View>
+                <View style={styles.headerRightSpacer} />
+              </View>
+            </>
+          ) : null}
+          <Text style={styles.headerTitle}>My Blyp Wallet</Text>
+          <View style={{ padding: 20 }}>
+            <Text style={{ color: '#fff', fontSize: 16 }}>Purchases are currently unavailable. Please try again later.</Text>
+          </View>
+        </View>
+      </ScreenContainer>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon  name="arrow-back" size={24} color="#fff"  />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Currency Store</Text>
-        
-        <View style={styles.balanceContainer}>
-          <View style={styles.balanceRow}>
-            <Text style={styles.coinEmoji}>🪙</Text>
-            <Text style={styles.balanceAmount}>{balance.toLocaleString()}</Text>
+    <ScreenContainer noSafeArea={true} style={styles.screenContainer}>
+      <SafeAreaView style={styles.container}>
+        {!embedded ? (
+          <>
+            <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+
+            {/* Header */}
+            <View style={[styles.header, { paddingTop: headerTopPadding }]}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => navigation.goBack()}
+              >
+                <Icon name="arrow-back" size={24} color="#fff" />
+              </TouchableOpacity>
+
+              <View style={styles.headerCenter}>
+                <BlypLogo useGradientBackground={true} />
+              </View>
+
+              <View style={styles.headerRightSpacer} />
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.headerTitle}>My Blyp Wallet</Text>
+
+        {/* Large balances (centered) */}
+        <View style={styles.heroBalances}>
+          <View style={styles.heroBalanceRow}>
+            <Text style={styles.heroIcon}>{'\uD83E\uDE99'}</Text>
+            <Text style={styles.heroValue}>{balance.toLocaleString()}</Text>
           </View>
-          <View style={styles.balanceRow}>
-            <Text style={styles.coinEmoji}>💎</Text>
-            <Text style={styles.balanceAmount}>{gemBalance.toLocaleString()}</Text>
+          <View style={styles.heroBalanceRow}>
+            <Text style={styles.heroIcon}>{'\uD83D\uDC8E'}</Text>
+            <Text style={[styles.heroValue, styles.heroGemValue]}>{gemBalance.toLocaleString()}</Text>
+          </View>
+
+          <View style={styles.heroActions}>
+            {/* Convert / withdraw are not live yet — hide dead CTAs. */}
+            <TouchableOpacity
+              style={[styles.heroActionButton, styles.heroPrimaryActionButton]}
+              onPress={handleBuyMoreCoins}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={BLYP_LOGO_GRADIENT_COLORS}
+                style={styles.heroActionInner}
+              >
+                <Text style={[styles.heroActionText, styles.heroPrimaryActionText]}>
+                  {Platform.OS === 'android' ? 'Buy More Coins' : 'Coin packs (Android)'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
           </View>
         </View>
-      </View>
 
-      {/* Tabs */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'coins' && styles.activeTab]}
-          onPress={() => setSelectedTab('coins')}
+        <ScrollView
+          ref={scrollRef}
+          style={styles.content}
+          contentContainerStyle={{ paddingBottom: Math.max(24, (insets?.bottom || 0) + 24) }}
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.tabText, selectedTab === 'coins' && styles.activeTabText]}>
-            🪙 Blypcoins
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'gems' && styles.activeTab]}
-          onPress={() => setSelectedTab('gems')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'gems' && styles.activeTabText]}>
-            💎 Gems
-          </Text>
-        </TouchableOpacity>
-      </View>
+          {/* Info Section */}
+          <View style={styles.infoSection}>
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>
+                {selectedTab === 'coins' ? '\uD83D\uDCA1 What are Blypcoins?' : '\uD83D\uDC8E What are Gems?'}
+              </Text>
+              <Text style={styles.infoText}>
+                {selectedTab === 'coins'
+                  ? 'Send gifts to creators, unlock premium features, and show your support!'
+                  : 'Premium currency for exclusive features, rare gifts, and special perks!'
+                }
+              </Text>
+              {__DEV__ && shouldUseServerValidation() && !process.env.EXPO_PUBLIC_BILLING_VERIFY_URL && (
+                <Text style={[styles.infoText, { marginTop: 12, color: '#f87171' }]}>Billing verification backend missing - purchases will fail verification when flag flipped.</Text>
+              )}
+              {/* TODO(stage3-economy-hardening): Show clearer UI messaging when billing verification required but backend URL misconfigured. */}
+            </View>
+          </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.infoSection}>
-          <Text style={styles.infoTitle}>Purchases temporarily disabled</Text>
-          <Text style={styles.infoText}>
-            Store checkout is off until Google Play / App Store receipt verification is enabled.
-            Package cards are preview-only and cannot mint currency.
-          </Text>
-        </View>
-
-        {/* Info Section */}
-        <View style={styles.infoSection}>
-          <LinearGradient
-            colors={selectedTab === 'coins' ? ['#fbbf24', '#f59e0b', '#d97706'] : ['#ec4899', '#be185d', '#9d174d']}
-            style={styles.infoCard}
+          {/* Packages Grid */}
+          <View
+            style={styles.packagesSection}
+            onLayout={(e) => {
+              try {
+                packagesSectionYRef.current = e?.nativeEvent?.layout?.y || 0;
+              } catch { }
+            }}
           >
-            <Text style={styles.infoTitle}>
-              {selectedTab === 'coins' ? '💡 What are Blypcoins?' : '💎 What are Gems?'}
-            </Text>
-            <Text style={styles.infoText}>
-              {selectedTab === 'coins' 
-                ? 'Send gifts to creators, unlock premium features, and show your support!'
-                : 'Premium currency for exclusive features, rare gifts, and special perks!'
-              }
-            </Text>
-          </LinearGradient>
-        </View>
+            <Text style={styles.sectionTitle}>Choose Your Package</Text>
 
-        {/* Packages Grid */}
-        <View style={styles.packagesSection}>
-          <Text style={styles.sectionTitle}>Choose Your Package</Text>
-          
-          <View style={styles.packagesGrid}>
-            {selectedTab === 'coins' 
-              ? packages.map(renderPackage)
-              : gemPackages.map(renderGemPackage)
-            }
+            <View style={styles.packagesGrid}>
+              {Platform.OS !== 'android' ? (
+                <Text style={[styles.infoText, { paddingHorizontal: 8 }]}>
+                  In-app coin purchases are available on Android. iOS StoreKit is coming next.
+                </Text>
+              ) : selectedTab === 'coins' ? (
+                purchasableCoinPackages.map(renderPackage)
+              ) : (
+                <Text style={[styles.infoText, { paddingHorizontal: 8 }]}>
+                  Gem purchases are currently disabled.
+                </Text>
+              )}
+            </View>
           </View>
-        </View>
 
-        {/* Features */}
-        <View style={styles.featuresSection}>
-          <Text style={styles.sectionTitle}>
-            {selectedTab === 'coins' ? 'What You Can Do' : 'Exclusive Gem Benefits'}
-          </Text>
-          
-          <View style={styles.featuresList}>
-            {selectedTab === 'coins' ? (
-              <>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>🎁</Text>
-                  <Text style={styles.featureText}>Send gifts to creators</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>⭐</Text>
-                  <Text style={styles.featureText}>Boost your posts</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>👑</Text>
-                  <Text style={styles.featureText}>Unlock premium features</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>💰</Text>
-                  <Text style={styles.featureText}>Earn coins from gifts</Text>
-                </View>
-              </>
-            ) : (
-              <>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>🌟</Text>
-                  <Text style={styles.featureText}>Send exclusive premium gifts</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>💎</Text>
-                  <Text style={styles.featureText}>Access rare avatar frames</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>🎨</Text>
-                  <Text style={styles.featureText}>Unlock special themes</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureIcon}>👑</Text>
-                  <Text style={styles.featureText}>VIP status and benefits</Text>
-                </View>
-              </>
-            )}
+          {/* Features */}
+          <View style={styles.featuresSection}>
+            <Text style={styles.sectionTitle}>
+              {selectedTab === 'coins' ? 'What You Can Do' : 'Exclusive Gem Benefits'}
+            </Text>
+
+            <View style={styles.featuresList}>
+              {selectedTab === 'coins' ? (
+                <>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83C\uDF81'}</Text>
+                    <Text style={styles.featureText}>Send gifts to creators</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\u2B50'}</Text>
+                    <Text style={styles.featureText}>Boost your posts</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83D\uDC51'}</Text>
+                    <Text style={styles.featureText}>Unlock premium features</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83D\uDCB0'}</Text>
+                    <Text style={styles.featureText}>Earn coins from gifts</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83C\uDF1F'}</Text>
+                    <Text style={styles.featureText}>Send exclusive premium gifts</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83D\uDC8E'}</Text>
+                    <Text style={styles.featureText}>Access rare avatar frames</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83C\uDFA8'}</Text>
+                    <Text style={styles.featureText}>Unlock special themes</Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>{'\uD83D\uDC51'}</Text>
+                    <Text style={styles.featureText}>VIP status and benefits</Text>
+                  </View>
+                </>
+              )}
+            </View>
           </View>
-        </View>
 
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
-    </SafeAreaView>
+          <View style={styles.bottomSpacer} />
+        </ScrollView>
+
+        <Modal
+          visible={!!overlayType}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={closeOverlay}
+        >
+          <TouchableOpacity style={styles.overlayBackdrop} activeOpacity={1} onPress={closeOverlay}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.overlayCenter}
+            >
+              <TouchableOpacity activeOpacity={1} onPress={() => { }} style={styles.overlayCard}>
+                <Text style={styles.overlayTitle}>
+                  {overlayType === 'convert' ? 'Convert Gems to Coins' : 'Withdraw Gems'}
+                </Text>
+
+                <Text style={styles.overlaySubtitle}>
+                  {overlayType === 'convert'
+                    ? 'How many gems do you want to convert? (1 gem = 1 coin)'
+                    : 'How many gems do you want to cash out? (Minimum 500 gems)'}
+                </Text>
+
+                <TextInput
+                  value={overlayAmount}
+                  onChangeText={(t) => {
+                    setOverlayAmount(t);
+                    if (overlayError) setOverlayError('');
+                  }}
+                  placeholder="Enter amount"
+                  placeholderTextColor="#A1A1AA"
+                  keyboardType="number-pad"
+                  style={styles.overlayInput}
+                />
+
+                {!!overlayError && <Text style={styles.overlayError}>{overlayError}</Text>}
+
+                <View style={styles.overlayButtonsRow}>
+                  <TouchableOpacity style={[styles.overlayButton, styles.overlayButtonSecondary]} onPress={closeOverlay}>
+                    <Text style={styles.overlayButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.overlayButton, styles.overlayButtonPrimary]} onPress={submitOverlay}>
+                    <Text style={styles.overlayButtonText}>Confirm</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </KeyboardAvoidingView>
+          </TouchableOpacity>
+        </Modal>
+      </SafeAreaView>
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
+  screenContainer: {
+    paddingTop: 0,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.pageBackground,
   },
   header: {
     flexDirection: 'row',
@@ -375,7 +783,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: '#27272E',
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerRightSpacer: {
+    width: 40,
   },
   backButton: {
     padding: 8,
@@ -384,12 +800,15 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 20,
     fontWeight: '700',
+    textAlign: 'center',
+    paddingTop: 8,
+    paddingHorizontal: 20,
   },
   balanceContainer: {
     alignItems: 'flex-end',
   },
   balanceLabel: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 12,
   },
   balanceRow: {
@@ -408,7 +827,7 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     margin: 20,
     borderRadius: 12,
     padding: 4,
@@ -420,10 +839,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   activeTab: {
-    backgroundColor: '#334155',
+    backgroundColor: '#27272E',
   },
   tabText: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -433,23 +852,177 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+
+  heroBalances: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 8,
+    alignItems: 'center',
+  },
+  heroBalanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  heroIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  heroValue: {
+    color: '#F5F5F7',
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  heroGemValue: {
+    color: '#67E8F9',
+  },
+  heroActions: {
+    width: '100%',
+    marginTop: 14,
+    gap: 10,
+  },
+  heroActionButton: {
+    width: '100%',
+    backgroundColor: '#141418',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#27272E',
+    overflow: 'hidden',
+  },
+  heroPrimaryActionButton: {
+    backgroundColor: '#0b1220',
+    borderColor: '#27272E',
+    transform: [{ scale: 1.02 }],
+  },
+  heroSecondaryActionButton: {
+    backgroundColor: '#0b1220',
+  },
+  heroActionInner: {
+    width: '100%',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroPrimaryActionText: {
+    fontSize: 15,
+    color: '#0A0A0C',
+    fontWeight: '800',
+  },
+  heroSecondaryRow: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  heroSecondaryHalfButton: {
+    flex: 1,
+  },
+  heroActionText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  overlayBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+  overlayCenter: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  overlayCard: {
+    backgroundColor: '#0A0A0C',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#27272E',
+  },
+  overlayTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  overlaySubtitle: {
+    color: '#A1A1AA',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  overlayInput: {
+    backgroundColor: '#141418',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    borderWidth: 1,
+    borderColor: '#27272E',
+    textAlign: 'center',
+  },
+  overlayError: {
+    color: '#f87171',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  overlayButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  overlayButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#27272E',
+  },
+  overlayButtonPrimary: {
+    backgroundColor: '#141418',
+  },
+  overlayButtonSecondary: {
+    backgroundColor: '#0b1220',
+  },
+  overlayButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
   infoSection: {
     padding: 20,
   },
   infoCard: {
     padding: 20,
     borderRadius: 16,
+    backgroundColor: '#121216',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   infoTitle: {
-    color: '#fff',
+    color: '#F5F5F7',
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
   },
   infoText: {
-    color: '#fff',
+    color: '#A1A1AA',
     fontSize: 14,
-    opacity: 0.9,
   },
   packagesSection: {
     paddingHorizontal: 20,
@@ -473,20 +1046,21 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   popularCard: {
-    borderWidth: 2,
-    borderColor: '#fbbf24',
+    borderWidth: 1.5,
+    borderColor: '#00D2BE',
   },
   packageGradient: {
     padding: 20,
+    paddingTop: 28,
     position: 'relative',
   },
   popularBadge: {
     position: 'absolute',
-    top: -1,
-    left: -1,
-    right: -1,
-    backgroundColor: '#fbbf24',
-    paddingVertical: 4,
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#00D2BE',
+    paddingVertical: 5,
     alignItems: 'center',
   },
   popularText: {
@@ -516,7 +1090,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   totalCoins: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 14,
     marginTop: 2,
   },
@@ -529,7 +1103,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   pricePerCoin: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 12,
     marginTop: 2,
   },
@@ -548,7 +1122,7 @@ const styles = StyleSheet.create({
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     padding: 16,
     borderRadius: 12,
   },
@@ -567,3 +1141,4 @@ const styles = StyleSheet.create({
 });
 
 export default CoinStoreScreen;
+

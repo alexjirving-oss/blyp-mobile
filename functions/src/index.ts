@@ -11,16 +11,110 @@
  */
 
 import * as functions from 'firebase-functions';
+// Export billing verification function (Stage 3 economy hardening)
+export { billingVerify } from './billingVerify';
+// Export DEV-ONLY Firestore reset function (maintenance only)
+export { devResetFirestore } from './devReset';
+// Export live stream API functions
+export { addLiveStreamComment, addLiveStreamLike } from './liveStreamApi';
+// Export legacy IVS live streaming functions
+export { hostStart as hostStartLegacy, hostEnd as hostEndLegacy, guestJoin as guestJoinLegacy, viewerJoin as viewerJoinLegacy } from './live/liveRoutes';
+// Export new production-grade IVS token endpoints
+export { hostStart, guestJoin, viewerJoin } from './services/ivsRouter';
+// Export Blyp search platform endpoints (own search/distribution platform)
+export { blypSearch, blypSearchEvent } from './search/handlers';
+// Export Blyp search scheduled jobs (own-index builder + retention sweep)
+export { buildBlypIndex, blypRetentionSweep } from './search/scheduled';
+// Export Blyp distribution (earn-your-reach) endpoints + scheduled scorer
+export { blypPostEvent } from './distribution/handlers';
+export { blypReachSweep } from './distribution/scheduled';
+// Export subscription activation (verified Play purchase -> paid entitlement + coin grant)
+export { blypSubscriptionActivate } from './subscriptions/handlers';
+// Real-time Developer Notifications: keep entitlement in sync with the subscription
+// lifecycle (renewal/cancel/grace/hold/expiry/refund) so failed payments downgrade.
+export { blypPlayRtdn } from './subscriptions/rtdn';
+// Notification spine: scheduled dispatcher + live-alert fan-out triggers
+export { notificationDispatch, notificationOnCreate } from './notifications/dispatcher';
+export { onLiveStreamCreate, onLiveStreamGoLive } from './notifications/liveAlerts';
+// Direct-message push: new inbox message -> push to recipients (WhatsApp-style)
+export { onDirectMessageCreate } from './notifications/messageNotify';
+export {
+  onTeamJoinRequestCreate,
+  onTeamJoinRequestDecision,
+  onTeamBattleCreate,
+  onTeamGroupMessageCreate,
+} from './teams/teamNotify';
+export {
+  onAuditionMatched,
+  auditionOpponentSweep,
+  onAuditionBattleComplete,
+  onAuditionDecision,
+} from './teams/auditionFlow';
+// Presence watches: "notify me when <person> is next on the app"
+export { onUserPresenceOnline, presenceOfflineSweep } from './presence/presenceWatch';
+
+export { onBattleCreate, onBattleStatusChange, onBattleReminderCreate } from './battles/battleNotify';
+// Battle glory stats: idempotent per-creator aggregate for the battle leaderboard
+export { onBattleComplete } from './battles/battleStats';
+// "Blyp it" — premium AI compose-and-send assistant
+export { blypAssistantCompose } from './assistant/compose';
+// Gemini proxy (P7.4): keep the API key server-side; client calls authenticated relay
+export { geminiProxy } from './assistant/geminiProxy';
+// Server-authoritative daily streak engine + reminder sweep
+export { blypClaimDailyReward, streakReminderSweep } from './economy/streak';
+// Account-deletion worker (GDPR/CCPA, Google Play data-deletion): purge user data
+export { processAccountDeletion } from './account/deletionWorker';
+// Server-side text moderation (P0.2): authoritative comment + DM filtering
+export { moderateComment, moderateDirectMessage } from './moderation/textModeration';
+// Server-side image moderation (P0.1): Vision SafeSearch on post media (env-gated)
+export { moderatePostMedia } from './moderation/mediaModeration';
+import { evaluateAutoAction } from './moderation/reportAutoAction';
 import * as admin from 'firebase-admin';
-import { Storage } from '@google-cloud/storage';
-// @ts-ignore (library lacks bundled types)
-import * as ffmpeg from 'fluent-ffmpeg';
-import * as ffmpegPath from 'ffmpeg-static';
-import sharp from 'sharp';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import jwt from 'jsonwebtoken';
+import jwksClient from 'jwks-rsa';
 // fetch import removed (unused)
+
+// NOTE: These native/heavy modules can make the Functions emulator time out while it
+// tries to load user code and discover triggers. Lazy-load them only when invoked.
+let _storage: any | null = null;
+function getStorage(): any {
+  if (!_storage) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Storage } = require('@google-cloud/storage');
+    _storage = new Storage();
+  }
+  return _storage;
+}
+
+let _ffmpeg: any | null = null;
+function getFfmpeg(): any {
+  if (!_ffmpeg) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    _ffmpeg = require('fluent-ffmpeg');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ffmpegPath = require('ffmpeg-static');
+    if (ffmpegPath) {
+      try {
+        _ffmpeg.setFfmpegPath(ffmpegPath);
+      } catch {
+        // ignore; fluent-ffmpeg will fall back to PATH
+      }
+    }
+  }
+  return _ffmpeg;
+}
+
+let _sharp: any | null = null;
+function getSharp(): any {
+  if (!_sharp) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    _sharp = require('sharp');
+  }
+  return _sharp;
+}
 
 // Helper: parse stream path (legacy & new layouts)
 function parseStreamPath(filePath: string) {
@@ -65,15 +159,125 @@ function parseStreamPath(filePath: string) {
 }
 
 // Initialize Firebase Admin (use project default bucket, which may use the firebasestorage.app domain)
-admin.initializeApp();
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
 const db = admin.firestore();
-const storage = new Storage();
 
-// Set FFmpeg path
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
+// ============================================================================
+// AUTH BRIDGE: Cognito JWT -> Firebase Custom Token
+// - Needed so Firestore rules using request.auth.uid work with Cognito sub ids.
+// - Verifies Cognito ID token signature via JWKS.
+// Env required (same as backend/blyp-live-service):
+//   COGNITO_REGION
+//   COGNITO_USER_POOL_ID
+// ============================================================================
+
+const cognitoRegion = process.env.COGNITO_REGION;
+const cognitoUserPoolId = process.env.COGNITO_USER_POOL_ID;
+
+const getCognitoVerifier = (() => {
+  let client: any | null = null;
+  let issuer: string | null = null;
+  return () => {
+    if (!cognitoRegion || !cognitoUserPoolId) {
+      throw new Error('[config] COGNITO_REGION and COGNITO_USER_POOL_ID are required');
+    }
+    if (!client) {
+      const jwksUri = `https://cognito-idp.${cognitoRegion}.amazonaws.com/${cognitoUserPoolId}/.well-known/jwks.json`;
+      client = jwksClient({
+        jwksUri,
+        cache: true,
+        cacheMaxEntries: 10,
+        cacheMaxAge: 10 * 60 * 1000,
+      });
+      issuer = `https://cognito-idp.${cognitoRegion}.amazonaws.com/${cognitoUserPoolId}`;
+    }
+    return { client, issuer };
+  };
+})();
+
+function getKey(header: any, callback: any) {
+  try {
+    const { client } = getCognitoVerifier();
+    client.getSigningKey(header.kid, function (err: any, key: any) {
+      if (err) {
+        callback(err);
+        return;
+      }
+      const signingKey = key?.getPublicKey?.();
+      callback(null, signingKey);
+    });
+  } catch (e: any) {
+    callback(e);
+  }
 }
+
+export const mintFirebaseCustomToken = functions.https.onRequest(async (req, res) => {
+  // CORS (no wildcard; allowlist via CORS_ALLOWED_ORIGINS)
+  (() => {
+    const origin = String(req.headers.origin || '').trim();
+    const allowlist = String(process.env.CORS_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => !!s && s !== '*');
+    if (origin && allowlist.includes(origin)) {
+      res.set('Access-Control-Allow-Origin', origin);
+      res.set('Vary', 'Origin');
+    }
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  })();
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    const authHeader = String(req.headers.authorization || '');
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      res.status(401).json({ error: 'Missing or invalid Authorization header' });
+      return;
+    }
+    const token = match[1];
+
+    const { issuer } = getCognitoVerifier();
+    const decoded: any = await new Promise((resolve, reject) => {
+      jwt.verify(
+        token,
+        getKey,
+        {
+          algorithms: ['RS256'],
+          issuer: issuer || undefined,
+        },
+        (err: any, payload: any) => {
+          if (err) reject(err);
+          else resolve(payload);
+        },
+      );
+    });
+
+    const sub = String(decoded?.sub || '');
+    if (!sub) {
+      res.status(401).json({ error: 'Invalid token: missing sub' });
+      return;
+    }
+
+    // Mint Firebase custom token with uid == Cognito sub.
+    const firebaseToken = await admin.auth().createCustomToken(sub);
+    res.status(200).json({ uid: sub, firebaseToken });
+  } catch (e: any) {
+    console.error('[mintFirebaseCustomToken] 401 error:', e?.message || String(e));
+    res.status(401).json({ error: 'Invalid token', detail: e?.message || String(e) });
+  }
+});
+
 
 /**
  * Video Transcoding Function - Processes uploaded segments into multiple qualities
@@ -83,8 +287,7 @@ export const processVideoSegment = functions
   .runWith({
     timeoutSeconds: 540,
     memory: '2GB',
-    // Wave 0 containment: cap fan-out until owner-scoped uploads/quotas exist.
-    maxInstances: 2
+    maxInstances: 100
   })
   // Use default bucket trigger (avoid hard-coding bucket name to remain compatible with firebasestorage.app domain)
   .storage.object()
@@ -95,6 +298,14 @@ export const processVideoSegment = functions
         console.log('🛑 processVideoSegment disabled (Wave 0 containment)');
         return null;
       }
+      // Hard size cap even when FFmpeg is re-enabled (abuse / cost containment).
+      const MAX_SEGMENT_BYTES = 50 * 1024 * 1024; // 50 MiB
+      const objectSize = Number(object.size || 0);
+      if (objectSize > MAX_SEGMENT_BYTES) {
+        console.log('🛑 processVideoSegment skipped: object too large', { size: objectSize, max: MAX_SEGMENT_BYTES });
+        return null;
+      }
+
       const filePath = object.name;
       const bucket = object.bucket;
 
@@ -113,14 +324,14 @@ export const processVideoSegment = functions
         console.log('❌ Unable to determine rootDir for path', { filePath, parts });
         return null;
       }
-  const rootDirStr: string = rootDir as string; // non-null (guarded)
-  const segmentName = parts.find(p => /^segment_\d+/.test(p))?.replace(/\.mp4$/, '') || path.basename(filePath, path.extname(filePath));
-  console.log(`🧩 Parsed streamId=${streamId} variant=${variant} segmentName=${segmentName} rootDir=${rootDirStr}`);
+      const rootDirStr: string = rootDir as string; // non-null (guarded)
+      const segmentName = parts.find(p => /^segment_\d+/.test(p))?.replace(/\.mp4$/, '') || path.basename(filePath, path.extname(filePath));
+      console.log(`🧩 Parsed streamId=${streamId} variant=${variant} segmentName=${segmentName} rootDir=${rootDirStr}`);
 
       // Download original segment
       const tempDir = os.tmpdir();
       const sourceFile = path.join(tempDir, `source_${Date.now()}_${segmentName}.mp4`);
-      await storage.bucket(bucket).file(filePath).download({ destination: sourceFile });
+      await getStorage().bucket(bucket).file(filePath).download({ destination: sourceFile });
       console.log('📥 Downloaded source to', sourceFile);
 
       // Determine segment index for ramp decisions
@@ -158,7 +369,7 @@ export const processVideoSegment = functions
       }
 
       await updateStreamManifest(streamId, segmentName, processedSegments);
-  await generateHLSPlaylist(streamId, segmentName, rootDirStr);
+      await generateHLSPlaylist(streamId, segmentName, rootDirStr);
       await updateProcessingAnalytics(streamId, processedSegments.length);
 
       fs.unlinkSync(sourceFile);
@@ -181,14 +392,14 @@ async function transcodeSegment(
   bucket: string,
   rootDir: any // using any due to upstream nullable inference; guarded prior to call
 ): Promise<any> {
-  
+
   return new Promise((resolve, reject) => {
     const tempDir = os.tmpdir();
     const outputFile = path.join(tempDir, `${segmentName}_${quality.name}.mp4`);
-    
+
     console.log(`🔄 Transcoding to ${quality.name}: ${outputFile}`);
-    
-    ffmpeg(sourceFile)
+
+    getFfmpeg()(sourceFile)
       .videoCodec('libx264')
       .audioCodec('aac')
       .size(`${quality.width}x${quality.height}`)
@@ -210,8 +421,8 @@ async function transcodeSegment(
         try {
           // Upload transcoded segment
           const destinationPath = `${rootDir}/qualities/${quality.name}/${segmentName}.mp4`;
-          
-          await storage.bucket(bucket).upload(outputFile, {
+
+          await getStorage().bucket(bucket).upload(outputFile, {
             destination: destinationPath,
             metadata: {
               contentType: 'video/mp4',
@@ -224,18 +435,18 @@ async function transcodeSegment(
               }
             }
           });
-          
+
           // Get public URL
-          const [url] = await storage.bucket(bucket).file(destinationPath).getSignedUrl({
+          const [url] = await getStorage().bucket(bucket).file(destinationPath).getSignedUrl({
             action: 'read',
             expires: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
           });
-          
+
           // Cleanup temp file
           fs.unlinkSync(outputFile);
-          
+
           console.log(`✅ Uploaded ${quality.name}: ${destinationPath}`);
-          
+
           resolve({
             quality: quality.name,
             url: url,
@@ -244,13 +455,13 @@ async function transcodeSegment(
             height: quality.height,
             bitrate: quality.bitrate
           });
-          
+
         } catch (error) {
           console.error(`❌ Upload error for ${quality.name}:`, error);
           reject(error);
         }
       })
-  .on('error', (error: any) => {
+      .on('error', (error: any) => {
         console.error(`❌ Transcoding error for ${quality.name}:`, error);
         // Cleanup on error
         if (fs.existsSync(outputFile)) {
@@ -266,13 +477,13 @@ async function transcodeSegment(
  * Update stream manifest with processed segments
  */
 async function updateStreamManifest(
-  streamId: string, 
-  segmentName: string, 
+  streamId: string,
+  segmentName: string,
   processedSegments: any[]
 ) {
   try {
     const segmentNumber = parseInt(segmentName.replace('segment_', ''));
-    
+
     const qualitiesMap = processedSegments.reduce((acc, segment) => {
       acc[segment.quality] = {
         url: segment.url,
@@ -284,7 +495,7 @@ async function updateStreamManifest(
       };
       return acc;
     }, {});
-    
+
     await db.collection('liveStreams').doc(streamId).update({
       [`segments.${segmentNumber}.qualities`]: qualitiesMap,
       [`segments.${segmentNumber}.processed`]: true,
@@ -293,9 +504,9 @@ async function updateStreamManifest(
       lastProcessedSegment: segmentNumber,
       lastUpdated: admin.firestore.FieldValue.serverTimestamp()
     });
-    
+
     console.log(`📝 Updated manifest for segment ${segmentNumber}`);
-    
+
   } catch (error) {
     console.error('❌ Manifest update error:', error);
     throw error;
@@ -310,17 +521,17 @@ async function generateHLSPlaylist(streamId: string, segmentName: string, rootDi
     // Get stream data
     const streamDoc = await db.collection('liveStreams').doc(streamId).get();
     const streamData = streamDoc.data();
-    
+
     if (!streamData || !streamData.segments) {
       return;
     }
-    
+
     // Generate master playlist (after trimming window)
-  const masterPlaylist = generateMasterPlaylist(streamData);
-    
+    const masterPlaylist = generateMasterPlaylist(streamData);
+
     // Generate quality-specific playlists
-  const qualityPlaylists = generateQualityPlaylists(streamData);
-    
+    const qualityPlaylists = generateQualityPlaylists(streamData);
+
     // Upload playlists to storage
     await Promise.all([
       uploadPlaylist(rootDir, 'master.m3u8', masterPlaylist),
@@ -328,9 +539,9 @@ async function generateHLSPlaylist(streamId: string, segmentName: string, rootDi
         uploadPlaylist(rootDir, `${quality}.m3u8`, playlist as string)
       )
     ]);
-    
+
     console.log(`📋 Generated HLS playlists for stream ${streamId}`);
-    
+
   } catch (error) {
     console.error('❌ Playlist generation error:', error);
     throw error;
@@ -342,14 +553,14 @@ async function generateHLSPlaylist(streamId: string, segmentName: string, rootDi
  */
 function generateMasterPlaylist(streamData: any): string {
   let playlist = '#EXTM3U\n#EXT-X-VERSION:3\n\n';
-  
+
   const qualityInfo = {
     '240p': { bandwidth: 400000, resolution: '426x240' },
     '480p': { bandwidth: 1000000, resolution: '854x480' },
     '720p': { bandwidth: 2500000, resolution: '1280x720' },
     '1080p': { bandwidth: 5000000, resolution: '1920x1080' }
   };
-  
+
   if (streamData.availableQualities) {
     streamData.availableQualities.forEach((quality: string) => {
       const info = (qualityInfo as Record<string, { bandwidth: number; resolution: string }>)[quality];
@@ -359,7 +570,7 @@ function generateMasterPlaylist(streamData: any): string {
       }
     });
   }
-  
+
   return playlist;
 }
 
@@ -427,16 +638,16 @@ async function uploadPlaylist(rootDir: string, fileName: string, content: string
     // Use default bucket from Admin SDK (avoids hard-coded project-specific bucket name)
     const bucketRef = admin.storage().bucket();
     const file = bucketRef.file(`${rootDir}/playlists/${fileName}`);
-    
+
     await file.save(content, {
       metadata: {
         contentType: 'application/vnd.apple.mpegurl',
         cacheControl: 'public, max-age=30', // 30 seconds cache for live content
       }
     });
-    
+
     console.log(`📋 Uploaded playlist: ${fileName}`);
-    
+
   } catch (error) {
     console.error(`❌ Playlist upload error for ${fileName}:`, error);
     throw error;
@@ -453,12 +664,12 @@ export const updateStreamAnalytics = functions.firestore
       const streamId = context.params.streamId;
       const beforeData = change.before.data();
       const afterData = change.after.data();
-      
+
       // Calculate metrics
       const viewCountDelta = (afterData.viewCount || 0) - (beforeData.viewCount || 0);
-      const newSegments = Object.keys(afterData.segments || {}).length - 
-                          Object.keys(beforeData.segments || {}).length;
-      
+      const newSegments = Object.keys(afterData.segments || {}).length -
+        Object.keys(beforeData.segments || {}).length;
+
       // Update analytics
       await updateAnalyticsCollection(streamId, {
         viewCountDelta,
@@ -467,12 +678,12 @@ export const updateStreamAnalytics = functions.firestore
         totalSegments: Object.keys(afterData.segments || {}).length,
         lastUpdate: admin.firestore.FieldValue.serverTimestamp()
       });
-      
+
       // Check for alerts
       await checkStreamHealth(streamId, afterData);
-      
+
       console.log(`📊 Analytics updated for stream ${streamId}: +${viewCountDelta} viewers, +${newSegments} segments`);
-      
+
     } catch (error) {
       console.error('❌ Analytics update error:', error);
     }
@@ -483,7 +694,7 @@ export const updateStreamAnalytics = functions.firestore
  */
 async function updateAnalyticsCollection(streamId: string, metrics: any) {
   const analyticsRef = db.collection('streamAnalytics').doc(streamId);
-  
+
   await analyticsRef.set({
     streamId,
     ...metrics,
@@ -502,22 +713,22 @@ async function checkStreamHealth(streamId: string, streamData: any) {
   const now = Date.now();
   const lastUpdate = streamData.lastUpdated?.toMillis() || now;
   const timeSinceUpdate = now - lastUpdate;
-  
+
   // Alert conditions
   const alerts = [];
-  
+
   if (timeSinceUpdate > 30000) {
     alerts.push('Stream inactive for 30+ seconds');
   }
-  
+
   if (health.errorRate > 0.1) {
     alerts.push('High error rate detected');
   }
-  
+
   if (health.bufferHealth < 0.2) {
     alerts.push('Poor buffer health');
   }
-  
+
   if (alerts.length > 0) {
     await sendHealthAlert(streamId, alerts);
   }
@@ -528,7 +739,7 @@ async function checkStreamHealth(streamId: string, streamData: any) {
  */
 async function sendHealthAlert(streamId: string, alerts: string[]) {
   console.warn(`⚠️ Health alert for stream ${streamId}:`, alerts);
-  
+
   // In production, this would send to monitoring systems
   await db.collection('streamAlerts').add({
     streamId,
@@ -550,23 +761,23 @@ export const cleanupOldStreams = functions.pubsub
     try {
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - 24); // 24 hours ago
-      
+
       // Find old streams
       const oldStreamsQuery = await db.collection('liveStreams')
         .where('status', '!=', 'live')
         .where('lastUpdated', '<', cutoffTime)
         .limit(100)
         .get();
-      
+
       console.log(`🧹 Found ${oldStreamsQuery.size} old streams to cleanup`);
-      
+
       // Cleanup each stream
       for (const doc of oldStreamsQuery.docs) {
         await cleanupStream(doc.id, doc.data());
       }
-      
+
       console.log(`✅ Cleanup completed for ${oldStreamsQuery.size} streams`);
-      
+
     } catch (error) {
       console.error('❌ Cleanup error:', error);
     }
@@ -578,25 +789,25 @@ export const cleanupOldStreams = functions.pubsub
 async function cleanupStream(streamId: string, streamData: any) {
   try {
     console.log(`🗑️ Cleaning up stream: ${streamId}`);
-    
+
     // Delete storage files
     const bucketRef = admin.storage().bucket();
     const [files] = await bucketRef.getFiles({
       prefix: `streams/${streamId}/`
     });
-    
+
     // Delete files in batches
-  const deletePromises = files.map(file => file.delete());
+    const deletePromises = files.map(file => file.delete());
     await Promise.all(deletePromises);
-    
+
     // Delete Firestore documents
     await Promise.all([
       db.collection('liveStreams').doc(streamId).delete(),
       db.collection('streamAnalytics').doc(streamId).delete()
     ]);
-    
+
     console.log(`✅ Cleaned up stream ${streamId}: ${files.length} files deleted`);
-    
+
   } catch (error) {
     console.error(`❌ Error cleaning up stream ${streamId}:`, error);
   }
@@ -618,7 +829,7 @@ async function updateProcessingAnalytics(streamId: string, qualityCount: number)
         processedAt: new Date().toISOString()
       })
     }, { merge: true });
-    
+
   } catch (error) {
     console.error('❌ Processing analytics error:', error);
   }
@@ -630,32 +841,39 @@ async function updateProcessingAnalytics(streamId: string, qualityCount: number)
 export const generateThumbnails = functions
   .runWith({
     timeoutSeconds: 60,
-    memory: '1GB',
-    maxInstances: 2
+    memory: '1GB'
   })
   .storage.object()
   .onFinalize(async (object) => {
     try {
+      // Wave 0 containment: disable expensive FFmpeg thumbnails until Storage writes are owner-scoped.
       if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
         console.log('🛑 generateThumbnails disabled (Wave 0 containment)');
         return null;
       }
+      const MAX_SEGMENT_BYTES = 50 * 1024 * 1024; // 50 MiB
+      const objectSize = Number(object.size || 0);
+      if (objectSize > MAX_SEGMENT_BYTES) {
+        console.log('🛑 generateThumbnails skipped: object too large', { size: objectSize, max: MAX_SEGMENT_BYTES });
+        return null;
+      }
+
       const filePath = object.name;
       const bucket = object.bucket;
-      
+
       if (!filePath || !filePath.includes('streams/') || !filePath.includes('segment_')) {
         return null;
       }
-      
+
       console.log(`🖼️ Generating thumbnail for: ${filePath}`);
-      
+
       // Use unified parser to reliably extract streamId across path variants
       const { streamId, rootDir } = parseStreamPath(filePath);
       if (!streamId || !rootDir) {
         console.log('❌ Thumbnail generation: unable to determine streamId/rootDir from path', filePath);
         return null;
       }
-      
+
       // Only generate a thumbnail every 10th segment to reduce load
       const segmentIndex = parseInt(path.basename(filePath).match(/segment_(\d+)/)?.[1] || '0', 10);
       if (segmentIndex % 10 !== 0) {
@@ -667,12 +885,12 @@ export const generateThumbnails = functions
       const tempDir = os.tmpdir();
       const videoFile = path.join(tempDir, `video_${Date.now()}.mp4`);
       const thumbnailFile = path.join(tempDir, `thumb_${Date.now()}.jpg`);
-      
-      await storage.bucket(bucket).file(filePath).download({ destination: videoFile });
-      
+
+      await getStorage().bucket(bucket).file(filePath).download({ destination: videoFile });
+
       // Extract thumbnail using FFmpeg
       await new Promise<void>((resolve, reject) => {
-        ffmpeg(videoFile)
+        getFfmpeg()(videoFile)
           .screenshots({
             timestamps: ['50%'],
             filename: path.basename(thumbnailFile),
@@ -682,42 +900,42 @@ export const generateThumbnails = functions
           .on('end', () => resolve())
           .on('error', (error: any) => reject(error));
       });
-      
+
       // Optimize thumbnail with Sharp
       const optimizedThumbnail = path.join(tempDir, `optimized_${Date.now()}.jpg`);
-      await sharp(thumbnailFile)
+      await getSharp()(thumbnailFile)
         .resize(320, 180, { fit: 'cover' })
         .jpeg({ quality: 80 })
         .toFile(optimizedThumbnail);
-      
+
       // Upload thumbnail
-  const thumbnailPath = `${rootDir}/thumbnails/latest.jpg`;
-      await storage.bucket(bucket).upload(optimizedThumbnail, {
+      const thumbnailPath = `${rootDir}/thumbnails/latest.jpg`;
+      await getStorage().bucket(bucket).upload(optimizedThumbnail, {
         destination: thumbnailPath,
         metadata: {
           contentType: 'image/jpeg',
           cacheControl: 'public, max-age=3600'
         }
       });
-      
+
       // Update stream document
-      const [url] = await storage.bucket(bucket).file(thumbnailPath).getSignedUrl({
+      const [url] = await getStorage().bucket(bucket).file(thumbnailPath).getSignedUrl({
         action: 'read',
         expires: Date.now() + 24 * 60 * 60 * 1000
       });
-      
+
       await db.collection('liveStreams').doc(streamId).update({
         latestThumbnail: url,
         thumbnailUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
-      
+
       // Cleanup
       [videoFile, thumbnailFile, optimizedThumbnail].forEach(file => {
         if (fs.existsSync(file)) {
           fs.unlinkSync(file);
         }
       });
-      
+
       console.log(`✅ Thumbnail generated for stream ${streamId}`);
       return null; // Explicit return to satisfy TypeScript (no value needed)
     } catch (error) {
@@ -794,22 +1012,25 @@ export const aggregateReport = functions.firestore
     }
     const queueDocId = `${targetType}_${targetId}`;
     const ref = db.collection('moderationQueue').doc(queueDocId);
+    let aggregated: { totalReports: number; reasons: Record<string, number> } | null = null;
     try {
-      await db.runTransaction(async tx => {
+      aggregated = await db.runTransaction(async tx => {
         const existing = await tx.get(ref);
         const now = admin.firestore.FieldValue.serverTimestamp();
         if (!existing.exists) {
+          const reasons = { [reasonCode]: 1 } as Record<string, number>;
           tx.set(ref, {
             targetType,
             targetId,
             totalReports: 1,
-            reasons: { [reasonCode]: 1 },
+            reasons,
             firstReportedAt: now,
             lastReportedAt: now,
             openReportIds: [snap.id],
             status: 'pending_review',
             priorityScore: 1 // simple initial heuristic
           });
+          return { totalReports: 1, reasons };
         } else {
           const cur = existing.data() || {};
           const reasons = cur.reasons || {};
@@ -826,11 +1047,28 @@ export const aggregateReport = functions.firestore
             openReportIds,
             priorityScore
           });
+          return { totalReports, reasons };
         }
       });
       console.log(`🛡️ Aggregated report into moderationQueue/${queueDocId}`);
     } catch (err) {
       console.error('❌ Aggregation error:', err);
+    }
+
+    // P0.3: auto-action + alerting on the accumulated signal (best-effort, never throws).
+    if (aggregated) {
+      try {
+        await evaluateAutoAction(db, {
+          targetType,
+          targetId,
+          reasonCode,
+          totalReports: aggregated.totalReports,
+          reasons: aggregated.reasons,
+          reportId: snap.id,
+        });
+      } catch (err) {
+        console.error('❌ Auto-action error:', err);
+      }
     }
     return null;
   });

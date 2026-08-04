@@ -9,7 +9,7 @@ const StreamingConfig = {
   ERROR_MONITORING_ENABLED: false, // DISABLED to prevent alert loops
   
   // Debug mode - shows extra logging
-  DEBUG_MODE: true,
+  DEBUG_MODE: __DEV__ === true && String(process?.env?.EXPO_PUBLIC_ENABLE_DEVTOOLS || '') === '1',
   
   // Alert settings
   SHOW_ERROR_ALERTS: false, // DISABLED to prevent user interruption

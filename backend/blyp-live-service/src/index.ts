@@ -1,18 +1,19 @@
 import './config/env';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import http from 'http';
 import liveRoutes from './routes/liveRoutes';
+import roomsRoutes from './routes/roomsRoutes';
+import gameRoutes from './routes/gameRoutes';
 import economyRoutes from './economy/economyRoutes';
+import internalRoutes from './internal/internalRoutes';
 import adminRoutes from './admin/adminRoutes';
-import appVersionRoutes from './appVersion/appVersionRoutes';
-import firebaseTokenRoutes from './auth/firebaseTokenRoutes';
-
+import { ensureAdminSchema } from './admin/adminSchema';
 import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
 import { ensureEconomySchema } from './economy/schema';
 import { createSocketServer } from './realtime/socketServer';
 import { logger } from './config/logger';
-import { getAdminAuth } from './config/firebaseAdmin';
 
 const port = (() => {
   const rawPort = process.env.PORT;
@@ -27,8 +28,35 @@ const port = (() => {
 })();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// Security headers (safe defaults for a JSON API; CSP disabled since we serve no HTML).
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
+
+// CORS: native mobile clients send no Origin (always allowed). Browser origins
+// (the admin dashboard) are restricted to an env-driven allowlist. If the
+// allowlist is unset we log and fall back to permissive so prod/admin never
+// breaks on a missing config — set CORS_ALLOWED_ORIGINS to lock it down (P1.6).
+const corsAllowlist = String(process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (corsAllowlist.length === 0) {
+  logger.warn('[cors] CORS_ALLOWED_ORIGINS not set — allowing all browser origins (set it to restrict)');
+}
+app.use(
+  cors({
+    origin(origin, cb) {
+      if (!origin) return cb(null, true); // native apps / server-to-server
+      if (corsAllowlist.length === 0) return cb(null, true);
+      if (corsAllowlist.includes(origin)) return cb(null, true);
+      return cb(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  }),
+);
+
+// Cap request body size to blunt memory-exhaustion abuse (payloads here are small).
+app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', async (_req, res) => {
   // Liveness check: return 200 if the process/server is up.
@@ -37,13 +65,13 @@ app.get('/health', async (_req, res) => {
     const { db, redis } = getEconomyInfra();
     const [dbStatus, redisStatus] = await Promise.all([checkDb(db), checkRedis(redis)]);
     const ready = dbStatus.ok && redisStatus.ok;
+
     res.status(200).json({
       ok: true,
       ready,
       service: 'blyp-live-service',
       db: dbStatus,
       redis: redisStatus,
-      firebaseAdmin: !!getAdminAuth(),
     });
   } catch (e: any) {
     res.status(200).json({
@@ -76,21 +104,27 @@ app.get('/ready', async (_req, res) => {
   }
 });
 
-// Public update policy is intentionally available before auth so stale clients
-// can determine whether to show an update-required screen during startup.
-app.use(appVersionRoutes);
-
-// Admin auth surface must be mounted before economy routes because
-// economy router applies Cognito middleware at router level.
+// Admin dashboard API (self-contained auth via requireAdmin / per-route cognito).
+// Must be mounted BEFORE economyRoutes, whose router-level cognito middleware
+// otherwise intercepts every unauthenticated request (including /admin/auth/login).
 app.use(adminRoutes);
 
-// Cognito → Firebase custom-token federation (uid = Cognito sub).
-app.use(firebaseTokenRoutes);
+// Internal service-to-service routes (shared-secret auth). Must be mounted
+// BEFORE economyRoutes for the same reason adminRoutes is: the economy router's
+// router-level Cognito middleware would otherwise reject these as unauthenticated.
+app.use(internalRoutes);
 
 // Economy contracts (auth required inside router)
 app.use(economyRoutes);
 
 app.use('/api', liveRoutes);
+
+// Hostless, topic-based group video rooms (open-seat, symmetric multi-party).
+app.use('/api', roomsRoutes);
+
+// Blyp Artillery — server-authoritative battle-stage game (gated by
+// LIVE_ARTILLERY_ENABLED inside the router).
+app.use('/api', gameRoutes);
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   // Central error handler to avoid unhandled rejections leaking details
@@ -98,23 +132,40 @@ app.use((err: any, _req: any, res: any, _next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Ensure DB schema is bootstrapped without blocking server startup.
+// On Cloud Run the VPC/Redis/DB connections are frequently NOT ready during the
+// very first readiness probe, so a one-shot gate at boot would permanently skip
+// schema creation on a cold DB. This retries (out of band of listen()) until the
+// database is reachable, then runs the idempotent ensures exactly once.
+async function bootstrapSchemaWithRetry(db: any): Promise<void> {
+  const maxAttempts = 30;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const dbStatus = await checkDb(db);
+    if (dbStatus.ok) {
+      try {
+        await ensureEconomySchema(db);
+      } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[startup] economy schema ensure failed');
+      }
+      try {
+        await ensureAdminSchema(db);
+      } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[startup] admin schema ensure failed');
+      }
+      logger.info({ attempt }, '[startup] schema bootstrap complete');
+      return;
+    }
+    logger.warn({ attempt, db: dbStatus }, '[startup] DB not ready; retrying schema bootstrap');
+    await sleep(2000);
+  }
+  logger.error('[startup] DB never became ready; schema bootstrap abandoned');
+}
+
 // Explicitly bind to 0.0.0.0 so physical devices on LAN can reach the server
 async function main() {
-  const { db, redis } = getEconomyInfra();
-
-  // For local/dev bring-up we still want the service to boot (so mobile can hit /health
-  // and non-economy endpoints), even if DB/Redis aren't available.
-  // Schema bootstrap only depends on DB; do not gate it on Redis readiness.
-  const [dbStatus, redisStatus] = await Promise.all([checkDb(db), checkRedis(redis)]);
-  if (dbStatus.ok) {
-    try {
-      await ensureEconomySchema(db);
-    } catch (e: any) {
-      logger.error({ err: e?.message || String(e) }, '[startup] economy schema ensure failed');
-    }
-  } else {
-    logger.warn({ db: dbStatus, redis: redisStatus }, '[startup] DB not ready; starting anyway');
-  }
+  const { db } = getEconomyInfra();
 
   const server = http.createServer(app);
   createSocketServer(server);
@@ -126,6 +177,10 @@ async function main() {
     logger.info(`📍 /api/* routes ready`);
     logger.info(`📍 Socket.IO ready`);
   });
+
+  // Kick off schema bootstrap in the background so listen() (and thus the
+  // Cloud Run startup probe) is never delayed by a cold database.
+  void bootstrapSchemaWithRetry(db);
 }
 
 main().catch((err) => {

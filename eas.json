@@ -1,23 +1,25 @@
 {
   "cli": {
     "version": ">= 3.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug -Pandroid.useAndroidX=true"
       },
       "env": {
-          "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
-          "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
-          "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
-          "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
-          "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "",
-          "EXPO_PUBLIC_LIVE_SERVICE_URL": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
-          "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true"
+        "EXPO_PUBLIC_ENABLE_STREAMING": "1",
+        "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
+        "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
+        "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
+        "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
+        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3",
+        "EXPO_PUBLIC_STREAMING_BACKEND": "ivs",
+        "EXPO_PUBLIC_API_BASE_URL": "http://127.0.0.1:4000"
       },
       "cache": {
         "key": "webrtc-dev-001"
@@ -26,21 +28,58 @@
     "preview": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
-      }
-    },
-    "production": {
-      "android": {
-        "buildType": "app-bundle"
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -Pandroid.useAndroidX=true"
       },
       "env": {
+        "EXPO_PUBLIC_ENABLE_STREAMING": "1",
+        "EXPO_PUBLIC_ENABLE_GUEST_PUBLISH": "1",
+        "EXPO_PUBLIC_FUNCTIONS_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
+        "EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyAScxM-7tnuD0532VhY6bvaXvoWVEyDSF8",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "blyp-master.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "blyp-master",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "blyp-master.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "929105034040",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:929105034040:web:3f725bb93e50e9d8bb9fcd",
+        "EXPO_PUBLIC_LIVE_SERVICE_URL": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
+        "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true",
+        "EXPO_PUBLIC_DISABLE_PURCHASES": "false",
+        "EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED": "1",
         "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
         "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
         "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
         "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
-        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "",
+        "FORCE_GENERATE_AWS_EXPORTS": "1"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease -Pandroid.useAndroidX=true"
+      },
+      "env": {
+        "EXPO_PUBLIC_ENABLE_STREAMING": "1",
+        "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
+        "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
+        "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
+        "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
+        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3",
+        "EXPO_PUBLIC_API_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
+        "EXPO_PUBLIC_FUNCTIONS_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
+        "EXPO_PUBLIC_ENABLE_GUEST_PUBLISH": "1",
+        "EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyAScxM-7tnuD0532VhY6bvaXvoWVEyDSF8",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "blyp-master.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "blyp-master",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "blyp-master.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "929105034040",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:929105034040:web:3f725bb93e50e9d8bb9fcd",
         "EXPO_PUBLIC_LIVE_SERVICE_URL": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
-        "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true"
+        "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true",
+        "EXPO_PUBLIC_DISABLE_PURCHASES": "false",
+        "EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED": "1",
+        "FORCE_GENERATE_AWS_EXPORTS": "1"
       }
     }
   },
@@ -48,12 +87,20 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./android-service-account.json",
-        "track": "internal"
+        "track": "internal",
+        "releaseStatus": "draft"
       },
       "ios": {
         "appleId": "your-apple-id@email.com",
         "ascAppId": "1234567890",
         "appleTeamId": "ABCD123456"
+      }
+    },
+    "internal": {
+      "android": {
+        "serviceAccountKeyPath": "./android-service-account.json",
+        "track": "internal",
+        "releaseStatus": "completed"
       }
     }
   }

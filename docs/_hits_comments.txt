@@ -1,0 +1,616 @@
+.\src\components\ActivityFeed.js:125:        return `${actorName} commented on your post`;
+.\src\utils\activityTracker.js:19:  COMMENT: 'comment',
+.\src\services\aiService.js:326:      "Let me know in the comments!"
+.\src\components\CommentsModal.js:55:const CommentsModal = ({
+.\src\components\CommentsModal.js:61:  comments: externalComments,
+.\src\components\CommentsModal.js:62:  onSendComment,
+.\src\components\CommentsModal.js:63:  onCommentCountChange,
+.\src\components\CommentsModal.js:72:  // Cache resolved usernames by userId so comments don't display raw uids.
+.\src\components\CommentsModal.js:77:  const [internalComments, setInternalComments] = useState([
+.\src\components\CommentsModal.js:106:  const [newComment, setNewComment] = useState('');
+.\src\components\CommentsModal.js:107:  const [likedComments, setLikedComments] = useState(new Set());
+.\src\components\CommentsModal.js:110:  const [postComments, setPostComments] = useState([]);
+.\src\components\CommentsModal.js:111:  const [loadingComments, setLoadingComments] = useState(false);
+.\src\components\CommentsModal.js:112:  const [commentsError, setCommentsError] = useState(null);
+.\src\components\CommentsModal.js:114:  const shouldUseFirestoreComments =
+.\src\components\CommentsModal.js:124:    if (!shouldUseFirestoreComments) {
+.\src\components\CommentsModal.js:125:      setLoadingComments(false);
+.\src\components\CommentsModal.js:126:      setPostComments([]);
+.\src\components\CommentsModal.js:127:      setCommentsError(null);
+.\src\components\CommentsModal.js:131:    setLoadingComments(true);
+.\src\components\CommentsModal.js:132:    setCommentsError(null);
+.\src\components\CommentsModal.js:145:          setCommentsError(String(e?.message || e || 'Unable to establish auth'));
+.\src\components\CommentsModal.js:152:        .collection('comments')
+.\src\components\CommentsModal.js:170:                // Replies are represented as separate comment docs with parentId.
+.\src\components\CommentsModal.js:174:            setPostComments(next);
+.\src\components\CommentsModal.js:175:            setLoadingComments(false);
+.\src\components\CommentsModal.js:177:              onCommentCountChange?.(postId, next.length);
+.\src\components\CommentsModal.js:181:            // Keep modal usable even if comments can't be read.
+.\src\components\CommentsModal.js:182:            const msg = String(err?.message || err || 'Unable to load comments');
+.\src\components\CommentsModal.js:183:            setCommentsError(msg);
+.\src\components\CommentsModal.js:184:            setLoadingComments(false);
+.\src\components\CommentsModal.js:188:      setCommentsError('Unable to load comments');
+.\src\components\CommentsModal.js:189:      setLoadingComments(false);
+.\src\components\CommentsModal.js:197:  }, [postId, shouldUseFirestoreComments, onCommentCountChange]);
+.\src\components\CommentsModal.js:199:  // Keep local likedComments in sync with Firestore docs.
+.\src\components\CommentsModal.js:203:    if (!shouldUseFirestoreComments) return;
+.\src\components\CommentsModal.js:207:    for (const c of postComments) {
+.\src\components\CommentsModal.js:212:    setLikedComments(next);
+.\src\components\CommentsModal.js:213:  }, [visible, isLiveMode, shouldUseFirestoreComments, uid, postComments]);
+.\src\components\CommentsModal.js:253:  // For comments that came in with username == userId (uid), look up the user's profile username.
+.\src\components\CommentsModal.js:255:    if (!shouldUseFirestoreComments) return;
+.\src\components\CommentsModal.js:257:    if (!Array.isArray(postComments) || postComments.length === 0) return;
+.\src\components\CommentsModal.js:261:        postComments
+.\src\components\CommentsModal.js:266:            const comment = postComments.find((c) => String(c?.userId || '').trim() === id);
+.\src\components\CommentsModal.js:267:            const uname = String(comment?.username || '').trim();
+.\src\components\CommentsModal.js:296:  }, [shouldUseFirestoreComments, firebaseEnabled, db, postComments, usernameCacheTick]);
+.\src\components\CommentsModal.js:298:  const threadedPostComments = useMemo(() => {
+.\src\components\CommentsModal.js:299:    if (!shouldUseFirestoreComments) return [];
+.\src\components\CommentsModal.js:303:    for (const c of postComments) {
+.\src\components\CommentsModal.js:308:    for (const c of postComments) {
+.\src\components\CommentsModal.js:315:    const parents = postComments.filter((c) => !String(c?.parentId || '').trim());
+.\src\components\CommentsModal.js:325:  }, [postComments, shouldUseFirestoreComments]);
+.\src\components\CommentsModal.js:327:  const comments = useMemo(() => {
+.\src\components\CommentsModal.js:328:    if (isLiveMode) return Array.isArray(externalComments) ? externalComments : [];
+.\src\components\CommentsModal.js:329:    if (shouldUseFirestoreComments) return threadedPostComments;
+.\src\components\CommentsModal.js:330:    return internalComments;
+.\src\components\CommentsModal.js:331:  }, [externalComments, internalComments, isLiveMode, threadedPostComments, shouldUseFirestoreComments]);
+.\src\components\CommentsModal.js:350:  const handleSendComment = async () => {
+.\src\components\CommentsModal.js:351:    const text = String(newComment || '').trim();
+.\src\components\CommentsModal.js:356:        if (typeof onSendComment === 'function') {
+.\src\components\CommentsModal.js:357:          await onSendComment(text);
+.\src\components\CommentsModal.js:359:        setNewComment('');
+.\src\components\CommentsModal.js:367:    // Non-live (feed) comments: persist per post.
+.\src\components\CommentsModal.js:368:    if (shouldUseFirestoreComments) {
+.\src\components\CommentsModal.js:370:        Alert.alert('Sign in required', 'Please sign in to add a comment.');
+.\src\components\CommentsModal.js:380:        setCommentsError(String(msg || 'Auth unavailable'));
+.\src\components\CommentsModal.js:384:          Alert.alert('Auth Error', `Cannot comment until Firebase auth is ready.\n\n${code}${status}\n${msg}`);
+.\src\components\CommentsModal.js:404:          .collection('comments')
+.\src\components\CommentsModal.js:415:        setNewComment('');
+.\src\components\CommentsModal.js:419:        const rawMsg = String(e?.message || e || 'Failed to send comment');
+.\src\components\CommentsModal.js:421:        setCommentsError(rawMsg);
+.\src\components\CommentsModal.js:441:            'Comment failed',
+.\src\components\CommentsModal.js:442:            'Firestore denied the write (permission denied).\n\nMost common causes:\n- Firebase Auth bridge not established (start Functions emulator on 5001 and ensure adb reverse is set)\n- Firestore rules do not allow /posts/{postId}/comments writes (deploy updated firestore.rules)'
+.\src\components\CommentsModal.js:447:          Alert.alert('Comment failed', 'Network/offline error while saving your comment.');
+.\src\components\CommentsModal.js:452:        Alert.alert('Comment failed', __DEV__ ? rawMsg : 'Unable to save your comment right now.');
+.\src\components\CommentsModal.js:458:    const comment = {
+.\src\components\CommentsModal.js:467:    setInternalComments([comment, ...internalComments]);
+.\src\components\CommentsModal.js:468:    setNewComment('');
+.\src\components\CommentsModal.js:472:    (commentId) => {
+.\src\components\CommentsModal.js:473:      const isCurrentlyLiked = likedComments.has(commentId);
+.\src\components\CommentsModal.js:474:      const nextLiked = new Set(likedComments);
+.\src\components\CommentsModal.js:475:      if (isCurrentlyLiked) nextLiked.delete(commentId);
+.\src\components\CommentsModal.js:476:      else nextLiked.add(commentId);
+.\src\components\CommentsModal.js:477:      setLikedComments(nextLiked);
+.\src\components\CommentsModal.js:479:      if (shouldUseFirestoreComments) {
+.\src\components\CommentsModal.js:480:        setPostComments((prev) =>
+.\src\components\CommentsModal.js:482:            if (c?.id !== commentId) return c;
+.\src\components\CommentsModal.js:496:      setInternalComments((prev) =>
+.\src\components\CommentsModal.js:497:        prev.map((comment) =>
+.\src\components\CommentsModal.js:498:          comment.id === commentId
+.\src\components\CommentsModal.js:500:                ...comment,
+.\src\components\CommentsModal.js:501:                likes: nextLiked.has(commentId) ? comment.likes + 1 : Math.max(0, comment.likes - 1),
+.\src\components\CommentsModal.js:503:            : comment
+.\src\components\CommentsModal.js:507:    [likedComments, shouldUseFirestoreComments, uid]
+.\src\components\CommentsModal.js:510:  const runCommentLikeTransaction = useCallback(
+.\src\components\CommentsModal.js:511:    async ({ postId: pid, commentId, userId }) => {
+.\src\components\CommentsModal.js:521:          .collection('comments')
+.\src\components\CommentsModal.js:522:          .doc(commentId);
+.\src\components\CommentsModal.js:526:          if (!snap?.exists) throw new Error('Comment not found');
+.\src\components\CommentsModal.js:545:      const ref = webDoc(firestoreInstance, 'posts', pid, 'comments', commentId);
+.\src\components\CommentsModal.js:548:        if (!snap?.exists?.()) throw new Error('Comment not found');
+.\src\components\CommentsModal.js:567:  const handleLikeComment = useCallback(
+.\src\components\CommentsModal.js:568:    async (commentId) => {
+.\src\components\CommentsModal.js:570:      if (!commentId) return;
+.\src\components\CommentsModal.js:572:      // Firestore-backed comments
+.\src\components\CommentsModal.js:573:      if (shouldUseFirestoreComments) {
+.\src\components\CommentsModal.js:575:          Alert.alert('Sign in required', 'Please sign in to like comments.');
+.\src\components\CommentsModal.js:579:        if (likePendingRef.current.has(commentId)) return;
+.\src\components\CommentsModal.js:580:        likePendingRef.current.add(commentId);
+.\src\components\CommentsModal.js:583:        toggleLikeOptimistic(commentId);
+.\src\components\CommentsModal.js:587:          await runCommentLikeTransaction({ postId, commentId, userId: uid });
+.\src\components\CommentsModal.js:590:          toggleLikeOptimistic(commentId);
+.\src\components\CommentsModal.js:591:          const msg = String(e?.message || e || 'Unable to like comment');
+.\src\components\CommentsModal.js:592:          setCommentsError(msg);
+.\src\components\CommentsModal.js:593:          if (__DEV__) console.warn('[COMMENTS] Like failed', { postId, commentId, uid, msg });
+.\src\components\CommentsModal.js:595:          likePendingRef.current.delete(commentId);
+.\src\components\CommentsModal.js:600:      // Mock/internal comments
+.\src\components\CommentsModal.js:601:      toggleLikeOptimistic(commentId);
+.\src\components\CommentsModal.js:605:      shouldUseFirestoreComments,
+.\src\components\CommentsModal.js:611:      runCommentLikeTransaction,
+.\src\components\CommentsModal.js:615:  const handleReplyToComment = useCallback(
+.\src\components\CommentsModal.js:616:    (comment) => {
+.\src\components\CommentsModal.js:618:      if (!comment?.id) return;
+.\src\components\CommentsModal.js:619:      const label = resolveDisplayUsername(comment);
+.\src\components\CommentsModal.js:620:      setReplyingTo({ id: comment.id, username: label || 'User' });
+.\src\components\CommentsModal.js:625:  const renderComment = ({ item }) => {
+.\src\components\CommentsModal.js:626:    const isLiked = likedComments.has(item.id);
+.\src\components\CommentsModal.js:633:      <View style={styles.commentItem}>
+.\src\components\CommentsModal.js:635:          <Image source={{ uri: avatarUri }} style={styles.commentAvatar} />
+.\src\components\CommentsModal.js:637:          <View style={[styles.commentAvatar, styles.commentAvatarPlaceholder]} />
+.\src\components\CommentsModal.js:639:        <View style={styles.commentContent}>
+.\src\components\CommentsModal.js:640:          <View style={styles.commentHeader}>
+.\src\components\CommentsModal.js:641:            <Text style={styles.commentUsername}>{displayUsername}</Text>
+.\src\components\CommentsModal.js:642:            <Text style={styles.commentTime}>{item.time || ''}</Text>
+.\src\components\CommentsModal.js:644:          <Text style={styles.commentText}>{item.text}</Text>
+.\src\components\CommentsModal.js:646:            <View style={styles.commentActions}>
+.\src\components\CommentsModal.js:648:                style={styles.commentAction}
+.\src\components\CommentsModal.js:649:                onPress={() => handleLikeComment(item.id)}
+.\src\components\CommentsModal.js:656:                <Text style={[styles.commentActionText, isLiked && { color: COLORS.gradientEnd }]}>
+.\src\components\CommentsModal.js:660:              <TouchableOpacity style={styles.commentAction} onPress={() => handleReplyToComment(item)}>
+.\src\components\CommentsModal.js:661:                <Text style={styles.commentActionText}>Reply</Text>
+.\src\components\CommentsModal.js:711:              <Text style={styles.headerTitle}>{title || (isLiveMode ? 'Live Chat' : 'Comments')}</Text>
+.\src\components\CommentsModal.js:731:            {/* Comments List */}
+.\src\components\CommentsModal.js:733:              data={comments}
+.\src\components\CommentsModal.js:734:              renderItem={renderComment}
+.\src\components\CommentsModal.js:737:              contentContainerStyle={styles.commentsList}
+.\src\components\CommentsModal.js:740:            {/* Comment Input */}
+.\src\components\CommentsModal.js:758:                  style={styles.commentInput}
+.\src\components\CommentsModal.js:759:                  placeholder={isLiveMode ? 'Say something‘«™' : (replyingTo?.id ? 'Write a reply‘«™' : 'Add a comment...')}
+.\src\components\CommentsModal.js:761:                  value={newComment}
+.\src\components\CommentsModal.js:762:                  onChangeText={setNewComment}
+.\src\components\CommentsModal.js:766:                  style={[styles.sendButton, !newComment.trim() && styles.sendButtonDisabled]}
+.\src\components\CommentsModal.js:767:                  onPress={handleSendComment}
+.\src\components\CommentsModal.js:768:                  disabled={!newComment.trim()}
+.\src\components\CommentsModal.js:771:                    colors={newComment.trim() ? ['#ec4899', '#be185d'] : ['#374151', '#374151']}
+.\src\components\CommentsModal.js:846:  commentsList: {
+.\src\components\CommentsModal.js:849:  commentItem: {
+.\src\components\CommentsModal.js:858:  commentAvatar: {
+.\src\components\CommentsModal.js:864:  commentAvatarPlaceholder: {
+.\src\components\CommentsModal.js:867:  commentContent: {
+.\src\components\CommentsModal.js:870:  commentHeader: {
+.\src\components\CommentsModal.js:875:  commentUsername: {
+.\src\components\CommentsModal.js:881:  commentTime: {
+.\src\components\CommentsModal.js:885:  commentText: {
+.\src\components\CommentsModal.js:890:  commentActions: {
+.\src\components\CommentsModal.js:894:  commentAction: {
+.\src\components\CommentsModal.js:899:  commentActionText: {
+.\src\components\CommentsModal.js:974:  commentInput: {
+.\src\components\CommentsModal.js:1000:export default CommentsModal;
+.\src\runtime\assertWebSocketReady.js:12:        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+.\src\runtime\assertWebSocketReady.js:26:          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+.\src\screens\CommentsScreen.js:23:const CommentsScreen = ({ route, navigation }) => {
+.\src\screens\CommentsScreen.js:25:  const [comments, setComments] = useState([]);
+.\src\screens\CommentsScreen.js:26:  const [newComment, setNewComment] = useState('');
+.\src\screens\CommentsScreen.js:29:  const [likedComments, setLikedComments] = useState(new Set());
+.\src\screens\CommentsScreen.js:50:    loadComments();
+.\src\screens\CommentsScreen.js:53:  const loadComments = () => {
+.\src\screens\CommentsScreen.js:54:    // Mock comments data with realistic social media interactions
+.\src\screens\CommentsScreen.js:55:    const mockComments = [
+.\src\screens\CommentsScreen.js:57:        id: 'comment1',
+.\src\screens\CommentsScreen.js:77:        id: 'comment2',
+.\src\screens\CommentsScreen.js:87:        id: 'comment3',
+.\src\screens\CommentsScreen.js:116:        id: 'comment4',
+.\src\screens\CommentsScreen.js:126:        id: 'comment5',
+.\src\screens\CommentsScreen.js:139:            text: 'Engagement is everything! Keep commenting everyone ≠É∆¨',
+.\src\screens\CommentsScreen.js:147:    setComments(mockComments);
+.\src\screens\CommentsScreen.js:151:  const handleSendComment = async () => {
+.\src\screens\CommentsScreen.js:152:    if (!newComment.trim()) return;
+.\src\screens\CommentsScreen.js:154:    const commentText = newComment.trim();
+.\src\screens\CommentsScreen.js:155:    setNewComment('');
+.\src\screens\CommentsScreen.js:164:        text: `@${replyingTo.username} ${commentText}`,
+.\src\screens\CommentsScreen.js:169:      setComments(prevComments => 
+.\src\screens\CommentsScreen.js:170:        prevComments.map(comment => 
+.\src\screens\CommentsScreen.js:171:          comment.id === replyingTo.commentId
+.\src\screens\CommentsScreen.js:172:            ? { ...comment, replies: [...comment.replies, newReply] }
+.\src\screens\CommentsScreen.js:173:            : comment
+.\src\screens\CommentsScreen.js:178:      // Handle new comment
+.\src\screens\CommentsScreen.js:179:      const newCommentObj = {
+.\src\screens\CommentsScreen.js:180:        id: `comment_${Date.now()}`,
+.\src\screens\CommentsScreen.js:184:        text: commentText,
+.\src\screens\CommentsScreen.js:190:      setComments(prevComments => [newCommentObj, ...prevComments]);
+.\src\screens\CommentsScreen.js:193:    // Scroll to top to show new comment
+.\src\screens\CommentsScreen.js:199:  const handleLikeComment = (commentId, isReply = false, parentCommentId = null) => {
+.\src\screens\CommentsScreen.js:200:    const likeKey = isReply ? `${parentCommentId}_${commentId}` : commentId;
+.\src\screens\CommentsScreen.js:201:    const newLikedComments = new Set(likedComments);
+.\src\screens\CommentsScreen.js:203:    if (newLikedComments.has(likeKey)) {
+.\src\screens\CommentsScreen.js:204:      newLikedComments.delete(likeKey);
+.\src\screens\CommentsScreen.js:206:      newLikedComments.add(likeKey);
+.\src\screens\CommentsScreen.js:209:    setLikedComments(newLikedComments);
+.\src\screens\CommentsScreen.js:211:    // Update comment likes count
+.\src\screens\CommentsScreen.js:212:    setComments(prevComments => 
+.\src\screens\CommentsScreen.js:213:      prevComments.map(comment => {
+.\src\screens\CommentsScreen.js:214:        if (!isReply && comment.id === commentId) {
+.\src\screens\CommentsScreen.js:216:            ...comment,
+.\src\screens\CommentsScreen.js:217:            likes: newLikedComments.has(likeKey) ? comment.likes + 1 : comment.likes - 1
+.\src\screens\CommentsScreen.js:219:        } else if (isReply && comment.id === parentCommentId) {
+.\src\screens\CommentsScreen.js:221:            ...comment,
+.\src\screens\CommentsScreen.js:222:            replies: comment.replies.map(reply => 
+.\src\screens\CommentsScreen.js:223:              reply.id === commentId
+.\src\screens\CommentsScreen.js:224:                ? { ...reply, likes: newLikedComments.has(likeKey) ? reply.likes + 1 : reply.likes - 1 }
+.\src\screens\CommentsScreen.js:229:        return comment;
+.\src\screens\CommentsScreen.js:234:  const handleReply = (comment, isReply = false, parentCommentId = null) => {
+.\src\screens\CommentsScreen.js:236:      commentId: isReply ? parentCommentId : comment.id,
+.\src\screens\CommentsScreen.js:237:      username: comment.username,
+.\src\screens\CommentsScreen.js:238:      text: comment.text
+.\src\screens\CommentsScreen.js:256:  const closeComments = () => {
+.\src\screens\CommentsScreen.js:267:  const renderReply = ({ item: reply, index }, parentComment) => {
+.\src\screens\CommentsScreen.js:268:    const likeKey = `${parentComment.id}_${reply.id}`;
+.\src\screens\CommentsScreen.js:269:    const isLiked = likedComments.has(likeKey);
+.\src\screens\CommentsScreen.js:274:        <TouchableOpacity style={styles.commentItem}>
+.\src\screens\CommentsScreen.js:276:          <View style={styles.commentContent}>
+.\src\screens\CommentsScreen.js:277:            <View style={styles.commentHeader}>
+.\src\screens\CommentsScreen.js:278:              <Text style={styles.commentUsername}>{reply.username}</Text>
+.\src\screens\CommentsScreen.js:279:              <Text style={styles.commentTime}>{formatTimestamp(reply.timestamp)}</Text>
+.\src\screens\CommentsScreen.js:281:            <Text style={styles.commentText}>{reply.text}</Text>
+.\src\screens\CommentsScreen.js:282:            <View style={styles.commentActions}>
+.\src\screens\CommentsScreen.js:284:                style={styles.commentAction}
+.\src\screens\CommentsScreen.js:285:                onPress={() => handleLikeComment(reply.id, true, parentComment.id)}
+.\src\screens\CommentsScreen.js:292:                <Text style={[styles.commentActionText, isLiked && { color: COLORS.gradientEnd }]}>
+.\src\screens\CommentsScreen.js:297:                style={styles.commentAction}
+.\src\screens\CommentsScreen.js:298:                onPress={() => handleReply(reply, true, parentComment.id)}
+.\src\screens\CommentsScreen.js:300:                <Text style={styles.commentActionText}>Reply</Text>
+.\src\screens\CommentsScreen.js:309:  const renderComment = ({ item: comment, index }) => {
+.\src\screens\CommentsScreen.js:310:    const isLiked = likedComments.has(comment.id);
+.\src\screens\CommentsScreen.js:313:      <View style={styles.commentContainer}>
+.\src\screens\CommentsScreen.js:314:        <TouchableOpacity style={styles.commentItem}>
+.\src\screens\CommentsScreen.js:315:          <Image source={{ uri: comment.avatar }} style={styles.commentAvatar} />
+.\src\screens\CommentsScreen.js:316:          <View style={styles.commentContent}>
+.\src\screens\CommentsScreen.js:317:            <View style={styles.commentHeader}>
+.\src\screens\CommentsScreen.js:318:              <Text style={styles.commentUsername}>{comment.username}</Text>
+.\src\screens\CommentsScreen.js:319:              <Text style={styles.commentTime}>{formatTimestamp(comment.timestamp)}</Text>
+.\src\screens\CommentsScreen.js:321:            <Text style={styles.commentText}>{comment.text}</Text>
+.\src\screens\CommentsScreen.js:322:            <View style={styles.commentActions}>
+.\src\screens\CommentsScreen.js:324:                style={styles.commentAction}
+.\src\screens\CommentsScreen.js:325:                onPress={() => handleLikeComment(comment.id)}
+.\src\screens\CommentsScreen.js:332:                <Text style={[styles.commentActionText, isLiked && { color: COLORS.gradientEnd }]}>
+.\src\screens\CommentsScreen.js:333:                  {comment.likes}
+.\src\screens\CommentsScreen.js:337:                style={styles.commentAction}
+.\src\screens\CommentsScreen.js:338:                onPress={() => handleReply(comment)}
+.\src\screens\CommentsScreen.js:340:                <Text style={styles.commentActionText}>Reply</Text>
+.\src\screens\CommentsScreen.js:347:        {comment.replies && comment.replies.length > 0 && (
+.\src\screens\CommentsScreen.js:349:            data={comment.replies}
+.\src\screens\CommentsScreen.js:350:            renderItem={(props) => renderReply(props, comment)}
+.\src\screens\CommentsScreen.js:373:      <View style={styles.commentsHeader}>
+.\src\screens\CommentsScreen.js:374:        <Text style={styles.commentsTitle}>Comments ({comments.length})</Text>
+.\src\screens\CommentsScreen.js:393:            <TouchableOpacity style={styles.closeButton} onPress={closeComments}>
+.\src\screens\CommentsScreen.js:396:            <Text style={styles.headerTitle}>Comments</Text>
+.\src\screens\CommentsScreen.js:400:          {/* Comments List */}
+.\src\screens\CommentsScreen.js:403:            data={comments}
+.\src\screens\CommentsScreen.js:404:            renderItem={renderComment}
+.\src\screens\CommentsScreen.js:408:            contentContainerStyle={styles.commentsList}
+.\src\screens\CommentsScreen.js:423:          {/* Comment Input */}
+.\src\screens\CommentsScreen.js:429:                style={styles.commentInput}
+.\src\screens\CommentsScreen.js:430:                placeholder={replyingTo ? `Reply to @${replyingTo.username}...` : "Add a comment..."}
+.\src\screens\CommentsScreen.js:432:                value={newComment}
+.\src\screens\CommentsScreen.js:433:                onChangeText={setNewComment}
+.\src\screens\CommentsScreen.js:438:                style={[styles.sendButton, !newComment.trim() && styles.sendButtonDisabled]}
+.\src\screens\CommentsScreen.js:439:                onPress={handleSendComment}
+.\src\screens\CommentsScreen.js:440:                disabled={!newComment.trim()}
+.\src\screens\CommentsScreen.js:443:                  colors={newComment.trim() ? ['#ec4899', '#be185d'] : ['#374151', '#374151']}
+.\src\screens\CommentsScreen.js:522:  commentsHeader: {
+.\src\screens\CommentsScreen.js:527:  commentsTitle: {
+.\src\screens\CommentsScreen.js:532:  commentsList: {
+.\src\screens\CommentsScreen.js:535:  commentContainer: {
+.\src\screens\CommentsScreen.js:538:  commentItem: {
+.\src\screens\CommentsScreen.js:543:  commentAvatar: {
+.\src\screens\CommentsScreen.js:555:  commentContent: {
+.\src\screens\CommentsScreen.js:558:  commentHeader: {
+.\src\screens\CommentsScreen.js:563:  commentUsername: {
+.\src\screens\CommentsScreen.js:569:  commentTime: {
+.\src\screens\CommentsScreen.js:573:  commentText: {
+.\src\screens\CommentsScreen.js:579:  commentActions: {
+.\src\screens\CommentsScreen.js:583:  commentAction: {
+.\src\screens\CommentsScreen.js:589:  commentActionText: {
+.\src\screens\CommentsScreen.js:625:  commentInput: {
+.\src\screens\CommentsScreen.js:666:export default CommentsScreen;
+.\src\services\EnterpriseAnalyticsService.js:272:          comments: 0,
+.\src\services\EnterpriseAnalyticsService.js:407:          type: engagementType, // like, comment, share, follow, etc.
+.\src\services\geminiSpeechService.js:70:            { text: 'Transcribe ONLY the spoken words from this audio. Return plain text, no commentary.' },
+.\src\services\GameService.js:287:          comments: []
+.\src\components\WhatsAppPopularTab.js:195:            <Text style={styles.metricText}>{post.comments?.length || 0}</Text>
+.\src\utils\testDataHelper.js:49:      comments: 3,
+.\src\utils\testDataHelper.js:54:      commentCount: 3
+.\src\utils\testDataHelper.js:104:      comments: 8,
+.\src\utils\testDataHelper.js:109:      commentCount: 8
+.\src\services\geminiSpeechService.voice-file-read-backup.js:28:    const body = { contents: [{ parts: [{ text: 'Transcribe this audio to plain text. Output only what the speaker said, no extra commentary.' }, { inline_data: { mime_type: mimeType, data: base64 } }] }], generationConfig: { temperature: 0, maxOutputTokens: 256 } };
+.\src\utils\smartListGenerator.js:185:        comments: post.comments?.length || 0,
+.\src\utils\smartListGenerator.js:369:        const comments = post.comments?.length || 0;
+.\src\utils\smartListGenerator.js:376:          comments * 2.0 +       // Comments weight (higher value)
+.\src\utils\smartListGenerator.js:384:          metrics: { likes, comments, shares, views }
+.\src\utils\smartListGenerator.js:428:      "criteria": "High comment engagement",
+.\src\utils\smartListGenerator.js:480:      const comments = post.comments?.length || 0;
+.\src\utils\smartListGenerator.js:484:      const score = likes + (comments * 2) + (shares * 3) + (views * 0.1);
+.\src\utils\smartListGenerator.js:529:          criteria: 'Highest comment count',
+.\src\services\LiveStreamService.js:44:          allowComments: settings.allowComments !== false,
+.\src\services\LiveStreamService.js:176:   * Subscribe to stream comments in real-time
+.\src\services\LiveStreamService.js:178:   * @param {Function} callback - Callback function for new comments
+.\src\services\LiveStreamService.js:181:  subscribeToComments(streamId, callback) {
+.\src\services\LiveStreamService.js:182:    const commentsQuery = db
+.\src\services\LiveStreamService.js:185:      .collection('comments')
+.\src\services\LiveStreamService.js:189:    return commentsQuery.onSnapshot((snapshot) => {
+.\src\services\LiveStreamService.js:190:      const comments = snapshot.docs.map(docSnap => ({
+.\src\services\LiveStreamService.js:195:      callback(comments);
+.\src\services\LiveStreamService.js:197:      console.error(`‘ÿÓ Error subscribing to comments for stream ${streamId}:`, error);
+.\src\services\LiveStreamService.js:202:   * Add a comment to a livestream
+.\src\services\LiveStreamService.js:204:   * @param {string} content - Comment content
+.\src\services\LiveStreamService.js:205:   * @returns {Promise<string>} - Comment ID
+.\src\services\LiveStreamService.js:207:  async addComment(streamId, content) {
+.\src\services\LiveStreamService.js:210:      if (!user) throw new Error('User must be logged in to comment');
+.\src\services\LiveStreamService.js:212:      const commentRef = db.collection('liveStreams').doc(streamId).collection('comments');
+.\src\services\LiveStreamService.js:213:      const commentDoc = await commentRef.add({
+.\src\services\LiveStreamService.js:222:      return commentDoc.id;
+.\src\services\LiveStreamService.js:224:      console.error('‘ÿÓ Error adding comment:', error);
+.\src\screens\SearchResultsScreen.js:93:            <Text style={styles.postStatText}>{item.comments}</Text>
+.\src\components\LiveStreamViewer.js:757:    // the comments overlay never shows the black hostStage background.
+.\src\components\LiveStreamViewer.js:804:          Fill the small gap between guest tiles and the comments bar with the header/theme color.
+.\src\components\live\LiveBottomBar.js:6:  onPressComment,
+.\src\components\live\LiveBottomBar.js:22:        <TouchableOpacity style={styles.button} onPress={onPressComment} activeOpacity={0.8}>
+.\src\screens\AuthScreen.js:131:      // so comments and directory cards can resolve usernames reliably.
+.\src\services\LiveStreamingStressTest.js:8: * - Massive comment volumes
+.\src\services\LiveStreamingStressTest.js:31:      commentsPerSecond = 500,    // High comment volume
+.\src\services\LiveStreamingStressTest.js:52:      await this.testHighFrequencyOperations(commentsPerSecond);
+.\src\services\LiveStreamingStressTest.js:192:   * Test high-frequency operations (comments, likes, segments)
+.\src\services\LiveStreamingStressTest.js:215:          // Comments
+.\src\services\LiveStreamingStressTest.js:218:              HLSLiveStreamService.addComment(testStreamId, `Stress test comment ${i}`)
+.\src\services\LiveStreamingStressTest.js:362:      () => HLSLiveStreamService.getComments(streamId, 10)
+.\src\components\live\LiveBottomBar.tsx:6:  onPressComment,
+.\src\components\live\LiveBottomBar.tsx:13:  onPressComment?: () => void;
+.\src\components\live\LiveBottomBar.tsx:29:        <TouchableOpacity style={styles.button} onPress={onPressComment} activeOpacity={0.8}>
+.\src\screens\ReviewScreen.js:291:  // AI Comment Generation State
+.\src\screens\ReviewScreen.js:292:  const [isGeneratingComments, setIsGeneratingComments] = useState(false);
+.\src\screens\ReviewScreen.js:293:  const [generatedComments, setGeneratedComments] = useState([]);
+.\src\screens\ReviewScreen.js:2322:        comments: 0, // Add comments field  
+.\src\screens\ReviewScreen.js:2327:        commentCount: 0
+.\src\screens\ReviewScreen.js:2350:      // Generate AI comments in background (non-blocking, fire-and-forget)
+.\src\screens\ReviewScreen.js:2351:      console.log('≠ÉÒ˚ Starting background AI comment generation for post:', docRef.id);
+.\src\screens\ReviewScreen.js:2352:      generateAIComments(postData)
+.\src\screens\ReviewScreen.js:2353:        .then(aiComments => {
+.\src\screens\ReviewScreen.js:2354:          if (aiComments && aiComments.length > 0) {
+.\src\screens\ReviewScreen.js:2355:            console.log(`‘£‡ Generated ${aiComments.length} AI comments in background`);
+.\src\screens\ReviewScreen.js:2356:            setGeneratedComments(aiComments);
+.\src\screens\ReviewScreen.js:2357:            // Optionally: Update Firestore post with AI comment IDs for future retrieval
+.\src\screens\ReviewScreen.js:2361:          console.warn('[POST][AI] Background AI comment generation failed', { 
+.\src\screens\ReviewScreen.js:2375:      setIsGeneratingComments(false);
+.\src\screens\ReviewScreen.js:2516:  // Generate AI comments for the post
+.\src\screens\ReviewScreen.js:2517:  const generateAIComments = async (postData) => {
+.\src\screens\ReviewScreen.js:2519:      console.log('≠ÉÒ˚ Generating AI comments for post...');
+.\src\screens\ReviewScreen.js:2521:      // Simulate AI comment generation (replace with actual AI service)
+.\src\screens\ReviewScreen.js:2522:      const comments = [
+.\src\screens\ReviewScreen.js:2524:          id: 'ai-comment-1',
+.\src\screens\ReviewScreen.js:2531:          id: 'ai-comment-2', 
+.\src\screens\ReviewScreen.js:2538:          id: 'ai-comment-3',
+.\src\screens\ReviewScreen.js:2547:      // const comments = await aiService.generatePostComments(postData);
+.\src\screens\ReviewScreen.js:2549:      return comments;
+.\src\screens\ReviewScreen.js:2551:      console.error('‘ÿÓ AI comment generation failed:', error);
+.\src\screens\ReviewScreen.js:3277:      {/* AI Comment Generation Overlay */}
+.\src\screens\ReviewScreen.js:3279:        visible={isGeneratingComments}
+.\src\screens\HomeScreen.js:33:import CommentsModal from '../components/CommentsModal';
+.\src\screens\HomeScreen.js:56:const randomCommentsData = [
+.\src\screens\HomeScreen.js:174:// NOTE: Per-post comment counts are now driven by real Firestore comments.
+.\src\screens\HomeScreen.js:190:  const [commentCounts, setCommentCounts] = useState({});
+.\src\screens\HomeScreen.js:206:  const [commentsVisible, setCommentsVisible] = useState(false);
+.\src\screens\HomeScreen.js:220:  const commentScrollValue = useRef(new Animated.Value(0)).current;
+.\src\screens\HomeScreen.js:263:    const animateComments = () => {
+.\src\screens\HomeScreen.js:264:      commentScrollValue.setValue(0);
+.\src\screens\HomeScreen.js:266:        Animated.timing(commentScrollValue, {
+.\src\screens\HomeScreen.js:274:    animateComments();
+.\src\screens\HomeScreen.js:646:  const handleOpenComments = (post) => {
+.\src\screens\HomeScreen.js:648:    setCommentsVisible(true);
+.\src\screens\HomeScreen.js:718:  const handleCloseComments = () => {
+.\src\screens\HomeScreen.js:719:    setCommentsVisible(false);
+.\src\screens\HomeScreen.js:723:  const getPostCommentCount = useCallback(
+.\src\screens\HomeScreen.js:727:      const fromModal = postId ? commentCounts?.[postId] : undefined;
+.\src\screens\HomeScreen.js:731:        post?.commentCount ??
+.\src\screens\HomeScreen.js:732:        post?.commentsCount ??
+.\src\screens\HomeScreen.js:733:        post?.comment_count ??
+.\src\screens\HomeScreen.js:734:        post?.numComments ??
+.\src\screens\HomeScreen.js:735:        post?.comments;
+.\src\screens\HomeScreen.js:740:      if (Array.isArray(post?.comments)) return post.comments.length;
+.\src\screens\HomeScreen.js:743:    [commentCounts]
+.\src\screens\HomeScreen.js:1024:              onPress={() => handleOpenComments(item)}
+.\src\screens\HomeScreen.js:1025:              count={getPostCommentCount(item)}
+.\src\screens\HomeScreen.js:1197:            onPress={() => handleOpenComments(item)}
+.\src\screens\HomeScreen.js:1198:            count={getPostCommentCount(item)}
+.\src\screens\HomeScreen.js:1361:      <CommentsModal
+.\src\screens\HomeScreen.js:1362:        visible={commentsVisible}
+.\src\screens\HomeScreen.js:1363:        onClose={handleCloseComments}
+.\src\screens\HomeScreen.js:1366:        onCommentCountChange={(id, count) => {
+.\src\screens\HomeScreen.js:1370:          setCommentCounts((prev) => ({ ...prev, [id]: Math.max(0, Math.trunc(n)) }));
+.\src\screens\HomeScreen.js:1449:  commentPreviewBand: {
+.\src\screens\HomeScreen.js:1455:  commentPreviewBubble: {
+.\src\screens\HomeScreen.js:1466:  commentPreviewText: {
+.\src\screens\LiveStreamScreen_BROKEN.js:85:  // Comments
+.\src\screens\LiveStreamScreen_BROKEN.js:86:  const [comments, setComments] = useState([]);
+.\src\screens\LiveStreamScreen_BROKEN.js:87:  const [commentText, setCommentText] = useState('');
+.\src\screens\LiveStreamScreen_BROKEN.js:99:  const unsubscribeCommentsRef = React.useRef(null);
+.\src\screens\LiveStreamScreen_BROKEN.js:290:   * Subscribe to stream data and comments
+.\src\screens\LiveStreamScreen_BROKEN.js:323:    // Subscribe to comments
+.\src\screens\LiveStreamScreen_BROKEN.js:324:    unsubscribeCommentsRef.current = HLSLiveStreamService.subscribeToComments(targetStreamId, (commentsList) => {
+.\src\screens\LiveStreamScreen_BROKEN.js:325:      setComments(commentsList);
+.\src\screens\LiveStreamScreen_BROKEN.js:353:    if (unsubscribeCommentsRef.current) {
+.\src\screens\LiveStreamScreen_BROKEN.js:354:      unsubscribeCommentsRef.current();
+.\src\screens\LiveStreamScreen_BROKEN.js:619:   * Send comment
+.\src\screens\LiveStreamScreen_BROKEN.js:621:  const sendComment = async () => {
+.\src\screens\LiveStreamScreen_BROKEN.js:622:    if (!commentText.trim() || !route.params.streamId) return;
+.\src\screens\LiveStreamScreen_BROKEN.js:625:      await HLSLiveStreamService.addComment(route.params.streamId, commentText.trim());
+.\src\screens\LiveStreamScreen_BROKEN.js:626:      setCommentText('');
+.\src\screens\LiveStreamScreen_BROKEN.js:628:      console.error('‘ÿÓ Error sending comment:', error);
+.\src\screens\LiveStreamScreen_BROKEN.js:629:      Alert.alert('Error', 'Failed to send comment.');
+.\src\screens\LiveStreamScreen_BROKEN.js:1130:        {/* Comments section */}
+.\src\screens\LiveStreamScreen_BROKEN.js:1133:          style={styles.commentsSection}
+.\src\screens\LiveStreamScreen_BROKEN.js:1135:          {/* Comments list */}
+.\src\screens\LiveStreamScreen_BROKEN.js:1137:            data={comments}
+.\src\screens\LiveStreamScreen_BROKEN.js:1140:              <View style={styles.comment}>
+.\src\screens\LiveStreamScreen_BROKEN.js:1141:                <Text style={styles.commentAuthor}>{item.displayName}: </Text>
+.\src\screens\LiveStreamScreen_BROKEN.js:1142:                <Text style={styles.commentText}>{item.content}</Text>
+.\src\screens\LiveStreamScreen_BROKEN.js:1146:            style={styles.commentsList}
+.\src\screens\LiveStreamScreen_BROKEN.js:1149:          {/* Comment input */}
+.\src\screens\LiveStreamScreen_BROKEN.js:1150:          <View style={styles.commentInputContainer}>
+.\src\screens\LiveStreamScreen_BROKEN.js:1152:              style={styles.commentInput}
+.\src\screens\LiveStreamScreen_BROKEN.js:1153:              placeholder="Add a comment..."
+.\src\screens\LiveStreamScreen_BROKEN.js:1155:              value={commentText}
+.\src\screens\LiveStreamScreen_BROKEN.js:1156:              onChangeText={setCommentText}
+.\src\screens\LiveStreamScreen_BROKEN.js:1157:              onSubmitEditing={sendComment}
+.\src\screens\LiveStreamScreen_BROKEN.js:1161:              onPress={sendComment}
+.\src\screens\LiveStreamScreen_BROKEN.js:1162:              disabled={!commentText.trim()}
+.\src\screens\LiveStreamScreen_BROKEN.js:1167:                color={commentText.trim() ? COLORS.gradientEnd : '#666'}
+.\src\screens\LiveStreamScreen_BROKEN.js:1373:  commentsSection: {
+.\src\screens\LiveStreamScreen_BROKEN.js:1379:  commentsList: {
+.\src\screens\LiveStreamScreen_BROKEN.js:1383:  comment: {
+.\src\screens\LiveStreamScreen_BROKEN.js:1387:  commentAuthor: {
+.\src\screens\LiveStreamScreen_BROKEN.js:1392:  commentText: {
+.\src\screens\LiveStreamScreen_BROKEN.js:1397:  commentInputContainer: {
+.\src\screens\LiveStreamScreen_BROKEN.js:1404:  commentInput: {
+.\src\screens\MediaViewerScreen.js:535:        {/* Comment Button */}
+.\src\screens\MediaViewerScreen.js:539:            {actualPost.commentCount || actualPost.comments || ''}
+.\src\services\HLSLiveStreamService.js:121:        // Removed legacy comments array; comments now stored in subcollection liveStreams/{id}/comments
+.\src\services\HLSLiveStreamService.js:453:   * Lazy migrate embedded comments array (if any) into subcollection.
+.\src\services\HLSLiveStreamService.js:456:  async migrateEmbeddedComments(streamId) {
+.\src\services\HLSLiveStreamService.js:462:      const legacy = Array.isArray(data.comments) ? data.comments : null;
+.\src\services\HLSLiveStreamService.js:464:      console.log(`≠Éˆ‰ Migrating ${legacy.length} legacy embedded comments for stream ${streamId}`);
+.\src\services\HLSLiveStreamService.js:469:          // Normalize comment structure
+.\src\services\HLSLiveStreamService.js:479:          await streamRef.collection('comments').add(migrated);
+.\src\services\HLSLiveStreamService.js:486:          console.warn('‘‹·¥©≈ Comment migrate item failed:', e?.message);
+.\src\services\HLSLiveStreamService.js:490:      try { await streamRef.update({ comments: null }); } catch {}
+.\src\services\HLSLiveStreamService.js:491:      console.log(`‘£‡ Legacy comments migrated for stream ${streamId}`);
+.\src\services\HLSLiveStreamService.js:493:      console.warn('‘‹·¥©≈ migrateEmbeddedComments failed:', err?.message);
+.\src\services\HLSLiveStreamService.js:946:   * Add comment to live stream via backend API
+.\src\services\HLSLiveStreamService.js:948:  async addComment(streamId, content, userId, cognitoToken) {
+.\src\services\HLSLiveStreamService.js:951:        throw new Error('userId is required to add comment');
+.\src\services\HLSLiveStreamService.js:971:      // This keeps IVS orchestration on :4000 but still lets comments hit Functions emulator.
+.\src\services\HLSLiveStreamService.js:996:          'Missing Functions base URL for live comments. Set EXPO_PUBLIC_FUNCTIONS_BASE_URL (or EXPO_PUBLIC_FIREBASE_FUNCTIONS_BASE_URL) '
+.\src\services\HLSLiveStreamService.js:1001:      const url = `${resolvedBase}/addLiveStreamComment`;
+.\src\services\HLSLiveStreamService.js:1018:        throw new Error(error.error || 'Failed to add comment');
+.\src\services\HLSLiveStreamService.js:1021:      console.log(`≠É∆º Comment added to stream ${streamId}`);
+.\src\services\HLSLiveStreamService.js:1024:      console.error('‘ÿÓ Error adding comment:', error);
+.\src\services\HLSLiveStreamService.js:1030:   * Subscribe to comments with TikTok-style real-time updates
+.\src\services\HLSLiveStreamService.js:1032:  subscribeToComments(streamId, callback) {
+.\src\services\HLSLiveStreamService.js:1033:    const commentsRef = db.collection('liveStreams').doc(streamId).collection('comments');
+.\src\services\HLSLiveStreamService.js:1034:    const commentsQuery = commentsRef.orderBy('timestamp', 'desc').limit(50);
+.\src\services\HLSLiveStreamService.js:1036:    return commentsQuery.onSnapshot((snapshot) => {
+.\src\services\HLSLiveStreamService.js:1037:      const comments = snapshot.docs.map(docSnap => ({
+.\src\services\HLSLiveStreamService.js:1041:      callback(comments.reverse()); // Show oldest first
+.\src\services\HLSLiveStreamService.js:1043:      console.error('‘ÿÓ Error subscribing to comments:', error);
+.\src\services\HLSLiveStreamService.js:1051:  subscribeToCommentsLegacy(streamId, callback) {
+.\src\services\HLSLiveStreamService.js:1058:        if (Array.isArray(data.comments) && data.comments.length) {
+.\src\services\HLSLiveStreamService.js:1059:          this.migrateEmbeddedComments(streamId).catch(() => {});
+.\src\services\HLSLiveStreamService.js:1061:        const comments = data.comments || [];
+.\src\services\HLSLiveStreamService.js:1063:        const sortedComments = comments
+.\src\services\HLSLiveStreamService.js:1065:          .slice(0, 50); // Limit to recent 50 comments
+.\src\services\HLSLiveStreamService.js:1067:        callback(sortedComments);
+.\src\services\ScalableHLSService.js:476:      comments: [],
+.\src\screens\ProfileScreen.v3.tsx:676:            <Text style={styles.postMetricText}>{post.comments?.length || post.commentCount || 0}</Text>
+.\src\screens\PostPreviewScreen.js:119:        <Text style={styles.actionText}>{post.commentCount || 0}</Text>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:47:  const [comments, setComments] = useState([]);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:48:  const [commentText, setCommentText] = useState('');
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:145:    let unsubscribeComments;
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:183:          // Subscribe to comments
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:185:            unsubscribeComments = LiveStreamService.subscribeToComments(streamId, (commentsList) => {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:186:              console.log(`≠ÉÙÿ Received ${commentsList.length} comments for stream ${streamId}:`, commentsList);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:187:              setComments(commentsList);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:190:            console.error('‘ÿÓ Error subscribing to comments:', error);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:191:            // Still continue with empty comments
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:192:            setComments([]);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:215:      if (unsubscribeComments) unsubscribeComments();
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:259:          allowComments: true,
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:383:   * Send a comment
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:385:  const sendComment = async () => {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:386:    if (!commentText.trim() || !streamId) {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:387:      console.log('≠É∆º Cannot send comment - missing text or streamId:', { commentText, streamId });
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:392:      console.log(`≠É∆º Sending comment to stream ${streamId}:`, commentText);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:393:      const commentId = await LiveStreamService.addComment(streamId, commentText);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:394:      console.log(`≠É∆º Comment sent successfully: ${commentId}`);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:395:      setCommentText('');
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:397:      console.error('‘ÿÓ Error sending comment:', error);
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:518:                    <Text style={styles.settingTitle}>Comments</Text>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:564:   * Render comment item
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:566:  const renderCommentItem = ({ item }) => (
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:567:    <View style={styles.commentItem}>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:570:        style={styles.commentAvatar} 
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:572:      <View style={styles.commentContent}>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:573:        <Text style={styles.commentUsername}>{item.displayName || 'Anonymous'}</Text>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:574:        <Text style={styles.commentText}>{item.content}</Text>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:756:        {/* Comments Section */}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:759:          style={styles.commentsContainer}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:763:            data={comments}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:764:            renderItem={renderCommentItem}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:766:            style={styles.commentsList}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:770:          <View style={styles.commentInputContainer}>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:772:              style={styles.commentInput}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:773:              value={commentText}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:774:              onChangeText={setCommentText}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:775:              placeholder="Add a comment..."
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:779:            <View style={styles.commentActions}>
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:793:                onPress={sendComment}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:794:                disabled={!commentText.trim()}
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:796:                <Icon  name="send" size={24} color={commentText.trim() ? "#6366f1" : "#475569"}  />
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1075:  commentsContainer: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1081:  commentsList: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1084:  commentItem: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1089:  commentAvatar: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1095:  commentContent: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1098:  commentUsername: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1104:  commentText: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1108:  commentInputContainer: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1114:  commentInput: {
+.\src\screens\LiveStreamScreen-OLD-BROKEN.js:1124:  commentActions: {
+.\src\screens\LiveStreamScreen.js:45:import CommentsModal from '../components/CommentsModal';
+.\src\screens\LiveStreamScreen.js:342:  const [comments, setComments] = useState([]);
+.\src\screens\LiveStreamScreen.js:343:  const [newComment, setNewComment] = useState('');
+.\src\screens\LiveStreamScreen.js:348:  const [viewerCommentsOverlayHeight, setViewerCommentsOverlayHeight] = useState(0);
+.\src\screens\LiveStreamScreen.js:351:  const [hostCommentsOverlayHeight, setHostCommentsOverlayHeight] = useState(0);
+.\src\screens\LiveStreamScreen.js:353:  const [commentsModalVisible, setCommentsModalVisible] = useState(false);
+.\src\screens\LiveStreamScreen.js:361:    if (!commentsModalVisible) return;
+.\src\screens\LiveStreamScreen.js:364:      setCommentsModalVisible(false);
+.\src\screens\LiveStreamScreen.js:371:  }, [commentsModalVisible]);
+.\src\screens\LiveStreamScreen.js:584:  // Cache userId -> resolved username/display handle for legacy comments.
+.\src\screens\LiveStreamScreen.js:651:        // Patch existing comments that were rendered with placeholders.
+.\src\screens\LiveStreamScreen.js:652:        setComments((prev) => {
+.\src\screens\LiveStreamScreen.js:684:  const resolveCommentUsername = (c) => {
+.\src\screens\LiveStreamScreen.js:707:    // Legacy comments may only contain a uid. Try client-side lookup from users/{uid}.
+.\src\screens\LiveStreamScreen.js:711:      // Fire and forget: will update comment state when resolved.
+.\src\screens\LiveStreamScreen.js:719:  // Comment ticker UI is handled by <LiveChatTicker /> (fed by latestMessage).
+.\src\screens\LiveStreamScreen.js:1757:      setComments([]);
+.\src\screens\LiveStreamScreen.js:1846:      if (commentsModalVisible) return;
+.\src\screens\LiveStreamScreen.js:1856:  }, [navigation, confirmExitLive, commentsModalVisible, summaryStreamId]);
+.\src\screens\LiveStreamScreen.js:1894:  const sendComment = async (textOverride) => {
+.\src\screens\LiveStreamScreen.js:1896:    const content = (typeof textOverride === 'string' ? textOverride : newComment).trim();
+.\src\screens\LiveStreamScreen.js:1900:      console.error('Cannot send comment: user not authenticated');
+.\src\screens\LiveStreamScreen.js:1901:      Alert.alert('Login Required', 'You must be logged in to comment.');
+.\src\screens\LiveStreamScreen.js:1907:      await HLSLiveStreamServiceInstance.addComment(activeStreamId, content, uid, token);
+.\src\screens\LiveStreamScreen.js:1909:        setNewComment('');
+.\src\screens\LiveStreamScreen.js:1912:      console.error('Error sending comment:', error);
+.\src\screens\LiveStreamScreen.js:1913:      const message = error?.message || 'Failed to send comment. Please try again.';
+.\src\screens\LiveStreamScreen.js:1953:  // Subscribe to comments (host: when streaming; viewer: whenever viewing a stream)
+.\src\screens\LiveStreamScreen.js:1959:    const unsubscribe = HLSLiveStreamServiceInstance.subscribeToComments(activeStreamId, (items) => {
+.\src\screens\LiveStreamScreen.js:1964:        username: resolveCommentUsername(c),
+.\src\screens\LiveStreamScreen.js:1972:      setComments(normalized);
+.\src\screens\LiveStreamScreen.js:1994:      setComments([]);
+.\src\screens\LiveStreamScreen.js:2077:          overlayBottomInset={viewerCommentsOverlayHeight}
+.\src\screens\LiveStreamScreen.js:2145:          bottomOffset={(viewerCommentsOverlayHeight || 0) + 18}
+.\src\screens\LiveStreamScreen.js:2158:          style={styles.commentsContainer}
+.\src\screens\LiveStreamScreen.js:2160:          onLayout={(e) => setViewerCommentsOverlayHeight(e?.nativeEvent?.layout?.height || 0)}
+.\src\screens\LiveStreamScreen.js:2163:            onPressComment={() => setCommentsModalVisible(true)}
+.\src\screens\LiveStreamScreen.js:2172:        <CommentsModal
+.\src\screens\LiveStreamScreen.js:2173:          visible={commentsModalVisible}
+.\src\screens\LiveStreamScreen.js:2174:          onClose={() => setCommentsModalVisible(false)}
+.\src\screens\LiveStreamScreen.js:2177:          comments={comments}
+.\src\screens\LiveStreamScreen.js:2178:          onSendComment={(text) => sendComment(text)}
+.\src\screens\LiveStreamScreen.js:2360:              { bottom: hostCommentsOverlayHeight || 0 },
+.\src\screens\LiveStreamScreen.js:2662:              bottomOffset={(hostCommentsOverlayHeight || 0) + 18}
+.\src\screens\LiveStreamScreen.js:2676:              style={styles.commentsContainer}
+.\src\screens\LiveStreamScreen.js:2678:              onLayout={(e) => setHostCommentsOverlayHeight(e?.nativeEvent?.layout?.height || 0)}
+.\src\screens\LiveStreamScreen.js:2681:                onPressComment={() => setCommentsModalVisible(true)}
+.\src\screens\LiveStreamScreen.js:2690:            <CommentsModal
+.\src\screens\LiveStreamScreen.js:2691:              visible={commentsModalVisible}
+.\src\screens\LiveStreamScreen.js:2692:              onClose={() => setCommentsModalVisible(false)}
+.\src\screens\LiveStreamScreen.js:2695:              comments={comments}
+.\src\screens\LiveStreamScreen.js:2696:              onSendComment={(text) => sendComment(text)}
+.\src\screens\LiveStreamScreen.js:3119:  commentsContainer: {
+.\src\screens\LiveStreamScreen.js:3127:  commentsList: {
+.\src\screens\LiveStreamScreen.js:3130:  commentsListContent: {
+.\src\screens\LiveStreamScreen.js:3135:  commentRow: {
+.\src\screens\LiveStreamScreen.js:3138:  commentRowMine: {
+.\src\screens\LiveStreamScreen.js:3141:  commentRowOther: {
+.\src\screens\LiveStreamScreen.js:3144:  commentBubble: {
+.\src\screens\LiveStreamScreen.js:3149:  commentBubbleMine: {
+.\src\screens\LiveStreamScreen.js:3152:  commentBubbleOther: {
+.\src\screens\LiveStreamScreen.js:3155:  commentItem: {
+.\src\screens\LiveStreamScreen.js:3161:  commentTicker: {
+.\src\screens\LiveStreamScreen.js:3169:  commentTickerRow: {
+.\src\screens\LiveStreamScreen.js:3173:  commentTickerSegment: {
+.\src\screens\LiveStreamScreen.js:3178:  commentTickerSegmentSecondary: {
+.\src\screens\LiveStreamScreen.js:3184:  commentTickerLine: {
+.\src\screens\LiveStreamScreen.js:3188:  commentTickerUsername: {
+.\src\screens\LiveStreamScreen.js:3193:  commentUsername: {

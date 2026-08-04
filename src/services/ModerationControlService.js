@@ -2,6 +2,7 @@
 // Stores actions in moderationActions collection; live controls in liveStreams/{id}/controls doc.
 
 import { db, auth } from '../config/firebase';
+import { snapExists, snapData } from '../utils/firestoreSnap';
 
 class ModerationControlService {
   async _logAction({ actionType, targetType, targetId, streamId, reasonCode, ruleId, expiresAt }) {
@@ -25,7 +26,7 @@ class ModerationControlService {
     const ref = db.collection('liveStreams').doc(streamId).collection('controls').doc('mutes');
     const muteUntil = Date.now() + durationMs;
     const snap = await ref.get();
-    const data = snap.exists ? snap.data() : {};
+    const data = snapData(snap) || {};
     data[userId] = muteUntil;
     await ref.set(data, { merge: true });
     await this._logAction({ actionType: 'mute', targetType: 'user', targetId: userId, streamId, reasonCode, expiresAt: muteUntil });
@@ -35,7 +36,7 @@ class ModerationControlService {
   async kickUser(streamId, userId, reasonCode) {
     const ref = db.collection('liveStreams').doc(streamId).collection('controls').doc('kicks');
     const snap = await ref.get();
-    const data = snap.exists ? snap.data() : {};
+    const data = snapData(snap) || {};
     data[userId] = Date.now();
     await ref.set(data, { merge: true });
     await this._logAction({ actionType: 'kick', targetType: 'user', targetId: userId, streamId, reasonCode });
@@ -52,8 +53,8 @@ class ModerationControlService {
   async isUserMuted(streamId, userId) {
     const ref = db.collection('liveStreams').doc(streamId).collection('controls').doc('mutes');
     const snap = await ref.get();
-    if (!snap.exists) return false;
-    const data = snap.data() || {};
+    if (!snapExists(snap)) return false;
+    const data = snapData(snap) || {};
     const until = data[userId];
     return !!until && Date.now() < until;
   }
@@ -61,7 +62,7 @@ class ModerationControlService {
   async getSlowMode(streamId) {
     const ref = db.collection('liveStreams').doc(streamId).collection('controls').doc('slowMode');
     const snap = await ref.get();
-    return snap.exists ? snap.data().intervalMs : 0;
+    return snapData(snap)?.intervalMs || 0;
   }
 }
 

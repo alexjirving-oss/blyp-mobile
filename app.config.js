@@ -1,34 +1,75 @@
 // Single source of truth for Expo config.
-// This replaces app.json to avoid duplication and Expo Doctor warnings.
+// Load a deterministic env file so local Android release and EAS production
+// builds resolve the same repo-controlled production inputs.
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+
+const buildProfile = String(
+  process.env.BLYP_BUILD_PROFILE ||
+  process.env.EAS_BUILD_PROFILE ||
+  ''
+).trim().toLowerCase();
+const isProductionProfile = buildProfile === 'production' || process.env.BLYP_RELEASE_BUILD === '1';
+const envFiles = isProductionProfile
+  ? ['.env.production', '.env']
+  : ['.env'];
+
+for (const envFile of envFiles) {
+  const envPath = path.join(__dirname, envFile);
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: false });
+  }
+}
 
 module.exports = () => {
   // Prefer dynamic config only (avoid static app.json conflicts)
   const fromJson = {};
 
-  // Gemini key must NEVER be hard-coded. It is sourced from env/EAS secrets.
-  // If absent, downstream Gemini features must degrade safely (disabled mode).
-  const resolvedGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || (fromJson.extra && fromJson.extra.EXPO_PUBLIC_GEMINI_API_KEY) || '';
-  if (!resolvedGeminiKey) {
-    // eslint-disable-next-line no-console
-    console.warn('[BLYP][SECURITY] Gemini key not provided via env. Gemini features will be disabled.');
-  }
-  const liveServiceUrl =
-    process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
-    process.env.EXPO_PUBLIC_LIVE_API_BASE_URL ||
-    process.env.EXPO_PUBLIC_API_BASE_URL ||
-    'https://blyp-live-service-innn3d7yqq-uc.a.run.app';
+  const enableStreamingRaw = process.env.EXPO_PUBLIC_ENABLE_STREAMING;
+  const enableStreamingNormalized = typeof enableStreamingRaw === 'string' ? enableStreamingRaw.trim().toLowerCase() : '';
+  const enableStreaming = enableStreamingNormalized === '0' || enableStreamingNormalized === 'false' ? '0' : '1';
 
+  // Matchday Live is OFF by default; opt in for staged rollout.
+  const enableMatchdayRaw = process.env.EXPO_PUBLIC_ENABLE_MATCHDAY_LIVE;
+  const enableMatchdayNormalized = typeof enableMatchdayRaw === 'string' ? enableMatchdayRaw.trim().toLowerCase() : '';
+  const enableMatchdayLive = enableMatchdayNormalized === '1' || enableMatchdayNormalized === 'true' ? '1' : '0';
+
+  const guestPublishRaw = process.env.EXPO_PUBLIC_ENABLE_GUEST_PUBLISH;
+  const guestPublishNormalized = typeof guestPublishRaw === 'string' ? guestPublishRaw.trim().toLowerCase() : '';
+  const enableGuestPublish =
+    guestPublishNormalized === '0' || guestPublishNormalized === 'false' ? '0' : '1';
+
+  // P7.4: the Gemini API key is NO LONGER embedded in the client bundle. All
+  // client Gemini traffic is proxied through the authenticated server function
+  // (functions/geminiProxy), which holds the key server-side. We deliberately do
+  // not inject EXPO_PUBLIC_GEMINI_API_KEY into expo.extra any more.
   const extra = {
     ...(fromJson.extra || {}),
     eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
-    // Key value is injected at build/runtime from env; blank string in code ensures no committed secret.
-    EXPO_PUBLIC_GEMINI_API_KEY: resolvedGeminiKey,
-    EXPO_PUBLIC_LIVE_SERVICE_URL: liveServiceUrl,
+    // P7.4: Gemini key intentionally NOT injected — client uses the server proxy.
+    EXPO_PUBLIC_GEMINI_API_KEY: '',
+    // Release-safe default: streaming is ON unless explicitly disabled.
+    EXPO_PUBLIC_ENABLE_STREAMING: enableStreaming,
+    // Matchday Live: OFF unless explicitly enabled (staged rollout flag).
+    EXPO_PUBLIC_ENABLE_MATCHDAY_LIVE: enableMatchdayLive,
+    EXPO_PUBLIC_ENABLE_GUEST_PUBLISH: enableGuestPublish,
+    EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '',
+    EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'blyp-master.firebaseapp.com',
+    EXPO_PUBLIC_FIREBASE_PROJECT_ID: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'blyp-master',
+    EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'blyp-master.firebasestorage.app',
+    EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '929105034040',
+    EXPO_PUBLIC_FIREBASE_APP_ID: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '1:929105034040:web:3f725bb93e50e9d8bb9fcd',
+    EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL:
+      process.env.EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL ||
+      process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ||
+      'https://us-central1-blyp-master.cloudfunctions.net',
     EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET:
       process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET === '0' ||
       String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET || '').toLowerCase() === 'false'
-        ? 'false'
-        : 'true',
+        ? '0'
+        : '1',
+    EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
     },
@@ -44,7 +85,7 @@ module.exports = () => {
     icon: './assets/icon.png',
     userInterfaceStyle: 'dark',
     splash: {
-      backgroundColor: '#0f172a',
+      backgroundColor: '#0A0A0C',
       image: './assets/splash.png',
       resizeMode: 'contain',
     },
@@ -56,12 +97,14 @@ module.exports = () => {
         NSCameraUsageDescription: 'This app needs access to camera to take photos and videos',
         NSMicrophoneUsageDescription: 'This app needs access to microphone to record audio',
         NSPhotoLibraryUsageDescription: 'This app needs access to photo library to save and select media',
+        NSLocationWhenInUseUsageDescription:
+          'Blyp uses your location to find shops, restaurants, and takeaways near you.',
       },
     },
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
-        backgroundColor: '#0f172a',
+        backgroundColor: '#0A0A0C',
       },
       package: 'com.blyp.mobile',
       softwareKeyboardLayoutMode: 'pan',
@@ -72,6 +115,13 @@ module.exports = () => {
         'android.permission.ACCESS_NETWORK_STATE',
         'android.permission.MODIFY_AUDIO_SETTINGS',
         'android.permission.WAKE_LOCK',
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.ACCESS_FINE_LOCATION',
+        'android.permission.POST_NOTIFICATIONS',
+        'android.permission.RECEIVE_BOOT_COMPLETED',
+        'android.permission.SCHEDULE_EXACT_ALARM',
+        'android.permission.USE_EXACT_ALARM',
+        'android.permission.VIBRATE',
       ],
     },
     web: {
@@ -79,7 +129,6 @@ module.exports = () => {
       bundler: 'metro',
     },
     plugins: [
-      'sentry-expo',
       [
         'expo-camera',
         {
@@ -102,13 +151,32 @@ module.exports = () => {
         },
       ],
       'expo-font',
+      [
+        'expo-notifications',
+        {
+          color: '#00D2BE',
+          sounds: ['./assets/sounds/blyp_notify.wav'],
+          defaultChannel: 'blyp',
+        },
+      ],
+      [
+        'expo-location',
+        {
+          locationWhenInUsePermission:
+            'Allow Blyp to use your location to find places near you.',
+        },
+      ],
+      // Integrates the Amazon IVS iOS SDKs (Stages + Player) and Blyp's native
+      // Swift/ObjC bridge so live streaming works on iOS at parity with Android.
+      './plugins/withIVSiOS',
     ],
     extra,
     androidNavigationBar: {
       visible: 'immersive',
     },
     androidStatusBar: {
-      backgroundColor: '#0f172a',
+      backgroundColor: '#0A0A0C',
+      barStyle: 'light-content',
       translucent: true,
     },
     owner: 'alexjirving',

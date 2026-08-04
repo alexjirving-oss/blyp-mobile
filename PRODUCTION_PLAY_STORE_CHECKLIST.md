@@ -26,8 +26,9 @@ Fill Status with PASS/FAIL/—.
 1. Increment app version:
    - In `app.json` / `app.config` (if used): `version`, `android.versionCode`.
    - Ensure semantic version aligns with internal roadmap (e.g., 1.1.0 for first streaming release).
-2. Validate EAS profiles in `eas.json`:
-   - `production` uses Android App Bundle (AAB) (`buildType: app-bundle`).
+2. Validate release governance inputs:
+   - Android release creation must run through `tools/release/BUILD_RELEASE_CANDIDATE.ps1`.
+   - `eas.json` production values must not be treated as a direct Android build route.
 3. Confirm no lingering dev-only env vars in production profile.
 4. Commit changes: `git commit -m "chore: bump version for streaming release"`.
 
@@ -95,7 +96,7 @@ Full (outline):
 ---
 ## 6. Pre-Release Tracks & Testing
 1. Create Internal Test Track (Google Play Console) – assign internal testers.
-2. Upload AAB from `eas build --platform android` (production profile).
+2. Upload the frozen AAB from `diagnostics/release_aab/CANONICAL_PLAY_AAB_<timestamp>/app-release.aab`.
 3. Release notes (internal): focus on streaming test, flag is disabled by default.
 4. After internal PASS → move to Closed Testing (invite early adopters).
 5. Validate crash-free sessions (Crashlytics if integrated; otherwise JS error logs).
@@ -142,7 +143,7 @@ Rollback Ladder (fast → deep):
 | Item | Done? |
 |------|-------|
 | Incremented version & versionCode | |
-| Production EAS build successful | |
+| Canonical Android release build successful | |
 | Bundle passes Play pre-launch report | |
 | Privacy Policy URL live | |
 | Data Safety form submitted | |
@@ -186,7 +187,7 @@ Day 1:
 ## 14. Quick Commands Reference
 ```bash
 # Production build
-EAS_NO_VCS=1 eas build --platform android --profile production
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
 
 # Submit build to Play internal track
 eas submit --platform android --profile production
@@ -203,9 +204,9 @@ firebase storage:rules:get > backup/rules/storage.release.rules
 ## 15. Sign-Off Record Template
 ```
 Release Version: v1.1.0
-Commit SHA: 
-Rules Test Run ID: 
-Device Test Latency (avg): 
+Commit SHA:
+Rules Test Run ID:
+Device Test Latency (avg):
 Security Incidents: (none/summary)
 Flag State at Submission: false
 Flag State at Public Rollout: true (date/time)

@@ -354,12 +354,12 @@ const RockPaperScissorsGame = ({ gameData, gameId, currentUser, onGameUpdate }) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   header: {
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: '#141418',
   },
   scoreContainer: {
     flexDirection: 'row',
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roundText: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   countdownText: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 80,
     fontWeight: 'bold',
     textAlign: 'center',
@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
   },
   selectedChoice: {
     borderWidth: 3,
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   opponentChoice: {
     borderWidth: 3,
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
   },
   dot1: { opacity: 1 },
   dot2: { opacity: 0.6 },
@@ -538,7 +538,7 @@ const styles = StyleSheet.create({
   },
   rulesContainer: {
     padding: 20,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     margin: 20,
     borderRadius: 16,
   },

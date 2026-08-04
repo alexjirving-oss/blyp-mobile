@@ -14,6 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { smartListGenerator } from '../utils/smartListGenerator';
 import { responsiveFont } from '../utils/scaleUtils';
+import { COLORS } from '../styles/theme';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const fontScale = PixelRatio.getFontScale();
@@ -24,12 +25,12 @@ const pixelRatio = PixelRatio.get();
 // More aggressive responsive spacing for high-scaling devices
 const responsiveSize = (size) => {
   const isHighScaling = fontScale > 1.15 || pixelRatio > 3;
-  
+
   if (isHighScaling) {
     // Reduce spacing significantly on high-scaling devices
     return size * 0.8;
   }
-  
+
   const scale = Math.min(screenWidth / 375, 1.15); // Tighter limit
   return size * scale;
 };
@@ -61,15 +62,15 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
   const loadCategories = async () => {
     try {
       setLoading(true);
-      console.log('📂 Loading smart categories...');
-      
+      console.log('ðŸ“‚ Loading smart categories...');
+
       // Generate AI-powered categories
       const aiCategories = await smartListGenerator.generateCategories(posts);
       setCategories(aiCategories);
-      
-      console.log('✅ Categories loaded:', aiCategories.length);
+
+      console.log('âœ… Categories loaded:', aiCategories.length);
     } catch (error) {
-      console.error('❌ Error loading categories:', error);
+      console.error('âŒ Error loading categories:', error);
       // Load fallback categories
       setCategories(smartListGenerator.getFallbackCategories());
     } finally {
@@ -79,19 +80,19 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
 
   const handleCategoryPress = async (category) => {
     try {
-      console.log('📂 Filtering posts by category:', category.name);
+      console.log('ðŸ“‚ Filtering posts by category:', category.name);
       setSelectedCategory(category);
-      
+
       // Filter posts by selected category
       const filtered = await smartListGenerator.filterPostsByCategory(posts, category);
       setFilteredPosts(filtered);
-      
+
       // Call parent callback if provided
       if (onCategorySelect) {
         onCategorySelect(category, filtered);
       }
     } catch (error) {
-      console.error('❌ Category selection error:', error);
+      console.error('âŒ Category selection error:', error);
     }
   };
 
@@ -105,31 +106,31 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
       activeOpacity={0.8}
     >
       <LinearGradient
-        colors={[category.color || '#8b5cf6', `${category.color || '#8b5cf6'}90`]}
+        colors={[category.color || '#00D2BE', `${category.color || '#00D2BE'}90`]}
         style={styles.categoryGradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.categoryHeader}>
-          <Icon  
-            name={category.icon || 'apps'} 
-            size={responsiveSize(20)} 
-            color="#fff" 
-           />
+          <Icon
+            name={category.icon || 'apps'}
+            size={responsiveSize(20)}
+            color="#fff"
+          />
           <Text style={styles.categoryTitle} numberOfLines={1} adjustsFontSizeToFit={true} minimumFontScale={0.6}>
             {category.name}
           </Text>
         </View>
-        
+
         <Text style={styles.categoryDescription} numberOfLines={2}>
           {category.description}
         </Text>
-        
+
         <View style={styles.categoryFooter}>
           <Text style={styles.categoryStats}>
             {Math.floor(Math.random() * 500 + 100)} posts
           </Text>
-          <Icon  name="chevron-forward" size={16} color="#ffffff90"  />
+          <Icon name="chevron-forward" size={16} color="#ffffff90" />
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -137,15 +138,15 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>📂 Smart Categories</Text>
+      <Text style={styles.headerTitle}>Smart Categories</Text>
       <Text style={styles.headerSubtitle}>
         AI-curated content categories for easy discovery
       </Text>
-      
+
       {/* Search Input */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
-          <Icon  name="search" size={16} color="#666" style={styles.searchIcon}  />
+          <Icon name="search" size={16} color="#666" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search categories..."
@@ -160,12 +161,12 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
               onPress={() => setSearchQuery('')}
               style={styles.clearSearchButton}
             >
-              <Icon  name="close-circle" size={16} color="#666"  />
+              <Icon name="close-circle" size={16} color="#666" />
             </TouchableOpacity>
           )}
         </View>
       </View>
-      
+
       {selectedCategory && (
         <TouchableOpacity
           style={styles.clearButton}
@@ -174,105 +175,77 @@ const CategoriesTab = ({ posts = [], onCategorySelect, navigation }) => {
             setFilteredPosts([]);
           }}
         >
-          <Icon  name="close-circle" size={20} color="#ec4899"  />
+          <Icon name="close-circle" size={20} color="#A1A1AA" />
           <Text style={styles.clearButtonText}>Clear Filter</Text>
         </TouchableOpacity>
       )}
     </View>
   );
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Icon  name="folder-open" size={48} color="#8b5cf6"  />
-        <Text style={styles.loadingText}>Generating smart categories...</Text>
-      </View>
-    );
-  }
-
+  // Leaderboard-style placeholder body for Categories (EXACT PARITY)
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={filteredCategories}
-        renderItem={renderCategoryItem}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderHeader}
-        numColumns={2}
-        columnWrapperStyle={styles.row}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={loading}
-            onRefresh={loadCategories}
-            colors={['#8b5cf6']}
-            tintColor="#8b5cf6"
-          />
-        }
-        contentContainerStyle={styles.listContent}
-      />
-
-      {selectedCategory && (
-        <View style={styles.selectedInfo}>
-          <LinearGradient
-            colors={['rgba(139,92,246,0.1)', 'rgba(139,92,246,0.05)']}
-            style={styles.selectedInfoGradient}
-          >
-            <Text style={styles.selectedInfoText}>
-              Showing <Text style={styles.selectedInfoHighlight}>{selectedCategory.name}</Text>
-            </Text>
-            <Text style={styles.selectedInfoCount}>
-              {filteredPosts.length} posts found
-            </Text>
-          </LinearGradient>
-        </View>
-      )}
+    <View style={[styles.container, { backgroundColor: '#141418' }]}>
+      <View style={styles.comingSoon}>
+        <Icon name="folder-open" size={64} color="#fff" />
+        <Text style={styles.comingSoonTitle}>Categories</Text>
+        <Text style={styles.comingSoonText}>
+          Smart content categories coming soon!
+        </Text>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  subtitle: {
+    color: '#fff',
+    fontSize: 15,
+    marginTop: 8,
+    textAlign: 'center',
+    opacity: 0.7,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
-  loadingText: {
-    color: '#8b5cf6',
-    fontSize: 16,
-    marginTop: 16,
-    textAlign: 'center',
+  comingSoon: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
   },
-  header: {
-    padding: 20,
-    paddingTop: 60, // Account for status bar
-  },
-  headerTitle: {
-    fontSize: responsiveFont(28),
+  comingSoonTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
+    marginTop: 24,
     marginBottom: 8,
+    textAlign: 'center',
   },
-  headerSubtitle: {
+  comingSoonText: {
     fontSize: 16,
-    color: '#9ca3af',
-    marginBottom: 20,
+    color: '#e5e7eb',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 30,
   },
   clearButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(236,72,153,0.1)',
+    backgroundColor: 'rgba(203,251,69,0.1)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
     alignSelf: 'flex-start',
   },
   clearButtonText: {
-    color: '#ec4899',
+    color: '#00D2BE',
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '600',
@@ -301,6 +274,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   listContent: {
+    paddingTop: 8,
     paddingHorizontal: 10,
     paddingBottom: 100,
   },
@@ -370,7 +344,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   selectedInfoHighlight: {
-    color: '#8b5cf6',
+    color: '#00D2BE',
     fontWeight: 'bold',
   },
   selectedInfoCount: {

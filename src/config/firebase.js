@@ -15,6 +15,8 @@ import {
   where as firestoreWhere,
   orderBy as firestoreOrderBy,
   limit as firestoreLimit,
+  startAfter as firestoreStartAfter,
+  startAt as firestoreStartAt,
   onSnapshot
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
@@ -27,18 +29,41 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const readBool = (name) => {
   try { return ['1','true','yes'].includes(String(process.env?.[name] ?? '').toLowerCase()); } catch { return false; }
 };
+
+function readExpoExtra(key) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+    const Constants = require('expo-constants').default || require('expo-constants');
+    const extra = Constants?.expoConfig?.extra || Constants?.manifest?.extra || {};
+    const v = extra?.[key];
+    return v == null ? '' : String(v);
+  } catch {
+    return '';
+  }
+}
+
+function pickEnv(key, fallback = '') {
+  try {
+    const fromProcess = process.env?.[key];
+    if (fromProcess != null && String(fromProcess).trim() !== '') return String(fromProcess).trim();
+  } catch {}
+  const fromExtra = readExpoExtra(key);
+  if (fromExtra.trim() !== '') return fromExtra.trim();
+  return fallback;
+}
+
 const DISABLE_FIREBASE = readBool('EXPO_PUBLIC_DISABLE_FIREBASE');
 const FORCE_WEB = readBool('EXPO_PUBLIC_FORCE_WEB_FIREBASE');
 const FORCE_NATIVE = readBool('EXPO_PUBLIC_USE_NATIVE_FIREBASE');
 
-// Firebase configuration (env → optional JSON → optional local file → defaults)
+// Firebase configuration (env → expo.extra → optional JSON → optional local file → defaults)
 let firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || "",
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || "blyp-master.firebaseapp.com",
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "blyp-master",
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || "blyp-master.appspot.com",
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "929105034040",
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "1:929105034040:web:3f725bb93e50e9d8bb9fcd"
+  apiKey: pickEnv('EXPO_PUBLIC_FIREBASE_API_KEY', ''),
+  authDomain: pickEnv('EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN', 'blyp-master.firebaseapp.com'),
+  projectId: pickEnv('EXPO_PUBLIC_FIREBASE_PROJECT_ID', 'blyp-master'),
+  storageBucket: pickEnv('EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET', 'blyp-master.firebasestorage.app'),
+  messagingSenderId: pickEnv('EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID', '929105034040'),
+  appId: pickEnv('EXPO_PUBLIC_FIREBASE_APP_ID', '1:929105034040:web:3f725bb93e50e9d8bb9fcd'),
 };
 
 // Allow JSON-based override (useful in CI or local dev without many env vars)
@@ -133,19 +158,20 @@ const __callOnSnapshot__ = (callback, payload) => {
 };
 
 if (!EFFECTIVE_DISABLE && !USING_NATIVE) {
-  // Initialize Firebase
-  app = initializeApp(firebaseConfig);
-
-  // Normalize storage bucket if misconfigured (developers sometimes paste download domain)
+  // Default bucket for this project is blyp-master.firebasestorage.app.
+  // Remap legacy *.appspot.com before init so Storage hits a real bucket.
   try {
-    const bucket = firebaseConfig.storageBucket || '';
-    if (bucket.endsWith('.firebasestorage.app')) {
-      const project = firebaseConfig.projectId || bucket.split('.')[0];
-      const corrected = `${project}.appspot.com`;
-      console.warn?.(`⚠️ Correcting storageBucket from "${bucket}" to "${corrected}"`);
-      // This doesn't change the initialized app's internal bucket, but informs devs and avoids future misconfig.
+    const bucket = String(firebaseConfig.storageBucket || '');
+    if (bucket.endsWith('.appspot.com')) {
+      const project = firebaseConfig.projectId || bucket.split('.')[0] || 'blyp-master';
+      const corrected = `${project}.firebasestorage.app`;
+      console.warn?.(`⚠️ Remapping storageBucket from "${bucket}" to "${corrected}"`);
+      firebaseConfig.storageBucket = corrected;
     }
   } catch {}
+
+  // Initialize Firebase
+  app = initializeApp(firebaseConfig);
 
   // Initialize Auth with AsyncStorage persistence for React Native
   try {
@@ -222,7 +248,9 @@ const buildCompat = (isDisabled, isNative) => {
       orderBy: (field, dir='asc') => makeNativeQueryBuilder(baseRef.orderBy(field, dir), chainFn),
       limit: (n) => makeNativeQueryBuilder(baseRef.limit(n), chainFn),
       where: (...args) => makeNativeQueryBuilder(baseRef.where(...args), chainFn),
-      onSnapshot: (cb) => baseRef.onSnapshot(cb),
+      startAfter: (...args) => makeNativeQueryBuilder(baseRef.startAfter(...args), chainFn),
+      startAt: (...args) => makeNativeQueryBuilder(baseRef.startAt(...args), chainFn),
+      onSnapshot: (cb, onError) => baseRef.onSnapshot(cb, onError),
       get: () => baseRef.get()
     });
     return {
@@ -252,9 +280,11 @@ const buildCompat = (isDisabled, isNative) => {
         orderBy: (field, dir='asc') => makeWebQueryBuilder([...constraints, firestoreOrderBy(field, dir)]),
         limit: (n) => makeWebQueryBuilder([...constraints, firestoreLimit(n)]),
         where: (field, op, value) => makeWebQueryBuilder([...constraints, firestoreWhere(field, op, value)]),
-        onSnapshot: (callback) => {
+        startAfter: (...args) => makeWebQueryBuilder([...constraints, firestoreStartAfter(...args)]),
+        startAt: (...args) => makeWebQueryBuilder([...constraints, firestoreStartAt(...args)]),
+        onSnapshot: (callback, onError) => {
           const q = query(collRef, ...constraints);
-          return onSnapshot(q, callback);
+          return onSnapshot(q, callback, onError);
         },
         get: async () => {
           const q = query(collRef, ...constraints);
@@ -267,7 +297,7 @@ const buildCompat = (isDisabled, isNative) => {
           set: (data, options) => setDoc(firestoreDoc(firestore, collectionPath, docId), data, options || {}),
           update: (data) => updateDoc(firestoreDoc(firestore, collectionPath, docId), data),
           delete: () => deleteDoc(firestoreDoc(firestore, collectionPath, docId)),
-          onSnapshot: (callback) => onSnapshot(firestoreDoc(firestore, collectionPath, docId), callback),
+          onSnapshot: (callback, onError) => onSnapshot(firestoreDoc(firestore, collectionPath, docId), callback, onError),
           collection: (subCollectionPath) => db.collection(`${collectionPath}/${docId}/${subCollectionPath}`)
         }),
         add: (data) => addDoc(collRef, data),
@@ -275,7 +305,7 @@ const buildCompat = (isDisabled, isNative) => {
         where: (field, op, value) => makeWebQueryBuilder([firestoreWhere(field, op, value)]),
         orderBy: (field, dir='asc') => makeWebQueryBuilder([firestoreOrderBy(field, dir)]),
         limit: (n) => makeWebQueryBuilder([firestoreLimit(n)]),
-        onSnapshot: (callback) => onSnapshot(collRef, callback)
+        onSnapshot: (callback, onError) => onSnapshot(collRef, callback, onError)
       };
     }
   };
@@ -316,26 +346,40 @@ const firebaseCompat = {
 export default firebaseCompat;
 
 // Gemini API configuration
-// Prefer Expo extra (app.config.js / app.json) so the key is always available
-// in the dev client and production builds, then fall back to process.env.
-let resolvedGeminiKey = "";
-try {
-  // Lazy require to avoid bundler issues if expo-constants is unavailable in some environments
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
-  const Constants = require('expo-constants').default || require('expo-constants');
-  const extra = Constants?.expoConfig?.extra || Constants?.manifest?.extra || {};
-  if (extra.EXPO_PUBLIC_GEMINI_API_KEY) {
-    resolvedGeminiKey = String(extra.EXPO_PUBLIC_GEMINI_API_KEY);
+// P7.4: the Gemini API key is NO LONGER shipped to the client. All client Gemini
+// traffic goes through the authenticated server proxy (functions/geminiProxy),
+// which holds the key server-side, verifies a Firebase ID token, and rate-limits.
+// `geminiApiKey` is kept as a non-secret availability sentinel so the many call
+// sites that gate on `if (geminiApiKey)` continue to treat AI as enabled.
+const FUNCTIONS_BASE = (
+  process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL || 'https://us-central1-blyp-master.cloudfunctions.net'
+).replace(/\/+$/, '');
+
+export const geminiProxyBaseUrl = `${FUNCTIONS_BASE}/geminiProxy`;
+export const geminiApiKey = 'managed-by-proxy';
+export const geminiApiUrl = `${geminiProxyBaseUrl}?model=gemini-2.5-flash`;
+
+/**
+ * Build the headers for a proxied Gemini request, attaching the caller's Firebase
+ * ID token. Returns just Content-Type if no signed-in user (the proxy will then
+ * reject with 401 and the feature degrades, exactly as it would with no key).
+ */
+export async function geminiAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  try {
+    const user = auth?.currentUser;
+    if (user && typeof user.getIdToken === 'function') {
+      const token = await user.getIdToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+  } catch {
+    // No token -> proxy returns 401 -> caller degrades gracefully.
   }
-} catch {
-  // Swallow and fall back to env below
+  return headers;
 }
 
-if (!resolvedGeminiKey) {
-  resolvedGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
+/** Proxy URL for a specific model (defaults handled server-side). */
+export function geminiProxyUrlForModel(model) {
+  const m = String(model || '').replace(/^models\//, '').trim();
+  return m ? `${geminiProxyBaseUrl}?model=${encodeURIComponent(m)}` : geminiProxyBaseUrl;
 }
-
-export const geminiApiKey = resolvedGeminiKey;
-export const geminiApiUrl = process.env.EXPO_PUBLIC_GEMINI_API_URL || (geminiApiKey
-  ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`
-  : "");

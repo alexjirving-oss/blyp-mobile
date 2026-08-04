@@ -12,55 +12,14 @@ export type EconomyInfra = {
 let cachedInfra: EconomyInfra | null = null;
 let cachedBullmqRedis: Redis | null = null;
 
-function getPostgresConnection(postgresUrl: string) {
-  try {
-    const parsed = new URL(postgresUrl);
-    const sslmode = parsed.searchParams.get('sslmode')?.toLowerCase();
-
-    // Wave 0: never ship rejectUnauthorized:false for sslmode=require.
-    // Explicit no-verify remains opt-in for local/dev only.
-    if (sslmode === 'require') {
-      return {
-        connectionString: postgresUrl,
-        ssl: { rejectUnauthorized: true },
-      };
-    }
-    if (sslmode === 'no-verify') {
-      return {
-        connectionString: postgresUrl,
-        ssl: { rejectUnauthorized: false },
-      };
-    }
-  } catch {
-    // Preserve the original URL so Knex surfaces the configuration error.
-  }
-
-  return postgresUrl;
-}
-
-function getPostgresTarget(postgresUrl: string) {
-  try {
-    const parsed = new URL(postgresUrl);
-    return {
-      host: parsed.hostname,
-      database: parsed.pathname.replace(/^\//, ''),
-      sslmode: parsed.searchParams.get('sslmode') || 'default',
-    };
-  } catch {
-    return { host: 'unparseable', database: 'unparseable', sslmode: 'unknown' };
-  }
-}
-
 export function getEconomyInfra(): EconomyInfra {
   if (cachedInfra) return cachedInfra;
 
   const env = getEconomyEnv();
-  const postgresTarget = getPostgresTarget(env.POSTGRES_URL);
-  logger.info(postgresTarget, '[POSTGRES_CONFIG]');
 
   const db = knex({
     client: 'pg',
-    connection: getPostgresConnection(env.POSTGRES_URL),
+    connection: env.POSTGRES_URL,
     pool: { min: 0, max: 10 },
   });
 

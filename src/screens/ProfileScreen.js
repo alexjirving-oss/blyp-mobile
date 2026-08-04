@@ -1,28 +1,70 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, FlatList, StatusBar, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import BlueScreen from '../ui/BlueScreen';
+import { ActivityIndicator, Alert, Animated, FlatList, Image, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../components/Icon';
-import BlypLogo from '../components/BlypLogo';
-import ActivityFeed from '../components/ActivityFeed';
+import BlypLogo, { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
+import HeaderMenuTabs from '../components/HeaderMenuTabs';
 import { auth, db, storage, firebaseEnabled } from '../config/firebase';
+import { snapData } from '../utils/firestoreSnap';
 import { signOut } from 'firebase/auth';
 import { subscribeToFollowersCount, getFollowersCount } from '../utils/followUtils';
+
+// Posts load one page at a time. The first page is live (new posts/likes show
+// instantly); older pages are fetched on scroll so a profile shows ALL posts,
+// however many there are.
+const PROFILE_PAGE_SIZE = 30;
+
+// Merge a freshly-arrived live page into the existing list WITHOUT dropping the
+// older pages that pagination already appended (so the grid never snaps back to
+// a single page when a like count changes).
+function mergeLivePage(prev, livePage) {
+  if (!Array.isArray(prev) || prev.length === 0) return livePage;
+  const byId = new Map(livePage.map((p) => [p.id, p]));
+  const next = [];
+  prev.forEach((existing) => {
+    const updated = byId.get(existing.id);
+    if (updated) {
+      next.push(updated);
+      byId.delete(existing.id);
+    } else {
+      next.push(existing);
+    }
+  });
+  livePage.forEach((p) => {
+    if (byId.has(p.id)) next.push(p);
+  });
+  return next;
+}
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
   const user = auth.currentUser;
   const [userPosts, setUserPosts] = useState([]);
+  const [likedPosts, setLikedPosts] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [selectedTab, setSelectedTab] = useState('1');
+  const [selectedTab, setSelectedTab] = useState('posts'); // 'posts' or 'likes'
+  const [profileTab, setProfileTab] = useState('myProfile'); // 'myProfile', 'tab1', 'tab2', 'tab3'
   const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Pagination cursors/flags for posts and liked posts.
+  const postsCursorRef = useRef(null);
+  const postsHasMoreRef = useRef(true);
+  const loadingMorePostsRef = useRef(false);
+  const likesCursorRef = useRef(null);
+  const likesHasMoreRef = useRef(true);
+  const loadingMoreLikesRef = useRef(false);
+
   // Load profile
   useEffect(() => {
     if (!user) return;
     db.collection('users').doc(user.uid).get().then(doc => {
-      if (doc.exists) setUserProfile(doc.data());
+      const pd = snapData(doc);
+      if (pd) setUserProfile(pd);
       else setUserProfile({ displayName: user.displayName || 'anonymous', email: user.email, photoURL: user.photoURL, bio: '' });
     }).catch(e => {
       console.log('[PROFILE][ERROR] load profile', e.message);
@@ -30,242 +72,363 @@ const ProfileScreen = () => {
     });
   }, [user]);
 
-  // Followers
+  // Followers count
   useEffect(() => {
     if (!user) return;
     let unsub;
     try { unsub = subscribeToFollowersCount(user.uid, c => setFollowersCount(c)); }
-    catch { getFollowersCount(user.uid).then(c => setFollowersCount(c)).catch(()=>setFollowersCount(0)); }
+    catch { getFollowersCount(user.uid).then(c => setFollowersCount(c)).catch(() => setFollowersCount(0)); }
     return () => { if (unsub) unsub(); };
   }, [user]);
 
-  // Posts subscription
+  // Following count
   useEffect(() => {
-    if (!user) return;
-    if (!firebaseEnabled) { setLoading(false); setUserPosts([]); return; }
-    const unsub = db.collection('posts').orderBy('date','desc').limit(50).onSnapshot(
-      snap => {
-        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const uid = user.uid;
-        const owned = all.filter(p => p.userId === uid || p.ownerUid === uid || p.uid === uid);
-        setUserPosts(owned);
-        setLoading(false);
-        setError(null);
-      },
-      err => { setError(err); setLoading(false); }
+    if (!user || !firebaseEnabled) return;
+    const unsub = db.collection('followers').where('followerId', '==', user.uid).onSnapshot(
+      snap => setFollowingCount(snap.size),
+      err => console.log('[PROFILE][ERROR] following count', err.message)
     );
     return () => unsub();
   }, [user, firebaseEnabled]);
 
-  const handleLogout = async () => { try { await signOut(auth); } catch(e){ console.log('logout error', e.message);} };
-  const handleDeletePost = (post) => {
-    Alert.alert('Delete Post','Delete permanently?',[{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:async()=>{try{const promises=[]; if(post.videoUrl){try{promises.push(storage.refFromURL(post.videoUrl).delete());}catch{}} if(Array.isArray(post.media)){post.media.forEach(m=>{if(m.url){try{promises.push(storage.refFromURL(m.url).delete());}catch{}} if(m.thumbnail&&m.thumbnail!==m.url){try{promises.push(storage.refFromURL(m.thumbnail).delete());}catch{}}});} if(post.thumbnail && !post.media?.some(m=>m.thumbnail===post.thumbnail)){try{promises.push(storage.refFromURL(post.thumbnail).delete());}catch{}} if(promises.length) await Promise.allSettled(promises); await db.collection('posts').doc(post.id).delete();}catch(e){Alert.alert('Error deleting',e.message);}}}]);
+  // User posts subscription — live first page; older pages paginated below.
+  useEffect(() => {
+    if (!user) return;
+    if (!firebaseEnabled) { setLoading(false); setUserPosts([]); return; }
+    console.log('[PROFILE] Setting up posts query for userId:', user.uid);
+    const unsub = db.collection('posts').where('userId', '==', user.uid).orderBy('date', 'desc').limit(PROFILE_PAGE_SIZE).onSnapshot(
+      snap => {
+        const docs = snap.docs || [];
+        postsCursorRef.current = docs.length ? docs[docs.length - 1] : null;
+        postsHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
+        const page = docs.map(d => ({ id: d.id, ...d.data() }));
+        setUserPosts(prev => mergeLivePage(prev, page));
+        setLoading(false);
+      },
+      err => {
+        console.log('[PROFILE][ERROR] posts query', err.message);
+        setLoading(false);
+      }
+    );
+    return () => unsub();
+  }, [user, firebaseEnabled]);
+
+  // Liked posts subscription — live first page; older pages paginated below.
+  useEffect(() => {
+    if (!user || !firebaseEnabled) return;
+    console.log('[PROFILE] Setting up liked posts query');
+    const unsub = db.collection('posts').where('likedBy', 'array-contains', user.uid).orderBy('date', 'desc').limit(PROFILE_PAGE_SIZE).onSnapshot(
+      snap => {
+        const docs = snap.docs || [];
+        likesCursorRef.current = docs.length ? docs[docs.length - 1] : null;
+        likesHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
+        const page = docs.map(d => ({ id: d.id, ...d.data() }));
+        setLikedPosts(prev => mergeLivePage(prev, page));
+      },
+      err => console.log('[PROFILE][ERROR] liked posts query', err.message)
+    );
+    return () => unsub();
+  }, [user, firebaseEnabled]);
+
+  const loadMorePosts = useCallback(async () => {
+    if (loadingMorePostsRef.current || !postsHasMoreRef.current) return;
+    if (!user || !firebaseEnabled) return;
+    const cursor = postsCursorRef.current;
+    if (!cursor) return;
+    loadingMorePostsRef.current = true;
+    setLoadingMore(true);
+    try {
+      const snap = await db.collection('posts').where('userId', '==', user.uid)
+        .orderBy('date', 'desc').startAfter(cursor).limit(PROFILE_PAGE_SIZE).get();
+      const docs = snap.docs || [];
+      if (docs.length) postsCursorRef.current = docs[docs.length - 1];
+      postsHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
+      const older = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (older.length) {
+        setUserPosts(prev => {
+          const have = new Set(prev.map(p => p.id));
+          const add = older.filter(p => !have.has(p.id));
+          return add.length ? [...prev, ...add] : prev;
+        });
+      }
+    } catch (e) {
+      console.log('[PROFILE][ERROR] loadMorePosts', e.message);
+    } finally {
+      loadingMorePostsRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [user, firebaseEnabled]);
+
+  const loadMoreLikes = useCallback(async () => {
+    if (loadingMoreLikesRef.current || !likesHasMoreRef.current) return;
+    if (!user || !firebaseEnabled) return;
+    const cursor = likesCursorRef.current;
+    if (!cursor) return;
+    loadingMoreLikesRef.current = true;
+    setLoadingMore(true);
+    try {
+      const snap = await db.collection('posts').where('likedBy', 'array-contains', user.uid)
+        .orderBy('date', 'desc').startAfter(cursor).limit(PROFILE_PAGE_SIZE).get();
+      const docs = snap.docs || [];
+      if (docs.length) likesCursorRef.current = docs[docs.length - 1];
+      likesHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
+      const older = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (older.length) {
+        setLikedPosts(prev => {
+          const have = new Set(prev.map(p => p.id));
+          const add = older.filter(p => !have.has(p.id));
+          return add.length ? [...prev, ...add] : prev;
+        });
+      }
+    } catch (e) {
+      console.log('[PROFILE][ERROR] loadMoreLikes', e.message);
+    } finally {
+      loadingMoreLikesRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [user, firebaseEnabled]);
+
+  const handleLogout = async () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout', style: 'destructive', onPress: async () => { try { await signOut(auth); } catch (e) { console.log('logout error', e.message); } } }
+    ]);
   };
-  const handlePostPress = post => navigation.navigate('MediaViewer',{ post });
-  const getVideoThumbnail = post => post.thumbnail || post.media?.[0]?.thumbnail || post.media?.[0]?.url || post.videoUrl || post.imageUrl || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&h=400&fit=crop';
+
+  const handleDeletePost = (post) => {
+    Alert.alert('Delete Post', 'Delete permanently?', [{ text: 'Cancel', style: 'cancel' }, {
+      text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          const promises = [];
+          if (post.videoUrl) { try { promises.push(storage.refFromURL(post.videoUrl).delete()); } catch { } }
+          if (Array.isArray(post.media)) {
+            post.media.forEach(m => {
+              if (m.url) { try { promises.push(storage.refFromURL(m.url).delete()); } catch { } }
+              if (m.thumbnail && m.thumbnail !== m.url) { try { promises.push(storage.refFromURL(m.thumbnail).delete()); } catch { } }
+            });
+          }
+          if (post.thumbnail && !post.media?.some(m => m.thumbnail === post.thumbnail)) {
+            try { promises.push(storage.refFromURL(post.thumbnail).delete()); } catch { }
+          }
+          if (promises.length) await Promise.allSettled(promises);
+          await db.collection('posts').doc(post.id).delete();
+          Alert.alert('Deleted', 'Post deleted successfully');
+        } catch (e) { Alert.alert('Error deleting', e.message); }
+      }
+    }]);
+  };
+
+  const handlePostPress = post => navigation.navigate('MediaViewer', { post });
+
+  const getPostThumbnail = post => {
+    if (post.thumbnail) return post.thumbnail;
+    if (post.media?.[0]?.thumbnail) return post.media[0].thumbnail;
+    if (post.media?.[0]?.url) return post.media[0].url;
+    if (post.videoUrl) return post.videoUrl;
+    if (post.imageUrl) return post.imageUrl;
+    return 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=400&h=400&fit=crop';
+  };
 
   const renderPostItem = ({ item: post }) => {
-    const isVideo = post.type==='video'||post.media?.[0]?.type?.includes('video')||post.videoUrl||post.media?.[0]?.url?.includes('.mp4');
+    const isVideo = post.type === 'video' || post.media?.[0]?.type?.includes('video') || post.videoUrl || post.media?.[0]?.url?.includes('.mp4');
+    const thumbnail = getPostThumbnail(post);
     return (
-      <TouchableOpacity style={styles.postCard} onPress={()=>handlePostPress(post)} activeOpacity={0.8}>
-        <TouchableOpacity style={styles.deleteButton} onPress={()=>handleDeletePost(post)}><Icon name="trash-outline" size={16} color="#ef4444" /></TouchableOpacity>
-        {post.media?.length>0 ? (
-          <View style={styles.mediaContainer}>
-            <Image source={{ uri: getVideoThumbnail(post) }} style={styles.postImage} />
-            {isVideo && <View style={styles.videoIndicator}><Icon name="play" size={16} color="#fff" /></View>}
+      <TouchableOpacity style={styles.gridItem} onPress={() => handlePostPress(post)} activeOpacity={0.9}>
+        <Image source={{ uri: thumbnail }} style={styles.gridImage} resizeMode="cover" />
+        {isVideo && (
+          <View style={styles.playIconOverlay}>
+            <Icon name="play" size={20} color="#fff" />
           </View>
-        ) : (
-          <View style={styles.postTextPlaceholder}><Text style={styles.postEmoji}>{post.emoji||'💭'}</Text></View>
         )}
-        <View style={styles.postOverlay}>
-          <Text style={styles.postTitle} numberOfLines={2}>{post.title}</Text>
-          <View style={styles.postIndicators}>
-            {post.sharedTo?.length>0 && <View style={styles.sharedIndicator}><Icon name="share-outline" size={12} color="#fff" /></View>}
-            {post.likes>0 && <View style={styles.likeIndicator}><Icon name="heart" size={12} color="#ff1744" /><Text style={styles.likeCount}>{post.likes}</Text></View>}
+        <View style={styles.postStats}>
+          <View style={styles.statBadge}>
+            <Icon name="heart" size={14} color="#fff" />
+            <Text style={styles.statText}>{post.likes || 0}</Text>
           </View>
         </View>
+        <TouchableOpacity style={styles.deleteIcon} onPress={(e) => { e.stopPropagation(); handleDeletePost(post); }}>
+          <Icon name="close-circle" size={24} color="rgba(239,68,68,0.9)" />
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
 
-  const renderPostsGrid = () => {
-    if (loading) return <View style={styles.loadingContainer}><Icon name="reload" size={32} color="#ec4899" /><Text style={styles.loadingText}>Loading posts...</Text></View>;
-    if (error) return <View style={styles.postsGrid}><View style={styles.emptyPosts}><Icon name="warning-outline" size={48} color="#ef4444" /><Text style={styles.emptyText}>Error loading posts</Text><Text style={styles.emptySubtext}>{String(error.message||'Unknown error')}</Text></View></View>;
-    if (!firebaseEnabled) return <View style={styles.postsGrid}><View style={styles.emptyPosts}><Icon name="cloud-offline-outline" size={48} color="#374151" /><Text style={styles.emptyText}>Profile posts disabled</Text><Text style={styles.emptySubtext}>Firebase disabled in this build.</Text></View></View>;
-    if (userPosts.length===0) return <View style={styles.postsGrid}><View style={styles.emptyPosts}><Icon name="camera-outline" size={48} color="#374151" /><Text style={styles.emptyText}>No posts yet</Text><Text style={styles.emptySubtext}>Create your first post to see it here.</Text></View></View>;
-    return <FlatList style={styles.flatListContainer} data={userPosts} renderItem={renderPostItem} numColumns={2} keyExtractor={i=>i.id} contentContainerStyle={styles.postsGridContent} showsVerticalScrollIndicator={false} initialNumToRender={6} />;
-  };
+  const renderListHeader = () => (
+    <>
+      {/* Profile Info */}
+      <View style={styles.profileSection}>
+        <TouchableOpacity onPress={() => navigation.navigate('EditProfile')}>
+          <Image
+            source={{ uri: user?.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.displayName || 'User')}&size=120&background=a855f7&color=fff&bold=true` }}
+            style={styles.avatar}
+          />
+        </TouchableOpacity>
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <View style={styles.headerTop}>
-        <TouchableOpacity style={styles.menuButton}><Icon name="menu" size={24} color="#d1d5db" /></TouchableOpacity>
-        <BlypLogo useGradientBackground />
-        <TouchableOpacity style={styles.searchButton}><Icon name="search" size={24} color="#d1d5db" /></TouchableOpacity>
-      </View>
-      <View style={styles.tabContainer}>
-        <View style={styles.tabSelector}>
-          {[{key:'1',label:'My Profile'},{key:'2',label:'Activity'},{key:'3',label:'Drafts'},{key:'4',label:'Settings'}].map(t=> (
-            <TouchableOpacity key={t.key} style={styles.tab} onPress={()=>setSelectedTab(t.key)}>
-              <Text style={[styles.tabText, selectedTab===t.key && styles.activeTabText]}>{t.label}</Text>
-            </TouchableOpacity>
-          ))}
-          <LinearGradient colors={['#a855f7','#d946ef','#ec4899']} style={[styles.tabIndicator,{ left:`${['1','2','3','4'].indexOf(selectedTab)*25}%` }]} />
+        <View style={styles.stats}>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{followingCount}</Text>
+            <Text style={styles.statLabel}>Following</Text>
+          </View>
+          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers', { userId: user.uid })}>
+            <Text style={styles.statValue}>{followersCount}</Text>
+            <Text style={styles.statLabel}>Followers</Text>
+          </TouchableOpacity>
+          <View style={styles.statBox}>
+            <Text style={styles.statValue}>{userPosts.reduce((a, p) => a + (p.likes || 0), 0)}</Text>
+            <Text style={styles.statLabel}>Likes</Text>
+          </View>
         </View>
+
+        {userProfile?.bio ? (
+          <Text style={styles.bio}>{userProfile.bio}</Text>
+        ) : (
+          <Text style={styles.bioPlaceholder}>No bio yet</Text>
+        )}
+
+        <TouchableOpacity style={styles.editProfileButton} onPress={() => navigation.navigate('EditProfile')}>
+          <LinearGradient colors={BLYP_LOGO_GRADIENT_COLORS} style={styles.editProfileGradient}>
+            <Icon name="create-outline" size={18} color="#fff" />
+            <Text style={styles.editProfileText}>Edit Profile</Text>
+          </LinearGradient>
+        </TouchableOpacity>
       </View>
-    </View>
+
+      {/* Tabs */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tabButton, selectedTab === 'posts' && styles.activeTab]}
+          onPress={() => setSelectedTab('posts')}
+        >
+          <Icon name="grid-outline" size={24} color={selectedTab === 'posts' ? '#00D2BE' : '#A1A1AA'} />
+          <Text style={[styles.tabLabel, selectedTab === 'posts' && styles.activeTabLabel]}>Posts</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, selectedTab === 'likes' && styles.activeTab]}
+          onPress={() => setSelectedTab('likes')}
+        >
+          <Icon name="heart-outline" size={24} color={selectedTab === 'likes' ? '#00D2BE' : '#A1A1AA'} />
+          <Text style={[styles.tabLabel, selectedTab === 'likes' && styles.activeTabLabel]}>Likes</Text>
+        </TouchableOpacity>
+      </View>
+    </>
   );
 
-  const renderProfileInfo = () => (
-    <View style={styles.profileHeader}>
-      <TouchableOpacity style={styles.profileImageContainer} onPress={()=>navigation.navigate('EditProfile')}>
-        <Image source={{ uri: user?.photoURL || `https://placehold.co/120x120/475569/e2e8f0?text=${user?.displayName?.charAt(0).toUpperCase()||'A'}` }} style={styles.profileImage} />
-        <View style={styles.editIconContainer}><Icon name="camera" size={16} color="#fff" /></View>
-      </TouchableOpacity>
-      <Text style={styles.username}>@{userProfile?.displayName || user?.displayName || 'anonymous'}</Text>
-      <Text style={styles.userEmail}>{user?.email}</Text>
-      {userProfile?.bio ? <Text style={styles.userBio}>{userProfile.bio}</Text> : null}
-      <View style={styles.statsContainer}>
-        <TouchableOpacity style={styles.statItem} onPress={()=>navigation.navigate('Followers',{userId:user.uid,type:'followers'})}>
-          <Text style={styles.statNumber}>{followersCount}</Text><Text style={styles.statLabel}>Followers</Text>
-        </TouchableOpacity>
-        <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.length}</Text><Text style={styles.statLabel}>Posts</Text></View>
-        <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.reduce((a,p)=>a+(p.likes||0),0)}</Text><Text style={styles.statLabel}>Likes</Text></View>
-        <View style={styles.statItem}><Text style={styles.statNumber}>{userPosts.reduce((a,p)=>a+(p.sharedTo?.length||0),0)}</Text><Text style={styles.statLabel}>Shared</Text></View>
-      </View>
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.editButton} onPress={()=>navigation.navigate('EditProfile')}>
-          <LinearGradient colors={['#a855f7','#d946ef','#ec4899']} style={styles.editButtonGradient}><Text style={styles.editButtonText}>Edit Profile</Text></LinearGradient>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.bookmarkButton}><Icon name="bookmark-outline" size={20} color="#fff" /></TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const renderTabContent = () => {
-    switch(selectedTab){
-      case '1': return <View style={styles.tabContent}>{renderProfileInfo()}{renderPostsGrid()}</View>;
-      case '2': return <View style={styles.tabContent}><ActivityFeed navigation={navigation} /></View>;
-      case '3': return <View style={styles.tabContent}><View style={styles.comingSoon}><Icon name="document-text-outline" size={64} color="#374151" /><Text style={styles.comingSoonTitle}>Drafts</Text><Text style={styles.comingSoonText}>Your saved drafts will appear here</Text></View></View>;
-      case '4': return (
-        <View style={styles.tabContent}>
-          <ScrollView style={styles.settingsContainer}>
-            <View style={styles.settingsSection}>
-              <Text style={styles.settingsSectionTitle}>Account</Text>
-              <TouchableOpacity
-                style={styles.settingsItem}
-                onPress={() => navigation.navigate('EditProfile')}
-              >
-                <View style={styles.settingsItemLeft}>
-                  <Icon name="person-outline" size={24} color="#6b7280" />
-                  <Text style={styles.settingsItemText}>Account Information</Text>
-                </View>
-                <Icon name="chevron-forward" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.settingsItem}
-                onPress={() => navigation.navigate('PrivacySettings')}
-              >
-                <View style={styles.settingsItemLeft}>
-                  <Icon name="shield-outline" size={24} color="#6b7280" />
-                  <Text style={styles.settingsItemText}>Privacy & Security</Text>
-                </View>
-                <Icon name="chevron-forward" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      );
-      default: return null;
+  const renderListEmpty = () => {
+    if (loading && selectedTab === 'posts') {
+      return <View style={styles.emptyState}><Icon name="reload-circle-outline" size={48} color="#00D2BE" /><Text style={styles.emptyText}>Loading...</Text></View>;
     }
+    if (!firebaseEnabled) {
+      return <View style={styles.emptyState}><Icon name="cloud-offline-outline" size={48} color="#6b7280" /><Text style={styles.emptyText}>Offline mode</Text><Text style={styles.emptySubtext}>Posts unavailable</Text></View>;
+    }
+    return (
+      <View style={styles.emptyState}>
+        <Icon name="camera-outline" size={64} color="#6b7280" />
+        <Text style={styles.emptyText}>{selectedTab === 'posts' ? 'No posts yet' : 'No liked posts'}</Text>
+        <Text style={styles.emptySubtext}>{selectedTab === 'posts' ? 'Create your first post' : 'Like posts to see them here'}</Text>
+      </View>
+    );
   };
+
+  const displayPosts = selectedTab === 'posts' ? userPosts : likedPosts;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      {renderHeader()}
-      <View style={styles.content}>{renderTabContent()}</View>
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}><Icon name="log-out-outline" size={24} color="#ef4444" /><Text style={styles.logoutText}>Log Out</Text></TouchableOpacity>
-    </SafeAreaView>
+    <BlueScreen>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <TouchableOpacity style={styles.menuButton} onPress={() => navigation.openDrawer?.()}>
+              <Icon name="menu" size={24} color="#d1d5db" />
+            </TouchableOpacity>
+            <View style={styles.logoContainer}>
+              <BlypLogo useGradientBackground={true} />
+            </View>
+            <TouchableOpacity style={styles.menuButton} onPress={() => navigation.navigate('Search')}>
+              <Icon name="search" size={24} color="#d1d5db" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Tab Selector */}
+          <HeaderMenuTabs
+            tabs={[
+              { key: 'myProfile', label: 'My Profile' },
+              { key: 'tab1', label: '1' },
+              { key: 'tab2', label: '2' },
+              { key: 'tab3', label: '3' },
+            ]}
+            activeKey={profileTab}
+            onChange={setProfileTab}
+          />
+        </View>
+
+        <FlatList
+          key={selectedTab}
+          style={styles.scrollView}
+          data={displayPosts}
+          renderItem={renderPostItem}
+          keyExtractor={i => i.id}
+          numColumns={3}
+          ListHeaderComponent={renderListHeader}
+          ListEmptyComponent={renderListEmpty}
+          ListFooterComponent={loadingMore ? <View style={styles.footerLoader}><ActivityIndicator size="small" color="#00D2BE" /></View> : null}
+          onEndReached={selectedTab === 'posts' ? loadMorePosts : loadMoreLikes}
+          onEndReachedThreshold={1}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={15}
+          contentContainerStyle={styles.gridContainer}
+        />
+      </View>
+    </BlueScreen>
   );
 };
 
 const styles = StyleSheet.create({
-  container:{ flex:1, backgroundColor:'#0f172a' },
-  header:{ paddingTop:8 },
-  headerTop:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal:16, paddingBottom:8 },
-  menuButton:{ padding:8 },
-  searchButton:{ padding:8 },
-  tabContainer:{ paddingHorizontal:16, marginBottom:8 },
-  tabSelector:{ position:'relative', flexDirection:'row', backgroundColor:'#1e293b', borderRadius:16, overflow:'hidden' },
-  tab:{ flex:1, paddingVertical:12, alignItems:'center' },
-  tabText:{ color:'#94a3b8', fontSize:14, fontWeight:'600' },
-  activeTabText:{ color:'#fff' },
-  tabIndicator:{ position:'absolute', bottom:0, height:3, width:'25%' },
-  content:{ flex:1 },
-  tabContent:{ flex:1 },
-  comingSoon:{ flex:1, justifyContent:'center', alignItems:'center', paddingHorizontal:32 },
-  comingSoonTitle:{ fontSize:24, fontWeight:'bold', color:'#e2e8f0', marginTop:16, marginBottom:8 },
-  comingSoonText:{ fontSize:16, color:'#94a3b8', textAlign:'center', lineHeight:24 },
-  profileHeader:{ alignItems:'center', padding:24 },
-  profileImageContainer:{ position:'relative', marginBottom:16 },
-  profileImage:{ width:120, height:120, borderRadius:60, borderWidth:3, borderColor:'#a855f7' },
-  editIconContainer:{ position:'absolute', bottom:0, right:0, backgroundColor:'#a855f7', borderRadius:16, padding:6, borderWidth:2, borderColor:'#0f172a' },
-  username:{ color:'#fff', fontSize:24, fontWeight:'bold', marginBottom:4 },
-  userEmail:{ color:'#9ca3af', fontSize:16, marginBottom:8 },
-  userBio:{ color:'#e2e8f0', fontSize:14, textAlign:'center', lineHeight:20, marginBottom:12, paddingHorizontal:20 },
-  statsContainer:{ flexDirection:'row', marginTop:16, gap:24 },
-  statItem:{ alignItems:'center' },
-  statNumber:{ color:'#fff', fontSize:18, fontWeight:'bold' },
-  statLabel:{ color:'#9ca3af', fontSize:14, marginTop:2 },
-  actionButtons:{ flexDirection:'row', marginTop:16, gap:8 },
-  editButton:{ flex:1, marginRight:8, borderRadius:12, overflow:'hidden' },
-  editButtonGradient:{ paddingVertical:12, paddingHorizontal:24, alignItems:'center' },
-  editButtonText:{ color:'#fff', fontWeight:'600' },
-  bookmarkButton:{ backgroundColor:'#374151', paddingVertical:8, paddingHorizontal:16, borderRadius:12, alignItems:'center' },
-  flatListContainer:{ flex:1 },
-  postsGrid:{ flex:1, padding:8 },
-  postsGridContent:{ padding:8, flexGrow:1 },
-  loadingContainer:{ flex:1, justifyContent:'center', alignItems:'center', paddingVertical:40 },
-  loadingText:{ color:'#9ca3af', fontSize:16 },
-  postCard:{ flex:1, margin:4, aspectRatio:1, borderRadius:12, overflow:'hidden', backgroundColor:'#374151', position:'relative' },
-  deleteButton:{ position:'absolute', top:8, right:8, backgroundColor:'rgba(0,0,0,0.8)', borderRadius:16, padding:6, zIndex:10 },
-  postImage:{ width:'100%', height:'100%' },
-  postTextPlaceholder:{ width:'100%', height:'100%', justifyContent:'center', alignItems:'center', backgroundColor:'#1e293b' },
-  postEmoji:{ fontSize:32 },
-  mediaContainer:{ width:'100%', height:'100%', position:'relative' },
-  videoIndicator:{ position:'absolute', top:8, left:8, backgroundColor:'rgba(0,0,0,0.7)', borderRadius:12, padding:4, zIndex:1 },
-  postOverlay:{ position:'absolute', bottom:0, left:0, right:0, backgroundColor:'rgba(0,0,0,0.7)', padding:8 },
-  postTitle:{ color:'#fff', fontSize:12, fontWeight:'600', marginBottom:4 },
-  postIndicators:{ flexDirection:'row', alignItems:'center', gap:8 },
-  sharedIndicator:{ backgroundColor:'rgba(0,0,0,0.5)', borderRadius:12, padding:4 },
-  likeIndicator:{ flexDirection:'row', alignItems:'center', backgroundColor:'rgba(0,0,0,0.5)', borderRadius:12, padding:4, gap:4 },
-  likeCount:{ color:'#fff', fontSize:10, fontWeight:'600' },
-  emptyPosts:{ flex:1, justifyContent:'center', alignItems:'center', paddingVertical:80 },
-  emptyText:{ color:'#6b7280', fontSize:16, fontWeight:'600', marginTop:16 },
-  emptySubtext:{ color:'#4b5563', fontSize:14, marginTop:8, textAlign:'center', maxWidth:250 },
-  logoutButton:{ flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'rgba(239,68,68,0.1)', marginHorizontal:16, marginVertical:24, paddingVertical:12, borderRadius:12, gap:8 },
-  logoutText:{ color:'#ef4444', fontSize:16, fontWeight:'600' },
-  settingsContainer:{ flex:1, paddingHorizontal:20 },
-  settingsSection:{ marginBottom:32 },
-  settingsSectionTitle:{ fontSize:18, fontWeight:'bold', color:'#e2e8f0', marginBottom:16, marginTop:8 },
-  settingsItem:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical:16, paddingHorizontal:16, backgroundColor:'#1e293b', borderRadius:12, marginBottom:8 },
-  settingsItemLeft:{ flexDirection:'row', alignItems:'center', flex:1 },
-  settingsItemText:{ fontSize:16, color:'#e2e8f0', marginLeft:12, fontWeight:'500' },
-  developerBadge:{ backgroundColor:'rgba(139,92,246,0.1)', borderRadius:8, padding:12, marginTop:8, borderWidth:1, borderColor:'rgba(139,92,246,0.3)' },
-  developerBadgeText:{ color:'#8b5cf6', fontSize:14, fontWeight:'600', textAlign:'center' },
-  modalOverlay:{ flex:1, backgroundColor:'rgba(0,0,0,0.7)', justifyContent:'center', alignItems:'center' },
-  modalContainer:{ width:'85%', borderRadius:16, overflow:'hidden' },
-  modalGradient:{ padding:24, alignItems:'center' },
-  modalTitle:{ fontSize:20, fontWeight:'bold', color:'#fff', marginBottom:8, textAlign:'center' },
-  modalSubtitle:{ fontSize:16, color:'#e2e8f0', marginBottom:24, textAlign:'center' },
-  codeInput:{ width:'100%', backgroundColor:'rgba(255,255,255,0.1)', borderRadius:12, padding:16, fontSize:16, color:'#fff', textAlign:'center', marginBottom:24, borderWidth:2, borderColor:'rgba(255,255,255,0.3)' },
-  modalButtons:{ flexDirection:'row', gap:12, width:'100%' },
-  modalButton:{ flex:1, padding:14, borderRadius:12, alignItems:'center' },
-  cancelButton:{ backgroundColor:'rgba(255,255,255,0.1)', borderWidth:1, borderColor:'rgba(255,255,255,0.3)' },
-  submitButton:{ backgroundColor:'rgba(255,255,255,0.9)' },
-  cancelButtonText:{ color:'#fff', fontSize:16, fontWeight:'600' },
-  submitButtonText:{ color:'#8b5cf6', fontSize:16, fontWeight:'600' }
+  container: { flex: 1, backgroundColor: COLORS.pageBackground },
+  header: { paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 8 : 8, paddingBottom: 1, borderBottomWidth: 1, borderBottomColor: '#141418' },
+  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 16 },
+  logoContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  menuButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerBalances: { position: 'absolute', left: 56, height: '100%', justifyContent: 'center' },
+  tabContainer: { paddingHorizontal: 16, paddingBottom: 12 },
+  tabSelector: { position: 'relative', backgroundColor: '#374151', borderRadius: 9999, padding: 4, flexDirection: 'row' },
+  tab: { flex: 1, paddingVertical: 6, alignItems: 'center', zIndex: 2 },
+  tabText: { color: '#9ca3af', fontSize: 12, fontWeight: '600' },
+  activeTabText: { color: '#ffffff' },
+  tabIndicator: { position: 'absolute', top: 2, bottom: 2, width: '25%', borderRadius: 9999, zIndex: 1 },
+  tabIndicatorGradient: { flex: 1, borderRadius: 9999 },
+  scrollView: { flex: 1 },
+  profileSection: { alignItems: 'center', paddingVertical: 8, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#141418' },
+  avatar: { width: 100, height: 100, borderRadius: 50, borderWidth: 2, borderColor: '#26262C', marginBottom: 16 },
+  stats: { flexDirection: 'row', marginBottom: 16, gap: 32 },
+  statBox: { alignItems: 'center' },
+  statValue: { fontSize: 20, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
+  statLabel: { fontSize: 13, color: '#A1A1AA' },
+  bio: { fontSize: 14, color: '#E4E4E7', textAlign: 'center', lineHeight: 20, marginBottom: 16, paddingHorizontal: 20 },
+  bioPlaceholder: { fontSize: 14, color: '#6b7280', fontStyle: 'italic', marginBottom: 16 },
+  editProfileButton: { width: '100%', borderRadius: 12, overflow: 'hidden', marginTop: 8 },
+  editProfileGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 8 },
+  editProfileText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#141418', paddingHorizontal: 16 },
+  tabButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 6, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  activeTab: { borderBottomColor: '#00D2BE' },
+  tabLabel: { fontSize: 14, fontWeight: '600', color: '#A1A1AA' },
+  activeTabLabel: { color: '#00D2BE' },
+  gridContainer: { paddingTop: 2 },
+  gridItem: { flex: 1 / 3, aspectRatio: 1, margin: 1, backgroundColor: '#141418', position: 'relative' },
+  gridImage: { width: '100%', height: '100%' },
+  playIconOverlay: { position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 16, padding: 4 },
+  postStats: { position: 'absolute', bottom: 6, left: 6, flexDirection: 'row', gap: 6 },
+  statBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 12, paddingHorizontal: 6, paddingVertical: 3, gap: 3 },
+  statText: { fontSize: 11, fontWeight: '600', color: '#fff' },
+  deleteIcon: { position: 'absolute', top: 6, right: 6, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12 },
+  footerLoader: { paddingVertical: 20, alignItems: 'center', justifyContent: 'center' },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 32 },
+  emptyText: { fontSize: 16, fontWeight: '600', color: '#6b7280', marginTop: 12, textAlign: 'center' },
+  emptySubtext: { fontSize: 14, color: '#4b5563', marginTop: 6, textAlign: 'center' }
 });
 
 export default ProfileScreen;
+
+

@@ -1,6 +1,7 @@
 import {
     CognitoIdentityProviderClient,
     ListUsersCommand,
+    AdminDeleteUserCommand,
     type UserType,
 } from '@aws-sdk/client-cognito-identity-provider';
 import ENV from '../config/env';
@@ -150,4 +151,27 @@ export async function findDirectoryUser(inputUserId: string): Promise<DirectoryU
             .filter(Boolean)
             .some((value) => String(value).toLowerCase() === lowered);
     }) || null;
+}
+
+/** Delete a Cognito user by `sub` (used by internal account purge). */
+export async function deleteCognitoUserBySub(sub: string): Promise<boolean> {
+    const client = getClient();
+    const userPoolId = getPoolId();
+    const uid = String(sub || '').trim();
+    if (!client || !userPoolId || !uid) {
+        return false;
+    }
+    try {
+        const out = await client.send(new ListUsersCommand({
+            UserPoolId: userPoolId,
+            Filter: `sub = "${uid}"`,
+            Limit: 1,
+        }));
+        const username = String(out.Users?.[0]?.Username || '').trim();
+        if (!username) return true;
+        await client.send(new AdminDeleteUserCommand({ UserPoolId: userPoolId, Username: username }));
+        return true;
+    } catch {
+        return false;
+    }
 }

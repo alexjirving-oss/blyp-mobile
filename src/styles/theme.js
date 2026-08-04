@@ -1,44 +1,67 @@
 import { StyleSheet } from 'react-native';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
-// Common color palette
+// Common color palette — unified with the design system's DARK scheme
+// (see src/styles/designSystem/palettes.ts). Keep these keys in sync with the
+// dark scheme so legacy screens importing COLORS match the new look.
 export const COLORS = {
-  // Primary colors
-  primary: '#a855f7',
-  primaryDark: '#9333ea',
-  primaryLight: '#c084fc',
-  
-  // Secondary colors
-  secondary: '#ec4899',
-  secondaryDark: '#db2777',
-  secondaryLight: '#f472b6',
-  
-  // Background colors
-  background: '#0f172a',
-  backgroundLight: '#1e293b',
-  backgroundCard: '#334155',
-  
-  // Text colors
-  textPrimary: '#ffffff',
-  textSecondary: '#e2e8f0',
-  textMuted: '#94a3b8',
-  textDisabled: '#64748b',
-  
+  // Brand signal accent — Mercedes-AMG PETRONAS teal (used sparingly)
+  primary: '#00D2BE',
+  primaryDark: '#00A89E',
+  primaryLight: '#7FEDE2',
+
+  // Secondary (kept on-brand). Cyan is the cool highlight via `electric`.
+  secondary: '#00D2BE',
+  secondaryDark: '#00A89E',
+  secondaryLight: '#7FEDE2',
+
+  // Electric cyan highlight + glow
+  electric: '#67E8F9',
+  electricSoft: 'rgba(103,232,249,0.14)',
+  glow: '#00D2BE',
+
+  // Background colors (editorial near-black, neutral)
+  background: '#0A0A0C',
+  backgroundLight: '#141418',
+  backgroundCard: '#121216',
+  // Page background
+  pageBackground: '#0A0A0C',
+  // Input / tab-strip surface
+  tabStripBackground: 'rgba(255,255,255,0.06)',
+
+  // Text colors (neutral zinc ramp)
+  textPrimary: '#F5F5F7',
+  textSecondary: '#A1A1AA',
+  textMuted: '#71717A',
+  textDisabled: '#52525B',
+
   // Status colors
-  success: '#22c55e',
-  warning: '#f59e0b',
-  error: '#ef4444',
-  info: '#3b82f6',
-  
+  success: '#34D399',
+  warning: '#FBBF24',
+  error: '#FB7185',
+  info: '#60A5FA',
+
   // Utility colors
   white: '#ffffff',
   black: '#000000',
   transparent: 'transparent',
-  
-  // Gradient colors
-  gradientStart: '#a855f7',
-  gradientMiddle: '#d946ef',
-  gradientEnd: '#ec4899',
+
+  // Gradient colors (kept on-brand; gradients are used minimally now)
+  gradientStart: '#00D2BE',
+  gradientMiddle: '#00D2BE',
+  gradientEnd: '#00A89E',
+
+  // Screen background — flat near-black (no colour wash).
+  screenGradientTop: '#0A0A0C',
+  screenGradientMid: '#0A0A0C',
+  screenGradientBot: '#0A0A0C',
+
+  // Premium extras
+  border: 'rgba(255,255,255,0.08)',
+  borderStrong: 'rgba(255,255,255,0.16)',
+  divider: 'rgba(255,255,255,0.06)',
+  cardGlass: '#121216',
+  surface: '#141418',
 };
 
 // Common spacing values
@@ -72,28 +95,36 @@ export const BORDER_RADIUS = {
   round: responsiveSize(50),
 };
 
-// Shadow styles
+// Shadow styles — deeper, punchier elevation + brand glow for CTAs
 export const SHADOWS = {
   small: {
     shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    elevation: 3,
   },
   medium: {
     shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 6,
   },
   large: {
     shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.3,
+    shadowRadius: 26,
+    elevation: 12,
+  },
+  // Neon brand glow — use on primary CTAs for the 3D "punchy" feel.
+  glow: {
+    shadowColor: COLORS.glow,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.55,
+    shadowRadius: 20,
+    elevation: 10,
   },
 };
 
@@ -109,16 +140,16 @@ export const COMMON_STYLES = StyleSheet.create({
   spaceBetween: { justifyContent: 'space-between' },
   spaceAround: { justifyContent: 'space-around' },
   spaceEvenly: { justifyContent: 'space-evenly' },
-  
+
   // Positioning
   absolute: { position: 'absolute' },
   relative: { position: 'relative' },
-  
+
   // Background
-  backgroundPrimary: { backgroundColor: COLORS.background },
+  backgroundPrimary: { backgroundColor: COLORS.pageBackground },
   backgroundSecondary: { backgroundColor: COLORS.backgroundLight },
   backgroundCard: { backgroundColor: COLORS.backgroundCard },
-  
+
   // Text styles
   textPrimary: { color: COLORS.textPrimary },
   textSecondary: { color: COLORS.textSecondary },
@@ -126,33 +157,33 @@ export const COMMON_STYLES = StyleSheet.create({
   textCenter: { textAlign: 'center' },
   textLeft: { textAlign: 'left' },
   textRight: { textAlign: 'right' },
-  
+
   // Font weights
   fontLight: { fontWeight: '300' },
   fontRegular: { fontWeight: '400' },
   fontMedium: { fontWeight: '500' },
   fontSemiBold: { fontWeight: '600' },
   fontBold: { fontWeight: '700' },
-  
+
   // Borders
   borderPrimary: { borderColor: COLORS.primary },
   borderSecondary: { borderColor: COLORS.secondary },
   borderLight: { borderColor: COLORS.backgroundLight },
-  
+
   // Common padding
   paddingXs: { padding: SPACING.xs },
   paddingSm: { padding: SPACING.sm },
   paddingMd: { padding: SPACING.md },
   paddingLg: { padding: SPACING.lg },
   paddingXl: { padding: SPACING.xl },
-  
+
   // Common margin
   marginXs: { margin: SPACING.xs },
   marginSm: { margin: SPACING.sm },
   marginMd: { margin: SPACING.md },
   marginLg: { margin: SPACING.lg },
   marginXl: { margin: SPACING.xl },
-  
+
   // Common buttons
   button: {
     paddingVertical: SPACING.md,
@@ -161,21 +192,21 @@ export const COMMON_STYLES = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
+
   buttonPrimary: {
     backgroundColor: COLORS.primary,
   },
-  
+
   buttonSecondary: {
     backgroundColor: COLORS.secondary,
   },
-  
+
   buttonOutline: {
     backgroundColor: COLORS.transparent,
     borderWidth: 1,
     borderColor: COLORS.primary,
   },
-  
+
   // Common cards
   card: {
     backgroundColor: COLORS.backgroundCard,
@@ -183,7 +214,7 @@ export const COMMON_STYLES = StyleSheet.create({
     padding: SPACING.md,
     ...SHADOWS.medium,
   },
-  
+
   // Common inputs
   input: {
     backgroundColor: COLORS.backgroundLight,
@@ -193,20 +224,25 @@ export const COMMON_STYLES = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: FONT_SIZES.md,
   },
-  
+
   // Safe area
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.pageBackground,
   },
-  
+
   // Loading state
   loadingContainer: {
     flex: 1,
-    backgroundColor: COLORS.background,
-    ...COMMON_STYLES.center,
+    backgroundColor: COLORS.pageBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
+
+// Canonical screen background — flat near-black (editorial, no colour wash).
+// Import this wherever a full-page background is needed.
+export const SCREEN_GRADIENT_COLORS = ['#0A0A0C', '#0A0A0C', '#0A0A0C'];
 
 export default {
   COLORS,

@@ -1,6 +1,5 @@
 import { docClient } from '../aws/dynamoClient';
 import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { ENV } from '../config/env';
 
 export type GuestState = 'REQUESTED' | 'INVITED' | 'LIVE' | 'REJECTED' | 'KICKED' | 'LEFT';
 
@@ -16,9 +15,22 @@ export interface GuestSlot {
   disconnectedAt?: string;
   slotIndexRequested?: number;
   slotIndex?: number;
+  /**
+   * Host-applied mute. When true, the guest's client must keep its mic off and
+   * must not allow self-unmute (the host controls it). IVS cannot force-mute a
+   * remote publisher server-side, so this is a cooperative signal + client
+   * enforcement; the hard control for a non-cooperative guest is kick.
+   */
+  mutedByHost?: boolean;
+  /**
+   * Host-applied camera disable. When true, the guest's client must keep its
+   * camera off and must not allow self-enable (the host controls it). Same
+   * cooperative-signal + client-enforcement model as `mutedByHost`.
+   */
+  cameraOffByHost?: boolean;
 }
 
-const TABLE_NAME = process.env.LIVE_GUESTS_TABLE || ENV.LIVE_GUESTS_TABLE;
+const TABLE_NAME = process.env.LIVE_GUESTS_TABLE;
 
 if (!TABLE_NAME) {
   throw new Error('[config] LIVE_GUESTS_TABLE is required');
@@ -285,6 +297,62 @@ export async function inviteGuest(
       ':expected': 'REQUESTED',
     },
     ConditionExpression: 'attribute_exists(sessionId) AND attribute_exists(userId) AND #state = :expected',
+  }));
+}
+
+/**
+ * Host-initiated invite: put the user straight into INVITED with a slot, even if
+ * they never sent a request (no prior record required). Won't clobber a guest who
+ * is already LIVE. This backs the "host invites a viewer up" flow.
+ */
+export async function hostInviteGuest(
+  sessionId: string,
+  userId: string,
+  slotIndex: number,
+  nowIso: string
+): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { sessionId, userId },
+    UpdateExpression: 'set #state = :state, slotIndex = :slotIndex, requestedAt = :now, updatedAt = :now REMOVE guestSessionId, connectedAt, disconnectedAt',
+    ExpressionAttributeNames: {
+      '#state': 'state',
+    },
+    ExpressionAttributeValues: {
+      ':state': 'INVITED',
+      ':slotIndex': slotIndex,
+      ':now': nowIso,
+      ':live': 'LIVE',
+    },
+    // Upsert (creates the record if the viewer never requested), but never yank a
+    // guest who is currently LIVE.
+    ConditionExpression: 'attribute_not_exists(#state) OR #state <> :live',
+  }));
+}
+
+export async function setGuestMuted(sessionId: string, userId: string, muted: boolean, nowIso: string): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { sessionId, userId },
+    UpdateExpression: 'set mutedByHost = :muted, updatedAt = :updatedAt',
+    ExpressionAttributeValues: {
+      ':muted': muted,
+      ':updatedAt': nowIso,
+    },
+    ConditionExpression: 'attribute_exists(sessionId) AND attribute_exists(userId)',
+  }));
+}
+
+export async function setGuestCameraOff(sessionId: string, userId: string, cameraOff: boolean, nowIso: string): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { sessionId, userId },
+    UpdateExpression: 'set cameraOffByHost = :cameraOff, updatedAt = :updatedAt',
+    ExpressionAttributeValues: {
+      ':cameraOff': cameraOff,
+      ':updatedAt': nowIso,
+    },
+    ConditionExpression: 'attribute_exists(sessionId) AND attribute_exists(userId)',
   }));
 }
 

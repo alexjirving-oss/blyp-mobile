@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { logger } from '../config/logger';
+import { IAP_CATALOG } from './iapCatalog';
 
 let ensurePromise: Promise<void> | null = null;
 
@@ -46,13 +47,10 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           status text NOT NULL,
           reference_type text,
           reference_id text,
-          provider_purchase_id text,
           idempotency_key text UNIQUE,
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
-
-        `ALTER TABLE ledger_entries ADD COLUMN IF NOT EXISTS provider_purchase_id text`,
 
         `CREATE TABLE IF NOT EXISTS iap_products (
           platform text NOT NULL,
@@ -62,25 +60,6 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (platform, sku)
-        )`,
-
-        `CREATE TABLE IF NOT EXISTS iap_receipts (
-          purchase_id text PRIMARY KEY,
-          user_id text NOT NULL,
-          platform text NOT NULL,
-          sku text NOT NULL,
-          store_transaction_id text NOT NULL,
-          purchase_token text,
-          idempotency_key text NOT NULL,
-          verification_status text NOT NULL,
-          provider_response jsonb NOT NULL DEFAULT '{}'::jsonb,
-          granted_coins bigint NOT NULL DEFAULT 0,
-          ledger_entry_id text,
-          verified_at timestamptz,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE (user_id, idempotency_key),
-          UNIQUE (platform, store_transaction_id)
         )`,
 
         `CREATE TABLE IF NOT EXISTS gift_catalog (
@@ -123,6 +102,26 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           gems_earned bigint NOT NULL DEFAULT 0,
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (stream_id, creator_user_id)
+        )`,
+
+        // Team earnings: per (team, member) precise accrual of the team coin/gem
+        // bonus. Members earn an extra 10% of their base gems; the team leader
+        // earns 5% of each member's base gems. Wallet credits are whole gems, so
+        // we accrue in micro-gems (1 gem = 1_000_000 micro) and credit the floor,
+        // carrying the fractional remainder forward — this makes the 2.5-gem-type
+        // cuts exact over time instead of being lost to rounding.
+        `CREATE TABLE IF NOT EXISTS team_earnings (
+          team_id text NOT NULL,
+          member_user_id text NOT NULL,
+          leader_user_id text NOT NULL,
+          coins_received bigint NOT NULL DEFAULT 0,
+          base_gems bigint NOT NULL DEFAULT 0,
+          member_bonus_micro bigint NOT NULL DEFAULT 0,
+          member_bonus_paid bigint NOT NULL DEFAULT 0,
+          leader_bonus_micro bigint NOT NULL DEFAULT 0,
+          leader_bonus_paid bigint NOT NULL DEFAULT 0,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (team_id, member_user_id)
         )`,
 
         `CREATE TABLE IF NOT EXISTS promotions (
@@ -178,95 +177,75 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           UNIQUE (host_user_id, idempotency_key)
         )`,
 
-        `CREATE TABLE IF NOT EXISTS user_admin_state (
-          user_id text PRIMARY KEY,
-          role text NOT NULL DEFAULT 'user',
-          is_banned boolean NOT NULL DEFAULT false,
-          ban_reason text,
-          banned_until timestamptz,
+        `CREATE TABLE IF NOT EXISTS matchday_entitlements (
+          entitlement_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          event_id text NOT NULL,
+          status text NOT NULL,
+          coin_cost bigint NOT NULL DEFAULT 0,
+          expires_at timestamptz,
+          idempotency_key text NOT NULL,
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+          UNIQUE (user_id, event_id),
+          UNIQUE (user_id, idempotency_key)
         )`,
 
-                `CREATE TABLE IF NOT EXISTS admin_audit_log (
-          audit_id bigserial PRIMARY KEY,
-          actor_user_id text NOT NULL,
-          action text NOT NULL,
-          target_type text NOT NULL,
-          target_id text NOT NULL,
+        `CREATE TABLE IF NOT EXISTS matchday_predictions (
+          prediction_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          event_id text NOT NULL,
+          market text NOT NULL,
+          selection text NOT NULL,
+          stake_coins bigint NOT NULL DEFAULT 0,
+          status text NOT NULL,
+          payout_coins bigint NOT NULL DEFAULT 0,
+          idempotency_key text NOT NULL,
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          settled_at timestamptz,
+          UNIQUE (user_id, idempotency_key),
+          UNIQUE (user_id, event_id, market)
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS matchday_settlements (
+          settlement_id text PRIMARY KEY,
+          event_id text NOT NULL UNIQUE,
+          settled_by text NOT NULL,
+          idempotency_key text NOT NULL,
+          response_json jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
-        `CREATE TABLE IF NOT EXISTS app_version_policy (
-          policy_key text PRIMARY KEY,
-          enabled boolean NOT NULL DEFAULT false,
-          minimum_android_version_code bigint,
-          message text NOT NULL DEFAULT 'A newer version of BLYP is required to continue.',
-          store_url text NOT NULL DEFAULT 'https://play.google.com/store/apps/details?id=com.blyp.mobile',
-          updated_by_user_id text,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          CHECK (policy_key = 'android'),
-          CHECK (minimum_android_version_code IS NULL OR minimum_android_version_code > 0)
-        )`,
-
-        `CREATE TABLE IF NOT EXISTS admin_user_messages (
-
-          message_id text PRIMARY KEY,
-          actor_user_id text NOT NULL,
-          target_user_id text NOT NULL,
-          subject text,
-          body text NOT NULL,
-          channel text NOT NULL DEFAULT 'in_app',
-          status text NOT NULL DEFAULT 'queued',
-          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )`,
-
-        `CREATE TABLE IF NOT EXISTS subscription_plans (
-          plan_id text PRIMARY KEY,
-          plan_name text NOT NULL,
-          price_cents integer NOT NULL DEFAULT 0,
-          currency text NOT NULL DEFAULT 'USD',
-          interval text NOT NULL DEFAULT 'month',
-          coin_allowance bigint NOT NULL DEFAULT 0,
-          enabled boolean NOT NULL DEFAULT true,
-          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )`,
-
-        `CREATE TABLE IF NOT EXISTS user_subscriptions (
-          subscription_id text PRIMARY KEY,
-          user_id text NOT NULL,
-          plan_id text NOT NULL,
-          status text NOT NULL DEFAULT 'inactive',
-          provider text NOT NULL DEFAULT 'stripe',
-          provider_subscription_id text,
-          current_period_start timestamptz,
-          current_period_end timestamptz,
-          cancel_at_period_end boolean NOT NULL DEFAULT false,
-          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE (provider, provider_subscription_id)
-        )`,
-
-        `CREATE TABLE IF NOT EXISTS post_admin_state (
-          post_id text PRIMARY KEY,
-          is_removed boolean NOT NULL DEFAULT false,
-          removed_reason text,
-          removed_by_user_id text,
-          removed_at timestamptz,
+        `CREATE TABLE IF NOT EXISTS battle_escrows (
+          battle_id text PRIMARY KEY,
+          creator_uid text NOT NULL,
+          opponent_uid text NOT NULL,
+          stake_coins bigint NOT NULL DEFAULT 0,
+          pool_coins bigint NOT NULL DEFAULT 0,
+          creator_paid boolean NOT NULL DEFAULT false,
+          opponent_paid boolean NOT NULL DEFAULT false,
+          creator_paid_coins bigint NOT NULL DEFAULT 0,
+          opponent_paid_coins bigint NOT NULL DEFAULT 0,
+          creator_joined boolean NOT NULL DEFAULT false,
+          opponent_joined boolean NOT NULL DEFAULT false,
+          status text NOT NULL DEFAULT 'OPEN',
+          settlement_json jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
-        `CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_android_iap_provider_purchase ON ledger_entries (provider_purchase_id) WHERE provider_purchase_id IS NOT NULL AND entry_type = 'COIN_PURCHASE' AND reference_type = 'IAP' AND (metadata->>'platform') = 'ANDROID'`,
+        // Hard guarantee that a single store purchase token can only ever be
+        // redeemed once across the whole system (race-proof double-grant guard).
+        // NOTE: use jsonb_exists(metadata, 'purchaseToken') rather than the jsonb
+        // `?` operator — knex's db.raw() treats `?` as a bind placeholder and
+        // rewrites it to `$1`, producing a syntax error that aborted the whole
+        // schema bootstrap (and silently blocked the gift-catalog seed).
+        `CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_iap_purchase_token ON ledger_entries ((metadata->>'purchaseToken')) WHERE entry_type = 'COIN_PURCHASE' AND jsonb_exists(metadata, 'purchaseToken')`,
+        `CREATE INDEX IF NOT EXISTS idx_team_earnings_team ON team_earnings (team_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_team_earnings_leader ON team_earnings (leader_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_stream_id ON gift_events (stream_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_sender_user_id ON gift_events (sender_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_receiver_user_id ON gift_events (receiver_user_id)`,
@@ -275,18 +254,23 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_live_games_host_user_id ON live_games (host_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_live_game_entries_game_id ON live_game_entries (game_id)`,
         `CREATE INDEX IF NOT EXISTS idx_live_game_entries_user_id ON live_game_entries (user_id)`,
-        `CREATE INDEX IF NOT EXISTS idx_user_admin_state_role ON user_admin_state (role)`,
-        `CREATE INDEX IF NOT EXISTS idx_user_admin_state_is_banned ON user_admin_state (is_banned)`,
-        `CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_created ON admin_audit_log (actor_user_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_admin_audit_target_created ON admin_audit_log (target_type, target_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_target_created ON admin_user_messages (target_user_id, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_admin_user_messages_status ON admin_user_messages (status, created_at DESC)`,
-        `CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_status ON user_subscriptions (user_id, status)`,
-        `CREATE INDEX IF NOT EXISTS idx_post_admin_state_removed ON post_admin_state (is_removed, updated_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_matchday_entitlements_user ON matchday_entitlements (user_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_matchday_predictions_event ON matchday_predictions (event_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_matchday_predictions_user ON matchday_predictions (user_id)`,
       ];
 
+      // Resilient: a single failing DDL statement must never abort the whole
+      // schema bootstrap (and thereby silently block the gift-catalog seed that
+      // runs below). Log and continue so the rest of the schema + seed still run.
       for (const stmt of ddl) {
-        await db.raw(stmt);
+        try {
+          await db.raw(stmt);
+        } catch (e: any) {
+          logger.warn(
+            { err: e?.message || String(e), stmt: String(stmt).slice(0, 140) },
+            '[economy-schema] DDL statement failed; continuing'
+          );
+        }
       }
 
       // Seed gift catalog if empty (so gifting works immediately in local dev)
@@ -297,58 +281,62 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         if (!exists) {
           logger.warn('[economy-schema] gift_catalog missing after ensure; skipping seed');
         } else {
-          const row = await db('gift_catalog').count<{ count: string }[]>({ count: '*' }).first();
-          const count = Number((row as any)?.count ?? 0);
-          if (!Number.isFinite(count) || count === 0) {
-            await db('gift_catalog')
-              .insert([
-                { gift_id: 'heart', name: 'Heart', coin_cost: 1, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '❤️' } },
-                { gift_id: 'thumbsup', name: 'Thumbs Up', coin_cost: 2, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👍' } },
-                { gift_id: 'clap', name: 'Clap', coin_cost: 5, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👏' } },
-                { gift_id: 'fire', name: 'Fire', coin_cost: 10, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🔥' } },
-                { gift_id: 'star', name: 'Star', coin_cost: 15, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '⭐' } },
-                { gift_id: 'diamond', name: 'Diamond', coin_cost: 25, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💎' } },
-                { gift_id: 'crown', name: 'Crown', coin_cost: 50, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👑' } },
-                { gift_id: 'rocket', name: 'Rocket', coin_cost: 100, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🚀' } },
-              ])
-              .onConflict('gift_id')
-              .ignore();
-          }
+        // Always UPSERT the standard gifts so the catalog can never drift into an
+        // empty or all-disabled state (which surfaced to users as "gift is no longer
+        // available" on send, because sendGift rejects missing/disabled gifts).
+        // Idempotent: inserts what's missing and re-enables/refreshes existing rows.
+        await db('gift_catalog')
+          .insert([
+            { gift_id: 'heart', name: 'Heart', coin_cost: 1, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '❤️' } },
+            { gift_id: 'thumbsup', name: 'Thumbs Up', coin_cost: 2, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👍' } },
+            { gift_id: 'clap', name: 'Clap', coin_cost: 5, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👏' } },
+            { gift_id: 'fire', name: 'Fire', coin_cost: 10, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🔥' } },
+            { gift_id: 'star', name: 'Star', coin_cost: 15, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '⭐' } },
+            { gift_id: 'diamond', name: 'Diamond', coin_cost: 25, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💎' } },
+            { gift_id: 'crown', name: 'Crown', coin_cost: 50, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👑' } },
+            { gift_id: 'rocket', name: 'Rocket', coin_cost: 100, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🚀' } },
+            { gift_id: 'revive', name: 'Revive', coin_cost: 30, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🛟', action: 'revive' } },
+          ])
+          .onConflict('gift_id')
+          .merge(['name', 'coin_cost', 'enabled', 'rarity', 'asset_json']);
+
+        // Operational visibility: log the catalog state after seeding so an empty
+        // or disabled catalog (which surfaces to users as "gift no longer
+        // available") is diagnosable from logs without DB access.
+        const seededRows = await db('gift_catalog').select('gift_id', 'enabled').orderBy('gift_id');
+        logger.info(
+          { count: seededRows.length, gifts: seededRows.map((g: any) => `${g.gift_id}:${g.enabled}`).join(',') },
+          '[economy-schema] gift_catalog state after seed'
+        );
         }
       } catch (e: any) {
         logger.warn({ err: e?.message || String(e) }, '[economy-schema] seed gift_catalog failed');
       }
 
-      // Seed one minimal Android coin-pack SKU if none exists.
-      // This is a backend-readiness bootstrap only; provider verification still gates crediting.
+      // Seed IAP products if empty so /iap/verify can resolve a grant out of the
+      // box. Override coin grants / add SKUs via the iap_products table in prod.
       try {
         const existsRow = await db.raw("select to_regclass('public.iap_products') is not null as ok");
         const exists = Boolean((existsRow as any)?.rows?.[0]?.ok);
         if (!exists) {
           logger.warn('[economy-schema] iap_products missing after ensure; skipping seed');
         } else {
-          const activeAndroid = await db('iap_products')
-            .where({ platform: 'ANDROID', enabled: true })
-            .andWhere('coins_granted', '>', 0)
-            .first();
-
-          if (!activeAndroid) {
-            await db('iap_products')
-              .insert([
-                {
-                  platform: 'ANDROID',
-                  sku: 'blyp.android.proof.coinpack.100',
-                  coins_granted: 100,
-                  enabled: true,
-                  metadata: {
-                    source: 'schema_bootstrap',
-                    purpose: 'iap_verify_backend_proof_seed',
-                  },
-                },
-              ])
-              .onConflict(['platform', 'sku'])
-              .ignore();
-          }
+          // coins_granted = total coins delivered to the wallet (base + bonus).
+          // SKUs must match the Google Play product IDs and the client coin packs.
+          // Idempotent (onConflict ignore) so it safely tops up already-seeded DBs
+          // with any newly added packs without overwriting manual edits.
+          await db('iap_products')
+            .insert(
+              IAP_CATALOG.map((entry) => ({
+                platform: entry.platform,
+                sku: entry.sku,
+                coins_granted: entry.coinsGranted,
+                enabled: true,
+                metadata: jsonbDefault(db, { label: entry.label, priceUsd: entry.priceUsd }),
+              }))
+            )
+            .onConflict(['platform', 'sku'])
+            .ignore();
         }
       } catch (e: any) {
         logger.warn({ err: e?.message || String(e) }, '[economy-schema] seed iap_products failed');

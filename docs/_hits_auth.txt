@@ -1,0 +1,391 @@
+App.js:39:// CRITICAL: Amplify must be configured BEFORE any component mounts
+App.js:40:// that uses IVS live streaming (which requires Cognito JWT).
+App.js:57:import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
+App.js:118:import { useAuth, userPool, clearCognitoSessions, refreshAuthNow } from './src/hooks/useCommon';
+App.js:346:      // Keep this short; otherwise the UI can look logged-in while Cognito is actually expired.
+App.js:404:    // Common dev-bricker: Cognito session persisted in AsyncStorage is malformed.
+App.js:408:      console.warn('[BLYP][AUTH] Cognito session corrupted; clearing local session and returning to login');
+App.js:415:        try { await clearCognitoSessions(); } catch {}
+App.js:469:    const runCognitoLogin = async ({ email, password, role }) => {
+App.js:475:      // Clear any existing Cognito cached session artifacts first.
+App.js:481:        await clearCognitoSessions();
+App.js:487:          const cognitoUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+App.js:526:          try { await clearCognitoSessions(); } catch {}
+App.js:612:        await runCognitoLogin({ email, password, role });
+.\backend\blyp-live-service\src\realtime\socketServer.ts:3:import { verifyCognitoJwt } from '../auth/verifyCognitoJwt';
+.\backend\blyp-live-service\src\realtime\socketServer.ts:31:      const decoded = await verifyCognitoJwt(authToken);
+.\backend\blyp-live-service\src\config\env.ts:13:  // Cognito
+.\backend\blyp-live-service\src\auth\verifyCognitoJwt.ts:4:type CognitoConfig = {
+.\backend\blyp-live-service\src\auth\verifyCognitoJwt.ts:11:function getCognitoConfig(): CognitoConfig {
+.\backend\blyp-live-service\src\auth\verifyCognitoJwt.ts:29:  const { jwksUri } = getCognitoConfig();
+.\backend\blyp-live-service\src\auth\verifyCognitoJwt.ts:54:export async function verifyCognitoJwt(token: string): Promise<any> {
+.\backend\blyp-live-service\src\auth\verifyCognitoJwt.ts:55:  const { issuer } = getCognitoConfig();
+.\backend\blyp-live-service\src\auth\cognitoJwtMiddleware.ts:2:import { verifyCognitoJwt } from './verifyCognitoJwt';
+.\backend\blyp-live-service\src\auth\cognitoJwtMiddleware.ts:16:  verifyCognitoJwt(token)
+.\functions\src\services\ivsService.ts:5: * - Cognito ID token decoding and validation
+.\functions\src\services\ivsService.ts:10: * - Cognito verification is performed via JWKS (signature verification)
+.\functions\src\services\ivsService.ts:109:   * @param opts.userId - User ID (from Cognito sub)
+.\src\api\economyLiveApi.ts:1:import { getCognitoJwtForApi } from './getCognitoJwtForApi';
+.\src\api\economyLiveApi.ts:32:  const token = await getCognitoJwtForApi({ tokenType: 'id' });
+.\functions\src\services\ivsRouter.ts:46:const getCognitoVerifier = (() => {
+.\functions\src\services\ivsRouter.ts:70:    const { client } = getCognitoVerifier();
+.\functions\src\services\ivsRouter.ts:84:async function verifyCognitoIdToken(idToken: string): Promise<any> {
+.\functions\src\services\ivsRouter.ts:86:    throw new Error('Invalid Cognito token');
+.\functions\src\services\ivsRouter.ts:89:  const { issuer } = getCognitoVerifier();
+.\functions\src\services\ivsRouter.ts:107: * Cognito token middleware.
+.\functions\src\services\ivsRouter.ts:110:async function extractCognitoUserId(authHeader: string | undefined): Promise<string> {
+.\functions\src\services\ivsRouter.ts:112:  const decoded = await verifyCognitoIdToken(token);
+.\functions\src\services\ivsRouter.ts:186:    // 1. Extract and verify Cognito token
+.\functions\src\services\ivsRouter.ts:187:    const userId = await extractCognitoUserId(req.headers.authorization);
+.\functions\src\services\ivsRouter.ts:318:    // 1. Extract and verify Cognito token
+.\functions\src\services\ivsRouter.ts:319:    const userId = await extractCognitoUserId(req.headers.authorization);
+.\functions\src\services\ivsRouter.ts:424:    // 1. Extract and verify Cognito token
+.\functions\src\services\ivsRouter.ts:425:    const userId = await extractCognitoUserId(req.headers.authorization);
+.\src\config\preAuthCleanup.js:2:import { hydrateCognitoStorageCache, removeFromCognitoStorageCache } from '../lib/auth/cognitoStorage';
+.\src\config\preAuthCleanup.js:4:// Proactively sanitize any malformed Cognito tokens that could crash
+.\src\config\preAuthCleanup.js:5:// amazon-cognito-identity-js with `this.jwtToken.split is not a function`.
+.\src\config\preAuthCleanup.js:10:    const cognitoKeys = keys.filter((k) => k.includes('CognitoIdentityServiceProvider'));
+.\src\config\preAuthCleanup.js:53:    removeFromCognitoStorageCache(keysToRemove);
+.\src\config\preAuthCleanup.js:55:    console.log('­ƒº¦ Removed malformed Cognito keys from AsyncStorage', { count: keysToRemove.length });
+.\src\config\preAuthCleanup.js:58:  // Keep the sync storage mirror up-to-date for Cognito session reads.
+.\src\config\preAuthCleanup.js:60:    await hydrateCognitoStorageCache({ force: true });
+.\src\auth\getCognitoJwtForApi.ts:1:// Thin re-export to keep a single canonical implementation for Cognito JWT retrieval
+.\src\auth\getCognitoJwtForApi.ts:2:export { getCognitoJwtForApi } from '../api/getCognitoJwtForApi';
+.\src\api\getCognitoJwtForApi.ts:2:import { CognitoUserPool } from 'amazon-cognito-identity-js';
+.\src\api\getCognitoJwtForApi.ts:5:import { cognitoStorage, hydrateCognitoStorageCache } from '../lib/auth/cognitoStorage';
+.\src\api\getCognitoJwtForApi.ts:7:let cachedUserPool: CognitoUserPool | null = null;
+.\src\api\getCognitoJwtForApi.ts:8:function getUserPool(): CognitoUserPool {
+.\src\api\getCognitoJwtForApi.ts:10:  cachedUserPool = new CognitoUserPool({
+.\src\api\getCognitoJwtForApi.ts:18:async function tryGetJwtFromUserPool(tokenType: CognitoJwtTokenType): Promise<string | null> {
+.\src\api\getCognitoJwtForApi.ts:50:  tokenType: CognitoJwtTokenType,
+.\src\api\getCognitoJwtForApi.ts:65:const COGNITO_STORAGE_PREFIX = 'CognitoIdentityServiceProvider';
+.\src\api\getCognitoJwtForApi.ts:98:async function tryGetJwtFromAsyncStorage(tokenType: CognitoJwtTokenType): Promise<string | null> {
+.\src\api\getCognitoJwtForApi.ts:149:function getAmplifyAuth() {
+.\src\api\getCognitoJwtForApi.ts:194:export type CognitoJwtTokenType = 'id' | 'access';
+.\src\api\getCognitoJwtForApi.ts:196:export interface GetCognitoJwtForApiOptions {
+.\src\api\getCognitoJwtForApi.ts:197:  tokenType?: CognitoJwtTokenType;
+.\src\api\getCognitoJwtForApi.ts:199:   * Maximum time to wait for Cognito session/token hydration.
+.\src\api\getCognitoJwtForApi.ts:206: * Returns a Cognito JWT suitable for calling Blyp backend APIs.
+.\src\api\getCognitoJwtForApi.ts:207: * Requires the user to already be authenticated with Cognito.
+.\src\api\getCognitoJwtForApi.ts:209:export async function getCognitoJwtForApi(
+.\src\api\getCognitoJwtForApi.ts:210:  options: GetCognitoJwtForApiOptions = {}
+.\src\api\getCognitoJwtForApi.ts:212:  const tokenType: CognitoJwtTokenType = options.tokenType ?? 'id';
+.\src\api\getCognitoJwtForApi.ts:216:    // Ensure the sync Cognito storage adapter has hydrated from AsyncStorage.
+.\src\api\getCognitoJwtForApi.ts:220:      const hydrate = hydrateCognitoStorageCache();
+.\src\api\getCognitoJwtForApi.ts:227:    // PRIMARY: use the same Cognito session mechanism as AuthScreen (amazon-cognito-identity-js).
+.\src\api\getCognitoJwtForApi.ts:237:    const AmplifyAuth = getAmplifyAuth();
+.\src\api\getCognitoJwtForApi.ts:238:    if (!AmplifyAuth || typeof AmplifyAuth.currentSession !== 'function') {
+.\src\api\getCognitoJwtForApi.ts:239:      throw new Error('Amplify Auth.currentSession is unavailable');
+.\src\api\getCognitoJwtForApi.ts:243:    const sessionPromise = AmplifyAuth.currentSession();
+.\src\api\getCognitoJwtForApi.ts:247:      setTimeout(() => reject(new Error('Cognito session timeout (30s)')), 30000)
+.\src\api\getCognitoJwtForApi.ts:264:      throw new Error(`Cognito ${tokenType} token is empty or not a string`);
+.\src\api\getCognitoJwtForApi.ts:269:      throw new Error(`Cognito ${tokenType} token is malformed (expected 3 JWT parts, got ${parts.length})`);
+.\src\api\getCognitoJwtForApi.ts:278:      'Unknown error while retrieving Cognito session';
+.\src\api\getCognitoJwtForApi.ts:294:    console.warn('[COGNITO_JWT] Failed to obtain Cognito JWT', {
+.\src\api\getCognitoJwtForApi.ts:296:      hasAmplify: !!getAmplifyAuth(),
+.\src\api\getCognitoJwtForApi.ts:302:        `[COGNITO_JWT] Not logged in to Cognito (missing/expired session). ` +
+.\src\api\getCognitoJwtForApi.ts:308:      `[COGNITO_JWT] Unable to obtain Cognito JWT. ` +
+.\functions\src\liveStreamApi.ts:3: * Backend proxy for comments and likes with Cognito auth validation
+.\functions\src\liveStreamApi.ts:100:const getCognitoVerifier = (() => {
+.\functions\src\liveStreamApi.ts:124:    const { client } = getCognitoVerifier();
+.\functions\src\liveStreamApi.ts:138:async function verifyCognitoIdToken(idToken: string): Promise<any> {
+.\functions\src\liveStreamApi.ts:140:    throw new Error('Invalid Cognito token');
+.\functions\src\liveStreamApi.ts:143:  const { issuer } = getCognitoVerifier();
+.\functions\src\liveStreamApi.ts:160:async function verifyCognitoToken(token: string): Promise<any> {
+.\functions\src\liveStreamApi.ts:161:  return await verifyCognitoIdToken(token);
+.\functions\src\liveStreamApi.ts:188:    // Verify Cognito token
+.\functions\src\liveStreamApi.ts:189:    const cognitoUser = await verifyCognitoToken(token);
+.\functions\src\liveStreamApi.ts:220:    // Prefer app profile identity over Cognito payload (Cognito sub is usually a UUID).
+.\functions\src\liveStreamApi.ts:267:      // Fall back to Cognito payload if profile lookup fails.
+.\functions\src\liveStreamApi.ts:332:    // Verify Cognito token
+.\functions\src\liveStreamApi.ts:333:    const cognitoUser = await verifyCognitoToken(token);
+.\src\api\ivsLiveApi.ts:9: * - Security: Requires Cognito ID token for all requests
+.\src\api\ivsLiveApi.ts:34:import { getCognitoJwtForApi } from './getCognitoJwtForApi';
+.\src\api\ivsLiveApi.ts:350: * Generic helper to call IVS backend endpoints with Cognito authentication.
+.\src\api\ivsLiveApi.ts:351: * Validates Cognito token, constructs Authorization header, makes HTTP request.
+.\src\api\ivsLiveApi.ts:367:  // 2. Fetch Cognito ID token (returns validated JWT string)
+.\src\api\ivsLiveApi.ts:370:    console.log(`[IVS_API][${path}] Getting Cognito token...`);
+.\src\api\ivsLiveApi.ts:371:    token = await getCognitoJwtForApi({ tokenType: 'id', timeoutMs: 10000 });
+.\src\api\ivsLiveApi.ts:377:    throw new Error(`[IVS_API] Failed to get Cognito token: ${String(err)}`);
+.\src\api\ivsLiveApi.ts:592: * Call live backend with Cognito authentication.
+.\src\api\ivsLiveApi.ts:612:  // Get Cognito token
+.\src\api\ivsLiveApi.ts:615:    console.log(`[LIVE_API][${path}] Getting Cognito token...`);
+.\src\api\ivsLiveApi.ts:616:    token = await getCognitoJwtForApi({ tokenType: 'id' });
+.\src\api\ivsLiveApi.ts:621:    throw new Error(`[LIVE_API] Failed to get Cognito token: ${String(err)}`);
+.\src\config\firebase.js:181:    signInWithEmailAndPassword: async () => { throw new Error('Firebase auth disabled'); },
+.\src\config\amplify.js:1:// Ensure React Native polyfills for Amplify are loaded before configuring
+.\src\config\amplify.js:3:// Guard Amplify RN shim: if missing, fail soft.
+.\src\config\amplify.js:10:	console.warn('[Amplify] @aws-amplify/react-native not installed; continuing without shim');
+.\src\config\amplify.js:12:let Amplify = null;
+.\src\config\amplify.js:13:try { Amplify = require('aws-amplify').Amplify; } catch (e) { console.warn('[Amplify] aws-amplify package missing'); }
+.\src\config\amplify.js:15:const shouldEnableAmplify = (() => {
+.\src\config\amplify.js:19:if (!shouldEnableAmplify || !Amplify) {
+.\src\config\amplify.js:20:	console.log('[Amplify] Disabled via EXPO_PUBLIC_ENABLE_AMPLIFY flag or aws-amplify not available');
+.\src\config\amplify.js:22:	// Try aws-exports first, fall back to environment variables for Cognito config
+.\src\config\amplify.js:29:		console.warn('[Amplify] aws-exports not found; falling back to env vars');
+.\src\config\amplify.js:39:			console.log('[Amplify] Building config from env vars');
+.\src\config\amplify.js:49:	// Only configure Amplify when we have a plausible config (presence of at least one expected key)
+.\src\config\amplify.js:56:				Amplify.configure(awsconfig);
+.\src\config\amplify.js:57:				console.log('[Amplify] Ô£à Configured with region:', awsconfig.aws_project_region || awsconfig.aws_cognito_region);
+.\src\config\amplify.js:59:				console.warn('[Amplify] configure exception:', e?.message || e);
+.\src\config\amplify.js:62:			console.warn('[Amplify] configuration skipped (no region/user pool keys found in aws-exports or env vars)');
+.\src\config\amplify.js:65:		console.warn('[Amplify] configure failed:', e?.message || e);
+.\src\components\CommentsModal.js:23:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\components\CommentsModal.js:141:            await ensureFirebaseAuthReady({ uid });
+.\src\components\CommentsModal.js:375:        await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+.\src\components\CommentsModal.js:586:          await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+.\src\realtime\liveGiftSocket.ts:2:import { getCognitoJwtForApi } from '../api/getCognitoJwtForApi';
+.\src\realtime\liveGiftSocket.ts:26:  const token = await getCognitoJwtForApi({ tokenType: 'id' });
+.\src\utils\followUtils.js:11:import { ensureFirebaseAuthReady } from './firebaseAuthHelper';
+.\src\utils\followUtils.js:18:    await ensureFirebaseAuthReady({ uid: currentUserId });
+.\src\utils\followUtils.js:44:    await ensureFirebaseAuthReady({ uid: currentUserId });
+.\src\utils\followUtils.js:64:    await ensureFirebaseAuthReady({ uid: currentUserId });
+.\src\utils\followUtils.js:78:    await ensureFirebaseAuthReady();
+.\src\utils\followUtils.js:97:    await ensureFirebaseAuthReady();
+.\src\utils\followUtils.js:117:      await ensureFirebaseAuthReady();
+.\src\utils\followUtils.js:149:      await ensureFirebaseAuthReady();
+.\src\utils\followUtils.js:175:      await ensureFirebaseAuthReady({ uid: userId });
+.\functions\src\live\liveRoutes.ts:20: * Verify Cognito JWT token and extract user ID.
+.\functions\src\live\liveRoutes.ts:25:async function verifyCognitoToken(token: string): Promise<string> {
+.\functions\src\live\liveRoutes.ts:34:    // Verify with Cognito (simplified for now; production should use AWS Cognito verification)
+.\functions\src\live\liveRoutes.ts:75:    const userId = await verifyCognitoToken(authHeader);
+.\functions\src\live\liveRoutes.ts:127:      const userId = await verifyCognitoToken(authHeader);
+.\functions\src\live\liveRoutes.ts:180:      const userId = await verifyCognitoToken(authHeader);
+.\functions\src\live\liveRoutes.ts:233:      const userId = await verifyCognitoToken(authHeader);
+.\src\utils\firebaseAuthHelper.js:5: * PRODUCTION: Proper Firebase Custom Token bridge from Cognito must be implemented.
+.\src\utils\firebaseAuthHelper.js:116:  const explicit = normalizeBaseUrl(process.env?.EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL);
+.\src\utils\firebaseAuthHelper.js:147: * Signs in to Firebase Auth using a Firebase custom token minted from a Cognito JWT.
+.\src\utils\firebaseAuthHelper.js:149: * identity is Cognito `sub`.
+.\src\utils\firebaseAuthHelper.js:152: * @param {string} args.cognitoIdToken - Cognito ID token (JWT)
+.\src\utils\firebaseAuthHelper.js:153: * @param {string} args.uid - Cognito sub (desired Firebase uid)
+.\src\utils\firebaseAuthHelper.js:157:export async function ensureFirebaseAuth({ cognitoIdToken, uid, firebaseAuth }) {
+.\src\utils\firebaseAuthHelper.js:167:      console.warn('[AUTH][FIREBASE_BRIDGE] Missing Firebase bridge base URL; cannot mint Firebase custom token');
+.\src\utils\firebaseAuthHelper.js:171:      console.warn('[AUTH][FIREBASE_BRIDGE] Missing Cognito ID token; cannot mint Firebase custom token');
+.\src\utils\firebaseAuthHelper.js:189:          console.warn('[AUTH][FIREBASE_BRIDGE] mint failed', { status: resp.status, url, payload });
+.\src\utils\firebaseAuthHelper.js:194:          console.warn('[AUTH][FIREBASE_BRIDGE] mint response missing firebaseToken', { url });
+.\src\utils\firebaseAuthHelper.js:198:          console.log('[AUTH][FIREBASE_BRIDGE] mint ok', { url, uid });
+.\src\utils\firebaseAuthHelper.js:211:      console.warn('[AUTH][FIREBASE_BRIDGE] mint failed (no token)', { lastStatus, lastUrl, lastPayload });
+.\src\utils\firebaseAuthHelper.js:215:    // Native (@react-native-firebase/auth) has signInWithCustomToken on the instance.
+.\src\utils\firebaseAuthHelper.js:216:    if (typeof firebaseAuth?.signInWithCustomToken === 'function') {
+.\src\utils\firebaseAuthHelper.js:217:      await firebaseAuth.signInWithCustomToken(firebaseToken);
+.\src\utils\firebaseAuthHelper.js:219:        console.log('[AUTH][FIREBASE_BRIDGE] signInWithCustomToken ok (native)', { uid });
+.\src\utils\firebaseAuthHelper.js:224:    // Web SDK expects signInWithCustomToken(auth, token)
+.\src\utils\firebaseAuthHelper.js:227:      if (typeof mod?.signInWithCustomToken === 'function') {
+.\src\utils\firebaseAuthHelper.js:228:        await mod.signInWithCustomToken(firebaseAuth, firebaseToken);
+.\src\utils\firebaseAuthHelper.js:230:          console.log('[AUTH][FIREBASE_BRIDGE] signInWithCustomToken ok (web)', { uid });
+.\src\utils\firebaseAuthHelper.js:234:      console.warn('[AUTH][FIREBASE_BRIDGE] signInWithCustomToken failed', e?.message || String(e));
+.\src\utils\firebaseAuthHelper.js:237:    console.warn('[AUTH][FIREBASE_BRIDGE] unexpected error', e?.message || String(e));
+.\src\utils\firebaseAuthHelper.js:242:  getCognitoIdToken: null,
+.\src\utils\firebaseAuthHelper.js:249: * Services can then call ensureFirebaseAuthReady() without needing to thread tokens through.
+.\src\utils\firebaseAuthHelper.js:251:export function setFirebaseAuthBridgeContext(next) {
+.\src\utils\firebaseAuthHelper.js:253:    getCognitoIdToken: next?.getCognitoIdToken || bridgeContext.getCognitoIdToken,
+.\src\utils\firebaseAuthHelper.js:261:async function waitForFirebaseAuthUid({ firebaseAuth, desiredUid, timeoutMs }) {
+.\src\utils\firebaseAuthHelper.js:325: * - Ensures Firebase Auth is signed in with uid == Cognito sub before any Firestore call.
+.\src\utils\firebaseAuthHelper.js:329: * @param {string} [args.uid] - desired uid (Cognito sub)
+.\src\utils\firebaseAuthHelper.js:331: * @param {() => Promise<string>} [args.getCognitoIdToken] - provider for Cognito ID token JWT
+.\src\utils\firebaseAuthHelper.js:335:export async function ensureFirebaseAuthReady(args = {}) {
+.\src\utils\firebaseAuthHelper.js:375:  const getCognitoIdToken =
+.\src\utils\firebaseAuthHelper.js:376:    args.getCognitoIdToken || (typeof bridgeContext.getCognitoIdToken === 'function' ? bridgeContext.getCognitoIdToken : null);
+.\src\utils\firebaseAuthHelper.js:378:  if (typeof getCognitoIdToken !== 'function') {
+.\src\utils\firebaseAuthHelper.js:380:      console.warn('[AUTH][FIREBASE_READY] missing Cognito token provider (dev relaxed); continuing without Firebase sign-in');
+.\src\utils\firebaseAuthHelper.js:390:    // Important: do NOT auto-clear Cognito sessions from the Firebase bridge.
+.\src\utils\firebaseAuthHelper.js:392:    cognitoIdToken = await getCognitoIdToken({ autoClearOnCorruption: false });
+.\src\utils\firebaseAuthHelper.js:395:      console.warn('[AUTH][FIREBASE_READY] Cognito token fetch failed (dev relaxed); continuing without Firebase sign-in', e?.message || String(e));
+.\src\utils\firebaseAuthHelper.js:403:      console.warn('[AUTH][FIREBASE_READY] missing Cognito ID token (dev relaxed); continuing without Firebase sign-in');
+.\src\utils\firebaseAuthHelper.js:422:    const err = new Error('FIREBASE_BRIDGE_BASE_URL_MISSING');
+.\src\utils\firebaseAuthHelper.js:423:    err.code = 'FIREBASE_BRIDGE_BASE_URL_MISSING';
+.\src\utils\firebaseAuthHelper.js:487:  if (typeof firebaseAuth?.signInWithCustomToken === 'function') {
+.\src\utils\firebaseAuthHelper.js:488:    await firebaseAuth.signInWithCustomToken(firebaseToken);
+.\src\utils\firebaseAuthHelper.js:491:    if (typeof mod?.signInWithCustomToken !== 'function') {
+.\src\utils\firebaseAuthHelper.js:496:    await mod.signInWithCustomToken(firebaseAuth, firebaseToken);
+.\src\utils\firebaseAuthHelper.js:499:  const finalUid = await waitForFirebaseAuthUid({ firebaseAuth, desiredUid, timeoutMs: args.timeoutMs });
+.\src\components\GiftSystem.js:86:  // NOTE: Firebase auth may be null in Cognito-first flows. Use useAuth() uid for identity.
+.\src\components\GiftSystem.js:183:      // Avoid "sticky 0" if Cognito token isn't ready yet; retry a couple of times.
+.\src\components\GiftSystem.js:386:    // In IVS/live-service mode, Cognito auth is used and Firebase auth may be null.
+.\src\components\GiftSystem.js:397:    // Prevent self-gifting using the authenticated Cognito userId (server-authoritative).
+.\functions\src\index.ts:121:// AUTH BRIDGE: Cognito JWT -> Firebase Custom Token
+.\functions\src\index.ts:122:// - Needed so Firestore rules using request.auth.uid work with Cognito sub ids.
+.\functions\src\index.ts:123:// - Verifies Cognito ID token signature via JWKS.
+.\functions\src\index.ts:132:const getCognitoVerifier = (() => {
+.\functions\src\index.ts:155:    const { client } = getCognitoVerifier();
+.\functions\src\index.ts:202:    const { issuer } = getCognitoVerifier();
+.\functions\src\index.ts:224:    // Mint Firebase custom token with uid == Cognito sub.
+.\src\components\HeaderWalletBalances.js:25:    // NOTE: Most of the app runs on Cognito auth, with an optional Firebase auth bridge.
+.\src\hooks\useCommon.js:3:import { CognitoUserPool } from 'amazon-cognito-identity-js';
+.\src\hooks\useCommon.js:5:import { cognitoStorage, removeFromCognitoStorageCache } from '../lib/auth/cognitoStorage';
+.\src\hooks\useCommon.js:9:import { ensureFirebaseAuth, setFirebaseAuthBridgeContext } from '../utils/firebaseAuthHelper';
+.\src\hooks\useCommon.js:11:export const userPool = new CognitoUserPool({
+.\src\hooks\useCommon.js:14:  Storage: cognitoStorage, // must be synchronous for amazon-cognito-identity-js
+.\src\hooks\useCommon.js:18:// Optionally accepts a CognitoUser to set immediately after auth success
+.\src\hooks\useCommon.js:35:const isCognitoTokenCorruptionError = (e) => {
+.\src\hooks\useCommon.js:44:// Helper to clear any Cognito session artifacts in AsyncStorage
+.\src\hooks\useCommon.js:45:export const clearCognitoSessions = async () => {
+.\src\hooks\useCommon.js:54:    const cognitoKeys = keys.filter((k) => k.includes('CognitoIdentityServiceProvider'));
+.\src\hooks\useCommon.js:57:      removeFromCognitoStorageCache(cognitoKeys);
+.\src\hooks\useCommon.js:62:// Helper to get Cognito ID token (JWT) for API calls
+.\src\hooks\useCommon.js:63:export const getCognitoIdToken = async (options = {}) => {
+.\src\hooks\useCommon.js:70:      // Prefer an explicit Cognito user when provided.
+.\src\hooks\useCommon.js:81:      if (!global.__blypForcedCognitoSignOut) {
+.\src\hooks\useCommon.js:82:        global.__blypForcedCognitoSignOut = false;
+.\src\hooks\useCommon.js:93:          // Known corruption signature from amazon-cognito-identity-js:
+.\src\hooks\useCommon.js:99:              if (autoClearOnCorruption && !global.__blypForcedCognitoSignOut) {
+.\src\hooks\useCommon.js:100:                global.__blypForcedCognitoSignOut = true;
+.\src\hooks\useCommon.js:101:                clearCognitoSessions()
+.\src\hooks\useCommon.js:102:                  .then(() => console.log('­ƒº¦ Cleared corrupted Cognito session after token error'))
+.\src\hooks\useCommon.js:125:          // Safely extract token with guards against Cognito library issues
+.\src\hooks\useCommon.js:142:                if (autoClearOnCorruption && !global.__blypForcedCognitoSignOut) {
+.\src\hooks\useCommon.js:143:                  global.__blypForcedCognitoSignOut = true;
+.\src\hooks\useCommon.js:144:                  clearCognitoSessions()
+.\src\hooks\useCommon.js:145:                    .then(() => console.log('­ƒº¦ Cleared corrupted Cognito session after JWT extraction crash'))
+.\src\hooks\useCommon.js:153:            reject(new Error(`Cognito JWT extraction failed: ${e?.message || String(e)}`));
+.\src\hooks\useCommon.js:184:          if (autoClearOnCorruption && !global.__blypForcedCognitoSignOut) {
+.\src\hooks\useCommon.js:185:            global.__blypForcedCognitoSignOut = true;
+.\src\hooks\useCommon.js:186:            clearCognitoSessions()
+.\src\hooks\useCommon.js:187:              .then(() => console.log('­ƒº¦ Cleared corrupted Cognito session after outer token error'))
+.\src\hooks\useCommon.js:225:  // Prefer Firebase auth if explicitly requested via env, else use Cognito as default
+.\src\hooks\useCommon.js:228:      const v1 = String(process.env?.EXPO_PUBLIC_AUTH_PROVIDER || '').toLowerCase();
+.\src\hooks\useCommon.js:229:      const v2 = String(process.env?.EXPO_PUBLIC_PREFER_FIREBASE_AUTH || '').toLowerCase();
+.\src\hooks\useCommon.js:236:  // Helper: Extract uid from user object (Cognito or Firebase)
+.\src\hooks\useCommon.js:245:    // Cognito user path
+.\src\hooks\useCommon.js:246:    // IMPORTANT: Prefer Cognito `sub` (stable UUID) over username/email.
+.\src\hooks\useCommon.js:254:        user.signInUserSession ||
+.\src\hooks\useCommon.js:262:      // Fallbacks (less ideal): Cognito username or whatever getUsername returns.
+.\src\hooks\useCommon.js:296:  // When Cognito auth is active, also sign into Firebase Auth using a custom token.
+.\src\hooks\useCommon.js:297:  // This aligns request.auth.uid with the Cognito `sub` (uid) so Firestore rules work.
+.\src\hooks\useCommon.js:307:        setFirebaseAuthBridgeContext({
+.\src\hooks\useCommon.js:310:          getCognitoIdToken,
+.\src\hooks\useCommon.js:317:        // Important: do NOT auto-clear Cognito sessions from the Firebase bridge.
+.\src\hooks\useCommon.js:319:        const cognitoIdToken = await getCognitoIdToken({
+.\src\hooks\useCommon.js:325:        await ensureFirebaseAuth({ cognitoIdToken, uid: state.uid, firebaseAuth });
+.\src\hooks\useCommon.js:328:        console.warn('[AUTH][FIREBASE_BRIDGE] failed', e?.message || String(e));
+.\src\hooks\useCommon.js:354:        // Fall through to Cognito path on any Firebase subscription error
+.\src\hooks\useCommon.js:444:          // have a previously-stable Cognito user object whose session is valid.
+.\src\hooks\useCommon.js:477:          console.log('[AUTH][READY] Cognito auth stabilized (no user)');
+.\src\hooks\useCommon.js:491:            // During an active live session (or known Cognito token corruption), do NOT hard-logout.
+.\src\hooks\useCommon.js:493:            if (isLiveSessionActive() || reason === 'COGNITO_TOKEN_CORRUPTION' || isCognitoTokenCorruptionError(err)) {
+.\src\hooks\useCommon.js:512:            await clearCognitoSessions();
+.\src\hooks\useCommon.js:522:          if (err || !sessionValid) return void invalidate(isCognitoTokenCorruptionError(err) ? 'COGNITO_TOKEN_CORRUPTION' : 'INVALID_SESSION');
+.\src\hooks\useCommon.js:540:          console.log('[AUTH][READY] Cognito auth stabilized with valid session');
+.\src\hooks\useCommon.js:544:        const looksLikeCorruption = isCognitoTokenCorruptionError(e);
+.\src\hooks\useCommon.js:547:        // If we "keep" the user here, Firebase Auth cannot be established (no Cognito JWT),
+.\src\hooks\useCommon.js:550:          await clearCognitoSessions();
+.\src\hooks\useCommon.js:558:          console.warn('[AUTH][HARD_SESSION_ERROR] cleared corrupted Cognito session; forcing re-login', {
+.\src\hooks\useCommon.js:582:        await clearCognitoSessions();
+.\src\hooks\useCommon.js:584:        console.log('[AUTH][READY] Cognito auth stabilized (cleared corrupted session)');
+.\src\hooks\useCommon.js:655:    ['1', 'true', 'yes'].includes(String(process?.env?.EXPO_PUBLIC_AUTH_DEBUG || process?.env?.EXPO_PUBLIC_ENABLE_DEVTOOLS || '').toLowerCase());
+.\src\hooks\useCommon.js:670:  // Extract display name from user object (Cognito or Firebase)
+.\src\hooks\useCommon.js:679:    // Cognito path: look for name in attributes
+.\functions\src\firebaseAdmin.ts:62:    '[admin][warn] no service account found; using default credentials (ADC). In local emulators this may fail when minting custom tokens.'
+.\src\screens\UserProfileScreen.js:36:  // Source of truth for app login is Cognito uid (Firebase Auth is not guaranteed).
+.\src\screens\StubScreens.tsx:88:    // Evidence in ProfileScreen.v3.tsx indicates users/{uid} is keyed by Cognito sub.
+.\src\screens\ReviewScreen.js:30:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\screens\ReviewScreen.js:2170:        await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+.\src\screens\ReviewScreen.js:2181:    // Use Firebase user if available, otherwise create mock user with Cognito UID
+.\src\screens\ReviewScreen.js:2184:      // Create mock Firebase user with Cognito UID for DEV-OPEN rules
+.\src\screens\ReviewScreen.js:2193:      // No Firebase user and no Cognito user
+.\src\screens\ReviewScreen.js:2198:    const appUser = fbUser; // Use Firebase user if available, or Cognito-based mock user
+.\functions\src\auth\cognitoJwt.ts:4:export type CognitoJwtPayload = {
+.\functions\src\auth\cognitoJwt.ts:9:const getCognitoVerifier = (() => {
+.\functions\src\auth\cognitoJwt.ts:38:    const { client } = getCognitoVerifier();
+.\functions\src\auth\cognitoJwt.ts:61:export async function verifyCognitoIdToken(idToken: string): Promise<CognitoJwtPayload> {
+.\functions\src\auth\cognitoJwt.ts:63:    throw new Error('Invalid Cognito token');
+.\functions\src\auth\cognitoJwt.ts:66:  const { issuer } = getCognitoVerifier();
+.\functions\src\auth\cognitoJwt.ts:88:  return decoded as CognitoJwtPayload;
+.\src\lib\auth\index.js:1:// Minimal auth adapter centralizing Amplify v6 calls
+.\src\lib\auth\index.js:6:// Amplify v6 modular Auth imports
+.\src\lib\auth\index.js:7:// Note: Ensure Amplify.configure(...) is called once at app bootstrap (already present per logs)
+.\src\lib\auth\index.js:9:  signIn as amplifySignIn,
+.\src\lib\auth\index.js:50:export async function signIn({ email, password }) {
+.\src\lib\auth\index.js:69:    return await amplifyGetCurrentUser(); // { userId, username, signInDetails }
+.\src\lib\auth\cognitoStorage.js:3:const CACHE_PREFIX = 'CognitoIdentityServiceProvider';
+.\src\lib\auth\cognitoStorage.js:6: * amazon-cognito-identity-js expects a synchronous, localStorage-like adapter.
+.\src\lib\auth\cognitoStorage.js:29:export async function flushCognitoStorageWrites(options = {}) {
+.\src\lib\auth\cognitoStorage.js:49:export async function hydrateCognitoStorageCache(options = {}) {
+.\src\lib\auth\cognitoStorage.js:69:      // Best-effort only: if hydration fails, Cognito will behave as logged-out.
+.\src\lib\auth\cognitoStorage.js:76:export function removeFromCognitoStorageCache(keys) {
+.\src\lib\auth\cognitoStorage.js:84:export function clearCognitoStorageCache() {
+.\src\lib\auth\cognitoStorage.js:120:  hydrateCognitoStorageCache().catch(() => {});
+.\src\lib\auth\errors.js:1:// Centralized mapping of Cognito/Amplify Auth errors to friendly, actionable messages
+.\src\lib\auth\errors.js:7:      'Email sending limit reached for today. Please try again later or contact support. For production, configure Amazon SES in Cognito.',
+.\src\screens\ProfileScreen.v3.tsx:140:  // Older data (posts/users) may be keyed by Cognito username (e.g. "blyp") instead of Cognito sub.
+.\src\screens\ProfileScreen.v3.tsx:215:      // This addresses accounts created before the switch to Cognito sub as uid.
+.\src\screens\ProfileScreen.v3.tsx:546:      // Primary auth is Cognito in this app.
+.\src\screens\ProfileScreen.v3.tsx:547:      const maybeCognitoUser: any = user;
+.\src\screens\ProfileScreen.v3.tsx:548:      if (maybeCognitoUser?.signOut) {
+.\src\screens\ProfileScreen.v3.tsx:551:            // Some Cognito SDKs accept a callback.
+.\src\screens\ProfileScreen.v3.tsx:552:            const out = maybeCognitoUser.signOut(() => resolve());
+.\src\testing\EnterpriseLiveStreamTester.js:811:        await auth().signInAnonymously();
+.\src\screens\MessengerScreen.js:41:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\screens\MessengerScreen.js:858:          await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+.\src\screens\MessengerScreen.js:1218:            style={styles.signInButton}
+.\src\screens\MessengerScreen.js:1229:            <Text style={styles.signInButtonText}>OK</Text>
+.\src\screens\MessengerScreen.js:2046:  signInButton: {
+.\src\screens\MessengerScreen.js:2052:  signInButtonText: {
+.\src\screens\MediaViewerScreen.js:45:  // useAuth().uid is the app's primary identity id (Cognito user id)
+.\src\screens\EditProfileScreen.js:72:        // Display name must always mirror username. Do not hydrate it from Cognito uid-like fallbacks.
+.\src\screens\EditProfileScreen.js:258:      // Save profile data to Firestore using Cognito uid
+.\src\screens\HomeScreen.js:47:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\screens\HomeScreen.js:222:  const hasLoggedFirebaseAuthNotReadyRef = useRef(false);
+.\src\screens\HomeScreen.js:335:        await ensureFirebaseAuthReady({ uid, timeoutMs: 12000 });
+.\src\screens\HomeScreen.js:378:        if (!hasLoggedFirebaseAuthNotReadyRef.current) {
+.\src\screens\HomeScreen.js:379:          hasLoggedFirebaseAuthNotReadyRef.current = true;
+.\src\screens\HomeScreen.js:470:        await ensureFirebaseAuthReady({ uid, timeoutMs: 12000 });
+.\src\screens\HomeScreen.js:556:        if (!hasLoggedFirebaseAuthNotReadyRef.current) {
+.\src\screens\HomeScreen.js:557:          hasLoggedFirebaseAuthNotReadyRef.current = true;
+.\src\screens\FindPeopleScreen.js:22:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\screens\FindPeopleScreen.js:152:          await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+.\src\screens\AuthScreen.js:15:import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
+.\src\screens\AuthScreen.js:20:import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
+.\src\screens\AuthScreen.js:21:import { flushCognitoStorageWrites } from '../lib/auth/cognitoStorage';
+.\src\screens\AuthScreen.js:22:import { isSocialAuthEnabled, signInWithGoogle, signInWithFacebook } from '../services/socialAuthService';
+.\src\screens\AuthScreen.js:82:      const tempUser = new CognitoUser({ Username: norm, Pool: userPool });
+.\src\screens\AuthScreen.js:118:      // Lift auth state immediately if we have a CognitoUser reference
+.\src\screens\AuthScreen.js:123:      // Ensure Cognito tokens/session have actually been persisted to AsyncStorage.
+.\src\screens\AuthScreen.js:127:        await flushCognitoStorageWrites({ timeoutMs: 5000 });
+.\src\screens\AuthScreen.js:190:        const cognitoUser = new CognitoUser({ Username: emailToReset, Pool: userPool });
+.\src\screens\AuthScreen.js:213:  const cognitoUser = new CognitoUser({ Username: emailToConfirm, Pool: userPool });
+.\src\screens\AuthScreen.js:268:        const cognitoUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+.\src\screens\AuthScreen.js:283:              const pendingUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+.\src\screens\AuthScreen.js:334:        // Cognito pool is configured for email usernames, so email must be the Cognito Username.
+.\src\screens\AuthScreen.js:348:          // Common Cognito failure when app client doesn't have write access to these attributes.
+.\src\screens\AuthScreen.js:376:              const pendingUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+.\src\screens\AuthScreen.js:400:          // Do NOT resend here; Cognito already sent a code on sign-up.
+.\src\screens\AuthScreen.js:434:      const result = await signInWithGoogle();
+.\src\screens\AuthScreen.js:436:      // Future: exchange tokens with backend for Cognito federation.
+.\src\screens\AuthScreen.js:460:      const result = await signInWithFacebook();
+.\src\screens\AuthScreen.js:462:      // Future: exchange tokens with backend for Cognito federation.
+.\src\screens\AuthScreen.js:476:      await clearCognitoSessions();
+.\src\screens\AuthScreen.js:681:                  const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
+.\src\screens\AuthScreen.js:732:                const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
+.\src\screens\AuthScreen.js:746:                    // Cognito sometimes calls this callback before onSuccess; treat as success path
+.\src\screens\AuthScreen.js:765:                const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
+.\src\services\socialAuthService.js:15:// For production-grade token exchange with backend/Cognito federation, migrate to the
+.\src\services\socialAuthService.js:58:export const signInWithGoogle = async () => {
+.\src\services\socialAuthService.js:99:export const signInWithFacebook = async () => {
+.\src\services\socialAuthService.js:139:  signInWithGoogle,
+.\src\services\socialAuthService.js:140:  signInWithFacebook,
+.\src\services\LikeService.js:3:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\services\LikeService.js:16:  // Ensure Firebase Auth is signed in with uid == userId (Cognito sub).
+.\src\services\LikeService.js:19:    await ensureFirebaseAuthReady({ uid: userId, timeoutMs: 8000 });
+.\src\screens\LiveStreamScreen.js:36:import { getCognitoJwtForApi } from '../api/getCognitoJwtForApi';
+.\src\screens\LiveStreamScreen.js:38:import { useAuth, useFirestoreDoc, clearCognitoSessions, refreshAuthNow, userPool } from '../hooks/useCommon';
+.\src\screens\LiveStreamScreen.js:948:    // Socket auth requires a valid Cognito session.
+.\src\screens\LiveStreamScreen.js:1393:              'Your Cognito session is missing or expired. Please sign in again, then try going live.',
+.\src\screens\LiveStreamScreen.js:1886:        const token = await getCognitoJwtForApi({ tokenType: 'id' });
+.\src\screens\LiveStreamScreen.js:1906:      const token = await getCognitoJwtForApi({ tokenType: 'id' });
+.\src\services\BlypCoinService.js:19:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\services\BlypCoinService.js:70:      await ensureFirebaseAuthReady({ uid: userId });
+.\src\services\BlypCoinService.js:89:      // Cognito session corruption signature (amazon-cognito-identity-js). Don't crash the UI.
+.\src\services\BlypCoinService.js:106:        await ensureFirebaseAuthReady({ uid: userId });
+.\src\services\BlypCoinService.js:123:        // Common case: Cognito session in AsyncStorage is corrupted (amazon-cognito-identity-js).
+.\src\services\BlypCoinService.js:125:          console.warn('Balance listener skipped due to corrupted Cognito session; retry after re-login');
+.\src\services\GemService.js:12:import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+.\src\services\GemService.js:53:      await ensureFirebaseAuthReady({ uid: userId });
+.\src\services\GemService.js:93:        await ensureFirebaseAuthReady({ uid: userId });
+.\src\services\GemService.js:111:          console.warn('Gems listener skipped due to corrupted Cognito session; retry after re-login');
+.\src\services\AuthConsistencyService.js:1:// AuthConsistencyService: Verifies parity between Cognito and Firebase identities and emits analytics events.
+.\src\services\AuthConsistencyService.js:7:let AmplifyAuth = null; // lazy import to avoid startup weight
+.\src\services\AuthConsistencyService.js:11:  AmplifyAuth = mod.Auth || mod.default?.Auth || null;
+.\src\services\AuthConsistencyService.js:13:  AmplifyAuth = null;
+.\src\services\AuthConsistencyService.js:26:      if (AmplifyAuth) {
+.\src\services\AuthConsistencyService.js:27:        cognitoUser = await AmplifyAuth.currentAuthenticatedUser({ bypassCache: true });

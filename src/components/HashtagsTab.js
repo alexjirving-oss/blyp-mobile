@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { smartListGenerator } from '../utils/smartListGenerator';
+import { COLORS } from '../styles/theme';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -32,15 +33,15 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
   const loadHashtags = async () => {
     try {
       setLoading(true);
-      console.log('🏷️ Loading smart hashtags...');
-      
+      console.log('ðŸ·ï¸ Loading smart hashtags...');
+
       // Generate AI-powered hashtag recommendations
       const aiHashtags = await smartListGenerator.generateHashtags(posts, userInteractions);
       setHashtagCategories(aiHashtags);
-      
-      console.log('✅ Hashtag categories loaded:', aiHashtags.length);
+
+      console.log('âœ… Hashtag categories loaded:', aiHashtags.length);
     } catch (error) {
-      console.error('❌ Error loading hashtags:', error);
+      console.error('âŒ Error loading hashtags:', error);
       // Load fallback hashtags
       setHashtagCategories(smartListGenerator.getFallbackHashtags());
     } finally {
@@ -50,8 +51,8 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
 
   const handleHashtagPress = (hashtag) => {
     try {
-      console.log('🏷️ Selected hashtag:', hashtag);
-      
+      console.log('ðŸ·ï¸ Selected hashtag:', hashtag);
+
       let newSelectedHashtags;
       if (selectedHashtags.includes(hashtag)) {
         // Remove if already selected
@@ -60,13 +61,13 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
         // Add to selection (max 5 hashtags)
         newSelectedHashtags = [...selectedHashtags, hashtag].slice(-5);
       }
-      
+
       setSelectedHashtags(newSelectedHashtags);
-      
+
       // Filter posts by selected hashtags
       if (newSelectedHashtags.length > 0) {
         const filtered = posts.filter(post => {
-          return newSelectedHashtags.some(tag => 
+          return newSelectedHashtags.some(tag =>
             smartListGenerator.filterPostsByHashtag([post], tag).length > 0
           );
         });
@@ -74,13 +75,13 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
       } else {
         setFilteredPosts([]);
       }
-      
+
       // Call parent callback if provided
       if (onHashtagSelect) {
         onHashtagSelect(newSelectedHashtags, filteredPosts);
       }
     } catch (error) {
-      console.error('❌ Hashtag selection error:', error);
+      console.error('âŒ Hashtag selection error:', error);
     }
   };
 
@@ -90,7 +91,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
         <Text style={styles.categoryTitle}>{category.name}</Text>
         <Text style={styles.categoryDescription}>{category.description}</Text>
       </View>
-      
+
       <View style={styles.hashtagGrid}>
         {category.hashtags.map((hashtag, index) => (
           <TouchableOpacity
@@ -110,7 +111,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
               {hashtag}
             </Text>
             {selectedHashtags.includes(hashtag) && (
-              <Icon  name="checkmark" size={14} color="#fff" style={styles.checkIcon}  />
+              <Icon name="checkmark" size={14} color="#fff" style={styles.checkIcon} />
             )}
           </TouchableOpacity>
         ))}
@@ -120,14 +121,14 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>🏷️ Smart Hashtags</Text>
+      <Text style={styles.headerTitle}>Smart Hashtags</Text>
       <Text style={styles.headerSubtitle}>
         AI-curated hashtag recommendations for maximum reach
       </Text>
-      
+
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Icon  name="search" size={20} color="#9ca3af" style={styles.searchIcon}  />
+        <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search hashtags..."
@@ -136,7 +137,7 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
           onChangeText={setSearchQuery}
         />
       </View>
-      
+
       {/* Selected Hashtags */}
       {selectedHashtags.length > 0 && (
         <View style={styles.selectedContainer}>
@@ -146,22 +147,22 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
               <Text style={styles.clearAllButton}>Clear All</Text>
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.selectedHashtags}>
             {selectedHashtags.map((hashtag, index) => (
               <LinearGradient
                 key={index}
-                colors={['#8b5cf6', '#ec4899']}
+                colors={['#00D2BE', '#00A89E']}
                 style={styles.selectedHashtagChip}
               >
                 <Text style={styles.selectedHashtagText}>{hashtag}</Text>
                 <TouchableOpacity onPress={() => handleHashtagPress(hashtag)}>
-                  <Icon  name="close" size={14} color="#fff"  />
+                  <Icon name="close" size={14} color="#0A0A0C" />
                 </TouchableOpacity>
               </LinearGradient>
             ))}
           </View>
-          
+
           <Text style={styles.matchingPosts}>
             {filteredPosts.length} matching posts
           </Text>
@@ -173,83 +174,73 @@ const HashtagsTab = ({ posts = [], userInteractions = [], onHashtagSelect, navig
   // Filter categories based on search
   const filteredCategories = hashtagCategories.filter(category => {
     if (!searchQuery) return true;
-    
+
     const query = searchQuery.toLowerCase();
     return (
       category.name.toLowerCase().includes(query) ||
-      category.hashtags.some(hashtag => 
+      category.hashtags.some(hashtag =>
         hashtag.toLowerCase().includes(query)
       )
     );
   });
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Icon  name="pricetag" size={48} color="#8b5cf6"  />
-        <Text style={styles.loadingText}>Generating smart hashtags...</Text>
-      </View>
-    );
-  }
-
+  // Leaderboard-style placeholder body for Hashtags (EXACT PARITY)
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={filteredCategories}
-        renderItem={renderHashtagCategory}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderHeader}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={loading}
-            onRefresh={loadHashtags}
-            colors={['#8b5cf6']}
-            tintColor="#8b5cf6"
-          />
-        }
-        contentContainerStyle={styles.listContent}
-      />
+    <View style={[styles.container, { backgroundColor: '#141418' }]}>
+      <View style={styles.comingSoon}>
+        <Icon name="pricetag" size={64} color="#fff" />
+        <Text style={styles.comingSoonTitle}>Hashtags</Text>
+        <Text style={styles.comingSoonText}>
+          Smart hashtag suggestions coming soon!
+        </Text>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  subtitle: {
+    color: '#fff',
+    fontSize: 15,
+    marginTop: 8,
+    textAlign: 'center',
+    opacity: 0.7,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: COLORS.pageBackground,
   },
-  loadingText: {
-    color: '#8b5cf6',
-    fontSize: 16,
-    marginTop: 16,
-    textAlign: 'center',
+  comingSoon: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
   },
-  header: {
-    padding: 20,
-    paddingTop: 60, // Account for status bar
-  },
-  headerTitle: {
-    fontSize: 28,
+  comingSoonTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
+    marginTop: 24,
     marginBottom: 8,
+    textAlign: 'center',
   },
-  headerSubtitle: {
+  comingSoonText: {
     fontSize: 16,
-    color: '#9ca3af',
-    marginBottom: 20,
+    color: '#e5e7eb',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 30,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -264,7 +255,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   selectedContainer: {
-    backgroundColor: 'rgba(139,92,246,0.1)',
+    backgroundColor: 'rgba(203,251,69,0.1)',
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
@@ -276,12 +267,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   selectedTitle: {
-    color: '#8b5cf6',
+    color: '#F5F5F7',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   clearAllButton: {
-    color: '#ec4899',
+    color: '#00D2BE',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -311,6 +302,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   listContent: {
+    paddingTop: 8,
     paddingBottom: 100,
   },
   hashtagCategory: {
@@ -337,9 +329,9 @@ const styles = StyleSheet.create({
   hashtagChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
@@ -347,16 +339,17 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   selectedHashtagChip: {
-    backgroundColor: '#8b5cf6',
-    borderColor: '#8b5cf6',
+    backgroundColor: '#00D2BE',
+    borderColor: '#00D2BE',
   },
   hashtagText: {
-    color: '#9ca3af',
+    color: '#A1A1AA',
     fontSize: 14,
     fontWeight: '600',
   },
   selectedHashtagText: {
-    color: '#fff',
+    color: '#0A0A0C',
+    fontWeight: '700',
   },
   checkIcon: {
     marginLeft: 6,

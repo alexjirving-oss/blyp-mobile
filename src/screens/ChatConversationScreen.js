@@ -1,42 +1,108 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  StatusBar,
-  Alert,
-} from 'react-native';
+import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, where, getDocs, setDoc, getDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../utils/scaleUtils';
-import { auth, firestore as db } from '../config/firebase';
+import { firestore as db, db as compatDb } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
+import { useAuth } from '../hooks/useCommon';
+import { conversationsMessagingService } from '../services/messaging';
+import { theme as blypTheme } from '../styles/blypTheme';
+import ReportModal from '../components/ReportModal';
+import { inspectText } from '../utils/contentFilter';
+
+const withAlpha = (hex, alpha) => {
+  const s = String(hex || '').replace('#', '');
+  if (s.length !== 6) return hex;
+  const r = parseInt(s.slice(0, 2), 16);
+  const g = parseInt(s.slice(2, 4), 16);
+  const b = parseInt(s.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const T = blypTheme.colors;
+
+// A user is considered genuinely "online" only if presence says so AND the
+// heartbeat is fresh (presence is written on AppState changes, and a hard kill
+// can leave a stale 'online'); 2 minutes is a safe freshness window.
+const ONLINE_FRESHNESS_MS = 2 * 60 * 1000;
+
+const formatLastSeen = (ms) => {
+  const ts = Number(ms);
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  const diff = Date.now() - ts;
+  if (diff < 0) return 'just now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  try {
+    return new Date(ts).toLocaleDateString();
+  } catch {
+    return `${days}d ago`;
+  }
+};
 
 const ChatScreen = ({ route, navigation }) => {
   const { participant, otherUser, chatId } = route.params || {};
-  
-  const user = useMemo(() => 
-    otherUser || participant || { 
-      username: 'Unknown', 
+  const conversationId = route?.params?.conversationId || chatId;
+
+  const user = useMemo(() =>
+    otherUser || participant || {
+      username: 'Unknown',
       name: 'Unknown',
-      avatar: 'https://via.placeholder.com/50' 
+      avatar: 'https://via.placeholder.com/50'
     }, [otherUser, participant]
   );
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const currentUser = auth.currentUser;
-  
+  const { user: authUser, uid } = useAuth();
+
+  // Resolve the other participant's uid so we can show GENUINE presence
+  // (users/{uid}.presence = { state, lastSeenAt }) instead of a hardcoded
+  // "Online • Last seen recently" string.
+  const participantUid = useMemo(() => {
+    const candidate = user?.uid || user?.userId || user?.id || participant?.id || otherUser?.id;
+    return candidate ? String(candidate) : '';
+  }, [user, participant, otherUser]);
+  const [presence, setPresence] = useState(null);
+  const [reportVisible, setReportVisible] = useState(false);
+
+  useEffect(() => {
+    if (!participantUid || !compatDb?.collection) {
+      setPresence(null);
+      return undefined;
+    }
+    let unsub = () => {};
+    try {
+      unsub = compatDb
+        .collection('users')
+        .doc(participantUid)
+        .onSnapshot(
+          (snap) => {
+            const data = snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists)
+              ? snap.data()
+              : null;
+            setPresence(data?.presence || null);
+          },
+          () => setPresence(null),
+        );
+    } catch {
+      setPresence(null);
+    }
+    return () => {
+      try { unsub(); } catch { /* ignore */ }
+    };
+  }, [participantUid]);
+
   const flatListRef = useRef(null);
   const initialLoadRef = useRef(true);
   const soundRef = useRef(null);
@@ -56,9 +122,9 @@ const ChatScreen = ({ route, navigation }) => {
         console.error('Error setting up audio:', error);
       }
     };
-    
+
     setupAudio();
-    
+
     return () => {
       if (soundRef.current) {
         soundRef.current.unloadAsync();
@@ -68,12 +134,12 @@ const ChatScreen = ({ route, navigation }) => {
 
   const playMessageAlert = async () => {
     try {
-      console.log('🔊 Attempting to play message notification...');
-      
+      console.log('ðŸ”Š Attempting to play message notification...');
+
       // First trigger haptic feedback (vibration)
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      console.log('📳 Haptic feedback triggered');
-      
+      console.log('ðŸ“³ Haptic feedback triggered');
+
       // Unload previous sound if exists
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
@@ -83,116 +149,95 @@ const ChatScreen = ({ route, navigation }) => {
       try {
         // Use a simple tone generator for notification sound
         const { sound } = await Audio.Sound.createAsync(
-          { 
+          {
             uri: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.wav'
           },
-          { 
-            shouldPlay: true, 
+          {
+            shouldPlay: true,
             volume: 0.8,
-            isLooping: false 
+            isLooping: false
           }
         );
-        
+
         soundRef.current = sound;
-        console.log('🔔 Notification sound playing');
-        
+        console.log('ðŸ”” Notification sound playing');
+
         // Clean up sound after playing
         setTimeout(async () => {
           try {
             if (soundRef.current) {
               await soundRef.current.unloadAsync();
               soundRef.current = null;
-              console.log('🔇 Sound cleaned up');
+              console.log('ðŸ”‡ Sound cleaned up');
             }
           } catch (cleanupError) {
             console.error('Error cleaning up sound:', cleanupError);
           }
         }, 3000);
-        
+
       } catch (soundError) {
-        console.log('⚠️ Sound failed, using haptics only:', soundError.message);
+        console.log('âš ï¸ Sound failed, using haptics only:', soundError.message);
         // Haptic feedback already triggered above as primary notification
       }
-      
+
     } catch (error) {
-      console.error('❌ Complete notification alert failed:', error);
+      console.error('âŒ Complete notification alert failed:', error);
       // Last resort: try a different haptic pattern
       try {
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        console.log('📳 Fallback haptic feedback used');
+        console.log('ðŸ“³ Fallback haptic feedback used');
       } catch (hapticError) {
-        console.error('❌ Even haptic feedback failed:', hapticError);
+        console.error('âŒ Even haptic feedback failed:', hapticError);
       }
     }
   };
 
   useEffect(() => {
-    console.log('🏗️ ChatConversation screen loaded with params:', { participant, otherUser, chatId });
-    console.log('👤 Chat with user:', user.username, 'ChatID:', chatId);
-    
-    // Set up header
+    console.log('ðŸ—ï¸ ChatConversation screen loaded with params:', { participant, otherUser, chatId });
+    console.log('ðŸ‘¤ Chat with user:', user.username, 'ChatID:', chatId);
+
     navigation.setOptions({
       headerTitle: user.username || user.name || 'Chat',
-      headerStyle: {
-        backgroundColor: '#1e293b',
-      },
-      headerTintColor: '#fff',
+      headerStyle: { backgroundColor: T.headerBackground },
+      headerTintColor: T.textPrimary,
     });
 
-    // Set up real-time messaging if we have a chat ID
-    if (chatId) {
-      console.log('🔄 Setting up Firebase listener for chat:', chatId);
-      const messagesRef = collection(db, 'chats', chatId, 'messages');
-      const q = query(messagesRef, orderBy('timestamp', 'asc'));
-      
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        console.log('📨 Firebase snapshot received, message count:', snapshot.size);
-        const messagesList = [];
+    if (!conversationId) {
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
+
+    console.log('ðŸ”„ Setting up messages listener for conversation:', conversationId);
+    const unsubscribe = conversationsMessagingService.subscribeToMessages(
+      db,
+      conversationId,
+      (messagesList) => {
         let hasNewIncomingMessage = false;
-        
-        snapshot.forEach((doc) => {
-          const messageData = { id: doc.id, ...doc.data() };
-          messagesList.push(messageData);
-          console.log('💬 Message:', messageData.text, 'from:', messageData.senderName, 'status:', messageData.status);
-          
-          // Check if this is a new message from another user
-          if (!initialLoadRef.current && 
-              messageData.senderId !== currentUser?.uid && 
-              messageData.status === 'sent') {
+        messagesList.forEach((m) => {
+          if (!initialLoadRef.current && uid && m.senderId !== uid && m.status === 'sent') {
             hasNewIncomingMessage = true;
-            console.log('🔔 New incoming message detected:', messageData.text, 'from:', messageData.senderName);
           }
         });
-        
+
         setMessages(messagesList);
         setLoading(false);
-        
-        // Play alert sound for new incoming messages (not on initial load)
+
         if (hasNewIncomingMessage) {
-          console.log('🔊 Playing message alert sound');
           playMessageAlert();
         }
-        
-        // Set initial load flag to false after first snapshot
         if (initialLoadRef.current) {
           initialLoadRef.current = false;
         }
-        
-        // Mark messages as delivered (but not read yet - that happens when user enters chat)
-        snapshot.forEach((doc) => {
-          const message = doc.data();
-          if (message.senderId !== currentUser?.uid && message.status === 'sent') {
-            updateDoc(doc.ref, { status: 'delivered', deliveredAt: serverTimestamp() });
-          }
-        });
-      });
-      
-      return unsubscribe;
-    } else {
-      setMessages([]);
-      setLoading(false);
-    }
-  }, [navigation, user.username, chatId, currentUser?.uid]);
+      },
+      (e) => {
+        console.error('âŒ Error subscribing to messages:', e);
+        setLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [navigation, user.username, conversationId, uid]);
 
   useEffect(() => {
     // Auto scroll to bottom when messages change
@@ -205,125 +250,79 @@ const ChatScreen = ({ route, navigation }) => {
 
   // Mark messages as read and reset unread count when entering chat
   useEffect(() => {
-    if (!chatId || !currentUser?.uid || messages.length === 0) return;
-    
+    if (!conversationId || !uid || messages.length === 0) return;
+
     const markMessagesAsRead = async () => {
       try {
         // Mark all unread messages from others as read
-        const unreadMessages = messages.filter(msg => 
-          msg.senderId !== currentUser.uid && msg.status !== 'read'
+        const unreadMessages = messages.filter(msg =>
+          msg.senderId !== uid && msg.status !== 'read'
         );
-        
+
         if (unreadMessages.length > 0) {
-          console.log('👀 Marking', unreadMessages.length, 'messages as read');
-          
-          // Update message status to read
-          const updatePromises = unreadMessages.map(msg => {
-            const messageRef = doc(db, 'chats', chatId, 'messages', msg.id);
-            return updateDoc(messageRef, { 
-              status: 'read', 
-              readAt: serverTimestamp() 
-            });
-          });
-          
-          await Promise.all(updatePromises);
-          
-          // Reset unread count for current user in chat document
-          const chatRef = doc(db, 'chats', chatId);
-          const chatDocSnap = await getDoc(chatRef);
-          const chatData = chatDocSnap.data();
-          const currentUnreadCount = chatData?.unreadCount || {};
-          
-          if (currentUnreadCount[currentUser.uid] > 0) {
-            const updatedUnreadCount = { 
-              ...currentUnreadCount,
-              [currentUser.uid]: 0 
-            };
-            
-            await updateDoc(chatRef, { unreadCount: updatedUnreadCount });
-            console.log('✅ Reset unread count for current user');
-          }
+          console.log('ðŸ‘€ Marking', unreadMessages.length, 'messages as read');
+
+          await conversationsMessagingService.markMessagesRead(
+            db,
+            conversationId,
+            uid,
+            unreadMessages.map((m) => m.id),
+          );
+
+          await conversationsMessagingService.markThreadRead(db, conversationId, uid);
+          console.log('âœ… Marked thread read for current user');
         }
       } catch (error) {
-        console.error('❌ Error marking messages as read:', error);
+        console.error('âŒ Error marking messages as read:', error);
       }
     };
-    
+
     // Debounce to prevent excessive calls
     const timeoutId = setTimeout(markMessagesAsRead, 500);
     return () => clearTimeout(timeoutId);
-  }, [chatId, currentUser?.uid, messages.length]); // Only depend on messages.length, not the entire messages array
+  }, [conversationId, uid, messages.length]); // Only depend on messages.length, not the entire messages array
 
   const sendMessage = async () => {
-    if (!message.trim() || !chatId) {
-      console.log('❌ Cannot send message - missing text or chatId:', { message: message.trim(), chatId });
+    if (!message.trim() || !conversationId) {
+      console.log('âŒ Cannot send message - missing text or chatId:', { message: message.trim(), chatId });
       return;
     }
 
-    const messageData = {
-      text: message.trim(),
-      senderId: currentUser?.uid,
-      senderName: currentUser?.displayName || currentUser?.email || 'Unknown',
-      timestamp: serverTimestamp(),
-      status: 'sent', // sent -> delivered -> read
-    };
-    
-    console.log('📤 Sending message to Firebase:', { messageData, chatId });
-    
+    if (!uid) {
+      Alert.alert('Error', 'Please log in to send messages');
+      return;
+    }
+
+    // Client-side first line of defence (server re-inspects authoritatively).
+    const { blocked, clean } = inspectText(message.trim());
+    if (blocked) {
+      Alert.alert('Message not allowed', "That message contains content that isn't allowed on Blyp.");
+      return;
+    }
+
     try {
-      // Add message to subcollection
-      const messagesRef = collection(db, 'chats', chatId, 'messages');
-      const docRef = await addDoc(messagesRef, messageData);
-      console.log('✅ Message added to Firebase with ID:', docRef.id);
-      
-      // Update parent chat document with last message info and unread count
-      const chatRef = doc(db, 'chats', chatId);
-      
-      // Get current chat to find other participants
-      const chatDocRef = doc(db, 'chats', chatId);
-      const chatDocSnap = await getDoc(chatDocRef);
-      const chatData = chatDocSnap.data();
-      const participants = chatData?.participants || [];
-      
-      // Increment unread count for all other participants
-      const currentUnreadCount = chatData?.unreadCount || {};
-      const updatedUnreadCount = { ...currentUnreadCount };
-      
-      participants.forEach(participantId => {
-        if (participantId !== currentUser?.uid) {
-          updatedUnreadCount[participantId] = (currentUnreadCount[participantId] || 0) + 1;
-        }
-      });
-      
-      await updateDoc(chatRef, {
-        lastMessage: messageData.text,
-        lastMessageTime: serverTimestamp(),
-        unreadCount: updatedUnreadCount,
-      });
-      console.log('✅ Chat document updated with last message and unread count:', updatedUnreadCount);
-      
+      const senderName = authUser?.displayName || authUser?.username || authUser?.email || 'Unknown';
+      await conversationsMessagingService.sendMessage(db, conversationId, uid, senderName, clean);
       setMessage('');
-      console.log('📤 Message sent successfully to Firebase:', messageData.text);
     } catch (error) {
-      console.error('❌ Error sending message:', error);
+      console.error('âŒ Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
     }
   };
 
   const formatTime = (timestamp) => {
     if (!timestamp) return '';
-    
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
       minute: '2-digit',
-      hour12: true 
+      hour12: true,
     });
   };
 
   const renderMessage = ({ item }) => {
-    const isMe = item.senderId === currentUser?.uid;
-    
+    const isMe = item.senderId === uid;
+
     return (
       <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.otherMessage]}>
         <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.otherBubble]}>
@@ -337,18 +336,18 @@ const ChatScreen = ({ route, navigation }) => {
             {isMe && (
               <View style={styles.messageStatus}>
                 {item.status === 'sent' && (
-                  <Icon  name="checkmark" size={16} color="#8E9297"  />
+                  <Icon name="checkmark" size={16} color="rgba(0,0,0,0.55)" />
                 )}
                 {item.status === 'delivered' && (
                   <View style={styles.doubleCheck}>
-                    <Icon  name="checkmark" size={16} color="#8E9297" style={styles.check1}  />
-                    <Icon  name="checkmark" size={16} color="#8E9297" style={styles.check2}  />
+                    <Icon name="checkmark" size={16} color="rgba(0,0,0,0.55)" style={styles.check1} />
+                    <Icon name="checkmark" size={16} color="rgba(0,0,0,0.55)" style={styles.check2} />
                   </View>
                 )}
                 {item.status === 'read' && (
                   <View style={styles.doubleCheck}>
-                    <Icon  name="checkmark" size={16} color="#00D4AA" style={styles.check1}  />
-                    <Icon  name="checkmark" size={16} color="#00D4AA" style={styles.check2}  />
+                    <Icon name="checkmark" size={16} color="#003B30" style={styles.check1} />
+                    <Icon name="checkmark" size={16} color="#003B30" style={styles.check2} />
                   </View>
                 )}
               </View>
@@ -363,120 +362,154 @@ const ChatScreen = ({ route, navigation }) => {
     <View style={styles.blypHeader}>
       <View style={styles.headerTop}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon  name="arrow-back" size={24} color="#d1d5db"  />
+          <Icon name="arrow-back" size={24} color={T.textSecondary} />
         </TouchableOpacity>
         <BlypLogo useGradientBackground={true} />
         <View style={styles.headerActions}>
           <TouchableOpacity style={styles.headerActionButton}>
-            <Icon  name="videocam" size={24} color="#d1d5db"  />
+            <Icon name="videocam" size={24} color={T.textSecondary} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerActionButton}>
-            <Icon  name="call" size={24} color="#d1d5db"  />
+            <Icon name="call" size={24} color={T.textSecondary} />
           </TouchableOpacity>
+          {participantUid && participantUid !== uid ? (
+            <TouchableOpacity
+              style={styles.headerActionButton}
+              onPress={() => setReportVisible(true)}
+              accessibilityLabel="Report or block this person"
+            >
+              <Icon name="ellipsis-vertical" size={24} color={T.textSecondary} />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
-      
+
       <View style={styles.chatInfo}>
-        <Image 
-          source={{ uri: user.avatar || 'https://via.placeholder.com/50' }} 
-          style={styles.participantAvatar} 
+        <Image
+          source={{ uri: user.photoURL || user.avatar || user.userPhotoURL || user.photo || 'https://via.placeholder.com/50' }}
+          style={styles.participantAvatar}
         />
         <View style={styles.participantInfo}>
           <Text style={styles.participantName}>{user.username || user.name || 'Unknown'}</Text>
-          <Text style={styles.participantStatus}>Online • Last seen recently</Text>
+          {(() => {
+            const isOnline =
+              presence?.state === 'online' &&
+              Number(presence?.lastSeenAt) > 0 &&
+              Date.now() - Number(presence.lastSeenAt) < ONLINE_FRESHNESS_MS;
+            if (isOnline) {
+              return <Text style={[styles.participantStatus, styles.statusOnline]}>Online</Text>;
+            }
+            const seen = formatLastSeen(presence?.lastSeenAt);
+            if (seen) {
+              return <Text style={styles.participantStatus}>{`Last seen ${seen}`}</Text>;
+            }
+            // No genuine presence data — show the handle instead of a fake status.
+            const handle = user.username || user.name;
+            return (
+              <Text style={styles.participantStatus}>
+                {handle ? `@${String(handle).replace(/^@+/, '')}` : ''}
+              </Text>
+            );
+          })()}
         </View>
       </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
-      <LinearGradient
-        colors={['#0f172a', '#1e293b', '#334155']}
-        style={styles.gradient}
-      >
-        {renderBlypHeader()}
-        <KeyboardAvoidingView 
-          style={styles.keyboardContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-        >
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            style={styles.messagesList}
-            contentContainerStyle={styles.messagesContainer}
-            showsVerticalScrollIndicator={false}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          />
-          
-          <View style={styles.inputContainer}>
-            <View style={styles.inputWrapper}>
-              <TouchableOpacity style={styles.attachButton}>
-                <Icon  name="add" size={24} color="#8E9297"  />
-              </TouchableOpacity>
-              
-              <TextInput
-                style={styles.textInput}
-                value={message}
-                onChangeText={setMessage}
-                placeholder="Type a message..."
-                placeholderTextColor="#8E9297"
-                multiline
-                maxLength={1000}
-                maxFontSizeMultiplier={1.5} // Control scaling globally
-              />
-              
-              <TouchableOpacity style={styles.emojiButton}>
-                <Icon  name="happy-outline" size={24} color="#8E9297"  />
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.cameraButton}>
-                <Icon  name="camera" size={24} color="#8E9297"  />
+    <ScreenContainer>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
+        <View style={styles.gradient}>
+          {renderBlypHeader()}
+          <KeyboardAvoidingView
+            style={styles.keyboardContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          >
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              style={styles.messagesList}
+              contentContainerStyle={styles.messagesContainer}
+              showsVerticalScrollIndicator={false}
+              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            />
+
+            <View style={styles.inputContainer}>
+              <View style={styles.inputWrapper}>
+                <TouchableOpacity style={styles.attachButton}>
+                  <Icon name="add" size={24} color={T.textMuted} />
+                </TouchableOpacity>
+
+                <TextInput
+                  style={styles.textInput}
+                  value={message}
+                  onChangeText={setMessage}
+                  placeholder="Type a message..."
+                  placeholderTextColor={T.textMuted}
+                  multiline
+                  maxLength={1000}
+                  maxFontSizeMultiplier={1.5} // Control scaling globally
+                />
+
+                <TouchableOpacity style={styles.emojiButton}>
+                  <Icon name="happy-outline" size={24} color={T.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.cameraButton}>
+                  <Icon name="camera" size={24} color={T.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.sendButton, message.trim() ? styles.sendButtonActive : null]}
+                onPress={sendMessage}
+                disabled={!message.trim()}
+              >
+                <LinearGradient
+                  colors={message.trim() ? [T.gradientStart, T.gradientMiddle, T.gradientEnd] : [T.textDisabled, T.textMuted]}
+                  style={styles.sendButtonGradient}
+                >
+                  <Icon
+                    name={message.trim() ? "send" : "mic"}
+                    size={20}
+                    color={T.textPrimary}
+                  />
+                </LinearGradient>
               </TouchableOpacity>
             </View>
-            
-            <TouchableOpacity 
-              style={[styles.sendButton, message.trim() ? styles.sendButtonActive : null]}
-              onPress={sendMessage}
-              disabled={!message.trim()}
-            >
-              <LinearGradient
-                colors={message.trim() ? ['#a855f7', '#d946ef', '#ec4899'] : ['#64748b', '#475569']}
-                style={styles.sendButtonGradient}
-              >
-                <Icon  
-                  name={message.trim() ? "send" : "mic"} 
-                  size={20} 
-                  color="#fff" 
-                 />
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </LinearGradient>
-    </SafeAreaView>
+          </KeyboardAvoidingView>
+        </View>
+      </View>
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        targetType="user"
+        targetId={participantUid}
+        reportedUserId={participantUid}
+        targetLabel={user?.username || user?.name || 'this person'}
+      />
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
   },
   gradient: {
     flex: 1,
   },
   // Blyp Header Styles
   blypHeader: {
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    paddingTop: 50,
+    backgroundColor: withAlpha(T.headerBackground, 0.85),
+    paddingTop: 8,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: withAlpha(T.textPrimary, 0.06),
   },
   headerTop: {
     flexDirection: 'row',
@@ -511,14 +544,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   participantName: {
-    color: '#ffffff',
+    color: T.textPrimary,
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 2,
   },
   participantStatus: {
-    color: '#10b981',
+    color: T.primary,
     fontSize: 14,
+  },
+  statusOnline: {
+    color: T.primary,
+    fontWeight: '600',
   },
   keyboardContainer: {
     flex: 1,
@@ -534,12 +571,12 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   headerName: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     fontWeight: 'bold',
   },
   headerStatus: {
-    color: '#8E9297',
+    color: T.textMuted,
     fontSize: 12,
   },
   headerActions: {
@@ -574,24 +611,23 @@ const styles = StyleSheet.create({
     minWidth: 60,
   },
   myBubble: {
-    backgroundColor: '#a855f7',
+    backgroundColor: T.primary,
     borderBottomRightRadius: 5,
   },
   otherBubble: {
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    backgroundColor: withAlpha(T.surface, 0.9),
     borderBottomLeftRadius: 5,
-    borderWidth: 1,
-    borderColor: '#334155',
   },
   messageText: {
     fontSize: 16,
     lineHeight: 20,
   },
   myMessageText: {
-    color: '#fff',
+    // Teal/brand bubble background needs dark text to stay readable.
+    color: '#000000',
   },
   otherMessageText: {
-    color: '#fff',
+    color: T.textPrimary,
   },
   messageFooter: {
     flexDirection: 'row',
@@ -604,10 +640,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   myMessageTime: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(0, 0, 0, 0.55)',
   },
   otherMessageTime: {
-    color: '#8E9297',
+    color: T.textMuted,
   },
   readReceipt: {
     marginLeft: 4,
@@ -630,24 +666,24 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 15,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    backgroundColor: T.headerBackground,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: withAlpha(T.textPrimary, 0.06),
   },
   inputWrapper: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: withAlpha(T.surface, 0.5),
     borderRadius: 25,
     marginRight: 10,
     paddingHorizontal: 15,
     paddingVertical: 8,
     minHeight: 45,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: withAlpha(T.textPrimary, 0.1),
   },
   attachButton: {
     marginRight: 10,
@@ -655,7 +691,7 @@ const styles = StyleSheet.create({
   },
   textInput: {
     flex: 1,
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     maxHeight: 100,
     paddingVertical: 5,
@@ -687,3 +723,5 @@ const styles = StyleSheet.create({
 });
 
 export default ChatScreen;
+
+

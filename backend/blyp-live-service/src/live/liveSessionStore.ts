@@ -1,5 +1,5 @@
 import { docClient } from '../aws/dynamoClient';
-import { PutCommand, GetCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 export type LiveStatus = 'PENDING' | 'LIVE' | 'ENDED';
 
@@ -8,17 +8,25 @@ export interface LiveSession {
   hostUserId: string;
   stageArn: string;
   channelArn?: string;
+  /**
+   * AWS region the stage/channel lives in. Stored explicitly (rather than always
+   * re-parsing it from the stage ARN) so the session/registry is region-aware
+   * for multi-region routing and discovery. Optional for backward compatibility
+   * with sessions created before this field existed — callers should fall back
+   * to deriving it from `stageArn` when absent.
+   */
+  region?: string;
+  /**
+   * User IDs the host has appointed as moderators for this session. Stored as a
+   * DynamoDB String Set (so it reads back as a Set at runtime — use
+   * `sessionHasModerator` to test membership rather than Array methods).
+   * Moderators may mute/kick guests; they cannot invite guests or end the room.
+   */
+  moderatorIds?: string[];
   title: string;
   status: LiveStatus;
   createdAt: string;
   endedAt?: string;
-}
-
-export interface LiveSessionListItem {
-  sessionId: string;
-  status: LiveStatus;
-  hostUserId?: string;
-  createdAt?: string;
 }
 
 const TABLE_NAME = process.env.LIVE_SESSIONS_TABLE;
@@ -43,6 +51,34 @@ export async function getSessionById(sessionId: string): Promise<LiveSession | n
   return (res.Item as LiveSession | undefined) || null;
 }
 
+export async function addModerator(sessionId: string, userId: string): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { sessionId },
+    UpdateExpression: 'ADD moderatorIds :ids',
+    ExpressionAttributeValues: { ':ids': new Set([userId]) },
+    ConditionExpression: 'attribute_exists(sessionId)',
+  }));
+}
+
+export async function removeModerator(sessionId: string, userId: string): Promise<void> {
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { sessionId },
+    UpdateExpression: 'DELETE moderatorIds :ids',
+    ExpressionAttributeValues: { ':ids': new Set([userId]) },
+    ConditionExpression: 'attribute_exists(sessionId)',
+  }));
+}
+
+/** Membership test that tolerates the field being a Set (DynamoDB) or array. */
+export function sessionHasModerator(session: LiveSession, userId: string): boolean {
+  const mods = session.moderatorIds as unknown as Set<string> | string[] | undefined;
+  if (!mods) return false;
+  if (mods instanceof Set) return mods.has(userId);
+  return Array.isArray(mods) ? mods.includes(userId) : false;
+}
+
 export async function updateSessionStatus(sessionId: string, status: LiveStatus, endedAt?: string): Promise<void> {
   const updateExpr = ['set #status = :status'];
   const exprValues: Record<string, any> = { ':status': status };
@@ -61,31 +97,4 @@ export async function updateSessionStatus(sessionId: string, status: LiveStatus,
     ExpressionAttributeNames: exprNames,
     ConditionExpression: 'attribute_exists(sessionId)',
   }));
-}
-
-export async function listSessionsByStatus(status: LiveStatus, limit = 10): Promise<LiveSessionListItem[]> {
-  const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.trunc(limit))) : 10;
-  const res = await docClient.send(new ScanCommand({
-    TableName: TABLE_NAME,
-    FilterExpression: '#status = :status',
-    ExpressionAttributeNames: {
-      '#status': 'status',
-    },
-    ExpressionAttributeValues: {
-      ':status': status,
-    },
-    ProjectionExpression: 'sessionId, #status, hostUserId, createdAt',
-    Limit: boundedLimit,
-  }));
-
-  const items = Array.isArray(res.Items) ? (res.Items as LiveSessionListItem[]) : [];
-  return items
-    .map((item) => ({
-      sessionId: String(item.sessionId || ''),
-      status: item.status,
-      hostUserId: item.hostUserId ? String(item.hostUserId) : undefined,
-      createdAt: item.createdAt ? String(item.createdAt) : undefined,
-    }))
-    .filter((item) => item.sessionId.length > 0)
-    .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')));
 }

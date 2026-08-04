@@ -1,8 +1,11 @@
 package com.blyp.mobile
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import androidx.core.view.WindowCompat
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -21,6 +24,14 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    val chrome = Color.parseColor("#0A0A0C")
+    window.statusBarColor = chrome
+    window.navigationBarColor = chrome
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      window.isStatusBarContrastEnforced = false
+      window.isNavigationBarContrastEnforced = false
+    }
   }
 
   /**
@@ -61,5 +72,15 @@ class MainActivity : ReactActivity() {
       // Use the default back button implementation on Android S
       // because it's doing more than [Activity.moveTaskToBack] in fact.
       super.invokeDefaultOnBackPressed()
+  }
+
+  override fun onUserLeaveHint() {
+    // ReactActivityDelegate can be null during early startup / dev-launcher error flows.
+    // Guard against a hard crash so the dev-client can recover and reconnect.
+    try {
+      super.onUserLeaveHint()
+    } catch (t: Throwable) {
+      Log.w("BLYP", "Ignoring onUserLeaveHint crash during early startup", t)
+    }
   }
 }

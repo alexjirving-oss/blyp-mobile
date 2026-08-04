@@ -1,54 +1,68 @@
-<!-- Workspace-specific rules for AI coding agents working on Blyp Mobile -->
-
-# Blyp Mobile — Copilot instructions (React Native + Expo)
-
-Purpose: give AI agents the minimal, code-backed context to ship changes safely. Keep edits small, reuse utilities, and reference files by path.
+# Blyp (Blyp26) — Copilot Instructions
 
 ## Big picture
-- Entry: `App.js` wires Bottom Tabs + Stack. Heavy routes are lazy via `React.lazy` with `<Stack.Screen name="X" children={() => <Suspense>…</Suspense>}/>` (see Camera/Review/MediaViewer/LiveStream/Games).
-- Auth: Cognito via `src/hooks/useCommon.js` (`useAuth()`); token cleanup in `src/config/preAuthCleanup.js`; Amplify boot in `src/config/amplify.js`. UI uses a short “sticky” auth window to avoid post-login bounce.
-- Firebase: single wrapper `src/config/firebase.js` exposes compat-style `db.collection(...).doc(...).onSnapshot(...)` plus modular exports `{firestore, storage, auth, firebaseEnabled}`. If `EXPO_PUBLIC_DISABLE_FIREBASE=1` or missing `apiKey` → stub mode; code must tolerate `firebaseEnabled === false`.
-- Live streaming: segment upload/indexing in `src/services/HLSLiveStreamService.js`; presence/chat in `src/services/LiveService.js`; viewing in `src/components/LiveStreamViewer.js` which preloads next segments for seamless playback.
+- Repo has no ios/ directory → do not add iOS guidance or iOS changes.
+- **Mobile app:** Expo + React Native (entry: `../App.js`). IVS requires **Dev Client** (not Expo Go). See `../src/streaming/IVSNativeClient.ts`.
+- **Default local API (non-IVS):** **Firebase Functions emulator** (base URL via `EXPO_PUBLIC_API_BASE_URL`, code uses `../src/api/ivsLiveApi.ts`).
+- **Authoritative for IVS flows:** Express service **`backend/blyp-live-service`** (port **4000**) for create/join session, tokens, stage/participant orchestration, and server-side enforcement. Entry: `../backend/blyp-live-service/src/index.ts`.
 
-## Source layout (what to touch)
-- Screens: `src/screens/*` (e.g., `HomeScreen.js`, `CameraScreen.js`, `LiveStreamScreen.js`).
-- Components: `src/components/*` (e.g., `CreatePostButton.js`, `LiveStreamViewer.js`).
-- Services: `src/services/*` (`HLSLiveStreamService.js`, `LiveService.js`, `FirestoreLiveService.ts`).
-- Config/flags: `src/config/firebase.js`, `src/config/StreamingFeatureFlag.js`, {ENTER} `src/config/amplify.js`, `src/config/preAuthCleanup.js`.
-- Monitoring: `src/monitoring/sentry.js` initializes only if `EXPO_PUBLIC_SENTRY_DSN` is set.
+## Ops Enforcement Bridge (Mandatory Pre-Work)
+- `docs/ops` is the repo-controlled operating memory for critical operator work.
+- Before meaningful repo work, read in this exact order:
+	1. `docs/ops/HANDOVER_BLYP.md`
+	2. `docs/ops/PLAYBOOK.md`
+	3. `docs/ops/PROTECTED_FILES.md`
+	4. `docs/ops/CURRENT_STATE.md`
+	5. `docs/ops/ACTIVE_PROBLEMS.md`
+	6. `docs/ops/GOLDEN_BASELINES.md`
+	7. `docs/ops/VERIFICATION_MATRIX.md`
+	8. `docs/ops/PROOF_PATHS.md`
+	9. `docs/ops/CHANGELOG_AGENT.md`
+- Stale chat/session assumptions must not outrank repo memory.
+- Protected operational assets must not be casually edited (`diagnostics`, rails/megarail/autopilot, release/build/signing, install/verify, recovery tooling, golden code).
+- Do not claim fixes without proof.
+- If proof path status is `Missing` or `Contradictory`, do not claim a fix and do not improvise certainty.
+- Missing proof infrastructure must be recorded explicitly, not hidden.
+- Broad regex sweeps and blind global edits are forbidden for critical work.
+- After meaningful actions, keep these files current: `docs/ops/CURRENT_STATE.md`, `docs/ops/ACTIVE_PROBLEMS.md`, `docs/ops/GOLDEN_BASELINES.md`, `docs/ops/CHANGELOG_AGENT.md`.
 
-## Conventions that matter
-- Never import Amplify/Firebase SDKs directly in screens; go through hooks/services. For Firestore, prefer the compat wrapper shown in `src/config/firebase.js` within a given file.
-- Live model: `liveStreams/{streamId}` with `segments.{n}.url`, `currentSegment`, `lastSegmentUploadedAt`, `likes`, and subcollections `comments/` and `likes/`. Comments stream via `.../comments` ordered by `timestamp`.
-- Streaming flag: `src/config/StreamingFeatureFlag.js` provides `primeStreamingFlag()`, `isLiveStreamingEnabled()` (optimistic) and `isLiveStreamingEnabledAsync()`. Remote toggle lives at `appConfig/streaming.enabled`.
-- Navigation: add routes in `App.js` and follow the lazy `<Suspense>` pattern for heavy screens.
-- Auth gating: use `useAuth()`; when a Firebase UID is needed, read `auth.currentUser` from the Firebase wrapper.
+## Non-negotiable boot order (do not “tidy”)
+- `App.js` has a **startup prelude** that must remain ordered (auth cleanup / config first).
+- Preserve the early initialization pattern (`../src/config/preAuthCleanup.js`, `../src/config/amplify.js`, Firebase config in `../src/config/firebase.js`).
 
-## Developer workflows (Windows)
-- Fast start: `./start-app.ps1` (cleans cache, ADB reverse, sets LAN/Tunnel and port). Health check: `./check-status.ps1`.
-- Manual: Expo Go → `npx expo start --clear`; Dev Client → `npx expo start --dev-client --port 8083 --host lan|--tunnel` (avoid 127.0.0.1 on physical devices; prefer LAN/Tunnel).
-- Build/submit: `eas build --platform android` then `eas submit --platform android`. Dev client builds: `--profile development` (see `eas.json`).
-- Lint/type/tests: `npm run lint`, `npm run typecheck`, `npm test`, and Firestore/Storage rules `npm run test:rules`.
-- Perf/bundle: `npm run bundle:android` then `npm run perf:analyze` (reports in `_reports`).
+## IVS native views (crash-prone)
+- Native view managers live under `../android/app/src/main/java/com/blyp/mobile/ivs/`:
+	- `IVSBroadcastViewManager`, `IVSPlayerViewManager`, `IVSRealTimeViewManager` (each `getName()` must be unique).
+- **Only one JS registration point:** `../src/live/ivs/native/views.ts` (centralizes `requireNativeComponent`).
+- If you see **“Tried to register two views with the same name”**:
+	- Check for **manual + autolink** double inclusion.
+	- `PackageList.java` currently does **not** include IVS; IVS is manually wired in `../android/app/src/main/java/com/blyp/mobile/MainApplication.kt`. Ensure it’s added **once**.
 
-## Streaming notes (copy these patterns)
-- Write segments via `HLSLiveStreamService.uploadSegment(streamId, uri, n)`; it updates `liveStreams/{id}`: `currentSegment` and `segments.{n}`. Old segments are cleaned proactively.
-- View with `<LiveStreamViewer streamId={id} />`; the component preloads next chunks and tracks `viewCount` via `HLSLiveStreamService.updateViewCount()` on mount/unmount.
-- Presence/chat: use `LiveService` helpers (e.g., `subscribeToComments`, `sendMessage`), not direct Firestore writes from components.
+## Local dev workflow (Windows)
+- **Start Metro always (canonical):**
+	- `npm run dev-client -- --clear`
+	- Fallback: `npm start -- --clear`
+- **Start Functions emulator (default API):**
+	- `cd functions; npm install; npm run serve`
+- **Start `blyp-live-service` only when testing IVS flows (or if configured to hit `:4000`):**
+	- `cd backend/blyp-live-service; npm install; npm run dev`
 
-## Env & switches
-- Keys via `EXPO_PUBLIC_*` (Firebase, Gemini, Sentry). If Firebase is stubbed, listeners still fire with empty snapshots—UI must handle no data paths.
+## API routing policy
+- Keep Functions as the default base URL; treat `blyp-live-service` as the source of truth for IVS endpoints.
+- App chooses by `EXPO_PUBLIC_API_BASE_URL`:
+	- Functions (default): `EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:5001/<project>/<region>`
+	- IVS mode: `EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:4000` (or a dedicated `EXPO_PUBLIC_IVS_API_BASE_URL` later)
 
-If anything above conflicts with code, prefer the referenced files and update this doc accordingly.
+## “App won’t load” recovery (device)
+- If device can’t load bundle:
+	- `adb reverse tcp:8081 tcp:8081`
+	- In RN Dev Menu: set **Debug server host** to `localhost:8081` if it was changed.
+- For local APIs on device via reverse (common ports): `5001` (Functions), `4000` (Express).
 
-## Quick examples (use these exact patterns)
-- Add a lazy screen in `App.js`:
-	- `const XScreen = React.lazy(() => import('./src/screens/XScreen'));`
-	- `<Stack.Screen name="X" children={() => (<Suspense fallback={null}><XScreen/></Suspense>)} />`
-- Prime streaming flag on app start (in `App.js` top-level module scope):
-	- `import { primeStreamingFlag } from './src/config/StreamingFeatureFlag'; primeStreamingFlag();`
-- Firestore access in screens/components: use the compat wrapper:
-	- Do: `db.collection('liveStreams').doc(id).onSnapshot(...)`
-	- Don’t: import Firestore SDK directly in screens.
+## Quality gates used in this repo
+- `npm run lint`
+- `npm run typecheck`
 
-[start-app.ps1](http://_vscodecontentref_/11) -DevClient -Tunnel
+## Scripts you can rely on
+- Full bring-up + log capture: `../scripts/start_everything_for_testing.ps1`
+- Status helper: `../check-status.ps1`

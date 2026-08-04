@@ -1,10 +1,33 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { geminiApiKey } from '../config/firebase';
+import { geminiApiKey, geminiAuthHeaders, geminiProxyUrlForModel } from '../config/firebase';
 
 const AI_ENABLED = !!geminiApiKey;
 
-// Initialize Gemini AI with proper API key
-const genAI = AI_ENABLED ? new GoogleGenerativeAI(geminiApiKey) : null;
+// P7.4: previously used the @google/generative-ai SDK with an embedded key. Now
+// routed through the authenticated server proxy. This shim keeps the same
+// `getGenerativeModel(...).generateContent(prompt)` -> `{ response: { text() } }`
+// surface the rest of this file expects.
+function makeProxyGenAI() {
+  return {
+    getGenerativeModel({ model } = {}) {
+      const url = geminiProxyUrlForModel(model || 'gemini-2.5-flash');
+      return {
+        async generateContent(prompt) {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: await geminiAuthHeaders(),
+            body: JSON.stringify({ contents: [{ parts: [{ text: String(prompt || '') }] }] }),
+          });
+          if (!res.ok) throw new Error(`gemini proxy ${res.status}`);
+          const data = await res.json();
+          const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          return { response: { text: () => out } };
+        },
+      };
+    },
+  };
+}
+
+const genAI = AI_ENABLED ? makeProxyGenAI() : null;
 
 /**
  * Rate limiting and caching system
@@ -52,7 +75,7 @@ class RateLimiter {
  */
 export class SmartListGenerator {
   constructor() {
-    this.model = genAI ? genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' }) : null;
+    this.model = genAI ? genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }) : null;
     this.rateLimiter = new RateLimiter();
   }
 

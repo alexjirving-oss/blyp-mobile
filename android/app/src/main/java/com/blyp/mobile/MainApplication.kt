@@ -23,8 +23,16 @@ class MainApplication : Application(), ReactApplication {
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
             PackageList(this).packages.apply {
-              // Packages that cannot be autolinked yet can be added manually here, for example:
-              // add(MyReactNativePackage())
+              // Avoid double-registering IVS views if the package is already present.
+              if (none { it is com.blyp.mobile.ivs.IVSPackage }) {
+                add(com.blyp.mobile.ivs.IVSPackage())
+              }
+              if (none { it is com.blyp.mobile.billing.PlayBillingPackage }) {
+                add(com.blyp.mobile.billing.PlayBillingPackage())
+              }
+              if (none { it is com.blyp.mobile.notifications.NotificationGlancePackage }) {
+                add(com.blyp.mobile.notifications.NotificationGlancePackage())
+              }
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"

@@ -10,7 +10,9 @@ import {
   RefreshControl,
 } from 'react-native';
 import firebase, { auth as authExport, db } from '../config/firebase';
+import { snapData } from '../utils/firestoreSnap';
 import { getUserActivities, ACTIVITY_TYPES } from '../utils/activityTracker';
+import { COLORS } from '../styles/theme';
 
 const ActivityFeed = ({ navigation }) => {
   const [activities, setActivities] = useState([]);
@@ -39,8 +41,9 @@ const ActivityFeed = ({ navigation }) => {
         if (!actorProfiles[actorId]) {
           try {
             const userDoc = await db.collection('users').doc(actorId).get();
-            if (userDoc.exists) {
-              profiles[actorId] = userDoc.data();
+            const ud = snapData(userDoc);
+            if (ud) {
+              profiles[actorId] = ud;
             } else {
               // Create fallback profile based on user ID
               const fallbackName = generateFallbackName(actorId);
@@ -92,7 +95,7 @@ const ActivityFeed = ({ navigation }) => {
   const getActivityIcon = (type) => {
     switch (type) {
       case ACTIVITY_TYPES.LIKE:
-        return { name: 'heart', color: '#ff1744' };
+        return { name: 'heart', color: COLORS.gradientEnd };
       case ACTIVITY_TYPES.UNLIKE:
         return { name: 'heart-outline', color: '#9ca3af' };
       case ACTIVITY_TYPES.SHARE:
@@ -102,7 +105,7 @@ const ActivityFeed = ({ navigation }) => {
       case ACTIVITY_TYPES.COMMENT:
         return { name: 'chatbubble-outline', color: '#f59e0b' };
       case ACTIVITY_TYPES.FOLLOW:
-        return { name: 'person-add-outline', color: '#8b5cf6' };
+        return { name: 'person-add-outline', color: '#00D2BE' };
       default:
         return { name: 'notifications-outline', color: '#6b7280' };
     }
@@ -243,13 +246,13 @@ const ActivityFeed = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   loadingText: {
     color: '#9ca3af',
@@ -263,14 +266,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyTitle: {
-    color: '#e2e8f0',
+    color: '#E4E4E7',
     fontSize: 20,
     fontWeight: '600',
     marginTop: 16,
     marginBottom: 8,
   },
   emptyText: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -280,11 +283,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    backgroundColor: '#0f172a',
+    borderBottomColor: '#141418',
+    backgroundColor: '#0A0A0C',
   },
   unreadActivity: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
   },
   actorAvatar: {
     width: 44,
@@ -305,7 +308,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   postTitle: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 12,
     fontStyle: 'italic',
     marginBottom: 4,

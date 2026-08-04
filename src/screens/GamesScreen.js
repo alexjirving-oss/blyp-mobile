@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import BlueScreen from '../ui/BlueScreen';
 import Icon from '../components/Icon';
 import {
   View,
@@ -15,9 +16,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import GameService from '../services/GameService';
 import { auth } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
+import HeaderWalletBalances from '../components/HeaderWalletBalances';
+import { useAuth, hardLogout } from '../hooks/useCommon';
+import { getEconomyWallet } from '../api/economyLiveApi';
+import BlypCoinService from '../services/BlypCoinService';
+import GemService from '../services/GemService';
+import { COLORS } from '../styles/theme';
+import BlypHeaderFlow from '../components/BlypHeaderFlow';
 
 const GamesScreen = ({ navigation }) => {
   const [menuVisible, setMenuVisible] = useState(false);
+  const [coinBalance, setCoinBalance] = useState(0);
+  const [gemBalance, setGemBalance] = useState(0);
   const [selectedTab, setSelectedTab] = useState('browse');
   const [availableGames, setAvailableGames] = useState([]);
   const [myGames, setMyGames] = useState([]);
@@ -30,6 +40,16 @@ const GamesScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
 
   const currentUser = auth.currentUser;
+  const { uid, authReady, isAuthenticated } = useAuth();
+  const walletUid = uid || currentUser?.uid || null;
+
+  const shouldUseLiveServiceWallet = () => {
+    const enabled =
+      typeof process !== 'undefined' && process?.env?.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET
+        ? String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET).toLowerCase()
+        : '';
+    return enabled === '1' || enabled === 'true';
+  };
 
   const tabs = [
     { id: 'browse', label: 'Browse', icon: 'game-controller-outline' },
@@ -38,10 +58,10 @@ const GamesScreen = ({ navigation }) => {
   ];
 
   const gameTypes = [
-    { 
-      type: 'rock-paper-scissors', 
-      name: 'Rock Paper Scissors', 
-      icon: '✊', 
+    {
+      type: 'rock-paper-scissors',
+      name: 'Rock Paper Scissors',
+      icon: '✊',
       emoji: '✊🖐️✌️',
       players: '2 players',
       description: 'Classic hand game with rock, paper, and scissors',
@@ -49,10 +69,10 @@ const GamesScreen = ({ navigation }) => {
       difficulty: 'Easy',
       playTime: '2 min'
     },
-    { 
-      type: 'tic-tac-toe', 
-      name: 'Tic Tac Toe', 
-      icon: '⭕', 
+    {
+      type: 'tic-tac-toe',
+      name: 'Tic Tac Toe',
+      icon: '⭕',
       emoji: '❌⭕',
       players: '2 players',
       description: 'Get three in a row to win this classic strategy game',
@@ -60,10 +80,10 @@ const GamesScreen = ({ navigation }) => {
       difficulty: 'Easy',
       playTime: '3 min'
     },
-    { 
-      type: 'word-guess', 
-      name: 'Word Guess', 
-      icon: '🔤', 
+    {
+      type: 'word-guess',
+      name: 'Word Guess',
+      icon: '🔤',
       emoji: '🔤💭',
       players: 'Up to 4',
       description: 'Guess the mystery word before time runs out',
@@ -71,10 +91,10 @@ const GamesScreen = ({ navigation }) => {
       difficulty: 'Medium',
       playTime: '5 min'
     },
-    { 
-      type: 'quick-draw', 
-      name: 'Quick Draw', 
-      icon: '🎨', 
+    {
+      type: 'quick-draw',
+      name: 'Quick Draw',
+      icon: '🎨',
       emoji: '🎨✏️',
       players: 'Up to 8',
       description: 'Draw and guess in this fast-paced creative game',
@@ -82,10 +102,10 @@ const GamesScreen = ({ navigation }) => {
       difficulty: 'Medium',
       playTime: '4 min'
     },
-    { 
-      type: 'trivia', 
-      name: 'Trivia Quiz', 
-      icon: '🧠', 
+    {
+      type: 'trivia',
+      name: 'Trivia Quiz',
+      icon: '🧠',
       emoji: '🧠❓',
       players: 'Up to 6',
       description: 'Test your knowledge across various categories',
@@ -93,10 +113,10 @@ const GamesScreen = ({ navigation }) => {
       difficulty: 'Hard',
       playTime: '8 min'
     },
-    { 
-      type: 'memory-match', 
-      name: 'Memory Match', 
-      icon: '🃏', 
+    {
+      type: 'memory-match',
+      name: 'Memory Match',
+      icon: '🃏',
       emoji: '🃏🧩',
       players: '2-4 players',
       description: 'Match pairs of cards to test your memory skills',
@@ -109,6 +129,44 @@ const GamesScreen = ({ navigation }) => {
   useEffect(() => {
     loadGameData();
   }, []);
+
+  const loadBalances = async () => {
+    if (!walletUid) {
+      setCoinBalance(0);
+      setGemBalance(0);
+      return;
+    }
+    try {
+      if (shouldUseLiveServiceWallet()) {
+        if (!authReady || !isAuthenticated) {
+          setCoinBalance(0);
+          setGemBalance(0);
+          return;
+        }
+
+        const wallet = await getEconomyWallet();
+        const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+        const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+        setCoinBalance(Number.isFinite(coins) ? coins : 0);
+        setGemBalance(Number.isFinite(gems) ? gems : 0);
+        return;
+      }
+
+      const coins = await BlypCoinService.getUserBalance(walletUid);
+      const gems = await GemService.getUserGems(walletUid);
+      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+      setGemBalance(Number.isFinite(gems) ? gems : 0);
+    } catch (e) {
+      console.warn('[GAMES][BALANCES] failed', e?.message || String(e));
+      setCoinBalance(0);
+      setGemBalance(0);
+    }
+  };
+
+  useEffect(() => {
+    if (!menuVisible) return;
+    loadBalances();
+  }, [menuVisible, walletUid, authReady, isAuthenticated]);
 
   const loadGameData = async () => {
     setLoading(true);
@@ -183,13 +241,13 @@ const GamesScreen = ({ navigation }) => {
   const handlePlayNow = async (gameType) => {
     try {
       setMatchmakingQueue(true);
-      
+
       // First check if there's an existing game waiting for players
       const waitingGames = availableGames.filter(
-        game => game.gameType === gameType && 
-                game.status === 'waiting' && 
-                game.players.length < game.maxPlayers &&
-                !game.players.includes(currentUser.uid)
+        game => game.gameType === gameType &&
+          game.status === 'waiting' &&
+          game.players.length < game.maxPlayers &&
+          !game.players.includes(currentUser.uid)
       );
 
       if (waitingGames.length > 0) {
@@ -227,10 +285,10 @@ const GamesScreen = ({ navigation }) => {
     >
       <View style={styles.gameHeader}>
         <View style={styles.gameInfo}>
-          <Ionicons 
-            name={gameTypes.find(gt => gt.type === item.gameType)?.icon || 'game-controller-outline'} 
-            size={24} 
-            color="#a855f7" 
+          <Ionicons
+            name={gameTypes.find(gt => gt.type === item.gameType)?.icon || 'game-controller-outline'}
+            size={24}
+            color="#00D2BE"
           />
           <View style={styles.gameDetails}>
             <Text style={styles.gameTitle}>
@@ -248,12 +306,12 @@ const GamesScreen = ({ navigation }) => {
           <Text style={styles.playerCountText}>
             {item.players.length}/{item.maxPlayers}
           </Text>
-          <Icon  name="people-outline" size={16} color="#9ca3af"  />
+          <Icon name="people-outline" size={16} color="#9ca3af" />
         </View>
       </View>
-      
+
       {item.players.length < item.maxPlayers && (
-        <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.joinButton}>
+        <LinearGradient colors={[COLORS.gradientStart, COLORS.gradientMiddle]} style={styles.joinButton}>
           <Text style={styles.joinButtonText}>
             {item.players.includes(currentUser.uid) ? 'Rejoin' : 'Join Game'}
           </Text>
@@ -270,10 +328,10 @@ const GamesScreen = ({ navigation }) => {
     >
       <View style={styles.gameHeader}>
         <View style={styles.gameInfo}>
-          <Ionicons 
-            name={gameTypes.find(gt => gt.type === item.gameType)?.icon || 'game-controller-outline'} 
-            size={24} 
-            color="#a855f7" 
+          <Ionicons
+            name={gameTypes.find(gt => gt.type === item.gameType)?.icon || 'game-controller-outline'}
+            size={24}
+            color="#00D2BE"
           />
           <View style={styles.gameDetails}>
             <Text style={styles.gameTitle}>
@@ -284,8 +342,8 @@ const GamesScreen = ({ navigation }) => {
             </Text>
             {item.status === 'finished' && (
               <Text style={styles.gameResult}>
-                {item.winner === currentUser.uid ? '🏆 You won!' : 
-                 item.winner ? '😞 You lost' : '🤝 Draw'}
+                {item.winner === currentUser.uid ? '🏆 You won!' :
+                  item.winner ? '😞 You lost' : '🤝 Draw'}
               </Text>
             )}
           </View>
@@ -321,7 +379,7 @@ const GamesScreen = ({ navigation }) => {
               <Text style={styles.statLabel}>Draws</Text>
             </View>
           </View>
-          
+
           <View style={styles.favoriteGameCard}>
             <Text style={styles.favoriteGameTitle}>Favorite Game</Text>
             <Text style={styles.favoriteGameText}>{userStats.favoriteGame}</Text>
@@ -329,7 +387,7 @@ const GamesScreen = ({ navigation }) => {
         </>
       ) : (
         <View style={styles.emptyStats}>
-          <Icon  name="analytics-outline" size={64} color="#374151"  />
+          <Icon name="analytics-outline" size={64} color="#374151" />
           <Text style={styles.emptyStatsTitle}>No Game Stats Yet</Text>
           <Text style={styles.emptyStatsText}>
             Play some games to see your statistics here!
@@ -355,25 +413,25 @@ const GamesScreen = ({ navigation }) => {
             <Text style={styles.difficultyText}>{item.difficulty}</Text>
           </View>
         </View>
-        
+
         <View style={styles.gameTileContent}>
           <Text style={styles.gameTileName}>{item.name}</Text>
           <Text style={styles.gameTileDescription}>{item.description}</Text>
-          
+
           <View style={styles.gameTileFooter}>
             <View style={styles.gameMetaInfo}>
               <View style={styles.metaItem}>
-                <Icon  name="people" size={14} color="rgba(255,255,255,0.9)"  />
+                <Icon name="people" size={14} color="rgba(255,255,255,0.9)" />
                 <Text style={styles.metaText}>{item.players}</Text>
               </View>
               <View style={styles.metaItem}>
-                <Icon  name="time" size={14} color="rgba(255,255,255,0.9)"  />
+                <Icon name="time" size={14} color="rgba(255,255,255,0.9)" />
                 <Text style={styles.metaText}>{item.playTime}</Text>
               </View>
             </View>
-            
+
             <View style={styles.playButton}>
-              <Icon  name="play" size={16} color="#fff"  />
+              <Icon name="play" size={16} color="#fff" />
             </View>
           </View>
         </View>
@@ -397,7 +455,7 @@ const GamesScreen = ({ navigation }) => {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                tintColor="#a855f7"
+                tintColor="#00D2BE"
               />
             }
           />
@@ -413,12 +471,12 @@ const GamesScreen = ({ navigation }) => {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                tintColor="#a855f7"
+                tintColor="#00D2BE"
               />
             }
             ListEmptyComponent={
               <View style={styles.emptyState}>
-                <Icon  name="trophy-outline" size={64} color="#374151"  />
+                <Icon name="trophy-outline" size={64} color="#374151" />
                 <Text style={styles.emptyStateTitle}>No Games Yet</Text>
                 <Text style={styles.emptyStateText}>
                   Join or create games to see them here!
@@ -449,7 +507,7 @@ const GamesScreen = ({ navigation }) => {
                 style={styles.popupClose}
                 onPress={() => setShowGamePopup(false)}
               >
-                <Icon  name="close" size={24} color="#9ca3af"  />
+                <Icon name="close" size={24} color="#9ca3af" />
               </TouchableOpacity>
 
               <LinearGradient colors={selectedGame.gradient} style={styles.popupHeader}>
@@ -461,17 +519,17 @@ const GamesScreen = ({ navigation }) => {
               <View style={styles.popupInfo}>
                 <View style={styles.popupMetaGrid}>
                   <View style={styles.popupMetaItem}>
-                    <Icon  name="people" size={20} color="#a855f7"  />
+                    <Icon name="people" size={20} color="#00D2BE" />
                     <Text style={styles.popupMetaLabel}>Players</Text>
                     <Text style={styles.popupMetaValue}>{selectedGame.players}</Text>
                   </View>
                   <View style={styles.popupMetaItem}>
-                    <Icon  name="time" size={20} color="#a855f7"  />
+                    <Icon name="time" size={20} color="#00D2BE" />
                     <Text style={styles.popupMetaLabel}>Duration</Text>
                     <Text style={styles.popupMetaValue}>{selectedGame.playTime}</Text>
                   </View>
                   <View style={styles.popupMetaItem}>
-                    <Icon  name="star" size={20} color="#a855f7"  />
+                    <Icon name="star" size={20} color="#00D2BE" />
                     <Text style={styles.popupMetaLabel}>Difficulty</Text>
                     <Text style={styles.popupMetaValue}>{selectedGame.difficulty}</Text>
                   </View>
@@ -482,7 +540,7 @@ const GamesScreen = ({ navigation }) => {
                   onPress={() => handlePlayNow(selectedGame.type)}
                   disabled={matchmakingQueue}
                 >
-                  <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.playNowGradient}>
+                  <LinearGradient colors={[COLORS.gradientStart, COLORS.gradientMiddle]} style={styles.playNowGradient}>
                     {matchmakingQueue ? (
                       <>
                         <Text style={styles.playNowText}>Finding Player...</Text>
@@ -494,7 +552,7 @@ const GamesScreen = ({ navigation }) => {
                       </>
                     ) : (
                       <>
-                        <Icon  name="play" size={20} color="#fff"  />
+                        <Icon name="play" size={20} color="#fff" />
                         <Text style={styles.playNowText}>Play Now</Text>
                       </>
                     )}
@@ -523,7 +581,7 @@ const GamesScreen = ({ navigation }) => {
               onPress={() => setShowCreateModal(false)}
               style={styles.closeButton}
             >
-              <Icon  name="close" size={24} color="#9ca3af"  />
+              <Icon name="close" size={24} color="#9ca3af" />
             </TouchableOpacity>
           </View>
 
@@ -548,128 +606,112 @@ const GamesScreen = ({ navigation }) => {
     </Modal>
   );
 
+  const useSectionGradient = selectedTab !== 'live';
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" translucent={true} />
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-            <Icon  name="menu" size={24} color="#d1d5db"  />
-          </TouchableOpacity>
-          <View style={styles.logoContainer}>
-            <BlypLogo useGradientBackground={true} />
-          </View>
-          <TouchableOpacity
-            style={styles.createButton}
-            onPress={() => setShowCreateModal(true)}
-          >
-            <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.createButtonGradient}>
-              <Icon  name="add" size={20} color="#fff"  />
-              <Text style={styles.createButtonText}>Create</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tabs */}
-        <View style={styles.tabsContainer}>
-          {tabs.map((tab) => (
+    <BlueScreen>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" translucent={true} />
+        {/* Header – FLOW layout via BlypHeaderFlow */}
+        <BlypHeaderFlow
+          tabs={[
+            { key: 'browse', label: 'Browse' },
+            { key: 'my-games', label: 'My Games' },
+            { key: 'live', label: 'Live' },
+          ]}
+          matchHomePadding={true}
+          activeKey={selectedTab}
+          onTabChange={setSelectedTab}
+          onMenuPress={() => setMenuVisible(true)}
+          rightAction={
             <TouchableOpacity
-              key={tab.id}
-              style={[
-                styles.tabButton,
-                selectedTab === tab.id && styles.activeTabButton,
-              ]}
-              onPress={() => setSelectedTab(tab.id)}
+              style={styles.createButton}
+              onPress={() => setShowCreateModal(true)}
             >
-              <Icon 
-                name={tab.icon}
-                size={18}
-                color={selectedTab === tab.id ? '#fff' : '#9ca3af'}
-               />
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedTab === tab.id && styles.activeTabText,
-                ]}
-              >
-                {tab.label}
-              </Text>
+              <LinearGradient colors={[COLORS.gradientStart, COLORS.gradientMiddle]} style={styles.createButtonGradient}>
+                <Icon name="add" size={20} color={COLORS.white} />
+                <Text style={styles.createButtonText}>Create</Text>
+              </LinearGradient>
             </TouchableOpacity>
-          ))}
+          }
+        />
+
+        {/* Content */}
+        <View style={styles.content}>
+          {useSectionGradient && (
+            <LinearGradient
+              pointerEvents="none"
+              colors={['#0A0A0C', '#141418', '#1C1C22']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.sectionGradientBackground}
+            />
+          )}
+          {renderTabContent()}
         </View>
-      </View>
 
-      {/* Content */}
-      <View style={styles.content}>
-        {renderTabContent()}
-      </View>
+        <GamePopupModal />
+        <CreateGameModal />
 
-      <GamePopupModal />
-      <CreateGameModal />
-      
-      {/* Menu Overlay */}
-      <Modal
-        visible={menuVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableOpacity 
-          style={styles.menuOverlay}
-          activeOpacity={1}
-          onPress={() => setMenuVisible(false)}
+        {/* Menu Overlay */}
+        <Modal
+          visible={menuVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}
         >
-          <View style={styles.menuContainer}>
-            <TouchableOpacity 
-              style={styles.menuCloseButton}
-              onPress={() => setMenuVisible(false)}
-            >
-              <Icon  name="close" size={24} color="#d1d5db"  />
-            </TouchableOpacity>
-            <Text style={styles.menuTitle}>Your Wallet</Text>
-            
-            <View style={styles.balanceItems}>
-              <View style={styles.menuBalanceItem}>
-                <Text style={styles.balanceIcon}>🪙</Text>
-                <Text style={styles.balanceLabel}>Blyp Coins</Text>
-                <Text style={styles.balanceValue}>0</Text>
-              </View>
-              
-              <View style={styles.menuBalanceItem}>
-                <Text style={styles.balanceIcon}>💎</Text>
-                <Text style={styles.balanceLabel}>Blyp Gems</Text>
-                <Text style={styles.balanceValue}>0</Text>
-              </View>
+          <TouchableOpacity
+            style={styles.menuOverlay}
+            activeOpacity={1}
+            onPress={() => setMenuVisible(false)}
+          >
+            <View style={styles.menuContainer}>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={() => setMenuVisible(false)}
+              >
+                <Icon name="close" size={24} color="#d1d5db" />
+              </TouchableOpacity>
+              <Text style={styles.menuTitle}>Menu</Text>
+
+              <TouchableOpacity
+                style={styles.codeButton}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('HowBlypWorks', { mode: 'review' });
+                }}
+              >
+                <Text style={styles.menuButtonText}>Help</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuLogoutButton}
+                onPress={() => {
+                  setMenuVisible(false);
+                  hardLogout();
+                }}
+              >
+                <Text style={styles.menuLogoutText}>Log out</Text>
+              </TouchableOpacity>
             </View>
-            
-            <TouchableOpacity 
-              style={styles.codeButton}
-              onPress={() => {
-                setMenuVisible(false);
-                navigation.navigate('CoinStore');
-              }}
-            >
-              <Text style={styles.menuButtonText}>Get More</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </View>
+          </TouchableOpacity>
+        </Modal>
+      </View>
+    </BlueScreen>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.background,
   },
   header: {
-    backgroundColor: '#0f172a',
-    paddingTop: 50,
+    backgroundColor: COLORS.background,
+    paddingTop: 8,
     paddingBottom: 1,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: COLORS.divider,
   },
   headerTop: {
     flexDirection: 'row',
@@ -680,6 +722,12 @@ const styles = StyleSheet.create({
   },
   menuButton: {
     padding: 8,
+  },
+  headerBalances: {
+    position: 'absolute',
+    left: 56,
+    height: '100%',
+    justifyContent: 'center',
   },
   logoContainer: {
     position: 'absolute',
@@ -701,7 +749,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   createButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -719,34 +767,38 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 8,
     borderRadius: 20,
-    backgroundColor: '#1e293b',
+    backgroundColor: COLORS.backgroundLight,
     gap: 4,
   },
   activeTabButton: {
-    backgroundColor: '#a855f7',
+    backgroundColor: COLORS.primary,
   },
   tabText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 11,
     fontWeight: '500',
   },
   activeTabText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
   },
   content: {
     flex: 1,
+    position: 'relative',
+  },
+  sectionGradientBackground: {
+    ...StyleSheet.absoluteFillObject,
   },
   gamesList: {
     padding: 16,
     paddingBottom: 100,
   },
   gameItem: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
+    backgroundColor: COLORS.backgroundLight,
+    borderRadius: 14,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   gameHeader: {
     flexDirection: 'row',
@@ -764,28 +816,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   gameTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   gameHost: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     marginBottom: 2,
   },
   gameTime: {
-    color: '#10b981',
+    color: COLORS.success,
     fontSize: 12,
     fontWeight: '500',
   },
   gameStatus: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     marginBottom: 2,
   },
   gameResult: {
-    color: '#fbbf24',
+    color: COLORS.warning,
     fontSize: 12,
     fontWeight: '600',
   },
@@ -795,7 +847,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   playerCountText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
   },
   joinButton: {
@@ -805,7 +857,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   joinButtonText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -816,14 +868,14 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   emptyStateTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 20,
     fontWeight: 'bold',
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 8,
   },
   emptyStateText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -838,42 +890,42 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   statCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
+    backgroundColor: COLORS.backgroundLight,
+    borderRadius: 14,
     padding: 16,
     flex: 1,
     minWidth: '45%',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
   },
   statNumber: {
-    color: '#a855f7',
+    color: COLORS.primary,
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   statLabel: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 12,
     textAlign: 'center',
   },
   favoriteGameCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
+    backgroundColor: COLORS.backgroundLight,
+    borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: COLORS.border,
     alignItems: 'center',
   },
   favoriteGameTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
   },
   favoriteGameText: {
-    color: '#a855f7',
+    color: COLORS.primary,
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -884,14 +936,14 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   emptyStatsTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 20,
     fontWeight: 'bold',
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 8,
   },
   emptyStatsText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -903,7 +955,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#1e293b',
+    backgroundColor: COLORS.backgroundLight,
     borderRadius: 20,
     padding: 20,
     width: '90%',
@@ -917,7 +969,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -927,9 +979,9 @@ const styles = StyleSheet.create({
   gameOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#334155',
+    backgroundColor: COLORS.backgroundCard,
     padding: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     marginBottom: 12,
     gap: 16,
   },
@@ -937,19 +989,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   gameOptionText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 4,
   },
   gameOptionPlayers: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 12,
   },
   gameOptionEmoji: {
     fontSize: 32,
   },
-  
+
   // App Store Style Game Tiles
   gamesGrid: {
     padding: 16,
@@ -987,7 +1039,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   difficultyText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 10,
     fontWeight: 'bold',
   },
@@ -996,7 +1048,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   gameTileName: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
     marginBottom: 4,
@@ -1034,7 +1086,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  
+
   // Game Popup Modal Styles
   popupOverlay: {
     flex: 1,
@@ -1043,7 +1095,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   popupContent: {
-    backgroundColor: '#1e293b',
+    backgroundColor: COLORS.backgroundLight,
     borderRadius: 24,
     width: '85%',
     maxWidth: 400,
@@ -1064,7 +1116,7 @@ const styles = StyleSheet.create({
   },
   popupHeader: {
     padding: 32,
-    paddingTop: 48,
+    paddingTop: 8,
     alignItems: 'center',
   },
   popupGameEmoji: {
@@ -1072,7 +1124,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   popupGameName: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 8,
@@ -1097,13 +1149,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   popupMetaLabel: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 12,
     marginTop: 8,
     marginBottom: 4,
   },
   popupMetaValue: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1118,12 +1170,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: 8,
     paddingHorizontal: 32,
     gap: 8,
   },
   playNowText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -1135,7 +1187,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
   },
   dot1: {
     opacity: 1,
@@ -1155,11 +1207,11 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     width: '80%',
-    backgroundColor: '#1e293b',
+    backgroundColor: COLORS.backgroundLight,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1174,7 +1226,7 @@ const styles = StyleSheet.create({
   menuTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
+    color: COLORS.textPrimary,
     marginBottom: 24,
   },
   balanceItems: {
@@ -1197,16 +1249,16 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '500',
-    color: '#d1d5db',
+    color: COLORS.textSecondary,
     marginLeft: 8,
   },
   balanceValue: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: COLORS.textPrimary,
   },
   codeButton: {
-    backgroundColor: 'rgba(236, 72, 153, 0.8)',
+    backgroundColor: '#00D2BE',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -1214,10 +1266,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuButtonText: {
-    color: '#fff',
+    color: '#0A0A0C',
     fontWeight: '600',
     fontSize: 16,
   },
+  menuLogoutButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#FF5A5F',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  menuLogoutText: { color: '#FF5A5F', fontWeight: '700', fontSize: 16 },
 });
 
 export default GamesScreen;
+

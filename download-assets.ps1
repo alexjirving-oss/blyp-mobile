@@ -31,7 +31,7 @@ try {
     Write-Host "Next steps:" -ForegroundColor White
     Write-Host "1. Run 'npm start' to test the app with new assets" -ForegroundColor White
     Write-Host "2. Scan QR code with Expo Go to test on device" -ForegroundColor White
-    Write-Host "3. Run 'eas build --platform android' when ready to build" -ForegroundColor White
+    Write-Host "3. For Android Play release creation, use 'powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>'" -ForegroundColor White
 }
 catch {
     Write-Host "❌ Error downloading assets: $($_.Exception.Message)" -ForegroundColor Red

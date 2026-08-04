@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../components/Icon';
+import ScreenContainer from '../components/ScreenContainer';
 import {
   View,
   Text,
@@ -13,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import GameService from '../services/GameService';
 import { auth } from '../config/firebase';
 import RockPaperScissorsGame from '../components/RockPaperScissorsGame';
+import { COLORS } from '../styles/theme';
 
 const GameRoomScreen = ({ navigation, route }) => {
   const { gameId, gameType } = route.params;
@@ -104,7 +106,7 @@ const GameRoomScreen = ({ navigation, route }) => {
     if (gameData.status === 'waiting') {
       return (
         <View style={styles.waitingContainer}>
-          <Icon  name="hourglass-outline" size={64} color="#a855f7"  />
+          <Icon  name="hourglass-outline" size={64} color="#00D2BE"  />
           <Text style={styles.waitingTitle}>Waiting for Players</Text>
           <Text style={styles.waitingText}>
             {gameData.players.length}/{gameData.maxPlayers} players joined
@@ -178,7 +180,7 @@ const GameRoomScreen = ({ navigation, route }) => {
           <Icon  
             name={winner ? "trophy" : "handshake"} 
             size={64} 
-            color={winner ? "#fbbf24" : "#a855f7"} 
+            color={winner ? "#fbbf24" : "#00D2BE"} 
            />
           <Text style={styles.finishedTitle}>Game Over!</Text>
           <Text style={styles.finishedResult}>
@@ -190,10 +192,10 @@ const GameRoomScreen = ({ navigation, route }) => {
           
           <TouchableOpacity 
             style={styles.playAgainButton} 
-            onPress={() => navigation.navigate('GamesList')}
+            onPress={() => navigation.navigate('Games')}
           >
-            <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.playAgainGradient}>
-              <Icon  name="refresh" size={20} color="#fff"  />
+            <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.playAgainGradient}>
+              <Icon  name="refresh" size={20} color="#0A0A0C"  />
               <Text style={styles.playAgainText}>Play Again</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -206,13 +208,16 @@ const GameRoomScreen = ({ navigation, route }) => {
 
   if (loading || !gameData) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loadingText}>Loading game...</Text>
-      </View>
+      <ScreenContainer noSafeArea={true} style={styles.screenContainer}>
+        <View style={[styles.container, styles.centered]}>
+          <Text style={styles.loadingText}>Loading game...</Text>
+        </View>
+      </ScreenContainer>
     );
   }
 
   return (
+    <ScreenContainer noSafeArea={true} style={styles.screenContainer}>
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
@@ -257,13 +262,17 @@ const GameRoomScreen = ({ navigation, route }) => {
         </View>
       </ScrollView>
     </View>
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
+  screenContainer: {
+    paddingTop: 0,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: 'transparent',
   },
   centered: {
     justifyContent: 'center',
@@ -277,7 +286,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingTop: 50,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: '#141418',
   },
   backButton: {
     padding: 8,
@@ -305,7 +314,7 @@ const styles = StyleSheet.create({
   playersSection: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: '#141418',
   },
   sectionTitle: {
     color: '#fff',
@@ -317,13 +326,13 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   playerItem: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 12,
     padding: 12,
     marginRight: 12,
     width: 120,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#27272E',
   },
   playerInfo: {
     alignItems: 'center',
@@ -332,13 +341,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
   },
   playerAvatarText: {
-    color: '#fff',
+    color: '#0A0A0C',
     fontSize: 16,
     fontWeight: 'bold',
   },
@@ -412,15 +421,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   inviteButton: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#27272E',
   },
   inviteButtonText: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -474,7 +483,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   finishedResult: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 30,
@@ -492,9 +501,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   playAgainText: {
-    color: '#fff',
+    color: '#0A0A0C',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   loadingText: {
     color: '#fff',

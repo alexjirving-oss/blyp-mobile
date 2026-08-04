@@ -9,6 +9,11 @@ jest.mock('expo-splash-screen', () => ({
   hideAsync: jest.fn(),
 }));
 
+// Avoid loading native module in Jest (TurboModule) for thumbnail generation
+jest.mock('expo-video-thumbnails', () => ({
+  getThumbnailAsync: jest.fn(async () => ({ uri: 'file://mock-thumbnail.jpg' })),
+}));
+
 // Provide factory mock to avoid Jest attempting to load RN internals not present in test env
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({
   default: {},
@@ -50,7 +55,7 @@ jest.mock('@react-native-community/netinfo', () => ({
 // Mock project-specific side-effect modules to simplify rendering in Jest
 jest.mock('./src/config/amplify', () => ({}));
 jest.mock('./src/config/preAuthCleanup', () => ({}));
-jest.mock('sentry-expo', () => ({ init: jest.fn(), captureException: jest.fn() }));
+jest.mock('@sentry/react-native', () => ({ init: jest.fn(), captureException: jest.fn() }));
 jest.mock('./src/monitoring/sentry', () => ({}));
 jest.mock('expo-device', () => ({
   brand: 'test',

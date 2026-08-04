@@ -1,0 +1,21 @@
+---
+description: Release build workflow — commit first, then pause before building
+alwaysApply: true
+---
+
+# Release Build Gate
+
+When finishing a unit of work that would normally end in an Android/EAS build:
+
+1. **Commit everything first.** Stage and commit all changes so the working tree
+   is clean. Never leave dirty/uncommitted files before a build.
+2. **Stop before building.** Do NOT auto-run the build scripts
+   (`tools/release/BUILD_RELEASE_CANDIDATE.ps1`, `eas build`, gradle bundle, etc.)
+   or bump the version code for a build on your own.
+3. **Ask for explicit confirmation.** Tell the user the work is committed and ask
+   them to confirm they're ready for a build — they may want to add more changes first.
+4. Only after the user explicitly says to build should you bump the version code,
+   run the pre-release regression gate, and produce the AAB.
+
+This exists so the user can batch additional changes into a single build instead
+of getting a fresh build after every change.

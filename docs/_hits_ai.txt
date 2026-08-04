@@ -1,0 +1,160 @@
+app.json:77:      "EXPO_PUBLIC_GEMINI_API_KEY": ""
+app.config.js:9:  // Gemini key must NEVER be hard-coded. It is sourced from env/EAS secrets.
+app.config.js:10:  // If absent, downstream Gemini features must degrade safely (disabled mode).
+app.config.js:11:  const resolvedGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || (fromJson.extra && fromJson.extra.EXPO_PUBLIC_GEMINI_API_KEY) || '';
+app.config.js:12:  if (!resolvedGeminiKey) {
+app.config.js:14:    console.warn('[BLYP][SECURITY] Gemini key not provided via env. Gemini features will be disabled.');
+app.config.js:20:    EXPO_PUBLIC_GEMINI_API_KEY: resolvedGeminiKey,
+.\src\utils\logStructured.js:17:    if (typeof scrub.transcript === 'string' && scrub.transcript.startsWith('[ERROR:Gemini API error')) {
+.\src\services\aiService.js:1:import { geminiApiKey, geminiApiUrl } from '../config/firebase';
+.\src\services\aiService.js:6: * Provides intelligent post generation using Google's Gemini API
+.\src\services\aiService.js:15:class AIService {
+.\src\services\aiService.js:17:    this.apiKey = geminiApiKey;
+.\src\services\aiService.js:18:    this.apiUrl = geminiApiUrl;
+.\src\services\aiService.js:21:      console.warn('‘‹·¥©≈ Gemini API key not configured. AI features will be disabled.');
+.\src\services\aiService.js:41:      console.log('≠É∫¨ Testing Gemini API connection...');
+.\src\services\aiService.js:109:    // If Gemini is not configured, return a smart fallback instead of throwing
+.\src\services\aiService.js:154:      // Make API request to Gemini
+.\src\services\aiService.js:155:      const response = await this.makeGeminiRequest(parts);
+.\src\services\aiService.js:207:   * Make request to Gemini API
+.\src\services\aiService.js:209:  async makeGeminiRequest(parts) {
+.\src\services\aiService.js:231:    console.log('≠ÉÓ… Making Gemini API request...', {
+.\src\services\aiService.js:254:      console.error('‘ÿÓ Gemini API error:', response.status, errorText);
+.\src\services\aiService.js:255:      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+.\src\services\aiService.js:259:    console.log('≠ÉÙ‰ Gemini API response received');
+.\src\services\aiService.js:262:      console.error('‘ÿÓ Invalid Gemini API response structure:', result);
+.\src\services\aiService.js:263:      throw new Error('Invalid response from Gemini API');
+.\src\services\aiService.js:366:      return await this.makeGeminiRequest(parts);
+.\src\services\aiService.js:419:      const response = await this.makeGeminiRequest(parts);
+.\src\services\aiService.js:435:export default new AIService();
+.\src\services\aiService.js:438:export { AIService };
+.\src\utils\smartListGenerator.js:2:import { geminiApiKey } from '../config/firebase';
+.\src\utils\smartListGenerator.js:4:const AI_ENABLED = !!geminiApiKey;
+.\src\utils\smartListGenerator.js:6:// Initialize Gemini AI with proper API key
+.\src\utils\smartListGenerator.js:7:const genAI = AI_ENABLED ? new GoogleGenerativeAI(geminiApiKey) : null;
+.\src\utils\smartListGenerator.js:55:    this.model = genAI ? genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }) : null;
+.\src\config\firebase.js:318:// Gemini API configuration
+.\src\config\firebase.js:321:let resolvedGeminiKey = "";
+.\src\config\firebase.js:327:  if (extra.EXPO_PUBLIC_GEMINI_API_KEY) {
+.\src\config\firebase.js:328:    resolvedGeminiKey = String(extra.EXPO_PUBLIC_GEMINI_API_KEY);
+.\src\config\firebase.js:334:if (!resolvedGeminiKey) {
+.\src\config\firebase.js:335:  resolvedGeminiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
+.\src\config\firebase.js:338:export const geminiApiKey = resolvedGeminiKey;
+.\src\config\firebase.js:339:export const geminiApiUrl = process.env.EXPO_PUBLIC_GEMINI_API_URL || (geminiApiKey
+.\src\config\firebase.js:340:  ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`
+.\src\config\geminiConfig.js:1:// Canonical Gemini configuration.
+.\src\config\geminiConfig.js:4:export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+.\src\config\geminiConfig.js:6:export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
+.\src\config\geminiConfig.js:8:export const getGeminiApiKey = () => {
+.\src\config\geminiConfig.js:10:    process.env.EXPO_PUBLIC_GEMINI_API_KEY ||
+.\src\config\geminiConfig.js:11:    process.env.GEMINI_API_KEY ||
+.\src\config\geminiConfig.js:17:export const hasGeminiKey = () => {
+.\src\config\geminiConfig.js:18:  return !!getGeminiApiKey();
+.\src\config\geminiConfig.js:23:export const isGeminiAvailable = () => {
+.\src\config\geminiConfig.js:25:    return !!getGeminiApiKey();
+.\src\config\geminiConfig.js:32:export const buildGeminiUrl = (modelOverride) => {
+.\src\config\geminiConfig.js:33:  const apiKey = getGeminiApiKey();
+.\src\config\geminiConfig.js:34:  const modelId = (modelOverride || DEFAULT_GEMINI_MODEL).replace(/^models\//, '');
+.\src\config\geminiConfig.js:38:    return `${GEMINI_BASE_URL}/models/${modelId}:generateContent`;
+.\src\config\geminiConfig.js:40:  return `${GEMINI_BASE_URL}/models/${modelId}:generateContent?key=${apiKey}`;
+.\src\config\geminiConfig.js:44:const geminiConfig = {
+.\src\config\geminiConfig.js:45:  GEMINI_BASE_URL,
+.\src\config\geminiConfig.js:46:  DEFAULT_GEMINI_MODEL,
+.\src\config\geminiConfig.js:47:  getGeminiApiKey,
+.\src\config\geminiConfig.js:48:  hasGeminiKey,
+.\src\config\geminiConfig.js:49:  isGeminiAvailable,
+.\src\config\geminiConfig.js:50:  buildGeminiUrl,
+.\src\config\geminiConfig.js:54:export const GEMINI_API_BASE = GEMINI_BASE_URL;
+.\src\config\geminiConfig.js:55:export const GEMINI_MODEL_DEFAULT = DEFAULT_GEMINI_MODEL;
+.\src\config\geminiConfig.js:57:export default geminiConfig;
+.\src\config\MediaDescriptionFeatureFlag.js:4: * Controls whether Gemini AI descriptions are enabled for media items.
+.\src\screens\ReviewScreen.js:33:import aiService from '../services/aiService';
+.\src\screens\ReviewScreen.js:35:import geminiSpeechService from '../services/geminiSpeechService';
+.\src\screens\ReviewScreen.js:72:        message: 'Missing EXPO_PUBLIC_GEMINI_API_KEY in this build',
+.\src\screens\ReviewScreen.js:93:          message: 'Gemini quota/rate limit hit (HTTP 429). Try again later.',
+.\src\screens\ReviewScreen.js:99:          message: 'Gemini key rejected (HTTP 403). Check key validity.',
+.\src\screens\ReviewScreen.js:537:            ? 'Missing EXPO_PUBLIC_GEMINI_API_KEY'
+.\src\screens\ReviewScreen.js:662:      // Use Gemini AI for speech transcription with timeout
+.\src\screens\ReviewScreen.js:663:      console.log('≠ÉÒ˚ Using Gemini AI for speech transcription...');
+.\src\screens\ReviewScreen.js:665:      const transcriptionPromise = geminiSpeechService.transcribeAudio(audioUri);
+.\src\screens\ReviewScreen.js:672:      // GeminiSpeechService may return bracketed error tokens like [NO_KEY], [NO_CANDIDATE], [ERROR:...]
+.\src\screens\ReviewScreen.js:1045:    if (!aiService.isAvailable()) {
+.\src\screens\ReviewScreen.js:1055:      const connectionOk = await aiService.testConnection();
+.\src\screens\ReviewScreen.js:1069:      const aiContent = await aiService.enhanceExistingContent(caption, formattedMediaItems);
+.\src\screens\ReviewScreen.js:1087:      const fallbackContent = aiService.generateFallbackContent(caption, media ? [media] : []);
+.\src\screens\ReviewScreen.js:1853:      // If AI isn't available (missing Gemini key, quota, etc), don't attempt step-by-step AI.
+.\src\screens\ReviewScreen.js:1855:      if (!aiService.isAvailable()) {
+.\src\screens\ReviewScreen.js:1911:          const transcript = await geminiSpeechService.transcribeAudio(uri);
+.\src\screens\ReviewScreen.js:2547:      // const comments = await aiService.generatePostComments(postData);
+.\src\screens\ReviewScreen.js:3060:                  aiService.generateHashtags(caption, media ? [media] : [])
+.\src\services\geminiConfig.js:1:// Deprecated duplicate config: re-export authoritative helpers from src/config/geminiConfig.
+.\src\services\geminiConfig.js:3:export { getGeminiApiKey, hasGeminiKey, buildGeminiUrl, GEMINI_API_BASE as GEMINI_API_BASE_URL, GEMINI_MODEL_DEFAULT as GEMINI_PRIMARY_MODEL } from '../config/geminiConfig';
+.\src\services\geminiSpeechService.restore-voice-backup.js:1:/** Backup of geminiSpeechService.js before voice flow restoration */
+.\src\services\geminiSpeechService.restore-voice-backup.js:3: * Gemini-Powered Speech Service for Blyp Mobile
+.\src\services\geminiSpeechService.restore-voice-backup.js:5: * Uses Gemini AI's multi-modal capabilities to transcribe audio
+.\src\services\geminiSpeechService.restore-voice-backup.js:11:import { getGeminiApiKey, buildGeminiUrl, hasGeminiKey } from '../config/geminiConfig';
+.\src\services\geminiSpeechService.restore-voice-backup.js:14:// Read audio file as base64 and build Gemini inlineData part
+.\src\services\geminiSpeechService.restore-voice-backup.js:34:function extractTextFromGeminiSpeechResponse(data) {
+.\src\services\geminiSpeechService.restore-voice-backup.js:45:export async function transcribeWithGemini({ uri, mimeType = 'audio/mp4' }) {
+.\src\services\geminiSpeechService.restore-voice-backup.js:46:  if (!hasGeminiKey()) {
+.\src\services\geminiSpeechService.restore-voice-backup.js:47:    console.warn('[AI][GeminiSpeech] No API key; skipping transcription.');
+.\src\services\geminiSpeechService.restore-voice-backup.js:58:    const url = buildGeminiUrl();
+.\src\services\geminiSpeechService.restore-voice-backup.js:79:      console.warn('[AI][GeminiSpeech] Non-200 response', { status: res.status });
+.\src\services\geminiSpeechService.restore-voice-backup.js:84:    const transcript = extractTextFromGeminiSpeechResponse(json);
+.\src\services\geminiSpeechService.restore-voice-backup.js:86:      console.warn('[AI][GeminiSpeech] No transcript text in response');
+.\src\services\geminiSpeechService.restore-voice-backup.js:93:    console.warn('[AI][GeminiSpeech] Exception during transcription', { message: err?.message });
+.\src\services\geminiSpeechService.restore-voice-backup.js:99:export default { transcribeWithGemini };
+.\src\services\geminiSpeechService.js:2: * Gemini-Powered Speech Service for Blyp Mobile
+.\src\services\geminiSpeechService.js:4: * Uses Gemini AI's multi-modal capabilities to transcribe audio
+.\src\services\geminiSpeechService.js:11:import { geminiApiUrl, geminiApiKey } from '../config/firebase';
+.\src\services\geminiSpeechService.js:13:class GeminiSpeechService {
+.\src\services\geminiSpeechService.js:15:    this.apiUrl = geminiApiUrl || "";
+.\src\services\geminiSpeechService.js:38:   * Transcribe audio using Gemini AI's multimodal capabilities
+.\src\services\geminiSpeechService.js:45:    if (!geminiApiKey) {
+.\src\services\geminiSpeechService.js:46:      console.warn('‘‹·¥©≈ Missing Gemini API key; cannot transcribe.');
+.\src\services\geminiSpeechService.js:50:    console.log('≠ÉÒ˚ Transcribing with Gemini AI... uri=', audioUri);
+.\src\services\geminiSpeechService.js:86:      const primaryModel = (this.apiUrl.includes(':generateContent') && this.apiUrl.split('/models/')[1]?.split(':')[0]) || 'gemini-2.5-flash';
+.\src\services\geminiSpeechService.js:87:      const secondaryModel = 'gemini-1.5-flash';
+.\src\services\geminiSpeechService.js:90:      console.log('≠ÉÓ… Sending audio to Gemini for transcription...');
+.\src\services\geminiSpeechService.js:99:        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+.\src\services\geminiSpeechService.js:114:        throw new Error(`Gemini API error: ${response.status}`);
+.\src\services\geminiSpeechService.js:118:      console.log('≠ÉÙø Raw Gemini response (primary):', JSON.stringify(result).slice(0, 500));
+.\src\services\geminiSpeechService.js:130:            console.log('≠ÉÙø Raw Gemini response (secondary):', JSON.stringify(result).slice(0, 500));
+.\src\services\geminiSpeechService.js:149:      console.warn('‘‹·¥©≈ Gemini speech transcription failed reason=', reason);
+.\src\services\geminiSpeechService.js:227:export default new GeminiSpeechService();
+.\src\services\geminiSpeechService.voice-file-read-backup.js:3:import { buildGeminiUrl, hasGeminiKey } from '../config/geminiConfig';
+.\src\services\geminiSpeechService.voice-file-read-backup.js:6:function extractTextFromGeminiSpeechResponse(raw) {
+.\src\services\geminiSpeechService.voice-file-read-backup.js:21:export async function transcribeWithGemini({ audioUri, mimeType = 'audio/mp4' }) {
+.\src\services\geminiSpeechService.voice-file-read-backup.js:23:  if (!hasGeminiKey()) return { ok: false, transcript: '', error: 'NO_KEY' };
+.\src\services\geminiSpeechService.voice-file-read-backup.js:27:    const url = buildGeminiUrl();
+.\src\services\geminiSpeechService.voice-file-read-backup.js:32:    const transcript = extractTextFromGeminiSpeechResponse(json);
+.\src\services\geminiSpeechService.voice-file-read-backup.js:40:export default { transcribeWithGemini };
+.\src\services\mediaDescriptionService.photo-backup.js:3:import { getGeminiApiKey, buildGeminiUrl, hasGeminiKey } from '../config/geminiConfig';
+.\src\services\mediaDescriptionService.js:3:import { geminiApiKey } from '../config/firebase';
+.\src\services\mediaDescriptionService.js:6:const getApiUrl = () => `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+.\src\services\mediaDescriptionService.js:39:   * Test connection to Gemini API with a simple text request.
+.\src\services\mediaDescriptionService.js:58:      console.log('≠É∫¨ Testing Gemini API connection with simple text request...');
+.\src\services\mediaDescriptionService.js:60:      if (!geminiApiKey) {
+.\src\services\mediaDescriptionService.js:61:        console.log('‘‹·¥©≈ No Gemini API key configured; skipping connection test.');
+.\src\services\mediaDescriptionService.js:62:        this.lastConnectionError = { code: 'NO_KEY', message: 'Missing Gemini API key' };
+.\src\services\mediaDescriptionService.js:102:      console.log('‘ÿÓ Gemini API test error:', error.message);
+.\src\services\mediaDescriptionService.js:216:    // "Truncated" markers from Gemini / mocks
+.\src\services\mediaDescriptionService.js:253:   * Helper: Call Gemini API for description with optional simpler prompt.
+.\src\services\mediaDescriptionService.js:255:  async callGeminiForDescription(mediaItem, { simplePrompt }) {
+.\src\services\mediaDescriptionService.js:320:   * Helper: Extract candidate text and finishReason from Gemini response.
+.\src\services\mediaDescriptionService.js:383:      if (!geminiApiKey) {
+.\src\services\mediaDescriptionService.js:384:        console.log('‘ÿÓ No Gemini API key configured, using fallback');
+.\src\services\mediaDescriptionService.js:510:      console.log('≠ÉÓ… Sending contextual request to Gemini API...');
+.\src\services\mediaDescriptionService.js:529:        throw new Error(`Gemini API error: ${response.status}`);
+.\src\services\mediaDescriptionService.js:601:      if (!geminiApiKey) {
+.\src\services\mediaDescriptionService.js:602:        console.log('‘ÿÓ No Gemini API key configured, using fallback');
+.\src\services\mediaDescriptionService.js:671:      console.log('≠ÉÓ… Sending request to Gemini API...');
+.\src\services\mediaDescriptionService.js:698:        throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+.\src\services\mediaDescriptionService.js:702:      console.log('‘£‡ Raw Gemini response:', data);
+.\src\services\mediaDescriptionService.js:767:      if (!geminiApiKey) {
+.\src\services\mediaDescriptionService.js:768:        this.log('‘ÿÓ No Gemini API key configured');
+.\src\services\mediaDescriptionService.js:778:      const primaryJson = await this.callGeminiForDescription(mediaItem, { simplePrompt: false });
+.\src\services\mediaDescriptionService.js:789:        const retryJson = await this.callGeminiForDescription(mediaItem, { simplePrompt: true });
+.\src\services\mediaDescriptionService.restore-voice-backup.js:3:import { getGeminiApiKey, buildGeminiUrl, hasGeminiKey } from '../config/geminiConfig';
+.\src\services\mediaDescriptionService.restore-voice-backup.js:19:  extractTextFromGeminiDescriptionResponse(data) { /* content omitted */ }
+.\src\services\realSpeechService.js:12:    // Use the same API key as Gemini (both are Google Cloud services)

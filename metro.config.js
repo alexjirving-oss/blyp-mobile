@@ -5,6 +5,18 @@ const metroResolver = require('metro-resolver');
 
 const config = getDefaultConfig(__dirname);
 
+// Appium driver trees under node_modules can contain broken nested paths that
+// crash Metro's FallbackWatcher (ENOENT). They are not part of the app bundle.
+const appiumBlock = /node_modules[/\\]appium[^/\\]*[/\\].*/;
+if (config.resolver?.blockList) {
+  const prev = config.resolver.blockList;
+  config.resolver.blockList = Array.isArray(prev)
+    ? [...prev, appiumBlock]
+    : [prev, appiumBlock];
+} else if (config.resolver) {
+  config.resolver.blockList = [appiumBlock];
+}
+
 // Enable inline requires to improve startup performance (avoid spread for Node CJS compatibility)
 config.transformer = Object.assign({}, config.transformer || {}, { inlineRequires: true });
 

@@ -10,6 +10,7 @@ import {
   StatusBar,
   Platform,
   FlatList,
+  SectionList,
   Image,
   Alert,
   Animated,
@@ -21,27 +22,61 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
 import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../utils/scaleUtils';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, where, or, and, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, where, or, and, getDocs, limit } from 'firebase/firestore';
 import { firebaseEnabled, firestore as db } from '../config/firebase';
-import { subscribeToFollowingList, followUser } from '../utils/followUtils';
+import { subscribeToFollowingList, subscribeToFollowersList, followUser } from '../utils/followUtils';
+import { useTabReset } from '../utils/tabResetBus';
 import BlypLogo from '../components/BlypLogo';
+import BlypAvatar from '../components/BlypAvatar';
+import HeaderMenuTabs from '../components/HeaderMenuTabs';
+import HeaderWalletBalances from '../components/HeaderWalletBalances';
 import SearchBar from '../components/SearchBar';
 import Logger from '../utils/Logger';
 import ScreenContainer from '../components/ScreenContainer';
-import { useAuth, useToggle, useArray } from '../hooks/useCommon';
+import { useAuth, useToggle, useArray, hardLogout } from '../hooks/useCommon';
+import { exitGuestMode } from '../services/guestSessionService';
 import unreadCountManager from '../utils/unreadCountManager';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
+import { getEconomyWallet } from '../api/economyLiveApi';
+import { shouldUseLiveServiceWallet } from '../utils/walletSource';
+import { conversationsMessagingService } from '../services/messaging';
+import { loadBlockedUsers, getBlockedSet } from '../services/BlockService';
+import { messengerExtrasService } from '../services/messaging/messengerExtrasService';
+import { messengerUsersService } from '../services/messaging/messengerUsersService';
+import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messaging/resolveMessengerUser';
+import { subscribeNotifications, markNotificationRead } from '../services/notificationsInboxService';
+import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+import { theme as blypTheme } from '../styles/blypTheme';
+import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
+import BlypHeaderFlow from '../components/BlypHeaderFlow';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+
+const withAlpha = (hex, alpha) => {
+  const s = String(hex || '').replace('#', '');
+  if (s.length !== 6) return hex;
+  const r = parseInt(s.slice(0, 2), 16);
+  const g = parseInt(s.slice(2, 4), 16);
+  const b = parseInt(s.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+const T = blypTheme.colors;
+
+// Resolve a user's profile photo across the various field names used in the
+// codebase (canonical is photoURL; older docs use avatar/userPhotoURL/photo).
+// Re-exported from resolveMessengerUser for backwards compatibility in this file.
+
 const MessengerScreen = ({ navigation }) => {
   // If Firebase is disabled (stub mode), show a friendly message and skip all listeners
   if (!firebaseEnabled) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: T.headerBackground, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
         <BlypLogo useGradientBackground={false} />
-        <Text style={{ color: '#94a3b8', marginTop: 12, textAlign: 'center' }}>
+        <Text style={{ color: T.textMuted, marginTop: 12, textAlign: 'center' }}>
           Messaging is temporarily unavailable in this build.
         </Text>
-        <Text style={{ color: '#64748b', marginTop: 6, textAlign: 'center', fontSize: 12 }}>
+        <Text style={{ color: T.textDisabled, marginTop: 6, textAlign: 'center', fontSize: 12 }}>
           Enable Firebase to use chats and live users.
         </Text>
       </SafeAreaView>
@@ -50,175 +85,412 @@ const MessengerScreen = ({ navigation }) => {
 
   // Get screen dimensions
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-  
+
   // State management with improved patterns
   const [selectedTab, setSelectedTab] = useState('chats');
+  // Double-tap the Inbox tab → reset to the first sub-page ("Chats").
+  useTabReset('Messenger', () => setSelectedTab('chats'));
   const [chats, setChats] = useState([]);
+  const [participantProfiles, setParticipantProfiles] = useState({});
+  const [calls, setCalls] = useState([]);
+  const [callsLoading, setCallsLoading] = useState(true);
+  const [callsError, setCallsError] = useState(null);
+  const [statuses, setStatuses] = useState([]);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [followingUsers, setFollowingUsers] = useState([]);
   const [followingUserIds, setFollowingUserIds] = useState(new Set());
+  const [followerUserIds, setFollowerUserIds] = useState(new Set());
+  const [notifications, setNotifications] = useState([]);
+  const [notifLoading, setNotifLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [coinBalance, setCoinBalance] = useState(0);
   const [gemBalance, setGemBalance] = useState(0);
-  
+
   // Use proper authentication state management
-  const { user: currentUser, isAuthenticated, loading: authLoading } = useAuth();
-  
+  const { user: currentUser, uid, isAuthenticated, authReady, loading: authLoading } = useAuth();
+
+  const tabBarHeight = useBottomTabBarHeight();
+  const [headerHeight, setHeaderHeight] = useState(0);
+
   // Debug authentication state
   useEffect(() => {
-    console.log('🔐 MESSENGER AUTH STATE:', {
-      currentUser: currentUser?.uid,
+    console.log('ðŸ” MESSENGER AUTH STATE:', {
+      uid,
       isAuthenticated,
+      authReady,
       authLoading,
+      hasUser: !!currentUser,
       displayName: currentUser?.displayName,
       email: currentUser?.email
     });
-  }, [currentUser?.uid, isAuthenticated, authLoading]);
+  }, [uid, isAuthenticated, authReady, authLoading, currentUser?.displayName, currentUser?.email]);
 
   // Calculate total unread messages (memoized to prevent infinite loops)
   const totalUnreadCount = React.useMemo(() => {
-    if (!currentUser?.uid) return 0;
+    if (!uid) return 0;
     return chats.reduce((total, chat) => {
-      const unreadCount = chat.unreadCount?.[currentUser.uid] || 0;
+      const unreadCount = chat.unreadCount?.[uid] || 0;
       return total + unreadCount;
     }, 0);
-  }, [chats, currentUser?.uid]);
+  }, [chats, uid]);
 
-  useEffect(() => {
-    // Only load data when user is authenticated and not loading
-    if (authLoading || !isAuthenticated || !currentUser) {
-      console.log('⏳ MESSENGER: Waiting for authentication...', { authLoading, isAuthenticated, hasUser: !!currentUser });
+  // Define callback functions BEFORE the useEffect that uses them
+  const loadBalances = React.useCallback(async () => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadBalances - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
       return;
     }
-    
-    console.log('🚀 MESSENGER: Loading chat data for user:', currentUser.uid);
-    
-    // Load chats, following users, all users with proper cleanup
-    const unsubscribeChats = loadChats();
-    const unsubscribeFollowing = loadFollowingUsers();
-    const unsubscribeAllUsers = loadAllUsers();
-    loadBalances();
+    try {
+      if (shouldUseLiveServiceWallet()) {
+        if (!authReady || !isAuthenticated) {
+          return;
+        }
+
+        const wallet = await getEconomyWallet();
+        const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+        const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+        setCoinBalance(Number.isFinite(coins) ? coins : 0);
+        setGemBalance(Number.isFinite(gems) ? gems : 0);
+        return;
+      }
+
+      const coins = await BlypCoinService.getUserBalance(uid);
+      const gems = await GemService.getUserGems(uid);
+      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+      setGemBalance(Number.isFinite(gems) ? gems : 0);
+    } catch (error) {
+      const msg = String(error?.message || error || '');
+      console.warn('[MESSENGER][BALANCES] loadBalances failed:', msg);
+    }
+  }, [uid, authReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (!uid || !chats.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      for (const chat of chats) {
+        const otherId = chat.participants?.find((id) => id !== uid);
+        if (!otherId) continue;
+        if (allUsers.some((u) => u.id === otherId)) continue;
+        const profile = await fetchMessengerUserProfile(otherId);
+        if (profile) updates[otherId] = profile;
+      }
+      if (!cancelled && Object.keys(updates).length) {
+        setParticipantProfiles((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chats, uid, allUsers]);
+
+  const resolveOtherParticipant = React.useCallback((item) => {
+    const otherId = item.participants?.find((id) => id !== uid);
+    if (!otherId) return null;
+    const known = allUsers.find((user) => item.participants.includes(user.id) && user.id !== uid);
+    if (known) return known;
+    if (participantProfiles[otherId]) return participantProfiles[otherId];
+    return {
+      id: otherId,
+      username: item.participantNames?.find((name) => name !== currentUser?.displayName) || 'Unknown User',
+    };
+  }, [allUsers, participantProfiles, uid, currentUser]);
+
+  const loadChats = React.useCallback(() => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadChats - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
+      return () => { };
+    }
+
+    try {
+      console.log('ðŸ“¥ MESSENGER: Loading conversations for user:', uid);
+      // Warm the block cache so blocked conversations are filtered on first snapshot.
+      loadBlockedUsers().catch(() => {});
+      return conversationsMessagingService.subscribeToThreads(
+        db,
+        uid,
+        (threads) => {
+          // Hide conversations with users you've blocked.
+          const blocked = getBlockedSet();
+          const visible = blocked.size
+            ? (threads || []).filter((t) => {
+                const other = (t?.participants || []).find((id) => id !== uid);
+                return !other || !blocked.has(other);
+              })
+            : threads;
+          setChats(visible);
+          setLoading(false);
+          Logger.firebase('Loaded conversations', { count: visible.length });
+        },
+        (error) => {
+          const msg = String(error?.message || error || '');
+          const code = String(error?.code || '');
+          const isIndex = code === 'failed-precondition' || msg.toLowerCase().includes('requires an index') || msg.toLowerCase().includes('index');
+          const isPermission = code === 'permission-denied' || msg.toLowerCase().includes('missing or insufficient permissions');
+
+          if (isIndex || isPermission) {
+            console.warn('[MESSENGER] Conversations unavailable:', { code, msg });
+            setLoading(false);
+            // Avoid Alert + LogBox spam for expected config/rules issues.
+            return;
+          }
+
+          console.error('âŒ MESSENGER: Error loading conversations:', error);
+          setLoading(false);
+          Alert.alert('Error', 'Failed to load chats. Please check your connection.');
+        },
+      );
+    } catch (error) {
+      console.error('âŒ MESSENGER: Error setting up chat listener:', error);
+      setLoading(false);
+      return () => { };
+    }
+  }, [uid, authReady, isAuthenticated]);
+
+  const loadCalls = React.useCallback(() => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadCalls - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
+      setCalls([]);
+      setCallsLoading(false);
+      return () => { };
+    }
+
+    setCallsLoading(true);
+    setCallsError(null);
+    try {
+      return messengerExtrasService.subscribeToCalls(
+        db,
+        uid,
+        (next) => {
+          setCalls(next);
+          setCallsLoading(false);
+        },
+        (error) => {
+          const msg = String(error?.message || error || '');
+          const code = String(error?.code || '');
+          const isPermission = code === 'permission-denied' || msg.toLowerCase().includes('missing or insufficient permissions');
+
+          if (isPermission) {
+            console.warn('[MESSENGER] Calls unavailable:', { code, msg });
+            setCalls([]);
+            setCallsLoading(false);
+            setCallsError(null);
+            return;
+          }
+
+          console.error('âŒ MESSENGER: Error loading calls:', error);
+          setCalls([]);
+          setCallsLoading(false);
+          setCallsError(error);
+        },
+      );
+    } catch (error) {
+      console.error('âŒ MESSENGER: Error setting up calls listener:', error);
+      setCalls([]);
+      setCallsLoading(false);
+      setCallsError(error);
+      return () => { };
+    }
+  }, [uid, authReady, isAuthenticated]);
+
+  const loadStatuses = React.useCallback(() => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadStatuses - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
+      setStatuses([]);
+      setStatusLoading(false);
+      return () => { };
+    }
+
+    setStatusLoading(true);
+    setStatusError(null);
+    try {
+      return messengerExtrasService.subscribeToRecentStatuses(
+        db,
+        (raw) => {
+          const now = Date.now();
+          const next = raw.filter((s) => {
+            const expiresAt = s.expiresAt;
+            const expMs = typeof expiresAt?.toMillis === 'function' ? expiresAt.toMillis() : (typeof expiresAt === 'number' ? expiresAt : 0);
+            if (!expMs) return true;
+            return expMs > now;
+          });
+          setStatuses(next);
+          setStatusLoading(false);
+        },
+        (error) => {
+          const msg = String(error?.message || error || '');
+          const code = String(error?.code || '');
+          const isPermission = code === 'permission-denied' || msg.toLowerCase().includes('missing or insufficient permissions');
+
+          if (isPermission) {
+            console.warn('[MESSENGER] Statuses unavailable:', { code, msg });
+            setStatuses([]);
+            setStatusLoading(false);
+            setStatusError(null);
+            return;
+          }
+
+          console.error('âŒ MESSENGER: Error loading statuses:', error);
+          setStatuses([]);
+          setStatusLoading(false);
+          setStatusError(error);
+        },
+      );
+    } catch (error) {
+      console.error('âŒ MESSENGER: Error setting up status listener:', error);
+      setStatuses([]);
+      setStatusLoading(false);
+      setStatusError(error);
+      return () => { };
+    }
+  }, [uid, authReady, isAuthenticated]);
+
+  const loadFollowingUsers = React.useCallback(() => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadFollowingUsers - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
+      return () => { };
+    }
+
+    // Subscribe to the list of users the current user is following
+    const unsubscribe = subscribeToFollowingList(uid, (followingSet) => {
+      console.log('ðŸ”„ MESSENGER: Received following list update with', followingSet.size, 'users');
+      setFollowingUserIds(followingSet);
+
+      if (followingSet.size === 0) {
+        setFollowingUsers([]);
+      }
+    });
+
+    // Subscribe to who follows the current user, so we can detect mutual follows.
+    const unsubscribeFollowers = subscribeToFollowersList(uid, (followersSet) => {
+      setFollowerUserIds(followersSet);
+    });
+
+    // Subscribe to the durable notification inbox (team requests, battles, etc.).
+    const unsubscribeNotifs = subscribeNotifications(uid, (items) => {
+      setNotifications(items);
+      setNotifLoading(false);
+    });
 
     return () => {
-      console.log('🧹 MESSENGER: Cleaning up Firebase listeners');
-      if (unsubscribeChats) unsubscribeChats();
-      if (unsubscribeFollowing) unsubscribeFollowing();
-      if (unsubscribeAllUsers) unsubscribeAllUsers();
+      try { unsubscribe && unsubscribe(); } catch {}
+      try { unsubscribeFollowers && unsubscribeFollowers(); } catch {}
+      try { unsubscribeNotifs && unsubscribeNotifs(); } catch {}
     };
-  // Only depend on authLoading, isAuthenticated, and uid - not the entire currentUser object
-  // Using function references in dependencies to ensure they're stable
-  }, [authLoading, isAuthenticated, currentUser?.uid, loadChats, loadFollowingUsers, loadAllUsers, loadBalances]);
-  
-  const loadBalances = React.useCallback(async () => {
-    if (!currentUser?.uid) return;
-    try {
-      const coins = await BlypCoinService.getUserBalance(currentUser.uid);
-      const gems = await GemService.getUserGems(currentUser.uid);
-      setCoinBalance(coins);
-      setGemBalance(gems);
-    } catch (error) {
-      console.error('Error loading balances:', error);
-      setCoinBalance(0);
-      setGemBalance(0);
+  }, [uid, authReady, isAuthenticated]);
+
+  const loadAllUsers = React.useCallback(() => {
+    if (!uid) {
+      console.warn('[MESSENGER] Skipping loadAllUsers - no uid', { authReady, isAuthenticated, uidPresent: !!uid });
+      return () => { };
     }
-  }, [currentUser?.uid]);
+    try {
+      // Subscribe to all users for the "People you may know" section
+      console.log('ðŸ‘¥ MESSENGER: Loading all users for current user:', uid);
+      Logger.firebase('Loading all users for current user', { userId: uid });
+
+      return messengerUsersService.subscribeToAllUsers(
+        db,
+        uid,
+        (users) => {
+          setAllUsers(users);
+          Logger.firebase('Retrieved users from Firebase', {
+            userCount: users.length,
+          });
+        },
+        (error) => {
+          console.error('âŒ MESSENGER: Error loading users:', error);
+          // Don't show alert for users loading error, just log it
+        },
+      );
+    } catch (error) {
+      console.error('âŒ MESSENGER: Error setting up users listener:', error);
+      return () => { };
+    }
+  }, [uid, authReady, isAuthenticated]);
+
+  // Main effect to load data when auth is ready
+  useEffect(() => {
+    // Block until auth system is ready and user is authenticated
+    if (!authReady || authLoading || !isAuthenticated || !uid) {
+      console.log('â³ MESSENGER: Waiting for authentication...', { authReady, authLoading, isAuthenticated, uidPresent: !!uid });
+      return;
+    }
+
+    let cancelled = false;
+    const subs = [];
+
+    const doLoad = () => {
+      if (cancelled) return;
+      console.log('ðŸš€ MESSENGER: Loading chat data for user:', uid);
+
+      // Load chats, following users, all users, calls, and statuses with proper cleanup
+      subs.push(loadChats());
+      subs.push(loadFollowingUsers());
+      subs.push(loadAllUsers());
+      subs.push(loadCalls());
+      subs.push(loadStatuses());
+      loadBalances();
+    };
+
+    // In release, ensure Firebase auth bridge is ready before reading Firestore.
+    // Without this, Firestore snapshots fail with permission-denied because
+    // rules require request.auth != null.
+    if (!__DEV__) {
+      console.warn('[MESSENGER][AUTH] Ensuring Firebase auth before loading data...');
+      ensureFirebaseAuthReady({ uid, timeoutMs: 15000 })
+        .then(() => {
+          console.warn('[MESSENGER][AUTH] Firebase auth ready, loading data');
+          doLoad();
+        })
+        .catch((e) => {
+          console.error('[MESSENGER][AUTH] Firebase auth not ready, loading anyway (may fail):', e?.code || e?.message);
+          doLoad();
+        });
+    } else {
+      doLoad();
+    }
+
+    return () => {
+      cancelled = true;
+      console.log('ðŸ§¹ MESSENGER: Cleaning up Firebase listeners');
+      subs.forEach((unsub) => { if (typeof unsub === 'function') unsub(); });
+    };
+  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadCalls, loadStatuses, loadBalances]);
 
   // Update unread count manager when total count changes
   useEffect(() => {
     unreadCountManager.setUnreadCount(totalUnreadCount);
-    console.log('📊 MESSENGER: Unread count updated:', totalUnreadCount);
-    
+    console.log('ðŸ“Š MESSENGER: Unread count updated:', totalUnreadCount);
+
     // No cleanup needed for this effect since it's just updating a value
   }, [totalUnreadCount]);
 
   // Update filtered users when following list changes
   useEffect(() => {
-    console.log('🔥 MESSENGER: Filtering users - allUsers:', allUsers.length, 'followingIds:', followingUserIds.size);
-    if (allUsers.length > 0 && currentUser?.uid) {
-      // TEMPORARILY SHOW ALL USERS (ignoring following status for testing)  
-      const filteredUsers = allUsers.filter(user => 
-        user.id !== currentUser.uid
+    console.log('ðŸ”¥ MESSENGER: Filtering users - allUsers:', allUsers.length, 'followingIds:', followingUserIds.size);
+    if (allUsers.length > 0 && uid) {
+      // TEMPORARILY SHOW ALL USERS (ignoring following status for testing)
+      const filteredUsers = allUsers.filter(user =>
+        user.id !== uid
       );
-      Logger.firebase('Filtered users for display', { 
+      Logger.firebase('Filtered users for display', {
         filteredCount: filteredUsers.length,
         users: filteredUsers.map(u => ({ id: u.id, username: u.username }))
       });
     }
-  }, [followingUserIds, allUsers, currentUser?.uid]);
+  }, [followingUserIds, allUsers, uid]);
 
-
-
-  const loadChats = React.useCallback(() => {
-    try {
-      console.log('📥 MESSENGER: Loading chats for user:', currentUser.uid);
-      
-      // Simplified query to avoid Firebase index requirements
-      const q = query(
-        collection(db, 'chats'),
-        where('participants', 'array-contains', currentUser.uid)
-      );
-
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        console.log('📨 MESSENGER: Received chat snapshot with', snapshot.docs.length, 'chats');
-        
-        const chatData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        
-        console.log('📋 MESSENGER: Chat data:', chatData.map(c => ({ 
-          id: c.id, 
-          participants: c.participants, 
-          lastMessage: c.lastMessage?.slice?.(0, 50) || 'No message'
-        })));
-        
-        // Sort locally to avoid Firebase composite index
-        chatData.sort((a, b) => {
-          const aTime = a.lastMessageTime?.toDate?.() || new Date(0);
-          const bTime = b.lastMessageTime?.toDate?.() || new Date(0);
-          return bTime - aTime;
-        });
-        
-        setChats(chatData);
-        setLoading(false);
-        Logger.firebase('Loaded chats', { count: chatData.length });
-      }, (error) => {
-        console.error('❌ MESSENGER: Error loading chats:', error);
-        setLoading(false);
-        Alert.alert('Error', 'Failed to load chats. Please check your connection.');
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      console.error('❌ MESSENGER: Error setting up chat listener:', error);
-      setLoading(false);
-      return () => {};
-    }
-  }, [currentUser?.uid]);
-
-  const loadFollowingUsers = React.useCallback(() => {
-    if (!currentUser?.uid) return () => {};
-    
-    // Subscribe to the list of users the current user is following
-    const unsubscribe = subscribeToFollowingList(currentUser.uid, (followingSet) => {
-      console.log('🔄 MESSENGER: Received following list update with', followingSet.size, 'users');
-      setFollowingUserIds(followingSet);
-      
-      if (followingSet.size === 0) {
-        setFollowingUsers([]);
-      }
-    });
-    
-    return unsubscribe;
-  }, [currentUser?.uid]);
-  
   // Separate effect to fetch user data when followingUserIds changes
   useEffect(() => {
     if (!followingUserIds || followingUserIds.size === 0) return;
-    
-    console.log('🔄 MESSENGER: Fetching data for', followingUserIds.size, 'following users');
-    
+
+    console.log('ðŸ”„ MESSENGER: Fetching data for', followingUserIds.size, 'following users');
+
     const fetchFollowingUserData = async () => {
       try {
         const followingUsersData = [];
@@ -235,59 +507,27 @@ const MessengerScreen = ({ navigation }) => {
             console.error('Error fetching individual user data:', error);
           }
         }
-        
+
         setFollowingUsers(followingUsersData);
       } catch (error) {
         console.error('Error in fetchFollowingUserData:', error);
       }
     };
-    
+
     fetchFollowingUserData();
   }, [followingUserIds]);
 
-  const loadAllUsers = React.useCallback(() => {
-    if (!currentUser?.uid) return () => {};
-    try {
-      // Subscribe to all users for the "People you may know" section
-      console.log('👥 MESSENGER: Loading all users for current user:', currentUser.uid);
-      Logger.firebase('Loading all users for current user', { userId: currentUser.uid });
-      const q = query(collection(db, 'users'));
-      
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        console.log('👤 MESSENGER: Received users snapshot with', snapshot.docs.length, 'users');
-        
-        const allUsersData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          username: doc.data().username || doc.data().displayName || 'Unknown User',
-          ...doc.data()
-        })).filter(user => user.id !== currentUser.uid); // Only exclude current user
-        
-        console.log('✅ MESSENGER: Filtered users:', allUsersData.length, 'users after excluding current user');
-        
-        Logger.firebase('Retrieved users from Firebase', { 
-          userCount: allUsersData.length, 
-          rawDocs: snapshot.docs.length 
-        });
-        setAllUsers(allUsersData);
-      }, (error) => {
-        console.error('❌ MESSENGER: Error loading users:', error);
-        // Don't show alert for users loading error, just log it
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      console.error('❌ MESSENGER: Error setting up users listener:', error);
-      return () => {};
-    }
-  }, [currentUser?.uid]);
-
-
-
   const formatLastMessageTime = (timestamp) => {
     if (!timestamp) return '';
-    
+
     const now = new Date();
-    const messageTime = timestamp.toDate();
+    // Accept Firestore Timestamps, {seconds}, epoch ms numbers, ISO strings.
+    let messageTime;
+    if (typeof timestamp?.toDate === 'function') messageTime = timestamp.toDate();
+    else if (typeof timestamp?.seconds === 'number') messageTime = new Date(timestamp.seconds * 1000);
+    else if (typeof timestamp === 'number') messageTime = new Date(timestamp);
+    else messageTime = new Date(timestamp);
+    if (!messageTime || isNaN(messageTime.getTime())) return '';
     const diffInMs = now - messageTime;
     const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
     const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
@@ -297,7 +537,7 @@ const MessengerScreen = ({ navigation }) => {
     if (diffInMinutes < 60) return `${diffInMinutes}m`;
     if (diffInHours < 24) return `${diffInHours}h`;
     if (diffInDays < 7) return `${diffInDays}d`;
-    
+
     return messageTime.toLocaleDateString();
   };
 
@@ -316,29 +556,21 @@ const MessengerScreen = ({ navigation }) => {
             style: 'destructive',
             onPress: async () => {
               Logger.user('Deleting chat', { chatId, username });
-              
-              // Delete from Firebase - actually delete the document
-              const chatRef = doc(db, 'chats', chatId);
-              await deleteDoc(chatRef);
-              
-              // Also delete all messages in the chat
-              const messagesRef = collection(db, 'chats', chatId, 'messages');
-              const messagesSnapshot = await getDocs(messagesRef);
-              
-              const deletePromises = messagesSnapshot.docs.map(messageDoc => 
-                deleteDoc(doc(db, 'chats', chatId, 'messages', messageDoc.id))
-              );
-              
-              await Promise.all(deletePromises);
-              
-              Logger.user('Chat and messages deleted successfully');
-              Alert.alert('Deleted', `Conversation with ${username} has been permanently deleted.`);
+
+              const chatRef = doc(db, 'conversations', chatId);
+              await updateDoc(chatRef, {
+                deleted: true,
+                deletedAt: serverTimestamp(),
+              });
+
+              Logger.user('Chat soft-deleted successfully');
+              Alert.alert('Deleted', `Conversation with ${username} has been removed.`);
             }
           }
         ]
       );
     } catch (error) {
-      console.error('❌ Error deleting chat:', error);
+      console.error('âŒ Error deleting chat:', error);
       Alert.alert('Error', 'Failed to delete conversation. Please try again.');
     }
   };
@@ -350,18 +582,18 @@ const MessengerScreen = ({ navigation }) => {
         'Are you sure you want to delete this chat? This action cannot be undone.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Delete', 
+          {
+            text: 'Delete',
             style: 'destructive',
             onPress: async () => {
               // Delete from Firebase
-              const chatRef = doc(db, 'chats', chatId);
+              const chatRef = doc(db, 'conversations', chatId);
               await updateDoc(chatRef, {
                 participants: [],
                 deleted: true,
                 deletedAt: serverTimestamp()
               });
-              console.log('🗑️ Chat deleted:', chatId);
+              console.log('ðŸ—‘ï¸ Chat deleted:', chatId);
             }
           }
         ]
@@ -374,40 +606,16 @@ const MessengerScreen = ({ navigation }) => {
 
   const SwipeableChatItem = ({ item }) => {
     const [panX] = useState(new Animated.Value(0));
-    
-    // Find other participant
-    const otherParticipant = allUsers.find(user => 
-      item.participants.includes(user.id) && user.id !== currentUser.uid
-    );
 
-    console.log('🧑‍🤝‍🧑 SWIPEABLE: Chat participants:', item.participants);
-    console.log('👥 SWIPEABLE: All users count:', allUsers.length);
-    console.log('👤 SWIPEABLE: Current user:', currentUser.uid);
-    console.log('🔍 SWIPEABLE: Other participant found:', otherParticipant ? otherParticipant.username : 'NOT FOUND');
-
-    if (!otherParticipant) {
-      // Create a fallback participant if we can't find the user
-      const otherParticipantId = item.participants.find(id => id !== currentUser.uid);
-      if (!otherParticipantId) {
-        console.log('❌ SWIPEABLE: No other participant ID found');
-        return null;
-      }
-      
-      console.log('⚠️ SWIPEABLE: Creating fallback participant for ID:', otherParticipantId);
-      const fallbackParticipant = {
-        id: otherParticipantId,
-        username: item.participantNames?.find(name => name !== currentUser.displayName) || 'Unknown User'
-      };
-      
-      return renderChatItemContent(item, fallbackParticipant, panX);
-    }
+    const otherParticipant = resolveOtherParticipant(item);
+    if (!otherParticipant) return null;
 
     return renderChatItemContent(item, otherParticipant, panX);
   };
 
   const renderChatItemContent = (item, otherParticipant, panX) => {
     // Calculate unread count for current user
-    const unreadCount = item.unreadCount?.[currentUser.uid] || 0;
+    const unreadCount = item.unreadCount?.[uid] || 0;
     const hasUnread = unreadCount > 0;
 
     const panResponder = PanResponder.create({
@@ -437,10 +645,10 @@ const MessengerScreen = ({ navigation }) => {
       <View style={styles.chatItemWrapper}>
         {/* Delete background */}
         <View style={styles.deleteBackground}>
-          <Icon  name="trash" size={24} color="#fff"  />
+          <Icon name="trash" size={24} color={T.textPrimary} />
           <Text style={styles.deleteText}>Delete</Text>
         </View>
-        
+
         <Animated.View
           style={[
             styles.swipeableItem,
@@ -448,54 +656,54 @@ const MessengerScreen = ({ navigation }) => {
           ]}
           {...panResponder.panHandlers}
         >
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
               styles.whatsappChatItem,
               hasUnread && styles.chatItemUnread,
-              { 
-                backgroundColor: hasUnread ? 'rgba(37, 211, 102, 0.08)' : '#1e293b',
+              {
+                backgroundColor: hasUnread ? withAlpha(T.success, 0.08) : T.surface,
                 borderLeftWidth: hasUnread ? 4 : 0,
-                borderLeftColor: hasUnread ? '#25d366' : 'transparent'
+                borderLeftColor: hasUnread ? T.success : T.transparent
               }
             ]}
-            onPress={() => navigation.navigate('ChatConversation', { 
+            onPress={() => navigation.navigate('ChatConversation', {
               chatId: item.id,
-              otherUser: otherParticipant 
+              otherUser: otherParticipant
             })}
             activeOpacity={0.7}
           >
             <View style={styles.avatarContainer}>
-              <View style={[
-                styles.defaultAvatar,
-                hasUnread && { borderWidth: 2, borderColor: '#00D4AA' }
-              ]}>
-                <Text style={styles.avatarText}>
-                  {otherParticipant.username?.charAt(0).toUpperCase() || '?'}
-                </Text>
-              </View>
+              <BlypAvatar
+                uri={resolveUserPhoto(otherParticipant)}
+                name={otherParticipant.username || otherParticipant.displayName}
+                profile={otherParticipant}
+                size={50}
+                showBadge={false}
+                style={hasUnread ? { borderRadius: 25, borderWidth: 2, borderColor: T.success } : undefined}
+              />
               {hasUnread && <View style={styles.unreadIndicator} />}
             </View>
-            
+
             <View style={styles.chatContent}>
               <View style={styles.chatHeader}>
                 <Text style={[
                   styles.chatName,
-                  hasUnread && { color: '#00D4AA', fontWeight: 'bold' }
+                  hasUnread && { color: T.success, fontWeight: 'bold' }
                 ]}>
                   {otherParticipant.username || 'Unknown User'}
                 </Text>
                 <Text style={[
                   styles.chatTime,
-                  hasUnread && { color: '#00D4AA', fontWeight: '600' }
+                  hasUnread && { color: T.success, fontWeight: '600' }
                 ]}>
                   {formatLastMessageTime(item.lastMessageTime)}
                 </Text>
               </View>
-              
+
               <View style={styles.messagePreview}>
                 <Text style={[
                   styles.lastMessage,
-                  hasUnread && { color: '#d1d5db', fontWeight: '600' }
+                  hasUnread && { color: T.textSecondary, fontWeight: '600' }
                 ]} numberOfLines={1}>
                   {item.lastMessage || 'No messages yet'}
                 </Text>
@@ -514,37 +722,77 @@ const MessengerScreen = ({ navigation }) => {
     );
   };
 
-  const renderChatItem = ({ item }) => {
-    console.log('📱 renderChatItem called for chat:', item.id, 'participants:', item.participants);
-    console.log('📊 Chat unread data:', item.unreadCount, 'lastMessage:', item.lastMessage);
-    
-    // Find other participant
-    const otherParticipant = allUsers.find(user => 
-      item.participants.includes(user.id) && user.id !== currentUser.uid
-    );
-    
-    // Create fallback participant if not found in allUsers
-    if (!otherParticipant) {
-      const otherParticipantId = item.participants.find(id => id !== currentUser.uid);
-      if (!otherParticipantId) return null;
-      
-      const fallbackParticipant = {
-        id: otherParticipantId,
-        username: item.participantNames?.find(name => name !== currentUser.displayName) || 'Unknown User'
-      };
-      
-      return renderChatBar(item, fallbackParticipant);
+  const onNotificationPress = (item) => {
+    try { markNotificationRead(item.id); } catch {}
+    const data = item?.data || {};
+    try {
+      if ((data.type === 'message' || data.type === 'conversation') && data.conversationId) {
+        navigation.navigate('ChatConversation', {
+          conversationId: data.conversationId,
+          chatId: data.conversationId,
+          otherUser: { id: data.senderId, displayName: data.senderName, username: data.senderName },
+        });
+      } else if (data.teamId) {
+        navigation.navigate('MyTeam');
+      } else if (data.battleId) {
+        navigation.navigate('BattleDetail', { battleId: data.battleId });
+      }
+    } catch (e) {
+      console.warn('[MESSENGER] notification route failed', e?.message || e);
     }
-    
+  };
+
+  const notifIconFor = (type) => {
+    switch (type) {
+      case 'battle': return 'flash';
+      case 'message': return 'chatbubble-ellipses';
+      case 'live': return 'radio';
+      case 'team': return 'people';
+      default: return 'notifications';
+    }
+  };
+
+  const renderNotificationItem = ({ item }) => {
+    const unread = item.status !== 'read';
+    return (
+      <TouchableOpacity
+        style={[styles.whatsappChatItem, unread && { backgroundColor: withAlpha(T.success, 0.06) }]}
+        activeOpacity={0.7}
+        onPress={() => onNotificationPress(item)}
+      >
+        <View style={styles.avatarContainer}>
+          <View style={[styles.defaultAvatar, { backgroundColor: withAlpha(T.success, 0.15) }]}>
+            <Icon name={notifIconFor(item.type)} size={22} color={T.success} />
+          </View>
+        </View>
+        <View style={styles.chatContent}>
+          <View style={styles.chatHeader}>
+            <Text style={[styles.chatName, unread && { fontWeight: 'bold' }]} numberOfLines={1}>
+              {item.title || 'Notification'}
+            </Text>
+            <Text style={styles.chatTime}>{formatLastMessageTime(item.createdAt)}</Text>
+          </View>
+          <View style={styles.messagePreview}>
+            <Text style={styles.lastMessage} numberOfLines={2}>{item.body || ''}</Text>
+            {unread && <View style={styles.unreadIndicator} />}
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderChatItem = ({ item }) => {
+    const otherParticipant = resolveOtherParticipant(item);
+    if (!otherParticipant) return null;
     return renderChatBar(item, otherParticipant);
   };
 
   // Create a separate component for swipeable chat items
   const SwipeableChatBar = ({ item, otherParticipant }) => {
-    const unreadCount = item.unreadCount?.[currentUser.uid] || 0;
+    const unreadCount = item.unreadCount?.[uid] || 0;
     const hasUnread = unreadCount > 0;
     const [panX] = useState(new Animated.Value(0));
-    
+
     const panResponder = PanResponder.create({
       onMoveShouldSetPanResponder: (evt, gestureState) => {
         return Math.abs(gestureState.dx) > 20 && Math.abs(gestureState.dy) < 100;
@@ -567,7 +815,7 @@ const MessengerScreen = ({ navigation }) => {
         }).start();
       },
     });
-    
+
     return (
       <View style={styles.chatItemWrapper}>
         <Animated.View
@@ -577,52 +825,52 @@ const MessengerScreen = ({ navigation }) => {
           ]}
           {...panResponder.panHandlers}
         >
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
               styles.whatsappChatItem,
-              hasUnread && { backgroundColor: 'rgba(0, 212, 170, 0.1)' }
+              hasUnread && { backgroundColor: withAlpha(T.success, 0.1) }
             ]}
             onPress={() => {
-              console.log('🎯 Chat tapped:', item.id, 'with:', otherParticipant.username);
-              navigation.navigate('ChatConversation', { 
+              console.log('ðŸŽ¯ Chat tapped:', item.id, 'with:', otherParticipant.username);
+              navigation.navigate('ChatConversation', {
                 chatId: item.id,
-                otherUser: otherParticipant 
+                otherUser: otherParticipant
               });
             }}
             activeOpacity={0.7}
           >
             <View style={styles.avatarContainer}>
-              <View style={[
-                styles.defaultAvatar,
-                hasUnread && { borderWidth: 2, borderColor: '#00D4AA' }
-              ]}>
-                <Text style={styles.avatarText}>
-                  {otherParticipant.username?.charAt(0).toUpperCase() || '?'}
-                </Text>
-              </View>
+              <BlypAvatar
+                uri={resolveUserPhoto(otherParticipant)}
+                name={otherParticipant.username || otherParticipant.displayName}
+                profile={otherParticipant}
+                size={50}
+                showBadge={false}
+                style={hasUnread ? { borderRadius: 25, borderWidth: 2, borderColor: T.success } : undefined}
+              />
               {hasUnread && <View style={styles.unreadIndicator} />}
             </View>
-            
+
             <View style={styles.chatContent}>
               <View style={styles.chatHeader}>
                 <Text style={[
                   styles.chatName,
-                  hasUnread && { color: '#00D4AA', fontWeight: 'bold' }
+                  hasUnread && { color: T.success, fontWeight: 'bold' }
                 ]}>
                   {otherParticipant.username || 'Unknown User'}
                 </Text>
                 <Text style={[
                   styles.chatTime,
-                  hasUnread && { color: '#00D4AA', fontWeight: '600' }
+                  hasUnread && { color: T.success, fontWeight: '600' }
                 ]}>
                   {formatLastMessageTime(item.lastMessageTime)}
                 </Text>
               </View>
-              
+
               <View style={styles.messagePreview}>
                 <Text style={[
                   styles.lastMessage,
-                  hasUnread && { color: '#d1d5db', fontWeight: '600' }
+                  hasUnread && { color: T.textSecondary, fontWeight: '600' }
                 ]} numberOfLines={1}>
                   {item.lastMessage || 'No messages yet'}
                 </Text>
@@ -648,18 +896,15 @@ const MessengerScreen = ({ navigation }) => {
   const renderNewChatItem = ({ item }) => (
     <View style={styles.newChatItem}>
       <View style={styles.avatarContainer}>
-        {item.avatar ? (
-          <Image source={{ uri: item.avatar }} style={styles.avatar} />
-        ) : (
-          <View style={styles.defaultAvatar}>
-            <Text style={styles.avatarText}>
-              {item.username?.charAt(0).toUpperCase() || '?'}
-            </Text>
-          </View>
-        )}
+        <BlypAvatar
+          uri={resolveUserPhoto(item)}
+          name={item.username || item.displayName}
+          profile={item}
+          size={48}
+        />
         {item.isOnline && <View style={styles.onlineIndicator} />}
       </View>
-      
+
       <View style={styles.userInfo}>
         <Text style={styles.userName}>{item.username || 'Unknown User'}</Text>
         <Text style={styles.userStatus}>
@@ -668,18 +913,18 @@ const MessengerScreen = ({ navigation }) => {
       </View>
 
       <View style={styles.actionButtons}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.followButton}
           onPress={() => handleFollowUser(item)}
         >
           <Text style={styles.followButtonText}>Follow</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.messageButton}
           onPress={() => startNewChat(item)}
         >
-          <Icon  name="chatbubble" size={18} color="#fff"  />
+          <Icon name="chatbubble" size={18} color={T.textPrimary} />
         </TouchableOpacity>
       </View>
     </View>
@@ -687,7 +932,7 @@ const MessengerScreen = ({ navigation }) => {
 
   const handleFollowUser = async (user) => {
     try {
-      const result = await followUser(currentUser.uid, user.id);
+      const result = await followUser(uid, user.id);
       if (result.success) {
         Alert.alert('Success', `You are now following ${user.username}`);
       } else {
@@ -701,63 +946,36 @@ const MessengerScreen = ({ navigation }) => {
 
   const startNewChat = async (otherUser) => {
     try {
-      console.log('🚀 Starting new chat with:', otherUser.username, 'ID:', otherUser.id);
-      console.log('👤 Current user:', currentUser.uid);
-      
-      // Check if chat already exists more thoroughly
-      const existingChat = chats.find(chat => 
-        chat.participants.includes(currentUser.uid) && 
-        chat.participants.includes(otherUser.id)
-      );
+      console.log('ðŸš€ Starting new chat with:', otherUser.username, 'ID:', otherUser.id);
+      console.log('ðŸ‘¤ Current user:', uid);
 
-      if (existingChat) {
-        console.log('💬 Found existing chat:', existingChat.id);
-        navigation.navigate('ChatConversation', { 
-          chatId: existingChat.id,
-          otherUser: otherUser 
-        });
+      if (!uid) {
+        Alert.alert('Error', 'Please log in to start a chat');
         return;
       }
 
-      // Double-check in Firebase to avoid duplicates
-      const chatsRef = collection(db, 'chats');
-      const q = query(chatsRef, where('participants', 'array-contains', currentUser.uid));
-      const querySnapshot = await getDocs(q);
-      
-      let foundChat = null;
-      querySnapshot.forEach((doc) => {
-        const chatData = doc.data();
-        if (chatData.participants.includes(otherUser.id)) {
-          foundChat = { id: doc.id, ...chatData };
+      if (!__DEV__) {
+        try {
+          await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+        } catch (e) {
+          const code = e?.code || e?.name || 'FIREBASE_AUTH_ERROR';
+          const msg = e?.message || String(e);
+          const status = typeof e?.status === 'number' ? ` (HTTP ${e.status})` : '';
+          console.error('[CHAT][AUTH] Firebase auth bridge not ready', { code, msg, status, detail: e?.detail, url: e?.url });
+          Alert.alert('Auth Error', `Cannot start chat until Firebase auth is ready.\n\n${code}${status}\n${msg}`);
+          return;
         }
-      });
-
-      if (foundChat) {
-        console.log('💬 Found existing chat in Firebase:', foundChat.id);
-        navigation.navigate('ChatConversation', { 
-          chatId: foundChat.id,
-          otherUser: otherUser 
-        });
-        return;
       }
 
-      // Create new chat
-      const newChat = {
-        participants: [currentUser.uid, otherUser.id],
-        participantNames: [currentUser.displayName || 'Unknown', otherUser.username || otherUser.displayName || 'Unknown'],
-        createdAt: serverTimestamp(),
-        lastMessage: '',
-        lastMessageTime: serverTimestamp(),
-        unreadCount: { [currentUser.uid]: 0, [otherUser.id]: 0 }
-      };
+      const meName = currentUser?.displayName || currentUser?.username || currentUser?.email || 'Unknown';
+      const otherName = otherUser?.username || otherUser?.displayName || 'Unknown';
+      const conversationId = await conversationsMessagingService.createOrGetDirectThread(db, uid, otherUser.id, meName, otherName);
+      console.log('âœ… Conversation ready with ID:', conversationId);
 
-      console.log('📝 Creating new chat with data:', newChat);
-      const chatDoc = await addDoc(chatsRef, newChat);
-      console.log('✅ Chat created with ID:', chatDoc.id);
-      
-      navigation.navigate('ChatConversation', { 
-        chatId: chatDoc.id,
-        otherUser: otherUser 
+      navigation.navigate('ChatConversation', {
+        conversationId,
+        chatId: conversationId,
+        otherUser: otherUser
       });
     } catch (error) {
       console.error('Error starting new chat:', error);
@@ -768,135 +986,131 @@ const MessengerScreen = ({ navigation }) => {
 
 
   const renderHeader = () => (
-    <View style={styles.header}>
-      <View style={styles.headerTop}>
-        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-          <Icon  name="menu" size={24} color="#d1d5db"  />
-        </TouchableOpacity>
-        <View style={styles.logoContainer}>
-          <BlypLogo useGradientBackground={true} />
-        </View>
-        <TouchableOpacity 
-          style={styles.searchButton}
-          onPress={() => navigation.navigate('Search')}
-        >
-          <Icon  name="search" size={24} color="#d1d5db"  />
-        </TouchableOpacity>
-      </View>
-      
-      {/* Tab Selector */}
-      <View style={styles.tabContainer}>
-        <View style={styles.tabSelector}>
-          <TouchableOpacity 
-            style={styles.tab}
-            onPress={() => setSelectedTab('chats')}
-          >
-            <Text style={[
-              styles.tabText,
-              selectedTab === 'chats' && styles.activeTabText
-            ]}>
-              Chats
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.tab}
-            onPress={() => setSelectedTab('calls')}
-          >
-            <Text style={[
-              styles.tabText,
-              selectedTab === 'calls' && styles.activeTabText
-            ]}>
-              Calls
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.tab}
-            onPress={() => setSelectedTab('groups')}
-          >
-            <Text style={[
-              styles.tabText,
-              selectedTab === 'groups' && styles.activeTabText
-            ]}>
-              Groups
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.tab}
-            onPress={() => setSelectedTab('status')}
-          >
-            <Text style={[
-              styles.tabText,
-              selectedTab === 'status' && styles.activeTabText
-            ]}>
-              Status
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Tab Indicator */}
-          <View style={[
-            styles.tabIndicator,
-            {
-              left: selectedTab === 'chats' ? '2%' :
-                    selectedTab === 'calls' ? '27%' :
-                    selectedTab === 'groups' ? '52%' : '77%'
-            }
-          ]}>
-            <LinearGradient
-              colors={['#25d366', '#128c7e']}
-              style={styles.tabIndicatorGradient}
-            />
-          </View>
-        </View>
-      </View>
-    </View>
+    <BlypHeaderFlow
+      tabs={[
+        { key: 'chats', label: 'Chats' },
+        { key: 'notifications', label: 'Notifications' },
+        { key: 'calls', label: 'Calls' },
+        { key: 'groups', label: 'Groups' },
+        { key: 'status', label: 'Status' },
+      ]}
+      matchHomePadding={true}
+      activeKey={selectedTab}
+      onTabChange={setSelectedTab}
+      onMenuPress={() => setMenuVisible(true)}
+      onSearchPress={() => navigation.navigate('Search')}
+    />
   );
 
   const renderTabContent = React.useMemo(() => {
-    console.log('🔥 MESSENGER: Rendering tab content for:', selectedTab);
-    console.log('👤 MESSENGER: Current user ID:', currentUser?.uid);
-    console.log('📊 MESSENGER: Loading state:', loading);
-    
+    console.log('ðŸ”¥ MESSENGER: Rendering tab content for:', selectedTab);
+    console.log('ðŸ‘¤ MESSENGER: Current user ID:', currentUser?.uid);
+    console.log('ðŸ“Š MESSENGER: Loading state:', loading);
+
     switch (selectedTab) {
-      case 'chats':
+      case 'chats': {
         // Show all chats that include the current user (WhatsApp style)
-        const allUserChats = chats.filter(chat => 
-          chat.participants && chat.participants.includes(currentUser?.uid)
+        const allUserChats = chats.filter(chat =>
+          chat.participants && chat.participants.includes(uid)
         );
-        
-        console.log('💬 MESSENGER: Showing', allUserChats.length, 'conversations');
-        
+
+        console.log('ðŸ’¬ MESSENGER: Showing', allUserChats.length, 'conversations');
+
+        // Split into two sections per product spec:
+        //  - Top: mutual follows (you follow them AND they follow you back)
+        //  - Bottom: everyone else, with "you follow but they don't follow back"
+        //    prioritised at the top of that section, then the rest.
+        // `allUserChats` is already ordered by lastMessageTime desc, so filtering
+        // preserves recency within each group.
+        const otherIdOf = (chat) =>
+          (chat.participants || []).find((id) => id !== uid) || null;
+        const mutualChats = [];
+        const followedNotBackChats = [];
+        const otherChats = [];
+        for (const chat of allUserChats) {
+          const other = otherIdOf(chat);
+          const iFollow = other && followingUserIds.has(other);
+          const followsMe = other && followerUserIds.has(other);
+          if (iFollow && followsMe) mutualChats.push(chat);
+          else if (iFollow && !followsMe) followedNotBackChats.push(chat);
+          else otherChats.push(chat);
+        }
+        const chatSections = [];
+        if (mutualChats.length) {
+          chatSections.push({ key: 'mutual', title: 'Friends · you follow each other', data: mutualChats });
+        }
+        const bottomData = [...followedNotBackChats, ...otherChats];
+        if (bottomData.length) {
+          chatSections.push({ key: 'other', title: 'Other people', data: bottomData });
+        }
+
         return (
           <View style={styles.chatsList}>
             {allUserChats.length === 0 ? (
               <View style={styles.emptyState}>
-                <Icon  name="chatbubble-ellipses-outline" size={64} color="#6b7280"  />
+                <Icon name="chatbubble-ellipses-outline" size={64} color={T.textDisabled} />
                 <Text style={styles.emptyTitle}>No conversations yet</Text>
                 <Text style={styles.emptySubtitle}>
                   Start chatting with someone from your network
                 </Text>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.newChatButton}
                   onPress={() => navigation.navigate('FindPeople')}
                   activeOpacity={0.8}
                 >
                   <LinearGradient
-                    colors={['#a855f7', '#d946ef', '#ec4899']}
+                    colors={[T.gradientStart, T.gradientMiddle, T.gradientEnd]}
                     style={styles.newChatButtonGradient}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                   >
-                    <Icon  name="add-circle" size={22} color="#fff" style={styles.newChatIcon}  />
+                    <Icon name="add-circle" size={22} color={T.textPrimary} style={styles.newChatIcon} />
                     <Text style={styles.newChatButtonText}>Start New Chat</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
             ) : (
-              <FlatList
-                data={allUserChats}
+              <SectionList
+                sections={chatSections}
                 renderItem={renderChatItem}
+                renderSectionHeader={({ section }) =>
+                  chatSections.length > 1 ? (
+                    <View style={styles.chatSectionHeader}>
+                      <Text style={styles.chatSectionHeaderText}>{section.title}</Text>
+                    </View>
+                  ) : null
+                }
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                style={styles.chatList}
+                stickySectionHeadersEnabled={false}
+                removeClippedSubviews={false}
+              />
+            )}
+          </View>
+        );
+      }
+
+      case 'notifications':
+        return (
+          <View style={styles.chatsList}>
+            {notifLoading ? (
+              <View style={styles.loadingContainer}>
+                <Icon name="notifications-outline" size={48} color={T.textDisabled} />
+                <Text style={styles.loadingText}>Loading notifications…</Text>
+              </View>
+            ) : notifications.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Icon name="notifications-off-outline" size={64} color={T.textDisabled} />
+                <Text style={styles.emptyTitle}>No notifications yet</Text>
+                <Text style={styles.emptySubtitle}>
+                  Team requests, battles and updates will show up here.
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={notifications}
+                renderItem={renderNotificationItem}
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
                 style={styles.chatList}
@@ -905,59 +1119,183 @@ const MessengerScreen = ({ navigation }) => {
             )}
           </View>
         );
-        
+
       case 'calls':
+        if (callsLoading) {
+          return (
+            <View style={styles.loadingContainer}>
+              <Icon name="time-outline" size={48} color={T.textDisabled} />
+              <Text style={styles.loadingText}>Loading calls...</Text>
+            </View>
+          );
+        }
+
+        if (callsError) {
+          return (
+            <View style={styles.emptyState}>
+              <Icon name="alert-circle-outline" size={64} color={T.textDisabled} />
+              <Text style={styles.emptyTitle}>Couldn't load calls</Text>
+              <Text style={styles.emptySubtitle}>Please try again later</Text>
+            </View>
+          );
+        }
+
+        if (!calls || calls.length === 0) {
+          return (
+            <View style={styles.emptyState}>
+              <Icon name="call-outline" size={64} color={T.textDisabled} />
+              <Text style={styles.emptyTitle}>No recent calls</Text>
+              <Text style={styles.emptySubtitle}>Your call history will appear here</Text>
+            </View>
+          );
+        }
+
         return (
-          <View style={styles.emptyState}>
-            <Icon  name="call-outline" size={64} color="#6b7280"  />
-            <Text style={styles.emptyTitle}>No recent calls</Text>
-            <Text style={styles.emptySubtitle}>
-              Your call history will appear here
-            </Text>
-          </View>
+          <FlatList
+            data={calls}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={false}
+            contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
+            renderItem={({ item }) => {
+              const isMissed = String(item.status || '').toLowerCase() === 'missed';
+              const startedAt = item.startedAt;
+              const time = startedAt?.toDate ? startedAt.toDate().toLocaleString() : '';
+              const otherId = Array.isArray(item.participantIds)
+                ? item.participantIds.find((id) => id && id !== uid)
+                : null;
+              const other = otherId ? allUsers.find((u) => u.id === otherId) : null;
+              const label = other?.username || other?.displayName || item.otherName || 'Unknown';
+
+              return (
+                <View style={styles.callRow}>
+                  <View style={styles.callRowLeft}>
+                    <Icon name={isMissed ? 'call-outline' : 'call'} size={18} color={isMissed ? T.error : T.textSecondary} />
+                  </View>
+                  <View style={styles.callRowBody}>
+                    <Text style={styles.callRowTitle} numberOfLines={1}>{label}</Text>
+                    <Text style={styles.callRowSubtitle} numberOfLines={1}>{time || String(item.type || 'Call')}</Text>
+                  </View>
+                </View>
+              );
+            }}
+          />
         );
-        
+
       case 'groups':
+        // Groups are derived from the real conversations query (chats). No placeholders.
+        const groupChats = chats.filter((c) => String(c.type || '').toLowerCase() === 'group');
+        if (!groupChats || groupChats.length === 0) {
+          return (
+            <View style={styles.emptyState}>
+              <Icon name="people-outline" size={64} color={T.textDisabled} />
+              <Text style={styles.emptyTitle}>No groups yet</Text>
+              <Text style={styles.emptySubtitle}>Your group chats will appear here</Text>
+            </View>
+          );
+        }
+
         return (
-          <View style={styles.emptyState}>
-            <Icon  name="people-outline" size={64} color="#6b7280"  />
-            <Text style={styles.emptyTitle}>No groups yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Create or join groups to start chatting
-            </Text>
-          </View>
+          <FlatList
+            data={groupChats}
+            renderItem={renderChatItem}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            style={styles.chatList}
+            removeClippedSubviews={false}
+            contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
+          />
         );
-        
+
       case 'status':
+        if (statusLoading) {
+          return (
+            <View style={styles.loadingContainer}>
+              <Icon name="radio-outline" size={48} color={T.textDisabled} />
+              <Text style={styles.loadingText}>Loading status...</Text>
+            </View>
+          );
+        }
+
+        if (statusError) {
+          return (
+            <View style={styles.emptyState}>
+              <Icon name="alert-circle-outline" size={64} color={T.textDisabled} />
+              <Text style={styles.emptyTitle}>Couldn't load status</Text>
+              <Text style={styles.emptySubtitle}>Please try again later</Text>
+            </View>
+          );
+        }
+
+        const allowedIds = new Set([uid, ...Array.from(followingUserIds || [])]);
+        const visibleStatuses = (statuses || []).filter((s) => {
+          const authorId = s.userId || s.authorId;
+          if (!authorId) return false;
+          return allowedIds.has(authorId);
+        });
+
+        if (visibleStatuses.length === 0) {
+          return (
+            <View style={styles.emptyState}>
+              <Icon name="radio-outline" size={64} color={T.textDisabled} />
+              <Text style={styles.emptyTitle}>No status updates</Text>
+              <Text style={styles.emptySubtitle}>Status updates from you and people you follow will show here</Text>
+            </View>
+          );
+        }
+
         return (
-          <View style={styles.emptyState}>
-            <Icon  name="radio-outline" size={64} color="#6b7280"  />
-            <Text style={styles.emptyTitle}>No status updates</Text>
-            <Text style={styles.emptySubtitle}>
-              Share your status with friends
-            </Text>
-          </View>
+          <FlatList
+            data={visibleStatuses}
+            keyExtractor={(item) => item.id}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={false}
+            contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
+            renderItem={({ item }) => {
+              const authorId = item.userId || item.authorId;
+              const author = authorId ? allUsers.find((u) => u.id === authorId) : null;
+              const label = author?.username || author?.displayName || item.userName || 'Unknown';
+              const createdAt = item.createdAt;
+              const time = createdAt?.toDate ? createdAt.toDate().toLocaleString() : '';
+
+              return (
+                <View style={styles.statusRow}>
+                  <View style={styles.statusAvatar}>
+                    {author?.photoURL ? (
+                      <Image source={{ uri: author.photoURL }} style={styles.statusAvatarImg} />
+                    ) : (
+                      <View style={styles.statusAvatarFallback} />
+                    )}
+                  </View>
+                  <View style={styles.statusBody}>
+                    <Text style={styles.statusTitle} numberOfLines={1}>{label}</Text>
+                    <Text style={styles.statusSubtitle} numberOfLines={1}>{time || 'Recent update'}</Text>
+                  </View>
+                </View>
+              );
+            }}
+          />
         );
-        
+
       default:
         return null;
     }
-  }, [selectedTab, chats, currentUser?.uid, loading, allUsers, followingUsers]);
+  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, tabBarHeight]);
 
   // Simple user list for messaging
   const renderSimpleChatList = () => {
-    console.log('🔥 MESSENGER: WARNING - renderSimpleChatList called (this should not be used anymore)', allUsers.length, 'users');
-    
+    console.log('ðŸ”¥ MESSENGER: WARNING - renderSimpleChatList called (this should not be used anymore)', allUsers.length, 'users');
+
     return (
       <FlatList
-        data={allUsers.filter(user => user.id !== currentUser.uid)}
+        data={allUsers.filter(user => user.id !== uid)}
         renderItem={renderSimpleChatItem}
         keyExtractor={(item) => item.id}
         style={styles.chatList}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={() => (
           <View style={styles.emptyState}>
-            <Icon  name="chatbubbles-outline" size={64} color="#6b7280"  />
+            <Icon name="chatbubbles-outline" size={64} color={T.textDisabled} />
             <Text style={styles.emptyStateTitle}>No people to chat with</Text>
             <Text style={styles.emptyStateText}>
               Follow some people to start conversations
@@ -970,7 +1308,7 @@ const MessengerScreen = ({ navigation }) => {
 
   const renderSimpleChatItem = ({ item: user }) => {
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.whatsappChatItem}
         onPress={() => startNewChat(user)}
         activeOpacity={0.7}
@@ -987,13 +1325,13 @@ const MessengerScreen = ({ navigation }) => {
           )}
           {user.isOnline && <View style={styles.onlineIndicator} />}
         </View>
-        
+
         <View style={styles.chatContent}>
           <View style={styles.chatHeader}>
             <Text style={styles.chatName}>{user.username || 'Unknown User'}</Text>
             <Text style={styles.chatTime}>Online</Text>
           </View>
-          
+
           <View style={styles.messagePreview}>
             <Text style={styles.newChatMessage} numberOfLines={1}>
               Tap to start conversation
@@ -1005,7 +1343,7 @@ const MessengerScreen = ({ navigation }) => {
   };
 
   // Show loading screen while authentication is loading
-  if (authLoading) {
+  if (!authReady || authLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
@@ -1018,58 +1356,64 @@ const MessengerScreen = ({ navigation }) => {
   }
 
   // Show authentication required screen if not authenticated
-  if (!isAuthenticated || !currentUser) {
+  if (!authReady || !isAuthenticated || !currentUser) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
         <View style={styles.authRequiredContainer}>
-          <Icon  name="chatbubbles-outline" size={64} color="#6b7280"  />
-          <Text style={styles.authRequiredTitle}>Authentication Required</Text>
-          <Text style={styles.authRequiredText}>Please sign in to access your messages</Text>
-          <TouchableOpacity 
+          <Icon name="chatbubbles-outline" size={64} color={T.textDisabled} />
+          <Text style={styles.authRequiredTitle}>Sign in for messages</Text>
+          <Text style={styles.authRequiredText}>Create a free account or sign in to access chats and inbox.</Text>
+          <TouchableOpacity
             style={styles.signInButton}
             onPress={() => {
-              // Since authentication is handled at the app level,
-              // we can just show a message or navigate to profile
-              Alert.alert(
-                'Authentication Required',
-                'Please sign in from the app home screen to access messaging features.',
-                [{ text: 'OK', style: 'default' }]
-              );
+              exitGuestMode().catch(() => {});
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
           >
-            <Text style={styles.signInButtonText}>OK</Text>
+            <Text style={styles.signInButtonText}>Sign in</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
+  const useSectionGradient = selectedTab === 'chats' || selectedTab === 'notifications' || selectedTab === 'calls' || selectedTab === 'groups' || selectedTab === 'status';
+
   return (
-    <ScreenContainer style={styles.container}>      
-      {/* Messenger Header with Tabs */}
-      <View style={styles.headerOverlay}>
-        {renderHeader()}
-      </View>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
+      {/* Messenger Header — FLOW layout; HeaderContainer owns top safe-area */}
+      {renderHeader()}
 
       {/* Tab Content */}
-      <View style={styles.tabContent}>
+      <View style={[styles.tabContent, { flex: 1, paddingBottom: tabBarHeight }]}>
+        {useSectionGradient && (
+          <LinearGradient
+            pointerEvents="none"
+            colors={['#0A0A0C', '#141418', '#1C1C22']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.sectionGradientBackground}
+          />
+        )}
         {renderTabContent}
       </View>
 
       {/* Floating Action Button for Find People */}
-      <TouchableOpacity 
-        style={styles.fab}
+      <TouchableOpacity
+        style={[styles.fab, { bottom: tabBarHeight + 20 }]}
         onPress={() => {
-          console.log('🚀 FAB pressed - navigating to FindPeople');
+          console.log('ðŸš€ FAB pressed - navigating to FindPeople');
           navigation.navigate('FindPeople');
         }}
       >
         <LinearGradient
-          colors={['#25d366', '#128c7e']} // WhatsApp green colors
+          colors={[T.gradientStart, T.gradientEnd]}
           style={styles.fabGradient}
         >
-          <Icon  name="chatbubble" size={24} color="#fff"  />
+          <Icon name="chatbubble" size={24} color={T.textPrimary} />
         </LinearGradient>
       </TouchableOpacity>
 
@@ -1080,66 +1424,131 @@ const MessengerScreen = ({ navigation }) => {
         animationType="fade"
         onRequestClose={() => setMenuVisible(false)}
       >
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.menuOverlay}
           activeOpacity={1}
           onPress={() => setMenuVisible(false)}
         >
           <View style={styles.menuContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.menuCloseButton}
               onPress={() => setMenuVisible(false)}
             >
-              <Icon  name="close" size={24} color="#d1d5db"  />
+              <Icon name="close" size={24} color={T.textSecondary} />
             </TouchableOpacity>
-            <Text style={styles.menuTitle}>Your Wallet</Text>
-            
-            <View style={styles.balanceItems}>
-              <View style={styles.menuBalanceItem}>
-                <Text style={styles.balanceIcon}>🪙</Text>
-                <Text style={styles.balanceLabel}>Blyp Coins</Text>
-                <Text style={styles.balanceValue}>{formatBalance(coinBalance)}</Text>
-              </View>
-              
-              <View style={styles.menuBalanceItem}>
-                <Text style={styles.balanceIcon}>💎</Text>
-                <Text style={styles.balanceLabel}>Blyp Gems</Text>
-                <Text style={styles.balanceValue}>{gemBalance}</Text>
-              </View>
-            </View>
-            
-            <TouchableOpacity 
+            <Text style={styles.menuTitle}>Menu</Text>
+
+            <TouchableOpacity
               style={styles.getMoreButton}
               onPress={() => {
                 setMenuVisible(false);
-                navigation.navigate('CoinStore');
+                navigation.navigate('HowBlypWorks', { mode: 'review' });
               }}
             >
-              <Text style={styles.menuButtonText}>Get More</Text>
+              <Text style={styles.menuButtonText}>Help</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuLogoutButton}
+              onPress={() => {
+                setMenuVisible(false);
+                hardLogout();
+              }}
+            >
+              <Text style={styles.menuLogoutText}>Log out</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
 
-    </ScreenContainer>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: T.headerBackground,
   },
   tabContent: {
     flex: 1,
+    position: 'relative',
+  },
+  sectionGradientBackground: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  callRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: T.border,
+  },
+  callRowLeft: {
+    width: 28,
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  callRowBody: {
+    flex: 1,
+  },
+  callRowTitle: {
+    color: T.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  callRowSubtitle: {
+    marginTop: 2,
+    color: T.textMuted,
+    fontSize: 12,
+  },
+
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: T.border,
+  },
+  statusAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 9999,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  statusAvatarImg: {
+    width: 40,
+    height: 40,
+  },
+  statusAvatarFallback: {
+    width: 40,
+    height: 40,
+    backgroundColor: T.surfaceAlt,
+  },
+  statusBody: {
+    flex: 1,
+  },
+  statusTitle: {
+    color: T.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  statusSubtitle: {
+    marginTop: 2,
+    color: T.textMuted,
+    fontSize: 12,
   },
   // WhatsApp-style Header
   whatsappHeader: {
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    paddingTop: 50,
+    backgroundColor: withAlpha(T.background, 0.5),
+    paddingTop: 0,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: T.surface,
   },
   headerContent: {
     flexDirection: 'row',
@@ -1150,7 +1559,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: responsiveFont(24),
     fontWeight: 'bold',
-    color: '#fff',
+    color: T.textPrimary,
   },
   menuButton: {
     padding: 8,
@@ -1174,12 +1583,24 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
   },
+  chatSectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  chatSectionHeaderText: {
+    color: T.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   whatsappChatItem: {
     flexDirection: 'row',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: withAlpha(T.textPrimary, 0.1),
     backgroundColor: 'transparent',
   },
   avatarContainer: {
@@ -1195,12 +1616,12 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#374151',
+    backgroundColor: T.surfaceAlt,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
   },
@@ -1211,9 +1632,9 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#10b981',
+    backgroundColor: T.success,
     borderWidth: 2,
-    borderColor: '#0f172a',
+    borderColor: T.background,
   },
   chatContent: {
     flex: 1,
@@ -1226,12 +1647,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   chatName: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
   chatTime: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 12,
   },
   messagePreview: {
@@ -1240,16 +1661,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 14,
     flex: 1,
   },
   newChatMessage: {
     fontStyle: 'italic',
-    color: '#6b7280',
+    color: T.textDisabled,
   },
   unreadBadge: {
-    backgroundColor: '#DC2626', // WhatsApp red
+    backgroundColor: T.success,
     borderRadius: 12,
     minWidth: 24,
     height: 24,
@@ -1257,7 +1678,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 6,
     elevation: 3,
-    shadowColor: '#DC2626',
+    shadowColor: T.success,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -1266,13 +1687,13 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   unreadCount: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 11,
     fontWeight: '700',
   },
   chatItemUnread: {
     elevation: 2,
-    shadowColor: '#25d366',
+    shadowColor: T.success,
     shadowOffset: {
       width: 0,
       height: 1,
@@ -1287,29 +1708,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emptyStateTitle: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
     marginTop: 16,
     textAlign: 'center',
   },
   emptyStateText: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 8,
   },
   newChatButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#a855f7',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
     borderRadius: 25,
-    marginTop: 16,
+    marginTop: 24,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: T.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   newChatButtonText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -1320,7 +1742,7 @@ const styles = StyleSheet.create({
     bottom: 20,
     right: 20,
     elevation: 8,
-    shadowColor: '#000',
+    shadowColor: T.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1332,55 +1754,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  header: {
-    backgroundColor: '#0f172a',
-    paddingTop: 50,
-    paddingBottom: 1,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-  },
-  headerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-  },
   headerTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
     marginBottom: 16,
   },
   logoContainer: {
-    flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#fff',
+    color: T.textPrimary,
   },
   menuButton: {
     padding: 8,
+    position: 'absolute',
+    left: 16,
   },
-  logoContainer: {
+  headerBalances: {
+    position: 'absolute',
+    left: 56,
+    height: '100%',
     justifyContent: 'center',
-    alignItems: 'center',
   },
   logoText: {
     fontSize: 32,
     fontWeight: '800',
     textAlign: 'center',
-    color: '#ec4899',
-    textShadowColor: 'rgba(168, 85, 247, 0.3)',
+    color: T.accent,
+    textShadowColor: withAlpha(T.primary, 0.3),
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
   searchButton: {
     padding: 8,
+    position: 'absolute',
+    right: 16,
   },
   tabContainer: {
     paddingHorizontal: 16,
@@ -1388,7 +1801,7 @@ const styles = StyleSheet.create({
   },
   tabSelector: {
     position: 'relative',
-    backgroundColor: '#374151',
+    backgroundColor: T.surfaceAlt,
     borderRadius: 9999,
     padding: 4,
     flexDirection: 'row',
@@ -1400,12 +1813,12 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   tabText: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 12,
     fontWeight: '600',
   },
   activeTabText: {
-    color: '#ffffff',
+    color: T.textPrimary,
   },
   tabIndicator: {
     position: 'absolute',
@@ -1426,13 +1839,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   comingSoonTitle: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 18,
     fontWeight: '600',
     marginTop: 16,
   },
   comingSoonText: {
-    color: '#6b7280',
+    color: T.textDisabled,
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
@@ -1444,7 +1857,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: withAlpha(T.textPrimary, 0.1),
   },
   avatarContainer: {
     position: 'relative',
@@ -1459,12 +1872,12 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#374151',
+    backgroundColor: T.surfaceAlt,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -1475,21 +1888,21 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#10b981',
+    backgroundColor: T.success,
     borderWidth: 2,
-    borderColor: '#0f172a',
+    borderColor: T.background,
   },
   userInfo: {
     flex: 1,
   },
   userName: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
   userStatus: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 14,
   },
   actionButtons: {
@@ -1498,18 +1911,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   followButton: {
-    backgroundColor: '#a855f7',
+    backgroundColor: T.primary,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
   },
   followButtonText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 14,
     fontWeight: '600',
   },
   messageButton: {
-    backgroundColor: '#1f2937',
+    backgroundColor: T.surfaceAlt,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -1523,16 +1936,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: withAlpha(T.textPrimary, 0.1),
   },
   sectionTitle: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   sectionSubtitle: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 14,
   },
   userListContainer: {
@@ -1544,7 +1957,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   swipeableItem: {
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    backgroundColor: withAlpha(T.background, 0.8),
     borderRadius: 8,
     marginHorizontal: 8,
     marginVertical: 2,
@@ -1555,14 +1968,14 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 80,
-    backgroundColor: '#ef4444',
+    backgroundColor: T.error,
     justifyContent: 'center',
     alignItems: 'center',
     borderTopRightRadius: 8,
     borderBottomRightRadius: 8,
   },
   deleteText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 12,
     fontWeight: '600',
     marginTop: 4,
@@ -1577,18 +1990,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   chatItemUnread: {
-    backgroundColor: 'rgba(0, 212, 170, 0.1)',
+    backgroundColor: withAlpha(T.success, 0.1),
     borderLeftWidth: 3,
-    borderLeftColor: '#00D4AA',
+    borderLeftColor: T.success,
   },
   // Avatar styles with unread indicators
   avatarUnread: {
     borderWidth: 2,
-    borderColor: '#00D4AA',
+    borderColor: T.success,
   },
   defaultAvatarUnread: {
     borderWidth: 2,
-    borderColor: '#00D4AA',
+    borderColor: T.success,
   },
   unreadIndicator: {
     position: 'absolute',
@@ -1597,9 +2010,9 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#00D4AA',
+    backgroundColor: T.success,
     borderWidth: 2,
-    borderColor: '#0f172a',
+    borderColor: T.background,
   },
   // Chat info styles
   chatInfo: {
@@ -1615,18 +2028,18 @@ const styles = StyleSheet.create({
   chatName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: T.textPrimary,
   },
   chatNameUnread: {
-    color: '#00D4AA',
+    color: T.success,
     fontWeight: 'bold',
   },
   chatTime: {
     fontSize: 12,
-    color: '#8e9297',
+    color: T.textMuted,
   },
   chatTimeUnread: {
-    color: '#00D4AA',
+    color: T.success,
     fontWeight: '600',
   },
   messagePreview: {
@@ -1636,16 +2049,16 @@ const styles = StyleSheet.create({
   },
   lastMessage: {
     fontSize: 14,
-    color: '#8e9297',
+    color: T.textMuted,
     flex: 1,
     marginRight: 8,
   },
   lastMessageUnread: {
-    color: '#d1d5db',
+    color: T.textSecondary,
     fontWeight: '600',
   },
   unreadBadge: {
-    backgroundColor: '#00D4AA',
+    backgroundColor: T.success,
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1654,7 +2067,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unreadCount: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1665,26 +2078,26 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#22c55e',
+    backgroundColor: T.success,
     borderWidth: 2,
-    borderColor: '#0f172a',
+    borderColor: T.background,
   },
   // Welcome screen styles
   // Menu styles
   menuOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: withAlpha(T.shadow, 0.5),
     justifyContent: 'flex-start',
     alignItems: 'flex-start',
   },
   menuContainer: {
     width: 250,
-    backgroundColor: '#1e293b',
+    backgroundColor: T.surface,
     borderRadius: 12,
     padding: 16,
     margin: 16,
-    marginTop: 70,
-    shadowColor: '#000',
+    marginTop: 0,
+    shadowColor: T.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
@@ -1697,7 +2110,7 @@ const styles = StyleSheet.create({
   menuTitle: {
     fontSize: responsiveFont(18),
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: T.textPrimary,
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -1707,7 +2120,7 @@ const styles = StyleSheet.create({
   menuBalanceItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: withAlpha(T.textPrimary, 0.1),
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
@@ -1720,15 +2133,15 @@ const styles = StyleSheet.create({
   balanceLabel: {
     flex: 1,
     fontSize: responsiveFont(14),
-    color: '#d1d5db',
+    color: T.textSecondary,
   },
   balanceValue: {
     fontSize: responsiveFont(16),
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: T.textPrimary,
   },
   getMoreButton: {
-    backgroundColor: 'rgba(236, 72, 153, 0.8)',
+    backgroundColor: withAlpha(T.accent, 0.8),
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -1736,10 +2149,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   menuButtonText: {
-    color: '#ffffff',
+    color: T.textPrimary,
     fontSize: responsiveFont(14),
     fontWeight: 'bold',
   },
+  menuLogoutButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#FF5A5F',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  menuLogoutText: { color: '#FF5A5F', fontWeight: '700', fontSize: responsiveFont(14) },
   // Loading screen styles
   loadingContainer: {
     flex: 1,
@@ -1748,7 +2172,7 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   loadingText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     marginTop: 16,
     textAlign: 'center',
@@ -1761,29 +2185,57 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   authRequiredTitle: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 20,
     fontWeight: 'bold',
     marginTop: 16,
     textAlign: 'center',
   },
   authRequiredText: {
-    color: '#9ca3af',
+    color: T.textMuted,
     fontSize: 16,
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 24,
   },
   signInButton: {
-    backgroundColor: '#a855f7',
+    backgroundColor: T.primary,
     paddingHorizontal: 32,
     paddingVertical: 12,
     borderRadius: 25,
   },
   signInButtonText: {
-    color: '#fff',
+    color: T.textPrimary,
     fontSize: 16,
     fontWeight: '600',
+  },
+  // --- WhatsApp-style empty-state & premium touches ---
+  emptyTitle: {
+    color: T.textPrimary,
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 20,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  emptySubtitle: {
+    color: T.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
+    paddingHorizontal: 16,
+  },
+  newChatButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 25,
+  },
+  newChatIcon: {
+    marginRight: 8,
   },
 });
 

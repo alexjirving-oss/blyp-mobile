@@ -1,45 +1,72 @@
 import React, { useState, useRef } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ActivityIndicator,
-  StyleSheet,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-} from 'react-native';
+import BlueScreen from '../ui/BlueScreen';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Icon from '../components/Icon';
 import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
 import { mapAuthError } from '../lib/auth/errors';
+import {
+  generateOpaqueCognitoUsername,
+  isEmailAliasUsernameError,
+  isSignupAttributeRejection,
+} from '../lib/auth/cognitoUsername';
 import BlypLogo from '../components/BlypLogo';
+import { COLORS } from '../styles/theme';
 import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
-import { ensureFirebaseFederatedSession } from '../services/FirebaseFederation';
+import { flushCognitoStorageWrites } from '../lib/auth/cognitoStorage';
+import { isSocialAuthEnabled, signInWithGoogle, signInWithFacebook } from '../services/socialAuthService';
+import { ensureUserProfile } from '../services/LiveService';
+import { enterGuestMode } from '../services/guestSessionService';
+
+const MIN_SIGNUP_AGE = 13;
+
+// Parse a DD/MM/YYYY string and return { valid, age, iso } where age is whole years.
+function parseDob(input) {
+  const m = String(input || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return { valid: false };
+  const day = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  const year = parseInt(m[3], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return { valid: false };
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return { valid: false };
+  const now = new Date();
+  if (d > now) return { valid: false };
+  let age = now.getFullYear() - year;
+  const beforeBirthday = now.getMonth() < month - 1 || (now.getMonth() === month - 1 && now.getDate() < day);
+  if (beforeBirthday) age -= 1;
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return { valid: true, age, iso };
+}
+
 const AuthScreen = () => {
   const [isLogin, setIsLogin] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [dob, setDob] = useState(''); // signup age gate, DD/MM/YYYY
   const [loading, setLoading] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [confirmCode, setConfirmCode] = useState('');
   const [confirmEmail, setConfirmEmail] = useState('');
+  const [confirmUsername, setConfirmUsername] = useState('');
   const [lastError, setLastError] = useState('');
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [resetMode, setResetMode] = useState(false);
+  const [guestConfirmVisible, setGuestConfirmVisible] = useState(false);
   const [resetCode, setResetCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [suggestReset, setSuggestReset] = useState(false);
   const [accountExists, setAccountExists] = useState(undefined); // undefined=unknown, true/false known
   const [lockoutDetected, setLockoutDetected] = useState(false);
+  const [isSocialAuthInProgress, setIsSocialAuthInProgress] = useState(false);
+
   // TODO[BLYP][UX]: Future onboarding polish:
   //  - Consider one-line tagline under logo
-  //  - Optional “By continuing you agree to …” legal line at bottom of screen
+  //  - Optional â€œBy continuing you agree to â€¦â€ legal line at bottom of screen
   //  - A/B test sign-in vs sign-up default focus
 
   const loginStartRef = useRef(null);
@@ -53,7 +80,7 @@ const AuthScreen = () => {
       const code = err?.code || err?.name;
       const msg = err?.message || String(err);
       console.warn('[BLYP][AUTH][ERROR]', code, msg);
-    } catch {}
+    } catch { }
   };
 
   const maskEmail = (raw) => {
@@ -68,35 +95,22 @@ const AuthScreen = () => {
     }
   };
 
-  const probeAccountExistence = (emailToProbe) => {
-    // Avoid redundant probes or empty emails
-    const norm = (emailToProbe || '').trim();
-    if (!norm || accountExists !== undefined) return;
-    try {
-      const tempUser = new CognitoUser({ Username: norm, Pool: userPool });
-      tempUser.forgotPassword({
-        onSuccess: () => {
-          // If reset started or code callback executed, user exists
-          setAccountExists(true);
-        },
-        inputVerificationCode: () => {
-          setAccountExists(true);
-        },
-        onFailure: (e) => {
-          // UserNotFoundException => user does not exist
-          if (e?.code === 'UserNotFoundException') {
-            setAccountExists(false);
-          } else {
-            // Leave as unknown for other errors to avoid leaking enumeration details
-            setAccountExists(undefined);
-          }
-        }
-      });
-    } catch {}
+  // Auto-format date of birth as the user types: digits only, with slashes
+  // inserted automatically -> DD/MM/YYYY. Backspacing works naturally because
+  // we recompute from the raw digits each change.
+  const handleDobChange = (text) => {
+    const digits = String(text || '').replace(/\D/g, '').slice(0, 8);
+    let formatted = digits;
+    if (digits.length > 4) {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+    } else if (digits.length > 2) {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    }
+    setDob(formatted);
   };
 
   // Unified success handler for any auth source (password, confirmed signup, social OAuth)
-  const handleAuthSuccess = (source, context = {}) => {
+  const handleAuthSuccess = async (source, context = {}) => {
     try {
       console.log('[AUTH][SUCCESS]', source, {
         at: new Date().toISOString(),
@@ -108,13 +122,51 @@ const AuthScreen = () => {
         console.log('[AUTH][METRICS] Login success duration(ms):', durationMs);
         loginStartRef.current = null;
       }
+
       // Lift auth state immediately if we have a CognitoUser reference
       if (context?.cognitoUser) {
-        try { refreshAuthNow?.(context.cognitoUser); } catch {}
-        // Best-effort: align Firebase auth.uid with Cognito sub for Firestore rules.
-        void ensureFirebaseFederatedSession(context.cognitoUser).catch((err) => {
-          console.warn('[AUTH][FEDERATION]', err?.message || err);
-        });
+        try { refreshAuthNow?.(context.cognitoUser); } catch { }
+      }
+
+      // Ensure Cognito tokens/session have actually been persisted to AsyncStorage.
+      // This reduces â€œlogged-in then suddenly logged-outâ€ behavior after dev-client reloads.
+      // Important: don't delay refreshAuthNow behind this flush.
+      try {
+        await flushCognitoStorageWrites({ timeoutMs: 5000 });
+      } catch { }
+
+      // Ensure Firestore profile exists for ALL users (not just hosts)
+      // so comments and directory cards can resolve usernames reliably.
+      try {
+        const tokens = context?.tokens;
+        const payload = tokens?.getIdToken?.()?.payload || null;
+        const sub = String(payload?.sub || '').trim();
+        const emailFromToken = String(payload?.email || '').trim();
+        const pictureFromToken = String(payload?.picture || '').trim();
+        const preferredUsername = String(payload?.preferred_username || payload?.['cognito:username'] || '').trim();
+        const nameFromToken = String(payload?.name || '').trim();
+
+        // On signup, we have an explicit username field in the UI; store it.
+        // On login, don't overwrite an existing username, but we still ensure displayName.
+        const usernameToStore = String(username || '').trim();
+
+        const userId = sub;
+        if (userId) {
+          const dobParsedForProfile = parseDob(dob);
+          ensureUserProfile({
+            userId,
+            displayName: usernameToStore || preferredUsername || nameFromToken || (emailFromToken ? emailFromToken.split('@')[0] : null),
+            // Important: pass `undefined` for missing optional fields so we don't wipe existing profile data.
+            photoURL: pictureFromToken || undefined,
+            email: emailFromToken || undefined,
+            username: usernameToStore || preferredUsername || undefined,
+            // Persist age attestation collected at sign-up (undefined on login so we don't overwrite).
+            birthdate: dobParsedForProfile.valid ? dobParsedForProfile.iso : undefined,
+            ageVerified: dobParsedForProfile.valid ? true : undefined,
+          }).catch(() => { });
+        }
+      } catch {
+        // Non-fatal: auth should still succeed even if profile write fails.
       }
       // Clear signing flags
       setIsSigningIn(false);
@@ -124,6 +176,7 @@ const AuthScreen = () => {
         setNeedsConfirm(false);
         setConfirmCode('');
         setConfirmEmail('');
+        setConfirmUsername('');
       }
       // Basic cooldown to prevent rapid re-entry taps after success
       setCooldownUntil(Date.now() + 1500);
@@ -133,24 +186,25 @@ const AuthScreen = () => {
   };
 
   const handleAuth = async () => {
-    if (!email || !password || (!isLogin && !username)) {
+    if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
     setLoading(true);
-    console.log('🔐 Auth attempt:', isLogin ? 'LOGIN' : 'SIGNUP', maskEmail(email));
-    
+    const emailNorm = String(email || '').trim().toLowerCase();
+    console.log('ðŸ” Auth attempt:', isLogin ? 'LOGIN' : 'SIGNUP', maskEmail(emailNorm));
+
     try {
       // Forgot password flow (change password after code)
       if (resetMode && resetCode.trim() && newPassword.trim()) {
         setLoading(true);
-        const emailToReset = email.trim();
+        const emailToReset = emailNorm;
         const cognitoUser = new CognitoUser({ Username: emailToReset, Pool: userPool });
-        console.log('🔐 Reset attempt (confirm new password)', maskEmail(emailToReset));
+        console.log('ðŸ” Reset attempt (confirm new password)', maskEmail(emailToReset));
         cognitoUser.confirmPassword(resetCode.trim(), newPassword.trim(), {
           onSuccess: () => {
-            console.log('✅ Password reset success');
+            console.log('âœ… Password reset success');
             Alert.alert('Password Reset', 'Your password has been updated. Please log in.');
             setResetMode(false);
             setResetCode('');
@@ -158,7 +212,7 @@ const AuthScreen = () => {
             setLoading(false);
           },
           onFailure: (err) => {
-            console.error('❌ Password reset failed:', err);
+            console.error('âŒ Password reset failed:', err);
             setLastError(err?.message || String(err));
             Alert.alert('Reset Error', err?.message || 'Could not reset password.');
             setLoading(false);
@@ -168,23 +222,24 @@ const AuthScreen = () => {
       }
       if (needsConfirm) {
         // Confirm code then auto-login
-  const emailToConfirm = (confirmEmail || email).trim();
-  const cognitoUser = new CognitoUser({ Username: emailToConfirm, Pool: userPool });
+        const emailToConfirm = String(confirmEmail || emailNorm).trim().toLowerCase();
+        // For email-alias pools, confirmation must target the opaque username the user was
+        // created under. Fall back to the email to preserve resend/re-signup edge cases.
+        const usernameToConfirm = String(confirmUsername || emailToConfirm).trim();
+        const cognitoUser = new CognitoUser({ Username: usernameToConfirm, Pool: userPool });
         cognitoUser.confirmRegistration(confirmCode.trim(), true, (err, result) => {
           const proceedToLogin = () => {
-            // Auto sign-in (treat already-confirmed as success path)
-            const authDetails = new AuthenticationDetails({ Username: email, Password: password });
-            cognitoUser.authenticateUser(authDetails, {
-              onSuccess: () => {
-                console.log('✅ Auto-login after confirm');
-                setNeedsConfirm(false);
-                setConfirmCode('');
-                setConfirmEmail('');
-                try { refreshAuthNow?.(cognitoUser); } catch {}
-                setLoading(false);
+            // After confirmation the email alias is active, so auto-login uses a FRESH
+            // CognitoUser built with the email to avoid a username/details mismatch.
+            const loginUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+            const authDetails = new AuthenticationDetails({ Username: emailNorm, Password: password });
+            loginUser.authenticateUser(authDetails, {
+              onSuccess: (result) => {
+                console.log('âœ… Auto-login after confirm');
+                handleAuthSuccess('confirm_auto_login', { cognitoUser: loginUser, tokens: result });
               },
               onFailure: (loginErr) => {
-                console.error('❌ Login failed after confirm:', loginErr);
+                console.error('âŒ Login failed after confirm:', loginErr);
                 setLastError(loginErr?.message || String(loginErr));
                 Alert.alert('Authentication Error', loginErr.message);
                 setLoading(false);
@@ -200,13 +255,13 @@ const AuthScreen = () => {
               proceedToLogin();
               return;
             }
-            console.error('❌ Confirmation failed:', err);
+            console.error('âŒ Confirmation failed:', err);
             setLastError(msg || String(err));
             Alert.alert('Confirmation Error', msg);
             setLoading(false);
             return;
           }
-          console.log('✅ Confirmation success:', result);
+          console.log('âœ… Confirmation success:', result);
           proceedToLogin();
         });
       } else if (isLogin) {
@@ -227,34 +282,35 @@ const AuthScreen = () => {
         setIsSigningIn(true);
         loginStartRef.current = Date.now();
         console.log('[AUTH][METRICS] Login start at', new Date(loginStartRef.current).toISOString());
-        const authDetails = new AuthenticationDetails({ Username: email, Password: password });
-        const cognitoUser = new CognitoUser({ Username: email, Pool: userPool });
-        
+        const authDetails = new AuthenticationDetails({ Username: emailNorm, Password: password });
+        const cognitoUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+
         cognitoUser.authenticateUser(authDetails, {
           onSuccess: (result) => {
-            console.log('✅ Sign in successful for', maskEmail(email));
+            console.log('âœ… Sign in successful for', maskEmail(emailNorm));
             handleAuthSuccess('password_login', { cognitoUser, tokens: result });
           },
           onFailure: (err) => {
             recordError(err);
             const friendly = mapAuthError(err);
-            console.error('❌ Login failed:', err);
+            console.error('âŒ Login failed:', err);
             setLastError(friendly?.message || err?.message || String(err));
             setAttempts(a => a + 1);
             if (err?.code === 'UserNotConfirmedException') {
-              console.log('ℹ️ User not confirmed. Prompting for code...');
-              const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
+              console.log('â„¹ï¸ User not confirmed. Prompting for code...');
+              const pendingUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
               pendingUser.resendConfirmationCode((resendErr, resendRes) => {
                 if (resendErr) {
-                  console.error('❌ Resend code failed:', resendErr);
+                  console.error('âŒ Resend code failed:', resendErr);
                   setLastError(resendErr?.message || String(resendErr));
                 } else {
                   const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
-                  console.log('📧 Code re-sent');
+                  console.log('ðŸ“§ Code re-sent');
                 }
               });
               setNeedsConfirm(true);
-              setConfirmEmail(email);
+              setConfirmEmail(emailNorm);
+              setConfirmUsername('');
               Alert.alert('Confirm Your Account', 'We sent you a verification code. Enter it to finish sign-in.');
               console.log(
                 '[AUTH][STATE] isSigningIn=false (error: NotConfirmed) at',
@@ -262,35 +318,11 @@ const AuthScreen = () => {
                 { message: err?.message, code: err?.code }
               );
               setIsSigningIn(false);
-            } else if (err?.code === 'NotAuthorizedException' && /[A-Z]/.test(email)) {
-              // Fallback: attempt lowercase username if mixed case might cause mismatch
-              const lowered = email.toLowerCase();
-              if (lowered !== email) {
-                console.log('ℹ️ Retrying sign-in with lowercase username fallback for', maskEmail(email));
-                const authDetails2 = new AuthenticationDetails({ Username: lowered, Password: password });
-                const cognitoUser2 = new CognitoUser({ Username: lowered, Pool: userPool });
-                cognitoUser2.authenticateUser(authDetails2, {
-                  onSuccess: () => {
-                    console.log('✅ Sign in successful (lowercase fallback) for', maskEmail(lowered));
-                    handleAuthSuccess('password_login_lowercase_fallback', { cognitoUser: cognitoUser2 });
-                  },
-                  onFailure: (err2) => {
-                    recordError(err2);
-                    console.error('❌ Lowercase fallback failed:', err2);
-                    const friendly2 = mapAuthError(err2);
-                    setLastError(friendly2?.message || err2?.message || String(err2));
-                    Alert.alert('Authentication Error', friendly2?.message || err2.message);
-                    console.log(
-                      '[AUTH][STATE] isSigningIn=false (error: LowercaseFallback) at',
-                      new Date().toISOString(),
-                      { message: err2?.message, code: err2?.code }
-                    );
-                    setIsSigningIn(false);
-                    setLoading(false);
-                  }
-                });
-                return;
-              }
+            } else if (err?.code === 'UserNotFoundException') {
+              // Definitive signal the account doesn't exist — drives the inline
+              // "no account, sign up?" hint WITHOUT sending any email.
+              setAccountExists(false);
+              Alert.alert('Authentication Error', 'No account found for this email. Try signing up.');
             } else {
               Alert.alert('Authentication Error', friendly?.message || err.message);
               // After 2 failed attempts with same credentials, surface reset suggestion
@@ -303,8 +335,6 @@ const AuthScreen = () => {
                 setLockoutDetected(true);
                 setSuggestReset(true);
               }
-              // Probe existence to help user choose between reset vs signup
-              probeAccountExistence(email);
               console.log(
                 '[AUTH][STATE] isSigningIn=false (error: General) at',
                 new Date().toISOString(),
@@ -317,60 +347,208 @@ const AuthScreen = () => {
         });
       } else {
         // Sign up
-        console.log('📝 Starting signup for:', maskEmail(email));
-        // Ensure email attribute is set so Cognito can deliver verification codes
-        const attributes = [
-          { Name: 'name', Value: username },
-          { Name: 'email', Value: email },
-          { Name: 'preferred_username', Value: username || email },
-        ];
-        userPool.signUp(email, password, attributes, null, (err, result) => {
-          console.log('📝 Signup callback fired', err ? 'ERROR' : 'SUCCESS');
-          
-          if (err) {
-            const friendly = mapAuthError(err);
-            console.error('❌ Signup error:', err);
-            setLastError(friendly?.message || err?.message || String(err));
-            if (err?.code === 'UsernameExistsException') {
-              console.log('ℹ️ User exists but may be unconfirmed; attempting to resend code for', maskEmail(email));
-              const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
-              pendingUser.resendConfirmationCode((resendErr, resendRes) => {
-                if (resendErr) {
-                  console.error('❌ Resend code failed:', resendErr);
-                  setLastError(resendErr?.message || String(resendErr));
-                  Alert.alert('Account Issue', 'This account already exists and may not be confirmed. Try "Log In" then "Resend code".');
-                } else {
-                  const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
-                  Alert.alert('Verify Your Email', `We re-sent a verification code to ${dest}. Enter it to finish sign-up.`);
-                  setNeedsConfirm(true);
-                  setConfirmEmail(email);
-                }
-              });
-            } else {
-              Alert.alert('Authentication Error', friendly?.message || err.message);
-              // Apply a brief cooldown on known quota limits to avoid hammering
-              if (friendly?.code === 'email_quota_exceeded') {
-                setCooldownUntil(Date.now() + 30_000);
-              }
-            }
-            setLoading(false);
-            return;
-          }
-          
-          // Do NOT resend here; Cognito already sent a code on sign-up.
-          const dest = result?.codeDeliveryDetails?.Destination || 'your email';
-          setNeedsConfirm(true);
-          setConfirmEmail(email);
-          Alert.alert('Verify Your Email', `We sent you a verification code to ${dest}. Enter it to finish sign-up.`);
+        // Client-side guards first so users get an instant, actionable message
+        // instead of a round-trip Cognito error.
+        const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm);
+        if (!emailValid) {
+          setLastError('Please enter a valid email address.');
+          Alert.alert('Check your email', 'Please enter a valid email address.');
           setLoading(false);
-        });
-      }
-          } catch (e) {
-            console.error('❌ Error preparing confirmation:', e);
-            setLastError(e?.message || String(e));
-            Alert.alert('Verification Error', 'Could not initiate email verification. Please try again.');
+          return;
+        }
+        // Age gate (neutral date-of-birth screen). Blyp is not for under-13s.
+        const dobParsed = parseDob(dob);
+        if (!dobParsed.valid) {
+          const msg = 'Please enter your date of birth as DD/MM/YYYY.';
+          setLastError(msg);
+          Alert.alert('Date of birth', msg);
+          setLoading(false);
+          return;
+        }
+        if (dobParsed.age < MIN_SIGNUP_AGE) {
+          const msg = `You must be at least ${MIN_SIGNUP_AGE} years old to use Blyp.`;
+          setLastError(msg);
+          Alert.alert('Sorry, you’re not old enough', msg);
+          setLoading(false);
+          return;
+        }
+        const pw = String(password || '');
+        const pwStrong = pw.length >= 8 && /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /[0-9]/.test(pw);
+        if (!pwStrong) {
+          const msg = 'Password must be at least 8 characters and include an uppercase letter, a lowercase letter and a number.';
+          setLastError(msg);
+          Alert.alert('Choose a stronger password', msg);
+          setLoading(false);
+          return;
+        }
+
+        const usernameNorm = String(username || '').trim();
+        const displayName = usernameNorm || (emailNorm ? emailNorm.split('@')[0] : '');
+
+        console.log('ðŸ“ Starting signup for:', maskEmail(emailNorm), 'displayName:', displayName);
+        // Cognito pools differ in two ways:
+        // 1) usernameAttributes: email — email is the Cognito Username.
+        // 2) aliasAttributes: email — Username must be opaque; email is an alias for sign-in.
+        // We try email first, then retry with a UUID when the pool rejects email-as-username.
+        // The UI "username" is a display/handle stored as attributes only.
+        // Pools also differ on which standard attributes the app client may write at sign-up.
+        // If preferred_username or name isn't writable Cognito returns InvalidParameterException.
+        // Tier down: full → email+name → email-only.
+        const attributeTiers = [
+          [
+            { Name: 'email', Value: emailNorm },
+            { Name: 'preferred_username', Value: displayName },
+            { Name: 'name', Value: displayName },
+          ],
+          [
+            { Name: 'email', Value: emailNorm },
+            { Name: 'name', Value: displayName },
+          ],
+          [
+            { Name: 'email', Value: emailNorm },
+          ],
+        ];
+
+        const attemptSignUp = (cognitoUsername, tierIndex) => {
+          const attrs = attributeTiers[tierIndex];
+          userPool.signUp(cognitoUsername, password, attrs, null, (err, result) => {
+            console.log('ðŸ“ Signup callback fired', err ? 'ERROR' : 'SUCCESS');
+
+            if (err) {
+              recordError(err);
+
+              if (cognitoUsername === emailNorm && isEmailAliasUsernameError(err)) {
+                const opaqueUsername = generateOpaqueCognitoUsername();
+                console.warn(
+                  '[BLYP][AUTH] Pool uses email alias; retrying signup with opaque username',
+                  { opaqueUsername: opaqueUsername.slice(0, 8) + '…' }
+                );
+                attemptSignUp(opaqueUsername, 0);
+                return;
+              }
+
+              const canTierDown =
+                tierIndex < attributeTiers.length - 1 && isSignupAttributeRejection(err);
+              if (canTierDown) {
+                console.warn(
+                  '[BLYP][AUTH] Signup rejected attributes; retrying with fewer attributes',
+                  { tier: tierIndex, code: err?.code, message: err?.message }
+                );
+                attemptSignUp(cognitoUsername, tierIndex + 1);
+                return;
+              }
+              const friendly = mapAuthError(err);
+              console.error('âŒ Signup error:', err);
+              setLastError(friendly?.message || err?.message || String(err));
+              if (err?.code === 'UsernameExistsException') {
+                console.log('â„¹ï¸ User exists but may be unconfirmed; attempting to resend code for:', maskEmail(emailNorm));
+                const pendingUser = new CognitoUser({ Username: emailNorm, Pool: userPool });
+                pendingUser.resendConfirmationCode((resendErr, resendRes) => {
+                  if (resendErr) {
+                    console.error('âŒ Resend code failed:', resendErr);
+                    setLastError(resendErr?.message || String(resendErr));
+                    Alert.alert('Account Issue', 'This account already exists and may not be confirmed. Try "Log In" then "Resend code".');
+                  } else {
+                    const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
+                    Alert.alert('Verify Your Email', `We re-sent a verification code to ${dest}. Enter it to finish sign-up.`);
+                    setNeedsConfirm(true);
+                    setConfirmEmail(emailNorm);
+                    setConfirmUsername('');
+                  }
+                });
+              } else {
+                Alert.alert('Authentication Error', friendly?.message || err.message);
+                // Apply a brief cooldown on known quota limits to avoid hammering
+                if (friendly?.code === 'email_quota_exceeded') {
+                  setCooldownUntil(Date.now() + 30_000);
+                }
+              }
+              setLoading(false);
+              return;
+            }
+
+            // Do NOT resend here; Cognito already sent a code on sign-up.
+            const dest = result?.codeDeliveryDetails?.Destination || 'your email';
+            // Capture the ACTUAL Cognito username used at sign-up. For email-alias pools the
+            // username is opaque and the email alias is not active until AFTER confirmation,
+            // so confirmRegistration must target this username, not the email.
+            const actualUsername = (result && result.user && typeof result.user.getUsername === 'function' && result.user.getUsername()) || cognitoUsername;
+            setConfirmUsername(actualUsername);
+            setNeedsConfirm(true);
+            setConfirmEmail(emailNorm);
+            Alert.alert('Verify Your Email', `We sent you a verification code to ${dest}. Enter it to finish sign-up.`);
             setLoading(false);
-          }
+          });
+        };
+
+        attemptSignUp(emailNorm, 0);
+      }
+    } catch (e) {
+      console.error('âŒ Error preparing confirmation:', e);
+      setLastError(e?.message || String(e));
+      Alert.alert('Verification Error', 'Could not initiate email verification. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignInPress = async () => {
+    if (!isSocialAuthEnabled()) {
+      Alert.alert('Unavailable', 'Social sign-in is not enabled in this build.');
+      return;
+    }
+
+    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
+      console.log('[AUTH][SOCIAL] Ignoring Google tap while auth is busy or cooled down');
+      return;
+    }
+
+    setIsSocialAuthInProgress(true);
+    console.log('[AUTH][SOCIAL] Starting Google sign-in at', new Date().toISOString());
+
+    try {
+      const result = await signInWithGoogle();
+      console.log('[AUTH][SOCIAL] Google sign-in result', result);
+      // Cognito session is required for app auth. Without Hosted UI / IdP linking,
+      // do not pretend the user is signed in.
+      Alert.alert(
+        'Almost there',
+        'Google sign-in worked, but this app still needs Cognito identity linking before social login can finish. Please sign in with email for now.',
+      );
+    } catch (err) {
+      console.log('[AUTH][SOCIAL] Google sign-in error', { message: err?.message, code: err?.code });
+      Alert.alert('Google sign-in failed', err?.message || 'Please try again or use email.');
+    } finally {
+      setIsSocialAuthInProgress(false);
+    }
+  };
+
+  const handleFacebookSignInPress = async () => {
+    if (!isSocialAuthEnabled()) {
+      Alert.alert('Unavailable', 'Social sign-in is not enabled in this build.');
+      return;
+    }
+
+    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
+      console.log('[AUTH][SOCIAL] Ignoring Facebook tap while auth is busy or cooled down');
+      return;
+    }
+
+    setIsSocialAuthInProgress(true);
+    console.log('[AUTH][SOCIAL] Starting Facebook sign-in at', new Date().toISOString());
+
+    try {
+      const result = await signInWithFacebook();
+      console.log('[AUTH][SOCIAL] Facebook sign-in result', result);
+      Alert.alert(
+        'Almost there',
+        'Facebook sign-in worked, but this app still needs Cognito identity linking before social login can finish. Please sign in with email for now.',
+      );
+    } catch (err) {
+      console.log('[AUTH][SOCIAL] Facebook sign-in error', { message: err?.message, code: err?.code });
+      Alert.alert('Facebook sign-in failed', err?.message || 'Please try again or use email.');
+    } finally {
+      setIsSocialAuthInProgress(false);
+    }
   };
 
   const handleReset = async () => {
@@ -382,332 +560,515 @@ const AuthScreen = () => {
       setNeedsConfirm(false);
       setConfirmCode('');
       setConfirmEmail('');
-    } catch {}
+      setConfirmUsername('');
+    } catch { }
     setLoading(false);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        behavior="padding"
-        style={styles.content}
-      >
-        <View style={styles.logoContainer}>
-          <Text style={styles.welcomeText}>Welcome to</Text>
-          <View style={styles.logoWrapper}>
-            <BlypLogo useGradientBackground={true} />
+    <BlueScreen>
+      <View style={styles.container}>
+        <KeyboardAvoidingView
+          behavior="padding"
+          style={styles.content}
+        >
+          <View style={styles.logoContainer}>
+            <Text style={styles.welcomeText}>Welcome to</Text>
+            <View style={styles.logoWrapper}>
+              <BlypLogo useGradientBackground={true} />
+            </View>
           </View>
-        </View>
 
-        <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>
-            {isLogin ? 'Log In' : 'Create Account'}
-          </Text>
+          <View style={styles.formContainer}>
+            <Text style={styles.formTitle}>
+              {isLogin ? 'Log In' : 'Create Account'}
+            </Text>
 
-          {!isLogin && (
-            <TextInput
-              style={styles.input}
-              placeholder="Username"
-              placeholderTextColor="#9ca3af"
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-            />
-          )}
-
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor="#9ca3af"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            editable={!needsConfirm}
-          />
-
-          {!resetMode && (
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor="#9ca3af"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              autoCapitalize="none"
-            />
-          )}
-          {resetMode && (
-            <>
-              <Text style={{ color: '#9ca3af', marginBottom: 8 }}>Resetting password for: <Text style={{ color: '#fff' }}>{email}</Text></Text>
+            {!isLogin && (
               <TextInput
                 style={styles.input}
-                placeholder="Reset code"
+                placeholder="Display name (optional)"
                 placeholderTextColor="#9ca3af"
-                value={resetCode}
-                onChangeText={setResetCode}
-                keyboardType="number-pad"
+                value={username}
+                onChangeText={setUsername}
                 autoCapitalize="none"
               />
+            )}
+
+            {!isLogin && !needsConfirm && (
               <TextInput
                 style={styles.input}
-                placeholder="New password"
+                placeholder="Date of birth (DD/MM/YYYY)"
                 placeholderTextColor="#9ca3af"
-                value={newPassword}
-                onChangeText={setNewPassword}
+                value={dob}
+                onChangeText={handleDobChange}
+                keyboardType="number-pad"
+                maxLength={10}
+              />
+            )}
+
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor="#9ca3af"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              editable={!needsConfirm}
+            />
+
+            {!resetMode && (
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor="#9ca3af"
+                value={password}
+                onChangeText={setPassword}
                 secureTextEntry
                 autoCapitalize="none"
               />
-            </>
-          )}
+            )}
+            {resetMode && (
+              <>
+                <Text style={{ color: '#9ca3af', marginBottom: 8 }}>Resetting password for: <Text style={{ color: '#fff' }}>{email}</Text></Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Reset code"
+                  placeholderTextColor="#9ca3af"
+                  value={resetCode}
+                  onChangeText={setResetCode}
+                  keyboardType="number-pad"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="New password"
+                  placeholderTextColor="#9ca3af"
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+              </>
+            )}
 
-          {!needsConfirm && !resetMode && (
-            <TouchableOpacity
-              style={styles.submitButton}
-              onPress={handleAuth}
-              disabled={(isLogin ? isSigningIn : loading) || Date.now() < cooldownUntil}
-            >
-              <LinearGradient
-                colors={['#a855f7', '#d946ef', '#ec4899']}
-                style={styles.submitGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Text style={styles.submitText}>
-                  {isLogin
-                    ? (isSigningIn
-                        ? 'Loading...'
-                        : (Date.now() < cooldownUntil ? 'Temporarily limited…' : 'Log In'))
-                    : (loading ? 'Please wait...' : 'Sign Up')}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-
-          {resetMode && (
-            <TouchableOpacity
-              style={styles.submitButton}
-              onPress={handleAuth}
-              disabled={loading || !resetCode.trim() || !newPassword.trim()}
-            >
-              <LinearGradient
-                colors={['#a855f7', '#d946ef', '#ec4899']}
-                style={styles.submitGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Text style={styles.submitText}>
-                  {loading ? 'Updating...' : 'Set New Password'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-          {needsConfirm && !resetMode && (
-            <View>
-              <Text style={{ color: '#9ca3af', marginBottom: 8 }}>
-                Confirming email: <Text style={{ color: '#fff' }}>{confirmEmail || email}</Text>
-              </Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Confirmation code"
-                placeholderTextColor="#9ca3af"
-                value={confirmCode}
-                onChangeText={setConfirmCode}
-                keyboardType="number-pad"
-                autoCapitalize="none"
-              />
-
+            {!needsConfirm && !resetMode && (
               <TouchableOpacity
                 style={styles.submitButton}
                 onPress={handleAuth}
-                disabled={loading || !confirmCode.trim()}
+                disabled={(isLogin ? isSigningIn : loading) || Date.now() < cooldownUntil}
               >
                 <LinearGradient
-                  colors={['#a855f7', '#d946ef', '#ec4899']}
+                  colors={['#00D2BE', '#00D2BE', '#00A89E']}
                   style={styles.submitGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
                   <Text style={styles.submitText}>
-                    {loading ? 'Confirming...' : 'Confirm & Continue'}
+                    {isLogin
+                      ? (isSigningIn
+                        ? 'Loading...'
+                        : (Date.now() < cooldownUntil ? 'Temporarily limitedâ€¦' : 'Log In'))
+                      : (loading ? 'Please wait...' : 'Sign Up')}
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
+            )}
 
+            {isSocialAuthEnabled() && !needsConfirm && !resetMode && (
+              <>
+                <View style={styles.socialDivider}>
+                  <View style={styles.socialDividerLine} />
+                  <Text style={styles.socialDividerText} allowFontScaling={false}>
+                    Or continue with
+                  </Text>
+                  <View style={styles.socialDividerLine} />
+                </View>
+
+                <View style={styles.socialButtonsRow}>
+                  {/* TODO[BLYP][UX]: Design final copy/layout for Google/Facebook sign-in row
+                    - Confirm brand guidelines (Google / Meta)
+                    - Decide button ordering and spacing relative to email/password form
+                    - Add tracking for tap events (provider, success/failure, latency) */}
+                  <TouchableOpacity
+                    style={[
+                      styles.socialButton,
+                      isSocialAuthInProgress && styles.socialButtonDisabled,
+                    ]}
+                    onPress={handleGoogleSignInPress}
+                    disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
+                    activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
+                  >
+                    <Text style={styles.socialButtonText} allowFontScaling={false}>
+                      Continue with Google
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.socialButton,
+                      isSocialAuthInProgress && styles.socialButtonDisabled,
+                    ]}
+                    onPress={handleFacebookSignInPress}
+                    disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
+                    activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
+                  >
+                    <Text style={styles.socialButtonText} allowFontScaling={false}>
+                      Continue with Facebook
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {resetMode && (
               <TouchableOpacity
-                style={[styles.toggleButton, { marginTop: 8 }]}
+                style={styles.submitButton}
+                onPress={handleAuth}
+                disabled={loading || !resetCode.trim() || !newPassword.trim()}
+              >
+                <LinearGradient
+                  colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                  style={styles.submitGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={styles.submitText}>
+                    {loading ? 'Updating...' : 'Set New Password'}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+            {needsConfirm && !resetMode && (
+              <View>
+                <Text style={{ color: '#9ca3af', marginBottom: 8 }}>
+                  Confirming email: <Text style={{ color: '#fff' }}>{confirmEmail || email}</Text>
+                </Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Confirmation code"
+                  placeholderTextColor="#9ca3af"
+                  value={confirmCode}
+                  onChangeText={setConfirmCode}
+                  keyboardType="number-pad"
+                  autoCapitalize="none"
+                />
+
+                <TouchableOpacity
+                  style={styles.submitButton}
+                  onPress={handleAuth}
+                  disabled={loading || !confirmCode.trim()}
+                >
+                  <LinearGradient
+                    colors={['#00D2BE', '#00D2BE', '#00A89E']}
+                    style={styles.submitGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                  >
+                    <Text style={styles.submitText}>
+                      {loading ? 'Confirming...' : 'Confirm & Continue'}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.toggleButton, { marginTop: 8 }]}
+                  onPress={() => {
+                    // Prefer the opaque Cognito username captured at sign-up. On
+                    // email-alias pools the email alias is not active until AFTER
+                    // confirmation, so resending by email can fail — target the
+                    // actual username when we have it, falling back to email.
+                    const resendUsername = (confirmUsername && String(confirmUsername).trim())
+                      || String(email || '').trim().toLowerCase();
+                    const pendingUser = new CognitoUser({ Username: resendUsername, Pool: userPool });
+                    pendingUser.resendConfirmationCode((resendErr, resendRes) => {
+                      if (resendErr) {
+                        console.error('âŒ Resend code failed:', resendErr);
+                        setLastError(resendErr?.message || String(resendErr));
+                        Alert.alert('Resend Failed', resendErr?.message || 'Could not resend verification code.');
+                      } else {
+                        const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
+                        Alert.alert('Code Sent', `We resent the verification code to ${dest}.`);
+                      }
+                    });
+                  }}
+                >
+                  <Text style={styles.toggleText}>
+                    Didn't get a code? <Text style={styles.toggleLink}>Resend</Text>
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.toggleButton, { marginTop: 8 }]}
+                  onPress={handleReset}
+                >
+                  <Text style={styles.toggleText}>
+                    Wrong email? <Text style={styles.toggleLink}>Reset</Text>
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {!needsConfirm && !resetMode && (
+              <TouchableOpacity
+                style={styles.toggleButton}
+                onPress={() => setIsLogin(!isLogin)}
+              >
+                <Text style={styles.toggleText}>
+                  {isLogin ? "Don't have an account? " : 'Already have an account? '}
+                  <Text style={styles.toggleLink}>
+                    {isLogin ? 'Sign Up' : 'Log In'}
+                  </Text>
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {!needsConfirm && !resetMode && (
+              <TouchableOpacity
+                style={styles.guestButton}
+                onPress={() => setGuestConfirmVisible(true)}
+                disabled={isSigningIn || loading}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.guestButtonText} allowFontScaling={false}>
+                  Continue as guest
+                </Text>
+              </TouchableOpacity>
+            )}
+            {isLogin && !needsConfirm && !resetMode && (
+              <TouchableOpacity
+                style={styles.toggleButton}
                 onPress={() => {
-                  const pendingUser = new CognitoUser({ Username: email, Pool: userPool });
-                  pendingUser.resendConfirmationCode((resendErr, resendRes) => {
-                    if (resendErr) {
-                      console.error('❌ Resend code failed:', resendErr);
-                      setLastError(resendErr?.message || String(resendErr));
-                      Alert.alert('Resend Failed', resendErr?.message || 'Could not resend verification code.');
-                    } else {
-                      const dest = resendRes?.CodeDeliveryDetails?.Destination || 'your email';
-                      Alert.alert('Code Sent', `We resent the verification code to ${dest}.`);
+                  if (!email.trim()) {
+                    Alert.alert('Reset Password', 'Enter your email above first.');
+                    return;
+                  }
+                  setLastError('');
+                  const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
+                  console.log('ðŸ” Forgot password initiate for', maskEmail(email.trim()));
+                  pendingUser.forgotPassword({
+                    onSuccess: () => {
+                      Alert.alert('Reset Started', 'Check your email for the reset code.');
+                      setResetMode(true);
+                    },
+                    onFailure: (err) => {
+                      recordError(err);
+                      console.error('âŒ Forgot password failed:', err);
+                      setLastError(err?.message || String(err));
+                      Alert.alert('Reset Failed', err?.message || 'Could not start password reset.');
+                    },
+                    inputVerificationCode: (data) => {
+                      // Cognito sometimes calls this callback before onSuccess; treat as success path
+                      Alert.alert('Reset Code Sent', 'Enter the code below with a new password.');
+                      setResetMode(true);
                     }
                   });
                 }}
               >
-                <Text style={styles.toggleText}>
-                  Didn't get a code? <Text style={styles.toggleLink}>Resend</Text>
-                </Text>
+                <Text style={styles.toggleText}>Forgot password? <Text style={styles.toggleLink}>Reset</Text></Text>
               </TouchableOpacity>
-
+            )}
+            {isLogin && !needsConfirm && !resetMode && suggestReset && (
               <TouchableOpacity
-                style={[styles.toggleButton, { marginTop: 8 }]}
-                onPress={handleReset}
+                style={styles.toggleButton}
+                onPress={() => {
+                  setSuggestReset(false);
+                  if (!email.trim()) {
+                    Alert.alert('Reset Password', 'Enter your email above first.');
+                    return;
+                  }
+                  const pendingUser = new CognitoUser({ Username: String(email || '').trim().toLowerCase(), Pool: userPool });
+                  console.log('ðŸ” Auto-forgot after repeated failures for', maskEmail(email.trim()));
+                  pendingUser.forgotPassword({
+                    onSuccess: () => {
+                      Alert.alert('Reset Started', 'Check your email for the reset code.');
+                      setResetMode(true);
+                    },
+                    onFailure: (err) => {
+                      recordError(err);
+                      console.error('âŒ Auto-forgot failed:', err);
+                      setLastError(err?.message || String(err));
+                      Alert.alert('Reset Failed', err?.message || 'Could not start password reset.');
+                    },
+                    inputVerificationCode: () => {
+                      Alert.alert('Reset Code Sent', 'Enter the code below with a new password.');
+                      setResetMode(true);
+                    }
+                  });
+                }}
               >
-                <Text style={styles.toggleText}>
-                  Wrong email? <Text style={styles.toggleLink}>Reset</Text>
-                </Text>
+                <Text style={styles.toggleText}>Trouble logging in? <Text style={styles.toggleLink}>Send reset code</Text></Text>
               </TouchableOpacity>
-            </View>
-          )}
-
-          {!needsConfirm && !resetMode && (
-            <TouchableOpacity
-              style={styles.toggleButton}
-              onPress={() => setIsLogin(!isLogin)}
-            >
-              <Text style={styles.toggleText}>
-                {isLogin ? "Don't have an account? " : 'Already have an account? '}
-                <Text style={styles.toggleLink}>
-                  {isLogin ? 'Sign Up' : 'Log In'}
-                </Text>
+            )}
+            {isLogin && !needsConfirm && !resetMode && accountExists === false && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={[styles.toggleText, { textAlign: 'center' }]}>Account not found for this email.</Text>
+                <TouchableOpacity style={styles.toggleButton} onPress={() => setIsLogin(false)}>
+                  <Text style={styles.toggleText}>Create a new account? <Text style={styles.toggleLink}>Sign Up</Text></Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {isLogin && !needsConfirm && !resetMode && lockoutDetected && (
+              <Text style={[styles.toggleText, { marginTop: 8, textAlign: 'center', color: '#fca5a5' }]}>Too many failed attempts. Reset required.</Text>
+            )}
+            {resetMode && (
+              <TouchableOpacity
+                style={styles.toggleButton}
+                onPress={() => {
+                  setResetMode(false);
+                  setResetCode('');
+                  setNewPassword('');
+                }}
+              >
+                <Text style={styles.toggleText}>Back to <Text style={styles.toggleLink}>{isLogin ? 'Log In' : 'Sign Up'}</Text></Text>
+              </TouchableOpacity>
+            )}
+            {!isLogin && !needsConfirm && !resetMode && (
+              <Text style={styles.hintText}>
+                Use at least 8 characters with an uppercase letter, a lowercase letter and a number.
               </Text>
-            </TouchableOpacity>
-          )}
-          {isLogin && !needsConfirm && !resetMode && (
-            <TouchableOpacity
-              style={styles.toggleButton}
-              onPress={() => {
-                if (!email.trim()) {
-                  Alert.alert('Reset Password', 'Enter your email above first.');
-                  return;
-                }
-                setLastError('');
-                const pendingUser = new CognitoUser({ Username: email.trim(), Pool: userPool });
-                console.log('🔐 Forgot password initiate for', maskEmail(email.trim()));
-                pendingUser.forgotPassword({
-                  onSuccess: () => {
-                    Alert.alert('Reset Started', 'Check your email for the reset code.');
-                    setResetMode(true);
-                  },
-                  onFailure: (err) => {
-                    recordError(err);
-                    console.error('❌ Forgot password failed:', err);
-                    setLastError(err?.message || String(err));
-                    Alert.alert('Reset Failed', err?.message || 'Could not start password reset.');
-                  },
-                  inputVerificationCode: (data) => {
-                    // Cognito sometimes calls this callback before onSuccess; treat as success path
-                    Alert.alert('Reset Code Sent', 'Enter the code below with a new password.');
-                    setResetMode(true);
-                  }
-                });
-              }}
-            >
-              <Text style={styles.toggleText}>Forgot password? <Text style={styles.toggleLink}>Reset</Text></Text>
-            </TouchableOpacity>
-          )}
-          {isLogin && !needsConfirm && !resetMode && suggestReset && (
-            <TouchableOpacity
-              style={styles.toggleButton}
-              onPress={() => {
-                setSuggestReset(false);
-                if (!email.trim()) {
-                  Alert.alert('Reset Password', 'Enter your email above first.');
-                  return;
-                }
-                const pendingUser = new CognitoUser({ Username: email.trim(), Pool: userPool });
-                console.log('🔐 Auto-forgot after repeated failures for', maskEmail(email.trim()));
-                pendingUser.forgotPassword({
-                  onSuccess: () => {
-                    Alert.alert('Reset Started', 'Check your email for the reset code.');
-                    setResetMode(true);
-                  },
-                  onFailure: (err) => {
-                    recordError(err);
-                    console.error('❌ Auto-forgot failed:', err);
-                    setLastError(err?.message || String(err));
-                    Alert.alert('Reset Failed', err?.message || 'Could not start password reset.');
-                  },
-                  inputVerificationCode: () => {
-                    Alert.alert('Reset Code Sent', 'Enter the code below with a new password.');
-                    setResetMode(true);
-                  }
-                });
-              }}
-            >
-              <Text style={styles.toggleText}>Trouble logging in? <Text style={styles.toggleLink}>Send reset code</Text></Text>
-            </TouchableOpacity>
-          )}
-          {isLogin && !needsConfirm && !resetMode && accountExists === false && (
-            <View style={{ marginTop: 8 }}>
-              <Text style={[styles.toggleText, { textAlign: 'center' }]}>Account not found for this email.</Text>
-              <TouchableOpacity style={styles.toggleButton} onPress={() => setIsLogin(false)}>
-                <Text style={styles.toggleText}>Create a new account? <Text style={styles.toggleLink}>Sign Up</Text></Text>
+            )}
+            {!!lastError && (
+              <Text style={styles.errorText}>{lastError}</Text>
+            )}
+            {__DEV__ && !!lastError && (
+              <TouchableOpacity
+                style={[styles.toggleButton, { marginTop: 4 }]}
+                onPress={() => setShowRawError(v => !v)}
+              >
+                <Text style={styles.toggleText}>Debug: <Text style={styles.toggleLink}>{showRawError ? 'Hide error details' : 'Show error details'}</Text></Text>
               </TouchableOpacity>
+            )}
+            {__DEV__ && showRawError && rawErrorObj && (
+              <Text style={styles.hintText} selectable={true}>
+                Code: {rawErrorObj.code || rawErrorObj.name || 'unknown'}{'\n'}
+                {rawErrorObj.message || String(rawErrorObj)}
+              </Text>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+        {/* Debug footer (dev only) */}
+        {__DEV__ && (
+          <View style={{ padding: 8 }}>
+            <Text style={{ color: '#71717A', fontSize: 12, textAlign: 'center' }}>
+              Pool: {awsconfig.aws_user_pools_id} Â· Region: {awsconfig.aws_cognito_region}
+            </Text>
+            {!!lastError && (
+              <Text style={{ color: '#fca5a5', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                {lastError}
+              </Text>
+            )}
+            {showRawError && rawErrorObj && (
+              <Text style={{ color: '#A1A1AA', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
+                Code: {rawErrorObj.code || rawErrorObj.name} | Message: {rawErrorObj.message}
+              </Text>
+            )}
+          </View>
+        )}
+        {isSigningIn && (
+          <View style={styles.authLoadingOverlay}>
+            <ActivityIndicator size="large" color="#00D2BE" />
+          </View>
+        )}
+
+        <Modal
+          visible={guestConfirmVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setGuestConfirmVisible(false)}
+        >
+          <View style={styles.guestModalBackdrop}>
+            <View style={styles.guestModalCard}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.guestModalScroll}>
+                <Text style={styles.guestModalTitle} allowFontScaling={false}>Continue as guest?</Text>
+                <Text style={styles.guestModalSub} allowFontScaling={false}>
+                  You can browse as a guest, but most of Blyp stays locked. As a guest you can't:
+                </Text>
+
+                <View style={styles.guestLockList}>
+                  {[
+                    'Post or go live',
+                    'Like, comment, follow or message',
+                    'Send or receive gifts & coins',
+                    'Use Blyp AI (ask anything, captions & titles)',
+                    'Save your activity, history or interests',
+                  ].map((t) => (
+                    <View key={t} style={styles.guestLockRow}>
+                      <Icon name="close-circle" size={18} color="#F87171" />
+                      <Text style={styles.guestLockText} allowFontScaling={false}>{t}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.guestPerksBox}>
+                  <Text style={styles.guestPerksTitle} allowFontScaling={false}>
+                    Start a 30-day free trial and unlock everything:
+                  </Text>
+                  {[
+                    'Blyp AI — ask anything, AI captions, titles & hashtags',
+                    'Post, go live & build your audience',
+                    'Like, comment, follow & message anyone',
+                    'Send & receive gifts, earn creator coins',
+                    'Your own personalised home & saved history',
+                  ].map((t) => (
+                    <View key={t} style={styles.guestPerkRow}>
+                      <Icon name="checkmark-circle" size={18} color={COLORS.primary} />
+                      <Text style={styles.guestPerkText} allowFontScaling={false}>{t}</Text>
+                    </View>
+                  ))}
+                  <Text style={styles.guestPerksFinePrint} allowFontScaling={false}>
+                    £0 today — Google shows the renewal date and you can cancel any time before the trial ends and pay nothing.
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.guestTrialBtn}
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setGuestConfirmVisible(false);
+                    setResetMode(false);
+                    setNeedsConfirm(false);
+                    setIsLogin(false);
+                  }}
+                >
+                  <LinearGradient
+                    colors={[COLORS.primary, '#0AA2C0']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.guestTrialBtnGrad}
+                  >
+                    <Text style={styles.guestTrialBtnText} allowFontScaling={false}>
+                      Start my 30-day free trial
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.guestProceedBtn}
+                  activeOpacity={0.8}
+                  onPress={async () => {
+                    setGuestConfirmVisible(false);
+                    try { await enterGuestMode(); } catch { }
+                  }}
+                >
+                  <Text style={styles.guestProceedText} allowFontScaling={false}>
+                    Continue as guest anyway
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
             </View>
-          )}
-          {isLogin && !needsConfirm && !resetMode && lockoutDetected && (
-            <Text style={[styles.toggleText, { marginTop: 8, textAlign: 'center', color: '#fca5a5' }]}>Too many failed attempts. Reset required.</Text>
-          )}
-          {resetMode && (
-            <TouchableOpacity
-              style={styles.toggleButton}
-              onPress={() => {
-                setResetMode(false);
-                setResetCode('');
-                setNewPassword('');
-              }}
-            >
-              <Text style={styles.toggleText}>Back to <Text style={styles.toggleLink}>{isLogin ? 'Log In' : 'Sign Up'}</Text></Text>
-            </TouchableOpacity>
-          )}
-          {!!lastError && (
-            <TouchableOpacity
-              style={[styles.toggleButton, { marginTop: 4 }]}
-              onPress={() => setShowRawError(v => !v)}
-            >
-              <Text style={styles.toggleText}>Debug: <Text style={styles.toggleLink}>{showRawError ? 'Hide error details' : 'Show error details'}</Text></Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </KeyboardAvoidingView>
-      {/* Debug footer (dev only) */}
-      {__DEV__ && (
-        <View style={{ padding: 8 }}>
-          <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center' }}>
-            Pool: {awsconfig.aws_user_pools_id} · Region: {awsconfig.aws_cognito_region}
-          </Text>
-          {!!lastError && (
-            <Text style={{ color: '#fca5a5', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-              {lastError}
-            </Text>
-          )}
-          {showRawError && rawErrorObj && (
-            <Text style={{ color: '#94a3b8', fontSize: 11, textAlign: 'center', marginTop: 4 }}>
-              Code: {rawErrorObj.code || rawErrorObj.name} | Message: {rawErrorObj.message}
-            </Text>
-          )}
-        </View>
-      )}
-      {isSigningIn && (
-        <View style={styles.authLoadingOverlay}>
-          <ActivityIndicator size="large" color="#ec4899" />
-        </View>
-      )}
-    </SafeAreaView>
+          </View>
+        </Modal>
+      </View>
+    </BlueScreen>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.pageBackground,
   },
   content: {
     flex: 1,
@@ -722,14 +1083,11 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: '800',
     textAlign: 'center',
-    color: '#ec4899',
-    textShadowColor: 'rgba(168, 85, 247, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    color: '#F5F5F7',
   },
   welcomeText: {
     fontSize: 20,
-    color: '#9ca3af',
+    color: '#A1A1AA',
     marginBottom: 20,
     textAlign: 'center',
   },
@@ -737,11 +1095,11 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.8 }],
   },
   formContainer: {
-    backgroundColor: '#1e293b',
-    borderRadius: 16,
+    backgroundColor: '#121216',
+    borderRadius: 20,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.25)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   formTitle: {
     fontSize: 24,
@@ -751,10 +1109,10 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   input: {
-    backgroundColor: '#374151',
+    backgroundColor: '#1C1C22',
     borderWidth: 1,
-    borderColor: '#4b5563',
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
     padding: 16,
     color: '#ffffff',
     fontSize: 16,
@@ -764,26 +1122,157 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   submitGradient: {
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 16,
     alignItems: 'center',
   },
   submitText: {
-    color: '#ffffff',
+    color: '#0A0A0C',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
   },
   toggleButton: {
-    marginTop: 16,
+    marginTop: 8,
     alignItems: 'center',
   },
   toggleText: {
-    color: '#9ca3af',
+    color: '#A1A1AA',
     fontSize: 14,
   },
   toggleLink: {
-    color: '#a855f7',
+    color: '#00D2BE',
+    fontWeight: '700',
+  },
+  guestButton: {
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestButtonText: {
+    color: '#e5e7eb',
+    fontSize: 15,
     fontWeight: '600',
+  },
+  guestModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 22,
+  },
+  guestModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '86%',
+    backgroundColor: '#14141A',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  guestModalScroll: {
+    padding: 22,
+  },
+  guestModalTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  guestModalSub: {
+    color: '#A1A1AA',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  guestLockList: {
+    marginTop: 16,
+    gap: 10,
+  },
+  guestLockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  guestLockText: {
+    flex: 1,
+    color: '#D4D4D8',
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  guestPerksBox: {
+    marginTop: 20,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,210,190,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.28)',
+    gap: 10,
+  },
+  guestPerksTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  guestPerkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  guestPerkText: {
+    flex: 1,
+    color: '#E5E7EB',
+    fontSize: 14,
+    lineHeight: 19,
+  },
+  guestPerksFinePrint: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  guestTrialBtn: {
+    marginTop: 22,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  guestTrialBtnGrad: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestTrialBtnText: {
+    color: '#04121A',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  guestProceedBtn: {
+    marginTop: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestProceedText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  hintText: {
+    color: '#71717A',
+    fontSize: 12,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#fca5a5',
+    fontSize: 13,
+    marginTop: 12,
+    textAlign: 'center',
   },
   authLoadingOverlay: {
     position: 'absolute',
@@ -800,17 +1289,17 @@ const styles = StyleSheet.create({
   socialDivider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 8,
     marginBottom: 16,
   },
   socialDividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#1f2933',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   socialDividerText: {
     marginHorizontal: 12,
-    color: '#6b7280',
+    color: '#71717A',
     fontSize: 13,
   },
   socialButtonsRow: {
@@ -819,13 +1308,13 @@ const styles = StyleSheet.create({
   },
   socialButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 14,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#020617',
+    backgroundColor: 'transparent',
   },
   socialButtonDisabled: {
     opacity: 0.6,
@@ -838,3 +1327,5 @@ const styles = StyleSheet.create({
 });
 
 export default AuthScreen;
+
+

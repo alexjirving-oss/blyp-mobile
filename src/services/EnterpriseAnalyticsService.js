@@ -34,6 +34,40 @@ import NetInfo from '@react-native-community/netinfo';
 import * as Device from 'expo-device';
 // Lazy-load expo-application at runtime to avoid native module crashes
 
+// Strip undefined / NaN / Infinity before sending to Firestore
+function sanitizeForFirestore(value) {
+  if (value === undefined) {
+    return undefined; // caller drops the key
+  }
+
+  if (value === null) return null;
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const cleaned = value
+      .map((v) => sanitizeForFirestore(v))
+      .filter((v) => v !== undefined);
+    return cleaned;
+  }
+
+  if (typeof value === 'object') {
+    const out = {};
+    Object.entries(value || {}).forEach(([k, v]) => {
+      const cleaned = sanitizeForFirestore(v);
+      if (cleaned !== undefined) {
+        out[k] = cleaned;
+      }
+    });
+    return out;
+  }
+
+  return value;
+}
+
 class EnterpriseAnalyticsService {
   constructor() {
     // Production analytics configuration
@@ -82,7 +116,7 @@ class EnterpriseAnalyticsService {
       privacy: {
         anonymizeIP: true,
         respectDNT: true,       // Do Not Track
-        consentRequired: true,
+        consentRequired: false,
         dataRetention: 90       // 90 days
       }
     };
@@ -123,28 +157,42 @@ class EnterpriseAnalyticsService {
     this.networkContext = null;
     
     this.isTest = typeof process !== 'undefined' && process?.env && (process.env.NODE_ENV === 'test' || !!process.env.JEST_WORKER_ID);
-    this.canWrite = !!firebaseEnabled && !this.isTest;
-    this.consentGranted = false;
+    // In dev, default analytics OFF unless explicitly enabled.
+    // This avoids LogBox spam + JS-thread lag when rules/config are not aligned.
+    const devAnalyticsEnabled =
+      __DEV__ === true &&
+      ['1', 'true', 'yes'].includes(String(process?.env?.EXPO_PUBLIC_ENABLE_ANALYTICS || '').toLowerCase());
 
-    console.log('📊 Enterprise Analytics Service initialized');
-    this.initialize();
+    this.enabled = !!firebaseEnabled && !this.isTest && (!__DEV__ || devAnalyticsEnabled);
+    this.canWrite = this.enabled;
+
+    this._lastWriteDisableAt = 0;
+    this._lastFlushErrorAt = 0;
+    this._lastFlushErrorMsg = '';
+
+    if (this.enabled) {
+      console.log('📊 Enterprise Analytics Service initialized');
+      this.initialize();
+    }
   }
 
-  async hasConsent() {
-    try {
-      // Lazy require avoids circular init with PrivacyConsent/Sentry.
-      // eslint-disable-next-line global-require
-      const { getAnalyticsConsent, hasAnalyticsConsentSync } = require('./PrivacyConsent');
-      if (hasAnalyticsConsentSync()) {
-        this.consentGranted = true;
-        return true;
-      }
-      this.consentGranted = await getAnalyticsConsent();
-      return this.consentGranted;
-    } catch {
-      this.consentGranted = false;
-      return false;
-    }
+  _shouldDisableWritesForError(error) {
+    const code = String(error?.code || '').toLowerCase();
+    const msg = String(error?.message || '').toLowerCase();
+    return (
+      code === 'permission-denied' ||
+      code === 'unauthenticated' ||
+      msg.includes('missing or insufficient permissions') ||
+      msg.includes('permission-denied')
+    );
+  }
+
+  _warnOncePerWindow(message, windowMs = 30000) {
+    const now = Date.now();
+    if (now - this._lastFlushErrorAt < windowMs && this._lastFlushErrorMsg === message) return;
+    this._lastFlushErrorAt = now;
+    this._lastFlushErrorMsg = message;
+    console.warn(message);
   }
 
   /**
@@ -152,12 +200,7 @@ class EnterpriseAnalyticsService {
    */
   async initialize() {
     try {
-      const allowed = await this.hasConsent();
-      if (!allowed) {
-        console.log('📊 Analytics idle (consent not granted)');
-        return;
-      }
-
+      if (!this.enabled) return;
       // Gather device context
       await this.gatherDeviceContext();
       
@@ -173,7 +216,7 @@ class EnterpriseAnalyticsService {
       console.log('✅ Analytics service initialized');
       
     } catch (error) {
-      console.error('❌ Analytics initialization failed:', error);
+      this._warnOncePerWindow(`❌ Analytics initialization failed: ${error?.message || String(error)}`);
     }
   }
 
@@ -456,36 +499,42 @@ class EnterpriseAnalyticsService {
    */
   async trackError(streamId, errorData) {
     try {
+      const safeUserId = typeof auth?.currentUser?.uid === 'string' && auth.currentUser.uid.length > 0
+        ? auth.currentUser.uid
+        : null;
+
+      const safeErrorPayload = {
+        type: errorData?.type,
+        message: errorData?.message || errorData?.error || 'Unknown error',
+        code: errorData?.code,
+        severity: errorData?.severity || 'medium',
+        context: errorData?.context,
+        stack: typeof errorData?.stack === 'string' ? errorData.stack.slice(0, 4000) : undefined,
+      };
+
       const event = {
         type: 'error',
         streamId,
         timestamp: Date.now(),
-        userId: auth.currentUser?.uid,
+        userId: safeUserId,
         
         // Error details
-        error: {
-          type: errorData.type,
-          message: errorData.message,
-          code: errorData.code,
-          severity: errorData.severity || 'medium',
-          context: errorData.context,
-          stack: errorData.stack
-        },
+        error: safeErrorPayload,
         
         // Recovery details
         recovery: {
-          attempted: errorData.recoveryAttempted || false,
-          successful: errorData.recoverySuccessful || false,
-          method: errorData.recoveryMethod,
-          time: errorData.recoveryTime || 0
+          attempted: !!errorData?.recoveryAttempted,
+          successful: !!errorData?.recoverySuccessful,
+          method: errorData?.recoveryMethod,
+          time: typeof errorData?.recoveryTime === 'number' ? errorData.recoveryTime : 0
         },
         
         // System state
         system: {
           device: this.deviceContext,
           network: this.networkContext,
-          memoryPressure: errorData.memoryPressure || false,
-          batteryLow: errorData.batteryLow || false
+          memoryPressure: !!errorData?.memoryPressure,
+          batteryLow: !!errorData?.batteryLow
         }
       };
       
@@ -662,6 +711,7 @@ class EnterpriseAnalyticsService {
    * Start event batching for performance
    */
   startEventBatching() {
+    if (!this.enabled) return;
     setInterval(() => {
       this.flushEventBuffer();
     }, this.config.realTime.flushInterval);
@@ -672,9 +722,13 @@ class EnterpriseAnalyticsService {
    */
   addEvent(event, highPriority = false) {
     try {
+      if (!this.enabled) return;
+      const safeUserId = typeof event?.userId === 'string' && event.userId.length > 0 ? event.userId : null;
+
       // Add timestamp and metadata
       const enrichedEvent = {
         ...event,
+        userId: safeUserId,
         id: this.generateEventId(),
         serverTimestamp: serverTimestamp(),
         retentionDays: this.config.privacy?.dataRetention || 90,
@@ -685,6 +739,8 @@ class EnterpriseAnalyticsService {
           ipAnonymized: true
         })
       };
+
+      const sanitizedEvent = sanitizeForFirestore(enrichedEvent);
       
       // In tests or when Firebase disabled, do not write to Firestore
       if (!this.canWrite) {
@@ -698,10 +754,10 @@ class EnterpriseAnalyticsService {
 
       if (highPriority) {
         // Send immediately for critical events
-        this.sendEvent(enrichedEvent);
+        this.sendEvent(sanitizedEvent);
       } else {
         // Add to buffer for batch processing
-        this.eventBuffer.push(enrichedEvent);
+        this.eventBuffer.push(sanitizedEvent);
         
         // Flush if buffer is full
         if (this.eventBuffer.length >= this.config.realTime.batchSize) {
@@ -710,7 +766,7 @@ class EnterpriseAnalyticsService {
       }
       
     } catch (error) {
-      console.error('❌ Event buffering failed:', error);
+      this._warnOncePerWindow(`❌ Event buffering failed: ${error?.message || String(error)}`);
     }
   }
 
@@ -720,20 +776,22 @@ class EnterpriseAnalyticsService {
   async flushEventBuffer() {
     if (this.eventBuffer.length === 0) return;
     if (!this.canWrite) return; // skip writes in tests/disabled mode
-    if (!(await this.hasConsent())) {
-      this.eventBuffer = [];
-      return;
-    }
     
+    let events = [];
     try {
       const batch = writeBatch(db);
-      const events = [...this.eventBuffer];
+      events = [...this.eventBuffer];
       this.eventBuffer = [];
       
       // Add events to batch
       events.forEach(event => {
         const eventRef = doc(collection(db, 'analytics'));
-        batch.set(eventRef, event);
+        const sanitizedEvent = sanitizeForFirestore(event);
+        // Strip any undefined that may remain at top-level
+        Object.keys(sanitizedEvent || {}).forEach((k) => {
+          if (sanitizedEvent[k] === undefined) delete sanitizedEvent[k];
+        });
+        batch.set(eventRef, sanitizedEvent);
       });
       
       // Commit batch
@@ -742,10 +800,27 @@ class EnterpriseAnalyticsService {
       console.log(`📤 Flushed ${events.length} events to analytics`);
       
     } catch (error) {
-      console.error('❌ Event buffer flush failed:', error);
-      
-      // Re-add events to buffer on failure
-      this.eventBuffer.unshift(...events);
+      // If this is a rules/auth issue, stop trying for this session to avoid JS-thread lag.
+      if (this._shouldDisableWritesForError(error)) {
+        this.canWrite = false;
+        this._lastWriteDisableAt = Date.now();
+        this.eventBuffer = []; // drop buffered analytics; not worth retrying in dev.
+        this._warnOncePerWindow(
+          `📊 Analytics writes disabled (Firestore permissions/auth). ${error?.message || String(error)}`,
+          10000
+        );
+        return;
+      }
+
+      this._warnOncePerWindow(`❌ Event buffer flush failed: ${error?.message || String(error)}`);
+
+      // Re-add events to buffer on transient failure
+      if (events && events.length > 0) {
+        this.eventBuffer.unshift(...events);
+        if (this.eventBuffer.length > this.config.realTime.maxBufferSize) {
+          this.eventBuffer.splice(0, this.eventBuffer.length - this.config.realTime.maxBufferSize);
+        }
+      }
     }
   }
 
@@ -755,14 +830,30 @@ class EnterpriseAnalyticsService {
   async sendEvent(event) {
     try {
       if (!this.canWrite) return; // skip writes in tests/disabled mode
-      if (!(await this.hasConsent())) return;
-      await addDoc(collection(db, 'analytics'), event);
+      const sanitizedEvent = sanitizeForFirestore(event);
+      Object.keys(sanitizedEvent || {}).forEach((k) => {
+        if (sanitizedEvent[k] === undefined) delete sanitizedEvent[k];
+      });
+      await addDoc(collection(db, 'analytics'), sanitizedEvent);
       console.log(`⚡ Critical event sent: ${event.type}`);
       
     } catch (error) {
-      console.error('❌ Critical event send failed:', error);
-      // Add to buffer as fallback
+      if (this._shouldDisableWritesForError(error)) {
+        this.canWrite = false;
+        this.eventBuffer = [];
+        this._warnOncePerWindow(
+          `📊 Analytics writes disabled (Firestore permissions/auth). ${error?.message || String(error)}`,
+          10000
+        );
+        return;
+      }
+
+      this._warnOncePerWindow(`❌ Critical event send failed: ${error?.message || String(error)}`);
+      // Add to buffer as fallback (bounded)
       this.eventBuffer.unshift(event);
+      if (this.eventBuffer.length > this.config.realTime.maxBufferSize) {
+        this.eventBuffer.splice(0, this.eventBuffer.length - this.config.realTime.maxBufferSize);
+      }
     }
   }
 

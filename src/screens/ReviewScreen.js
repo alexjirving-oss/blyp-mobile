@@ -16,37 +16,132 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import UnifiedVideo from '../components/UnifiedVideo';
 import { Audio } from 'expo-av';
+import { COLORS } from '../styles/theme';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { db as firestore, auth, storage } from '../config/firebase';
 import { serverTimestamp } from 'firebase/firestore';
-import { signInAnonymously } from 'firebase/auth';
 import { firebaseNative } from '../config/firebase';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../hooks/useCommon';
+import { useHasAI } from '../hooks/useEntitlement';
+import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+import { uploadMediaToStorage } from '../utils/uploadMediaToStorage';
 import Toast from 'react-native-toast-message';
 import BlypLogo from '../components/BlypLogo';
 import aiService from '../services/aiService';
 import speechToTextService from '../services/speechToTextService';
 import geminiSpeechService from '../services/geminiSpeechService';
 import mediaDescriptionService from '../services/mediaDescriptionService';
+import { initialReachState } from '../services/blypReachClient';
+import { COMPOSE_DRAFT_KEY } from '../components/CreatePostButton';
+// Caption orchestrator (smart-merge Option B)
+import { getPreviewCaption, freezeCaption } from '../../caption/orchestrator';
+import { preparePostMetadata } from '../../upload/preparePostMetadata';
 
 const ReviewScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { media, type, mode, transcript, source } = route.params || {};
-  const { user: cognitoUser, isAuthenticated } = useAuth();
+  const { media, type, mode, transcript, source, entryPoint } = route.params || {};
+  const { user: cognitoUser, uid, isAuthenticated, authReady } = useAuth();
+  const aiEntitled = useHasAI();
+
+  // Premium AI conveniences (captions/hashtags/titles) gate. Core posting,
+  // editing and voice-to-text for capture stay free; only the AI generation
+  // extras require Plus. Returns true if allowed, else routes to Plans.
+  const requireAI = () => {
+    if (aiEntitled) return true;
+    Alert.alert(
+      'A Plus feature',
+      'AI captions, titles and hashtags are part of Blyp Plus. You can still write and post normally on the free plan.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'See plans', onPress: () => navigation.navigate('Plans') },
+      ],
+    );
+    return false;
+  };
+
+  const getDescribeTargetLabel = () => {
+    // Prefer explicit route param when present
+    if (type === 'video' || type === 'videos') return 'video';
+    if (type === 'photos') return 'photos';
+    if (type === 'photo') return 'photo';
+
+    // Otherwise infer from the items
+    const items = Array.isArray(mediaItems) ? mediaItems : [];
+    if (items.length === 0) return 'media';
+    const uniqueTypes = Array.from(new Set(items.map(m => m?.type).filter(Boolean)));
+    if (uniqueTypes.length === 1) {
+      const t = uniqueTypes[0];
+      if (t === 'video') return items.length === 1 ? 'video' : 'videos';
+      if (t === 'photo' || t === 'image') return items.length === 1 ? 'photo' : 'photos';
+    }
+    return 'media';
+  };
+
+  const explainTranscriptErrorToken = (token) => {
+    const raw = typeof token === 'string' ? token.trim() : '';
+    const upper = raw.toUpperCase();
+
+    if (upper === '[NO_KEY]') {
+      return {
+        title: '🎤 Voice transcription unavailable',
+        message: 'Missing EXPO_PUBLIC_GEMINI_API_KEY in this build',
+      };
+    }
+    if (upper === '[READ_FAIL]') {
+      return {
+        title: '🎤 Could not read recording',
+        message: 'Try again (or record a bit longer)',
+      };
+    }
+    if (upper === '[NO_CANDIDATE]') {
+      return {
+        title: '🎤 Could not detect speech',
+        message: 'Try speaking louder/longer, then release',
+      };
+    }
+    if (upper.startsWith('[ERROR:')) {
+      const inner = raw.slice('[ERROR:'.length, -1); // strip [ERROR: ... ]
+      const innerUpper = inner.toUpperCase();
+      if (innerUpper.includes('429') || innerUpper.includes('QUOTA')) {
+        return {
+          title: '🎤 AI rate-limited',
+          message: 'Gemini quota/rate limit hit (HTTP 429). Try again later.',
+        };
+      }
+      if (innerUpper.includes('403')) {
+        return {
+          title: '🎤 AI auth failed',
+          message: 'Gemini key rejected (HTTP 403). Check key validity.',
+        };
+      }
+      return {
+        title: '🎤 Voice transcription unavailable',
+        message: inner?.slice?.(0, 90) ? `Error: ${inner.slice(0, 90)}` : 'Type your description instead',
+      };
+    }
+
+    return {
+      title: '🎤 Voice transcription unavailable',
+      message: 'Type your description instead',
+    };
+  };
   
   // Debug route params on screen initialization
-  console.log('🚀 ReviewScreen initialized with route params:', {
+  console.log('[POST][ENTRY] ReviewScreen opened', {
+    entryPoint: entryPoint || 'unknown',
     mediaCount: media ? (Array.isArray(media) ? media.length : 1) : 0,
     type,
     mode,
     source,
-    hasTranscript: !!transcript
+    hasTranscript: !!transcript,
+    authReady,
+    isAuthenticated
   });
   
   // Store source in state to persist across re-renders
@@ -78,7 +173,7 @@ const ReviewScreen = () => {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [generatedContent, setGeneratedContent] = useState(null);
   const [showAiContent, setShowAiContent] = useState(false);
-  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceCaption, setVoiceCaption] = useState('');
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordingStartTime, setRecordingStartTime] = useState(null);
   const [generatedHashtags, setGeneratedHashtags] = useState([]);
@@ -92,6 +187,28 @@ const ReviewScreen = () => {
   
   // Manual Description States
   const [manualDescription, setManualDescription] = useState('');
+  const [aiGeneratedCaptionState, setAiGeneratedCaptionState] = useState(null);
+  const [generatedTitleState, setGeneratedTitleState] = useState(null);
+  const [generatedHashtagsState, setGeneratedHashtagsState] = useState([]);
+  const [editedAfterAI, setEditedAfterAI] = useState(false);
+  // AI caption variants the user can choose between (2-3 options)
+  const [descriptionVariants, setDescriptionVariants] = useState([]);
+  const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
+  // Intent used to produce the current variants, so "regenerate" can reuse it
+  const [variantIntent, setVariantIntent] = useState('');
+  const [isRegeneratingVariants, setIsRegeneratingVariants] = useState(false);
+  // Smart-merge caption state
+  const [captionState, setCaptionState] = useState({
+    photos: [],
+    manualCaption: '',
+    voiceCaption: '',
+    aiCaptionsByPhotoId: {},
+    aiGeneratedCaption: null,
+    editedAfterAI: false,
+    previewCaption: '',
+    frozenCaption: undefined,
+    source: 'none'
+  });
   const [isGeneratingFromText, setIsGeneratingFromText] = useState(false);
   
   // UI State
@@ -102,6 +219,14 @@ const ReviewScreen = () => {
   const [shouldAutoTriggerStepByStep, setShouldAutoTriggerStepByStep] = useState(false);
   const scrollViewRef = useRef(null);
 
+  // MAGIC PATH state: show an instant optimistic caption, then upgrade it in
+  // place when the single multimodal AI call resolves.
+  const [isPolishingCaption, setIsPolishingCaption] = useState(false);
+  const [magicError, setMagicError] = useState(null);
+  const magicRunIdRef = useRef(0);          // invalidates stale in-flight runs
+  const magicUserTookOverRef = useRef(false); // user edited/picked → don't clobber
+  const magicAutoStartedRef = useRef(false); // ambient AI once per compose session
+
   // Initialize original caption when transcript changes
   useEffect(() => {
     if (transcript) {
@@ -109,44 +234,57 @@ const ReviewScreen = () => {
       setCaption(transcript);
     }
   }, [transcript]);
-  
-  // Auto-show description overlay immediately when media is added
+
+  // Keep captionState in sync with UI inputs and AI data
+  // PRIORITY: editedAfterAI → aiGeneratedCaption → smart-merge (voice + photos)
   useEffect(() => {
-    console.log('🔍 Checking auto-show conditions:', {
-      mediaItemsLength: mediaItems.length,
-      type: type,
-      sourceType: sourceType,
-      showDescriptionMethodOverlay: showDescriptionMethodOverlay,
-      overlayAlreadyShown: overlayAlreadyShown,
-      shouldAutoTriggerStepByStep: shouldAutoTriggerStepByStep
+    console.log('📋 Caption state update:', {
+      editedAfterAI,
+      hasAiGenerated: !!aiGeneratedCaptionState,
+      manualDescriptionLength: manualDescription?.length || 0,
+      voiceCaptionLength: voiceCaption?.length || 0
     });
     
-    if (mediaItems.length > 0 && (type === 'photo' || type === 'photos') && !showDescriptionMethodOverlay && !overlayAlreadyShown) {
-      // Show description overlay for both single and multiple photos from camera OR gallery
-      console.log(`📸 TRIGGERING description overlay for ${mediaItems.length} photos from ${sourceType || 'camera'}`);
-      
-      // For gallery selections, ensure we don't auto-trigger AI processing (but still show description overlay)
-      if (sourceType === 'gallery') {
-        console.log('🖼️ Gallery source detected - preventing auto AI triggers but showing description overlay');
-        setShouldAutoTriggerStepByStep(false);
-        setUserRequestedAI(false);
-        // Clear any pending AI states
-        setIsGeneratingContent(false);
-        setIsGeneratingDescriptions(false);
-        setIsProcessingAllAI(false);
-        setShowStepByStepOverlay(false);
+    // Build photos list with stable ids using index
+    const photos = (mediaItems || [])
+      .filter((m) => m?.type === 'photo' || m?.type === 'image')
+      .map((m, idx) => ({ id: String(idx) }));
+
+    // Map AI per-photo descriptions to ids (for smart-merge fallback)
+    const aiMap = {};
+    photos.forEach((p, idx) => {
+      const desc = mediaDescriptions?.[idx]?.description || mediaDescriptions?.[idx]?.text || mediaDescriptions?.[idx] || '';
+      if (typeof desc === 'string' && desc.trim().length > 0) {
+        aiMap[p.id] = desc.trim();
       }
-      
-      // Use setTimeout to ensure this happens after component render
-      setTimeout(() => {
-        setShowDescriptionMethodOverlay(true);
-        setOverlayAlreadyShown(true);
-        console.log('✅ Description overlay state set to TRUE');
-      }, 100);
-    }
-  }, [mediaItems, type, sourceType]);
+    });
+
+    const nextState = {
+      photos,
+      manualCaption: manualDescription || '',
+      voiceCaption: voiceCaption || '',
+      aiCaptionsByPhotoId: aiMap,
+      aiGeneratedCaption: aiGeneratedCaptionState || null,
+      editedAfterAI: editedAfterAI || false,
+      frozenCaption: captionState.frozenCaption,
+      source: captionState.source || 'none'
+    };
+
+    // Derive preview caption via orchestrator
+    // getPreviewCaption respects priority: frozen → manual (if editedAfterAI) → aiGeneratedCaption → smart-merge
+    const preview = getPreviewCaption(nextState);
+    setCaptionState({ ...nextState, previewCaption: preview?.finalCaption ?? preview ?? '' });
+  }, [mediaItems, manualDescription, voiceCaption, mediaDescriptions, aiGeneratedCaptionState, editedAfterAI]);
   
-  // Removed backup trigger to prevent duplicate overlays
+  // Frictionless path: never auto-open the description gate. Ambient Magic Path
+  // runs once media lands (see generateMagicPost auto-start effect below).
+  useEffect(() => {
+    if (mediaItems.length > 0 && !overlayAlreadyShown) {
+      setOverlayAlreadyShown(true);
+      setShowDescriptionMethodOverlay(false);
+      setShouldAutoTriggerStepByStep(false);
+    }
+  }, [mediaItems.length, overlayAlreadyShown]);
   
   // Media Descriptions States
   const [mediaDescriptions, setMediaDescriptions] = useState([]);
@@ -201,11 +339,10 @@ const ReviewScreen = () => {
   // Check if there's unsaved content
   const hasUnsavedContent = () => {
     return (
-      mediaItems.length > 0 || 
-      caption.trim() !== '' || 
-      originalCaption.trim() !== '' ||
-      aiCaption.trim() !== '' ||
-      manualDescription.trim() !== ''
+      mediaItems.length > 0 ||
+      (captionState.previewCaption || '').trim() !== '' ||
+      manualDescription.trim() !== '' ||
+      voiceCaption.trim() !== ''
     );
   };
 
@@ -243,11 +380,26 @@ const ReviewScreen = () => {
       };
 
       await firestore.collection('drafts').add(draftData);
+
+      try {
+        await AsyncStorage.setItem(
+          COMPOSE_DRAFT_KEY,
+          JSON.stringify({
+            mediaItems: draftData.mediaItems,
+            caption: draftData.caption || '',
+            type: mediaItems.some((m) => m?.type === 'video') ? 'videos' : 'photos',
+            source: sourceType || 'draft',
+            savedAt: Date.now(),
+          })
+        );
+      } catch (e) {
+        console.warn('[POST] local draft cache failed', e?.message || e);
+      }
       
       Toast.show({
         type: 'success',
-        text1: '💾 Draft Saved!',
-        text2: 'Your post has been saved as a draft',
+        text1: 'Draft saved',
+        text2: 'Resume it anytime from the Create sheet',
         position: 'bottom',
         visibilityTime: 2000,
       });
@@ -263,7 +415,21 @@ const ReviewScreen = () => {
   // Handle discarding changes
   const handleDiscardChanges = () => {
     setShowBackConfirmation(false);
+    AsyncStorage.removeItem(COMPOSE_DRAFT_KEY).catch(() => {});
     navigation.goBack();
+  };
+
+  const mediaCountRef = useRef(0);
+  useEffect(() => {
+    mediaCountRef.current = mediaItems.length;
+  }, [mediaItems.length]);
+
+  /** Mode entry (FAB → camera/library): cancel with no media → leave composer. */
+  const exitIfEmptyModeCompose = () => {
+    if (mediaCountRef.current > 0) return;
+    if (mode === 'photo' || mode === 'video' || mode === 'library') {
+      navigation.goBack();
+    }
   };
 
   const togglePlatform = (platform) => {
@@ -273,104 +439,33 @@ const ReviewScreen = () => {
     }));
   };
 
-  // Reset AI content when mediaItems change (but don't auto-generate descriptions)
   // Separate ref to track if we just completed step-by-step processing
   const justCompletedStepByStepRef = useRef(false);
+  const prevMediaLenRef = useRef(0);
 
+  // Preserve AI caption when adding more media. Re-polish only if the user
+  // has not taken over editing (avoids wiping a good first caption).
   useEffect(() => {
-    if (mediaItems.length > 0) {
-      // Debug: Log all the conditions to understand what's happening
-      console.log('🔍 useEffect conditions:', {
-        stepByStepProcessed,
-        showStepByStepOverlay,
-        pendingStepByStepProcessing,
-        mediaItemsLength: mediaItems.length,
-        justCompletedStepByStep: justCompletedStepByStepRef.current,
-        shouldAutoTriggerStepByStep
+    const prev = prevMediaLenRef.current;
+    const next = mediaItems.length;
+    prevMediaLenRef.current = next;
+    if (next === 0) return;
+    setOverlayAlreadyShown(true);
+    setShowDescriptionMethodOverlay(false);
+    if (next > prev && prev > 0 && !magicUserTookOverRef.current) {
+      const note = (manualDescription || caption || '').trim();
+      void generateMagicPost(note).catch((e) => {
+        console.error('❌ re-polish after add-media failed', e);
       });
-      
-      // Don't reset if step-by-step processing is active/completed OR if we should auto-trigger
-      if (stepByStepProcessed || showStepByStepOverlay || pendingStepByStepProcessing || justCompletedStepByStepRef.current || shouldAutoTriggerStepByStep) {
-        console.log('🚫 Skipping AI content reset - step-by-step processing active/completed or auto-trigger pending');
-        
-        // Reset the ref flag after preventing the reset (but keep other conditions)
-        if (justCompletedStepByStepRef.current) {
-          setTimeout(() => {
-            justCompletedStepByStepRef.current = false;
-            console.log('🔄 Reset protection period ended');
-          }, 10000); // Much longer timeout to ensure stability
-        }
-        
-        // Only reset the flag if it was due to completion (not active processing)
-        if (stepByStepProcessed && !showStepByStepOverlay && !pendingStepByStepProcessing) {
-          setTimeout(() => {
-            setStepByStepProcessed(false);
-          }, 2000);
-        }
-        return;
-      }
-      
-      // Reset AI content when new media is added - user must manually trigger AI generation
-      setShowAiContent(false);
-      setGeneratedContent(null);
-      setAiCaption('');
-      setGeneratedHashtags([]);
-      setAiSuggestions(null);
-      
-      // Ensure no loading states are active
-      setIsGeneratingContent(false);
-      setIsGeneratingDescriptions(false);
-      setIsProcessingAllAI(false);
-      
-      // Reset user AI request flag for new photos
-      setUserRequestedAI(false);
-      
-      console.log('🔄 New media added - AI content reset, waiting for user to trigger generation');
     }
-  }, [mediaItems, stepByStepProcessed, showStepByStepOverlay, pendingStepByStepProcessing, shouldAutoTriggerStepByStep]);
+  }, [mediaItems.length]);
 
-  // Auto-generate descriptions for each photo as soon as it's added (camera flow only)
+  // Magic Path owns captions — do not run legacy per-photo auto-desc (quota + blocking modals).
   useEffect(() => {
-    const autoGenerateDescriptions = async () => {
-      // Only generate if we have media items and no descriptions yet
-      if (mediaItems.length === 0) return;
-      
-      // 🚫 SKIP auto-generation for gallery sources - they should use the overlay flow
-      console.log('🔍 DEBUGGING: Source value for auto-generation check:', sourceType);
-      if (sourceType === 'gallery') {
-        console.log('🚫 Skipping auto-description generation for gallery source');
-        console.log('📱 Triggering blue description overlay for gallery source instead');
-        
-        // Show the blue "tap to describe" overlay for gallery selections
-        if (!overlayAlreadyShown && !showDescriptionMethodOverlay) {
-          setTimeout(() => {
-            console.log('🎯 Showing description overlay for gallery source');
-            setShowDescriptionMethodOverlay(true);
-            setOverlayAlreadyShown(true);
-          }, 300); // Small delay to ensure UI is ready
-        }
-        
-        return;
-      }
-      
-      // Check if any photos need descriptions
-      const needsDescriptions = mediaItems.some((item, index) => {
-        return item.type === 'photo' && !mediaDescriptions[index];
-      });
-      
-      if (!needsDescriptions) return;
-      
-      console.log('🤖 Auto-generating descriptions for new photos (camera flow only)...');
-      
-      // Use existing generateMediaDescriptions with forceGeneration=true to bypass userRequestedAI check
-      await generateMediaDescriptions(true);
-    };
-    
-    // Don't auto-generate if step-by-step processing is happening
-    if (!showStepByStepOverlay && !stepByStepProcessed && !pendingStepByStepProcessing) {
-      autoGenerateDescriptions();
-    }
-  }, [mediaItems, sourceType]); // Depend on sourceType to properly handle gallery vs camera
+    if (mediaItems.length === 0) return;
+    setOverlayAlreadyShown(true);
+    setShowDescriptionMethodOverlay(false);
+  }, [mediaItems.length, sourceType]);
 
   // Auto-trigger logic removed - camera flow now goes directly to step-by-step processing
 
@@ -397,7 +492,17 @@ const ReviewScreen = () => {
       // Test media description service connection first
       const serviceOk = await mediaDescriptionService.testConnection();
       if (!serviceOk) {
-        console.error('❌ Media description service connection failed');
+        const last = mediaDescriptionService?.lastConnectionError;
+        const status = typeof last?.status === 'number' ? ` (HTTP ${last.status})` : '';
+        console.error('❌ Media description service connection failed', last);
+        Toast.show({
+          type: 'info',
+          text1: `AI unavailable${status}`,
+          text2: last?.code === 'NO_KEY'
+            ? 'Missing EXPO_PUBLIC_GEMINI_API_KEY'
+            : 'Check internet / quota / key validity',
+          position: 'bottom'
+        });
         throw new Error('Media description service not available');
       }
       
@@ -475,9 +580,10 @@ const ReviewScreen = () => {
         setIsRecording(true);
         Toast.show({
           type: 'info',
-          text1: '🎤 Recording... (Auto-stops when you finish)',
-          text2: 'Speak naturally, it will stop when you pause',
+          text1: '🎤 Recording…',
+          text2: 'Release to finish',
           position: 'top',
+          visibilityTime: 1500,
         });
       }
     } catch (error) {
@@ -528,11 +634,29 @@ const ReviewScreen = () => {
       );
       
       let transcript = await Promise.race([transcriptionPromise, timeoutPromise]);
+
+      // GeminiSpeechService may return bracketed error tokens like [NO_KEY], [NO_CANDIDATE], [ERROR:...]
+      const isErrorToken = typeof transcript === 'string' && /^\[[A-Z_]+(?::.*)?\]$/.test(transcript.trim());
+      if (isErrorToken) {
+        console.log('⚠️ Voice transcription returned error token; falling back to manual input', transcript);
+        setIsTranscribing(false);
+        const { title, message } = explainTranscriptErrorToken(transcript);
+        Toast.show({
+          type: 'info',
+          text1: title,
+          text2: message,
+          position: 'bottom',
+        });
+        // Keep the overlay open and show text input
+        setShowTextInput(true);
+        return;
+      }
+
       if (!transcript || /no clear speech/i.test(transcript)) {
         console.log('🌀 Low-confidence transcript; using placeholder text');
         transcript = 'Spoken description captured';
       }
-      setVoiceTranscript(transcript);
+      setVoiceCaption(transcript);
 
       console.log('📝 Voice transcript:', transcript);
 
@@ -551,8 +675,15 @@ const ReviewScreen = () => {
           voiceInputs: [...prev.voiceInputs, transcript]
         }));
         
-        // Also put in manual text box for potential editing
-        setManualDescription(prev => prev ? `${prev}\n\n${transcript}` : transcript);
+        // Only pre-fill the caption with raw voice IF we haven't already
+        // generated an AI post caption. Once AI has run, voice should live
+        // in voiceCaption but must not overwrite the AI description.
+        setManualDescription(prev => {
+          if (aiGeneratedCaptionState) {
+            return prev;
+          }
+          return prev ? `${prev}\n\n${transcript}` : transcript;
+        });
         setIsTranscribing(false);
         
         Toast.show({
@@ -564,32 +695,23 @@ const ReviewScreen = () => {
         
         // Auto-trigger step-by-step processing if recording was from description overlay
         if (isRecordingFromOverlay) {
-          console.log('🎤 Voice input recorded from overlay - starting step-by-step processing with transcript');
+          console.log('🎤 Voice input recorded from overlay - generating post (magic path)');
           console.log('🎤 Transcript to process:', transcript);
-          
-          // Close overlay and start step-by-step processing immediately with the transcript
-          setTimeout(() => {
-            setShowDescriptionMethodOverlay(false);
-            // Start step-by-step processing with the voice transcript
-            processPhotosStepByStepWithVoice(transcript);
-          }, 1000); // Short delay to show success toast
+          setShowDescriptionMethodOverlay(false);
+          // MAGIC PATH: instant draft + single multimodal upgrade.
+          void generateMagicPost(transcript).catch((e) => {
+            console.error('❌ generateMagicPost failed', e);
+          });
           return;
         }
         
         // Only auto-trigger AI generation if NOT coming from camera with multiple photos
         // If coming from camera, trigger step-by-step processing now that voice is done
-        if (!shouldAutoTriggerStepByStep) {
-          setTimeout(() => {
-            console.log('🚀 Auto-regenerating AI content with new voice input:', transcript);
-            generateComprehensiveAIContent(true, transcript); // Bypass step-by-step check, pass voice data
-          }, 1500); // Small delay to show the success toast
-        } else {
-          console.log('🎤 Voice input added - triggering step-by-step processing now');
-          setTimeout(() => {
-            initializeStepByStepProcessing();
-            setShouldAutoTriggerStepByStep(false); // Reset flag after triggering
-          }, 2000); // Small delay to show the success toast first
-        }
+        // MAGIC PATH for every voice route: instant draft + single multimodal upgrade.
+        setShouldAutoTriggerStepByStep(false);
+        void generateMagicPost(transcript).catch((e) => {
+          console.error('❌ generateMagicPost failed', e);
+        });
       } else {
         console.log('🎤 Voice recording complete - using fallback placeholder');
         setIsTranscribing(false);
@@ -611,12 +733,11 @@ const ReviewScreen = () => {
           return;
         }
         
-        // Only start step-by-step processing if NOT coming from camera with multiple photos
+        // MAGIC PATH without voice: still produce a draft straight from the photos.
         if (!shouldAutoTriggerStepByStep) {
-          setTimeout(() => {
-            console.log('🚀 Starting step-by-step processing without voice input');
-            initializeStepByStepProcessing();
-          }, 1000);
+          void generateMagicPost('').catch((e) => {
+            console.error('❌ generateMagicPost failed', e);
+          });
         } else {
           console.log('🎤 No transcript - waiting for user action in camera flow');
         }
@@ -640,12 +761,12 @@ const ReviewScreen = () => {
         return;
       }
       
-      // Only start step-by-step processing if NOT coming from camera with multiple photos
+      // MAGIC PATH: even if transcription failed, still produce a draft from photos.
       if (!shouldAutoTriggerStepByStep) {
-        console.log('🔄 Voice processing failed, continuing with step-by-step anyway');
-        setTimeout(() => {
-          initializeStepByStepProcessing();
-        }, 500);
+        console.log('🔄 Voice processing failed, generating post from photos anyway');
+        void generateMagicPost('').catch((e) => {
+          console.error('❌ generateMagicPost failed', e);
+        });
       } else {
         console.log('🔄 Voice processing failed in camera flow - waiting for user action');
       }
@@ -689,6 +810,7 @@ const ReviewScreen = () => {
 
   // Handle enhancing from manual text input
   const handleEnhanceFromText = async () => {
+    if (!requireAI()) return;
     if (!manualDescription.trim()) {
       Alert.alert('Empty Text', 'Please type a description first.');
       return;
@@ -715,6 +837,200 @@ const ReviewScreen = () => {
       Alert.alert('Error', 'Failed to enhance text. Please try again.');
     } finally {
       setIsGeneratingFromText(false);
+    }
+  };
+
+  // Apply one of the generated caption variants as the active caption.
+  const applyVariant = (index) => {
+    const variant = descriptionVariants[index];
+    if (!variant) return;
+
+    // User explicitly chose an option — don't let an in-flight magic upgrade clobber it.
+    magicUserTookOverRef.current = true;
+
+    setSelectedVariantIndex(index);
+
+    const description = variant.description || '';
+    const title = variant.title || '';
+    const hashtags = Array.isArray(variant.hashtags) ? variant.hashtags : [];
+
+    // Feed the caption pipeline (treated as a fresh AI result, not a manual edit).
+    setAiGeneratedCaptionState(description);
+    setEditedAfterAI(false);
+    setManualDescription(description);
+    if (title) setGeneratedTitleState(title);
+    if (hashtags.length > 0) {
+      setGeneratedHashtagsState(hashtags);
+      setGeneratedHashtags(hashtags);
+    }
+
+    // Keep legacy state in sync so existing UI / upload paths work unchanged.
+    setAiCaption(description);
+    setCaption(description);
+    setGeneratedContent((prev) => ({
+      ...(prev || {}),
+      title: title || prev?.title || '',
+      description,
+      hashtags: hashtags.length > 0 ? hashtags : (prev?.hashtags || [])
+    }));
+  };
+
+  // Shared: commit a variant result (from AI or fallback) into all caption state.
+  // Stores the full option set, defaults to the first, and keeps legacy state in sync.
+  // Returns true if at least one variant was committed.
+  const commitVariantResult = (variantResult, intent) => {
+    const variants = variantResult?.variants || [];
+    if (variants.length === 0) return false;
+
+    const primary = variants[0];
+    const primaryHashtags = Array.isArray(primary.hashtags) ? primary.hashtags : [];
+    const aiContent = {
+      title: primary.title || variantResult.title || '',
+      description: primary.description || '',
+      hashtags: primaryHashtags
+    };
+
+    setDescriptionVariants(variants);
+    setSelectedVariantIndex(0);
+    if (typeof intent === 'string') setVariantIntent(intent);
+
+    setAiGeneratedCaptionState(aiContent.description);
+    setGeneratedTitleState(aiContent.title);
+    setGeneratedHashtagsState(aiContent.hashtags);
+    setEditedAfterAI(false);
+    setManualDescription(aiContent.description);
+
+    setGeneratedContent(aiContent);
+    setAiCaption(aiContent.description);
+    setCaption(aiContent.description);
+    setGeneratedHashtags(aiContent.hashtags);
+    setAiSuggestions(aiContent);
+    setShowAiContent(true);
+    setContentView('ai');
+    return true;
+  };
+
+  // MAGIC PATH — "you speak, here's your post." Show an instant draft, then
+  // upgrade it in place from a SINGLE multimodal AI call. No step-by-step
+  // overlay, no artificial setTimeout delays: the post appears immediately and
+  // gets better when the model returns.
+  const generateMagicPost = async (intent = '') => {
+    const cleanIntent = (intent || '').trim();
+    const runId = (magicRunIdRef.current += 1);
+    magicUserTookOverRef.current = false;
+    setMagicError(null);
+
+    setUserRequestedAI(true);
+    setVariantIntent(cleanIntent);
+
+    // Land the user straight on the composer (close any open overlays).
+    setShowDescriptionMethodOverlay(false);
+    setShowStepByStepOverlay(false);
+    setShowReviewOverlay(false);
+    setShowMultiPhotoModal(false);
+    setIsCapturingMultiplePhotos(false);
+    setOverlayAlreadyShown(true);
+
+    // 1) Instant optimistic draft so a usable post appears right away.
+    const optimistic = mediaDescriptionService.getVariantFallback([], cleanIntent, 3);
+    commitVariantResult(optimistic, cleanIntent);
+    setIsPolishingCaption(true);
+
+    Toast.show({
+      type: 'info',
+      text1: 'Writing your post…',
+      text2: 'Polishing a caption from your media',
+      position: 'bottom',
+    });
+
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 280, animated: true });
+    }, 50);
+
+    // 2) Upgrade in place with ONE multimodal call (collapses the per-photo loop).
+    try {
+      const result = await mediaDescriptionService.generatePostFromMedia(
+        mediaItems,
+        cleanIntent,
+        { count: 3 }
+      );
+
+      // Ignore stale runs (a newer generateMagicPost started).
+      if (magicRunIdRef.current !== runId) return;
+
+      if (Array.isArray(result?.perPhotoDescriptions) && result.perPhotoDescriptions.length > 0) {
+        setMediaDescriptions(result.perPhotoDescriptions);
+      }
+
+      if (result?.aiError) {
+        setMagicError(String(result.aiError).slice(0, 120));
+      }
+
+      if (result?.variants?.length) {
+        if (magicUserTookOverRef.current) {
+          // User already edited / picked a variant — keep their choice, just
+          // refresh the available options for "Regenerate".
+          setDescriptionVariants(result.variants);
+        } else {
+          commitVariantResult(result, cleanIntent);
+          if (!result?.aiError) {
+            Toast.show({
+              type: 'success',
+              text1: 'Your post is ready',
+              text2: 'Pick a caption or tweak it your way',
+              position: 'bottom',
+            });
+          }
+        }
+        if (!result?.aiError) setMagicError(null);
+      } else if (!result?.aiError) {
+        setMagicError('Couldn’t polish — keep editing or post as-is');
+      }
+    } catch (e) {
+      console.error('❌ generateMagicPost failed', e);
+      if (magicRunIdRef.current === runId) {
+        setMagicError(e?.message ? String(e.message).slice(0, 90) : 'Couldn’t polish — keep editing or post as-is');
+      }
+    } finally {
+      if (magicRunIdRef.current === runId) setIsPolishingCaption(false);
+    }
+  };
+
+  // Re-roll the caption options without restarting the whole flow,
+  // reusing the same intent + the existing per-photo descriptions.
+  const regenerateVariants = async () => {
+    try {
+      setIsRegeneratingVariants(true);
+      const result = await mediaDescriptionService.generatePostDescriptionVariants(
+        mediaDescriptions || [],
+        variantIntent || '',
+        { count: 3 }
+      );
+      const ok = commitVariantResult(result, variantIntent);
+      if (!ok) {
+        const fallback = mediaDescriptionService.getVariantFallback(
+          mediaDescriptions || [],
+          variantIntent || '',
+          3
+        );
+        commitVariantResult(fallback, variantIntent);
+      }
+      Toast.show({
+        type: 'success',
+        text1: '🔄 New options ready',
+        text2: 'Fresh caption choices below',
+        position: 'bottom',
+      });
+    } catch (error) {
+      console.error('❌ Failed to regenerate variants:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Could not regenerate',
+        text2: 'Please try again',
+        position: 'bottom',
+      });
+    } finally {
+      setIsRegeneratingVariants(false);
     }
   };
 
@@ -746,27 +1062,64 @@ const ReviewScreen = () => {
         uri: firstMediaItem.uri?.substring(0, 50) + '...' 
       });
 
-      // Generate comprehensive post data using the new service
-      const aiContent = await mediaDescriptionService.generateFullPostData(
-        firstMediaItem.uri, 
-        voiceInput
+      // Build contextual prompt combining voice (PRIMARY) + photo descriptions
+      const hasVoice = voiceInput && voiceInput.trim().length > 0;
+      const hasPhotoDescriptions = mediaDescriptions && mediaDescriptions.length > 0;
+      
+      let contextPrompt = '';
+      if (hasVoice && hasPhotoDescriptions) {
+        // VOICE + PHOTO: treat voice as PRIMARY
+        contextPrompt = `Create a SHORT social media post emphasizing the user's voice message, with photos as visual context.
+
+🗣️ User's Voice (PRIMARY): "${voiceInput}"
+
+📸 Photo Context:
+${mediaDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+INSTRUCTIONS:
+- Write PRIMARILY about what the user said
+- Use photo descriptions only as context/validation
+- Make it natural and authentic
+- Keep it SHORT and catchy
+- Return JSON: {title, description, hashtags}`;
+        console.log('🎤📸 Using CONTEXTUAL path (voice PRIMARY + photos)');
+      } else if (hasPhotoDescriptions && !hasVoice) {
+        contextPrompt = `Create a social media post from these photo descriptions:
+
+${mediaDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+Write a natural, engaging caption with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('📸 Using CONTEXTUAL path (photos only)');
+      } else if (hasVoice && !hasPhotoDescriptions) {
+        contextPrompt = `Create a social media post from this message:
+
+"${voiceInput}"
+
+Write naturally with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('🎤 Using CONTEXTUAL path (voice only)');
+      } else {
+        throw new Error('No voice or photo descriptions available');
+      }
+
+      // Generate 2-3 selectable caption variants by fusing every per-photo
+      // description with the user's stated intent (voiceInput).
+      const variantResult = await mediaDescriptionService.generatePostDescriptionVariants(
+        mediaDescriptions || [],
+        voiceInput || '',
+        { count: 3 }
       );
 
-      console.log('✅ AI content generated:', aiContent);
+      console.log('✅ AI variants generated:', variantResult);
 
-      if (aiContent) {
-        setGeneratedContent(aiContent);
-        setAiCaption(aiContent.description);
-        setCaption(aiContent.description);
-        setGeneratedHashtags(aiContent.hashtags);
-        setAiSuggestions(aiContent);
-        setShowAiContent(true);
-        setContentView('ai');
-
+      const committed = commitVariantResult(variantResult, voiceInput || '');
+      if (committed) {
+        const optionCount = variantResult?.variants?.length || 0;
         Toast.show({
           type: 'success',
-          text1: '🤖 AI Enhancement Complete!',
-          text2: 'Your content has been enhanced with AI',
+          text1: '🤖 AI captions ready!',
+          text2: optionCount > 1
+            ? `Pick from ${optionCount} options below`
+            : 'Your caption has been generated',
           position: 'bottom',
         });
       } else {
@@ -776,13 +1129,30 @@ const ReviewScreen = () => {
     } catch (error) {
       console.error('❌ AI content generation failed:', error);
       
-      // Use smart fallback content from the new service with user input
-      const fallbackContent = mediaItems.length > 0 
-        ? mediaDescriptionService.getSmartFallbackDescription(mediaItems[0], voiceInput)
-        : { title: 'My Story', description: voiceInput + ' 📱✨', hashtags: ['story', 'personal', 'voice'] };
-      
+      // Use multi-variant fallback so the selector still offers choices offline.
+      const fallbackResult = mediaDescriptionService.getVariantFallback(
+        mediaDescriptions || [],
+        voiceInput || '',
+        3
+      );
+      const fallbackVariants = fallbackResult?.variants || [];
+      const fallbackContent = fallbackVariants.length > 0
+        ? { title: fallbackResult.title || 'My Story', description: fallbackVariants[0].description, hashtags: fallbackVariants[0].hashtags }
+        : { title: 'My Story', description: (voiceInput || '') + ' 📱✨', hashtags: ['story', 'personal', 'voice'] };
+
       console.log('🔄 Using personalized fallback with user input:', { voiceInput, fallbackContent });
+
+      setDescriptionVariants(fallbackVariants);
+      setSelectedVariantIndex(0);
+
+      // Store fallback in caption pipeline
+      setAiGeneratedCaptionState(fallbackContent.description || '');
+      setGeneratedTitleState(fallbackContent.title || '');
+      setGeneratedHashtagsState(fallbackContent.hashtags || []);
+      setEditedAfterAI(false);
+      setManualDescription(fallbackContent.description || '');
       
+      // Keep legacy state
       setGeneratedContent(fallbackContent);
       setAiCaption(fallbackContent.description);
       setCaption(fallbackContent.description);
@@ -921,15 +1291,33 @@ const ReviewScreen = () => {
         console.log('📝 Using direct analysis prompt - processing all media');
       }
       
-      // Use the first media item's URI for the API call, with the enhanced prompt as context
-      const primaryMediaItem = newMediaItems[0];
-      const aiContent = await mediaDescriptionService.generateFullPostDataWithContext(
-        primaryMediaItem.uri, 
-        enhancedPrompt,
-        mediaDescriptions
+      // Generate 2-3 selectable variants from all photo descriptions (no explicit user intent here).
+      const variantResult = await mediaDescriptionService.generatePostDescriptionVariants(
+        mediaDescriptions,
+        '',
+        { count: 3 }
       );
+      const _variants = (variantResult?.variants && variantResult.variants.length > 0)
+        ? variantResult.variants
+        : mediaDescriptionService.getVariantFallback(mediaDescriptions, '', 3).variants;
+      setDescriptionVariants(_variants);
+      setSelectedVariantIndex(0);
+      setVariantIntent('');
+      const aiContent = {
+        title: _variants[0].title || variantResult?.title || '',
+        description: _variants[0].description || '',
+        hashtags: _variants[0].hashtags || []
+      };
 
       if (aiContent) {
+        // Store AI-generated content in new state variables for caption pipeline
+        setAiGeneratedCaptionState(aiContent.description || '');
+        setGeneratedTitleState(aiContent.title || '');
+        setGeneratedHashtagsState(aiContent.hashtags || []);
+        setEditedAfterAI(false);
+        setManualDescription(aiContent.description || '');
+        
+        // Keep legacy state for backward compatibility
         setGeneratedContent(aiContent);
         setAiCaption(aiContent.description);
         setCaption(aiContent.description);
@@ -988,13 +1376,13 @@ const ReviewScreen = () => {
           console.log('📸 Total media items now:', updatedItems.length);
           return updatedItems;
         });
-        
-        // Individual descriptions will be generated by useEffect
-        // Full AI content will be generated after descriptions are ready
+      } else if (result.canceled) {
+        exitIfEmptyModeCompose();
       }
     } catch (error) {
       console.error('Error selecting media from library:', error);
       Alert.alert('Error', 'Failed to access media library');
+      exitIfEmptyModeCompose();
     }
   };
 
@@ -1023,25 +1411,23 @@ const ReviewScreen = () => {
   };
 
   const handleContinueWithPost = () => {
-    console.log('📝 User chose to continue with current photos - same as Done button behavior');
+    console.log('📝 Continue with photos — composer + ambient Magic Path');
     setShowMultiPhotoModal(false);
     setIsCapturingMultiplePhotos(false);
-    
-    // Behave exactly like the Done button from CameraScreen:
-    // Close modal and show description overlay immediately
-    console.log('🏁 [TRIGGER-2] Continuing with', mediaItems.length, 'photos - showing description options');
-    if (!overlayAlreadyShown) {
-      setShowDescriptionMethodOverlay(true);
-      setOverlayAlreadyShown(true);
-    } else {
-      console.log('⚠️ Overlay already shown, skipping duplicate trigger');
+    setShowDescriptionMethodOverlay(false);
+    setOverlayAlreadyShown(true);
+    if (!magicAutoStartedRef.current && mediaItems.length > 0) {
+      magicAutoStartedRef.current = true;
+      void generateMagicPost('').catch((e) => {
+        console.error('❌ generateMagicPost failed', e);
+      });
     }
   };
 
   // Initialize step-by-step processing immediately for voice input
-  const initializeStepByStepProcessingWithVoice = async (voiceTranscript = null) => {
+  const initializeStepByStepProcessingWithVoice = async (voiceCaption = null) => {
     try {
-      console.log('🚀 Initializing step-by-step processing with voice input:', voiceTranscript);
+      console.log('🚀 Initializing step-by-step processing with voice input:', voiceCaption);
       
       // Prepare steps for each photo + voice input
       const steps = [];
@@ -1054,11 +1440,11 @@ const ReviewScreen = () => {
       });
       
       // Add voice input step with actual transcript or placeholder
-      if (voiceTranscript) {
+      if (voiceCaption) {
         steps.push({
           title: 'Voice Input',
-          description: voiceTranscript.length > 60 ? voiceTranscript.slice(0, 60) + '...' : voiceTranscript,
-          fullDescription: voiceTranscript,
+          description: voiceCaption.length > 60 ? voiceCaption.slice(0, 60) + '...' : voiceCaption,
+          fullDescription: voiceCaption,
           completed: true,
           isVoice: true
         });
@@ -1085,7 +1471,7 @@ const ReviewScreen = () => {
       setShowStepByStepOverlay(true);
       
       // Start processing photos
-      await processPhotosStepByStepWithVoice(voiceTranscript);
+      await processPhotosStepByStepWithVoice(voiceCaption);
       
     } catch (error) {
       console.error('❌ Failed to initialize immediate step-by-step processing:', error);
@@ -1097,14 +1483,15 @@ const ReviewScreen = () => {
   // Initialize step-by-step processing for multiple photos
   const initializeStepByStepProcessing = async () => {
     try {
-      console.log('🚀 Initializing step-by-step AI processing for', mediaItems.length, 'photos');
+      console.log('🚀 Initializing step-by-step AI processing for', mediaItems.length, 'media items');
       
       // Prepare steps for each photo
       const steps = [];
       mediaItems.forEach((media, index) => {
+        const label = media?.type === 'video' ? 'Video' : 'Photo';
         steps.push({
-          title: `Photo ${index + 1} - Generating Description`,
-          description: `Creating AI description for photo ${index + 1}`,
+          title: `${label} ${index + 1} - Generating Description`,
+          description: `Creating AI description for ${label.toLowerCase()} ${index + 1}`,
           completed: false
         });
       });
@@ -1140,7 +1527,7 @@ const ReviewScreen = () => {
       // Set the steps and show overlay
       setAiSteps(steps);
       setCurrentStep(0);
-      setCurrentStepDescription(`Analyzing photo 1 of ${mediaItems.length}...`);
+      setCurrentStepDescription(`Analyzing item 1 of ${mediaItems.length}...`);
       setShowStepByStepOverlay(true);
       
       // Start processing each photo
@@ -1154,16 +1541,17 @@ const ReviewScreen = () => {
   };
 
   // Process photos step by step with voice input
-  const processPhotosStepByStepWithVoice = async (voiceTranscript = null) => {
+  const processPhotosStepByStepWithVoice = async (voiceCaption = null) => {
     try {
-      console.log('🚀 Starting step-by-step processing with voice transcript:', voiceTranscript);
+      console.log('🚀 Starting step-by-step processing with voice transcript:', voiceCaption);
       
       // Initialize steps for photos + voice + AI generation
       const steps = [];
       mediaItems.forEach((media, index) => {
+        const label = media?.type === 'video' ? 'Video' : 'Photo';
         steps.push({
-          title: `Photo ${index + 1}`,
-          description: `Analyzing photo ${index + 1}...`,
+          title: `${label} ${index + 1}`,
+          description: `Analyzing ${label.toLowerCase()} ${index + 1}...`,
           completed: false
         });
       });
@@ -1171,7 +1559,7 @@ const ReviewScreen = () => {
       // Add voice step
       steps.push({
         title: 'Voice Input',
-        description: voiceTranscript ? 'Processing voice description...' : 'Waiting for voice input...',
+        description: voiceCaption ? 'Processing voice description...' : 'Waiting for voice input...',
         completed: false
       });
       
@@ -1185,7 +1573,7 @@ const ReviewScreen = () => {
       // Set up the overlay
       setAiSteps(steps);
       setCurrentStep(0);
-      setCurrentStepDescription(`Analyzing photo 1 of ${mediaItems.length}...`);
+      setCurrentStepDescription(`Analyzing item 1 of ${mediaItems.length}...`);
       setShowStepByStepOverlay(true);
       
       const descriptions = [];
@@ -1193,20 +1581,21 @@ const ReviewScreen = () => {
       // Process each photo
       for (let i = 0; i < mediaItems.length; i++) {
         const media = mediaItems[i];
-        console.log(`🔍 Processing photo ${i + 1}/${mediaItems.length}`);
+        console.log(`🔍 Processing item ${i + 1}/${mediaItems.length}`, { type: media?.type });
         
         // Update current step
         setCurrentStep(i);
-        setCurrentStepDescription(`Analyzing photo ${i + 1} of ${mediaItems.length}...`);
+        setCurrentStepDescription(`Analyzing item ${i + 1} of ${mediaItems.length}...`);
         
-        // Generate description for this photo
-        const description = await mediaDescriptionService.generateMediaDescription(media);
+        // Generate description for this photo (may return null when AI is unavailable)
+        const rawDescription = await mediaDescriptionService.generateMediaDescription(media);
+        const description = rawDescription || mediaDescriptionService.getFallbackDescription(media, i);
         descriptions.push(description);
         
         // Update step to show completion
-        setAiSteps(prev => prev.map((step, index) => 
+        setAiSteps(prev => prev.map((step, index) => (
           index === i ? { ...step, completed: true, description: description.slice(0, 60) + '...' } : step
-        ));
+        )));
         
         // Small delay to show the completion
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1216,19 +1605,19 @@ const ReviewScreen = () => {
       const voiceStepIndex = mediaItems.length;
       setCurrentStep(voiceStepIndex);
       
-      if (voiceTranscript) {
+      if (voiceCaption) {
         setCurrentStepDescription('Processing voice description...');
         
         // Update voice step to show the actual transcript
         setAiSteps(prev => prev.map((step, index) => 
-          index === voiceStepIndex ? { ...step, completed: true, description: voiceTranscript } : step
+          index === voiceStepIndex ? { ...step, completed: true, description: voiceCaption } : step
         ));
         
         // Small delay to show the voice step
         await new Promise(resolve => setTimeout(resolve, 1200));
         
         // Complete the final step with AI generation
-        await completeStepByStepProcessing(voiceTranscript, descriptions);
+        await completeStepByStepProcessing(voiceCaption, descriptions);
       } else {
         setCurrentStepDescription('Waiting for voice description...');
         // Store descriptions for when voice completes
@@ -1247,20 +1636,21 @@ const ReviewScreen = () => {
       
       for (let i = 0; i < mediaItems.length; i++) {
         const media = mediaItems[i];
-        console.log(`🔍 Processing photo ${i + 1}/${mediaItems.length}`);
+        console.log(`🔍 Processing item ${i + 1}/${mediaItems.length}`, { type: media?.type });
         
         // Update current step
         setCurrentStep(i);
-        setCurrentStepDescription(`Analyzing photo ${i + 1} of ${mediaItems.length}...`);
+        setCurrentStepDescription(`Analyzing item ${i + 1} of ${mediaItems.length}...`);
         
-        // Generate description for this photo
-        const description = await mediaDescriptionService.generateMediaDescription(media);
+        // Generate description for this photo (may return null when AI is unavailable)
+        const rawDescription = await mediaDescriptionService.generateMediaDescription(media);
+        const description = rawDescription || mediaDescriptionService.getFallbackDescription(media, i);
         descriptions.push(description);
         
         // Update step to show completion
-        setAiSteps(prev => prev.map((step, index) => 
+        setAiSteps(prev => prev.map((step, index) => (
           index === i ? { ...step, completed: true, description: description.slice(0, 60) + '...' } : step
-        ));
+        )));
         
         // Small delay to show the completion
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -1312,28 +1702,38 @@ const ReviewScreen = () => {
       }
       
       let aiContent;
+      let _variants = null;
       try {
-        aiContent = await mediaDescriptionService.generateFullPostDataWithContext(
-          mediaItems[0].uri,
-          enhancedPrompt,
-          descriptions
+        const variantResult = await mediaDescriptionService.generatePostDescriptionVariants(
+          descriptions,
+          voiceContext,
+          { count: 3 }
         );
+        if (variantResult?.variants?.length) {
+          _variants = variantResult.variants;
+          aiContent = {
+            title: _variants[0].title || variantResult.title || '',
+            description: _variants[0].description || '',
+            hashtags: _variants[0].hashtags || []
+          };
+        }
         console.log('✅ AI generation successful');
       } catch (aiError) {
         console.log('⚠️ AI generation failed, using smart fallback:', aiError.message);
-        // Use smart fallback that considers the context
+      }
+      if (!_variants) {
+        // Smart fallback that still offers multiple distinct options.
+        const fb = mediaDescriptionService.getVariantFallback(descriptions, voiceContext, 3);
+        _variants = fb.variants;
         aiContent = {
-          title: mediaItems.length > 1 ? 'Photo Collection' : 'My Photo',
-          description: hasVoiceInput 
-            ? `${voiceContext} 📸✨` 
-            : (mediaItems.length > 1 
-                ? 'Sharing some awesome moments from today! 📸✨' 
-                : 'Captured a great moment! 📷✨'),
-          hashtags: hasVoiceInput 
-            ? ['photo', 'moment', 'life', 'voice'] 
-            : ['photo', 'moment', 'life', 'capture']
+          title: _variants[0].title || fb.title || '',
+          description: _variants[0].description || '',
+          hashtags: _variants[0].hashtags || []
         };
       }
+      setDescriptionVariants(_variants);
+      setSelectedVariantIndex(0);
+      setVariantIntent(voiceContext);
       
       // Update final step
       setAiSteps(prev => prev.map((step, index) => 
@@ -1376,7 +1776,7 @@ const ReviewScreen = () => {
   };
 
   // Complete step-by-step processing with voice input and photo descriptions
-  const completeStepByStepProcessing = async (voiceTranscript, photoDescriptions) => {
+  const completeStepByStepProcessing = async (voiceCaption, photoDescriptions) => {
     try {
       console.log('🎯 Completing step-by-step processing with voice and photos');
       
@@ -1399,7 +1799,7 @@ const ReviewScreen = () => {
       
       // Store the data for review overlay
       setReviewData({
-        voiceInput: voiceTranscript,
+        voiceInput: voiceCaption,
         photoDescriptions: photoDescriptions,
         isGeneratingAI: false
       });
@@ -1423,43 +1823,88 @@ const ReviewScreen = () => {
 
   // Generate AI Post from Review Overlay
   const handleGenerateAIPost = async () => {
+    if (!requireAI()) return;
     try {
       console.log('🚀 User clicked Generate AI Post button');
       
       // Update review overlay to show generating state
       setReviewData(prev => ({ ...prev, isGeneratingAI: true }));
       
-      // Generate AI content - COMPLETELY IGNORE PHOTO, FOCUS ON VOICE
-      const enhancedPrompt = `IGNORE THE IMAGE. Write a social media post ONLY about what the user said: "${reviewData.voiceInput}".
-
-USER'S MESSAGE (ONLY FOCUS): "${reviewData.voiceInput}"
-Photo context (ignore this): ${reviewData.photoDescriptions.join('. ')}
-
-ABSOLUTE RULES:
-- DO NOT describe what's in the photo
-- Write ONLY about: "${reviewData.voiceInput}"
-- If they mention feelings/thoughts not visible in photo, write about those
-- Write casually and naturally like a real person would post
-- Don't overuse slang abbreviations - keep it natural
-- Make the post about their WORDS, not visual elements
-- Generate a SHORT CATCHY TITLE (50 characters max) based on "${reviewData.voiceInput}"
-
-EXAMPLES:
-- Voice: "I'm so tired" → Write about being tired, NOT the laptop/coding
-- Voice: "this coffee is amazing" → Write about coffee, even if not in photo
-- Voice: "stressed about deadlines" → Focus on stress, not what's visible
-
-The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a short title!`;
-      console.log('🎤📸 Generating content FORCING user voice priority over photo content');
+      // Determine what inputs we have
+      const hasVoice = reviewData.voiceInput && reviewData.voiceInput.trim().length > 0;
+      const hasPhotoDescriptions = reviewData.photoDescriptions && reviewData.photoDescriptions.length > 0;
       
-      const aiContent = await mediaDescriptionService.generateFullPostDataWithContext(
-        mediaItems[0].uri,
-        enhancedPrompt,
-        reviewData.photoDescriptions
+      let contextPrompt = '';
+      
+      if (hasVoice && hasPhotoDescriptions) {
+        // PRIMARY CASE: Voice + Photo Descriptions - VOICE IS PRIMARY
+        contextPrompt = `Create a SHORT social media post emphasizing the user's voice message, with photos as visual context.
+
+🗣️ User's Voice (PRIMARY): "${reviewData.voiceInput}"
+
+📸 Photo Context:
+${reviewData.photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+INSTRUCTIONS:
+- Write PRIMARILY about what the user said
+- Use photos only as context/validation
+- Make it natural and authentic, like a real person posting
+- Generate a SHORT CATCHY TITLE (50 characters max)
+- Return JSON with: title, description, hashtags`;
+        console.log('🎤📸 Using CONTEXTUAL path (voice PRIMARY + photos)');
+      } else if (hasPhotoDescriptions && !hasVoice) {
+        // Photo descriptions only
+        contextPrompt = `Create a social media post from these photo descriptions:
+
+${reviewData.photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+Create a natural, engaging caption with a catchy title (50 chars max). Return JSON with: title, description, hashtags.`;
+        console.log('📸 Using CONTEXTUAL path (photos only)');
+      } else if (hasVoice && !hasPhotoDescriptions) {
+        // Voice only
+        contextPrompt = `Create a social media post from this user message:
+
+"${reviewData.voiceInput}"
+
+Write a natural, engaging caption with a catchy title (50 chars max). Return JSON with: title, description, hashtags.`;
+        console.log('🎤 Using CONTEXTUAL path (voice only)');
+      } else {
+        throw new Error('No voice or photo descriptions available');
+      }
+      
+      // Generate 2-3 selectable caption variants (consistent across the app).
+      const _intent = reviewData.voiceInput || '';
+      const _descs = reviewData.photoDescriptions || [];
+      const variantResult = await mediaDescriptionService.generatePostDescriptionVariants(
+        _descs,
+        _intent,
+        { count: 3 }
       );
+      const _variants = (variantResult?.variants && variantResult.variants.length > 0)
+        ? variantResult.variants
+        : mediaDescriptionService.getVariantFallback(_descs, _intent, 3).variants;
+      setDescriptionVariants(_variants);
+      setSelectedVariantIndex(0);
+      setVariantIntent(_intent);
+      const aiContent = {
+        title: _variants[0].title || variantResult?.title || '',
+        description: _variants[0].description || '',
+        hashtags: _variants[0].hashtags || []
+      };
+
+      // Apply the AI content (SINGLE SOURCE OF TRUTH)
+      console.log('✅ AI post generated successfully:', aiContent.description);
       
-      // Apply the AI content
       setMediaDescriptions(reviewData.photoDescriptions);
+      
+      // Update caption pipeline state with AI-generated description
+      setAiGeneratedCaptionState(aiContent.description || '');
+      setGeneratedTitleState(aiContent.title || '');
+      setGeneratedHashtagsState(aiContent.hashtags || []);
+      setManualDescription(aiContent.description || ''); // Pre-fill TextInput
+      setEditedAfterAI(false); // Mark as NOT edited
+      
+      // Keep legacy state for backward compatibility
       setAiCaption(aiContent.description || '');
       setCaption(aiContent.description || '');
       setGeneratedHashtags(aiContent.hashtags || []);
@@ -1573,12 +2018,24 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       setDescriptionText('');
       setShowTextInput(false);
       setShowDescriptionMethodOverlay(false);
-      
-      // Start step-by-step processing with user's description
-      await initializeStepByStepProcessing();
+
+      // If AI isn't available (missing Gemini key, quota, etc), don't attempt step-by-step AI.
+      // Still allow posting with the user's description.
+      if (!aiService.isAvailable()) {
+        Toast.show({
+          type: 'info',
+          text1: 'AI unavailable',
+          text2: 'Using your description without AI',
+          position: 'bottom',
+        });
+        return;
+      }
+
+      // MAGIC PATH: instant draft from the typed intent + photos, upgraded in place.
+      await generateMagicPost(descriptionText);
       
     } catch (error) {
-      console.error('❌ Failed to start step-by-step processing:', error);
+      console.error('❌ Failed to generate post from text:', error);
       Alert.alert('Error', 'Failed to start AI processing');
     }
   };
@@ -1593,13 +2050,14 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
     // Close overlay
     setShowDescriptionMethodOverlay(false);
     
-    // Reset the auto-trigger flag and start step-by-step processing
+    // Reset the auto-trigger flag and generate a draft straight from the photos.
     setShouldAutoTriggerStepByStep(false);
     
     try {
-      await initializeStepByStepProcessing();
+      // MAGIC PATH: no description needed — build the post from the photos.
+      await generateMagicPost('');
     } catch (error) {
-      console.error('❌ Failed to start step-by-step processing:', error);
+      console.error('❌ Failed to generate post:', error);
       Alert.alert('Error', 'Failed to start AI processing');
     }
   };
@@ -1622,9 +2080,22 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         try {
           const transcript = await geminiSpeechService.transcribeAudio(uri);
           console.log('📝 Voice transcribed:', transcript);
+
+          const isErrorToken = typeof transcript === 'string' && /^\[[A-Z_]+(?::.*)?\]$/.test(transcript.trim());
+          if (isErrorToken) {
+            const { title, message } = explainTranscriptErrorToken(transcript);
+            Toast.show({
+              type: 'info',
+              text1: title,
+              text2: message,
+              position: 'bottom',
+            });
+            setShowTextInput(true);
+            return;
+          }
           
           if (transcript && transcript.trim()) {
-            setVoiceTranscript(transcript);
+            setVoiceCaption(transcript);
             setOriginalCaption(transcript);
             setCaption(transcript);
             
@@ -1635,19 +2106,36 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
               voiceInputs: [...prev.voiceInputs, transcript]
             }));
             
-            // Automatically trigger step-by-step AI processing after voice input
-            console.log('🤖 Auto-triggering step-by-step processing after voice description');
+            // Only pre-fill the caption with raw voice IF we haven't already
+            // generated an AI post caption.
+            if (!aiGeneratedCaptionState) {
+              setManualDescription(transcript);
+            }
+            
+            // MAGIC PATH: instant draft + single multimodal upgrade after voice input.
+            console.log('🤖 Generating post (magic path) after voice description');
             setUserRequestedAI(true);
-            setTimeout(() => {
-              initializeStepByStepProcessing();
-            }, 1000);
+            void generateMagicPost(transcript).catch((e) => {
+              console.error('❌ generateMagicPost failed', e);
+            });
             
           } else {
-            Alert.alert('Transcription Error', 'Could not understand the audio. Please try again.');
+            Toast.show({
+              type: 'info',
+              text1: '🎤 Could not understand audio',
+              text2: 'Try again, or type your description instead',
+              position: 'bottom',
+            });
           }
         } catch (transcriptionError) {
           console.error('❌ Transcription failed:', transcriptionError);
-          Alert.alert('Transcription Error', 'Failed to process voice recording');
+          Toast.show({
+            type: 'error',
+            text1: '🎤 Transcription failed',
+            text2: transcriptionError?.message ? String(transcriptionError.message).slice(0, 90) : 'Type your description instead',
+            position: 'bottom',
+          });
+          setShowTextInput(true);
         }
       }
       
@@ -1660,12 +2148,9 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
     }
   };
 
-  // Take Photo handler with multi-photo support
+  // Take Photo — land straight on the composer (no multi-photo gate).
   const handleTakePhoto = async () => {
     try {
-      // Set multi-photo capture flag to prevent AI generation
-      setIsCapturingMultiplePhotos(true);
-      
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
@@ -1677,29 +2162,19 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           type: 'photo'
         };
         console.log('📷 Taking photo - new media item:', { type: newMediaItem.type, uri: newMediaItem.uri?.substring(0, 50) + '...' });
-        
-        setMediaItems(prevItems => {
-          const updatedItems = [...prevItems, newMediaItem];
-          console.log('📷 Total media items after photo:', updatedItems.length);
-          
-          // Show multi-photo option after adding the photo (but not during step-by-step processing)
-          setTimeout(() => {
-            setCurrentPhotoCount(updatedItems.length);
-            // Don't show modal if step-by-step processing is active
-            if (!showStepByStepOverlay && !stepByStepProcessed) {
-              setShowMultiPhotoModal(true);
-            }
-          }, 500); // Small delay to ensure state is updated
-          
-          return updatedItems;
-        });
-        
-        // Descriptions will be generated by useEffect, but full AI content will wait until user is done
+        setSourceType((prev) => prev || 'camera');
+        setShowMultiPhotoModal(false);
+        setIsCapturingMultiplePhotos(false);
+        setOverlayAlreadyShown(true);
+        setMediaItems((prevItems) => [...prevItems, newMediaItem]);
+      } else if (result.canceled) {
+        exitIfEmptyModeCompose();
       }
     } catch (error) {
       console.error('Camera error:', error);
       Alert.alert('Error', 'Failed to take photo');
-      setIsCapturingMultiplePhotos(false); // Reset flag on error
+      setIsCapturingMultiplePhotos(false);
+      exitIfEmptyModeCompose();
     }
   };
 
@@ -1716,16 +2191,60 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           ...result.assets[0],
           type: 'video'
         };
-        setMediaItems(prevItems => [...prevItems, newMediaItem]);
-        
-        // Individual descriptions will be generated by useEffect
-        // Full AI content will be generated after descriptions are ready
+        setSourceType((prev) => prev || 'camera');
+        setShowMultiPhotoModal(false);
+        setOverlayAlreadyShown(true);
+        setMediaItems((prevItems) => [...prevItems, newMediaItem]);
+      } else if (result.canceled) {
+        exitIfEmptyModeCompose();
       }
     } catch (error) {
       console.error('Video camera error:', error);
       Alert.alert('Error', 'Failed to record video');
+      exitIfEmptyModeCompose();
     }
   };
+
+  const modeLaunchRef = useRef(false);
+  useEffect(() => {
+    if (modeLaunchRef.current || mediaItems.length > 0) return;
+    if (mode === 'photo') {
+      modeLaunchRef.current = true;
+      setSourceType((prev) => prev || 'camera');
+      handleTakePhoto().catch(() => {});
+    } else if (mode === 'video') {
+      modeLaunchRef.current = true;
+      setSourceType((prev) => prev || 'camera');
+      handleTakeVideo().catch(() => {});
+    } else if (mode === 'library') {
+      modeLaunchRef.current = true;
+      setSourceType('gallery');
+      addMediaFromLibrary().catch(() => {});
+    }
+  }, [mode, mediaItems.length]);
+
+  // Ambient Magic Path: once media is present, auto-caption without a describe gate.
+  useEffect(() => {
+    if (mediaItems.length === 0) return;
+    if (magicAutoStartedRef.current) return;
+    if (route?.params?.resumeDraft) {
+      // Resumed drafts already have a caption; don't clobber unless empty.
+      if ((caption || '').trim().length > 0) {
+        magicAutoStartedRef.current = true;
+        return;
+      }
+    }
+    magicAutoStartedRef.current = true;
+    setOverlayAlreadyShown(true);
+    setShowDescriptionMethodOverlay(false);
+    setShowMultiPhotoModal(false);
+    const t = setTimeout(() => {
+      void generateMagicPost('').catch((e) => {
+        console.error('❌ ambient generateMagicPost failed', e);
+      });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [mediaItems.length]);
 
   const handleMediaLibraryPress = () => {
     addMediaFromLibrary().catch(error => {
@@ -1749,79 +2268,52 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
     console.log('📤 Media type:', mediaType);
     console.log('📤 Using Firebase UID:', fbUser.uid);
 
-    // Constrain file extensions to proven-good types
-    const fileExtension = mediaType === 'photo' ? 'jpg' : 'mp4';
+    const fileExtension =
+      mediaType === 'video' ? 'mp4' : mediaType === 'audio' ? 'm4a' : 'jpg';
     const fileName = `${mediaType}-${Date.now()}.${fileExtension}`;
     const filePath = `users/${fbUser.uid}/media/${fileName}`;
-    const fileRef = storageRef(storage, filePath);
+    const contentType =
+      mediaType === 'video' ? 'video/mp4' : mediaType === 'audio' ? 'audio/m4a' : 'image/jpeg';
 
-    console.log('📤 Uploading to:', fileName);
-
-    // Original working pattern: fetch -> blob -> uploadBytes (no metadata)
-    const resp = await fetch(mediaUri);
-    if (!resp.ok) throw new Error(`fetch failed status=${resp.status}`);
-    const blob = await resp.blob();
-    if (!blob || blob.size === 0) throw new Error('empty blob');
-
-    // Add a long timeout to avoid hangs in poor networks
-    const uploadPromise = uploadBytes(fileRef, blob);
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Upload timeout after 60 seconds')), 60000));
-    await Promise.race([uploadPromise, timeoutPromise]);
-
-    console.log('📤 Upload complete, getting download URL...');
-    const downloadURL = await getDownloadURL(fileRef);
-    console.log('📤 Download URL:', downloadURL);
+    const uploaded = await uploadMediaToStorage({
+      localUri: mediaUri,
+      storagePath: filePath,
+      contentType,
+    });
+    const downloadURL = uploaded.downloadURL;
+    console.log('📤 Upload complete, download URL:', downloadURL);
 
     let thumbnailUrl = null;
-    
+
     // Generate thumbnail for videos
-  if (mediaType === 'video') {
+    if (mediaType === 'video') {
       try {
         console.log('🎬 Generating video thumbnail...');
-        
-        // Add timeout to prevent hanging
-        const thumbnailPromise = VideoThumbnails.getThumbnailAsync(
-          mediaUri,
-          {
-            time: 1000, // Get thumbnail at 1 second
-            quality: 0.8,
-          }
-        );
-        
-        const timeoutPromise = new Promise((_, reject) => 
+        const thumbnailPromise = VideoThumbnails.getThumbnailAsync(mediaUri, {
+          time: 1000,
+          quality: 0.8,
+        });
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Thumbnail generation timeout')), 10000)
         );
-        
         const { uri: thumbnailUri } = await Promise.race([thumbnailPromise, timeoutPromise]);
-        
         console.log('✅ Thumbnail generated:', thumbnailUri);
-        
-        // Upload thumbnail using the same Firebase UID namespace
+
         const thumbnailFileName = `thumbnail-${Date.now()}.jpg`;
         const thumbPath = `users/${fbUser.uid}/thumbnails/${thumbnailFileName}`;
-        const thumbRef = storageRef(storage, thumbPath);
-        const tResp = await fetch(thumbnailUri);
-        if (tResp.ok) {
-          const tBlob = await tResp.blob();
-          if (tBlob && tBlob.size > 0) {
-            await uploadBytes(thumbRef, tBlob);
-            thumbnailUrl = await getDownloadURL(thumbRef);
-            console.log('✅ Thumbnail uploaded:', thumbnailUrl);
-          } else {
-            console.warn('⚠️ Thumbnail blob empty; skipping thumbnail upload');
-          }
-        } else {
-          console.warn(`⚠️ Thumbnail fetch failed status=${tResp.status}; skipping thumbnail upload`);
-        }
-        
+        const thumbUploaded = await uploadMediaToStorage({
+          localUri: thumbnailUri,
+          storagePath: thumbPath,
+          contentType: 'image/jpeg',
+        });
+        thumbnailUrl = thumbUploaded.downloadURL;
+        console.log('✅ Thumbnail uploaded:', thumbnailUrl);
       } catch (error) {
         console.error('⚠️ Failed to generate thumbnail:', error);
         console.log('📱 Continuing without thumbnail...');
-        // Continue without thumbnail - better than failing the entire upload
       }
     }
-    
-    // Normalize media descriptor for downstream rendering
+
     let normalizedType = 'image';
     if (mediaType === 'video') normalizedType = 'video';
     else if (mediaType === 'audio') normalizedType = 'audio';
@@ -1834,58 +2326,51 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
   };
 
   const handlePost = async () => {
-    if (!caption.trim() && (!media || !media.uri)) {
+    const hasMedia = Array.isArray(mediaItems) && mediaItems.length > 0;
+    if (!caption.trim() && !hasMedia && (!media || !media.uri)) {
       Alert.alert('Error', 'Please add a caption or media');
       return;
     }
-    // Ensure Firebase user BEFORE any uploads (rules require auth != null).
-    // Prefer Cognito→Firebase federation (uid = Cognito sub) over anonymous.
+
+    // Release builds must have Firebase Auth established before Storage/Firestore.
+    // In DEV we sometimes run with open rules, so we allow skipping.
+    if (__DEV__) {
+      console.log('[POST][AUTH] DEV: skipping strict Firebase auth gate.');
+    } else {
+      try {
+        if (!uid) {
+          Alert.alert('Auth Error', 'Missing user id (uid). Please sign out and sign back in.');
+          return;
+        }
+        await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+      } catch (e) {
+        const code = e?.code || e?.name || 'FIREBASE_AUTH_ERROR';
+        const msg = e?.message || String(e);
+        const status = typeof e?.status === 'number' ? ` (HTTP ${e.status})` : '';
+        console.error('[POST][AUTH] Firebase auth bridge not ready', { code, msg, status, detail: e?.detail });
+        Alert.alert('Auth Error', `Cannot post until Firebase auth is ready.\n\n${code}${status}\n${msg}`);
+        return;
+      }
+    }
+    
+    // Use Firebase user if available, otherwise create mock user with Cognito UID
     let fbUser = auth.currentUser;
-    try {
-      const looksFederated =
-        fbUser?.uid &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          fbUser.uid,
-        );
-      if (!looksFederated) {
-        try {
-          const { ensureFirebaseFederatedSession } = require('../services/FirebaseFederation');
-          const fed = await ensureFirebaseFederatedSession();
-          if (fed?.ok) {
-            fbUser = auth.currentUser;
-          }
-        } catch (fedErr) {
-          console.warn('🔐 Federation unavailable before post:', fedErr?.message || fedErr);
-        }
-      }
-      fbUser = auth.currentUser;
-      if (!fbUser) {
-        console.log('🔐 Ensuring Firebase auth (anonymous fallback)');
-        if (firebaseNative && typeof auth?.signInAnonymously === 'function') {
-          const cred = await auth.signInAnonymously();
-          fbUser = cred?.user || cred; // native returns user directly on some versions
-        } else {
-          const cred = await signInAnonymously(auth);
-          fbUser = cred.user;
-        }
-      }
-    } catch (authErr) {
-      const msg = authErr?.message || '';
-      console.error('❌ Firebase anonymous auth failed:', msg);
-      const suspended = /has-been-suspended/i.test(msg);
-      if (suspended) {
-        setFirebaseSuspended(true);
-        console.error('🛑 Detected suspended Firebase Web API key. Posting disabled until key rotated.');
-        Alert.alert(
-          'Firebase Key Suspended',
-          'The Firebase Web API key used by this build appears suspended (anonymous auth blocked).\n\nAction: In Firebase Console > Project Settings > General, create/rotate a new Web API key. Update EXPO_PUBLIC_FIREBASE_API_KEY (and any firebase.local override), then restart the dev client. Posting is disabled until fixed.'
-        );
-      } else {
-        Alert.alert('Auth Error', 'Unable to authenticate with Firebase. Please check network or Firebase config.');
-      }
+    if (!fbUser && cognitoUser && __DEV__) {
+      // Create mock Firebase user with Cognito UID for DEV-OPEN rules
+      fbUser = { 
+        uid: cognitoUser.getUsername?.() || uid,
+        displayName: null,
+        email: null,
+        photoURL: null,
+        providerId: 'cognito'
+      };
+    } else if (!fbUser) {
+      // No Firebase user and no Cognito user
+      console.error('❌ No user available for posting');
+      Alert.alert('Auth Error', 'You must be logged in to post.');
       return;
     }
-    const appUser = fbUser; // Do NOT fall back to Cognito for Storage/Firestore rules
+    const appUser = fbUser; // Use Firebase user if available, or Cognito-based mock user
     
     console.log('🚀 Starting post creation...');
     console.log('🚀 Current user (fb||cognito):', appUser);
@@ -1920,13 +2405,17 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             } catch (uploadError) {
               // Expanded diagnostics for storage/unknown issues
               const errObj = uploadError || {};
+              const customData = errObj.customData || errObj._customData || null;
               const diag = {
                 index: i + 1,
                 code: errObj.code,
                 name: errObj.name,
                 message: errObj.message,
-                customData: errObj.customData || errObj._customData,
+                customData,
+                customDataJson: customData ? JSON.stringify(customData).slice(0, 500) : null,
                 serverResponse: errObj.serverResponse || errObj.response || (errObj.error && errObj.error.serverResponse),
+                authUid: auth?.currentUser?.uid || null,
+                cognitoUid: uid || null,
                 stack: errObj.stack ? errObj.stack.split('\n').slice(0, 3) : null
               };
               console.error(`📤 Media upload ${i + 1} failed`, diag);
@@ -1974,15 +2463,29 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       const appUserId = fbUser?.uid || cognitoUser?.getUsername?.() || 'anonymous';
       const displayName = fbUser?.displayName || cognitoUser?.getUsername?.() || 'Anonymous';
       const photoURL = fbUser?.photoURL || null;
+      // Freeze caption before preparing metadata
+      const frozen = freezeCaption(captionState);
+      setCaptionState(frozen);
+
+      // Prepare upload metadata with frozen caption
+      const metadata = preparePostMetadata({
+        captionState: frozen,
+        photos: (uploadedMedia || []).filter(m => m.type === 'image').map((m, idx) => ({ id: String(idx) }))
+      });
+
+      // Single source of truth for caption
+      const baseCaption = metadata.caption || '';
+      
       const postData = {
         userId: appUserId,
         username: displayName,
         userPhotoURL: photoURL,
-        title: generatedContent?.title || caption.substring(0, 50) || 'New Post',
-        transcript: caption,
-        description: generatedContent?.description || caption, // Use AI description if available
-        caption: caption, // Keep original caption field
-        tags: extractHashtags(caption),
+        title: (generatedTitleState && generatedTitleState.trim()) || baseCaption.substring(0, 80) || 'New Post',
+        transcript: baseCaption,
+        description: baseCaption,
+        caption: baseCaption,
+        tags: extractHashtags(baseCaption),
+        hashtags: generatedHashtagsState || [],
         emoji: uploadedMedia.length > 0 ? '📸' : '💭',
         media: uploadedMedia,
         type: postType, // Add post type
@@ -2000,7 +2503,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         sharedTo: Object.keys(selectedPlatforms).filter(k => selectedPlatforms[k]),
         date: serverTimestamp(),
         likeCount: 0,
-        commentCount: 0
+        commentCount: 0,
+        viewCount: 0,
+        views: 0,
+        // Earn-your-reach: every new post enters audition with a fair, equal start.
+        reach: initialReachState(),
       };
 
       console.log('=== SAVING POST TO FIREBASE ===');
@@ -2010,29 +2517,50 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       
       console.log('✅ Post saved successfully with ID:', docRef.id);
       
-      // Start AI comment generation immediately after upload
-      setIsUploading(false); // Stop upload overlay
-      setIsGeneratingComments(true); // Start comment generation overlay
+      // Stop upload overlay and navigate immediately
+      setIsUploading(false);
+
+      try {
+        await AsyncStorage.removeItem(COMPOSE_DRAFT_KEY);
+      } catch {
+        // non-blocking
+      }
       
-      // Generate AI comments for the post
-      console.log('🤖 Starting AI comment generation...');
-      const aiComments = await generateAIComments(postData);
-      setGeneratedComments(aiComments);
+      Toast.show({
+        type: 'success',
+        text1: 'Post created!',
+        text2: 'Your post is now live',
+        position: 'bottom',
+      });
       
-      setTimeout(() => {
-        setIsGeneratingComments(false);
-        Toast.show({
-          type: 'success',
-          text1: 'Post created with AI comments!',
-          text2: `Generated ${aiComments.length} smart comments`,
-          position: 'bottom',
+      // Navigate immediately - user doesn't need to wait. Land on the For You
+      // feed (not the HomeBase hub) so the user can actually see posted content (P7.7).
+      navigation.navigate('MainTabs', { screen: 'Home', params: { focusFeed: true } });
+      
+      // Generate AI comments in background (non-blocking, fire-and-forget)
+      console.log('🤖 Starting background AI comment generation for post:', docRef.id);
+      generateAIComments(postData)
+        .then(aiComments => {
+          if (aiComments && aiComments.length > 0) {
+            console.log(`✅ Generated ${aiComments.length} AI comments in background`);
+            setGeneratedComments(aiComments);
+            // Optionally: Update Firestore post with AI comment IDs for future retrieval
+          }
+        })
+        .catch(err => {
+          console.warn('[POST][AI] Background AI comment generation failed', { 
+            postId: docRef.id, 
+            error: err?.message 
+          });
+          // Fail silently - post is already created successfully
         });
-        navigation.navigate('MainTabs', { screen: 'Home' });
-      }, 2000); // Show overlay for 2 seconds
       
     } catch (error) {
-      console.error('Error posting:', error);
-      Alert.alert('Error', 'Failed to post. Please try again.');
+      const code = error?.code || error?.name || 'POST_FAILED';
+      const msg = error?.message || String(error);
+      const status = typeof error?.status === 'number' ? ` (HTTP ${error.status})` : '';
+      console.error('Error posting:', { code, msg, status, error });
+      Alert.alert('Error', `Failed to post.\n\n${code}${status}\n${msg}`);
       setIsUploading(false);
       setIsGeneratingComments(false);
     }
@@ -2081,58 +2609,74 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
       console.log('🎯 Final voice inputs for comprehensive AI:', voiceInputs);
       console.log('🎯 Final photo descriptions for comprehensive AI:', photoDescriptions);
       
-      // Create comprehensive context prompt - FORCE user input priority
-      let contextPrompt = 'CRITICAL: Write about what the user SAID/WROTE - even if those things aren\'t visible in photos:\n\n';
+      // Build contextual prompt using SAME structure as other entry points
+      const hasVoice = voiceInputs && voiceInputs.length > 0;
+      const hasManualText = manualText && manualText.trim().length > 0;
+      const hasPhotoDescriptions = photoDescriptions && photoDescriptions.length > 0;
       
-      // Add voice inputs FIRST - this is the MAIN content
-      if (voiceInputs.length > 0) {
-        contextPrompt += '🎯 THE REAL STORY (user\'s words - 95% focus):\n';
-        voiceInputs.forEach((voice, index) => {
-          contextPrompt += `"${voice}"\n`;
-        });
-        contextPrompt += '\nThis is THE story - write about this even if photos don\'t show it.\n\n';
+      // Combine all voice inputs into single string
+      const combinedVoice = voiceInputs.join(' ');
+      
+      let contextPrompt = '';
+      if ((hasVoice || hasManualText) && hasPhotoDescriptions) {
+        // VOICE/TEXT + PHOTO: treat voice/text as PRIMARY
+        const primaryMessage = hasVoice ? combinedVoice : manualText;
+        contextPrompt = `Create a SHORT social media post emphasizing the user's message, with photos as visual context.
+
+🗣️ User's Message (PRIMARY): "${primaryMessage}"
+
+📸 Photo Context:
+${photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+INSTRUCTIONS:
+- Write PRIMARILY about what the user said
+- Use photo descriptions only as context/validation
+- Make it natural and authentic
+- Keep it SHORT and catchy
+- Return JSON: {title, description, hashtags}`;
+        console.log('🎤📸 Using CONTEXTUAL path (voice/text PRIMARY + photos)');
+      } else if (hasPhotoDescriptions && !hasVoice && !hasManualText) {
+        // Photos only
+        contextPrompt = `Create a social media post from these photo descriptions:
+
+${photoDescriptions.map((desc, i) => `${i + 1}. ${desc}`).join('\n')}
+
+Write a natural, engaging caption with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('📸 Using CONTEXTUAL path (photos only)');
+      } else if ((hasVoice || hasManualText) && !hasPhotoDescriptions) {
+        // Voice/text only
+        const primaryMessage = hasVoice ? combinedVoice : manualText;
+        contextPrompt = `Create a social media post from this message:
+
+"${primaryMessage}"
+
+Write naturally with catchy title. Return JSON: {title, description, hashtags}.`;
+        console.log('🎤 Using CONTEXTUAL path (voice/text only)');
+      } else {
+        throw new Error('No voice, text, or photo descriptions available');
       }
       
-      // Add manual text as primary if no voice
-      if (manualText && manualText.trim() && voiceInputs.length === 0) {
-        contextPrompt += `🎯 THE REAL STORY (user\'s message - 95% focus):\n"${manualText}"\n\nThis is THE story - write about this even if photos don\'t show it.\n\n`;
-      } else if (manualText && manualText.trim()) {
-        contextPrompt += `📝 Extra user context: ${manualText}\n\n`;
-      }
-      
-      // Add photo descriptions as minimal visual context
-      if (photoDescriptions.length > 0) {
-        contextPrompt += '📸 Photo context (minor background only):\n';
-        photoDescriptions.forEach((desc, index) => {
-          contextPrompt += `${desc}\n`;
-        });
-        contextPrompt += '\n';
-      }
-      
-      contextPrompt += 'CRITICAL RULES:\n- Write about what they SAID, even if not visible in photos\n- If they mention feelings/thoughts/activities not shown, INCLUDE THEM\n- Photos are just background - their words are the content\n- Write naturally and casually like a real person would post\n- Don\'t overuse slang abbreviations - keep it natural and relatable\n- Generate a SHORT CATCHY TITLE (50 characters max) based on their message\n- Their message is 95% of the post, photos are 5%\n- Focus on what they SAID, not what photos show';
-      
-      console.log('📝 Comprehensive context prompt:', contextPrompt);
-      
-      // Generate AI content with comprehensive context
-      const aiContent = await mediaDescriptionService.generateFullPostDataWithContext(
-        mediaItems[0].uri,
-        contextPrompt,
-        photoDescriptions
+      // The user's stated intent (voice or typed text) drives the caption;
+      // photo descriptions are supporting context.
+      const intent = hasVoice ? combinedVoice : (hasManualText ? manualText : '');
+
+      // Generate 2-3 selectable caption variants from ALL photo descriptions + intent.
+      const variantResult = await mediaDescriptionService.generatePostDescriptionVariants(
+        photoDescriptions || [],
+        intent,
+        { count: 3 }
       );
-      
-      if (aiContent) {
-        setGeneratedContent(aiContent);
-        setAiCaption(aiContent.description);
-        setCaption(aiContent.description);
-        setGeneratedHashtags(aiContent.hashtags);
-        setAiSuggestions(aiContent);
-        setShowAiContent(true);
-        setContentView('ai');
-        
+
+      const committed = commitVariantResult(variantResult, intent);
+      if (committed) {
+        const optionCount = variantResult?.variants?.length || 0;
+        console.log('✅ AI post generated successfully:', variantResult?.variants?.[0]?.description);
         Toast.show({
           type: 'success',
-          text1: '🧠 Comprehensive AI Content Generated!',
-          text2: `Used ${photoDescriptions.length} photos + ${voiceInputs.length} voice inputs`,
+          text1: '🤖 AI captions ready!',
+          text2: optionCount > 1
+            ? `Pick from ${optionCount} options below`
+            : 'Voice + photos combined into one great post',
           position: 'bottom',
         });
       }
@@ -2242,14 +2786,14 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           }
         }}
       >
-        {/* Top Action Buttons */}
+        {/* Top Action Buttons — add media only (voice is hold-to-talk below) */}
         <View style={styles.topActionButtons}>
           <TouchableOpacity 
             style={styles.topActionButton}
             onPress={handleTakePhoto}
           >
             <LinearGradient
-              colors={['#10b981', '#059669']}
+              colors={['#1A1A1F', '#141418']}
               style={styles.topActionGradient}
             >
               <Icon  name="camera" size={24} color="white"  />
@@ -2262,7 +2806,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             onPress={handleTakeVideo}
           >
             <LinearGradient
-              colors={['#3b82f6', '#2563eb']}
+              colors={['#1A1A1F', '#141418']}
               style={styles.topActionGradient}
             >
               <Icon  name="videocam" size={24} color="white"  />
@@ -2272,23 +2816,10 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
 
           <TouchableOpacity 
             style={styles.topActionButton}
-            onPress={startVoiceDescription}
-          >
-            <LinearGradient
-              colors={['#a855f7', '#d946ef']}
-              style={styles.topActionGradient}
-            >
-              <Icon  name="mic" size={24} color="white"  />
-              <Text style={styles.topActionText}>Voice Note</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.topActionButton}
             onPress={handleMediaLibraryPress}
           >
             <LinearGradient
-              colors={['#f59e0b', '#d97706']}
+              colors={['#1A1A1F', '#141418']}
               style={styles.topActionGradient}
             >
               <Icon  name="images" size={24} color="white"  />
@@ -2341,7 +2872,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   {/* AI Description */}
                   <View style={styles.descriptionContainer}>
                     <Text style={styles.mediaDescription} numberOfLines={2}>
-                      {mediaDescriptions[index] || 'Generating description...'}
+                      {mediaDescriptions[index] || '—'}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -2350,56 +2881,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           </View>
         )}
 
-        {/* Comprehensive AI Data Summary */}
-        {(allContextualData.photoDescriptions.length > 0 || allContextualData.voiceInputs.length > 0) && (
-          <View style={styles.comprehensiveAiSection}>
-            <View style={styles.aiSummaryHeader}>
-              <Icon  name="bulb" size={24} color="#a855f7"  />
-              <Text style={styles.aiSummaryTitle}>AI Data Collected</Text>
-            </View>
-            
-            {/* Photo Descriptions Summary */}
-            {allContextualData.photoDescriptions.length > 0 && (
-              <View style={styles.aiDataItem}>
-                <Text style={styles.aiDataLabel}>📸 Photo Descriptions: {allContextualData.photoDescriptions.length}</Text>
-                <Text style={styles.aiDataPreview} numberOfLines={2}>
-                  {allContextualData.photoDescriptions.join(' • ')}
-                </Text>
-              </View>
-            )}
-            
-            {/* Voice Inputs Summary */}
-            {allContextualData.voiceInputs.length > 0 && (
-              <View style={styles.aiDataItem}>
-                <Text style={styles.aiDataLabel}>🗣️ Voice Inputs: {allContextualData.voiceInputs.length}</Text>
-                <Text style={styles.aiDataPreview} numberOfLines={2}>
-                  {allContextualData.voiceInputs.join(' • ')}
-                </Text>
-              </View>
-            )}
-            
-            {/* Comprehensive AI Generate Button - HIDDEN */}
-            <TouchableOpacity
-              style={[styles.comprehensiveAiButton, { display: 'none' }]}
-              onPress={generateComprehensiveAIContent}
-              disabled={isGeneratingContent}
-            >
-              <LinearGradient
-                colors={isGeneratingContent ? ['#6b7280', '#6b7280'] : ['#a855f7', '#d946ef', '#ec4899']}
-                style={styles.comprehensiveAiGradient}
-              >
-                {isGeneratingContent ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Icon  name="bulb" size={24} color="white"  />
-                )}
-                <Text style={styles.comprehensiveAiButtonText}>
-                  {isGeneratingContent ? 'Generating...' : 'Generate Comprehensive AI Post'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Legacy "AI Data Collected" debug panel removed — Magic Path owns captions. */}
 
         {/* AI Voice Description Section */}
         <View style={styles.aiVoiceSection}>
@@ -2414,7 +2896,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             disabled={isTranscribing || isGeneratingContent}
           >
             <LinearGradient
-              colors={isRecording ? ['#ff4444', '#ff6b6b'] : ['#a855f7', '#d946ef']}
+              colors={isRecording ? ['#ff4444', '#ff6b6b'] : ['#00D2BE', '#00A89E']}
               style={styles.voiceButtonGradient}
             >
               {isTranscribing ? (
@@ -2423,7 +2905,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 <Icon  
                   name={isRecording ? "stop" : "mic"} 
                   size={32} 
-                  color="white" 
+                  color={isRecording ? "white" : "#0A0A0C"} 
                  />
               )}
             </LinearGradient>
@@ -2444,13 +2926,62 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           </View>
         </View>
 
-        {/* Manual Text Description Section */}
+        {/* Caption editor — always available (AI fills it; user can type anytime) */}
+        {!generatedContent && (
+          <View style={styles.manualDescriptionSection}>
+            <Text style={styles.sectionLabel}>Caption</Text>
+            <View style={styles.manualTextContainer}>
+              <TextInput
+                style={styles.manualTextInput}
+                placeholder="Write a caption, or wait for AI…"
+                placeholderTextColor="#888"
+                value={manualDescription}
+                onChangeText={(text) => {
+                  magicUserTookOverRef.current = true;
+                  setManualDescription(text);
+                  setCaption(text);
+                  setAllContextualData(prev => ({
+                    ...prev,
+                    manualText: text
+                  }));
+                }}
+                multiline={true}
+                numberOfLines={3}
+                maxLength={500}
+                returnKeyType="default"
+                blurOnSubmit={false}
+              />
+              <TouchableOpacity 
+                style={[styles.enhanceFromTextButton, !manualDescription.trim() && styles.enhanceButtonDisabled]}
+                onPress={() => handleEnhanceFromText()}
+                disabled={!manualDescription.trim() || isGeneratingFromText || mediaItems.length === 0}
+              >
+                <LinearGradient
+                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#00D2BE', '#00A89E']}
+                  style={styles.enhanceFromTextGradient}
+                >
+                  {isGeneratingFromText ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <>
+                      <Icon  name="sparkles" size={20} color={manualDescription.trim() ? "#0A0A0C" : "white"}  />
+                      <Text style={[styles.enhanceFromTextButtonText, manualDescription.trim() && { color: '#0A0A0C' }]}>Enhance with AI</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Optional text intent when AI content already showing */}
+        {generatedContent && (
         <View style={styles.manualDescriptionSection}>
           <TouchableOpacity 
             style={styles.collapsibleHeader}
             onPress={() => setIsManualDescriptionExpanded(!isManualDescriptionExpanded)}
           >
-            <Text style={styles.sectionLabel}>Or describe in text:</Text>
+            <Text style={styles.sectionLabel}>Add more context:</Text>
             <Icon  
               name={isManualDescriptionExpanded ? "chevron-up" : "chevron-down"} 
               size={20} 
@@ -2462,26 +2993,15 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             <View style={styles.manualTextContainer}>
               <TextInput
                 style={styles.manualTextInput}
-                placeholder="Type your description here..."
+                placeholder="Extra notes for AI polish…"
                 placeholderTextColor="#888"
                 value={manualDescription}
                 onChangeText={(text) => {
                   setManualDescription(text);
-                  // Update contextual data
                   setAllContextualData(prev => ({
                     ...prev,
                     manualText: text
                   }));
-                  // Auto-expand if user starts typing
-                  if (text.length > 0 && !isManualDescriptionExpanded) {
-                    setIsManualDescriptionExpanded(true);
-                  }
-                }}
-                onFocus={() => {
-                  // Auto-expand when focused
-                  if (!isManualDescriptionExpanded) {
-                    setIsManualDescriptionExpanded(true);
-                  }
                 }}
                 multiline={true}
                 numberOfLines={3}
@@ -2496,15 +3016,15 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 disabled={!manualDescription.trim() || isGeneratingFromText}
               >
                 <LinearGradient
-                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#a855f7', '#d946ef']}
+                  colors={!manualDescription.trim() ? ['#666', '#666'] : ['#00D2BE', '#00A89E']}
                   style={styles.enhanceFromTextGradient}
                 >
                   {isGeneratingFromText ? (
                     <ActivityIndicator size="small" color="white" />
                   ) : (
                     <>
-                      <Icon  name="sparkles" size={20} color="white"  />
-                      <Text style={styles.enhanceFromTextButtonText}>Enhance with AI</Text>
+                      <Icon  name="sparkles" size={20} color={manualDescription.trim() ? "#0A0A0C" : "white"}  />
+                      <Text style={[styles.enhanceFromTextButtonText, manualDescription.trim() && { color: '#0A0A0C' }]}>Enhance with AI</Text>
                     </>
                   )}
                 </LinearGradient>
@@ -2512,6 +3032,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             </View>
           )}
         </View>
+        )}
 
         {/* AI Generated Content Display */}
         {generatedContent && (
@@ -2524,7 +3045,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 setCaption(aiCaption);
               }}
             >
-              <Icon  name="sparkles" size={18} color={contentView === 'ai' ? "white" : "#a855f7"}  />
+              <Icon  name="sparkles" size={18} color={contentView === 'ai' ? "#0A0A0C" : "#00D2BE"}  />
               <Text style={[styles.toggleButtonText, contentView === 'ai' && styles.activeToggleText]}>AI Enhanced</Text>
             </TouchableOpacity>
             
@@ -2541,13 +3062,24 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
           </View>
           
           {/* Voice Transcript Box - Only shown in Original mode */}
-          {(contentView === 'original' && voiceTranscript) && (
+          {(contentView === 'original' && voiceCaption) && (
             <View style={styles.transcriptContainer}>
               <Text style={styles.transcriptLabel}>🎤 Audio Recorded</Text>
               <TextInput
                 style={styles.transcriptInput}
-                value={originalCaption || ''}
+                value={captionState.previewCaption || ''}
                 onChangeText={(text) => {
+                  // User started editing — don't let an in-flight magic upgrade clobber it.
+                  magicUserTookOverRef.current = true;
+                  // Track manual edits after AI generation
+                  if (aiGeneratedCaptionState && aiGeneratedCaptionState.trim().length > 0) {
+                    setEditedAfterAI(true);
+                  }
+                  
+                  // Update manual description (feeds into captionState)
+                  setManualDescription(text);
+                  
+                  // Keep legacy state
                   setOriginalCaption(text);
                   setCaption(text);
                 }}
@@ -2561,19 +3093,85 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 onPress={() => handleUseTranscript()}
               >
                 <LinearGradient
-                  colors={['#a855f7', '#d946ef']}
+                  colors={['#00D2BE', '#00A89E']}
                   style={styles.enhanceAiGradient}
                 >
-                  <Icon  name="sparkles" size={20} color="white"  />
-                  <Text style={styles.enhanceAiButtonText}>Enhance with AI</Text>
+                  <Icon  name="sparkles" size={20} color="#0A0A0C"  />
+                  <Text style={[styles.enhanceAiButtonText, { color: '#0A0A0C' }]}>Enhance with AI</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
           )}
           
           {/* Editable Caption - Hide in Original mode when transcript exists */}
-          {!(contentView === 'original' && voiceTranscript) && (
+          {!(contentView === 'original' && voiceCaption) && (
             <View style={styles.aiDescriptionBox}>
+              {/* AI Caption Variants Selector */}
+              {contentView === 'ai' && descriptionVariants.length >= 1 && (
+                <View style={styles.variantSelectorContainer}>
+                  <View style={styles.variantSelectorHeader}>
+                    <Text style={styles.variantSelectorLabel}>
+                      {isPolishingCaption
+                        ? '✍️ Polishing your caption…'
+                        : descriptionVariants.length > 1
+                          ? `Choose a caption (${descriptionVariants.length} options)`
+                          : 'AI caption'}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.regenerateButton}
+                      onPress={regenerateVariants}
+                      disabled={isRegeneratingVariants}
+                      activeOpacity={0.7}
+                    >
+                      {isRegeneratingVariants ? (
+                        <ActivityIndicator size="small" color="#00D2BE" />
+                      ) : (
+                        <Icon name="refresh" size={14} color="#00D2BE" />
+                      )}
+                      <Text style={styles.regenerateButtonText}>
+                        {isRegeneratingVariants ? 'Regenerating…' : 'Regenerate'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {descriptionVariants.map((variant, index) => {
+                    const isSelected = index === selectedVariantIndex;
+                    return (
+                      <TouchableOpacity
+                        key={`variant-${index}`}
+                        activeOpacity={0.8}
+                        style={[styles.variantCard, isSelected && styles.variantCardSelected]}
+                        onPress={() => applyVariant(index)}
+                      >
+                        <View style={[styles.variantRadio, isSelected && styles.variantRadioSelected]}>
+                          {isSelected && <Icon name="checkmark" size={14} color="#0A0A0C" />}
+                        </View>
+                        <View style={styles.variantBody}>
+                          {!!variant.title && (
+                            <Text
+                              style={[styles.variantTitle, isSelected && styles.variantTitleSelected]}
+                              numberOfLines={1}
+                            >
+                              {variant.title}
+                            </Text>
+                          )}
+                          <Text
+                            style={[styles.variantText, isSelected && styles.variantTextSelected]}
+                            numberOfLines={4}
+                          >
+                            {variant.description}
+                          </Text>
+                          {Array.isArray(variant.hashtags) && variant.hashtags.length > 0 && (
+                            <Text style={styles.variantHashtags} numberOfLines={1}>
+                              {variant.hashtags.map((h) => `#${h}`).join(' ')}
+                            </Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
               {/* AI Generated Title */}
               {contentView === 'ai' && generatedContent?.title && (
                 <View style={styles.aiTitleContainer}>
@@ -2587,6 +3185,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                       if (generatedContent) {
                         setGeneratedContent({...generatedContent, title: text});
                       }
+                      setGeneratedTitleState(text);
                     }}
                     maxLength={50}
                     returnKeyType="done"
@@ -2600,8 +3199,19 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 style={styles.aiCaptionInput}
                 placeholder="Edit your caption..."
                 placeholderTextColor="#9ca3af"
-                value={caption || ''}
+                value={manualDescription || ''}
                 onChangeText={(text) => {
+                  // User started editing — don't let an in-flight magic upgrade clobber it.
+                  magicUserTookOverRef.current = true;
+                  // Track manual edits after AI generation
+                  if (aiGeneratedCaptionState && aiGeneratedCaptionState.trim().length > 0) {
+                    setEditedAfterAI(true);
+                  }
+                  
+                  // Update manual description (this feeds into captionState)
+                  setManualDescription(text);
+                  
+                  // Keep legacy state for backward compatibility
                   setCaption(text);
                   if (contentView === 'ai') {
                     setAiCaption(text);
@@ -2625,7 +3235,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                   {generatedHashtags.filter(tag => tag && typeof tag === 'string').map((tag, index) => (
                     <TouchableOpacity key={index} style={styles.hashtagChip}>
                       <LinearGradient
-                        colors={['#a855f7', '#d946ef', '#ec4899']}
+                        colors={['#00D2BE', '#00D2BE', '#00A89E']}
                         style={styles.hashtagGradient}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
@@ -2637,30 +3247,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 </View>
               </View>
             )}
-
-            {/* Use AI Content Button */}
-            <TouchableOpacity
-              style={styles.useAiButton}
-              onPress={() => {
-                setCaption(generatedContent.description);
-                setShowAiContent(false);
-                Toast.show({
-                  type: 'success',
-                  text1: 'AI content applied!',
-                  position: 'bottom',
-                });
-              }}
-            >
-              <Text style={styles.useAiButtonText}>Use AI Content</Text>
-            </TouchableOpacity>
           </View>
         )}
 
         {/* Media Preview */}
 
-        {/* Action Buttons */}
-        {!showAiContent && (
-          <View style={styles.actionButtons}>
+        {/* Action Buttons — always available while composing */}
+        <View style={styles.actionButtons}>
             <TouchableOpacity
               style={styles.actionButton}
               onPress={handleMediaLibraryPress}
@@ -2672,57 +3265,72 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => {
-                // Generate hashtags for current content
-                if (caption.trim()) {
-                  aiService.generateHashtags(caption, media ? [media] : [])
-                    .then(hashtags => {
-                      setGeneratedHashtags(hashtags);
-                      Toast.show({
-                        type: 'success',
-                        text1: 'Hashtags generated!',
-                        position: 'bottom',
-                      });
-                    })
-                    .catch(() => {
-                      Toast.show({
-                        type: 'error',
-                        text1: 'Failed to generate hashtags',
-                        position: 'bottom',
-                      });
-                    });
-                }
+                handleTakePhoto().catch(() => {});
               }}
             >
-              <Icon  name="pricetag" size={20} color="#9ca3af"  />
-              <Text style={styles.actionButtonText}>Generate #</Text>
+              <Icon name="camera" size={20} color="#9ca3af" />
+              <Text style={styles.actionButtonText}>Add Photo</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => {
+                const note = (manualDescription || caption || '').trim();
+                void generateMagicPost(note).catch((e) => {
+                  console.error('❌ polish generateMagicPost failed', e);
+                });
+              }}
+              disabled={isPolishingCaption || mediaItems.length === 0}
+            >
+              <Icon name="sparkles" size={20} color="#00D2BE" />
+              <Text style={[styles.actionButtonText, { color: '#00D2BE' }]}>
+                {isPolishingCaption ? 'Polishing…' : 'Polish AI'}
+              </Text>
             </TouchableOpacity>
           </View>
-        )}
 
-        {/* Social Platforms */}
-        <View style={styles.platformsContainer}>
-          <Text style={styles.sectionTitle}>Share to (optional)</Text>
-          <View style={styles.platformsGrid}>
-            {renderPlatformButton('facebook', 'logo-facebook', ['#1877F2'])}
-            {renderPlatformButton('instagram', 'logo-instagram', ['#E4405F'])}
-            {renderPlatformButton('tiktok', 'musical-notes', ['#000000'])}
-            {renderPlatformButton('youtube', 'logo-youtube', ['#FF0000'])}
-          </View>
-        </View>
+        {/* External share row removed — not implemented; platforms still unused. */}
 
         {/* Bottom Spacer */}
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Post Button */}
+      {/* Post Button — AI polish never blocks publish */}
       <View style={styles.footer}>
+        {isPolishingCaption || magicError ? (
+          <View style={styles.magicStatusChip}>
+            {isPolishingCaption ? (
+              <>
+                <ActivityIndicator size="small" color="#00D2BE" style={{ marginRight: 8 }} />
+                <Text style={styles.magicStatusText}>Writing caption…</Text>
+              </>
+            ) : (
+              <>
+                <Icon name="alert-circle-outline" size={16} color="#FBBF24" />
+                <Text style={[styles.magicStatusText, { marginLeft: 8, color: '#FBBF24' }]} numberOfLines={2}>
+                  {magicError}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    magicAutoStartedRef.current = true;
+                    void generateMagicPost(variantIntent || '').catch(() => {});
+                  }}
+                  style={{ marginLeft: 10 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={{ color: '#00D2BE', fontWeight: '700', fontSize: 13 }}>Retry</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        ) : null}
         <TouchableOpacity
-          style={[styles.postButton, (isUploading || isGeneratingContent) && styles.postButtonDisabled]}
+          style={[styles.postButton, isUploading && styles.postButtonDisabled]}
           onPress={handlePostPress}
-          disabled={isUploading || isGeneratingContent}
+          disabled={isUploading}
         >
           <LinearGradient
-            colors={(isUploading || isGeneratingContent) ? ['#6b7280', '#6b7280'] : ['#a855f7', '#d946ef', '#ec4899']}
+            colors={isUploading ? ['#6b7280', '#6b7280'] : ['#00D2BE', '#00D2BE', '#00A89E']}
             style={styles.postGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -2732,13 +3340,8 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
                 <Text style={styles.postButtonText}>Posting...</Text>
               </>
-            ) : isGeneratingContent ? (
-              <>
-                <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
-                <Text style={styles.postButtonText}>Enhancing...</Text>
-              </>
             ) : (
-              <Text style={styles.postButtonText}>Accept & Save</Text>
+              <Text style={[styles.postButtonText, { color: '#0A0A0C' }]}>Post</Text>
             )}
           </LinearGradient>
         </TouchableOpacity>
@@ -2825,11 +3428,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.aiOverlay}>
           <View style={styles.aiOverlayContent}>
             <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
+              colors={['#1C1C22', '#161619', '#141418']}
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Icon  name="sparkles" size={48} color="white"  />
+                <Icon  name="sparkles" size={48} color="#00D2BE"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Analyzing Media</Text>
               <Text style={styles.aiOverlaySubtitle}>AI is examining your photos and videos...</Text>
@@ -2875,11 +3478,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.aiOverlay}>
           <View style={styles.aiOverlayContent}>
             <LinearGradient
-              colors={['#8b5cf6', '#7c3aed', '#6d28d9']}
+              colors={['#1C1C22', '#161619', '#141418']}
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Icon  name="cloud-upload" size={48} color="white"  />
+                <Icon  name="cloud-upload" size={48} color="#00D2BE"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Uploading Your Post</Text>
               <Text style={styles.aiOverlaySubtitle}>Preparing your content...</Text>
@@ -2900,11 +3503,11 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.aiOverlay}>
           <View style={styles.aiOverlayContent}>
             <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
+              colors={['#1C1C22', '#161619', '#141418']}
               style={styles.aiOverlayGradient}
             >
               <View style={styles.aiIconContainer}>
-                <Icon  name="sparkles" size={48} color="white"  />
+                <Icon  name="sparkles" size={48} color="#00D2BE"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Blyp AI Processing</Text>
               <Text style={styles.aiOverlaySubtitle}>Blyp AI is now generating your post...</Text>
@@ -2925,13 +3528,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.stepByStepOverlay}>
           <View style={styles.stepByStepContent}>
             <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
+              colors={['#1C1C22', '#161619', '#141418']}
               style={styles.stepByStepGradient}
             >
               {/* Header */}
               <View style={styles.stepByStepHeader}>
                 <View style={styles.stepByStepIconContainer}>
-                  <Icon  name="sparkles" size={32} color="white"  />
+                  <Icon  name="sparkles" size={32} color="#00D2BE"  />
                 </View>
                 <Text style={styles.stepByStepTitle}>Creating Your Post</Text>
                 <Text style={styles.stepByStepSubtitle}>
@@ -2946,15 +3549,15 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                     <View style={[
                       styles.stepNumber,
                       index <= currentStep ? styles.stepNumberActive : styles.stepNumberInactive,
-                      step.isVoice && { backgroundColor: '#8b5cf6' }
+                      step.isVoice && { backgroundColor: '#00D2BE' }
                     ]}>
                       {step.isVoice ? (
                         index < currentStep ? (
-                          <Icon  name="checkmark" size={16} color="white"  />
+                          <Icon  name="checkmark" size={16} color="#0A0A0C"  />
                         ) : index === currentStep ? (
-                          <ActivityIndicator size="small" color="white" />
+                          <ActivityIndicator size="small" color="#0A0A0C" />
                         ) : (
-                          <Icon  name="mic" size={14} color="white"  />
+                          <Icon  name="mic" size={14} color="#0A0A0C"  />
                         )
                       ) : (
                         index < currentStep ? (
@@ -2977,7 +3580,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                         <Text style={[
                           styles.stepDescription,
                           index <= currentStep ? styles.stepDescriptionActive : styles.stepDescriptionInactive,
-                          step.isVoice && { fontStyle: 'italic', color: '#a78bfa' }
+                          step.isVoice && { fontStyle: 'italic', color: '#00D2BE' }
                         ]}>
                           {step.isVoice && step.completed ? `"${step.fullDescription || step.description}"` : step.description}
                         </Text>
@@ -3009,13 +3612,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.reviewOverlay}>
           <View style={styles.reviewContent}>
             <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
+              colors={['#1C1C22', '#161619', '#141418']}
               style={styles.reviewGradient}
             >
               {/* Header */}
               <View style={styles.reviewHeader}>
                 <View style={styles.reviewIconContainer}>
-                  <Icon  name="document-text" size={32} color="white"  />
+                  <Icon  name="document-text" size={32} color="#00D2BE"  />
                 </View>
                 <Text style={styles.reviewTitle}>Review & Generate</Text>
                 <Text style={styles.reviewSubtitle}>
@@ -3121,7 +3724,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
                 </View>
                 <Text style={styles.descriptionMethodTitle}>Add Description</Text>
                 <Text style={styles.descriptionMethodSubtitle}>
-                  How would you like to describe your photos?
+                  How would you like to describe your {getDescribeTargetLabel()}?
                 </Text>
               </View>
 
@@ -3230,13 +3833,13 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.multiPhotoModalOverlay}>
           <View style={styles.multiPhotoModalContent}>
             <LinearGradient
-              colors={['#a855f7', '#d946ef', '#ec4899']}
+              colors={['#1C1C22', '#161619', '#141418']}
               style={styles.multiPhotoModalGradient}
             >
               {/* Header with camera icon */}
               <View style={styles.multiPhotoModalHeader}>
                 <View style={styles.multiPhotoIconContainer}>
-                  <Icon  name="camera" size={32} color="white"  />
+                  <Icon  name="camera" size={32} color="#00D2BE"  />
                 </View>
                 <Text style={styles.multiPhotoModalTitle}>Photo Captured!</Text>
                 <Text style={styles.multiPhotoModalSubtitle}>
@@ -3281,7 +3884,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
         <View style={styles.confirmationModalOverlay}>
           <View style={styles.confirmationModalContent}>
             <LinearGradient
-              colors={['#1e293b', '#334155', '#475569']}
+              colors={['#141418', '#27272E', '#3F3F46']}
               style={styles.confirmationModalGradient}
             >
               {/* Header */}
@@ -3342,7 +3945,7 @@ The image is IRRELEVANT. Focus 100% on: "${reviewData.voiceInput}". Include a sh
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.pageBackground,
   },
   header: {
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
@@ -3353,7 +3956,7 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: '#141418',
   },
   headerTitle: {
     color: '#ffffff',
@@ -3377,11 +3980,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     borderRadius: 12,
     overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    borderWidth: 1,
+    borderColor: '#26262C',
   },
   topActionGradient: {
     flexDirection: 'column',
@@ -3401,12 +4001,12 @@ const styles = StyleSheet.create({
   aiVoiceSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 16,
     padding: 20,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#27272E',
   },
   voiceButton: {
     width: 80,
@@ -3450,7 +4050,7 @@ const styles = StyleSheet.create({
 
   // Manual Description Section
   manualDescriptionSection: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
@@ -3470,11 +4070,11 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   manualTextContainer: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#27272E',
     marginTop: 12,
   },
   manualTextInput: {
@@ -3509,12 +4109,12 @@ const styles = StyleSheet.create({
 
   // AI Content Section
   aiContentSection: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#a855f7',
+    borderColor: '#26262C',
   },
   aiHeader: {
     flexDirection: 'row',
@@ -3522,7 +4122,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   aiTitle: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -3545,7 +4145,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   activeToggleButton: {
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
   },
   toggleButtonText: {
     color: '#9ca3af',
@@ -3554,10 +4154,10 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   activeToggleText: {
-    color: 'white',
+    color: '#0A0A0C',
   },
   transcriptContainer: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -3571,7 +4171,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   transcriptInput: {
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
     borderRadius: 8,
     padding: 12,
     color: '#ffffff',
@@ -3580,7 +4180,7 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: '#27272E',
     marginBottom: 12,
   },
   enhanceAiButton: {
@@ -3605,6 +4205,95 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
+  },
+  variantSelectorContainer: {
+    marginBottom: 16,
+  },
+  variantSelectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  variantSelectorLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    flexShrink: 1,
+  },
+  regenerateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(203,251,69,0.4)',
+    backgroundColor: 'rgba(203,251,69,0.08)',
+    marginLeft: 8,
+  },
+  regenerateButtonText: {
+    color: '#00D2BE',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 5,
+  },
+  variantCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  variantCardSelected: {
+    borderColor: '#00D2BE',
+    backgroundColor: 'rgba(203,251,69,0.08)',
+  },
+  variantRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.30)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginTop: 1,
+  },
+  variantRadioSelected: {
+    borderColor: '#00D2BE',
+    backgroundColor: '#00D2BE',
+  },
+  variantBody: {
+    flex: 1,
+  },
+  variantTitle: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  variantTitleSelected: {
+    color: '#ffffff',
+  },
+  variantText: {
+    color: '#d1d5db',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  variantTextSelected: {
+    color: '#ffffff',
+  },
+  variantHashtags: {
+    color: '#00D2BE',
+    fontSize: 12,
+    marginTop: 6,
+    opacity: 0.85,
   },
   aiDescriptionText: {
     color: '#ffffff',
@@ -3673,13 +4362,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   useAiButton: {
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
   },
   useAiButtonText: {
-    color: '#ffffff',
+    color: '#0A0A0C',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -3752,7 +4441,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   descriptionContainer: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     padding: 4,
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
@@ -3765,7 +4454,7 @@ const styles = StyleSheet.create({
 
   // Caption Section
   captionContainer: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -3789,10 +4478,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   enhanceButtonText: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 12,
     fontWeight: '600',
     marginLeft: 4,
@@ -3824,7 +4513,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#475569',
+    borderColor: '#3F3F46',
   },
   actionButtonText: {
     color: '#9ca3af',
@@ -3855,7 +4544,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#475569',
+    borderColor: '#3F3F46',
     width: '48%',
   },
   platformText: {
@@ -3869,8 +4558,25 @@ const styles = StyleSheet.create({
   footer: {
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
-    backgroundColor: '#1e293b',
+    borderTopColor: '#27272E',
+    backgroundColor: '#141418',
+  },
+  magicStatusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#1C1C22',
+    borderWidth: 1,
+    borderColor: '#27272E',
+  },
+  magicStatusText: {
+    flex: 1,
+    color: '#E4E4E7',
+    fontSize: 13,
+    fontWeight: '600',
   },
   postButton: {
     borderRadius: 16,
@@ -3901,7 +4607,7 @@ const styles = StyleSheet.create({
   modalContainer: {
     width: '90%',
     maxHeight: '80%',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 24,
     overflow: 'hidden',
     elevation: 12,
@@ -3915,7 +4621,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   modalTitle: {
     color: 'white',
@@ -4024,7 +4730,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: 'hidden',
     elevation: 20,
-    shadowColor: '#a855f7',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
     shadowRadius: 20,
@@ -4117,7 +4823,7 @@ const styles = StyleSheet.create({
   },
   confirmationModalSubtitle: {
     fontSize: 16,
-    color: '#cbd5e1',
+    color: '#D4D4D8',
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -4147,7 +4853,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(148, 163, 184, 0.3)',
   },
   cancelButtonText: {
-    color: '#cbd5e1',
+    color: '#D4D4D8',
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
@@ -4156,12 +4862,12 @@ const styles = StyleSheet.create({
   
   // Comprehensive AI Styles
   comprehensiveAiSection: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
     borderWidth: 2,
-    borderColor: '#a855f7',
+    borderColor: '#26262C',
   },
   aiSummaryHeader: {
     flexDirection: 'row',
@@ -4169,7 +4875,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   aiSummaryTitle: {
-    color: '#a855f7',
+    color: '#00D2BE',
     fontSize: 18,
     fontWeight: '700',
     marginLeft: 8,

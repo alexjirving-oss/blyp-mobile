@@ -2,16 +2,23 @@
 // Adapter to centralize video backend (expo-av vs expo-video) behind an env flag.
 // Default behavior (flag off): use expo-av Video to ensure zero regression.
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
 import { Video as ExpoAVVideo } from 'expo-av';
 import { VideoView } from 'expo-video';
 
 // Internal env flag (do not export). Explicit true only.
 const ENABLE_EXPO_VIDEO = process.env.EXPO_PUBLIC_ENABLE_EXPO_VIDEO === 'true' || process.env.EXPO_PUBLIC_ENABLE_EXPO_VIDEO === '1';
 
-// Public component API remains unchanged for callers.
-export default function UnifiedVideo({
+// Public component API remains unchanged for callers. Wrapped in forwardRef so
+// callers (e.g. EnhancedVideo) can imperatively control playback —
+// playAsync/pauseAsync/replayAsync/getStatusAsync — which is essential for
+// reliably resuming a video after the screen/tab regains focus.
+const UnifiedVideo = React.forwardRef(function UnifiedVideo({
   source,
+  uri,
+  playbackUrl,
+  streamUrl,
+  hlsUrl,
   style,
   resizeMode = 'cover',
   shouldPlay = false,
@@ -21,16 +28,38 @@ export default function UnifiedVideo({
   useNativeControls,
   onLoad,
   onError,
+  onReadyForDisplay,
   onPlaybackStatusUpdate, // retained for compatibility; not mapped in expo-video branch yet
   ...rest
-}) {
+}, ref) {
+  const resolvedUri = (() => {
+    const explicit = typeof uri === 'string' ? uri.trim() : '';
+    const altPlayback = typeof playbackUrl === 'string' ? playbackUrl.trim() : '';
+    const altStream = typeof streamUrl === 'string' ? streamUrl.trim() : '';
+    const altHls = typeof hlsUrl === 'string' ? hlsUrl.trim() : '';
+    const fromSource = source && typeof source.uri === 'string' ? source.uri.trim() : '';
+    return explicit || altPlayback || altStream || altHls || fromSource || '';
+  })();
+
+  // Guard against missing/invalid URI: do not play mock or placeholder content
+  if (!resolvedUri) {
+    try {
+      console.warn('[UnifiedVideo] Missing video URI. Rendering fallback UI only.');
+    } catch {}
+    return (
+      <View style={[style || StyleSheet.absoluteFill, { backgroundColor: '#0b1220', alignItems: 'center', justifyContent: 'center' }]}>
+        <Text style={{ color: '#71717A', fontSize: 14 }}>Video unavailable</Text>
+      </View>
+    );
+  }
+
   // Dev-only backend selection logging
   if (__DEV__) {
     const backend = ENABLE_EXPO_VIDEO ? 'expo-video' : 'expo-av';
     try {
       // eslint-disable-next-line no-console
       console.log('[VIDEO][UnifiedVideo] backend selected:', backend, {
-        uri: source && source.uri,
+        uri: resolvedUri,
       });
     } catch {}
   }
@@ -38,7 +67,8 @@ export default function UnifiedVideo({
   if (!ENABLE_EXPO_VIDEO) {
     return (
       <ExpoAVVideo
-        source={source}
+        ref={ref}
+        source={{ uri: resolvedUri }}
         style={style || StyleSheet.absoluteFill}
         resizeMode={resizeMode}
         shouldPlay={shouldPlay}
@@ -48,6 +78,7 @@ export default function UnifiedVideo({
         useNativeControls={useNativeControls}
         onLoad={onLoad}
         onError={onError}
+        onReadyForDisplay={onReadyForDisplay}
         onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         {...rest}
       />
@@ -127,7 +158,7 @@ export default function UnifiedVideo({
     <VideoView
       ref={videoRef}
       style={style || StyleSheet.absoluteFill}
-      source={source}
+      source={{ uri: resolvedUri }}
       contentFit={contentFit}
       isLooping={isLooping}
       isMuted={isMuted}
@@ -139,4 +170,6 @@ export default function UnifiedVideo({
       {...rest}
     />
   );
-}
+});
+
+export default UnifiedVideo;

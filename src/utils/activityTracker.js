@@ -1,4 +1,14 @@
-import { db as firestore } from '../config/firebase';
+import { serverTimestamp, writeBatch, doc as webDoc } from 'firebase/firestore';
+import { db, firestore } from '../config/firebase';
+
+let hasWarnedActivityPermissions = false;
+
+function isFirestorePermissionError(error) {
+  const code = String(error?.code || '').toLowerCase();
+  if (code === 'permission-denied' || code === 'unauthenticated') return true;
+  const msg = String(error?.message || error || '');
+  return msg.includes('Missing or insufficient permissions');
+}
 
 // Activity types
 export const ACTIVITY_TYPES = {
@@ -29,7 +39,7 @@ export const trackActivity = async (activityType, actorId, targetUserId, metadat
       type: activityType,
       actorId,
       targetUserId,
-      timestamp: firestore.FieldValue.serverTimestamp(),
+      timestamp: serverTimestamp(),
       read: false,
       metadata: {
         ...metadata
@@ -39,6 +49,16 @@ export const trackActivity = async (activityType, actorId, targetUserId, metadat
     await db.collection('activities').add(activityData);
     console.log('✅ Activity tracked:', activityType, 'for', targetUserId);
   } catch (error) {
+    // Activity tracking is non-blocking. If rules deny this write in some
+    // environments, do not surface as a dev-bricking console error.
+    if (isFirestorePermissionError(error)) {
+      if (!hasWarnedActivityPermissions) {
+        hasWarnedActivityPermissions = true;
+        console.warn('⚠️ Activity tracking skipped (Firestore permissions)', error?.message || String(error));
+      }
+      return;
+    }
+
     console.error('❌ Error tracking activity:', error);
   }
 };
@@ -64,6 +84,13 @@ export const getUserActivities = (userId, limitCount = 50, callback) => {
       
       callback(snapshot);
     }, (error) => {
+      if (isFirestorePermissionError(error)) {
+        if (!hasWarnedActivityPermissions) {
+          hasWarnedActivityPermissions = true;
+          console.warn('⚠️ Activity feed disabled (Firestore permissions)', error?.message || String(error));
+        }
+        return;
+      }
       console.error('❌ getUserActivities: Snapshot error:', error);
     });
   } catch (error) {
@@ -78,14 +105,22 @@ export const getUserActivities = (userId, limitCount = 50, callback) => {
  */
 export const markActivitiesAsRead = async (activityIds) => {
   try {
-    const batch = db.batch();
-    
-    activityIds.forEach(activityId => {
-      const activityRef = db.collection('activities').doc(activityId);
-      batch.update(activityRef, { read: true });
-    });
-
-    await batch.commit();
+    // The compat `db` wrapper has no .batch(); use the raw instance.
+    if (typeof firestore?.batch === 'function' && typeof firestore?.collection === 'function') {
+      // Native (@react-native-firebase) instance.
+      const batch = firestore.batch();
+      activityIds.forEach((activityId) => {
+        batch.update(firestore.collection('activities').doc(activityId), { read: true });
+      });
+      await batch.commit();
+    } else {
+      // Web modular instance.
+      const batch = writeBatch(firestore);
+      activityIds.forEach((activityId) => {
+        batch.update(webDoc(firestore, 'activities', activityId), { read: true });
+      });
+      await batch.commit();
+    }
     console.log('✅ Activities marked as read');
   } catch (error) {
     console.error('❌ Error marking activities as read:', error);
@@ -103,6 +138,9 @@ export const getUnreadActivityCount = (userId, callback) => {
       .collection('activities')
       .where('targetUserId', '==', userId)
       .where('read', '==', false)
+      // Bound the read: a badge never needs more than this, and an unbounded
+      // listener grows without limit as unread items accumulate.
+      .limit(99)
       .onSnapshot((snapshot) => {
         callback(snapshot.docs.length);
       });

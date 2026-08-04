@@ -1,31 +1,21 @@
 import React, { useState, useEffect } from 'react';
+import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { ActivityIndicator, FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { auth, firestore as db } from '../config/firebase';
-import { 
-  collection, 
-  query, 
-  getDocs, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
+import {
+  collection,
+  query,
+  getDocs,
+  doc,
+  setDoc,
+  deleteDoc,
   getDoc,
   onSnapshot,
   limit,
   startAfter,
-  orderBy 
+  orderBy
 } from 'firebase/firestore';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
@@ -41,7 +31,7 @@ const FollowersScreen = () => {
   const [lastDoc, setLastDoc] = useState(null);
   const [followingList, setFollowingList] = useState(new Set());
   const currentUser = auth.currentUser;
-  
+
   const ITEMS_PER_PAGE = 20;
 
   useEffect(() => {
@@ -80,23 +70,23 @@ const FollowersScreen = () => {
 
   const loadUsers = async (isInitial = false) => {
     if (!hasMoreData && !isInitial) return;
-    
+
     try {
       if (isInitial) {
         setLoading(true);
       } else {
         setLoadingMore(true);
       }
-      
+
       const collectionName = type === 'followers' ? 'followers' : 'following';
       const usersRef = collection(db, 'users', userId, collectionName);
-      
+
       let q = query(
         usersRef,
         orderBy('timestamp', 'desc'),
         limit(ITEMS_PER_PAGE)
       );
-      
+
       if (!isInitial && lastDoc) {
         q = query(
           usersRef,
@@ -105,14 +95,14 @@ const FollowersScreen = () => {
           limit(ITEMS_PER_PAGE)
         );
       }
-      
+
       const snapshot = await getDocs(q);
-      
+
       if (snapshot.empty) {
         setHasMoreData(false);
         return;
       }
-      
+
       // Batch fetch user data for better performance
       const userPromises = snapshot.docs.map(async (docSnap) => {
         const userDocRef = doc(db, 'users', docSnap.id);
@@ -125,22 +115,22 @@ const FollowersScreen = () => {
         }
         return null;
       });
-      
+
       const userResults = await Promise.all(userPromises);
       const usersList = userResults.filter(user => user !== null);
-      
+
       setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
-      
+
       if (isInitial) {
         setUsers(usersList);
       } else {
         setUsers(prevUsers => [...prevUsers, ...usersList]);
       }
-      
+
       if (snapshot.docs.length < ITEMS_PER_PAGE) {
         setHasMoreData(false);
       }
-      
+
     } catch (error) {
       console.error('Error loading users:', error);
     } finally {
@@ -154,7 +144,7 @@ const FollowersScreen = () => {
 
   const loadCurrentUserFollowing = () => {
     if (!currentUser) return;
-    
+
     const followingRef = collection(db, 'users', currentUser.uid, 'following');
     return onSnapshot(followingRef, (snapshot) => {
       const following = new Set(snapshot.docs.map(doc => doc.id));
@@ -167,7 +157,7 @@ const FollowersScreen = () => {
 
     try {
       const isFollowing = followingList.has(targetUserId);
-      
+
       if (isFollowing) {
         // Unfollow
         await deleteDoc(doc(db, 'users', currentUser.uid, 'following', targetUserId));
@@ -196,8 +186,8 @@ const FollowersScreen = () => {
           style={styles.userInfo}
           onPress={() => {
             if (!isCurrentUser) {
-              console.log('🎯 FollowersScreen: Navigating to user profile:', { userId: item.id, username: item.displayName || item.username });
-              navigation.navigate('UserProfile', { 
+              console.log('ðŸŽ¯ FollowersScreen: Navigating to user profile:', { userId: item.id, username: item.displayName || item.username });
+              navigation.navigate('UserProfile', {
                 userId: item.id,
                 username: item.displayName || item.username || '@user'
               });
@@ -231,86 +221,83 @@ const FollowersScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={['#000000', '#1a1a2e', '#16213e']}
-        style={styles.gradient}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Icon  name="arrow-back" size={24} color="#fff"  />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {type === 'followers' ? 'Followers' : 'Following'}
-          </Text>
-          <View style={styles.placeholder} />
-        </View>
-
-        {/* Users List */}
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#e74c3c" />
-            <Text style={styles.loadingText}>Loading {type}...</Text>
-          </View>
-        ) : users.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Icon  
-              name={type === 'followers' ? 'people-outline' : 'person-add-outline'} 
-              size={64} 
-              color="#666" 
-             />
-            <Text style={styles.emptyText}>
-              {type === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
+    <ScreenContainer>
+      <View style={styles.container}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Icon name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>
+              {type === 'followers' ? 'Followers' : 'Following'}
             </Text>
+            <View style={styles.placeholder} />
           </View>
-        ) : (
-          <FlatList
-            data={users}
-            keyExtractor={(item) => item.id}
-            renderItem={renderUserItem}
-            contentContainerStyle={styles.listContainer}
-            showsVerticalScrollIndicator={false}
-            onEndReached={() => {
-              if (hasMoreData && !loadingMore) {
-                loadUsers(false);
-              }
-            }}
-            onEndReachedThreshold={0.5}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-                tintColor="#e74c3c"
-                colors={['#e74c3c']}
-                progressBackgroundColor="#1a1a2e"
+
+          {/* Users List */}
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#e74c3c" />
+              <Text style={styles.loadingText}>Loading {type}...</Text>
+            </View>
+          ) : users.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Icon
+                name={type === 'followers' ? 'people-outline' : 'person-add-outline'}
+                size={64}
+                color="#666"
               />
-            }
-            ListFooterComponent={() => {
-              if (loadingMore) {
-                return (
-                  <View style={styles.loadingMoreContainer}>
-                    <ActivityIndicator size="small" color="#e74c3c" />
-                    <Text style={styles.loadingMoreText}>Loading more...</Text>
-                  </View>
-                );
+              <Text style={styles.emptyText}>
+                {type === 'followers' ? 'No followers yet' : 'Not following anyone yet'}
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={users}
+              keyExtractor={(item) => item.id}
+              renderItem={renderUserItem}
+              contentContainerStyle={styles.listContainer}
+              showsVerticalScrollIndicator={false}
+              onEndReached={() => {
+                if (hasMoreData && !loadingMore) {
+                  loadUsers(false);
+                }
+              }}
+              onEndReachedThreshold={0.5}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor="#e74c3c"
+                  colors={['#e74c3c']}
+                  progressBackgroundColor="#1a1a2e"
+                />
               }
-              if (!hasMoreData && users.length > 0) {
-                return (
-                  <View style={styles.endOfListContainer}>
-                    <Text style={styles.endOfListText}>No more {type} to load</Text>
-                  </View>
-                );
-              }
-              return null;
-            }}
-          />
-        )}
-      </LinearGradient>
-    </SafeAreaView>
+              ListFooterComponent={() => {
+                if (loadingMore) {
+                  return (
+                    <View style={styles.loadingMoreContainer}>
+                      <ActivityIndicator size="small" color="#e74c3c" />
+                      <Text style={styles.loadingMoreText}>Loading more...</Text>
+                    </View>
+                  );
+                }
+                if (!hasMoreData && users.length > 0) {
+                  return (
+                    <View style={styles.endOfListContainer}>
+                      <Text style={styles.endOfListText}>No more {type} to load</Text>
+                    </View>
+                  );
+                }
+                return null;
+              }}
+            />
+          )}
+      </View>
+    </ScreenContainer>
   );
 };
 
@@ -326,7 +313,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
@@ -353,7 +340,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: '#fff',
-    marginTop: 16,
+    marginTop: 8,
     fontSize: 16,
   },
   emptyContainer: {
@@ -364,11 +351,11 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#666',
     fontSize: 16,
-    marginTop: 16,
+    marginTop: 8,
   },
   listContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   userItem: {
     flexDirection: 'row',
@@ -426,7 +413,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
+    paddingVertical: 8,
   },
   loadingMoreText: {
     color: '#fff',
@@ -435,7 +422,7 @@ const styles = StyleSheet.create({
   },
   endOfListContainer: {
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 8,
   },
   endOfListText: {
     color: '#666',
@@ -444,3 +431,5 @@ const styles = StyleSheet.create({
 });
 
 export default FollowersScreen;
+
+

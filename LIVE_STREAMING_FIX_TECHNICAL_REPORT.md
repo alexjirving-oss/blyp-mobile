@@ -1,5 +1,9 @@
 # 📋 LIVE STREAMING FIX - TECHNICAL REPORT
 
+HISTORICAL ONLY
+NON-CANONICAL
+DO NOT USE FOR RELEASE
+
 **Date**: October 8, 2025  
 **Status**: ✅ COMPLETED SUCCESSFULLY  
 **Validation Result**: 16/16 tests passed (100%)
@@ -210,7 +214,8 @@ OVERALL VALIDATION:   16/16 ✅ (100%)
 ### **Production Build & Testing**:
 ```bash
 # 1. Build production APK
-eas build --platform android --profile preview
+eas build --platform android --profile preview  # TEST/PREVIEW ONLY / NON-CANONICAL / DO NOT USE FOR RELEASE
+# TEST/PREVIEW ONLY / NON-CANONICAL / DO NOT USE FOR RELEASE
 
 # 2. Install on physical devices
 # Download APK from EAS build and install

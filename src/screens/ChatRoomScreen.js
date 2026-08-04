@@ -1,22 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  SafeAreaView,
-  StatusBar,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Modal
-} from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Modal, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
+import { COLORS } from '../styles/theme';
 
 const MESSAGE_TYPES = {
   TEXT: 'text',
@@ -48,7 +37,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
     try {
       const roomData = await ChatRoomService.getRoomDetails(roomId);
       setRoom(roomData);
-      
+
       // Update navigation header
       navigation.setOptions({
         title: roomData.name,
@@ -57,7 +46,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
             style={styles.headerButton}
             onPress={() => setShowParticipants(true)}
           >
-            <Icon  name="people" size={24} color="#fff"  />
+            <Icon name="people" size={24} color="#fff" />
             <Text style={styles.participantCount}>{roomData.participantCount}</Text>
           </TouchableOpacity>
         ),
@@ -73,7 +62,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
     const unsubscribe = ChatRoomService.subscribeToRoomMessages(roomId, (newMessages) => {
       setMessages(newMessages);
       setLoading(false);
-      
+
       // Scroll to bottom when new messages arrive
       setTimeout(() => {
         if (flatListRef.current && newMessages.length > 0) {
@@ -132,7 +121,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
     const date = new Date(timestamp);
     const now = new Date();
     const isToday = date.toDateString() === now.toDateString();
-    
+
     if (isToday) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } else {
@@ -143,7 +132,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
   const renderMessage = ({ item: message, index }) => {
     const isCurrentUser = message.senderId === currentUser?.uid;
     const isSystem = message.type === MESSAGE_TYPES.SYSTEM;
-    const showTimestamp = index === 0 || 
+    const showTimestamp = index === 0 ||
       (new Date(messages[index - 1]?.timestamp) - new Date(message.timestamp)) > 300000; // 5 minutes
 
     if (isSystem) {
@@ -162,7 +151,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
         {showTimestamp && (
           <Text style={styles.timestamp}>{formatTimestamp(message.timestamp)}</Text>
         )}
-        
+
         <View style={[
           styles.messageBubble,
           isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble
@@ -208,7 +197,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
                 Created {room?.createdAt ? formatTimestamp(room.createdAt) : ''}
               </Text>
               <Text style={styles.roomMetaText}>
-                {room?.category.charAt(0).toUpperCase() + room?.category.slice(1)} • 
+                {room?.category.charAt(0).toUpperCase() + room?.category.slice(1)} Ã¢â‚¬Â¢
                 {room?.isPrivate ? ' Private' : ' Public'}
               </Text>
             </View>
@@ -219,7 +208,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
             <Text style={styles.sectionTitle}>Members</Text>
             <View style={styles.participantItem}>
               <View style={styles.participantAvatar}>
-                <Icon  name="person" size={20} color="#fff"  />
+                <Icon name="person" size={20} color="#fff" />
               </View>
               <View style={styles.participantInfo}>
                 <Text style={styles.participantName}>
@@ -233,7 +222,7 @@ const ChatRoomScreen = ({ route, navigation }) => {
                 </View>
               )}
             </View>
-            
+
             {/* Additional participants would be loaded from Firebase */}
             <View style={styles.participantPlaceholder}>
               <Text style={styles.participantPlaceholderText}>
@@ -248,144 +237,146 @@ const ChatRoomScreen = ({ route, navigation }) => {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Icon  name="chatbubbles-outline" size={64} color="#374151"  />
-        <Text style={styles.loadingText}>Loading room...</Text>
-      </View>
+      <ScreenContainer>
+        <View style={styles.loadingContainer}>
+          <Icon name="chatbubbles-outline" size={64} color="#374151" />
+          <Text style={styles.loadingText}>Loading room...</Text>
+        </View>
+      </ScreenContainer>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon  name="arrow-back" size={24} color="#fff"  />
-        </TouchableOpacity>
-        
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{room?.name}</Text>
-          <Text style={styles.headerSubtitle}>
-            {room?.participantCount} member{room?.participantCount !== 1 ? 's' : ''}
-          </Text>
-        </View>
-        
-        <TouchableOpacity 
-          style={styles.participantsButton}
-          onPress={() => setShowParticipants(true)}
-        >
-          <Icon  name="people" size={24} color="#fff"  />
-        </TouchableOpacity>
-      </View>
+    <ScreenContainer>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* Messages List */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        style={styles.messagesList}
-        contentContainerStyle={styles.messagesContent}
-        showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => {
-          if (flatListRef.current) {
-            flatListRef.current.scrollToEnd({ animated: false });
-          }
-        }}
-        ListEmptyComponent={
-          <View style={styles.emptyMessages}>
-            <Icon  name="chatbubbles-outline" size={64} color="#374151"  />
-            <Text style={styles.emptyTitle}>Start the conversation</Text>
-            <Text style={styles.emptyText}>
-              Be the first to send a message in this room
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{room?.name}</Text>
+            <Text style={styles.headerSubtitle}>
+              {room?.participantCount} member{room?.participantCount !== 1 ? 's' : ''}
             </Text>
           </View>
-        }
-      />
 
-      {/* Message Input */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.inputContainer}
-      >
-        <View style={styles.inputRow}>
-          <TouchableOpacity style={styles.attachButton}>
-            <Icon  name="add" size={24} color="#6b7280"  />
-          </TouchableOpacity>
-          
-          <TextInput
-            style={styles.messageInput}
-            placeholder="Type a message..."
-            placeholderTextColor="#6b7280"
-            value={messageText}
-            onChangeText={setMessageText}
-            multiline
-            maxLength={1000}
-            editable={!sending}
-          />
-          
           <TouchableOpacity
-            style={[
-              styles.sendButton,
-              (messageText.trim() && !sending) ? styles.sendButtonActive : styles.sendButtonInactive
-            ]}
-            onPress={handleSendMessage}
-            disabled={!messageText.trim() || sending}
+            style={styles.participantsButton}
+            onPress={() => setShowParticipants(true)}
           >
-            <LinearGradient
-              colors={
-                (messageText.trim() && !sending) 
-                  ? ['#a855f7', '#d946ef'] 
-                  : ['#374151', '#374151']
-              }
-              style={styles.sendButtonGradient}
-            >
-              <Icon  
-                name={sending ? "hourglass-outline" : "send"} 
-                size={20} 
-                color="#fff" 
-               />
-            </LinearGradient>
+            <Icon name="people" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
 
-      {/* Participants Modal */}
-      {renderParticipantsModal()}
-    </SafeAreaView>
+        {/* Messages List */}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          style={styles.messagesList}
+          contentContainerStyle={styles.messagesContent}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => {
+            if (flatListRef.current) {
+              flatListRef.current.scrollToEnd({ animated: false });
+            }
+          }}
+          ListEmptyComponent={
+            <View style={styles.emptyMessages}>
+              <Icon name="chatbubbles-outline" size={64} color="#374151" />
+              <Text style={styles.emptyTitle}>Start the conversation</Text>
+              <Text style={styles.emptyText}>
+                Be the first to send a message in this room
+              </Text>
+            </View>
+          }
+        />
+
+        {/* Message Input */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.inputContainer}
+        >
+          <View style={styles.inputRow}>
+            <TouchableOpacity style={styles.attachButton}>
+              <Icon name="add" size={24} color="#6b7280" />
+            </TouchableOpacity>
+
+            <TextInput
+              style={styles.messageInput}
+              placeholder="Type a message..."
+              placeholderTextColor="#6b7280"
+              value={messageText}
+              onChangeText={setMessageText}
+              multiline
+              maxLength={1000}
+              editable={!sending}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.sendButton,
+                (messageText.trim() && !sending) ? styles.sendButtonActive : styles.sendButtonInactive
+              ]}
+              onPress={handleSendMessage}
+              disabled={!messageText.trim() || sending}
+            >
+              <LinearGradient
+                colors={
+                  (messageText.trim() && !sending)
+                    ? ['#00D2BE', '#00A89E']
+                    : ['#27272E', '#27272E']
+                }
+                style={styles.sendButtonGradient}
+              >
+                <Icon
+                  name={sending ? "hourglass-outline" : "send"}
+                  size={20}
+                  color={(messageText.trim() && !sending) ? '#0A0A0C' : '#71717A'}
+                />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+
+        {/* Participants Modal */}
+        {renderParticipantsModal()}
+      </View>
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f172a',
   },
   loadingText: {
     fontSize: 16,
     color: '#9ca3af',
-    marginTop: 16,
+    marginTop: 8,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingTop: StatusBar.currentHeight + 12,
-    backgroundColor: '#1e293b',
+    paddingTop: 0,
+    backgroundColor: '#141418',
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: '#27272E',
   },
   backButton: {
     padding: 8,
@@ -411,7 +402,6 @@ const styles = StyleSheet.create({
   },
   messagesList: {
     flex: 1,
-    backgroundColor: '#0f172a',
   },
   messagesContent: {
     padding: 16,
@@ -439,11 +429,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   currentUserBubble: {
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
     borderBottomRightRadius: 4,
   },
   otherUserBubble: {
-    backgroundColor: '#334155',
+    backgroundColor: '#27272E',
     borderBottomLeftRadius: 4,
   },
   senderName: {
@@ -457,7 +447,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   currentUserText: {
-    color: '#fff',
+    color: '#0A0A0C',
   },
   otherUserText: {
     color: '#fff',
@@ -471,7 +461,7 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontStyle: 'italic',
     textAlign: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
@@ -479,13 +469,13 @@ const styles = StyleSheet.create({
   emptyMessages: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: 8,
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#fff',
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 8,
   },
   emptyText: {
@@ -494,9 +484,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inputContainer: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: '#27272E',
   },
   inputRow: {
     flexDirection: 'row',
@@ -509,13 +499,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#334155',
+    backgroundColor: '#27272E',
     justifyContent: 'center',
     alignItems: 'center',
   },
   messageInput: {
     flex: 1,
-    backgroundColor: '#334155',
+    backgroundColor: '#27272E',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -543,22 +533,22 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingTop: StatusBar.currentHeight + 16,
-    backgroundColor: '#1e293b',
+    paddingVertical: 8,
+    paddingTop: 0,
+    backgroundColor: '#141418',
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: '#27272E',
   },
   modalCancel: {
     fontSize: 16,
-    color: '#a855f7',
+    color: '#00D2BE',
     fontWeight: '600',
   },
   modalTitle: {
@@ -609,7 +599,7 @@ const styles = StyleSheet.create({
   participantItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -618,7 +608,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#a855f7',
+    backgroundColor: '#00D2BE',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -649,7 +639,7 @@ const styles = StyleSheet.create({
   },
   participantPlaceholder: {
     alignItems: 'center',
-    paddingVertical: 32,
+    paddingVertical: 8,
   },
   participantPlaceholderText: {
     fontSize: 14,
@@ -659,3 +649,5 @@ const styles = StyleSheet.create({
 });
 
 export default ChatRoomScreen;
+
+

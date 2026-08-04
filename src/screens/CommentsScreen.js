@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import BlueScreen from '../ui/BlueScreen';
 import Icon from '../components/Icon';
 import {
   View,
@@ -16,6 +17,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { db, auth } from '../config/firebase';
+import { COLORS } from '../styles/theme';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -165,8 +167,8 @@ const CommentsScreen = ({ route, navigation }) => {
         likes: 0
       };
 
-      setComments(prevComments => 
-        prevComments.map(comment => 
+      setComments(prevComments =>
+        prevComments.map(comment =>
           comment.id === replyingTo.commentId
             ? { ...comment, replies: [...comment.replies, newReply] }
             : comment
@@ -198,17 +200,17 @@ const CommentsScreen = ({ route, navigation }) => {
   const handleLikeComment = (commentId, isReply = false, parentCommentId = null) => {
     const likeKey = isReply ? `${parentCommentId}_${commentId}` : commentId;
     const newLikedComments = new Set(likedComments);
-    
+
     if (newLikedComments.has(likeKey)) {
       newLikedComments.delete(likeKey);
     } else {
       newLikedComments.add(likeKey);
     }
-    
+
     setLikedComments(newLikedComments);
 
     // Update comment likes count
-    setComments(prevComments => 
+    setComments(prevComments =>
       prevComments.map(comment => {
         if (!isReply && comment.id === commentId) {
           return {
@@ -218,7 +220,7 @@ const CommentsScreen = ({ route, navigation }) => {
         } else if (isReply && comment.id === parentCommentId) {
           return {
             ...comment,
-            replies: comment.replies.map(reply => 
+            replies: comment.replies.map(reply =>
               reply.id === commentId
                 ? { ...reply, likes: newLikedComments.has(likeKey) ? reply.likes + 1 : reply.likes - 1 }
                 : reply
@@ -279,20 +281,20 @@ const CommentsScreen = ({ route, navigation }) => {
             </View>
             <Text style={styles.commentText}>{reply.text}</Text>
             <View style={styles.commentActions}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.commentAction}
                 onPress={() => handleLikeComment(reply.id, true, parentComment.id)}
               >
-                <Icon  
-                  name={isLiked ? "heart" : "heart-outline"} 
-                  size={16} 
-                  color={isLiked ? "#ff1744" : "#666"} 
-                 />
-                <Text style={[styles.commentActionText, isLiked && { color: '#ff1744' }]}>
+                <Icon
+                  name={isLiked ? "heart" : "heart-outline"}
+                  size={16}
+                  color={isLiked ? COLORS.gradientEnd : "#666"}
+                />
+                <Text style={[styles.commentActionText, isLiked && { color: COLORS.gradientEnd }]}>
                   {reply.likes}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.commentAction}
                 onPress={() => handleReply(reply, true, parentComment.id)}
               >
@@ -319,20 +321,20 @@ const CommentsScreen = ({ route, navigation }) => {
             </View>
             <Text style={styles.commentText}>{comment.text}</Text>
             <View style={styles.commentActions}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.commentAction}
                 onPress={() => handleLikeComment(comment.id)}
               >
-                <Icon  
-                  name={isLiked ? "heart" : "heart-outline"} 
-                  size={16} 
-                  color={isLiked ? "#ff1744" : "#666"} 
-                 />
-                <Text style={[styles.commentActionText, isLiked && { color: '#ff1744' }]}>
+                <Icon
+                  name={isLiked ? "heart" : "heart-outline"}
+                  size={16}
+                  color={isLiked ? COLORS.gradientEnd : "#666"}
+                />
+                <Text style={[styles.commentActionText, isLiked && { color: COLORS.gradientEnd }]}>
                   {comment.likes}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.commentAction}
                 onPress={() => handleReply(comment)}
               >
@@ -341,7 +343,7 @@ const CommentsScreen = ({ route, navigation }) => {
             </View>
           </View>
         </TouchableOpacity>
-        
+
         {/* Render Replies */}
         {comment.replies && comment.replies.length > 0 && (
           <FlatList
@@ -358,7 +360,7 @@ const CommentsScreen = ({ route, navigation }) => {
   const renderHeader = () => (
     <View style={styles.postSummary}>
       <View style={styles.postHeader}>
-        <Image 
+        <Image
           source={{ uri: postData?.user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face' }}
           style={styles.postAvatar}
         />
@@ -376,80 +378,82 @@ const CommentsScreen = ({ route, navigation }) => {
   );
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <Animated.View 
-        style={[
-          styles.content,
-          { transform: [{ translateY: slideAnim }] }
-        ]}
+    <BlueScreen>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.gradient}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.closeButton} onPress={closeComments}>
-              <Icon  name="close" size={28} color="#fff"  />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Comments</Text>
-            <View style={styles.headerSpacer} />
-          </View>
-
-          {/* Comments List */}
-          <FlatList
-            ref={flatListRef}
-            data={comments}
-            renderItem={renderComment}
-            keyExtractor={(item) => item.id}
-            ListHeaderComponent={renderHeader}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.commentsList}
-          />
-
-          {/* Reply Preview */}
-          {replyingTo && (
-            <View style={styles.replyPreview}>
-              <Text style={styles.replyPreviewText}>
-                Replying to @{replyingTo.username}
-              </Text>
-              <TouchableOpacity onPress={() => setReplyingTo(null)}>
-                <Icon  name="close" size={20} color="#666"  />
+        <Animated.View
+          style={[
+            styles.content,
+            { transform: [{ translateY: slideAnim }] }
+          ]}
+        >
+          <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.gradient}>
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity style={styles.closeButton} onPress={closeComments}>
+                <Icon name="close" size={28} color="#fff" />
               </TouchableOpacity>
+              <Text style={styles.headerTitle}>Comments</Text>
+              <View style={styles.headerSpacer} />
             </View>
-          )}
 
-          {/* Comment Input */}
-          <View style={styles.inputContainer}>
-            <Image source={{ uri: currentUser.avatar }} style={styles.inputAvatar} />
-            <View style={styles.inputWrapper}>
-              <TextInput
-                ref={inputRef}
-                style={styles.commentInput}
-                placeholder={replyingTo ? `Reply to @${replyingTo.username}...` : "Add a comment..."}
-                placeholderTextColor="#666"
-                value={newComment}
-                onChangeText={setNewComment}
-                multiline
-                maxLength={500}
-              />
-              <TouchableOpacity 
-                style={[styles.sendButton, !newComment.trim() && styles.sendButtonDisabled]}
-                onPress={handleSendComment}
-                disabled={!newComment.trim()}
-              >
-                <LinearGradient
-                  colors={newComment.trim() ? ['#ec4899', '#be185d'] : ['#374151', '#374151']}
-                  style={styles.sendGradient}
+            {/* Comments List */}
+            <FlatList
+              ref={flatListRef}
+              data={comments}
+              renderItem={renderComment}
+              keyExtractor={(item) => item.id}
+              ListHeaderComponent={renderHeader}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.commentsList}
+            />
+
+            {/* Reply Preview */}
+            {replyingTo && (
+              <View style={styles.replyPreview}>
+                <Text style={styles.replyPreviewText}>
+                  Replying to @{replyingTo.username}
+                </Text>
+                <TouchableOpacity onPress={() => setReplyingTo(null)}>
+                  <Icon name="close" size={20} color="#666" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Comment Input */}
+            <View style={styles.inputContainer}>
+              <Image source={{ uri: currentUser.avatar }} style={styles.inputAvatar} />
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  ref={inputRef}
+                  style={styles.commentInput}
+                  placeholder={replyingTo ? `Reply to @${replyingTo.username}...` : "Add a comment..."}
+                  placeholderTextColor="#666"
+                  value={newComment}
+                  onChangeText={setNewComment}
+                  multiline
+                  maxLength={500}
+                />
+                <TouchableOpacity
+                  style={[styles.sendButton, !newComment.trim() && styles.sendButtonDisabled]}
+                  onPress={handleSendComment}
+                  disabled={!newComment.trim()}
                 >
-                  <Icon  name="send" size={20} color="#fff"  />
-                </LinearGradient>
-              </TouchableOpacity>
+                  <LinearGradient
+                    colors={newComment.trim() ? ['#00D2BE', '#00A89E'] : ['#27272E', '#27272E']}
+                    style={styles.sendGradient}
+                  >
+                    <Icon name="send" size={20} color={newComment.trim() ? '#0A0A0C' : '#71717A'} />
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </LinearGradient>
-      </Animated.View>
-    </KeyboardAvoidingView>
+          </LinearGradient>
+        </Animated.View>
+      </KeyboardAvoidingView>
+    </BlueScreen>
   );
 };
 
@@ -472,7 +476,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#2a2a2a',
   },
@@ -656,10 +660,11 @@ const styles = StyleSheet.create({
     borderTopColor: '#333',
   },
   replyPreviewText: {
-    color: '#ec4899',
+    color: '#00D2BE',
     fontSize: 14,
     fontWeight: '600',
   },
 });
 
 export default CommentsScreen;
+

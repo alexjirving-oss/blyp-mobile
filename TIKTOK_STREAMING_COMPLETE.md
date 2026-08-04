@@ -132,8 +132,11 @@ firebase deploy --only firestore:rules,storage
 4. Verify no black screens occur
 
 ### 4. Production Build
+
+HISTORICAL ONLY - NON-CANONICAL - DO NOT USE FOR RELEASE:
+
 ```bash
-eas build --platform android --profile production
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
 ```
 
 ## 📊 Expected Performance

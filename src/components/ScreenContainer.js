@@ -1,56 +1,56 @@
 import React from 'react';
-import { 
-  View, 
-  StyleSheet, 
-  SafeAreaView, 
-  StatusBar, 
-  Platform
-} from 'react-native';
+import { Platform, StatusBar, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme } from '../styles/ThemeProvider';
 
 /**
  * ScreenContainer - A consistent screen wrapper with proper SafeArea handling
- * 
- * This component provides consistent screen layout across the app by:
- * 1. Using SafeAreaView for proper insets on iOS/Android
- * 2. Setting consistent status bar styling
- * 3. Handling edge cases with notches/cutouts
- * 
- * @param {Object} props - Component props
- * @param {React.ReactNode} props.children - Screen content
- * @param {Object} props.style - Additional styles for the container
- * @param {boolean} props.noSafeArea - Whether to disable SafeAreaView (useful for screens with custom headers)
- * @param {string} props.statusBarColor - Custom status bar color (default: '#0f172a')
- * @param {string} props.barStyle - Status bar style ('light-content' or 'dark-content')
+ *
+ * Uses safe-area insets (not RN SafeAreaView) so Android edge-to-edge /
+ * translucent status bars get a real top offset.
  */
-const ScreenContainer = ({ 
-  children, 
-  style, 
+const ScreenContainer = ({
+  children,
+  style = undefined,
   noSafeArea = false,
-  statusBarColor = '#0f172a',
-  barStyle = 'light-content'
+  statusBarColor = undefined,
+  barStyle = undefined,
 }) => {
-  // Use regular View if noSafeArea is true
-  const Container = noSafeArea ? View : SafeAreaView;
-  
+  const { colors, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const topPad = noSafeArea
+    ? 0
+    : Math.max(insets.top, Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0);
+
   return (
-    <Container style={[styles.container, style]}>
-      <StatusBar 
-        barStyle={barStyle} 
-        backgroundColor={statusBarColor}
-        translucent={Platform.OS === 'android'} 
-      />
-      {children}
-    </Container>
+    <LinearGradient
+      colors={colors.bgGradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+      style={styles.gradient}
+    >
+      <View style={[styles.container, { paddingTop: topPad }, style]}>
+        <StatusBar
+          barStyle={barStyle || (isDark ? 'light-content' : 'dark-content')}
+          backgroundColor={statusBarColor || colors.bgGradient[0]}
+          translucent={Platform.OS === 'android'}
+        />
+        {children}
+      </View>
+    </LinearGradient>
   );
 };
 
 const styles = StyleSheet.create({
+  gradient: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
-    // Add padding for Android when using translucent status bar
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    backgroundColor: 'transparent',
   }
 });
 
 export default ScreenContainer;
+

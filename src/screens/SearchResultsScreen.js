@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../components/Icon';
+import ScreenContainer from '../components/ScreenContainer';
 import {
   View,
   Text,
@@ -44,7 +45,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
   const renderUserItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.userItem}
-      onPress={() => navigation.navigate('Profile', { userId: item.id })}
+      onPress={() => navigation.navigate('UserProfile', { userId: item.id, username: item.username })}
     >
       <Image source={{ uri: item.avatar }} style={styles.userAvatar} />
       <View style={styles.userInfo}>
@@ -59,7 +60,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
       </View>
       <TouchableOpacity style={styles.followButton}>
         <LinearGradient
-          colors={['#ec4899', '#be185d']}
+          colors={['#00D2BE', '#00A89E']}
           style={styles.followGradient}
         >
           <Text style={styles.followButtonText}>Follow</Text>
@@ -71,7 +72,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
   const renderPostItem = ({ item, index }) => (
     <TouchableOpacity 
       style={[styles.postItem, { width: screenWidth / 3 - 4 }]}
-      onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
+      onPress={() => navigation.navigate('Blyp', { initialQuery: query })}
     >
       <Image source={{ uri: item.thumbnail }} style={styles.postThumbnail} />
       {item.type === 'video' && (
@@ -100,13 +101,13 @@ const SearchResultsScreen = ({ route, navigation }) => {
   const renderHashtagItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.hashtagItem}
-      onPress={() => navigation.navigate('HashtagPosts', { hashtag: item.hashtag })}
+      onPress={() => navigation.navigate('Blyp', { initialQuery: item.hashtag })}
     >
       <LinearGradient
-        colors={['#ec4899', '#be185d']}
+        colors={['#00D2BE', '#00A89E']}
         style={styles.hashtagIcon}
       >
-        <Icon  name="pricetag" size={24} color="#fff"  />
+        <Icon  name="pricetag" size={24} color="#0A0A0C"  />
       </LinearGradient>
       <View style={styles.hashtagInfo}>
         <Text style={styles.hashtagText}>{item.hashtag}</Text>
@@ -115,7 +116,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
         </Text>
         {item.trending && (
           <View style={styles.trendingIndicator}>
-            <Icon  name="trending-up" size={12} color="#ec4899"  />
+            <Icon  name="trending-up" size={12} color="#00D2BE"  />
             <Text style={styles.trendingText}>Trending</Text>
           </View>
         )}
@@ -127,7 +128,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
   const renderLocationItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.locationItem}
-      onPress={() => navigation.navigate('LocationPosts', { locationId: item.id })}
+      onPress={() => navigation.navigate('Blyp', { initialQuery: item.name })}
     >
       <LinearGradient
         colors={['#10b981', '#059669']}
@@ -170,7 +171,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
 
   if (isLoading) {
     return (
-      <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.container}>
+      <ScreenContainer noSafeArea={true} style={{ paddingTop: 0 }}>
         <View style={styles.header}>
           <TouchableOpacity 
             style={styles.backButton}
@@ -181,17 +182,17 @@ const SearchResultsScreen = ({ route, navigation }) => {
           <Text style={styles.headerTitle}>Search Results</Text>
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#ec4899" />
+          <ActivityIndicator size="large" color="#00D2BE" />
           <Text style={styles.loadingText}>Searching for "{query}"...</Text>
         </View>
-      </LinearGradient>
+      </ScreenContainer>
     );
   }
 
   const resultCount = getResultCount();
 
   return (
-    <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.container}>
+    <ScreenContainer noSafeArea={true} style={{ paddingTop: 0 }}>
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
@@ -215,7 +216,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.users && results.users.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="people" size={20} color="#ec4899"  />
+                <Icon  name="people" size={20} color="#00D2BE"  />
                 <Text style={styles.sectionTitle}>Users ({results.users.length})</Text>
               </View>
               <FlatList
@@ -231,7 +232,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.posts && results.posts.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="grid" size={20} color="#ec4899"  />
+                <Icon  name="grid" size={20} color="#00D2BE"  />
                 <Text style={styles.sectionTitle}>Posts ({results.posts.length})</Text>
               </View>
               <FlatList
@@ -248,7 +249,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.hashtags && results.hashtags.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="pricetag" size={20} color="#ec4899"  />
+                <Icon  name="pricetag" size={20} color="#00D2BE"  />
                 <Text style={styles.sectionTitle}>Hashtags ({results.hashtags.length})</Text>
               </View>
               <FlatList
@@ -264,7 +265,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           {results?.locations && results.locations.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <Icon  name="location" size={20} color="#ec4899"  />
+                <Icon  name="location" size={20} color="#00D2BE"  />
                 <Text style={styles.sectionTitle}>Locations ({results.locations.length})</Text>
               </View>
               <FlatList
@@ -277,7 +278,7 @@ const SearchResultsScreen = ({ route, navigation }) => {
           )}
         </ScrollView>
       )}
-    </LinearGradient>
+    </ScreenContainer>
   );
 };
 
@@ -373,9 +374,9 @@ const styles = StyleSheet.create({
     borderRadius: 15,
   },
   followButtonText: {
-    color: '#fff',
+    color: '#0A0A0C',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   postItem: {
     margin: 1,
@@ -450,7 +451,7 @@ const styles = StyleSheet.create({
   },
   trendingText: {
     fontSize: 12,
-    color: '#ec4899',
+    color: '#00D2BE',
     marginLeft: 4,
     fontWeight: '600',
   },

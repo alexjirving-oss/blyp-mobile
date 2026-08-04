@@ -45,7 +45,7 @@ firebase functions:list
 
 **✅ Expected Result:** All functions deployed successfully
 - `processVideoSegment` - Video transcoding
-- `generateHLSPlaylist` - Playlist generation  
+- `generateHLSPlaylist` - Playlist generation
 - `cleanupExpiredStreams` - Automated cleanup
 - `trackAnalytics` - Analytics processing
 
@@ -80,10 +80,10 @@ firebase firestore:indexes
 ### **Step 4: App Build and Deployment**
 
 ```bash
-# Build for Android production
-eas build --platform android --profile production
+# Build Android Play AAB via canonical governance path
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
 
-# Submit to Google Play Store (after testing)
+# Optional: Submit latest completed build to Google Play (after testing)
 eas submit --platform android --profile production
 ```
 
@@ -295,7 +295,7 @@ node src/testing/EnterpriseLiveStreamTester.js
 
 ### **Post-Launch Monitoring (First 24 Hours)**
 - [ ] **Real-time monitoring** of all key metrics
-- [ ] **Error rates** within acceptable thresholds  
+- [ ] **Error rates** within acceptable thresholds
 - [ ] **Performance metrics** meeting SLA targets
 - [ ] **User feedback** collection active
 - [ ] **Support team** ready for issues
@@ -314,11 +314,11 @@ node src/testing/EnterpriseLiveStreamTester.js
 Your enterprise-grade live streaming system is now **PRODUCTION READY** and deployed at massive scale!
 
 ### **What You've Accomplished:**
-✅ **Massive Scale**: Supporting millions of concurrent users  
-✅ **Global Reach**: Multi-region deployment with CDN  
-✅ **Enterprise Grade**: 99.9% uptime SLA with comprehensive monitoring  
-✅ **Production Hardened**: Thorough testing and validation  
-✅ **Future Ready**: Scalable architecture for continued growth  
+✅ **Massive Scale**: Supporting millions of concurrent users
+✅ **Global Reach**: Multi-region deployment with CDN
+✅ **Enterprise Grade**: 99.9% uptime SLA with comprehensive monitoring
+✅ **Production Hardened**: Thorough testing and validation
+✅ **Future Ready**: Scalable architecture for continued growth
 
 ### **Next Steps:**
 1. **Monitor Performance** - Watch real-time metrics dashboard

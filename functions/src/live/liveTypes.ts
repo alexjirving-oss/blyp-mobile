@@ -1,0 +1,180 @@
+/**
+ * Domain types for Amazon IVS Live Streaming.
+ * 
+ * Architecture:
+ * - LiveSession: Represents a live stream session (1 host, 0-11 guests, unlimited viewers)
+ * - LiveSlot: Represents a guest participant slot within a session
+ * - All state persisted to Firestore at: liveSessions/{sessionId}
+ */
+
+/**
+ * Backend type for live streaming service.
+ * Extensible for future implementations (e.g., 'agora', 'jitsi').
+ */
+export type LiveBackend = 'ivs';
+
+/**
+ * Role in a live session.
+ * - 'host': Single host who publishes video/audio, manages invites. Uses Stage with PUBLISH role.
+ * - 'guest': Co-host who publishes video/audio (up to 11 total). Uses Stage with PUBLISH role.
+ * - 'viewer': Passive audience member who subscribes only. Uses playback URL with SUBSCRIBE role.
+ */
+export type LiveRole = 'host' | 'guest' | 'viewer';
+
+/**
+ * Live session status lifecycle.
+ * - 'creating': Stage creation in progress
+ * - 'live': Session is active, streaming
+ * - 'ended': Host ended stream, session closed
+ * - 'failed': Stage creation failed, session unusable
+ */
+export type LiveSessionStatus = 'creating' | 'live' | 'ended' | 'failed';
+
+/**
+ * Guest slot state within a session.
+ * - 'empty': Slot not allocated
+ * - 'invited': Guest invited but not yet accepted
+ * - 'connecting': Guest accepted, participant token generated, joining stage
+ * - 'live': Guest successfully joined stage, publishing
+ * - 'disconnected': Guest disconnected (left or ejected)
+ */
+export type LiveSlotState = 'empty' | 'invited' | 'connecting' | 'live' | 'disconnected';
+
+/**
+ * Live session document in Firestore at liveSessions/{sessionId}.
+ * 
+ * Firestore structure:
+ * ```
+ * liveSessions/{sessionId}
+ *   ├─ backend: 'ivs'
+ *   ├─ hostUserId: string
+ *   ├─ stageArn: string (AWS resource ARN for IVS Stage)
+ *   ├─ playbackUrl: string (HLS playback endpoint)
+ *   ├─ status: 'creating' | 'live' | 'ended' | 'failed'
+ *   ├─ title: string (optional stream title)
+ *   ├─ createdAt: Timestamp
+ *   ├─ startedAt: Timestamp (when status became 'live')
+ *   ├─ endedAt: Timestamp (when host ended stream)
+ *   ├─ maxGuestSlots: number (typically 11 for Amazon IVS)
+ *   ├─ metadata: { [key: string]: any } (extensible user-supplied data)
+ *   └─ liveSessions/{sessionId}/slots/{slotIndex}
+ *      ├─ sessionId: string
+ *      ├─ slotIndex: number (0-10)
+ *      ├─ userId: string (optional, who holds this slot)
+ *      ├─ state: 'empty' | 'invited' | 'connecting' | 'live' | 'disconnected'
+ *      ├─ joinedAt: Timestamp
+ *      ├─ leftAt: Timestamp
+ *      └─ metadata: { [key: string]: any }
+ * ```
+ */
+export interface LiveSession {
+  // Session identity
+  sessionId: string;
+  backend: LiveBackend;
+
+  // Participants
+  hostUserId: string;
+
+  // AWS IVS Stage
+  stageArn: string;
+  playbackUrl: string;
+
+  // Status
+  status: LiveSessionStatus;
+  title?: string;
+
+  // Timestamps
+  createdAt: FirebaseFirestore.Timestamp;
+  startedAt?: FirebaseFirestore.Timestamp;
+  endedAt?: FirebaseFirestore.Timestamp;
+
+  // Configuration
+  maxGuestSlots: number;
+
+  // Extensible metadata
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Live guest slot document in Firestore at liveSessions/{sessionId}/slots/{slotIndex}.
+ * Each session has up to maxGuestSlots (typically 11) slots.
+ * 
+ * Slot transitions:
+ * - 'empty' → 'invited' (host invites guest)
+ * - 'invited' → 'connecting' (guest accepts, token generated)
+ * - 'connecting' → 'live' (guest successfully joins stage)
+ * - 'live' → 'disconnected' (guest leaves or is ejected)
+ * - 'empty' ← 'disconnected' (slot recycled after guest leaves)
+ */
+export interface LiveSlot {
+  // Identity
+  sessionId: string;
+  slotIndex: number; // 0-10 for max 11 guests
+
+  // Occupant
+  userId?: string; // Absent when state === 'empty'
+
+  // State
+  state: LiveSlotState;
+
+  // Timestamps
+  joinedAt?: FirebaseFirestore.Timestamp;
+  leftAt?: FirebaseFirestore.Timestamp;
+
+  // Extensible metadata
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Response returned to client when joining as host, guest, or viewer.
+ * Matches the mobile API contract in src/api/ivsLiveApi.ts.
+ */
+export interface LiveJoinResponse {
+  // Session identity
+  streamId: string;
+  stageArn: string;
+  region: string;
+  role: LiveRole;
+
+  // Participant token for Amazon IVS SDK
+  participantToken: string;
+  expiresAt: string; // ISO 8601 timestamp
+
+  // Caller identity
+  userId: string;
+}
+
+/**
+ * Request to start a new host session.
+ * Matches mobile API contract for POST /ivs/host/start.
+ */
+export interface HostStartRequest {
+  title?: string;
+  streamId?: string; // Optional; backend generates if omitted
+}
+
+/**
+ * Request to join as guest.
+ * Matches mobile API contract for POST /ivs/guest/join.
+ */
+export interface GuestJoinRequest {
+  streamId: string;
+}
+
+/**
+ * Request to join as viewer.
+ * Matches mobile API contract for POST /ivs/viewer/join.
+ */
+export interface ViewerJoinRequest {
+  streamId: string;
+}
+
+/**
+ * Internal token details used by backend.
+ * Generated by AWS IVS Realtime SDK.
+ */
+export interface ParticipantTokenDetails {
+  token: string;
+  expiresAt: Date;
+  durationSeconds: number;
+}

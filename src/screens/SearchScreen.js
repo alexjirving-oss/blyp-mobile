@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import BlueScreen from '../ui/BlueScreen';
 import Icon from '../components/Icon';
 import {
   View,
@@ -15,6 +16,7 @@ import {
 import ScreenContainer from '../components/ScreenContainer';
 import { LinearGradient } from 'expo-linear-gradient';
 import searchService from '../services/searchService';
+import { COLORS } from '../styles/theme';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -94,7 +96,7 @@ const SearchScreen = ({ navigation }) => {
   const renderSearchInput = () => (
     <View style={styles.searchContainer}>
       <View style={styles.searchInputContainer}>
-        <Icon  name="search" size={20} color="#666" style={styles.searchIcon}  />
+        <Icon name="search" size={20} color="#666" style={styles.searchIcon} />
         <TextInput
           ref={searchInputRef}
           style={styles.searchInput}
@@ -109,7 +111,7 @@ const SearchScreen = ({ navigation }) => {
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
-            <Icon  name="close-circle" size={20} color="#666"  />
+            <Icon name="close-circle" size={20} color="#666" />
           </TouchableOpacity>
         )}
       </View>
@@ -117,8 +119,8 @@ const SearchScreen = ({ navigation }) => {
   );
 
   const renderSearchTabs = () => (
-    <ScrollView 
-      horizontal 
+    <ScrollView
+      horizontal
       showsHorizontalScrollIndicator={false}
       style={styles.tabsContainer}
       contentContainerStyle={styles.tabsContent}
@@ -132,11 +134,11 @@ const SearchScreen = ({ navigation }) => {
           ]}
           onPress={() => setSelectedTab(tab.id)}
         >
-          <Icon  
-            name={tab.icon} 
-            size={16} 
-            color={selectedTab === tab.id ? '#fff' : '#666'} 
-           />
+          <Icon
+            name={tab.icon}
+            size={16}
+            color={selectedTab === tab.id ? '#fff' : '#666'}
+          />
           <Text style={[
             styles.tabText,
             selectedTab === tab.id && styles.activeTabText
@@ -149,7 +151,7 @@ const SearchScreen = ({ navigation }) => {
   );
 
   const renderUserItem = ({ item }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.userItem}
       onPress={() => navigateToResults(item.username, 'users')}
     >
@@ -158,7 +160,7 @@ const SearchScreen = ({ navigation }) => {
         <View style={styles.userNameRow}>
           <Text style={styles.username}>@{item.username}</Text>
           {item.verified && (
-            <Icon  name="checkmark-circle" size={16} color="#1da1f2"  />
+            <Icon name="checkmark-circle" size={16} color="#1da1f2" />
           )}
         </View>
         <Text style={styles.displayName}>{item.displayName}</Text>
@@ -171,19 +173,19 @@ const SearchScreen = ({ navigation }) => {
   );
 
   const renderPostItem = ({ item, index }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={[styles.postItem, { width: screenWidth / 3 - 4 }]}
-      onPress={() => navigation.navigate('PostDetail', { postId: item.id })}
+      onPress={() => navigation.navigate('Blyp', { initialQuery: searchQuery })}
     >
       <Image source={{ uri: item.thumbnail }} style={styles.postThumbnail} />
       {item.type === 'video' && (
         <View style={styles.videoIndicator}>
-          <Icon  name="play" size={16} color="#fff"  />
+          <Icon name="play" size={16} color="#fff" />
         </View>
       )}
       <View style={styles.postStats}>
         <View style={styles.postStat}>
-          <Icon  name="heart" size={12} color="#fff"  />
+          <Icon name="heart" size={12} color="#fff" />
           <Text style={styles.postStatText}>{item.likes}</Text>
         </View>
       </View>
@@ -191,12 +193,12 @@ const SearchScreen = ({ navigation }) => {
   );
 
   const renderHashtagItem = ({ item }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.hashtagItem}
-      onPress={() => navigation.navigate('HashtagPosts', { hashtag: item.hashtag })}
+      onPress={() => navigation.navigate('Blyp', { initialQuery: item.hashtag })}
     >
       <View style={styles.hashtagIcon}>
-        <Icon  name="pricetag" size={24} color="#ec4899"  />
+        <Icon name="pricetag" size={24} color="#00D2BE" />
       </View>
       <View style={styles.hashtagInfo}>
         <Text style={styles.hashtagText}>{item.hashtag}</Text>
@@ -213,12 +215,12 @@ const SearchScreen = ({ navigation }) => {
   );
 
   const renderLocationItem = ({ item }) => (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.locationItem}
-      onPress={() => navigation.navigate('LocationPosts', { locationId: item.id })}
+      onPress={() => navigation.navigate('Blyp', { initialQuery: item.name })}
     >
       <View style={styles.locationIcon}>
-        <Icon  name="location" size={24} color="#10b981"  />
+        <Icon name="location" size={24} color="#10b981" />
       </View>
       <View style={styles.locationInfo}>
         <Text style={styles.locationName}>{item.name}</Text>
@@ -236,12 +238,12 @@ const SearchScreen = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent</Text>
           {suggestions.recent.map((item, index) => (
-            <TouchableOpacity 
+            <TouchableOpacity
               key={index}
               style={styles.suggestionItem}
               onPress={() => handleSuggestionPress(item)}
             >
-              <Icon  name="time-outline" size={16} color="#666"  />
+              <Icon name="time-outline" size={16} color="#666" />
               <Text style={styles.suggestionText}>{item}</Text>
             </TouchableOpacity>
           ))}
@@ -253,12 +255,12 @@ const SearchScreen = ({ navigation }) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Trending</Text>
           {suggestions.trending.map((item, index) => (
-            <TouchableOpacity 
+            <TouchableOpacity
               key={index}
               style={styles.suggestionItem}
               onPress={() => handleSuggestionPress(item)}
             >
-              <Icon  name="trending-up" size={16} color="#ec4899"  />
+              <Icon name="trending-up" size={16} color="#00D2BE" />
               <Text style={styles.suggestionText}>{item}</Text>
             </TouchableOpacity>
           ))}
@@ -297,7 +299,7 @@ const SearchScreen = ({ navigation }) => {
     if (isLoading) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#ec4899" />
+          <ActivityIndicator size="large" color="#00D2BE" />
           <Text style={styles.loadingText}>Searching...</Text>
         </View>
       );
@@ -431,14 +433,16 @@ const SearchScreen = ({ navigation }) => {
   };
 
   return (
-    <ScreenContainer>
-      <LinearGradient colors={['#000000', '#1a1a1a']} style={styles.container}>
-        {renderSearchInput()}
-        {renderSearchTabs()}
-        
-        {searchQuery.length >= 2 ? renderSearchResults() : renderSuggestions()}
-      </LinearGradient>
-    </ScreenContainer>
+    <BlueScreen>
+      <ScreenContainer>
+        <LinearGradient colors={[COLORS.pageBackground, COLORS.backgroundLight]} style={styles.container}>
+          {renderSearchInput()}
+          {renderSearchTabs()}
+
+          {searchQuery.length >= 2 ? renderSearchResults() : renderSuggestions()}
+        </LinearGradient>
+      </ScreenContainer>
+    </BlueScreen>
   );
 };
 
@@ -484,7 +488,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2a2a2a',
   },
   activeTab: {
-    backgroundColor: '#ec4899',
+    backgroundColor: '#00D2BE',
   },
   tabText: {
     color: '#666',
@@ -493,7 +497,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   activeTabText: {
-    color: '#fff',
+    color: '#0A0A0C',
+    fontWeight: '700',
   },
   suggestionsContainer: {
     flex: 1,
@@ -515,7 +520,7 @@ const styles = StyleSheet.create({
   },
   viewAllButton: {
     fontSize: 14,
-    color: '#ec4899',
+    color: '#00D2BE',
     fontWeight: '600',
   },
   suggestionItem: {
@@ -565,15 +570,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   followButton: {
-    backgroundColor: '#ec4899',
+    backgroundColor: '#00D2BE',
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 15,
   },
   followButtonText: {
-    color: '#fff',
+    color: '#0A0A0C',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   postItem: {
     margin: 1,
@@ -637,15 +642,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   trendingBadge: {
-    backgroundColor: '#ec4899',
+    backgroundColor: '#00D2BE',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
   },
   trendingText: {
-    color: '#fff',
+    color: '#0A0A0C',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   locationItem: {
     flexDirection: 'row',
@@ -687,9 +692,10 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: '#ccc',
-    marginTop: 16,
+    marginTop: 8,
     fontSize: 16,
   },
 });
 
 export default SearchScreen;
+

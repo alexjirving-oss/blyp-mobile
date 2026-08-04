@@ -1,30 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useContext } from 'react';
+import BlueScreen from '../ui/BlueScreen';
 import Icon from '../components/Icon';
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  FlatList,
-  TouchableOpacity,
-  Image,
-  StatusBar,
-  TextInput,
-  Alert,
-  Modal,
-  ScrollView,
-} from 'react-native';
+import { Alert, FlatList, Image, Modal, PanResponder, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'firebase/firestore';
 import { auth, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList } from '../utils/followUtils';
+import { useTabReset } from '../utils/tabResetBus';
 import { useIsFocused } from '@react-navigation/native';
-import BlypLogo from '../components/BlypLogo';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
+import BlypAvatar from '../components/BlypAvatar';
+import HeaderMenuTabs from '../components/HeaderMenuTabs';
+import HeaderWalletBalances from '../components/HeaderWalletBalances';
+import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
+import BlypHeaderFlow from '../components/BlypHeaderFlow';
+import PlanStatusBanner from '../components/PlanStatusBanner';
+import { COLORS } from '../styles/theme';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
+import { getEconomyWallet } from '../api/economyLiveApi';
 import ChatRoomService from '../services/ChatRoomService';
 import GameService from '../services/GameService';
 import LiveUsersTab from '../components/LiveUsersTab';
+import YourBlypContent from '../components/YourBlyp/YourBlypContent';
+import BattlesContent from '../components/Battles/BattlesContent';
+import TeamsContent from '../components/Teams/TeamsContent';
+import { useAuth, hardLogout } from '../hooks/useCommon';
+import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messaging/resolveMessengerUser';
 
 const ROOM_CATEGORIES = [
   { id: 'general', name: 'General', icon: 'chatbubbles-outline', color: '#3b82f6' },
@@ -36,66 +38,66 @@ const ROOM_CATEGORIES = [
 ];
 
 const GAME_TYPES = [
-  { 
-    type: 'rock-paper-scissors', 
-    name: 'Rock Paper Scissors', 
-    icon: '✊', 
-    emoji: '✊🖐️✌️',
+  {
+    type: 'rock-paper-scissors',
+    name: 'Rock Paper Scissors',
+    icon: 'âœŠ',
+    emoji: 'âœŠðŸ–ï¸âœŒï¸',
     players: '2 players',
     description: 'Classic hand game with rock, paper, and scissors',
     gradient: ['#FF6B6B', '#FF8E53'],
     difficulty: 'Easy',
     playTime: '2 min'
   },
-  { 
-    type: 'tic-tac-toe', 
-    name: 'Tic Tac Toe', 
-    icon: '⭕', 
-    emoji: '❌⭕',
+  {
+    type: 'tic-tac-toe',
+    name: 'Tic Tac Toe',
+    icon: 'â­•',
+    emoji: 'âŒâ­•',
     players: '2 players',
     description: 'Get three in a row to win this classic strategy game',
     gradient: ['#4ECDC4', '#44A08D'],
     difficulty: 'Easy',
     playTime: '3 min'
   },
-  { 
-    type: 'word-guess', 
-    name: 'Word Guess', 
-    icon: '🔤', 
-    emoji: '🔤💭',
+  {
+    type: 'word-guess',
+    name: 'Word Guess',
+    icon: 'ðŸ”¤',
+    emoji: 'ðŸ”¤ðŸ’­',
     players: 'Up to 4',
     description: 'Guess the mystery word before time runs out',
     gradient: ['#A8E6CF', '#7FCDCD'],
     difficulty: 'Medium',
     playTime: '5 min'
   },
-  { 
-    type: 'quick-draw', 
-    name: 'Quick Draw', 
-    icon: '🎨', 
-    emoji: '🎨✏️',
+  {
+    type: 'quick-draw',
+    name: 'Quick Draw',
+    icon: 'ðŸŽ¨',
+    emoji: 'ðŸŽ¨âœï¸',
     players: 'Up to 8',
     description: 'Draw and guess in this fast-paced creative game',
     gradient: ['#FFD93D', '#FF6B6B'],
     difficulty: 'Medium',
     playTime: '4 min'
   },
-  { 
-    type: 'trivia', 
-    name: 'Trivia Quiz', 
-    icon: '🧠', 
-    emoji: '🧠❓',
+  {
+    type: 'trivia',
+    name: 'Trivia Quiz',
+    icon: 'ðŸ§ ',
+    emoji: 'ðŸ§ â“',
     players: 'Up to 6',
     description: 'Test your knowledge across various categories',
     gradient: ['#A8EDEA', '#FED6E3'],
     difficulty: 'Hard',
     playTime: '8 min'
   },
-  { 
-    type: 'memory-match', 
-    name: 'Memory Match', 
-    icon: '🃏', 
-    emoji: '🃏🧩',
+  {
+    type: 'memory-match',
+    name: 'Memory Match',
+    icon: 'ðŸƒ',
+    emoji: 'ðŸƒðŸ§©',
     players: 'Up to 4',
     description: 'Match pairs in this brain-training memory game',
     gradient: ['#667eea', '#764ba2'],
@@ -105,7 +107,14 @@ const GAME_TYPES = [
 ];
 
 const ChatListScreen = ({ navigation }) => {
-  const [selectedTab, setSelectedTab] = useState('chats');
+  // The main tab bar (App.js MainTabs) is an absolute overlay, so this screen
+  // must reserve its height or every sub-tab's bottom (Your Blyp stats, team
+  // lists, etc.) renders hidden underneath the footer. Context (not the hook)
+  // so the screen also works if ever mounted outside the tab navigator.
+  const tabBarHeight = useContext(BottomTabBarHeightContext) || 68;
+  const [selectedTab, setSelectedTab] = useState('notifications');
+  // Double-tap the Chat/Games tab → reset to the first sub-page ("Live").
+  useTabReset('Chat', () => setSelectedTab('notifications'));
   const [chats, setChats] = useState([]);
   const [followingUsers, setFollowingUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,7 +123,7 @@ const ChatListScreen = ({ navigation }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [coinBalance, setCoinBalance] = useState(0);
   const [gemBalance, setGemBalance] = useState(0);
-  
+
   // Chat Rooms state
   const [rooms, setRooms] = useState([]);
   const [userRooms, setUserRooms] = useState([]);
@@ -122,7 +131,7 @@ const ChatListScreen = ({ navigation }) => {
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
-  
+
   // Games state
   const [availableGames, setAvailableGames] = useState([]);
   const [myGames, setMyGames] = useState([]);
@@ -130,21 +139,38 @@ const ChatListScreen = ({ navigation }) => {
   const [gameSearchQuery, setGameSearchQuery] = useState('');
   const [selectedGameTab, setSelectedGameTab] = useState('browse');
   const [showCreateGameModal, setShowCreateGameModal] = useState(false);
-  
+
   // Live users state
   const [liveUsers, setLiveUsers] = useState([]);
   const [liveUsersLoading, setLiveUsersLoading] = useState(true);
-  
+
   const isFocused = useIsFocused();
   const currentUser = auth.currentUser;
+  const { uid: authUid, authReady, isAuthenticated } = useAuth();
+  const walletUid = authUid || currentUser?.uid || null;
+
+  const shouldUseLiveServiceWallet = () => {
+    const enabled =
+      typeof process !== 'undefined' && process?.env?.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET
+        ? String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET).toLowerCase()
+        : '';
+    return enabled === '1' || enabled === 'true';
+  };
 
 
 
   useEffect(() => {
-    if (isFocused && currentUser) {
+    if (!isFocused) return;
+
+    // Balance panel should work even when Firebase auth isn't the source of truth.
+    if (walletUid) {
+      loadBalances();
+    }
+
+    // The chat/games/live-users tabs still depend on Firebase-backed data.
+    if (currentUser) {
       loadChats();
       loadFollowingUsers();
-      loadBalances();
       if (selectedTab === 'chats') {
         loadRooms();
       } else if (selectedTab === 'requests') {
@@ -153,17 +179,33 @@ const ChatListScreen = ({ navigation }) => {
         loadLiveUsers();
       }
     }
-  }, [isFocused, currentUser, selectedTab]);
-  
+  }, [isFocused, currentUser, selectedTab, walletUid, authReady, isAuthenticated]);
+
   const loadBalances = async () => {
-    if (!currentUser) return;
+    if (!walletUid) return;
     try {
-      const coins = await BlypCoinService.getUserBalance(currentUser.uid);
-      const gems = await GemService.getUserGems(currentUser.uid);
-      setCoinBalance(coins);
-      setGemBalance(gems);
+      if (shouldUseLiveServiceWallet()) {
+        if (!authReady || !isAuthenticated) {
+          setCoinBalance(0);
+          setGemBalance(0);
+          return;
+        }
+
+        const wallet = await getEconomyWallet();
+        const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+        const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+        setCoinBalance(Number.isFinite(coins) ? coins : 0);
+        setGemBalance(Number.isFinite(gems) ? gems : 0);
+        return;
+      }
+
+      const coins = await BlypCoinService.getUserBalance(walletUid);
+      const gems = await GemService.getUserGems(walletUid);
+      setCoinBalance(Number.isFinite(coins) ? coins : 0);
+      setGemBalance(Number.isFinite(gems) ? gems : 0);
     } catch (error) {
-      console.error('Error loading balances:', error);
+      const msg = String(error?.message || error || '');
+      console.warn('[BALANCES] loadBalances failed:', msg);
       setCoinBalance(0);
       setGemBalance(0);
     }
@@ -171,7 +213,7 @@ const ChatListScreen = ({ navigation }) => {
 
   const loadRooms = () => {
     if (!currentUser) return;
-    
+
     setRoomsLoading(true);
 
     // Subscribe to all available rooms
@@ -180,7 +222,7 @@ const ChatListScreen = ({ navigation }) => {
 
       // Apply search filter
       if (roomSearchQuery.trim()) {
-        filteredRooms = filteredRooms.filter(room => 
+        filteredRooms = filteredRooms.filter(room =>
           room.name.toLowerCase().includes(roomSearchQuery.toLowerCase()) ||
           room.description.toLowerCase().includes(roomSearchQuery.toLowerCase()) ||
           room.tags.some(tag => tag.toLowerCase().includes(roomSearchQuery.toLowerCase()))
@@ -199,7 +241,7 @@ const ChatListScreen = ({ navigation }) => {
     // Subscribe to user's rooms
     const unsubscribeUserRooms = ChatRoomService.subscribeToUserRooms((myRooms) => {
       setUserRooms(myRooms);
-      
+
       // Calculate active rooms (rooms with activity in last 24 hours)
       const activeRoomsFiltered = myRooms.filter(room => {
         const lastActivity = new Date(room.lastActivity);
@@ -229,11 +271,11 @@ const ChatListScreen = ({ navigation }) => {
     const unsubscribe = onSnapshot(liveUsersQuery, async (snapshot) => {
       try {
         const liveUsersList = [];
-        
+
         // For each live user, get their stream details
         for (const userDoc of snapshot.docs) {
           const userData = userDoc.data();
-          
+
           // If user has a current stream, get the stream details
           if (userData.currentStreamId) {
             try {
@@ -256,7 +298,7 @@ const ChatListScreen = ({ navigation }) => {
             }
           }
         }
-        
+
         setLiveUsers(liveUsersList);
         setLiveUsersLoading(false);
       } catch (error) {
@@ -282,20 +324,36 @@ const ChatListScreen = ({ navigation }) => {
         collection(db, 'chats'),
         where('participants', 'array-contains', currentUser.uid)
       );
-      
-      const unsubscribe = onSnapshot(chatsQuery, (snapshot) => {
+
+      const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
         const chatData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }))
-        // Sort on client side to avoid compound index requirement
-        .sort((a, b) => {
-          const aTime = a.lastMessageTime?.seconds || 0;
-          const bTime = b.lastMessageTime?.seconds || 0;
-          return bTime - aTime;
-        });
-        
-        setChats(chatData);
+          .sort((a, b) => {
+            const aTime = a.lastMessageTime?.seconds || 0;
+            const bTime = b.lastMessageTime?.seconds || 0;
+            return bTime - aTime;
+          });
+
+        const enriched = await Promise.all(chatData.map(async (chat) => {
+          if (chat.participantInfo?.avatar) return chat;
+          const otherId = (chat.participants || []).find((id) => id !== currentUser.uid);
+          if (!otherId) return chat;
+          const profile = await fetchMessengerUserProfile(otherId);
+          const name = profile?.displayName || profile?.username || chat.participantNames?.[0] || 'User';
+          return {
+            ...chat,
+            participantInfo: {
+              name,
+              username: profile?.username || name,
+              avatar: resolveUserPhoto(profile),
+              online: false,
+            },
+          };
+        }));
+
+        setChats(enriched);
         setLoading(false);
       });
 
@@ -329,7 +387,7 @@ const ChatListScreen = ({ navigation }) => {
           console.error('Error fetching user data:', error);
         }
       }
-      
+
       setFollowingUsers(followingUsersData);
     });
 
@@ -342,12 +400,15 @@ const ChatListScreen = ({ navigation }) => {
       return;
     }
 
-    const filtered = chats.filter(chat => 
-      chat.participantInfo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      chat.participantInfo.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      chat.lastMessage.text.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    
+    const filtered = chats.filter(chat => {
+      const info = chat.participantInfo || {};
+      const name = String(info.name || '').toLowerCase();
+      const username = String(info.username || '').toLowerCase();
+      const last = String(chat.lastMessage?.text || '').toLowerCase();
+      const q = searchQuery.toLowerCase();
+      return name.includes(q) || username.includes(q) || last.includes(q);
+    });
+
     setFilteredChats(filtered);
   };
 
@@ -371,13 +432,13 @@ const ChatListScreen = ({ navigation }) => {
   const getMessagePreview = (message) => {
     switch (message.type) {
       case 'image':
-        return '📷 Photo';
+        return 'ðŸ“· Photo';
       case 'video':
-        return '🎥 Video';
+        return 'ðŸŽ¥ Video';
       case 'audio':
-        return '🎵 Audio';
+        return 'ðŸŽµ Audio';
       case 'file':
-        return '📄 Document';
+        return 'ðŸ“„ Document';
       default:
         return message.text;
     }
@@ -405,8 +466,8 @@ const ChatListScreen = ({ navigation }) => {
           'This room requires a password:',
           [
             { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Join', 
+            {
+              text: 'Join',
               onPress: async (password) => {
                 try {
                   await ChatRoomService.joinRoom(room.id, password);
@@ -440,7 +501,7 @@ const ChatListScreen = ({ navigation }) => {
   // Games loading functions
   const loadGames = async () => {
     if (!currentUser) return;
-    
+
     setGamesLoading(true);
     try {
       // Subscribe to available games
@@ -507,16 +568,20 @@ const ChatListScreen = ({ navigation }) => {
 
   const renderChatItem = ({ item }) => {
     const isUnread = item.unreadCount > 0;
-    
+
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={[styles.chatItem, item.isPinned && styles.pinnedChat]}
         onPress={() => handleChatPress(item)}
         activeOpacity={0.7}
       >
         {/* Avatar with online indicator */}
         <View style={styles.avatarContainer}>
-          <Image source={{ uri: item.participantInfo.avatar }} style={styles.avatar} />
+          <BlypAvatar
+            uri={item.participantInfo?.avatar}
+            name={item.participantInfo?.name || item.participantInfo?.username}
+            size={48}
+          />
           {item.participantInfo.online && (
             <View style={styles.onlineIndicator} />
           )}
@@ -530,7 +595,7 @@ const ChatListScreen = ({ navigation }) => {
                 {item.participantInfo.name}
               </Text>
               {item.isPinned && (
-                <Icon  name="pin" size={14} color="#a855f7"  />
+                <Icon name="pin" size={14} color="#00D2BE" />
               )}
             </View>
             <Text style={[styles.timestamp, isUnread && styles.unreadTimestamp]}>
@@ -539,11 +604,11 @@ const ChatListScreen = ({ navigation }) => {
           </View>
 
           <View style={styles.messageRow}>
-            <Text 
-              style={[styles.lastMessage, isUnread && styles.unreadMessage]} 
+            <Text
+              style={[styles.lastMessage, isUnread && styles.unreadMessage]}
               numberOfLines={1}
             >
-              {item.lastMessage.senderId === 'current_user' ? '✓✓ ' : ''}
+              {item.lastMessage.senderId === 'current_user' ? 'âœ“âœ“ ' : ''}
               {getMessagePreview(item.lastMessage)}
             </Text>
             {isUnread && (
@@ -559,13 +624,18 @@ const ChatListScreen = ({ navigation }) => {
 
   // Room rendering functions
   const renderRoomItem = ({ item: room }) => {
-    const category = ROOM_CATEGORIES.find(cat => cat.id === room.category) || ROOM_CATEGORIES[0];
+    const category = ROOM_CATEGORIES.find((cat) => cat.id === room.category) || ROOM_CATEGORIES[0];
     const isUserRoom = room.participants.includes(currentUser?.uid);
     const canJoin = !isUserRoom && room.participantCount < room.maxParticipants;
+
+    const statusStyle = isUserRoom ? styles.joinedBadge : canJoin ? styles.joinBadge : styles.fullBadge;
+    const statusTextStyle = isUserRoom ? styles.joinedText : canJoin ? styles.joinText : styles.fullText;
+    const statusLabel = isUserRoom ? 'Joined' : canJoin ? 'Join' : 'Full';
 
     return (
       <TouchableOpacity
         style={styles.roomCard}
+        activeOpacity={0.8}
         onPress={() => {
           if (isUserRoom) {
             navigation.navigate('ChatRoom', { roomId: room.id });
@@ -583,42 +653,31 @@ const ChatListScreen = ({ navigation }) => {
           <View style={styles.roomHeader}>
             <View style={styles.roomInfo}>
               <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
-                <Icon  name={category.icon} size={20} color="#fff"  />
+                <Icon name={category.icon} size={20} color="#fff" />
               </View>
+
               <View style={styles.roomDetails}>
                 <View style={styles.roomTitleRow}>
-                  <Text style={styles.roomName} numberOfLines={1}>{room.name}</Text>
-                  {room.isPrivate && <Icon  name="lock-closed" size={16} color="#f59e0b"  />}
+                  <Text style={styles.roomName} numberOfLines={1}>
+                    {room.name}
+                  </Text>
                 </View>
                 <Text style={styles.roomDescription} numberOfLines={2}>
-                  {room.description || 'No description'}
+                  {room.description}
                 </Text>
                 <View style={styles.roomMeta}>
                   <Text style={styles.categoryText}>{category.name}</Text>
                   <Text style={styles.participantCount}>
-                    {room.participantCount}/{room.maxParticipants} members
+                    {room.participantCount}/{room.maxParticipants} players
                   </Text>
                 </View>
               </View>
             </View>
-            
+
             <View style={styles.roomActions}>
-              {isUserRoom ? (
-                <View style={[styles.statusBadge, styles.joinedBadge]}>
-                  <Icon  name="checkmark" size={16} color="#10b981"  />
-                  <Text style={styles.joinedText}>Joined</Text>
-                </View>
-              ) : canJoin ? (
-                <TouchableOpacity style={[styles.statusBadge, styles.joinBadge]}>
-                  <Icon  name="add" size={16} color="#3b82f6"  />
-                  <Text style={styles.joinText}>Join</Text>
-                </TouchableOpacity>
-              ) : (
-                <View style={[styles.statusBadge, styles.fullBadge]}>
-                  <Icon  name="people" size={16} color="#6b7280"  />
-                  <Text style={styles.fullText}>Full</Text>
-                </View>
-              )}
+              <View style={[styles.statusBadge, statusStyle]}>
+                <Text style={statusTextStyle}>{statusLabel}</Text>
+              </View>
             </View>
           </View>
         </LinearGradient>
@@ -630,7 +689,7 @@ const ChatListScreen = ({ navigation }) => {
     if (data.length === 0) {
       return (
         <View style={styles.emptySection}>
-          <Icon  name={emptyIcon} size={48} color="#374151"  />
+          <Icon name={emptyIcon} size={48} color="#374151" />
           <Text style={styles.emptySectionTitle}>{emptyTitle}</Text>
           <Text style={styles.emptySectionText}>{emptyText}</Text>
         </View>
@@ -649,8 +708,8 @@ const ChatListScreen = ({ navigation }) => {
   };
 
   const renderCategoryFilter = () => (
-    <ScrollView 
-      horizontal 
+    <ScrollView
+      horizontal
       showsHorizontalScrollIndicator={false}
       style={styles.categoryFilter}
       contentContainerStyle={styles.categoryFilterContent}
@@ -667,7 +726,7 @@ const ChatListScreen = ({ navigation }) => {
           !selectedCategory && styles.categoryChipTextActive
         ]}>All</Text>
       </TouchableOpacity>
-      
+
       {ROOM_CATEGORIES.map((category) => (
         <TouchableOpacity
           key={category.id}
@@ -679,11 +738,11 @@ const ChatListScreen = ({ navigation }) => {
             selectedCategory === category.id ? null : category.id
           )}
         >
-          <Icon  
-            name={category.icon} 
-            size={16} 
-            color={selectedCategory === category.id ? '#fff' : category.color} 
-           />
+          <Icon
+            name={category.icon}
+            size={16}
+            color={selectedCategory === category.id ? COLORS.white : category.color}
+          />
           <Text style={[
             styles.categoryChipText,
             selectedCategory === category.id && styles.categoryChipTextActive
@@ -723,7 +782,7 @@ const ChatListScreen = ({ navigation }) => {
         </View>
         <Text style={styles.gameTypeDescription}>{gameType.description}</Text>
         <View style={styles.playButton}>
-          <Icon  name="play" size={16} color="#fff"  />
+          <Icon name="play" size={16} color="#fff" />
         </View>
       </LinearGradient>
     </TouchableOpacity>
@@ -732,7 +791,7 @@ const ChatListScreen = ({ navigation }) => {
   const renderActiveGameItem = ({ item: game }) => {
     const gameType = GAME_TYPES.find(gt => gt.type === game.gameType) || GAME_TYPES[0];
     const isUserGame = game.players.includes(currentUser?.uid);
-    
+
     return (
       <TouchableOpacity
         style={styles.activeGameCard}
@@ -740,7 +799,7 @@ const ChatListScreen = ({ navigation }) => {
         activeOpacity={0.8}
       >
         <LinearGradient
-          colors={['#1f2937', '#374151']}
+          colors={[COLORS.backgroundLight, COLORS.tabStripBackground]}
           style={styles.activeGameGradient}
         >
           <View style={styles.activeGameHeader}>
@@ -749,22 +808,22 @@ const ChatListScreen = ({ navigation }) => {
               <View style={styles.activeGameDetails}>
                 <Text style={styles.activeGameName}>{gameType.name}</Text>
                 <Text style={styles.activeGameStatus}>
-                  {game.status === 'waiting' ? 'Waiting for players' : 
-                   game.status === 'active' ? 'Game in progress' : 'Finished'}
+                  {game.status === 'waiting' ? 'Waiting for players' :
+                    game.status === 'active' ? 'Game in progress' : 'Finished'}
                 </Text>
               </View>
             </View>
             <View style={styles.activeGamePlayers}>
-              <Icon  name="people" size={16} color="#9ca3af"  />
+              <Icon name="people" size={16} color="#9ca3af" />
               <Text style={styles.activeGamePlayerCount}>
                 {game.players.length}/{game.maxPlayers}
               </Text>
             </View>
           </View>
-          
+
           {isUserGame && (
             <View style={styles.activeGameBadge}>
-              <Icon  name="checkmark-circle" size={16} color="#10b981"  />
+              <Icon name="checkmark-circle" size={16} color="#10b981" />
               <Text style={styles.activeGameBadgeText}>Your Game</Text>
             </View>
           )}
@@ -775,419 +834,189 @@ const ChatListScreen = ({ navigation }) => {
 
   const renderContent = () => {
     switch (selectedTab) {
-      case 'chats': // Rooms
-        return (
-          <View style={styles.roomsContainer}>
-            {/* Search Bar */}
-            <View style={styles.searchContainer}>
-              <View style={styles.searchBar}>
-                <Icon  name="search" size={20} color="#6b7280"  />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search rooms..."
-                  placeholderTextColor="#6b7280"
-                  value={roomSearchQuery}
-                  onChangeText={setRoomSearchQuery}
-                />
-              </View>
-            </View>
-
-            <ScrollView 
-              style={styles.roomsContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {/* Category Filter */}
-              {renderCategoryFilter()}
-
-              {/* Active Rooms Section */}
-              {activeRooms.length > 0 && (
-                <View style={styles.roomSection}>
-                  <View style={styles.sectionHeader}>
-                    <Icon  name="pulse-outline" size={24} color="#a855f7"  />
-                    <Text style={styles.sectionTitle}>Active Rooms</Text>
-                    <View style={styles.countBadge}>
-                      <Text style={styles.countText}>{activeRooms.length}</Text>
-                    </View>
-                  </View>
-                  {renderRoomSection(
-                    activeRooms,
-                    'No active rooms',
-                    'Rooms with recent activity will appear here',
-                    'pulse-outline'
-                  )}
-                </View>
-              )}
-
-              {/* My Rooms Section */}
-              {userRooms.length > 0 && (
-                <View style={styles.roomSection}>
-                  <View style={styles.sectionHeader}>
-                    <Icon  name="chatbubbles-outline" size={24} color="#a855f7"  />
-                    <Text style={styles.sectionTitle}>My Rooms</Text>
-                    <View style={styles.countBadge}>
-                      <Text style={styles.countText}>{userRooms.length}</Text>
-                    </View>
-                  </View>
-                  {renderRoomSection(
-                    userRooms,
-                    'No rooms yet',
-                    'Join some rooms to get started',
-                    'chatbubbles-outline'
-                  )}
-                </View>
-              )}
-
-              {/* Browse All Rooms Section */}
-              <View style={styles.roomSection}>
-                <View style={styles.sectionHeader}>
-                  <Icon  name="search-outline" size={24} color="#a855f7"  />
-                  <Text style={styles.sectionTitle}>Browse Rooms</Text>
-                  <View style={styles.countBadge}>
-                    <Text style={styles.countText}>{rooms.length}</Text>
-                  </View>
-                </View>
-                {renderRoomSection(
-                  rooms,
-                  'No rooms found',
-                  'Try adjusting your search or create a new room',
-                  'search-outline'
-                )}
-              </View>
-            </ScrollView>
-          </View>
-        );
-      case 'requests': // Games
-        return (
-          <View style={styles.gamesContainer}>
-            {/* Game Tabs */}
-            <View style={styles.gameTabContainer}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {[
-                  { key: 'browse', label: 'Browse Games', icon: 'grid-outline' },
-                  { key: 'active', label: 'Active Games', icon: 'play-circle-outline' },
-                  { key: 'my-games', label: 'My Games', icon: 'trophy-outline' }
-                ].map((tab) => (
-                  <TouchableOpacity
-                    key={tab.key}
-                    style={[
-                      styles.gameTab,
-                      selectedGameTab === tab.key && styles.activeGameTab
-                    ]}
-                    onPress={() => setSelectedGameTab(tab.key)}
-                  >
-                    <Icon  
-                      name={tab.icon} 
-                      size={18} 
-                      color={selectedGameTab === tab.key ? '#fff' : '#9ca3af'} 
-                     />
-                    <Text style={[
-                      styles.gameTabText,
-                      selectedGameTab === tab.key && styles.activeGameTabText
-                    ]}>
-                      {tab.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            {/* Games Content */}
-            <ScrollView style={styles.gamesContent} showsVerticalScrollIndicator={false}>
-              {selectedGameTab === 'browse' && (
-                <View>
-                  {/* Create Game Button */}
-                  <TouchableOpacity 
-                    style={styles.createGameButton}
-                    onPress={() => setShowCreateGameModal(true)}
-                  >
-                    <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.createGameGradient}>
-                      <Icon  name="add-circle-outline" size={24} color="#fff"  />
-                      <Text style={styles.createGameText}>Create New Game</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-
-                  {/* Game Types Grid */}
-                  <View style={styles.gameTypesHeader}>
-                    <Icon  name="game-controller-outline" size={20} color="#a855f7"  />
-                    <Text style={styles.gameTypesTitle}>Available Games</Text>
-                  </View>
-                  <FlatList
-                    data={GAME_TYPES}
-                    renderItem={renderGameTypeItem}
-                    keyExtractor={(item) => item.type}
-                    numColumns={2}
-                    scrollEnabled={false}
-                    contentContainerStyle={styles.gameTypesGrid}
-                    columnWrapperStyle={styles.gameTypesRow}
-                  />
-                </View>
-              )}
-
-              {selectedGameTab === 'active' && (
-                <View>
-                  <View style={styles.activeGamesHeader}>
-                    <Icon  name="play-circle-outline" size={20} color="#10b981"  />
-                    <Text style={styles.activeGamesTitle}>Join Active Games</Text>
-                    <View style={styles.countBadge}>
-                      <Text style={styles.countText}>{availableGames.length}</Text>
-                    </View>
-                  </View>
-                  
-                  {gamesLoading ? (
-                    <View style={styles.loadingContainer}>
-                      <Text style={styles.loadingText}>Loading games...</Text>
-                    </View>
-                  ) : availableGames.length === 0 ? (
-                    <View style={styles.emptySection}>
-                      <Icon  name="game-controller-outline" size={48} color="#374151"  />
-                      <Text style={styles.emptySectionTitle}>No Active Games</Text>
-                      <Text style={styles.emptySectionText}>
-                        No games are currently waiting for players. Create one to get started!
-                      </Text>
-                    </View>
-                  ) : (
-                    <FlatList
-                      data={availableGames}
-                      renderItem={renderActiveGameItem}
-                      keyExtractor={(item) => item.id}
-                      scrollEnabled={false}
-                      contentContainerStyle={styles.activeGamesList}
-                    />
-                  )}
-                </View>
-              )}
-
-              {selectedGameTab === 'my-games' && (
-                <View>
-                  <View style={styles.myGamesHeader}>
-                    <Icon  name="trophy-outline" size={20} color="#f59e0b"  />
-                    <Text style={styles.myGamesTitle}>My Game History</Text>
-                    <View style={styles.countBadge}>
-                      <Text style={styles.countText}>{myGames.length}</Text>
-                    </View>
-                  </View>
-                  
-                  {gamesLoading ? (
-                    <View style={styles.loadingContainer}>
-                      <Text style={styles.loadingText}>Loading your games...</Text>
-                    </View>
-                  ) : myGames.length === 0 ? (
-                    <View style={styles.emptySection}>
-                      <Icon  name="trophy-outline" size={48} color="#374151"  />
-                      <Text style={styles.emptySectionTitle}>No Games Yet</Text>
-                      <Text style={styles.emptySectionText}>
-                        You haven't played any games yet. Start by creating or joining a game!
-                      </Text>
-                    </View>
-                  ) : (
-                    <FlatList
-                      data={myGames}
-                      renderItem={renderActiveGameItem}
-                      keyExtractor={(item) => item.id}
-                      scrollEnabled={false}
-                      contentContainerStyle={styles.myGamesList}
-                    />
-                  )}
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        );
       case 'notifications': // Live Users (renamed from Active Now to Live)
         return <LiveUsersTab />;
-      case 'groups': // Leaderboard
-        return (
-          <View style={styles.comingSoon}>
-            <Icon  name="trophy-outline" size={64} color="#374151"  />
-            <Text style={styles.comingSoonTitle}>Leaderboard</Text>
-            <Text style={styles.comingSoonText}>
-              Check top players and your ranking.
-            </Text>
-          </View>
-        );
+      case 'battles': // Battles — head-to-head live battles
+        return <BattlesContent navigation={navigation} />;
+      case 'yourblyp': // Your Blyp — personal recap
+        return <YourBlypContent navigation={navigation} />;
+      case 'teams': // Teams — official creator agencies
+        return <TeamsContent navigation={navigation} />;
       default:
         return null;
     }
   };
 
+  // Horizontal swipe to move between the Live / Battles / Your Blyp header tabs.
+  // Built-in PanResponder (gesture-handler is shimmed); only a decisive
+  // horizontal swipe is claimed, so inner scrolling is never hijacked.
+  const TAB_ORDER = ['notifications', 'battles', 'yourblyp', 'teams'];
+  const selectedTabRef = useRef(selectedTab);
+  useEffect(() => { selectedTabRef.current = selectedTab; }, [selectedTab]);
+  const goToAdjacentTab = useCallback((dir) => {
+    const i = TAB_ORDER.indexOf(selectedTabRef.current);
+    if (i < 0) return;
+    const ni = i + dir;
+    if (ni < 0 || ni >= TAB_ORDER.length) return;
+    setSelectedTab(TAB_ORDER[ni]);
+  }, []);
+  const tabSwipeResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_evt, g) =>
+        Math.abs(g.dx) > 28 && Math.abs(g.dx) > Math.abs(g.dy) * 1.8,
+      onPanResponderRelease: (_evt, g) => {
+        const fast = Math.abs(g.vx) > 0.35;
+        if (g.dx <= -55 || (fast && g.vx < 0)) goToAdjacentTab(1);
+        else if (g.dx >= 55 || (fast && g.vx > 0)) goToAdjacentTab(-1);
+      },
+    }),
+  ).current;
+
+  const useSectionGradient =
+    selectedTab === 'notifications' || selectedTab === 'battles' || selectedTab === 'yourblyp' || selectedTab === 'teams';
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
-      
-      {/* Header */}
-      <View style={styles.headerOverlay}>
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-              <Icon  name="menu-outline" size={24} color="#d1d5db"  />
-            </TouchableOpacity>
-            <View style={styles.logoContainer}>
-              <BlypLogo useGradientBackground={true} />
-            </View>
-            <TouchableOpacity 
-              style={styles.searchButton}
-              onPress={() => navigation.navigate('Search')}
-            >
-              <Icon  name="search" size={24} color="#d1d5db"  />
-            </TouchableOpacity>
-          </View>
-          
-          
-          <View style={styles.tabContainer}>
-            <View style={styles.tabSelector}>
-              {[
-                { key: 'chats', label: 'Rooms' },
-                { key: 'requests', label: 'Games' },
-                { key: 'notifications', label: 'Live' },
-                { key: 'groups', label: 'Leaderboard' }
-              ].map((tab, index) => (
-                <TouchableOpacity
-                  key={tab.key}
-                  style={styles.tab}
-                  onPress={() => setSelectedTab(tab.key)}
-                >
-                  <Text style={[
-                    styles.tabText,
-                    selectedTab === tab.key && styles.activeTabText
-                  ]}>
-                    {tab.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              <LinearGradient
-                colors={['#a855f7', '#d946ef', '#ec4899']}
-                style={[
-                  styles.tabIndicator,
-                  { 
-                    left: `${['chats', 'requests', 'notifications', 'groups'].indexOf(selectedTab) * 25}%` 
-                  }
-                ]}
-              />
-            </View>
-          </View>
+    <BlueScreen>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
+
+        {/* Header â€“ FLOW layout (no overlay) */}
+        <BlypHeaderFlow
+          tabs={[
+            { key: 'notifications', label: 'Live' },
+            { key: 'battles', label: 'Battles' },
+            { key: 'yourblyp', label: 'Your Blyp' },
+            { key: 'teams', label: 'Teams' },
+          ]}
+          matchHomePadding={true}
+          activeKey={selectedTab}
+          onTabChange={setSelectedTab}
+          onMenuPress={() => setMenuVisible(true)}
+          onSearchPress={() => navigation.navigate('Search')}
+        />
+
+        <View style={[styles.contentShell, { paddingBottom: tabBarHeight }]} {...tabSwipeResponder.panHandlers}>
+          {useSectionGradient && (
+            <LinearGradient
+              pointerEvents="none"
+              colors={['#0A0A0C', '#141418', '#1C1C22']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.sectionGradientBackground}
+            />
+          )}
+          <PlanStatusBanner />
+          {renderContent()}
         </View>
-      </View>
 
-      {renderContent()}
-      
-      {/* Menu Overlay */}
-      <Modal
-        visible={menuVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableOpacity 
-          style={styles.menuOverlay}
-          activeOpacity={1}
-          onPress={() => setMenuVisible(false)}
+        {/* Menu Overlay */}
+        <Modal
+          visible={menuVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setMenuVisible(false)}
         >
-          <View style={styles.menuContainer}>
-            <TouchableOpacity 
-              style={styles.menuCloseButton}
-              onPress={() => setMenuVisible(false)}
-            >
-              <Icon  name="close" size={24} color="#d1d5db"  />
-            </TouchableOpacity>
-            <Text style={styles.menuTitle}>Your Wallet</Text>
-            
-            <View style={styles.balanceItems}>
-              <View style={styles.menuBalanceItem}>
-                <Text style={styles.balanceIcon}>🪙</Text>
-                <Text style={styles.balanceLabel}>Blyp Coins</Text>
-                <Text style={styles.balanceValue}>{formatBalance(coinBalance)}</Text>
-              </View>
-              
-              <View style={styles.menuBalanceItem}>
-                <Text style={styles.balanceIcon}>💎</Text>
-                <Text style={styles.balanceLabel}>Blyp Gems</Text>
-                <Text style={styles.balanceValue}>{gemBalance}</Text>
-              </View>
-            </View>
-            
-            <TouchableOpacity 
-              style={styles.getMoreButton}
-              onPress={() => {
-                setMenuVisible(false);
-                navigation.navigate('CoinStore');
-              }}
-            >
-              <Text style={styles.menuButtonText}>Get More</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Create Game Modal */}
-      <Modal
-        visible={showCreateGameModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowCreateGameModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create New Game</Text>
-              <TouchableOpacity 
-                style={styles.modalCloseButton}
-                onPress={() => setShowCreateGameModal(false)}
+          <TouchableOpacity
+            style={styles.menuOverlay}
+            activeOpacity={1}
+            onPress={() => setMenuVisible(false)}
+          >
+            <View style={styles.menuContainer}>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={() => setMenuVisible(false)}
               >
-                <Icon  name="close" size={24} color="#9ca3af"  />
+                <Icon name="close" size={24} color="#d1d5db" />
+              </TouchableOpacity>
+              <Text style={styles.menuTitle}>Menu</Text>
+
+              <TouchableOpacity
+                style={styles.getMoreButton}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('HowBlypWorks', { mode: 'review' });
+                }}
+              >
+                <Text style={styles.menuButtonText}>Help</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuLogoutButton}
+                onPress={() => {
+                  setMenuVisible(false);
+                  hardLogout();
+                }}
+              >
+                <Text style={styles.menuLogoutText}>Log out</Text>
               </TouchableOpacity>
             </View>
-            
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalSubtitle}>Choose a game type to create:</Text>
-              
-              {GAME_TYPES.map((gameType) => (
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Create Game Modal */}
+        <Modal
+          visible={showCreateGameModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowCreateGameModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Create New Game</Text>
                 <TouchableOpacity
-                  key={gameType.type}
-                  style={styles.modalGameOption}
-                  onPress={() => handleCreateGame(gameType.type)}
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowCreateGameModal(false)}
                 >
-                  <LinearGradient
-                    colors={gameType.gradient}
-                    style={styles.modalGameGradient}
-                  >
-                    <Text style={styles.modalGameIcon}>{gameType.icon}</Text>
-                    <View style={styles.modalGameInfo}>
-                      <Text style={styles.modalGameName}>{gameType.name}</Text>
-                      <Text style={styles.modalGameDesc}>{gameType.description}</Text>
-                      <Text style={styles.modalGameMeta}>
-                        {gameType.players} • {gameType.difficulty} • {gameType.playTime}
-                      </Text>
-                    </View>
-                    <Icon  name="chevron-forward" size={20} color="rgba(255,255,255,0.7)"  />
-                  </LinearGradient>
+                  <Icon name="close" size={24} color="#9ca3af" />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              </View>
+
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalSubtitle}>Choose a game type to create:</Text>
+
+                {GAME_TYPES.map((gameType) => (
+                  <TouchableOpacity
+                    key={gameType.type}
+                    style={styles.modalGameOption}
+                    onPress={() => handleCreateGame(gameType.type)}
+                  >
+                    <LinearGradient
+                      colors={gameType.gradient}
+                      style={styles.modalGameGradient}
+                    >
+                      <Text style={styles.modalGameIcon}>{gameType.icon}</Text>
+                      <View style={styles.modalGameInfo}>
+                        <Text style={styles.modalGameName}>{gameType.name}</Text>
+                        <Text style={styles.modalGameDesc}>{gameType.description}</Text>
+                        <Text style={styles.modalGameMeta}>
+                          {gameType.players} â€¢ {gameType.difficulty} â€¢ {gameType.playTime}
+                        </Text>
+                      </View>
+                      <Icon name="chevron-forward" size={20} color="rgba(255,255,255,0.7)" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+        </Modal>
+      </View>
+    </BlueScreen>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: COLORS.background,
   },
-  header: {
-    backgroundColor: '#0f172a',
-    paddingTop: 50,
-    paddingBottom: 1,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+  contentShell: {
+    flex: 1,
+    position: 'relative',
   },
-  headerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
+  sectionGradientBackground: {
+    ...StyleSheet.absoluteFillObject,
   },
   headerTop: {
     flexDirection: 'row',
@@ -1203,6 +1032,12 @@ const styles = StyleSheet.create({
   },
   menuButton: {
     padding: 8,
+  },
+  headerBalances: {
+    position: 'absolute',
+    left: 56,
+    height: '100%',
+    justifyContent: 'center',
   },
   searchButton: {
     padding: 8,
@@ -1220,7 +1055,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerSubtitle: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1237,7 +1072,7 @@ const styles = StyleSheet.create({
   },
   tabSelector: {
     position: 'relative',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.tabStripBackground,
     borderRadius: 9999,
     padding: 4,
     flexDirection: 'row',
@@ -1249,12 +1084,12 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   tabText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: '600',
   },
   activeTabText: {
-    color: '#ffffff',
+    color: COLORS.textPrimary,
   },
   tabIndicator: {
     position: 'absolute',
@@ -1271,7 +1106,7 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.tabStripBackground,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -1279,7 +1114,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
   },
   chatList: {
@@ -1294,10 +1129,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    borderBottomColor: COLORS.divider,
   },
   pinnedChat: {
-    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+    backgroundColor: 'rgba(203, 251, 69, 0.1)',
   },
   avatarContainer: {
     position: 'relative',
@@ -1315,9 +1150,9 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#10b981',
+    backgroundColor: COLORS.success,
     borderWidth: 2,
-    borderColor: '#0f172a',
+    borderColor: COLORS.background,
   },
   chatInfo: {
     flex: 1,
@@ -1334,12 +1169,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   contactName: {
-    color: '#e2e8f0',
+    color: COLORS.textSecondary,
     fontSize: 16,
     fontWeight: '600',
   },
   timestamp: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 12,
   },
   messageRow: {
@@ -1348,25 +1183,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     flex: 1,
     marginRight: 8,
   },
   unreadText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontWeight: '700',
   },
   unreadTimestamp: {
-    color: '#a855f7',
+    color: COLORS.primary,
     fontWeight: '600',
   },
   unreadMessage: {
-    color: '#e2e8f0',
+    color: COLORS.textSecondary,
     fontWeight: '600',
   },
   unreadBadge: {
-    backgroundColor: '#a855f7',
+    backgroundColor: COLORS.primary,
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -1375,7 +1210,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   unreadCount: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -1385,7 +1220,7 @@ const styles = StyleSheet.create({
     right: 20,
     borderRadius: 28,
     elevation: 8,
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1404,15 +1239,15 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   comingSoonTitle: {
-    color: '#ffffff',
+    color: COLORS.textPrimary,
     fontSize: 24,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 8,
   },
   comingSoonText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 16,
     textAlign: 'center',
     lineHeight: 24,
@@ -1431,7 +1266,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   launchGamesText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1440,17 +1275,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
-    paddingVertical: 80,
+    paddingVertical: 8,
   },
   emptyStateTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 24,
     fontWeight: 'bold',
-    marginTop: 20,
+    marginTop: 8,
     textAlign: 'center',
   },
   emptyStateText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 16,
     textAlign: 'center',
     lineHeight: 24,
@@ -1468,7 +1303,7 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
   },
   emptyStateButtonText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -1482,12 +1317,12 @@ const styles = StyleSheet.create({
   },
   menuContainer: {
     width: 250,
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
+    backgroundColor: COLORS.backgroundLight,
+    borderRadius: 14,
     padding: 16,
     margin: 16,
-    marginTop: 70,
-    shadowColor: '#000',
+    marginTop: 8,
+    shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
@@ -1500,7 +1335,7 @@ const styles = StyleSheet.create({
   menuTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: COLORS.textPrimary,
     marginBottom: 16,
     textAlign: 'center',
   },
@@ -1523,32 +1358,43 @@ const styles = StyleSheet.create({
   balanceLabel: {
     flex: 1,
     fontSize: 14,
-    color: '#d1d5db',
+    color: COLORS.textSecondary,
   },
   balanceValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: COLORS.textPrimary,
   },
   getMoreButton: {
-    backgroundColor: 'rgba(236, 72, 153, 0.8)',
+    backgroundColor: '#00D2BE',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 8,
-    marginTop: 16,
+    marginTop: 8,
     alignItems: 'center',
   },
   menuButtonText: {
-    color: '#ffffff',
+    color: '#0A0A0C',
     fontSize: 14,
     fontWeight: 'bold',
   },
-  
+  menuLogoutButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#FF5A5F',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  menuLogoutText: { color: '#FF5A5F', fontWeight: '700', fontSize: 14 },
+
   // Room styles
   roomsContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
-    paddingTop: 20,
+    backgroundColor: COLORS.background,
+    paddingTop: 8,
   },
   roomsContent: {
     flex: 1,
@@ -1556,7 +1402,7 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: COLORS.backgroundLight,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -1572,25 +1418,25 @@ const styles = StyleSheet.create({
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: COLORS.backgroundLight,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     gap: 6,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: COLORS.border,
   },
   categoryChipActive: {
     backgroundColor: 'transparent',
-    borderColor: '#a855f7',
+    borderColor: COLORS.primary,
   },
   categoryChipText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#9ca3af',
+    color: COLORS.textMuted,
   },
   categoryChipTextActive: {
-    color: '#a855f7',
+    color: COLORS.primary,
   },
   roomSection: {
     marginBottom: 20,
@@ -1600,27 +1446,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: '#0f172a',
+    paddingVertical: 8,
+    backgroundColor: COLORS.background,
     gap: 12,
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#fff',
+    color: COLORS.textPrimary,
   },
   countBadge: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    backgroundColor: 'rgba(203, 251, 69, 0.16)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#a855f7',
+    borderColor: COLORS.primary,
   },
   countText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#a855f7',
+    color: COLORS.primary,
   },
   roomCard: {
     marginHorizontal: 10,
@@ -1630,7 +1476,7 @@ const styles = StyleSheet.create({
   },
   roomCardGradient: {
     padding: 20,
-    backgroundColor: '#1f2937',
+    backgroundColor: COLORS.backgroundLight,
   },
   roomHeader: {
     flexDirection: 'row',
@@ -1661,12 +1507,12 @@ const styles = StyleSheet.create({
   roomName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#fff',
+    color: COLORS.textPrimary,
     flex: 1,
   },
   roomDescription: {
     fontSize: 14,
-    color: '#d1d5db',
+    color: COLORS.textSecondary,
     marginBottom: 8,
     lineHeight: 20,
   },
@@ -1677,12 +1523,12 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: 12,
-    color: '#a855f7',
+    color: COLORS.primary,
     fontWeight: '600',
   },
   participantCount: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: COLORS.textMuted,
   },
   roomActions: {
     justifyContent: 'center',
@@ -1698,48 +1544,48 @@ const styles = StyleSheet.create({
   joinedBadge: {
     backgroundColor: 'rgba(16, 185, 129, 0.2)',
     borderWidth: 1,
-    borderColor: '#10b981',
+    borderColor: COLORS.success,
   },
   joinedText: {
-    color: '#10b981',
+    color: COLORS.success,
     fontSize: 12,
     fontWeight: '600',
   },
   joinBadge: {
     backgroundColor: 'rgba(59, 130, 246, 0.2)',
     borderWidth: 1,
-    borderColor: '#3b82f6',
+    borderColor: COLORS.info,
   },
   joinText: {
-    color: '#3b82f6',
+    color: COLORS.info,
     fontSize: 12,
     fontWeight: '600',
   },
   fullBadge: {
     backgroundColor: 'rgba(107, 114, 128, 0.2)',
     borderWidth: 1,
-    borderColor: '#6b7280',
+    borderColor: COLORS.textMuted,
   },
   fullText: {
-    color: '#6b7280',
+    color: COLORS.textMuted,
     fontSize: 12,
     fontWeight: '600',
   },
   emptySection: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 8,
     paddingHorizontal: 20,
   },
   emptySectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#9ca3af',
-    marginTop: 16,
+    color: COLORS.textMuted,
+    marginTop: 8,
     marginBottom: 8,
   },
   emptySectionText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: COLORS.textDisabled,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1747,8 +1593,8 @@ const styles = StyleSheet.create({
   // Games styles
   gamesContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
-    paddingTop: 20,
+    backgroundColor: COLORS.background,
+    paddingTop: 8,
   },
   gameTabContainer: {
     paddingHorizontal: 16,
@@ -1761,22 +1607,22 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginRight: 12,
     borderRadius: 20,
-    backgroundColor: '#1f2937',
+    backgroundColor: COLORS.backgroundLight,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: COLORS.border,
   },
   activeGameTab: {
-    backgroundColor: '#a855f7',
-    borderColor: '#a855f7',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   gameTabText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     fontWeight: '500',
     marginLeft: 6,
   },
   activeGameTabText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
   },
   gamesContent: {
     flex: 1,
@@ -1791,11 +1637,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: 8,
     paddingHorizontal: 20,
   },
   createGameText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -1806,7 +1652,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   gameTypesTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 18,
     fontWeight: '600',
     marginLeft: 8,
@@ -1847,7 +1693,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   gameTypeName: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 14,
     fontWeight: '600',
     lineHeight: 18,
@@ -1893,7 +1739,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   activeGamesTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 18,
     fontWeight: '600',
     marginLeft: 8,
@@ -1905,7 +1751,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   myGamesTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 18,
     fontWeight: '600',
     marginLeft: 8,
@@ -1944,12 +1790,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   activeGameName: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
   },
   activeGameStatus: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     marginTop: 2,
   },
@@ -1958,7 +1804,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   activeGamePlayerCount: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 14,
     marginLeft: 4,
   },
@@ -1973,7 +1819,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   activeGameBadgeText: {
-    color: '#10b981',
+    color: COLORS.success,
     fontSize: 12,
     fontWeight: '500',
     marginLeft: 4,
@@ -1998,7 +1844,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalGameName: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
@@ -2027,7 +1873,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   liveUsersTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 24,
     fontWeight: '700',
     marginLeft: 12,
@@ -2036,7 +1882,7 @@ const styles = StyleSheet.create({
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(236, 72, 153, 0.2)',
+    backgroundColor: 'rgba(203, 251, 69, 0.16)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
@@ -2045,44 +1891,44 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#ec4899',
+    backgroundColor: COLORS.secondary,
     marginRight: 6,
   },
   liveBadgeText: {
-    color: '#ec4899',
+    color: COLORS.secondary,
     fontSize: 12,
     fontWeight: '600',
   },
   liveUsersSubtitle: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 60,
+    paddingTop: 8,
   },
   loadingText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 16,
-    marginTop: 16,
+    marginTop: 8,
   },
   emptyLiveContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 60,
+    paddingTop: 8,
   },
   emptyLiveTitle: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 20,
     fontWeight: '600',
-    marginTop: 20,
+    marginTop: 8,
     marginBottom: 8,
   },
   emptyLiveText: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 16,
     textAlign: 'center',
     lineHeight: 24,
@@ -2118,7 +1964,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#374151',
+    backgroundColor: COLORS.tabStripBackground,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -2126,7 +1972,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: -2,
     right: -2,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.black,
     borderRadius: 8,
     padding: 2,
   },
@@ -2134,24 +1980,24 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#ec4899',
+    backgroundColor: COLORS.secondary,
   },
   liveUserDetails: {
     flex: 1,
   },
   liveUserName: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
   },
   liveUserStatus: {
-    color: '#ec4899',
+    color: COLORS.secondary,
     fontSize: 14,
     marginBottom: 2,
   },
   liveStreamTitle: {
-    color: '#9ca3af',
+    color: COLORS.textMuted,
     fontSize: 13,
   },
   liveUserAction: {
@@ -2165,7 +2011,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   watchButtonText: {
-    color: '#fff',
+    color: COLORS.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 6,
@@ -2180,3 +2026,5 @@ const formatBalance = (balance) => {
 };
 
 export default ChatListScreen;
+
+

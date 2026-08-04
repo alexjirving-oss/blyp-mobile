@@ -1,0 +1,171 @@
+{
+  "baseline_key": "HOME_4ME",
+  "tol_px": 3,
+  "baseline_xml": "HOME_4ME__bottom_ok__sub_ok.xml",
+  "target_files": 8,
+  "total_files": 12,
+  "files": [
+    {
+      "file": "CHAT_GAMES__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "CHAT_LEADERBOARD__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "CHAT_LIVE__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "CHAT_ROOMS__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "HOME_4ME__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "HOME_CATEGORIES__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "HOME_HASHTAGS__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    },
+    {
+      "file": "HOME_WHATS_HOT__bottom_ok__sub_ok.xml",
+      "failures": [],
+      "checks": {
+        "BOUNDS:blyp_header": true,
+        "BOUNDS:blyp_header_logo": true,
+        "BOUNDS:blyp_header_tabs": true,
+        "TAB_EVEN_SPACING": true
+      },
+      "spacing": {
+        "avg_gap": 161.16666666666666,
+        "gaps": [
+          161.0,
+          161.0,
+          161.5
+        ],
+        "worst_dev": 0.3333333333333428
+      },
+      "verdict": "PASS"
+    }
+  ],
+  "verdict": "PASS",
+  "failures": 0
+}

@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blyp — Short video, live streaming & creator-vs-creator Battles</title>
+  <meta name="description" content="Blyp is a short-video and live-streaming app where reach is earned, not bought. Go live, run creator-vs-creator Battles, gift coins, and bring your content over from TikTok." />
+  <meta name="theme-color" content="#0A0A0C" />
+  <meta name="keywords" content="Blyp, short video app, live streaming, live battles, creator economy, blyp coins, earn your reach, TikTok alternative" />
+  <link rel="canonical" href="https://blyp.world/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Blyp" />
+  <meta property="og:title" content="Blyp — short video, live streaming & Battles" />
+  <meta property="og:description" content="A live-first social app where reach is earned, not bought. Go live, run creator-vs-creator Battles, gift coins, and bring your content over." />
+  <meta property="og:url" content="https://blyp.world/" />
+  <meta property="og:image" content="https://blyp.world/assets/app-home.jpg" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Blyp — short video, live streaming & Battles" />
+  <meta name="twitter:description" content="A live-first social app where reach is earned, not bought." />
+  <meta name="twitter:image" content="https://blyp.world/assets/app-home.jpg" />
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%230A0A0C'/%3E%3Ctext x='14' y='70' font-family='Arial,sans-serif' font-size='58' font-weight='800' fill='%23F5F5F7'%3Eb%3C/text%3E%3Ccircle cx='66' cy='62' r='11' fill='%2300D2BE'/%3E%3C/svg%3E" />
+
+  <style>
+    :root {
+      --primary: #00D2BE;
+      --primary-dark: #00A89E;
+      --primary-light: #7FEDE2;
+      --electric: #67E8F9;
+      --bg: #0A0A0C;
+      --bg-soft: #121216;
+      --card: #141418;
+      --text: #F5F5F7;
+      --muted: #A1A1AA;
+      --muted-2: #71717A;
+      --success: #34D399;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --maxw: 1120px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a { color: inherit; }
+
+    /* Ambient background glows */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background:
+        radial-gradient(60% 50% at 78% -5%, rgba(0, 210, 190, 0.16), transparent 60%),
+        radial-gradient(50% 40% at 8% 8%, rgba(103, 232, 249, 0.10), transparent 55%),
+        var(--bg);
+    }
+
+    .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+
+    /* ---------- Nav ---------- */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(14px);
+      background: rgba(10, 10, 12, 0.62);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .logo {
+      display: inline-flex;
+      align-items: flex-end;
+      gap: 6px;
+      font-weight: 800;
+      font-size: 24px;
+      letter-spacing: -0.04em;
+      text-decoration: none;
+      color: var(--text);
+    }
+    .logo .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 14px rgba(0, 210, 190, 0.9);
+      margin-bottom: 5px;
+    }
+    .nav-links { display: flex; align-items: center; gap: 28px; }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.15s ease;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta { display: flex; align-items: center; gap: 12px; }
+    @media (max-width: 860px) { .nav-links { display: none; } }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary-light), var(--primary) 45%, var(--primary-dark));
+      color: #04201D;
+      box-shadow: 0 10px 30px rgba(0, 210, 190, 0.28);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(0, 210, 190, 0.42); }
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+    }
+    .btn-ghost:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255,255,255,0.28); }
+    .btn-sm { padding: 9px 16px; font-size: 13px; }
+
+    /* ---------- Hero ---------- */
+    .hero { padding: 72px 0 40px; }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 48px;
+      align-items: center;
+    }
+    @media (max-width: 920px) {
+      .hero-grid { grid-template-columns: 1fr; text-align: center; }
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(0, 210, 190, 0.08);
+      border: 1px solid rgba(0, 210, 190, 0.25);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--primary-light);
+      margin-bottom: 22px;
+    }
+    .badge-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 12px rgba(52, 211, 153, 0.9);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    h1 {
+      font-size: clamp(36px, 5.4vw, 60px);
+      line-height: 1.04;
+      margin: 0 0 18px;
+      letter-spacing: -0.03em;
+      font-weight: 800;
+    }
+    h1 .grad {
+      background: linear-gradient(120deg, var(--electric), var(--primary) 55%, var(--primary-dark));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .hero p.lead {
+      max-width: 520px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.65;
+      margin: 0 0 28px;
+    }
+    @media (max-width: 920px) {
+      .hero p.lead { margin-left: auto; margin-right: auto; }
+    }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 22px; }
+    @media (max-width: 920px) { .cta-row { justify-content: center; } }
+    .hero-stats {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+    }
+    @media (max-width: 920px) { .hero-stats { justify-content: center; } }
+    .hero-stats .stat .n { font-size: 19px; font-weight: 700; color: var(--text); }
+    .hero-stats .stat .l { font-size: 12.5px; color: var(--muted-2); }
+
+    /* Phone mock */
+    .hero-art { position: relative; display: flex; justify-content: center; }
+    .phone {
+      width: 280px;
+      max-width: 74vw;
+      border-radius: 38px;
+      padding: 10px;
+      background: linear-gradient(160deg, #26262c, #131317);
+      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      position: relative;
+    }
+    .phone-screen {
+      border-radius: 30px;
+      overflow: hidden;
+      background: #000;
+      /* Match the real screenshots (1080x2520 = 9:21) so they show in full,
+         in their original aspect ratio, with no cropping. */
+      aspect-ratio: 9 / 21;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .phone-screen img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      opacity: 0;
+      transition: opacity 0.7s ease;
+    }
+    .phone-screen img.is-active { opacity: 1; }
+    /* Slide dots */
+    .phone-dots {
+      position: absolute;
+      bottom: -26px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 7px;
+    }
+    .phone-dots .dotmark {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: rgba(255,255,255,0.22);
+      transition: background 0.3s ease, width 0.3s ease;
+    }
+    .phone-dots .dotmark.on { background: var(--primary); width: 18px; border-radius: 999px; }
+    .float-pill {
+      position: absolute;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      background: rgba(20, 20, 24, 0.85);
+      border: 1px solid var(--border);
+      font-size: 12.5px;
+      font-weight: 600;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+    }
+    .float-live { top: 40px; left: -8px; color: #fff; animation: floaty 5s ease-in-out infinite; }
+    .float-battle { bottom: 70px; right: -14px; color: var(--primary-light); animation: floaty 6s ease-in-out infinite 0.6s; }
+    .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #FB7185; box-shadow: 0 0 10px #FB7185; }
+    @keyframes floaty {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    /* ---------- Sections ---------- */
+    section.block { padding: 56px 0; }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
+      margin: 0 0 12px;
+    }
+    .section-head { max-width: 680px; margin: 0 0 40px; }
+    .section-head.center { margin-left: auto; margin-right: auto; text-align: center; }
+    .section-head h2 {
+      font-size: clamp(26px, 3.6vw, 40px);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      font-weight: 800;
+      margin: 0 0 14px;
+    }
+    .section-head p {
+      font-size: 16.5px;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    /* Feature grid */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    @media (max-width: 940px) { .features { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 620px) { .features { grid-template-columns: 1fr; } }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 26px;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(0, 210, 190, 0.35);
+      background: linear-gradient(180deg, rgba(0,210,190,0.06), rgba(255,255,255,0.01));
+    }
+    .icon {
+      width: 46px; height: 46px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 13px;
+      background: rgba(0, 210, 190, 0.12);
+      border: 1px solid rgba(0, 210, 190, 0.22);
+      margin-bottom: 16px;
+    }
+    .icon svg { width: 24px; height: 24px; stroke: var(--primary-light); }
+    .card h3 { font-size: 18.5px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+    .card p { font-size: 14.5px; color: var(--muted); margin: 0; }
+
+    /* Split spotlight */
+    .spotlight {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 44px;
+      align-items: center;
+      background: linear-gradient(150deg, rgba(0,210,190,0.07), rgba(255,255,255,0.015));
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 44px;
+    }
+    @media (max-width: 880px) { .spotlight { grid-template-columns: 1fr; padding: 30px; } }
+    .spotlight h2 { font-size: clamp(24px, 3.2vw, 34px); margin: 14px 0 14px; letter-spacing: -0.02em; font-weight: 800; line-height: 1.12; }
+    .spotlight p { color: var(--muted); font-size: 15.5px; margin: 0 0 18px; }
+    .ticks { list-style: none; padding: 0; margin: 0 0 8px; }
+    .ticks li { position: relative; padding-left: 28px; margin-bottom: 12px; font-size: 14.5px; color: var(--text); }
+    .ticks li::before {
+      content: "";
+      position: absolute; left: 0; top: 4px;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: rgba(0,210,190,0.15);
+      border: 1px solid var(--primary);
+    }
+    .ticks li::after {
+      content: "";
+      position: absolute; left: 5px; top: 8px;
+      width: 5px; height: 8px;
+      border: solid var(--primary);
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    /* Battle VS visual */
+    .vs-visual {
+      position: relative;
+      border-radius: 22px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #0c0c10;
+      aspect-ratio: 4 / 3;
+      display: flex;
+    }
+    .vs-side { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+    .vs-side.a { background: radial-gradient(circle at 50% 40%, rgba(0,210,190,0.28), transparent 70%); }
+    .vs-side.b { background: radial-gradient(circle at 50% 40%, rgba(103,232,249,0.22), transparent 70%); }
+    .vs-avatar { width: 78px; height: 78px; border-radius: 50%; background: linear-gradient(135deg, #2a2a30, #16161a); border: 2px solid rgba(255,255,255,0.12); }
+    .vs-badge {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 58px; height: 58px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 18px; color: #04201D;
+      background: linear-gradient(135deg, var(--primary-light), var(--primary-dark));
+      box-shadow: 0 0 0 6px rgba(10,10,12,0.9), 0 8px 24px rgba(0,210,190,0.5);
+    }
+    .vs-timer {
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      padding: 5px 12px; border-radius: 999px;
+      background: rgba(0,0,0,0.55); border: 1px solid var(--border);
+      font-size: 12px; font-weight: 700; color: #fff;
+    }
+
+    /* Economy flow */
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      gap: 14px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    @media (max-width: 760px) { .flow { grid-template-columns: 1fr; } .flow .arrow { transform: rotate(90deg); justify-self: center; } }
+    .flow-node {
+      text-align: center;
+      padding: 22px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.025);
+    }
+    .flow-node .big { font-size: 30px; }
+    .flow-node h4 { margin: 8px 0 4px; font-size: 15px; }
+    .flow-node p { margin: 0; font-size: 12.5px; color: var(--muted); }
+    .flow .arrow { color: var(--primary); font-size: 22px; text-align: center; }
+    .note {
+      margin-top: 18px; font-size: 13px; color: var(--muted-2);
+      text-align: center;
+    }
+
+    /* Reach waves */
+    .waves { display: flex; align-items: flex-end; gap: 10px; height: 150px; margin-top: 6px; }
+    .wave-bar {
+      flex: 1; border-radius: 10px 10px 4px 4px;
+      background: linear-gradient(180deg, var(--primary), rgba(0,210,190,0.15));
+      position: relative;
+      animation: grow 1.1s ease both;
+    }
+    @keyframes grow { from { transform: scaleY(0.05); } to { transform: scaleY(1); } }
+    .wave-bar span { position: absolute; bottom: -22px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--muted-2); }
+
+    /* Final CTA */
+    .cta-band {
+      text-align: center;
+      background: linear-gradient(135deg, rgba(0,210,190,0.14), rgba(103,232,249,0.06));
+      border: 1px solid rgba(0,210,190,0.25);
+      border-radius: 28px;
+      padding: 56px 28px;
+    }
+    .cta-band h2 { font-size: clamp(28px, 4vw, 42px); margin: 0 0 14px; letter-spacing: -0.02em; font-weight: 800; }
+    .cta-band p { color: var(--muted); font-size: 16.5px; max-width: 540px; margin: 0 auto 26px; }
+
+    /* Footer */
+    footer { border-top: 1px solid var(--border); margin-top: 40px; }
+    .footer-inner { padding: 40px 0 48px; display: flex; flex-wrap: wrap; gap: 24px; justify-content: space-between; }
+    .footer-brand { max-width: 320px; }
+    .footer-brand p { color: var(--muted); font-size: 13.5px; margin: 12px 0 0; }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 40px; }
+    .footer-col h5 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-2); margin: 0 0 12px; }
+    .footer-col a { display: block; color: var(--muted); text-decoration: none; font-size: 14px; margin-bottom: 9px; transition: color 0.15s; }
+    .footer-col a:hover { color: var(--primary); }
+    .footer-bottom { border-top: 1px solid var(--border); padding: 18px 0; font-size: 12.5px; color: var(--muted-2); text-align: center; }
+    .footer-bottom a { color: var(--muted-2); text-decoration: none; }
+    .footer-bottom a:hover { color: var(--muted); }
+
+    /* Reveal animation */
+    .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .reveal { opacity: 1; transform: none; transition: none; }
+      .badge-dot, .float-live, .float-battle, .wave-bar { animation: none; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ===== Nav ===== -->
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="logo" href="/">blyp<span class="dot"></span></a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#battles">Battles</a>
+        <a href="#economy">Coins &amp; Gems</a>
+        <a href="#reach">Earn your reach</a>
+        <a href="/why-blyp.html">Why Blyp</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn btn-primary btn-sm" href="#get">Get the app</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===== Hero ===== -->
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div class="reveal">
+        <span class="badge"><span class="badge-dot"></span> Early access &middot; Beta now live</span>
+        <h1>Short video that's <span class="grad">live-first</span> — where reach is earned, not bought.</h1>
+        <p class="lead">
+          Blyp is a short-video and live-streaming app built for real communities.
+          Go live, run creator-vs-creator <strong>Battles</strong>, gift coins to the people
+          you back, and bring your content over from TikTok — on a platform that ranks
+          you on merit, not your wallet.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#get">Get early access</a>
+          <a class="btn btn-ghost" href="#features">See how it works</a>
+        </div>
+        <div class="hero-stats">
+          <div class="stat"><div class="n">Live-first</div><div class="l">Battles &amp; co-host built in</div></div>
+          <div class="stat"><div class="n">Merit-based</div><div class="l">Reach you actually earn</div></div>
+          <div class="stat"><div class="n">Creator-first</div><div class="l">A fair coin economy</div></div>
+        </div>
+      </div>
+
+      <div class="hero-art reveal">
+        <div class="phone">
+          <div class="phone-screen" id="phoneShots">
+            <img class="is-active" src="assets/app-home.jpg" alt="Blyp home feed with the Blyp it AI search bar" loading="eager" />
+            <img src="assets/app-import.jpg" alt="Bring your content over from TikTok and YouTube" loading="lazy" />
+            <img src="assets/app-topics.jpg" alt="Formula 1 topic page with race weekends and standings" loading="lazy" />
+            <img src="assets/app-creator.jpg" alt="Your Blyp creator analytics and numbers" loading="lazy" />
+            <div class="phone-dots" id="phoneDots" aria-hidden="true"></div>
+          </div>
+          <div class="float-pill float-live"><span class="live-dot"></span> LIVE now</div>
+        </div>
+      </div>
+    </div>
+  </header>
+  <!-- ===== Features ===== -->
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <p class="eyebrow">What makes Blyp different</p>
+        <h2>Everything a live-first creator actually needs</h2>
+        <p>Six things built into Blyp from day one — designed around live, community and a fair deal for the people who show up.</p>
+      </div>
+
+      <div class="features">
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/><path d="M16 16l5 2.5L16 21z" fill="currentColor" stroke="none"/></svg>
+          </span>
+          <h3>A "For You" feed that learns</h3>
+          <p>Short videos ranked by who you follow, your interests and real engagement — with a touch of freshness so the feed never feels stale or repetitive.</p>
+        </div>
+
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5-3v10L15 14"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>
+          </span>
+          <h3>Live streaming + co-hosting</h3>
+          <p>Go live in seconds, bring guests on as co-hosts, and react in real time with your community. Live isn't an afterthought here — it's the centre of the app.</p>
+        </div>
+
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12z" fill="currentColor" stroke="none"/></svg>
+          </span>
+          <h3>Creator-vs-creator Battles</h3>
+          <p>Schedule a head-to-head live battle, invite an opponent and split the screen. Viewers vote and gift to crown a winner — with reminders and push so nobody misses it.</p>
+        </div>
+
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.5h3.2a1.6 1.6 0 010 3.2H10"/></svg>
+          </span>
+          <h3>Coins &amp; gems gifting</h3>
+          <p>Top up Blyp Coins and gift them to the creators you love. Gifts turn into gems creators keep — a clean, closed-loop economy, never resold as cash.</p>
+        </div>
+
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-5 4 3 4-6 5 4"/><path d="M3 21h18"/></svg>
+          </span>
+          <h3>Earn your reach</h3>
+          <p>Every post gets a fair "audition" with the right people first. Genuinely liked posts go wider in waves. Boost buys a bigger test — never a place at the top.</p>
+        </div>
+
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/><path d="M11 8v6M8 11h6"/></svg>
+          </span>
+          <h3>"Blyp it" AI + reminders</h3>
+          <p>Ask anything in plain language and get a concise answer blended with real posts and creators. Say "remind me to…" and Blyp schedules it for you.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- ===== Battles spotlight ===== -->
+  <section class="block" id="battles">
+    <div class="wrap">
+      <div class="spotlight reveal">
+        <div>
+          <p class="eyebrow">The headline feature</p>
+          <h2>Battles: two creators, one live arena</h2>
+          <p>
+            Pick an opponent, set a time, and go live together in a split-screen showdown.
+            Your supporters get a reminder and a push notification so they show up — then
+            vote and gift to decide the winner.
+          </p>
+          <ul class="ticks">
+            <li>Schedule in a tap — in 15 min, tonight, or tomorrow at 8pm.</li>
+            <li>Optional equal coin deposit acts as an attendance bond, held in escrow.</li>
+            <li>Both show up &rarr; stakes returned. A no-show &rarr; the other takes the pot.</li>
+            <li>Glory is the real prize — winners are decided by the crowd, not the wallet.</li>
+          </ul>
+          <a class="btn btn-primary" href="#get">Start your first Battle</a>
+        </div>
+        <div>
+          <div class="vs-visual" aria-hidden="true">
+            <span class="vs-timer">&#9889; LIVE &middot; 02:00</span>
+            <div class="vs-side a"><div class="vs-avatar"></div></div>
+            <div class="vs-side b"><div class="vs-avatar"></div></div>
+            <div class="vs-badge">VS</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- ===== Economy ===== -->
+  <section class="block" id="economy">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <p class="eyebrow">A fair creator economy</p>
+        <h2>Coins to support. Gems to keep.</h2>
+        <p>Buy coins, gift them to creators, and watch them become gems creators hold onto. Top up on the web to keep more value in the community and away from heavy app-store fees.</p>
+      </div>
+
+      <div class="flow reveal">
+        <div class="flow-node">
+          <div class="big">&#128176;</div>
+          <h4>Buy coins</h4>
+          <p>Top up in-app or on the web for lower fees.</p>
+        </div>
+        <div class="arrow">&rarr;</div>
+        <div class="flow-node">
+          <div class="big">&#127873;</div>
+          <h4>Gift a creator</h4>
+          <p>Send coins live or on any post you love.</p>
+        </div>
+        <div class="arrow">&rarr;</div>
+        <div class="flow-node">
+          <div class="big">&#128142;</div>
+          <h4>They earn gems</h4>
+          <p>Gifts convert into gems creators keep.</p>
+        </div>
+      </div>
+      <p class="note">
+        Coins are a closed-loop in-app currency — gift them or convert them, but they're never cashable.
+        It keeps the economy clean and honest. <a href="/coins" style="color:var(--primary);text-decoration:none;">Learn about Blyp Coins on web &rarr;</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== Earn your reach ===== -->
+  <section class="block" id="reach">
+    <div class="wrap">
+      <div class="spotlight reveal">
+        <div>
+          <div class="waves" aria-hidden="true">
+            <div class="wave-bar" style="height:20%"><span>Audition</span></div>
+            <div class="wave-bar" style="height:38%"><span>Wave 1</span></div>
+            <div class="wave-bar" style="height:60%"><span>Wave 2</span></div>
+            <div class="wave-bar" style="height:82%"><span>Wave 3</span></div>
+            <div class="wave-bar" style="height:100%"><span>Everyone</span></div>
+          </div>
+        </div>
+        <div>
+          <p class="eyebrow">Reach is earned</p>
+          <h2>Good content climbs. Paying can't fake it.</h2>
+          <p>
+            Every new post is shown to a fair sample of the right people first. If they
+            genuinely enjoy it, it earns the next wave — and the next. Reach is driven by a
+            transparent score built on real signals, not by who paid the most.
+          </p>
+          <ul class="ticks">
+            <li>A fresh "audition" guarantees every post is actually seen.</li>
+            <li>Merit moves you wider; resting posts are gently quieted, never hidden.</li>
+            <li>Boost buys a bigger, faster test — weak content still won't fly.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- ===== Import + more ===== -->
+  <section class="block" id="more">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <p class="eyebrow">Make Blyp yours, fast</p>
+        <h2>Bring your content. Tune your feed.</h2>
+        <p>Switching shouldn't mean starting over — and your home should feel like yours.</p>
+      </div>
+      <div class="features">
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 21h14"/></svg>
+          </span>
+          <h3>Import from TikTok</h3>
+          <p>Add your TikTok username, confirm it's yours, and bring your own videos over to your Blyp profile. YouTube imports are supported too.</p>
+        </div>
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg>
+          </span>
+          <h3>Interest, topic &amp; sport pages</h3>
+          <p>Follow the topics and teams you care about and get dedicated pages, plus a clean following feed of just the creators you back.</p>
+        </div>
+        <div class="card reveal">
+          <span class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+          </span>
+          <h3>Transparency &amp; your data</h3>
+          <p>Your data is yours — sharing is opt-in and explained in plain words. Standing badges are positive-only, so there's no public score to weaponise.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Final CTA ===== -->
+  <section class="block" id="get">
+    <div class="wrap">
+      <div class="cta-band reveal">
+        <h2>Join Blyp early</h2>
+        <p>Be one of the first creators and fans on a live-first platform that puts merit and community first. Tell us your handle and where you create.</p>
+        <div class="cta-row" style="justify-content:center;">
+          <a class="btn btn-primary" href="mailto:hello@blyp.world?subject=Blyp%20early%20access&amp;body=Hi%20Blyp%20team%2C%20here's%20my%20handle%20and%20platform%3A">Get early access</a>
+          <a class="btn btn-ghost" href="mailto:hello@blyp.world">Talk to the team</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Footer ===== -->
+  <footer>
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="logo" href="/">blyp<span class="dot"></span></a>
+        <p>Short video and live streaming, built live-first — where reach is earned, gifts go further, and your data stays yours.</p>
+      </div>
+      <div class="footer-links">
+        <div class="footer-col">
+          <h5>Product</h5>
+          <a href="#features">Features</a>
+          <a href="#battles">Battles</a>
+          <a href="#economy">Coins &amp; Gems</a>
+          <a href="#reach">Earn your reach</a>
+        </div>
+        <div class="footer-col">
+          <h5>Company</h5>
+          <a href="/why-blyp.html">Why Blyp beats TikTok</a>
+          <a href="/coins">Blyp Coins (web top-ups)</a>
+          <a href="mailto:hello@blyp.world">Contact</a>
+        </div>
+        <div class="footer-col">
+          <h5>Legal</h5>
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/delete-account">Delete account</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      &copy; <span id="year"></span> Blyp &middot; A product of blyp.world &middot;
+      <a href="/privacy">Privacy</a> &middot; <a href="/delete-account">Delete account</a>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    /* Hero phone slideshow — cross-fades through real app screenshots. */
+    (function () {
+      var stage = document.getElementById("phoneShots");
+      if (!stage) return;
+      var imgs = stage.querySelectorAll("img");
+      if (imgs.length < 2) return;
+
+      var dotsWrap = document.getElementById("phoneDots");
+      var dots = [];
+      if (dotsWrap) {
+        imgs.forEach(function (_, idx) {
+          var d = document.createElement("span");
+          d.className = "dotmark" + (idx === 0 ? " on" : "");
+          dotsWrap.appendChild(d);
+          dots.push(d);
+        });
+      }
+
+      var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) return;
+
+      var i = 0;
+      setInterval(function () {
+        imgs[i].classList.remove("is-active");
+        if (dots[i]) dots[i].classList.remove("on");
+        i = (i + 1) % imgs.length;
+        imgs[i].classList.add("is-active");
+        if (dots[i]) dots[i].classList.add("on");
+      }, 3800);
+    })();
+
+    (function () {
+      var els = document.querySelectorAll(".reveal");
+      if (!("IntersectionObserver" in window)) {
+        els.forEach(function (el) { el.classList.add("in"); });
+        return;
+      }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.12 });
+      els.forEach(function (el) { io.observe(el); });
+    })();
+  </script>
+</body>
+</html>

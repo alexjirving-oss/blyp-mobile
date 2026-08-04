@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "929105034040",
+    "project_id": "blyp-master",
+    "storage_bucket": "blyp-master.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:929105034040:android:1e04385f61035f1abb9fcd",
+        "android_client_info": {
+          "package_name": "com.blyp.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClPhy-w1-1NN81IKnLlfIUzM1YajeOry0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,6 +1,8 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+// FCM: must come after the Android application plugin. Reads android/app/google-services.json.
+apply plugin: "com.google.gms.google-services"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -81,6 +83,10 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Expo uses the `expo.jsEngine` Gradle property to select the JS engine.
+// Default to Hermes to match modern Expo/RN defaults.
+def hermesEnabled = (findProperty('expo.jsEngine') ?: 'hermes').toString() == 'hermes'
+
 android {
     ndkVersion rootProject.ext.ndkVersion
 
@@ -92,7 +98,7 @@ android {
         applicationId 'com.blyp.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 2026304700
         versionName "1.0.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
@@ -105,45 +111,105 @@ android {
             keyPassword 'android'
         }
         release {
-            // Loaded from env or android/keystore.local.properties (gitignored).
-            // Never fall back to the debug keystore for release artifacts.
+            def getPropOrEnv = { String name ->
+                return (project.findProperty(name) ?: System.getProperty(name) ?: System.getenv(name))
+            }
+
+            def allowDebugSignedRelease = {
+                def v = (project.findProperty('BLYP_ALLOW_DEBUG_SIGNED_RELEASE') ?: System.getenv('BLYP_ALLOW_DEBUG_SIGNED_RELEASE') ?: '').toString().toLowerCase()
+                return ['1', 'true', 'yes'].contains(v)
+            }
+
+            def pickFirstNonEmpty = { List<String> names ->
+                for (def n : names) {
+                    def v = getPropOrEnv(n)
+                    if (v != null) {
+                        def s = v.toString().trim()
+                        if (s.length() > 0) {
+                            return s
+                        }
+                    }
+                }
+                return null
+            }
+
+            // Local: BLYP_RELEASE_* (env/gradle.properties)
+            // EAS/CI: Android Gradle Plugin supports injected signing properties:
+            // - android.injected.signing.store.file
+            // - android.injected.signing.store.password
+            // - android.injected.signing.key.alias
+            // - android.injected.signing.key.password
+            def storeFilePath = pickFirstNonEmpty([
+                    'BLYP_RELEASE_STORE_FILE',
+                    'android.injected.signing.store.file',
+                    'ANDROID_KEYSTORE_PATH',
+                    'ANDROID_KEYSTORE_FILE'
+            ])
+            def storePasswordValue = pickFirstNonEmpty([
+                    'BLYP_RELEASE_STORE_PASSWORD',
+                    'android.injected.signing.store.password',
+                    'ANDROID_KEYSTORE_PASSWORD',
+                    'ANDROID_STORE_PASSWORD'
+            ])
+            def keyAliasValue = pickFirstNonEmpty([
+                    'BLYP_RELEASE_KEY_ALIAS',
+                    'android.injected.signing.key.alias',
+                    'ANDROID_KEY_ALIAS',
+                    'ANDROID_ALIAS'
+            ])
+            def keyPasswordValue = pickFirstNonEmpty([
+                    'BLYP_RELEASE_KEY_PASSWORD',
+                    'android.injected.signing.key.password',
+                    'ANDROID_KEY_PASSWORD',
+                    'ANDROID_KEYSTORE_KEY_PASSWORD'
+            ])
+
+            // EAS writes credentials.json before gradlew.
+            def credentialsJson = rootProject.file('../credentials.json')
+            if ((!storeFilePath || !storePasswordValue || !keyAliasValue || !keyPasswordValue) && credentialsJson.exists()) {
+                def credentials = new groovy.json.JsonSlurper().parse(credentialsJson)
+                def ks = credentials?.android?.keystore
+                if (ks?.keystorePath && ks?.keystorePassword && ks?.keyAlias) {
+                    def keystorePath = java.nio.file.Paths.get(ks.keystorePath as String)
+                    storeFilePath = (keystorePath.isAbsolute()
+                        ? keystorePath
+                        : rootProject.file('..').toPath().resolve(keystorePath)).toFile().absolutePath
+                    storePasswordValue = ks.keystorePassword
+                    keyAliasValue = ks.keyAlias
+                    keyPasswordValue = ks.keyPassword ?: ks.keystorePassword
+                }
+            }
+
+            def resolvedStoreFile = storeFilePath ? file(storeFilePath) : null
+
+            if (storeFilePath && (!resolvedStoreFile || !resolvedStoreFile.exists())) {
+                println "WARNING: Release keystore file not found at: ${storeFilePath}"
+            }
+
+            if (resolvedStoreFile && resolvedStoreFile.exists() && storePasswordValue && keyAliasValue && keyPasswordValue) {
+                storeFile resolvedStoreFile
+                storePassword storePasswordValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            } else if (allowDebugSignedRelease()) {
+                println 'WARNING: Release signing not configured; using debug keystore for this release build (local testing only).'
+                storeFile file('debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
         }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.getByName('debug')
         }
         release {
-            // Wave 2: require dedicated release credentials. Do not use debug signing.
-            def keystoreProperties = new Properties()
-            def keystorePropertiesFile = rootProject.file('keystore.local.properties')
-            if (keystorePropertiesFile.exists()) {
-                keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-            }
-
-            def releaseStoreFilePath = System.getenv('BLYP_RELEASE_STORE_FILE') ?: keystoreProperties['BLYP_RELEASE_STORE_FILE']
-            def releaseStorePassword = System.getenv('BLYP_RELEASE_STORE_PASSWORD') ?: keystoreProperties['BLYP_RELEASE_STORE_PASSWORD']
-            def releaseKeyAlias = System.getenv('BLYP_RELEASE_KEY_ALIAS') ?: keystoreProperties['BLYP_RELEASE_KEY_ALIAS']
-            def releaseKeyPassword = System.getenv('BLYP_RELEASE_KEY_PASSWORD') ?: keystoreProperties['BLYP_RELEASE_KEY_PASSWORD']
-
-            def hasReleaseCreds =
-                releaseStoreFilePath &&
-                releaseStorePassword &&
-                releaseKeyAlias &&
-                releaseKeyPassword
-
-            if (hasReleaseCreds) {
-                signingConfigs.release.storeFile file(releaseStoreFilePath)
-                signingConfigs.release.storePassword releaseStorePassword
-                signingConfigs.release.keyAlias releaseKeyAlias
-                signingConfigs.release.keyPassword releaseKeyPassword
-                signingConfig signingConfigs.release
-            } else if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) {
-                throw new GradleException(
-                    "Release signing credentials missing. Set BLYP_RELEASE_* env vars or create android/keystore.local.properties from keystore.local.properties.example. Debug keystore must not sign release builds."
-                )
-            }
-
+            // Caution! In production, you need to generate your own keystore file.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            // Always attach the release signingConfig; we enforce presence later
+            // (after project evaluation) so EAS can inject signing config.
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
@@ -160,6 +226,135 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+}
+
+// Fail-fast for release builds *after* the project is evaluated so EAS Build can
+// inject signing config into build.gradle. Canonical Play uploads must come
+// through the guarded release script with explicit version intent.
+def isReleaseTaskRequested = {
+    def tasks = gradle.startParameter.taskNames ?: []
+    return tasks.any { (it ?: '').toString().toLowerCase().contains('release') }
+}
+
+def isCanonicalReleaseRequested = {
+    def raw = (project.findProperty('BLYP_CANONICAL_RELEASE') ?: System.getenv('BLYP_CANONICAL_RELEASE') ?: '').toString().toLowerCase()
+    return ['1', 'true', 'yes'].contains(raw)
+}
+
+def isAllowDebugSignedRelease = {
+    def v = (project.findProperty('BLYP_ALLOW_DEBUG_SIGNED_RELEASE') ?: System.getenv('BLYP_ALLOW_DEBUG_SIGNED_RELEASE') ?: '').toString().toLowerCase()
+    return ['1', 'true', 'yes'].contains(v)
+}
+
+def isLocalDeviceReleaseRequested = {
+    def raw = (project.findProperty('BLYP_LOCAL_DEVICE_RELEASE') ?: System.getenv('BLYP_LOCAL_DEVICE_RELEASE') ?: '').toString().toLowerCase()
+    return ['1', 'true', 'yes'].contains(raw)
+}
+
+def isAssembleReleaseOnly = {
+    def tasks = gradle.startParameter.taskNames ?: []
+    return tasks.any { (it ?: '').toString().toLowerCase().contains('assemblerelease') }
+}
+
+def getExpectedReleaseVersionCode = {
+    return (project.findProperty('BLYP_EXPECTED_VERSION_CODE') ?: System.getenv('BLYP_EXPECTED_VERSION_CODE') ?: '').toString().trim()
+}
+
+afterEvaluate {
+    if (isReleaseTaskRequested()) {
+        // Fast path: local adb smoke with bundled JS (debug-signed APK, no Play ledger).
+        if (isLocalDeviceReleaseRequested() && isAssembleReleaseOnly()) {
+            if (!isAllowDebugSignedRelease()) {
+                throw new RuntimeException(
+                        'Local device release requires BLYP_ALLOW_DEBUG_SIGNED_RELEASE=1 (debug-signed APK for adb only).'
+                )
+            }
+            println 'INFO: BLYP_LOCAL_DEVICE_RELEASE ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â assembleRelease for adb smoke (skips canonical Play gates).'
+            return
+        }
+
+        def easBuildProfile = (System.getenv('EAS_BUILD_PROFILE') ?: '').toString().trim().toLowerCase()
+        if (easBuildProfile == 'production') {
+            throw new RuntimeException(
+                    'Release build blocked. EAS production build profile is NON-CANONICAL and must not be used for Play-upload AAB release. Use tools/release/BUILD_RELEASE_CANDIDATE.ps1.'
+            )
+        }
+
+        // Internal EAS APK profiles are device-smoke builds, not Play-upload candidates.
+        if (easBuildProfile == 'preview' || easBuildProfile == 'preview-staging') {
+            println "INFO: EAS profile '${easBuildProfile}' — skipping canonical Play release gates."
+            return
+        }
+
+        if (!isCanonicalReleaseRequested()) {
+            throw new RuntimeException(
+                    'Release build blocked. Use tools/release/BUILD_RELEASE_CANDIDATE.ps1 with BLYP_CANONICAL_RELEASE=1.'
+            )
+        }
+
+        def expectedVersionCode = getExpectedReleaseVersionCode()
+        if (!expectedVersionCode) {
+            throw new RuntimeException(
+                    'Release build blocked. Set BLYP_EXPECTED_VERSION_CODE to the intended versionCode before running a canonical release build.'
+            )
+        }
+
+        def androidExt = project.extensions.findByName('android')
+        def actualVersionCode = androidExt?.defaultConfig?.versionCode?.toString()
+        if (actualVersionCode != expectedVersionCode) {
+            throw new RuntimeException(
+                    "Release build blocked. versionCode mismatch: expected ${expectedVersionCode}, actual ${actualVersionCode}."
+            )
+        }
+
+        // Anti-reuse guard: a versionCode that has already been built for upload
+        // must NEVER be rebuilt - Google Play rejects duplicate version codes.
+        // Every release build records its code in tools/release/built_versioncodes.txt
+        // (committed, durable memory). To build again you MUST allocate a fresh,
+        // strictly-increasing code via tools/release/bump_version_code.ps1.
+        def builtLedgerFile = new File(projectRoot, 'tools/release/built_versioncodes.txt')
+        if (builtLedgerFile.exists()) {
+            def consumedCodes = builtLedgerFile.readLines()
+                    .collect { (it ?: '').trim() }
+                    .findAll { it ==~ /\d+/ }
+            if (consumedCodes.contains(actualVersionCode)) {
+                throw new RuntimeException(
+                        "Release build blocked. versionCode ${actualVersionCode} has already been built/uploaded " +
+                        "(recorded in tools/release/built_versioncodes.txt). Run tools/release/bump_version_code.ps1 " +
+                        "to allocate a fresh versionCode, then rebuild."
+                )
+            }
+        }
+
+        def releaseStoreFile = androidExt?.signingConfigs?.findByName('release')?.storeFile
+        if (releaseStoreFile == null) {
+            throw new RuntimeException(
+                    'Release signing is not configured. ' +
+                            'Set BLYP_RELEASE_STORE_FILE, BLYP_RELEASE_STORE_PASSWORD, BLYP_RELEASE_KEY_ALIAS, BLYP_RELEASE_KEY_PASSWORD via gradle.properties or environment variables.'
+            )
+        }
+
+        if (releaseStoreFile.name?.equalsIgnoreCase('debug.keystore')) {
+            throw new RuntimeException('Debug keystore cannot be used for canonical release builds.')
+        }
+
+        // Record this versionCode as consumed as soon as a release artifact is
+        // produced, so the anti-reuse guard above blocks any future rebuild of
+        // the same code - on this machine or any other (the file is committed).
+        def builtRecorder = tasks.register('recordBuiltVersionCode') {
+            doLast {
+                builtLedgerFile.parentFile.mkdirs()
+                def already = builtLedgerFile.exists() ?
+                        builtLedgerFile.readLines().collect { (it ?: '').trim() } : []
+                if (!already.contains(actualVersionCode)) {
+                    builtLedgerFile << "${actualVersionCode}${System.lineSeparator()}"
+                    println "Recorded built versionCode ${actualVersionCode} in tools/release/built_versioncodes.txt"
+                }
+            }
+        }
+        tasks.matching { it.name == 'bundleRelease' || it.name == 'assembleRelease' }
+                .configureEach { finalizedBy(builtRecorder) }
     }
 }
 
@@ -186,6 +381,7 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    implementation("com.android.billingclient:billing-ktx:7.1.1")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
@@ -205,9 +401,19 @@ dependencies {
         }
     }
 
-    if (hermesEnabled.toBoolean()) {
+    if (hermesEnabled) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
     }
+
+    // Amazon IVS SDKs for real-time streaming
+    implementation "com.amazonaws:ivs-player:1.47.0"
+    // Real-Time Stage SDK (Stage classifier). If this fails to resolve, fall back to 1.16.0:stages@aar
+    implementation "com.amazonaws:ivs-broadcast:1.37.0:stages@aar"
+    // implementation "com.amazonaws:ivs-broadcast:1.16.0:stages@aar"
+}
+
+if (file("./eas-build.gradle").exists()) {
+    apply from: "./eas-build.gradle"
 }

@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import HLSLiveStreamService from '../services/HLSLiveStreamService';
+import { COLORS } from '../styles/theme';
 
 /**
  * Example 1: "Go Live" Button for Profile Screen
@@ -174,7 +175,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FF1744',
+    backgroundColor: COLORS.gradientEnd,
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 24,

@@ -1,4 +1,4 @@
-import { geminiApiKey, geminiApiUrl } from '../config/firebase';
+import { geminiApiKey, geminiApiUrl, geminiAuthHeaders } from '../config/firebase';
 
 /**
  * AI Service for Blyp Mobile
@@ -51,9 +51,7 @@ class AIService {
 
       const response = await fetch(this.apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: await geminiAuthHeaders(),
         body: JSON.stringify(testPayload)
       });
 
@@ -241,9 +239,7 @@ Make it authentic, engaging, and optimized for social media virality. Include re
 
     const fetchPromise = fetch(this.apiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: await geminiAuthHeaders(),
       body: JSON.stringify(payload)
     });
 

@@ -1,45 +1,107 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Icon from '../components/Icon';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  ScrollView,
   TouchableOpacity,
   Image,
   FlatList,
+  ActivityIndicator,
   Dimensions,
   StatusBar,
+  Alert,
 } from 'react-native';
+import ReportModal from '../components/ReportModal';
+import { blockUser, unblockUser, isBlockedCached, loadBlockedUsers } from '../services/BlockService';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc, orderBy, limit, startAfter, getCountFromServer } from 'firebase/firestore';
 import { auth, firestore as db } from '../config/firebase';
 import { useIsFocused } from '@react-navigation/native';
 import Toast from 'react-native-toast-message';
 import { responsiveFont } from '../utils/scaleUtils';
 import ScreenContainer from '../components/ScreenContainer';
+import { useAuth } from '../hooks/useCommon';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+const PROFILE_PAGE_SIZE = 30;
+
 const UserProfileScreen = ({ route, navigation }) => {
-  const { userId, username } = route.params;
+  // Guard against a missing params object (deep links / malformed navigation),
+  // which would otherwise throw on destructure and crash the screen.
+  const { userId, username } = route?.params || {};
+  const { uid: cognitoUid } = useAuth();
   const [userProfile, setUserProfile] = useState(null);
   const [userPosts, setUserPosts] = useState([]);
+  const [postCount, setPostCount] = useState(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const postsCursorRef = useRef(null);
+  const postsHasMoreRef = useRef(true);
+  const loadingMorePostsRef = useRef(false);
   const isFocused = useIsFocused();
-  const currentUser = auth.currentUser;
+  // Source of truth for app login is Cognito uid (Firebase Auth is not guaranteed).
+  const currentUserId = cognitoUid || null;
 
   useEffect(() => {
     if (isFocused) {
+      if (!userId) {
+        // No target user (malformed navigation / deep link) — stop the spinner
+        // and let the render fall through to the empty/not-found state.
+        setLoading(false);
+        return;
+      }
       fetchUserProfile();
       fetchUserPosts();
       checkFollowStatus();
+      loadBlockedUsers().then(() => setBlocked(isBlockedCached(userId))).catch(() => {});
     }
   }, [isFocused, userId]);
+
+  const handleOpenProfileMenu = useCallback(() => {
+    if (!userId || currentUserId === userId) return;
+    const actions = [
+      { text: 'Report user', onPress: () => setReportVisible(true) },
+      blocked
+        ? {
+            text: 'Unblock user',
+            onPress: async () => {
+              try { await unblockUser(userId); setBlocked(false); Toast.show({ type: 'success', text1: 'Unblocked', position: 'bottom' }); }
+              catch (e) { Alert.alert('Couldn’t unblock', e?.message || 'Please try again.'); }
+            },
+          }
+        : {
+            text: 'Block user',
+            style: 'destructive',
+            onPress: () => {
+              Alert.alert(
+                'Block user',
+                'You won’t see their posts, comments or messages, and they won’t be able to message you. You can unblock them from their profile.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Block',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try { await blockUser(userId); setBlocked(true); Toast.show({ type: 'success', text1: 'Blocked', position: 'bottom' }); }
+                      catch (e) { Alert.alert('Couldn’t block', e?.message || 'Please try again.'); }
+                    },
+                  },
+                ]
+              );
+            },
+          },
+      { text: 'Cancel', style: 'cancel' },
+    ];
+    Alert.alert(userProfile?.displayName || 'Options', '', actions);
+  }, [userId, currentUserId, blocked, userProfile?.displayName]);
 
   const fetchUserProfile = async () => {
     try {
@@ -107,44 +169,86 @@ const UserProfileScreen = ({ route, navigation }) => {
     }
   };
 
+  // First page of this user's posts (newest first). Older pages load on scroll
+  // via loadMoreUserPosts, so every post for the account is reachable.
   const fetchUserPosts = async () => {
     try {
-      // Fetch real user posts from Firebase
+      postsCursorRef.current = null;
+      postsHasMoreRef.current = true;
       const postsQuery = query(
         collection(db, 'posts'),
-        where('userId', '==', userId)
+        where('userId', '==', userId),
+        orderBy('date', 'desc'),
+        limit(PROFILE_PAGE_SIZE)
       );
-      
+
       const querySnapshot = await getDocs(postsQuery);
-      const posts = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      // Sort posts by date (newest first)
-      posts.sort((a, b) => {
-        if (a.date && b.date) {
-          return b.date.toMillis() - a.date.toMillis();
-        }
-        return 0;
-      });
-      
+      const docs = querySnapshot.docs || [];
+      postsCursorRef.current = docs.length ? docs[docs.length - 1] : null;
+      postsHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
+      const posts = docs.map(d => ({ id: d.id, ...d.data() }));
       setUserPosts(posts);
+      console.log(`📱 UserProfile: Loaded first ${posts.length} posts for user ${userId}`);
     } catch (error) {
       console.error('Error fetching user posts:', error);
       setUserPosts([]);
     } finally {
       setLoading(false);
     }
+
+    // True total post count (so the stat shows e.g. 136 even before scrolling).
+    try {
+      const countSnap = await getCountFromServer(
+        query(collection(db, 'posts'), where('userId', '==', userId))
+      );
+      const total = countSnap?.data()?.count;
+      if (typeof total === 'number') setPostCount(total);
+    } catch {
+      setPostCount(null); // fall back to loaded length
+    }
   };
 
+  const loadMoreUserPosts = useCallback(async () => {
+    if (loadingMorePostsRef.current || !postsHasMoreRef.current) return;
+    const cursor = postsCursorRef.current;
+    if (!cursor) return;
+    loadingMorePostsRef.current = true;
+    setLoadingMore(true);
+    try {
+      const postsQuery = query(
+        collection(db, 'posts'),
+        where('userId', '==', userId),
+        orderBy('date', 'desc'),
+        startAfter(cursor),
+        limit(PROFILE_PAGE_SIZE)
+      );
+      const querySnapshot = await getDocs(postsQuery);
+      const docs = querySnapshot.docs || [];
+      if (docs.length) postsCursorRef.current = docs[docs.length - 1];
+      postsHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
+      const older = docs.map(d => ({ id: d.id, ...d.data() }));
+      if (older.length) {
+        setUserPosts(prev => {
+          const have = new Set(prev.map(p => p.id));
+          const add = older.filter(p => !have.has(p.id));
+          return add.length ? [...prev, ...add] : prev;
+        });
+      }
+    } catch (error) {
+      console.error('Error loading more user posts:', error);
+    } finally {
+      loadingMorePostsRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [userId]);
+
   const checkFollowStatus = async () => {
-    if (!currentUser) return;
+    if (!currentUserId) return;
     
     try {
       // Check real follow status using follow utilities
       const { isFollowing: checkIsFollowing } = require('../utils/followUtils');
-      const followStatus = await checkIsFollowing(currentUser.uid, userId);
+      const followStatus = await checkIsFollowing(currentUserId, userId);
       setIsFollowing(followStatus);
     } catch (error) {
       console.error('Error checking follow status:', error);
@@ -152,7 +256,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   };
 
   const handleFollowToggle = async () => {
-    if (!currentUser) {
+    if (!currentUserId) {
       Toast.show({
         type: 'error',
         text1: 'Please login to follow users',
@@ -161,37 +265,31 @@ const UserProfileScreen = ({ route, navigation }) => {
       return;
     }
 
+    // Optimistic update, then reconcile against the actual write result so a
+    // denied/failed write can't leave the UI showing a follow that didn't stick.
+    const wasFollowing = isFollowing;
     try {
       const { followUser, unfollowUser } = require('../utils/followUtils');
-      
-      if (isFollowing) {
-        // Unfollow the user
-        await unfollowUser(currentUser.uid, userId);
+
+      if (wasFollowing) {
         setIsFollowing(false);
         setFollowerCount(prev => Math.max(0, prev - 1));
-        
-        Toast.show({
-          type: 'success',
-          text1: `Unfollowed ${username}`,
-          position: 'bottom',
-        });
+        const res = await unfollowUser(currentUserId, userId);
+        if (!res?.success) throw res?.error || new Error('unfollow failed');
+        Toast.show({ type: 'success', text1: `Unfollowed ${username}`, position: 'bottom' });
       } else {
-        // Follow the user
-        await followUser(currentUser.uid, userId);
         setIsFollowing(true);
         setFollowerCount(prev => prev + 1);
-        
-        Toast.show({
-          type: 'success',
-          text1: `Following ${username}!`,
-          position: 'bottom',
-        });
+        const res = await followUser(currentUserId, userId);
+        if (!res?.success) throw res?.error || new Error('follow failed');
+        Toast.show({ type: 'success', text1: `Following ${username}!`, position: 'bottom' });
       }
     } catch (error) {
       console.error('Error updating follow status:', error);
-      // Revert on error
-      setIsFollowing(!isFollowing);
-      setFollowerCount(prev => isFollowing ? prev + 1 : prev - 1);
+      // Revert to the real previous state.
+      setIsFollowing(wasFollowing);
+      setFollowerCount(prev => Math.max(0, wasFollowing ? prev + 1 : prev - 1));
+      Toast.show({ type: 'error', text1: 'Couldn’t update follow. Please try again.', position: 'bottom' });
     }
   };
 
@@ -230,11 +328,11 @@ const UserProfileScreen = ({ route, navigation }) => {
           <View style={styles.postStats}>
             <View style={styles.postStat}>
               <Icon  name="heart" size={12} color="#fff"  />
-              <Text style={styles.postStatText}>{formatNumber(item.likes || item.likeCount || 0)}</Text>
+              <Text style={styles.postStatText}>{formatNumber(item.likeCount || item.likes || item.likedBy?.length || 0)}</Text>
             </View>
             <View style={styles.postStat}>
               <Icon  name="eye" size={12} color="#fff"  />
-              <Text style={styles.postStatText}>{formatNumber(item.views || 0)}</Text>
+              <Text style={styles.postStatText}>{formatNumber(item.viewCount || item.views || item.playCount || 0)}</Text>
             </View>
           </View>
         </View>
@@ -246,7 +344,7 @@ const UserProfileScreen = ({ route, navigation }) => {
     return (
     <ScreenContainer>
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+        <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" />
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
@@ -258,7 +356,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   return (
     <ScreenContainer>
       <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+      <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" />
       
       {/* Header */}
       <View style={styles.header}>
@@ -269,89 +367,120 @@ const UserProfileScreen = ({ route, navigation }) => {
           <Icon  name="arrow-back" size={24} color="#ffffff"  />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{userProfile?.displayName}</Text>
-        <TouchableOpacity style={styles.moreButton}>
-          <Icon  name="ellipsis-horizontal" size={24} color="#ffffff"  />
+        <TouchableOpacity
+          style={styles.moreButton}
+          onPress={handleOpenProfileMenu}
+          disabled={currentUserId === userId}
+        >
+          <Icon  name="ellipsis-horizontal" size={24} color={currentUserId === userId ? 'transparent' : '#ffffff'}  />
         </TouchableOpacity>
       </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Info */}
-        <View style={styles.profileSection}>
-          <View style={styles.avatarContainer}>
-            {userProfile?.avatar ? (
-              <Image source={{ uri: userProfile.avatar }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarFallback]}>
-                <Icon  name="person" size={40} color="#6b7280"  />
-              </View>
-            )}
-            {userProfile?.verified && (
-              <View style={styles.verifiedBadge}>
-                <Icon  name="checkmark" size={12} color="#fff"  />
-              </View>
-            )}
-          </View>
-          
-          <Text style={styles.displayName}>{userProfile?.displayName}</Text>
-          <Text style={styles.username}>{userProfile?.username}</Text>
-          
-          {userProfile?.bio && (
-            <Text style={styles.bio}>{userProfile.bio}</Text>
-          )}
-
-          {/* Stats */}
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{userPosts.length}</Text>
-              <Text style={styles.statLabel}>Posts</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{formatNumber(followerCount)}</Text>
-              <Text style={styles.statLabel}>Followers</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{formatNumber(followingCount)}</Text>
-              <Text style={styles.statLabel}>Following</Text>
-            </View>
-          </View>
-
-          {/* Action Buttons */}
-          {currentUser?.uid !== userId && (
-            <View style={styles.actionButtons}>
-              <TouchableOpacity 
-                style={[styles.followButton, isFollowing && styles.followingButton]}
-                onPress={handleFollowToggle}
-              >
-                <LinearGradient
-                  colors={isFollowing ? ['#374151', '#4b5563'] : ['#a855f7', '#d946ef']}
-                  style={styles.followButtonGradient}
-                >
-                  <Text style={styles.followButtonText}>
-                    {isFollowing ? 'Following' : 'Follow'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.messageButton}>
-                <Icon  name="chatbubble-outline" size={20} color="#fff"  />
-              </TouchableOpacity>
-            </View>
-          )}
+      <ReportModal
+        visible={reportVisible}
+        onClose={() => setReportVisible(false)}
+        targetType="user"
+        targetId={userId}
+        targetLabel={userProfile?.displayName ? `@${userProfile.displayName}` : 'this user'}
+        reportedUserId={userId}
+      />
+      {blocked ? (
+        <View style={styles.blockedBanner}>
+          <Icon name="ban" size={16} color="#FF6B60" />
+          <Text style={styles.blockedBannerText}>You’ve blocked this user. Tap the menu to unblock.</Text>
         </View>
+      ) : null}
 
-        {/* Posts Grid */}
-        <View style={styles.postsSection}>
-          <Text style={styles.sectionTitle}>Posts</Text>
-          <FlatList
-            data={userPosts}
-            renderItem={renderPostItem}
-            keyExtractor={(item) => item.id}
-            numColumns={3}
-            scrollEnabled={false}
-            contentContainerStyle={styles.postsGrid}
-          />
-        </View>
-      </ScrollView>
+      <FlatList
+        style={styles.content}
+        data={userPosts}
+        renderItem={renderPostItem}
+        keyExtractor={(item) => item.id}
+        numColumns={3}
+        showsVerticalScrollIndicator={false}
+        onEndReached={loadMoreUserPosts}
+        onEndReachedThreshold={1}
+        initialNumToRender={15}
+        contentContainerStyle={styles.postsGrid}
+        ListHeaderComponent={(
+          <>
+            {/* Profile Info */}
+            <View style={styles.profileSection}>
+              <View style={styles.avatarContainer}>
+                {userProfile?.avatar ? (
+                  <Image source={{ uri: userProfile.avatar }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarFallback]}>
+                    <Icon  name="person" size={40} color="#6b7280"  />
+                  </View>
+                )}
+                {userProfile?.verified && (
+                  <View style={styles.verifiedBadge}>
+                    <Icon  name="checkmark" size={12} color="#fff"  />
+                  </View>
+                )}
+              </View>
+
+              <Text style={styles.displayName}>{userProfile?.displayName}</Text>
+              <Text style={styles.username}>{userProfile?.username}</Text>
+
+              {userProfile?.bio && (
+                <Text style={styles.bio}>{userProfile.bio}</Text>
+              )}
+
+              {/* Stats */}
+              <View style={styles.statsContainer}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{postCount != null ? formatNumber(postCount) : userPosts.length}</Text>
+                  <Text style={styles.statLabel}>Posts</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{formatNumber(followerCount)}</Text>
+                  <Text style={styles.statLabel}>Followers</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statNumber}>{formatNumber(followingCount)}</Text>
+                  <Text style={styles.statLabel}>Following</Text>
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              {currentUserId !== userId && (
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={[styles.followButton, isFollowing && styles.followingButton]}
+                    onPress={handleFollowToggle}
+                  >
+                    <LinearGradient
+                      colors={isFollowing ? ['#27272E', '#3F3F46'] : ['#00D2BE', '#00A89E']}
+                      style={styles.followButtonGradient}
+                    >
+                      <Text style={[styles.followButtonText, !isFollowing && styles.followButtonTextActive]}>
+                        {isFollowing ? 'Following' : 'Follow'}
+                      </Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.messageButton}>
+                    <Icon  name="chatbubble-outline" size={20} color="#fff"  />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Posts Grid */}
+            <Text style={[styles.sectionTitle, styles.postsSectionTitle]}>Posts</Text>
+          </>
+        )}
+        ListEmptyComponent={(
+          <View style={styles.emptyPosts}>
+            <Icon name="camera-outline" size={48} color="#6b7280" />
+            <Text style={styles.loadingText}>No posts yet</Text>
+          </View>
+        )}
+        ListFooterComponent={loadingMore ? (
+          <View style={styles.footerLoader}><ActivityIndicator size="small" color="#00D2BE" /></View>
+        ) : null}
+      />
       </SafeAreaView>
     </ScreenContainer>
   );
@@ -360,7 +489,7 @@ const UserProfileScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0A0A0C',
   },
   loadingContainer: {
     flex: 1,
@@ -378,7 +507,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
+    borderBottomColor: '#27272E',
   },
   backButton: {
     padding: 8,
@@ -390,6 +519,20 @@ const styles = StyleSheet.create({
   },
   moreButton: {
     padding: 8,
+  },
+  blockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,59,48,0.12)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  blockedBannerText: {
+    color: '#FF6B60',
+    fontSize: responsiveFont(12),
+    fontWeight: '600',
+    flexShrink: 1,
   },
   content: {
     flex: 1,
@@ -408,7 +551,7 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
     borderWidth: 3,
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   avatarFallback: {
     backgroundColor: '#374151',
@@ -426,7 +569,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#0f172a',
+    borderColor: '#0A0A0C',
   },
   displayName: {
     color: '#ffffff',
@@ -440,7 +583,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   bio: {
-    color: '#e2e8f0',
+    color: '#E4E4E7',
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 20,
@@ -488,6 +631,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
+  followButtonTextActive: {
+    color: '#0A0A0C',
+    fontWeight: '800',
+  },
   messageButton: {
     backgroundColor: '#374151',
     borderRadius: 12,
@@ -506,8 +653,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 16,
   },
+  postsSectionTitle: {
+    paddingHorizontal: 20,
+  },
   postsGrid: {
     gap: 2,
+    paddingHorizontal: 18,
+    paddingBottom: 24,
+  },
+  footerLoader: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyPosts: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 8,
   },
   postItem: {
     width: (screenWidth - 44) / 3,

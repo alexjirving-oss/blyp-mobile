@@ -1,6 +1,18 @@
 {
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "auth": {
+      "port": 9099
+    },
+    "ui": {
+      "enabled": false,
+      "port": 4002
+    }
+  },
   "firestore": {
-    "rules": "firestore.rules",
+    "rules": "firestore.wave0-live.rules",
     "indexes": "firestore.indexes.json"
   },
   "hosting": {

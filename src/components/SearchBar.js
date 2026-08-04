@@ -52,7 +52,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       const suggestionsData = searchService.getSearchSuggestions();
       setSuggestions(suggestionsData);
     } catch (error) {
-      console.error('❌ Error loading suggestions:', error);
+      console.error('âŒ Error loading suggestions:', error);
     }
   };
 
@@ -73,7 +73,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       
       closeSearchModal();
     } catch (error) {
-      console.error('❌ Search error:', error);
+      console.error('âŒ Search error:', error);
     } finally {
       setIsLoading(false);
     }
@@ -92,7 +92,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       <Icon  
         name={section === 'trending' ? 'trending-up' : 'time-outline'} 
         size={16} 
-        color={section === 'trending' ? '#ec4899' : '#666'} 
+        color={section === 'trending' ? '#00D2BE' : '#666'} 
        />
       <Text style={styles.suggestionText}>{item}</Text>
       <Icon  name="arrow-up-outline" size={16} color="#666" style={styles.suggestionArrow}  />
@@ -105,7 +105,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       <View style={styles.quickActions}>
         {[
           { icon: 'people', label: 'Users', color: '#3b82f6' },
-          { icon: 'grid', label: 'Posts', color: '#ec4899' },
+          { icon: 'grid', label: 'Posts', color: '#00D2BE' },
           { icon: 'pricetag', label: 'Tags', color: '#f59e0b' },
           { icon: 'location', label: 'Places', color: '#10b981' },
         ].map((action, index) => (
@@ -150,7 +150,7 @@ const SearchBar = ({ navigation, placeholder = "Search...", onSearch }) => {
       {suggestions?.trending && suggestions.trending.length > 0 && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon  name="flame" size={20} color="#ec4899"  />
+            <Icon  name="flame" size={20} color="#00D2BE"  />
             <Text style={styles.sectionTitle}>Trending Now</Text>
           </View>
           <FlatList
@@ -243,7 +243,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     flex: 1,
-    marginTop: 50,
+    marginTop: 0,
   },
   modalGradient: {
     flex: 1,
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    paddingTop: 24,
+    paddingTop: 0,
     borderBottomWidth: 1,
     borderBottomColor: '#2a2a2a',
   },
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   cancelButtonText: {
-    color: '#ec4899',
+    color: '#00D2BE',
     fontSize: 16,
     fontWeight: '600',
   },

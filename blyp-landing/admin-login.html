@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blyp Admin Login</title>
+    <style>
+        :root {
+            --bg: #0A0A0C;
+            --surface: #141418;
+            --surface-2: #15151B;
+            --text: #F5F5F7;
+            --muted: #A1A1AA;
+            --accent: #00D2BE;
+            --accent-2: #00A89E;
+            --danger: #FB7185;
+            --ok: #34D399;
+            --border: rgba(255, 255, 255, 0.2);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Inter", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 15% 0%, #0A0A0C 0%, transparent 40%),
+                radial-gradient(circle at 90% 20%, #0A0A0C 0%, transparent 35%),
+                var(--bg);
+            min-height: 100vh;
+        }
+
+        .wrap {
+            max-width: 840px;
+            margin: 0 auto;
+            padding: 26px 18px 42px;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            min-height: 40px;
+        }
+
+        .brand-logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 11px 7px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #00D2BE, #00BFB0, #00A89E);
+            color: #0A0A0C;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+            font-size: 21px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+            box-shadow: 0 6px 16px rgba(0, 210, 190, 0.3);
+        }
+
+        a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 13px;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .card {
+            background: linear-gradient(180deg, rgba(28,28,34, 0.8), rgba(18,18,22, 0.9));
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 20px 45px rgba(2, 8, 22, 0.55);
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: clamp(26px, 3.3vw, 34px);
+            color: #F5F5F7;
+        }
+
+        .sub {
+            margin: 0 0 18px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        label {
+            display: block;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #A1A1AA;
+            font-weight: 600;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: var(--surface-2);
+            color: var(--text);
+            padding: 10px 12px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        input:focus,
+        textarea:focus {
+            border-color: rgba(0, 210, 190, 0.85);
+            box-shadow: 0 0 0 2px rgba(0, 210, 190, 0.25);
+        }
+
+        textarea {
+            min-height: 140px;
+            resize: vertical;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 12px;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        @media (max-width: 760px) {
+            .row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: none;
+            border-radius: 11px;
+            padding: 11px 16px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            color: #0A0A0C;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        }
+
+        .ghost {
+            color: #F5F5F7;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+        }
+
+        .hint {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .status {
+            margin-top: 14px;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 13px;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            background: rgba(20,20,24, 0.7);
+            color: #A1A1AA;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .status.ok {
+            border-color: rgba(16, 185, 129, 0.5);
+            color: #9ae6c8;
+        }
+
+        .status.err {
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #FECDD3;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="topbar">
+            <div class="brand"><span class="brand-logo" aria-label="Blyp logo">Blyp</span></div>
+            <a href="/">Back to site</a>
+        </div>
+
+        <section class="card">
+            <h1>Admin Login</h1>
+            <p class="sub">
+                Sign in to access the admin dashboard.
+            </p>
+
+            <div class="row">
+                <div>
+                    <label for="apiBase">API Base URL</label>
+                    <input id="apiBase" type="text" value="" placeholder="https://your-admin-api-host" />
+                </div>
+                <div>
+                    <label for="timeoutMs">Request Timeout (ms)</label>
+                    <input id="timeoutMs" type="number" min="1000" max="30000" value="8000" />
+                </div>
+            </div>
+
+            <label for="email">Email</label>
+            <input id="email" type="email" placeholder="alex@tapaquatics.com" autocomplete="username" />
+
+            <label for="password">Password</label>
+            <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" />
+
+            <div class="actions">
+                <button id="loginBtn" type="button">Login and open dashboard</button>
+                <button id="checkHealthBtn" class="ghost" type="button">Check backend health</button>
+                <button id="autoDetectBtn" class="ghost" type="button">Auto-detect API</button>
+                <button id="clearBtn" class="ghost" type="button">Clear saved session</button>
+            </div>
+
+            <div id="status" class="status">Waiting for input.</div>
+
+            <p class="hint">
+                Expected backend run command: `cd backend/blyp-live-service && npm run dev`.
+            </p>
+        </section>
+    </div>
+
+    <script>
+        const DEFAULT_API_BASE = 'https://blyp-live-service-innn3d7yqq-uc.a.run.app';
+
+        const el = {
+            apiBase: document.getElementById('apiBase'),
+            timeoutMs: document.getElementById('timeoutMs'),
+            email: document.getElementById('email'),
+            password: document.getElementById('password'),
+            status: document.getElementById('status'),
+            loginBtn: document.getElementById('loginBtn'),
+            checkHealthBtn: document.getElementById('checkHealthBtn'),
+            autoDetectBtn: document.getElementById('autoDetectBtn'),
+            clearBtn: document.getElementById('clearBtn'),
+        };
+
+        function setStatus(message, kind) {
+            el.status.textContent = message;
+            el.status.className = 'status' + (kind ? ' ' + kind : '');
+        }
+
+        function getSession() {
+            return {
+                apiBase: String(el.apiBase.value || '').trim(),
+                email: String(el.email.value || '').trim(),
+                password: String(el.password.value || ''),
+                sessionToken: '',
+                timeoutMs: Number(el.timeoutMs.value || 8000),
+            };
+        }
+
+        function saveSession() {
+            const session = getSession();
+            localStorage.setItem('blypAdminSession', JSON.stringify(session));
+            return session;
+        }
+
+        function loadSession() {
+            try {
+                const raw = localStorage.getItem('blypAdminSession');
+                if (!raw) {
+                    el.apiBase.value = DEFAULT_API_BASE;
+                    return;
+                }
+                const parsed = JSON.parse(raw);
+                let prefillApiBase = parsed.apiBase ? String(parsed.apiBase) : DEFAULT_API_BASE;
+                if (/onrender\.com/i.test(prefillApiBase)) prefillApiBase = DEFAULT_API_BASE;
+                el.apiBase.value = prefillApiBase;
+                if (parsed.email) el.email.value = String(parsed.email);
+                if (parsed.timeoutMs) el.timeoutMs.value = String(parsed.timeoutMs);
+            } catch {
+                el.apiBase.value = DEFAULT_API_BASE;
+            }
+        }
+
+        function clearSession() {
+            localStorage.removeItem('blypAdminSession');
+            el.password.value = '';
+            setStatus('Session cleared.', 'ok');
+        }
+
+        function showFlashIfPresent() {
+            try {
+                const flash = String(sessionStorage.getItem('blypAdminFlash') || '').trim();
+                if (!flash) return;
+                sessionStorage.removeItem('blypAdminFlash');
+                setStatus(flash, 'err');
+            } catch { }
+        }
+
+        async function fetchWithTimeout(url, options, timeoutMs) {
+            const ctrl = new AbortController();
+            const id = setTimeout(() => ctrl.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: ctrl.signal });
+            } finally {
+                clearTimeout(id);
+            }
+        }
+
+        async function checkHealth() {
+            const { apiBase, timeoutMs } = getSession();
+            if (!apiBase) {
+                setStatus('Please set API Base URL.', 'err');
+                return;
+            }
+            setStatus('Checking /health ...');
+            try {
+                const res = await fetchWithTimeout(apiBase + '/health', { method: 'GET' }, timeoutMs);
+                const txt = await res.text();
+                setStatus('Health [' + res.status + ']\n' + txt, res.ok ? 'ok' : 'err');
+            } catch (e) {
+                setStatus('Health request failed: ' + (e && e.message ? e.message : String(e)), 'err');
+            }
+        }
+
+        async function probeApiBase(base, timeoutMs) {
+            const out = {
+                base,
+                healthOk: false,
+                loginRouteOk: false,
+                detail: '',
+            };
+
+            try {
+                const h = await fetchWithTimeout(base + '/health', { method: 'GET' }, timeoutMs);
+                if (h.ok) {
+                    out.healthOk = true;
+                }
+            } catch { }
+
+            try {
+                const res = await fetchWithTimeout(base + '/admin/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: 'probe@invalid.local', password: 'probe' }),
+                }, timeoutMs);
+
+                const txt = await res.text();
+                if (res.status === 401 && txt.includes('INVALID_CREDENTIALS')) {
+                    out.loginRouteOk = true;
+                    out.detail = 'login route reachable (invalid credentials expected)';
+                } else if (res.status === 200 || res.status === 500) {
+                    out.loginRouteOk = true;
+                    out.detail = 'login route reachable';
+                } else {
+                    out.detail = 'login route status ' + res.status;
+                }
+            } catch (e) {
+                out.detail = 'login route probe failed: ' + (e && e.message ? e.message : String(e));
+            }
+
+            return out;
+        }
+
+        async function autoDetectApi() {
+            const timeoutMs = Number(el.timeoutMs.value || 8000);
+            const isNonLocalPage = !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || '');
+            const candidates = [
+                String(el.apiBase.value || '').trim(),
+                DEFAULT_API_BASE,
+                'https://api.blyp.world',
+                'https://live.blyp.world',
+                'https://blyp.world',
+                'http://127.0.0.1:4000',
+                'http://localhost:4000',
+            ].filter(Boolean);
+
+            const unique = [...new Set(candidates)].filter((base) => {
+                if (!isNonLocalPage) return true;
+                return !/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(base);
+            });
+            setStatus('Auto-detecting API host ...\n' + unique.join('\n'));
+
+            const results = [];
+            for (const base of unique) {
+                const r = await probeApiBase(base, timeoutMs);
+                results.push(r);
+                if (r.healthOk && r.loginRouteOk) {
+                    el.apiBase.value = base;
+                    setStatus('Detected API base: ' + base + '\n' + r.detail, 'ok');
+                    return;
+                }
+            }
+
+            const lines = ['Auto-detect could not find a valid admin API host.'];
+            for (const r of results) {
+                lines.push('- ' + r.base + ' | health=' + r.healthOk + ' | loginRoute=' + r.loginRouteOk + ' | ' + (r.detail || 'no detail'));
+            }
+            setStatus(lines.join('\n'), 'err');
+        }
+
+        async function loginAndRedirect() {
+            const base = getSession();
+            const { apiBase, email, password, timeoutMs } = base;
+            if (!apiBase) {
+                setStatus('API Base URL is required.', 'err');
+                return;
+            }
+
+            const isNonLocalPage = !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname || '');
+            if (isNonLocalPage && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(apiBase)) {
+                setStatus('Localhost API is blocked on this hosted page. Enter your deployed admin API host.', 'err');
+                return;
+            }
+
+            if (!email || !password) {
+                setStatus('Email and password are required.', 'err');
+                return;
+            }
+
+            setStatus('Signing in via /admin/auth/login ...');
+            try {
+                const res = await fetchWithTimeout(apiBase + '/admin/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                }, timeoutMs);
+
+                if (!res.ok) {
+                    const txt = await res.text();
+                    setStatus('Login failed [' + res.status + ']\n' + txt, 'err');
+                    return;
+                }
+
+                const payload = await res.json();
+                const session = {
+                    apiBase,
+                    email,
+                    timeoutMs,
+                    sessionToken: String(payload.sessionToken || ''),
+                };
+                localStorage.setItem('blypAdminSession', JSON.stringify(session));
+
+                setStatus('Login success. Redirecting ...', 'ok');
+                window.location.href = '/admin-dashboard.html';
+            } catch (e) {
+                setStatus('Login request failed: ' + (e && e.message ? e.message : String(e)), 'err');
+            }
+        }
+
+        el.loginBtn.addEventListener('click', loginAndRedirect);
+        el.checkHealthBtn.addEventListener('click', checkHealth);
+        el.autoDetectBtn.addEventListener('click', autoDetectApi);
+        el.clearBtn.addEventListener('click', clearSession);
+
+        loadSession();
+        showFlashIfPresent();
+    </script>
+</body>
+
+</html>

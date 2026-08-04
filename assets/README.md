@@ -1,5 +1,10 @@
 # Assets Directory - Blyp Mobile App
 
+NON-CANONICAL
+DO NOT USE FOR RELEASE
+HISTORICAL/ASSET-HELPER NOTE: any Android build command shown here is not a valid Play release creation path.
+# Assets Directory - Blyp Mobile App
+
 ## 🎨 Required Assets for Production
 
 Create these files in the `/assets` directory before building:
@@ -66,9 +71,9 @@ After adding assets, verify they work:
 
 ## 🚀 Ready for Production
 
-Once assets are added, you can build for production:
+Once assets are added, use the canonical Android release path for production:
 ```bash
-eas build --platform android
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
 ```
 
 Your app will be ready for Google Play Store submission!

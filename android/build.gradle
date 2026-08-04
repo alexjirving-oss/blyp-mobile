@@ -9,6 +9,9 @@ buildscript {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    // FCM: processes android/app/google-services.json so the client can fetch a
+    // device push token for the blyp-master Firebase project.
+    classpath('com.google.gms:google-services:4.4.2')
   }
 }
 
@@ -22,3 +25,12 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+// Some Expo modules read `project(':app').hermesEnabled` during configuration.
+// Define it early and derive from Expo's `expo.jsEngine` property (defaults to Hermes).
+def expoJsEngine = (findProperty('expo.jsEngine') ?: 'hermes').toString()
+def resolvedHermesEnabled = (expoJsEngine == 'hermes')
+def appProject = findProject(':app')
+if (appProject != null) {
+  appProject.ext.set('hermesEnabled', resolvedHermesEnabled)
+}

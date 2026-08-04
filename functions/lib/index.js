@@ -37,18 +37,146 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recalcModerationQueue = exports.aggregateReport = exports.purgeExpiredAnalytics = exports.generateThumbnails = exports.cleanupOldStreams = exports.updateStreamAnalytics = exports.processVideoSegment = void 0;
+exports.cleanupOldStreams = exports.updateStreamAnalytics = exports.processVideoSegment = exports.mintFirebaseCustomToken = exports.moderatePostMedia = exports.moderateDirectMessage = exports.moderateComment = exports.processAccountDeletion = exports.streakReminderSweep = exports.blypClaimDailyReward = exports.geminiProxy = exports.blypAssistantCompose = exports.onBattleComplete = exports.onBattleReminderCreate = exports.onBattleStatusChange = exports.onBattleCreate = exports.presenceOfflineSweep = exports.onUserPresenceOnline = exports.onAuditionDecision = exports.onAuditionBattleComplete = exports.auditionOpponentSweep = exports.onAuditionMatched = exports.onTeamGroupMessageCreate = exports.onTeamBattleCreate = exports.onTeamJoinRequestDecision = exports.onTeamJoinRequestCreate = exports.onDirectMessageCreate = exports.onLiveStreamGoLive = exports.onLiveStreamCreate = exports.notificationOnCreate = exports.notificationDispatch = exports.blypPlayRtdn = exports.blypSubscriptionActivate = exports.blypReachSweep = exports.blypPostEvent = exports.blypRetentionSweep = exports.buildBlypIndex = exports.blypSearchEvent = exports.blypSearch = exports.viewerJoin = exports.guestJoin = exports.hostStart = exports.viewerJoinLegacy = exports.guestJoinLegacy = exports.hostEndLegacy = exports.hostStartLegacy = exports.addLiveStreamLike = exports.addLiveStreamComment = exports.devResetFirestore = exports.billingVerify = void 0;
+exports.recalcModerationQueue = exports.aggregateReport = exports.purgeExpiredAnalytics = exports.generateThumbnails = void 0;
 const functions = __importStar(require("firebase-functions"));
+// Export billing verification function (Stage 3 economy hardening)
+var billingVerify_1 = require("./billingVerify");
+Object.defineProperty(exports, "billingVerify", { enumerable: true, get: function () { return billingVerify_1.billingVerify; } });
+// Export DEV-ONLY Firestore reset function (maintenance only)
+var devReset_1 = require("./devReset");
+Object.defineProperty(exports, "devResetFirestore", { enumerable: true, get: function () { return devReset_1.devResetFirestore; } });
+// Export live stream API functions
+var liveStreamApi_1 = require("./liveStreamApi");
+Object.defineProperty(exports, "addLiveStreamComment", { enumerable: true, get: function () { return liveStreamApi_1.addLiveStreamComment; } });
+Object.defineProperty(exports, "addLiveStreamLike", { enumerable: true, get: function () { return liveStreamApi_1.addLiveStreamLike; } });
+// Export legacy IVS live streaming functions
+var liveRoutes_1 = require("./live/liveRoutes");
+Object.defineProperty(exports, "hostStartLegacy", { enumerable: true, get: function () { return liveRoutes_1.hostStart; } });
+Object.defineProperty(exports, "hostEndLegacy", { enumerable: true, get: function () { return liveRoutes_1.hostEnd; } });
+Object.defineProperty(exports, "guestJoinLegacy", { enumerable: true, get: function () { return liveRoutes_1.guestJoin; } });
+Object.defineProperty(exports, "viewerJoinLegacy", { enumerable: true, get: function () { return liveRoutes_1.viewerJoin; } });
+// Export new production-grade IVS token endpoints
+var ivsRouter_1 = require("./services/ivsRouter");
+Object.defineProperty(exports, "hostStart", { enumerable: true, get: function () { return ivsRouter_1.hostStart; } });
+Object.defineProperty(exports, "guestJoin", { enumerable: true, get: function () { return ivsRouter_1.guestJoin; } });
+Object.defineProperty(exports, "viewerJoin", { enumerable: true, get: function () { return ivsRouter_1.viewerJoin; } });
+// Export Blyp search platform endpoints (own search/distribution platform)
+var handlers_1 = require("./search/handlers");
+Object.defineProperty(exports, "blypSearch", { enumerable: true, get: function () { return handlers_1.blypSearch; } });
+Object.defineProperty(exports, "blypSearchEvent", { enumerable: true, get: function () { return handlers_1.blypSearchEvent; } });
+// Export Blyp search scheduled jobs (own-index builder + retention sweep)
+var scheduled_1 = require("./search/scheduled");
+Object.defineProperty(exports, "buildBlypIndex", { enumerable: true, get: function () { return scheduled_1.buildBlypIndex; } });
+Object.defineProperty(exports, "blypRetentionSweep", { enumerable: true, get: function () { return scheduled_1.blypRetentionSweep; } });
+// Export Blyp distribution (earn-your-reach) endpoints + scheduled scorer
+var handlers_2 = require("./distribution/handlers");
+Object.defineProperty(exports, "blypPostEvent", { enumerable: true, get: function () { return handlers_2.blypPostEvent; } });
+var scheduled_2 = require("./distribution/scheduled");
+Object.defineProperty(exports, "blypReachSweep", { enumerable: true, get: function () { return scheduled_2.blypReachSweep; } });
+// Export subscription activation (verified Play purchase -> paid entitlement + coin grant)
+var handlers_3 = require("./subscriptions/handlers");
+Object.defineProperty(exports, "blypSubscriptionActivate", { enumerable: true, get: function () { return handlers_3.blypSubscriptionActivate; } });
+// Real-time Developer Notifications: keep entitlement in sync with the subscription
+// lifecycle (renewal/cancel/grace/hold/expiry/refund) so failed payments downgrade.
+var rtdn_1 = require("./subscriptions/rtdn");
+Object.defineProperty(exports, "blypPlayRtdn", { enumerable: true, get: function () { return rtdn_1.blypPlayRtdn; } });
+// Notification spine: scheduled dispatcher + live-alert fan-out triggers
+var dispatcher_1 = require("./notifications/dispatcher");
+Object.defineProperty(exports, "notificationDispatch", { enumerable: true, get: function () { return dispatcher_1.notificationDispatch; } });
+Object.defineProperty(exports, "notificationOnCreate", { enumerable: true, get: function () { return dispatcher_1.notificationOnCreate; } });
+var liveAlerts_1 = require("./notifications/liveAlerts");
+Object.defineProperty(exports, "onLiveStreamCreate", { enumerable: true, get: function () { return liveAlerts_1.onLiveStreamCreate; } });
+Object.defineProperty(exports, "onLiveStreamGoLive", { enumerable: true, get: function () { return liveAlerts_1.onLiveStreamGoLive; } });
+// Direct-message push: new inbox message -> push to recipients (WhatsApp-style)
+var messageNotify_1 = require("./notifications/messageNotify");
+Object.defineProperty(exports, "onDirectMessageCreate", { enumerable: true, get: function () { return messageNotify_1.onDirectMessageCreate; } });
+var teamNotify_1 = require("./teams/teamNotify");
+Object.defineProperty(exports, "onTeamJoinRequestCreate", { enumerable: true, get: function () { return teamNotify_1.onTeamJoinRequestCreate; } });
+Object.defineProperty(exports, "onTeamJoinRequestDecision", { enumerable: true, get: function () { return teamNotify_1.onTeamJoinRequestDecision; } });
+Object.defineProperty(exports, "onTeamBattleCreate", { enumerable: true, get: function () { return teamNotify_1.onTeamBattleCreate; } });
+Object.defineProperty(exports, "onTeamGroupMessageCreate", { enumerable: true, get: function () { return teamNotify_1.onTeamGroupMessageCreate; } });
+var auditionFlow_1 = require("./teams/auditionFlow");
+Object.defineProperty(exports, "onAuditionMatched", { enumerable: true, get: function () { return auditionFlow_1.onAuditionMatched; } });
+Object.defineProperty(exports, "auditionOpponentSweep", { enumerable: true, get: function () { return auditionFlow_1.auditionOpponentSweep; } });
+Object.defineProperty(exports, "onAuditionBattleComplete", { enumerable: true, get: function () { return auditionFlow_1.onAuditionBattleComplete; } });
+Object.defineProperty(exports, "onAuditionDecision", { enumerable: true, get: function () { return auditionFlow_1.onAuditionDecision; } });
+// Presence watches: "notify me when <person> is next on the app"
+var presenceWatch_1 = require("./presence/presenceWatch");
+Object.defineProperty(exports, "onUserPresenceOnline", { enumerable: true, get: function () { return presenceWatch_1.onUserPresenceOnline; } });
+Object.defineProperty(exports, "presenceOfflineSweep", { enumerable: true, get: function () { return presenceWatch_1.presenceOfflineSweep; } });
+var battleNotify_1 = require("./battles/battleNotify");
+Object.defineProperty(exports, "onBattleCreate", { enumerable: true, get: function () { return battleNotify_1.onBattleCreate; } });
+Object.defineProperty(exports, "onBattleStatusChange", { enumerable: true, get: function () { return battleNotify_1.onBattleStatusChange; } });
+Object.defineProperty(exports, "onBattleReminderCreate", { enumerable: true, get: function () { return battleNotify_1.onBattleReminderCreate; } });
+// Battle glory stats: idempotent per-creator aggregate for the battle leaderboard
+var battleStats_1 = require("./battles/battleStats");
+Object.defineProperty(exports, "onBattleComplete", { enumerable: true, get: function () { return battleStats_1.onBattleComplete; } });
+// "Blyp it" — premium AI compose-and-send assistant
+var compose_1 = require("./assistant/compose");
+Object.defineProperty(exports, "blypAssistantCompose", { enumerable: true, get: function () { return compose_1.blypAssistantCompose; } });
+// Gemini proxy (P7.4): keep the API key server-side; client calls authenticated relay
+var geminiProxy_1 = require("./assistant/geminiProxy");
+Object.defineProperty(exports, "geminiProxy", { enumerable: true, get: function () { return geminiProxy_1.geminiProxy; } });
+// Server-authoritative daily streak engine + reminder sweep
+var streak_1 = require("./economy/streak");
+Object.defineProperty(exports, "blypClaimDailyReward", { enumerable: true, get: function () { return streak_1.blypClaimDailyReward; } });
+Object.defineProperty(exports, "streakReminderSweep", { enumerable: true, get: function () { return streak_1.streakReminderSweep; } });
+// Account-deletion worker (GDPR/CCPA, Google Play data-deletion): purge user data
+var deletionWorker_1 = require("./account/deletionWorker");
+Object.defineProperty(exports, "processAccountDeletion", { enumerable: true, get: function () { return deletionWorker_1.processAccountDeletion; } });
+// Server-side text moderation (P0.2): authoritative comment + DM filtering
+var textModeration_1 = require("./moderation/textModeration");
+Object.defineProperty(exports, "moderateComment", { enumerable: true, get: function () { return textModeration_1.moderateComment; } });
+Object.defineProperty(exports, "moderateDirectMessage", { enumerable: true, get: function () { return textModeration_1.moderateDirectMessage; } });
+// Server-side image moderation (P0.1): Vision SafeSearch on post media (env-gated)
+var mediaModeration_1 = require("./moderation/mediaModeration");
+Object.defineProperty(exports, "moderatePostMedia", { enumerable: true, get: function () { return mediaModeration_1.moderatePostMedia; } });
+const reportAutoAction_1 = require("./moderation/reportAutoAction");
 const admin = __importStar(require("firebase-admin"));
-const storage_1 = require("@google-cloud/storage");
-// @ts-ignore (library lacks bundled types)
-const ffmpeg = __importStar(require("fluent-ffmpeg"));
-const ffmpegPath = __importStar(require("ffmpeg-static"));
-const sharp_1 = __importDefault(require("sharp"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const fs = __importStar(require("fs"));
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const jwks_rsa_1 = __importDefault(require("jwks-rsa"));
 // fetch import removed (unused)
+// NOTE: These native/heavy modules can make the Functions emulator time out while it
+// tries to load user code and discover triggers. Lazy-load them only when invoked.
+let _storage = null;
+function getStorage() {
+    if (!_storage) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Storage } = require('@google-cloud/storage');
+        _storage = new Storage();
+    }
+    return _storage;
+}
+let _ffmpeg = null;
+function getFfmpeg() {
+    if (!_ffmpeg) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        _ffmpeg = require('fluent-ffmpeg');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const ffmpegPath = require('ffmpeg-static');
+        if (ffmpegPath) {
+            try {
+                _ffmpeg.setFfmpegPath(ffmpegPath);
+            }
+            catch (_a) {
+                // ignore; fluent-ffmpeg will fall back to PATH
+            }
+        }
+    }
+    return _ffmpeg;
+}
+let _sharp = null;
+function getSharp() {
+    if (!_sharp) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        _sharp = require('sharp');
+    }
+    return _sharp;
+}
 // Helper: parse stream path (legacy & new layouts)
 function parseStreamPath(filePath) {
     const parts = filePath.split('/');
@@ -94,13 +222,114 @@ function parseStreamPath(filePath) {
     return { streamId, variant, parts, rootDir };
 }
 // Initialize Firebase Admin (use project default bucket, which may use the firebasestorage.app domain)
-admin.initializeApp();
-const db = admin.firestore();
-const storage = new storage_1.Storage();
-// Set FFmpeg path
-if (ffmpegPath) {
-    ffmpeg.setFfmpegPath(ffmpegPath);
+if (!admin.apps.length) {
+    admin.initializeApp();
 }
+const db = admin.firestore();
+// ============================================================================
+// AUTH BRIDGE: Cognito JWT -> Firebase Custom Token
+// - Needed so Firestore rules using request.auth.uid work with Cognito sub ids.
+// - Verifies Cognito ID token signature via JWKS.
+// Env required (same as backend/blyp-live-service):
+//   COGNITO_REGION
+//   COGNITO_USER_POOL_ID
+// ============================================================================
+const cognitoRegion = process.env.COGNITO_REGION;
+const cognitoUserPoolId = process.env.COGNITO_USER_POOL_ID;
+const getCognitoVerifier = (() => {
+    let client = null;
+    let issuer = null;
+    return () => {
+        if (!cognitoRegion || !cognitoUserPoolId) {
+            throw new Error('[config] COGNITO_REGION and COGNITO_USER_POOL_ID are required');
+        }
+        if (!client) {
+            const jwksUri = `https://cognito-idp.${cognitoRegion}.amazonaws.com/${cognitoUserPoolId}/.well-known/jwks.json`;
+            client = (0, jwks_rsa_1.default)({
+                jwksUri,
+                cache: true,
+                cacheMaxEntries: 10,
+                cacheMaxAge: 10 * 60 * 1000,
+            });
+            issuer = `https://cognito-idp.${cognitoRegion}.amazonaws.com/${cognitoUserPoolId}`;
+        }
+        return { client, issuer };
+    };
+})();
+function getKey(header, callback) {
+    try {
+        const { client } = getCognitoVerifier();
+        client.getSigningKey(header.kid, function (err, key) {
+            var _a;
+            if (err) {
+                callback(err);
+                return;
+            }
+            const signingKey = (_a = key === null || key === void 0 ? void 0 : key.getPublicKey) === null || _a === void 0 ? void 0 : _a.call(key);
+            callback(null, signingKey);
+        });
+    }
+    catch (e) {
+        callback(e);
+    }
+}
+exports.mintFirebaseCustomToken = functions.https.onRequest(async (req, res) => {
+    // CORS (no wildcard; allowlist via CORS_ALLOWED_ORIGINS)
+    (() => {
+        const origin = String(req.headers.origin || '').trim();
+        const allowlist = String(process.env.CORS_ALLOWED_ORIGINS || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => !!s && s !== '*');
+        if (origin && allowlist.includes(origin)) {
+            res.set('Access-Control-Allow-Origin', origin);
+            res.set('Vary', 'Origin');
+        }
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    })();
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed' });
+        return;
+    }
+    try {
+        const authHeader = String(req.headers.authorization || '');
+        const match = authHeader.match(/^Bearer\s+(.+)$/i);
+        if (!match) {
+            res.status(401).json({ error: 'Missing or invalid Authorization header' });
+            return;
+        }
+        const token = match[1];
+        const { issuer } = getCognitoVerifier();
+        const decoded = await new Promise((resolve, reject) => {
+            jsonwebtoken_1.default.verify(token, getKey, {
+                algorithms: ['RS256'],
+                issuer: issuer || undefined,
+            }, (err, payload) => {
+                if (err)
+                    reject(err);
+                else
+                    resolve(payload);
+            });
+        });
+        const sub = String((decoded === null || decoded === void 0 ? void 0 : decoded.sub) || '');
+        if (!sub) {
+            res.status(401).json({ error: 'Invalid token: missing sub' });
+            return;
+        }
+        // Mint Firebase custom token with uid == Cognito sub.
+        const firebaseToken = await admin.auth().createCustomToken(sub);
+        res.status(200).json({ uid: sub, firebaseToken });
+    }
+    catch (e) {
+        console.error('[mintFirebaseCustomToken] 401 error:', (e === null || e === void 0 ? void 0 : e.message) || String(e));
+        res.status(401).json({ error: 'Invalid token', detail: (e === null || e === void 0 ? void 0 : e.message) || String(e) });
+    }
+});
 /**
  * Video Transcoding Function - Processes uploaded segments into multiple qualities
  * Triggered when a video segment is uploaded to Firebase Storage
@@ -109,8 +338,7 @@ exports.processVideoSegment = functions
     .runWith({
     timeoutSeconds: 540,
     memory: '2GB',
-    // Wave 0 containment: cap fan-out until owner-scoped uploads/quotas exist.
-    maxInstances: 2
+    maxInstances: 100
 })
     // Use default bucket trigger (avoid hard-coding bucket name to remain compatible with firebasestorage.app domain)
     .storage.object()
@@ -120,6 +348,13 @@ exports.processVideoSegment = functions
         // Wave 0 containment: disable expensive FFmpeg processing until Storage writes are owner-scoped.
         if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
             console.log('🛑 processVideoSegment disabled (Wave 0 containment)');
+            return null;
+        }
+        // Hard size cap even when FFmpeg is re-enabled (abuse / cost containment).
+        const MAX_SEGMENT_BYTES = 50 * 1024 * 1024; // 50 MiB
+        const objectSize = Number(object.size || 0);
+        if (objectSize > MAX_SEGMENT_BYTES) {
+            console.log('🛑 processVideoSegment skipped: object too large', { size: objectSize, max: MAX_SEGMENT_BYTES });
             return null;
         }
         const filePath = object.name;
@@ -144,7 +379,7 @@ exports.processVideoSegment = functions
         // Download original segment
         const tempDir = os.tmpdir();
         const sourceFile = path.join(tempDir, `source_${Date.now()}_${segmentName}.mp4`);
-        await storage.bucket(bucket).file(filePath).download({ destination: sourceFile });
+        await getStorage().bucket(bucket).file(filePath).download({ destination: sourceFile });
         console.log('📥 Downloaded source to', sourceFile);
         // Determine segment index for ramp decisions
         const segmentIndex = parseInt(segmentName.replace('segment_', ''), 10);
@@ -200,7 +435,7 @@ async function transcodeSegment(sourceFile, quality, streamId, segmentName, buck
         const tempDir = os.tmpdir();
         const outputFile = path.join(tempDir, `${segmentName}_${quality.name}.mp4`);
         console.log(`🔄 Transcoding to ${quality.name}: ${outputFile}`);
-        ffmpeg(sourceFile)
+        getFfmpeg()(sourceFile)
             .videoCodec('libx264')
             .audioCodec('aac')
             .size(`${quality.width}x${quality.height}`)
@@ -222,7 +457,7 @@ async function transcodeSegment(sourceFile, quality, streamId, segmentName, buck
             try {
                 // Upload transcoded segment
                 const destinationPath = `${rootDir}/qualities/${quality.name}/${segmentName}.mp4`;
-                await storage.bucket(bucket).upload(outputFile, {
+                await getStorage().bucket(bucket).upload(outputFile, {
                     destination: destinationPath,
                     metadata: {
                         contentType: 'video/mp4',
@@ -236,7 +471,7 @@ async function transcodeSegment(sourceFile, quality, streamId, segmentName, buck
                     }
                 });
                 // Get public URL
-                const [url] = await storage.bucket(bucket).file(destinationPath).getSignedUrl({
+                const [url] = await getStorage().bucket(bucket).file(destinationPath).getSignedUrl({
                     action: 'read',
                     expires: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
                 });
@@ -572,15 +807,21 @@ async function updateProcessingAnalytics(streamId, qualityCount) {
 exports.generateThumbnails = functions
     .runWith({
     timeoutSeconds: 60,
-    memory: '1GB',
-    maxInstances: 2
+    memory: '1GB'
 })
     .storage.object()
     .onFinalize(async (object) => {
     var _a;
     try {
+        // Wave 0 containment: disable expensive FFmpeg thumbnails until Storage writes are owner-scoped.
         if (process.env.ENABLE_STORAGE_FFMPEG !== '1') {
             console.log('🛑 generateThumbnails disabled (Wave 0 containment)');
+            return null;
+        }
+        const MAX_SEGMENT_BYTES = 50 * 1024 * 1024; // 50 MiB
+        const objectSize = Number(object.size || 0);
+        if (objectSize > MAX_SEGMENT_BYTES) {
+            console.log('🛑 generateThumbnails skipped: object too large', { size: objectSize, max: MAX_SEGMENT_BYTES });
             return null;
         }
         const filePath = object.name;
@@ -605,10 +846,10 @@ exports.generateThumbnails = functions
         const tempDir = os.tmpdir();
         const videoFile = path.join(tempDir, `video_${Date.now()}.mp4`);
         const thumbnailFile = path.join(tempDir, `thumb_${Date.now()}.jpg`);
-        await storage.bucket(bucket).file(filePath).download({ destination: videoFile });
+        await getStorage().bucket(bucket).file(filePath).download({ destination: videoFile });
         // Extract thumbnail using FFmpeg
         await new Promise((resolve, reject) => {
-            ffmpeg(videoFile)
+            getFfmpeg()(videoFile)
                 .screenshots({
                 timestamps: ['50%'],
                 filename: path.basename(thumbnailFile),
@@ -620,13 +861,13 @@ exports.generateThumbnails = functions
         });
         // Optimize thumbnail with Sharp
         const optimizedThumbnail = path.join(tempDir, `optimized_${Date.now()}.jpg`);
-        await (0, sharp_1.default)(thumbnailFile)
+        await getSharp()(thumbnailFile)
             .resize(320, 180, { fit: 'cover' })
             .jpeg({ quality: 80 })
             .toFile(optimizedThumbnail);
         // Upload thumbnail
         const thumbnailPath = `${rootDir}/thumbnails/latest.jpg`;
-        await storage.bucket(bucket).upload(optimizedThumbnail, {
+        await getStorage().bucket(bucket).upload(optimizedThumbnail, {
             destination: thumbnailPath,
             metadata: {
                 contentType: 'image/jpeg',
@@ -634,7 +875,7 @@ exports.generateThumbnails = functions
             }
         });
         // Update stream document
-        const [url] = await storage.bucket(bucket).file(thumbnailPath).getSignedUrl({
+        const [url] = await getStorage().bucket(bucket).file(thumbnailPath).getSignedUrl({
             action: 'read',
             expires: Date.now() + 24 * 60 * 60 * 1000
         });
@@ -723,22 +964,25 @@ exports.aggregateReport = functions.firestore
     }
     const queueDocId = `${targetType}_${targetId}`;
     const ref = db.collection('moderationQueue').doc(queueDocId);
+    let aggregated = null;
     try {
-        await db.runTransaction(async (tx) => {
+        aggregated = await db.runTransaction(async (tx) => {
             const existing = await tx.get(ref);
             const now = admin.firestore.FieldValue.serverTimestamp();
             if (!existing.exists) {
+                const reasons = { [reasonCode]: 1 };
                 tx.set(ref, {
                     targetType,
                     targetId,
                     totalReports: 1,
-                    reasons: { [reasonCode]: 1 },
+                    reasons,
                     firstReportedAt: now,
                     lastReportedAt: now,
                     openReportIds: [snap.id],
                     status: 'pending_review',
                     priorityScore: 1 // simple initial heuristic
                 });
+                return { totalReports: 1, reasons };
             }
             else {
                 const cur = existing.data() || {};
@@ -756,12 +1000,29 @@ exports.aggregateReport = functions.firestore
                     openReportIds,
                     priorityScore
                 });
+                return { totalReports, reasons };
             }
         });
         console.log(`🛡️ Aggregated report into moderationQueue/${queueDocId}`);
     }
     catch (err) {
         console.error('❌ Aggregation error:', err);
+    }
+    // P0.3: auto-action + alerting on the accumulated signal (best-effort, never throws).
+    if (aggregated) {
+        try {
+            await (0, reportAutoAction_1.evaluateAutoAction)(db, {
+                targetType,
+                targetId,
+                reasonCode,
+                totalReports: aggregated.totalReports,
+                reasons: aggregated.reasons,
+                reportId: snap.id,
+            });
+        }
+        catch (err) {
+            console.error('❌ Auto-action error:', err);
+        }
     }
     return null;
 });

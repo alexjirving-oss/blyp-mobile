@@ -1,8 +1,0 @@
-App: Blyp (slug: blyp-mobile)
-Version: 1.0.1 (app.json)
-RN: 0.81.5
-Expo: ~54.0.22
-Node: v22.20.0
-JDK: 17.0.16
-Date: 2025-11-05
-Git: master @ 45f0e46 (dirty)

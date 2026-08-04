@@ -1,6 +1,0 @@
-C:\Users\Alex\369369369\blyp-dev-client.apk
-C:\Users\Alex\369369369\dist\blyp-production.aab
-C:\Users\Alex\369369369\dist\blyp.universal.apks
-C:\Users\Alex\369369369\dist\blyp.universal.zip
-C:\Users\Alex\369369369\dist\bundletool.jar
-C:\Users\Alex\369369369\dist\universal\universal.apk

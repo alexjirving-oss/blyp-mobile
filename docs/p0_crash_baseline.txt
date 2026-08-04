@@ -1,0 +1,35 @@
+﻿P0 Crash Baseline (pre-fix)
+Date: 2025-12-23
+
+Target crashes:
+1) Invariant Violation: Tried to register two views with the same name IVS(Broadcast|Player|RealTime)View
+2) Error: Element type is invalid. Received a promise that resolves to: undefined. Lazy element type must resolve to a class or function.
+
+=== Metro baseline ===
+Source: logs/metro_20251215_091012.log
+
+ERROR  [Invariant Violation: Tried to register two views with the same name IVSBroadcastView]
+
+Call Stack
+  invariant (node_modules\invariant\browser.js)
+  register (node_modules\react-native\Libraries\Renderer\shims\ReactNativeViewConfigRegistry.js)
+  createReactNativeComponentClass (node_modules\react-native\Libraries\Renderer\shims\createReactNativeComponentClass.js)
+  requireNativeComponent (node_modules\react-native\Libraries\ReactNative\requireNativeComponent.js)
+  <global> (src\components\LiveStreamViewer.js)
+  ... (HMRClient / metro-require stack trimmed)
+
+=== Logcat baseline (host) ===
+Source: logs/logcat_host_20251215_181004.log (around 18:09:15)
+
+E/ReactNativeJS: { [Invariant Violation: Tried to register two views with the same name IVSBroadcastView] name: 'Invariant Violation', framesToPop: 1 }
+E/ReactNativeJS: { [Error: Element type is invalid. Received a promise that resolves to: undefined. Lazy element type must resolve to a class or function.] ... }
+
+=== Logcat baseline (viewer) ===
+Source: logs/logcat_viewer_20251215_181004.log (around 18:09:27)
+
+E/ReactNativeJS: { [Invariant Violation: Tried to register two views with the same name IVSBroadcastView] name: 'Invariant Violation', framesToPop: 1 }
+E/ReactNativeJS: { [Error: Element type is invalid. Received a promise that resolves to: undefined. Lazy element type must resolve to a class or function.] ... }
+
+Notes:
+- The Metro call stack points at requireNativeComponent being triggered via src/components/LiveStreamViewer.js (which calls getNativeIVS*View())
+- This strongly suggests a Fast Refresh / HMR path where requireNativeComponent is executed again after ReactNativeViewConfigRegistry persisted.

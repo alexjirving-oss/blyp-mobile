@@ -1,0 +1,120 @@
+---
+description: Anti-loop agent protocol — verify before next step; no churn; forward progress only
+alwaysApply: true
+---
+
+# Verified forward progress only
+
+**Hard layer:** `.cursor/hooks.json` blocks builds, quota burners, browser/API caps, and runs `npm run verify:session` on stop. See `AGENTS.md`.
+
+The agent optimizes for plausible next steps by default. **This rule overrides that.**
+Optimize for **verified working state**, not fluent continuation.
+
+## Core law
+
+**No new change, suggestion, or "next step" until the current hypothesis is verified or explicitly abandoned.**
+
+Verification = you ran a command/test and read the output, or you read existing proof artifacts.
+"I think this fixes it" is not verification.
+
+---
+
+## Stop conditions (mandatory)
+
+STOP and report to the user (do not patch again) when:
+
+1. **Same class of failure twice** after two different fixes on the same symptom
+2. **You are about to revert or re-touch code you changed earlier in this session** without new evidence
+3. **Rate limit / quota / auth error** — do not retry in a loop; stop, explain, wait for user
+4. **Background job > 15 calls or > 5 minutes** without user opt-in
+5. **You cannot reproduce the bug** — say so; do not refactor speculatively
+
+When stopped, output: **what failed**, **what you tried**, **what evidence you have**, **one recommended next move** (not five).
+
+---
+
+## One hypothesis per turn
+
+- Change the **minimum** surface needed for the stated goal
+- Do not edit unrelated files "while you're here"
+- Do not stack refactors, formatting, and feature work in one pass
+- If the user asked a question only, **do not edit code**
+
+---
+
+## Verify ladder (run before saying "done" or "fixed")
+
+Pick the **lowest rung that applies** and run it:
+
+| Context | Minimum verification |
+|---------|----------------------|
+| Single function / util | Targeted test or script that exercises it |
+| React Native screen | `get_errors` / tsc on touched files; state what was not run on device |
+| Backend change | `npm run typecheck` or `npm run build` in that package |
+| E2E / live / release claim | `npm run verify:live` or Appium rail + packet path recorded |
+| Forensic / browser study | Model + account + chat URL recorded; response captured |
+| API batch | Probe 1 call first; user approves N and delay; Pro-first unless user says otherwise |
+
+**Never claim PASS** without naming the command and outcome.
+**Never claim steering/null** without naming N, arm, and grade source.
+
+---
+
+## Anti-churn (coding)
+
+- Do not rename, move, or reformat files outside the task
+- Do not add tests the user did not ask for unless they block a verified claim
+- Do not introduce new abstractions for one-off logic
+- Before replacing approach A with B, state **what evidence showed A failed**
+- Match existing repo conventions in touched files
+
+---
+
+## Anti-churn (operations)
+
+- **No secrets in chat, commits, or logs** — env vars only; warn if user pastes a key
+- **No `functions/.env` for audits** unless user explicitly allows repo key
+- **Gemini API:** use `x-goog-api-key` header; AQ and AIza keys; default model `gemini-2.5-pro`; **no silent Flash fallback**
+- **Gemini browser:** confirm Pro/Extended in mode picker before send; new chat per trial; Send not Enter
+- **Do not merge** consumer UI results with API results without labeling channel
+
+---
+
+## Long-running work
+
+Before any batch > 10 external calls:
+
+1. State **model, N, estimated minutes, cost/rate-limit risk**
+2. Get implicit or explicit user go-ahead
+3. Use `--resume` / incremental jsonl where scripts support it
+4. Report partial results if blocked; do not spin until quota dies
+
+---
+
+## Release builds (inherits release-build-gate)
+
+When work would end in an Android/EAS build:
+
+1. Commit only when user asks; never commit proactively unless requested
+2. **Do not** auto-run `BUILD_RELEASE_CANDIDATE.ps1`, `eas build`, gradle bundle, or bump version code
+3. Ask user to confirm before any build
+4. Only after explicit "build" → version bump + pre-release regression gate + AAB
+
+---
+
+## Done means
+
+A task is **done** only when:
+
+- The user’s stated success criterion is met **or** you clearly state it is not met and why
+- Verification output is summarized in plain English
+- No known regression introduced in touched scope (or regressions are listed)
+- Dirty state is intentional (uncommitted work) and noted
+
+**Done does not mean:** more ideas, optional refactors, or "say the word and I'll…" unless the user asked for options.
+
+---
+
+## If this rule conflicts with speed
+
+**This rule wins.** Slower and correct beats fast and circular.

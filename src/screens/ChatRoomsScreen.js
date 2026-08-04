@@ -1,20 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  Modal,
-  TextInput,
-  Alert,
-  ScrollView,
-  Switch,
-  SafeAreaView,
-  StatusBar,
-  RefreshControl
-} from 'react-native';
+import { Alert, FlatList, Modal, RefreshControl, ScrollView, StatusBar, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
@@ -36,7 +23,7 @@ const ChatRoomsScreen = ({ navigation }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(null);
-  
+
   // Create room form state
   const [roomName, setRoomName] = useState('');
   const [roomDescription, setRoomDescription] = useState('');
@@ -64,7 +51,7 @@ const ChatRoomsScreen = ({ navigation }) => {
 
       // Apply search filter
       if (searchQuery.trim()) {
-        filteredRooms = filteredRooms.filter(room => 
+        filteredRooms = filteredRooms.filter(room =>
           room.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           room.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
           room.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -83,7 +70,7 @@ const ChatRoomsScreen = ({ navigation }) => {
     // Subscribe to user's rooms
     const unsubscribeUserRooms = ChatRoomService.subscribeToUserRooms((myRooms) => {
       setUserRooms(myRooms);
-      
+
       // Calculate active rooms (rooms with activity in last 24 hours)
       const activeRoomsFiltered = myRooms.filter(room => {
         const lastActivity = new Date(room.lastActivity);
@@ -123,13 +110,15 @@ const ChatRoomsScreen = ({ navigation }) => {
       };
 
       const roomId = await ChatRoomService.createChatRoom(roomData);
-      
+
       Alert.alert('Success', 'Room created successfully!', [
-        { text: 'OK', onPress: () => {
-          setShowCreateModal(false);
-          resetForm();
-          navigation.navigate('ChatRoom', { roomId });
-        }}
+        {
+          text: 'OK', onPress: () => {
+            setShowCreateModal(false);
+            resetForm();
+            navigation.navigate('ChatRoom', { roomId });
+          }
+        }
       ]);
     } catch (error) {
       Alert.alert('Error', error.message);
@@ -146,8 +135,8 @@ const ChatRoomsScreen = ({ navigation }) => {
           `Enter password for "${room.name}"`,
           [
             { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Join', 
+            {
+              text: 'Join',
               onPress: async (password) => {
                 try {
                   await ChatRoomService.joinRoom(room.id, password);
@@ -220,12 +209,12 @@ const ChatRoomsScreen = ({ navigation }) => {
           <View style={styles.roomHeader}>
             <View style={styles.roomInfo}>
               <View style={[styles.categoryIcon, { backgroundColor: category.color }]}>
-                <Icon  name={category.icon} size={20} color="#fff"  />
+                <Icon name={category.icon} size={20} color="#fff" />
               </View>
               <View style={styles.roomDetails}>
                 <View style={styles.roomTitleRow}>
                   <Text style={styles.roomName} numberOfLines={1}>{room.name}</Text>
-                  {room.isPrivate && <Icon  name="lock-closed" size={16} color="#f59e0b"  />}
+                  {room.isPrivate && <Icon name="lock-closed" size={16} color="#f59e0b" />}
                 </View>
                 <Text style={styles.roomDescription} numberOfLines={2}>
                   {room.description || 'No description'}
@@ -238,16 +227,16 @@ const ChatRoomsScreen = ({ navigation }) => {
                 </View>
               </View>
             </View>
-            
+
             <View style={styles.roomActions}>
               {isUserRoom ? (
                 <View style={[styles.statusBadge, styles.joinedBadge]}>
-                  <Icon  name="checkmark" size={16} color="#10b981"  />
+                  <Icon name="checkmark" size={16} color="#10b981" />
                   <Text style={styles.joinedText}>Joined</Text>
                 </View>
               ) : canJoin ? (
                 <TouchableOpacity style={[styles.statusBadge, styles.joinBadge]}>
-                  <Icon  name="add" size={16} color="#3b82f6"  />
+                  <Icon name="add" size={16} color="#3b82f6" />
                   <Text style={styles.joinText}>Join</Text>
                 </TouchableOpacity>
               ) : (
@@ -287,8 +276,8 @@ const ChatRoomsScreen = ({ navigation }) => {
   };
 
   const renderCategoryFilter = () => (
-    <ScrollView 
-      horizontal 
+    <ScrollView
+      horizontal
       showsHorizontalScrollIndicator={false}
       style={styles.categoryFilter}
       contentContainerStyle={styles.categoryFilterContent}
@@ -305,7 +294,7 @@ const ChatRoomsScreen = ({ navigation }) => {
           !selectedCategory && styles.categoryChipTextActive
         ]}>All</Text>
       </TouchableOpacity>
-      
+
       {ROOM_CATEGORIES.map((category) => (
         <TouchableOpacity
           key={category.id}
@@ -317,11 +306,11 @@ const ChatRoomsScreen = ({ navigation }) => {
             selectedCategory === category.id ? null : category.id
           )}
         >
-          <Icon  
-            name={category.icon} 
-            size={16} 
-            color={selectedCategory === category.id ? '#fff' : category.color} 
-           />
+          <Icon
+            name={category.icon}
+            size={16}
+            color={selectedCategory === category.id ? '#fff' : category.color}
+          />
           <Text style={[
             styles.categoryChipText,
             selectedCategory === category.id && styles.categoryChipTextActive
@@ -336,7 +325,7 @@ const ChatRoomsScreen = ({ navigation }) => {
   const renderSectionHeader = (title, icon, count = null) => (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionHeaderLeft}>
-        <Icon  name={icon} size={24} color="#a855f7"  />
+        <Icon name={icon} size={24} color="#00D2BE" />
         <Text style={styles.sectionTitle}>{title}</Text>
         {count !== null && (
           <View style={styles.countBadge}>
@@ -351,7 +340,7 @@ const ChatRoomsScreen = ({ navigation }) => {
     if (data.length === 0) {
       return (
         <View style={styles.emptySection}>
-          <Icon  name={emptyIcon} size={48} color="#374151"  />
+          <Icon name={emptyIcon} size={48} color="#374151" />
           <Text style={styles.emptySectionTitle}>{emptyTitle}</Text>
           <Text style={styles.emptySectionText}>{emptyText}</Text>
         </View>
@@ -366,226 +355,231 @@ const ChatRoomsScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon  name="arrow-back" size={24} color="#fff"  />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>💬 Chat Rooms</Text>
-        <Text style={styles.headerSubtitle}>Connect and chat with people worldwide</Text>
-        
-        <TouchableOpacity 
-          style={styles.createButton}
-          onPress={() => setShowCreateModal(true)}
-        >
-          <LinearGradient colors={['#a855f7', '#d946ef']} style={styles.createButtonGradient}>
-            <Icon  name="add" size={24} color="#fff"  />
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
+    <ScreenContainer noSafeArea={true} style={styles.screenContainer}>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <Icon  name="search" size={20} color="#6b7280"  />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search rooms..."
-            placeholderTextColor="#6b7280"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+
+          <Text style={styles.headerTitle}>Chat Rooms</Text>
+          <Text style={styles.headerSubtitle}>Connect and chat with people worldwide</Text>
+
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => setShowCreateModal(true)}
+          >
+            <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.createButtonGradient}>
+              <Icon name="add" size={24} color="#0A0A0C" />
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
-      </View>
 
-      {/* Main Content - Vertical Scroll */}
-      <ScrollView 
-        style={styles.mainContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl 
-            refreshing={loading}
-            onRefresh={loadRooms}
-            tintColor="#a855f7"
-            colors={['#a855f7']}
-          />
-        }
-      >
-        {/* Category Filter */}
-        {renderCategoryFilter()}
-
-        {/* Active Rooms Section */}
-        {renderSectionHeader('Active Rooms', 'pulse-outline', activeRooms.length)}
-        {renderRoomSection(
-          activeRooms,
-          'No active rooms',
-          'Rooms with recent activity will appear here',
-          'pulse-outline'
-        )}
-
-        {/* My Rooms Section */}
-        {renderSectionHeader('My Rooms', 'chatbubbles-outline', userRooms.length)}
-        {renderRoomSection(
-          userRooms,
-          'No rooms yet',
-          'Join some rooms or create your own to get started',
-          'chatbubbles-outline'
-        )}
-
-        {/* Browse All Rooms Section */}
-        {renderSectionHeader('Browse Rooms', 'search-outline', rooms.length)}
-        {renderRoomSection(
-          rooms,
-          'No rooms found',
-          'Try adjusting your search or create a new room',
-          'search-outline'
-        )}
-
-        {/* Bottom padding for better scrolling */}
-        <View style={styles.bottomPadding} />
-      </ScrollView>
-
-      {/* Create Room Modal */}
-      <Modal
-        visible={showCreateModal}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowCreateModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowCreateModal(false)}>
-              <Text style={styles.modalCancel}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Create Room</Text>
-            <TouchableOpacity 
-              onPress={handleCreateRoom}
-              disabled={creating}
-            >
-              <Text style={[styles.modalCreate, creating && styles.modalCreateDisabled]}>
-                {creating ? 'Creating...' : 'Create'}
-              </Text>
-            </TouchableOpacity>
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <Icon name="search" size={20} color="#6b7280" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search rooms..."
+              placeholderTextColor="#6b7280"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
           </View>
+        </View>
 
-          <ScrollView style={styles.modalContent}>
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Room Name *</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="Enter room name"
-                value={roomName}
-                onChangeText={setRoomName}
-                maxLength={50}
-              />
+        {/* Main Content - Vertical Scroll */}
+        <ScrollView
+          style={styles.mainContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={loading}
+              onRefresh={loadRooms}
+              tintColor="#00D2BE"
+              colors={['#00D2BE']}
+            />
+          }
+        >
+          {/* Category Filter */}
+          {renderCategoryFilter()}
+
+          {/* Active Rooms Section */}
+          {renderSectionHeader('Active Rooms', 'pulse-outline', activeRooms.length)}
+          {renderRoomSection(
+            activeRooms,
+            'No active rooms',
+            'Rooms with recent activity will appear here',
+            'pulse-outline'
+          )}
+
+          {/* My Rooms Section */}
+          {renderSectionHeader('My Rooms', 'chatbubbles-outline', userRooms.length)}
+          {renderRoomSection(
+            userRooms,
+            'No rooms yet',
+            'Join some rooms or create your own to get started',
+            'chatbubbles-outline'
+          )}
+
+          {/* Browse All Rooms Section */}
+          {renderSectionHeader('Browse Rooms', 'search-outline', rooms.length)}
+          {renderRoomSection(
+            rooms,
+            'No rooms found',
+            'Try adjusting your search or create a new room',
+            'search-outline'
+          )}
+
+          {/* Bottom padding for better scrolling */}
+          <View style={styles.bottomPadding} />
+        </ScrollView>
+
+        {/* Create Room Modal */}
+        <Modal
+          visible={showCreateModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowCreateModal(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+                <Text style={styles.modalCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Create Room</Text>
+              <TouchableOpacity
+                onPress={handleCreateRoom}
+                disabled={creating}
+              >
+                <Text style={[styles.modalCreate, creating && styles.modalCreateDisabled]}>
+                  {creating ? 'Creating...' : 'Create'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Description</Text>
-              <TextInput
-                style={[styles.formInput, styles.formTextArea]}
-                placeholder="Describe your room"
-                value={roomDescription}
-                onChangeText={setRoomDescription}
-                maxLength={200}
-                multiline
-                numberOfLines={3}
-              />
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Category</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {ROOM_CATEGORIES.map((category) => (
-                  <TouchableOpacity
-                    key={category.id}
-                    style={[
-                      styles.categoryOption,
-                      roomCategory === category.id && styles.categoryOptionActive
-                    ]}
-                    onPress={() => setRoomCategory(category.id)}
-                  >
-                    <Icon  
-                      name={category.icon} 
-                      size={20} 
-                      color={roomCategory === category.id ? '#fff' : category.color} 
-                     />
-                    <Text style={[
-                      styles.categoryOptionText,
-                      roomCategory === category.id && styles.categoryOptionTextActive
-                    ]}>
-                      {category.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-
-            <View style={styles.formGroup}>
-              <View style={styles.switchRow}>
-                <Text style={styles.formLabel}>Private Room</Text>
-                <Switch
-                  value={isPrivate}
-                  onValueChange={setIsPrivate}
-                  trackColor={{ false: '#374151', true: '#a855f7' }}
-                  thumbColor="#fff"
-                />
-              </View>
-              {isPrivate && (
+            <ScrollView style={styles.modalContent}>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Room Name *</Text>
                 <TextInput
                   style={styles.formInput}
-                  placeholder="Room password"
-                  value={roomPassword}
-                  onChangeText={setRoomPassword}
-                  secureTextEntry
+                  placeholder="Enter room name"
+                  value={roomName}
+                  onChangeText={setRoomName}
+                  maxLength={50}
                 />
-              )}
-            </View>
+              </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Max Participants</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="50"
-                value={maxParticipants}
-                onChangeText={setMaxParticipants}
-                keyboardType="numeric"
-                maxLength={3}
-              />
-            </View>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Description</Text>
+                <TextInput
+                  style={[styles.formInput, styles.formTextArea]}
+                  placeholder="Describe your room"
+                  value={roomDescription}
+                  onChangeText={setRoomDescription}
+                  maxLength={200}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Tags (comma separated)</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="fun, casual, friendly"
-                value={roomTags}
-                onChangeText={setRoomTags}
-                maxLength={100}
-              />
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
-    </SafeAreaView>
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Category</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {ROOM_CATEGORIES.map((category) => (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={[
+                        styles.categoryOption,
+                        roomCategory === category.id && styles.categoryOptionActive
+                      ]}
+                      onPress={() => setRoomCategory(category.id)}
+                    >
+                      <Icon
+                        name={category.icon}
+                        size={20}
+                        color={roomCategory === category.id ? '#fff' : category.color}
+                      />
+                      <Text style={[
+                        styles.categoryOptionText,
+                        roomCategory === category.id && styles.categoryOptionTextActive
+                      ]}>
+                        {category.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View style={styles.formGroup}>
+                <View style={styles.switchRow}>
+                  <Text style={styles.formLabel}>Private Room</Text>
+                  <Switch
+                    value={isPrivate}
+                    onValueChange={setIsPrivate}
+                    trackColor={{ false: '#374151', true: '#00D2BE' }}
+                    thumbColor="#fff"
+                  />
+                </View>
+                {isPrivate && (
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="Room password"
+                    value={roomPassword}
+                    onChangeText={setRoomPassword}
+                    secureTextEntry
+                  />
+                )}
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Max Participants</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="50"
+                  value={maxParticipants}
+                  onChangeText={setMaxParticipants}
+                  keyboardType="numeric"
+                  maxLength={3}
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Tags (comma separated)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="fun, casual, friendly"
+                  value={roomTags}
+                  onChangeText={setRoomTags}
+                  maxLength={100}
+                />
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
+      </View>
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
+  screenContainer: {
+    paddingTop: 0,
+  },
   container: {
     flex: 1,
     backgroundColor: '#000',
   },
   header: {
     padding: 20,
-    paddingTop: StatusBar.currentHeight + 20,
+    paddingTop: 0,
     backgroundColor: '#000',
   },
   backButton: {
@@ -635,7 +629,7 @@ const styles = StyleSheet.create({
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -654,9 +648,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 8,
     backgroundColor: '#000',
-    marginTop: 20,
+    marginTop: 8,
   },
   sectionHeaderLeft: {
     flexDirection: 'row',
@@ -669,26 +663,26 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   countBadge: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    backgroundColor: 'rgba(203, 251, 69, 0.16)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   countText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#a855f7',
+    color: '#00D2BE',
   },
   emptySection: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
+    paddingVertical: 8,
     paddingHorizontal: 40,
     marginHorizontal: 20,
     marginVertical: 8,
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#374151',
@@ -722,7 +716,7 @@ const styles = StyleSheet.create({
   categoryChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -732,7 +726,7 @@ const styles = StyleSheet.create({
   },
   categoryChipActive: {
     backgroundColor: 'transparent',
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   categoryChipText: {
     fontSize: 12,
@@ -740,7 +734,7 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   categoryChipTextActive: {
-    color: '#a855f7',
+    color: '#00D2BE',
   },
   roomsList: {
     paddingHorizontal: 10,
@@ -754,7 +748,7 @@ const styles = StyleSheet.create({
   },
   roomCardGradient: {
     padding: 20,
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
   },
   roomHeader: {
     flexDirection: 'row',
@@ -877,16 +871,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
-    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+    backgroundColor: 'rgba(203, 251, 69, 0.1)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
+    borderColor: 'rgba(203, 251, 69, 0.3)',
   },
   tagText: {
     fontSize: 10,
-    color: '#a855f7',
+    color: '#00D2BE',
     fontWeight: 'bold',
   },
   moreTags: {
@@ -896,14 +890,14 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 80,
+    paddingVertical: 8,
     paddingHorizontal: 40,
   },
   emptyStateTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 8,
     textAlign: 'center',
   },
@@ -922,8 +916,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingTop: StatusBar.currentHeight + 16,
+    paddingVertical: 8,
+    paddingTop: 0,
     backgroundColor: '#000',
   },
   modalCancel: {
@@ -938,7 +932,7 @@ const styles = StyleSheet.create({
   modalCreate: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#a855f7',
+    color: '#00D2BE',
   },
   modalCreateDisabled: {
     opacity: 0.5,
@@ -957,12 +951,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   formInput: {
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     borderWidth: 1,
     borderColor: '#374151',
     borderRadius: 16,
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 8,
     fontSize: 16,
     color: '#fff',
   },
@@ -979,7 +973,7 @@ const styles = StyleSheet.create({
   categoryOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1f2937',
+    backgroundColor: '#141418',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 16,
@@ -990,7 +984,7 @@ const styles = StyleSheet.create({
   },
   categoryOptionActive: {
     backgroundColor: 'transparent',
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   categoryOptionText: {
     fontSize: 14,
@@ -998,8 +992,10 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   categoryOptionTextActive: {
-    color: '#a855f7',
+    color: '#00D2BE',
   },
 });
 
 export default ChatRoomsScreen;
+
+

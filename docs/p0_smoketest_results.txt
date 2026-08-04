@@ -1,0 +1,59 @@
+P0 Crash Fix Pack — Smoke Test Results (post-fix)
+
+Date:
+Tester:
+Devices:
+- Host:
+- Viewer:
+Build:
+- Variant: debug
+- Install method: adb install -r -d android/app/build/outputs/apk/debug/app-debug.apk
+
+Build evidence (local)
+- Command: `cd android; .\\gradlew clean`
+  - Result: FAIL (CMake/autolinking)
+  - Snippet:
+    - CMake Error at android/app/build/generated/autolinking/src/main/jni/Android-autolinking.cmake (add_subdirectory)
+    - add_subdirectory given source ".../node_modules/@aws-amplify/react-native/android/build/generated/source/codegen/jni/" which is not an existing directory
+    - add_subdirectory given source ".../node_modules/@react-native-async-storage/async-storage/android/build/generated/source/codegen/jni/" which is not an existing directory
+    - add_subdirectory given source ".../node_modules/react-native-view-shot/android/build/generated/source/codegen/jni/" which is not an existing directory
+    - add_subdirectory given source ".../node_modules/sentry-expo/node_modules/@sentry/react-native/android/build/generated/source/codegen/jni/" which is not an existing directory
+    - BUILD FAILED
+
+- Command: `cd android; .\\gradlew :app:assembleDebug --stacktrace`
+  - Result: SUCCESS
+  - Snippet:
+    - BUILD SUCCESSFUL in 2m 56s
+    - 502 actionable tasks: 440 executed, 62 up-to-date
+
+Pre-reqs
+- Metro running: `npm run dev-client -- --clear`
+- Device reverse ports: `adb reverse tcp:8081 tcp:8081`
+
+Steps
+1) Cold start app on HOST
+2) Cold start app on VIEWER
+3) Navigate to live streaming entry (LiveStreamScreen)
+4) Trigger Fast Refresh / reload once (to exercise the duplicate native view registration path)
+
+Expected
+- No crash/red screen for:
+  - `Tried to register two views with the same name IVSBroadcastView` (or IVSPlayerView/IVSRealTimeView)
+  - `Element type is invalid. Received a promise that resolves to: undefined. Lazy element type must resolve to a class or function.`
+
+Observed
+- Host:
+  - Result: PASS/FAIL
+  - Notes:
+- Viewer:
+  - Result: PASS/FAIL
+  - Notes:
+
+Evidence files
+- Host logcat:
+- Viewer logcat:
+- Metro log:
+
+Quick grep (paste matching lines here if any)
+- `Tried to register two views with the same name`:
+- `Element type is invalid`:

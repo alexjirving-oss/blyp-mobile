@@ -1,1 +1,0 @@
-Hermes note: RN Hermes bytecode reduces JS bundle; on-device differs.

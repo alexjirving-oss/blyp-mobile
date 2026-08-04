@@ -1,9 +1,5 @@
 import { z } from 'zod';
 
-const cognitoSubSchema = z
-  .string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, 'must be a Cognito sub');
-
 export const paginationSchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -40,7 +36,7 @@ export const iapVerifySchema = z
 export const giftSendSchema = z.object({
   idempotencyKey: z.string().min(1),
   streamId: z.string().min(1),
-  receiverUserId: cognitoSubSchema,
+  receiverUserId: z.string().min(1),
   giftId: z.string().min(1),
   quantity: z.coerce.number().int().min(1).max(1000),
 });
@@ -64,13 +60,13 @@ export const liveGameFinalizeSchema = z
   .object({
     idempotencyKey: z.string().min(1),
     streamId: z.string().min(1),
-    winners: z.array(cognitoSubSchema).max(100).optional(),
+    winners: z.array(z.string().min(1)).max(100).optional(),
   })
   .strict();
 
 export const adminCreditCoinsSchema = z
   .object({
-    targetUserId: cognitoSubSchema,
+    targetUserId: z.string().min(1),
     coins: z.coerce.number().int().min(1).max(1_000_000),
     idempotencyKey: z.string().min(1),
     reason: z.string().min(1).max(200).optional(),
@@ -102,9 +98,90 @@ export const promoteSpotlightBookSchema = z
   })
   .strict();
 
+export const matchdayPurchaseSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    eventId: z.string().min(1).max(120),
+    eventMeta: z
+      .object({
+        homeTeam: z.string().max(120).optional(),
+        awayTeam: z.string().max(120).optional(),
+        league: z.string().max(120).optional(),
+        kickoff: z.string().max(40).optional(),
+      })
+      .partial()
+      .optional(),
+  })
+  .strict();
+
+export const matchdayPredictionPlaceSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    eventId: z.string().min(1).max(120),
+    market: z.enum(['SCORELINE', 'FIRST_SCORER', 'RESULT']),
+    selection: z.string().min(1).max(80),
+    stakeCoins: z.coerce.number().int().min(1).max(1_000_000),
+  })
+  .strict();
+
+export const matchdayPredictionSettleSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    eventId: z.string().min(1).max(120),
+    result: z
+      .object({
+        status: z.enum(['COMPLETED', 'VOID']),
+        homeScore: z.coerce.number().int().min(0).max(99).nullable().optional(),
+        awayScore: z.coerce.number().int().min(0).max(99).nullable().optional(),
+        winner: z.enum(['HOME', 'AWAY', 'DRAW']).nullable().optional(),
+        firstScorer: z.string().max(120).nullable().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const matchdayReactSchema = z
+  .object({
+    eventId: z.string().min(1).max(120),
+    emoji: z.string().min(1).max(16),
+  })
+  .strict();
+
+export const battleDepositSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    battleId: z.string().min(1).max(120),
+    role: z.enum(['creator', 'opponent']),
+    stakeCoins: z.coerce.number().int().min(1).max(1_000_000),
+    creatorUid: z.string().min(1).max(128),
+    opponentUid: z.string().min(1).max(128),
+  })
+  .strict();
+
+export const battleCancelRefundSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    battleId: z.string().min(1).max(120),
+  })
+  .strict();
+
+export const battleSettleSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    battleId: z.string().min(1).max(120),
+  })
+  .strict();
+
 export type GiftSendInput = z.infer<typeof giftSendSchema>;
 export type IapVerifyInput = z.infer<typeof iapVerifySchema>;
 export type AdminCreditCoinsInput = z.infer<typeof adminCreditCoinsSchema>;
 export type PromoteBattleInput = z.infer<typeof promoteBattleSchema>;
 export type PromoteTimeSlotBookInput = z.infer<typeof promoteTimeSlotBookSchema>;
 export type PromoteSpotlightBookInput = z.infer<typeof promoteSpotlightBookSchema>;
+export type MatchdayPurchaseInput = z.infer<typeof matchdayPurchaseSchema>;
+export type MatchdayPredictionPlaceInput = z.infer<typeof matchdayPredictionPlaceSchema>;
+export type MatchdayPredictionSettleInput = z.infer<typeof matchdayPredictionSettleSchema>;
+export type MatchdayReactInput = z.infer<typeof matchdayReactSchema>;
+export type BattleDepositInput = z.infer<typeof battleDepositSchema>;
+export type BattleCancelRefundInput = z.infer<typeof battleCancelRefundSchema>;
+export type BattleSettleInput = z.infer<typeof battleSettleSchema>;

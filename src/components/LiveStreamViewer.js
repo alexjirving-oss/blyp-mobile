@@ -1,17 +1,36 @@
 /**
  * LiveStreamViewer Component - TikTok-Style Architecture
- * 
+ *
  * Production-grade live streaming viewer with:
- * - Continuous segment playback without interruption
+ * - IVS Real-Time for low-latency streaming (primary)
+ * - HLS segmented playback for legacy support
  * - Adaptive buffering for smooth experience
  * - Robust error recovery and fallback mechanisms
  * - Real-world performance optimizations
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ActivityIndicator, Text, Alert } from 'react-native';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  Text,
+  Alert,
+  ScrollView,
+  TouchableOpacity,
+  PanResponder,
+  AppState,
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import UnifiedVideo from './UnifiedVideo';
-import HLSLiveStreamService from '../services/HLSLiveStreamService';
+import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
+import { logStreamingEvent } from '../streaming/StreamingLog';
+import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
+import {
+  incrementViewer as incrementFirestoreViewer,
+  mirrorGuestRequest,
+  clearGuestRequest,
+} from '../services/LiveService';
 import StreamSegmentsAdapter from '../services/StreamSegmentsAdapter';
 import EnterpriseAnalyticsService from '../services/EnterpriseAnalyticsService';
 import ManifestService from '../services/ManifestService';
@@ -22,21 +41,1372 @@ import { decideNextQuality, createSlidingWindowCounter, emitQualitySwitchEvent }
 import SegmentBandwidthEstimatorService from '../services/SegmentBandwidthEstimatorService';
 import NetInfo from '@react-native-community/netinfo';
 import { isManifestEnabled, isPlaylistViewerEnabled, getFeatureFlags } from '../config/FeatureFlags';
-// Unified live model (Stage 2.1B incremental adaptation)
-import {
-  decideSegmentSource,
-  LIVE_STREAMS_COLLECTION,
-  SEGMENTS_SUBCOLLECTION,
-  ENABLE_LIVE_FEATURES,
-  ENABLE_LIVE_SEGMENTS_SUBCOLLECTION,
-  ENABLE_LEGACY_SEGMENTS_MAP,
-  ENABLE_PLAYLIST_MANIFEST_VIEWER,
-} from '../config/liveStreamModel';
+import { useAuth } from '../hooks/useCommon';
+import { streamingConfig } from '../config/StreamingFeatureConfig';
+import { StreamingBackend } from '../config/StreamingBackend';
+import { useIVSViewerSession } from '../live/ivs/hooks/useIVSViewerSession';
+import { COLORS } from '../styles/theme';
+import Icon from './Icon';
+import { createGuestToken, requestGuestSlot, getMyGuestRequest, leaveGuest, guestHeartbeat, MAX_GUEST_SLOTS } from '../api/ivsLiveApi';
+import { requestCameraAndAudioPermission } from '../utils/permissions';
+import { getIVSNativeClient } from '../streaming/IVSNativeClient';
+import { subscribeToRoomEvents } from '../realtime/roomEventsSocket';
 
-const LiveStreamViewer = ({ streamId, onError, style }) => {
+import {
+  getNativeIVSBroadcastView,
+  getNativeIVSPlayerView,
+  getNativeIVSRealTimeView,
+} from '../live/ivs/native/views';
+
+const tileCoinStyles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 11,
+    zIndex: 40,
+  },
+  guestPos: { left: 6, bottom: 6 },
+  hostPos: { left: 12, top: 12 },
+  text: { color: '#FFD54A', fontSize: 11, fontWeight: '800' },
+});
+
+// Small "coins received this stream" badge rendered over the host + guest tiles.
+const TileCoinBadge = ({ coins, style }) => {
+  if (!coins || coins <= 0) return null;
+  return (
+    <View style={[tileCoinStyles.badge, style]} pointerEvents="none">
+      <Text style={tileCoinStyles.text} allowFontScaling={false}>{`🪙 ${coins}`}</Text>
+    </View>
+  );
+};
+
+const LiveStreamViewer = ({
+  streamId,
+  onError,
+  style,
+  hostUid,
+  overlayBottomInset = 0,
+  onGuestPagerLayout,
+  guestRoster = [],
+  giftTotalsByUser = {},
+}) => {
+  const backend = streamingConfig.backend;
+
+  // IVS Viewer Mode
+  if (backend === StreamingBackend.IVS) {
+    return (
+      <IVSLiveStreamViewer
+        streamId={streamId}
+        hostUid={hostUid}
+        onError={onError}
+        style={style}
+        overlayBottomInset={overlayBottomInset}
+        onGuestPagerLayout={onGuestPagerLayout}
+        guestRoster={guestRoster}
+        giftTotalsByUser={giftTotalsByUser}
+      />
+    );
+  }
+
+  // HLS Legacy Mode
+  return <HLSLiveStreamViewer streamId={streamId} onError={onError} style={style} />;
+};
+
+/**
+ * IVS Live Stream Viewer
+ * Uses Amazon IVS Real-Time for low-latency streaming
+ */
+const IVSLiveStreamViewer = ({
+  streamId,
+  hostUid,
+  onError,
+  style,
+  overlayBottomInset = 0,
+  onGuestPagerLayout,
+  guestRoster = [],
+  giftTotalsByUser = {},
+}) => {
+  // Center-crop guest tiles so video fills the box without stretching.
+  // For a square tile, a 16:9 cover factor is ~1.78 (works well for typical phone video orientations).
+  const GUEST_TILE_ZOOM = 16 / 9;
+  const NativeIVSBroadcastView = getNativeIVSBroadcastView();
+  const NativeIVSPlayerView = getNativeIVSPlayerView();
+  const NativeIVSRealTimeView = getNativeIVSRealTimeView();
+
+  const { uid, getDisplayName } = useAuth();
+  const viewerDisplayName = useMemo(() => {
+    try {
+      return (typeof getDisplayName === 'function' ? getDisplayName() : null) || undefined;
+    } catch {
+      return undefined;
+    }
+  }, [getDisplayName]);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const [layout, setLayout] = useState({ width: 0, height: 0 });
+  const [guestRequestStatus, setGuestRequestStatus] = useState('idle'); // idle | sending | sent | error
+  const [guestMode, setGuestMode] = useState(false);
+  const guestModeRef = useRef(false);
+  const [guestSlotId, setGuestSlotId] = useState(null);
+  const [guestRequestedSlotId, setGuestRequestedSlotId] = useState(null);
+  const [guestStageArn, setGuestStageArn] = useState(null);
+  const [guestToken, setGuestToken] = useState(null);
+  const [guestSessionId, setGuestSessionId] = useState(null);
+  const guestSessionIdRef = useRef(null);
+  const [guestJoinError, setGuestJoinError] = useState(null);
+  const [guestGridHeight, setGuestGridHeight] = useState(0);
+  const [guestPagerMeasuredHeight, setGuestPagerMeasuredHeight] = useState(0);
+  // Default hidden so a solo host is full-bleed (no empty tiles squishing the
+  // video mid-screen). Auto-opens when real guests are on stage (effect below).
+  const [guestTrayMode, setGuestTrayMode] = useState('expanded'); // expanded | collapsed | hidden
+  const [suspendViewerAutoJoin, setSuspendViewerAutoJoin] = useState(false);
+  // Host-applied mute on this user (when on stage as a guest). Host controls it;
+  // the guest cannot self-unmute while true.
+  const [mutedByHost, setMutedByHost] = useState(false);
+  // Host-applied camera disable while on stage as a guest. Host owns it; the guest
+  // cannot turn the camera back on themselves while true.
+  const [cameraOffByHost, setCameraOffByHost] = useState(false);
+  // Set when the host invites this viewer up (host-initiated). Drives an accept prompt.
+  const [hostInvite, setHostInvite] = useState(null);
+  // Refs so the AppState listener (registered once) reads the latest enforced state.
+  const mutedByHostRef = useRef(false);
+  const cameraOffByHostRef = useRef(false);
+  mutedByHostRef.current = mutedByHost;
+  cameraOffByHostRef.current = cameraOffByHost;
+  const bgLeaveTimerRef = useRef(null);
+
+  const guestPagerScrollRef = useRef(null);
+  const ivsSessionRef = useRef(null);
+
+  useEffect(() => {
+    guestModeRef.current = guestMode;
+    if (!guestMode) {
+      setMutedByHost(false);
+      setCameraOffByHost(false);
+    }
+  }, [guestMode]);
+
+  const guestRequestStatusRef = useRef('idle');
+  useEffect(() => {
+    guestRequestStatusRef.current = guestRequestStatus;
+  }, [guestRequestStatus]);
+
+  const generateGuestSessionId = useCallback(() => {
+    const randomUUID = global?.crypto?.randomUUID?.();
+    if (randomUUID && typeof randomUUID === 'string') return randomUUID;
+    return `guest-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+  }, []);
+
+  const leaveAsGuestAndCleanup = useCallback(async (reason, opts = {}) => {
+    const force = opts?.force === true;
+    const sid = guestSessionIdRef.current;
+
+    try {
+      if (streamId && sid) {
+        await leaveGuest(streamId, sid, force);
+      }
+    } catch (e) {
+      console.warn('[IVS_VIEWER][LEAVE_GUEST_API_FAILED]', { reason, error: e?.message || String(e) });
+    }
+
+    // Remove our Firestore request mirror so we no longer appear as pending.
+    if (streamId && uid) clearGuestRequest(streamId, uid);
+
+    try {
+      const nativeClient = getIVSNativeClient();
+      // Defensive: native stop can occasionally hang; never block state reset on it.
+      const stopPromise = Promise.resolve(nativeClient.stopGuestSession());
+      const timeoutPromise = new Promise((resolve) => {
+        const t = setTimeout(() => {
+          clearTimeout(t);
+          resolve();
+        }, 1500);
+      });
+      await Promise.race([stopPromise, timeoutPromise]);
+    } catch (err) {
+      console.warn('[IVS_VIEWER][STOP_GUEST_FAILED]', { reason, error: err?.message || String(err) });
+    } finally {
+      guestModeRef.current = false;
+      setGuestMode(false);
+      setGuestSlotId(null);
+      setGuestRequestedSlotId(null);
+      setGuestStageArn(null);
+      setGuestToken(null);
+      setGuestSessionId(null);
+      guestSessionIdRef.current = null;
+      setGuestJoinError(null);
+      setGuestRequestStatus('idle');
+      setSuspendViewerAutoJoin(false);
+
+      const joinFn = ivsSessionRef.current?.joinStream;
+      if (typeof joinFn === 'function') {
+        try {
+          await joinFn();
+        } catch (err) {
+          console.warn('[IVS_VIEWER][REJOIN_AS_VIEWER_ERROR]', err);
+        }
+      }
+    }
+  }, [streamId]);
+
+  // App background/foreground while on stage. Previously we left the stage on ANY
+  // backgrounding, so quickly checking another app (e.g. replying on WhatsApp)
+  // kicked the guest off. Now we keep the slot for a grace period and only drop
+  // it if the app stays backgrounded; on return we resume publishing (re-asserting
+  // mic/camera, honoring any host-applied mute/camera-off).
+  useEffect(() => {
+    const GRACE_MS = 30000;
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') {
+        const onStageOrPending = guestModeRef.current || guestRequestStatusRef.current === 'sent';
+        if (onStageOrPending && !bgLeaveTimerRef.current) {
+          bgLeaveTimerRef.current = setTimeout(() => {
+            bgLeaveTimerRef.current = null;
+            Promise.resolve(leaveAsGuestAndCleanup('appstate_timeout', { force: false })).catch(() => {});
+          }, GRACE_MS);
+        }
+      } else {
+        // Back in foreground within the grace window — cancel the pending leave.
+        if (bgLeaveTimerRef.current) {
+          clearTimeout(bgLeaveTimerRef.current);
+          bgLeaveTimerRef.current = null;
+        }
+        // Resume the guest publish (the OS may have suspended the camera while away).
+        if (guestModeRef.current) {
+          try {
+            const nativeClient = getIVSNativeClient();
+            if (nativeClient && typeof nativeClient.setCameraEnabled === 'function') {
+              Promise.resolve(nativeClient.setCameraEnabled(!cameraOffByHostRef.current)).catch(() => {});
+            }
+            if (nativeClient && typeof nativeClient.setMicEnabled === 'function') {
+              Promise.resolve(nativeClient.setMicEnabled(!mutedByHostRef.current)).catch(() => {});
+            }
+          } catch (e) {
+            console.warn('[IVS_VIEWER][RESUME_ON_FOREGROUND_FAILED]', e?.message || String(e));
+          }
+        }
+      }
+    });
+    return () => {
+      try { sub?.remove?.(); } catch { }
+      if (bgLeaveTimerRef.current) {
+        clearTimeout(bgLeaveTimerRef.current);
+        bgLeaveTimerRef.current = null;
+      }
+    };
+  }, [leaveAsGuestAndCleanup]);
+
+  // While guest publishing, keep a heartbeat so the backend can detect stale sessions.
+  useEffect(() => {
+    if (!streamId) return;
+    if (!guestMode) return;
+    if (!guestSessionId) return;
+
+    let cancelled = false;
+    const timer = setInterval(() => {
+      if (cancelled) return;
+      guestHeartbeat(streamId, guestSessionId).catch((e) => {
+        console.warn('[IVS_VIEWER][GUEST_HEARTBEAT_FAILED]', e?.message || String(e));
+      });
+    }, 10_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [streamId, guestMode, guestSessionId]);
+
+  // Host-remote-mute enforcement. When this user is on stage as a guest and the
+  // host (or a moderator) mutes/unmutes them, honor it instantly by toggling the
+  // local publisher mic via the native client. The guest cannot self-unmute while
+  // muted — the host owns that state. Additive to the REST/poll path.
+  useEffect(() => {
+    if (!streamId) return;
+    let sub = null;
+    let active = true;
+    (async () => {
+      try {
+        sub = await subscribeToRoomEvents(streamId, (evt) => {
+          if (!evt) return;
+          const t = evt.type;
+
+          if (t === 'room.ended') {
+            setConnectionStatus('ended');
+            if (guestModeRef.current) {
+              try { leaveAsGuestAndCleanup('room_ended', { force: true }); } catch { /* ignore */ }
+            }
+            if (onError) onError({ message: 'Stream has ended' });
+            return;
+          }
+
+          if (t === 'guest.invited') {
+            if (!uid || evt.guestUserId !== uid) return;
+            if (guestModeRef.current) return;
+            if (guestRequestStatusRef.current === 'sending') return;
+            setHostInvite({ slotIndex: typeof evt.slotIndex === 'number' ? evt.slotIndex : null });
+            return;
+          }
+
+          if (!evt.guestUserId || !uid || evt.guestUserId !== uid) return;
+          if (!guestModeRef.current) return;
+          if (t === 'guest.muted' || t === 'guest.unmuted') {
+            const shouldMute = t === 'guest.muted';
+            setMutedByHost(shouldMute);
+            try {
+              const nativeClient = getIVSNativeClient();
+              if (nativeClient && typeof nativeClient.setMicEnabled === 'function') {
+                Promise.resolve(nativeClient.setMicEnabled(!shouldMute)).catch(() => {});
+              }
+            } catch (e) {
+              console.warn('[IVS_VIEWER][HOST_MUTE_ENFORCE_FAILED]', e?.message || String(e));
+            }
+          } else if (t === 'guest.camera_off' || t === 'guest.camera_on') {
+            const shouldDisable = t === 'guest.camera_off';
+            setCameraOffByHost(shouldDisable);
+            try {
+              const nativeClient = getIVSNativeClient();
+              if (nativeClient && typeof nativeClient.setCameraEnabled === 'function') {
+                Promise.resolve(nativeClient.setCameraEnabled(!shouldDisable)).catch(() => {});
+              }
+            } catch (e) {
+              console.warn('[IVS_VIEWER][HOST_CAMERA_ENFORCE_FAILED]', e?.message || String(e));
+            }
+          } else if (t === 'guest.kicked') {
+            // Host disconnected this guest: tear down our publish and return to
+            // watching as a normal viewer. (This is what made the disconnect
+            // button appear to "do nothing" before — the guest never reacted.)
+            try { setGuestJoinError('You were removed from the stage by the host.'); } catch { /* ignore */ }
+            try { leaveAsGuestAndCleanup('kicked_by_host', { force: true }); } catch { /* ignore */ }
+          }
+        });
+        if (!active && sub) { try { sub.close(); } catch { /* ignore */ } }
+      } catch (e) {
+        console.warn('[IVS_VIEWER][ROOM_EVENTS_SUBSCRIBE_FAILED]', e?.message || String(e));
+      }
+    })();
+    return () => {
+      active = false;
+      try { sub?.close?.(); } catch { /* ignore */ }
+    };
+  }, [streamId, uid]);
+
+  // Accept a host-initiated invite: the host already put us in INVITED with a
+  // slot, so we can go straight to publishing (no request round-trip).
+  const acceptHostInvite = useCallback(async () => {
+    const slot = hostInvite?.slotIndex;
+    setHostInvite(null);
+    try {
+      if (typeof slot === 'number') {
+        setGuestRequestedSlotId(slot);
+        setGuestSlotId(slot);
+      }
+      if (!guestSessionIdRef.current) {
+        const sid = generateGuestSessionId();
+        guestSessionIdRef.current = sid;
+        setGuestSessionId(sid);
+      }
+      setGuestRequestStatus('sent');
+      await attemptStartGuestPublish();
+    } catch (e) {
+      setGuestJoinError(e instanceof Error ? e.message : 'Unable to join as guest');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostInvite, attemptStartGuestPublish, generateGuestSessionId]);
+
+  // Surface the host invite as a native prompt with Accept / Not now.
+  useEffect(() => {
+    if (!hostInvite) return;
+    Alert.alert(
+      'Invitation to join',
+      'The host invited you to join the live as a guest.',
+      [
+        { text: 'Not now', style: 'cancel', onPress: () => setHostInvite(null) },
+        { text: 'Join', onPress: () => { acceptHostInvite(); } },
+      ],
+      { cancelable: true, onDismiss: () => setHostInvite(null) }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hostInvite]);
+
+  const setNextGuestTrayMode = useCallback((nextMode) => {
+    setGuestTrayMode((prev) => {
+      const next = typeof nextMode === 'string' ? nextMode : prev;
+      // Reset paging to the first page when switching modes (avoids awkward mid-page offsets).
+      try {
+        guestPagerScrollRef.current?.scrollTo?.({ x: 0, y: 0, animated: false });
+      } catch { }
+      return next;
+    });
+  }, []);
+
+  const guestTrayPanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_evt, gesture) => {
+        const dx = Math.abs(gesture.dx || 0);
+        const dy = Math.abs(gesture.dy || 0);
+        // Only capture mostly-vertical gestures so horizontal page swipes keep working.
+        return dy > 12 && dy > dx;
+      },
+      onPanResponderRelease: (_evt, gesture) => {
+        const dy = gesture.dy || 0;
+        if (dy > 22) {
+          // Swipe down: expanded -> collapsed -> hidden
+          setGuestTrayMode((prev) => {
+            const next = prev === 'expanded' ? 'collapsed' : prev === 'collapsed' ? 'hidden' : 'hidden';
+            try {
+              guestPagerScrollRef.current?.scrollTo?.({ x: 0, y: 0, animated: false });
+            } catch { }
+            return next;
+          });
+        } else if (dy < -22) {
+          // Swipe up: hidden -> collapsed -> expanded
+          setGuestTrayMode((prev) => {
+            const next = prev === 'hidden' ? 'collapsed' : prev === 'collapsed' ? 'expanded' : 'expanded';
+            try {
+              guestPagerScrollRef.current?.scrollTo?.({ x: 0, y: 0, animated: false });
+            } catch { }
+            return next;
+          });
+        }
+      },
+    })
+  ).current;
+
+  const guestStartInFlightRef = useRef(false);
+  const guestStartAlertedRef = useRef(false);
+  const GUEST_TRAY_HIDDEN_TAB_HEIGHT = 28;
+  const GUEST_START_TIMEOUT_MS = 9000;
+
+  // If the viewer navigates to a different stream (or remount reuses the component),
+  // never carry guest state across sessions.
+  useEffect(() => {
+    let cancelled = false;
+
+    const reset = async () => {
+      try {
+        const nativeClient = getIVSNativeClient();
+        if (nativeClient && typeof nativeClient.stopGuestSession === 'function') {
+          // Defensive: native stop can occasionally hang; never block state reset on it.
+          const stopPromise = Promise.resolve(nativeClient.stopGuestSession());
+          const timeoutPromise = new Promise((resolve) => {
+            const t = setTimeout(() => {
+              clearTimeout(t);
+              resolve();
+            }, 1500);
+          });
+          await Promise.race([stopPromise, timeoutPromise]);
+        }
+      } catch (err) {
+        console.warn('[IVS_VIEWER][STREAM_CHANGE_STOP_GUEST_FAILED]', err);
+      }
+
+      if (cancelled) return;
+
+      guestStartInFlightRef.current = false;
+      guestStartAlertedRef.current = false;
+
+      setGuestMode(false);
+      guestModeRef.current = false;
+      setGuestSlotId(null);
+      setGuestRequestedSlotId(null);
+      setGuestStageArn(null);
+      setGuestToken(null);
+      setGuestSessionId(null);
+      guestSessionIdRef.current = null;
+      setGuestJoinError(null);
+      setGuestRequestStatus('idle');
+      setSuspendViewerAutoJoin(false);
+    };
+
+    if (streamId) {
+      reset();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [streamId]);
+
+  const attemptStartGuestPublish = useCallback(async () => {
+    if (!streamId) return;
+    if (guestModeRef.current) return;
+    if (guestStartInFlightRef.current) return;
+
+    guestStartInFlightRef.current = true;
+    try {
+      const req = await getMyGuestRequest(streamId);
+      const status = req?.status;
+
+      if (!status) {
+        return;
+      }
+
+      if (status === 'REJECTED') {
+        setGuestRequestStatus('idle');
+        setGuestJoinError('Host declined your request');
+        Alert.alert('Request declined', 'Host declined your request to join.');
+        if (streamId && uid) clearGuestRequest(streamId, uid);
+        return;
+      }
+
+      if (status !== 'INVITED' && status !== 'LIVE') {
+        // Still waiting for the host to accept.
+        return;
+      }
+
+      const hasPermissions = await requestCameraAndAudioPermission();
+      if (!hasPermissions) {
+        setGuestJoinError('Camera and microphone permissions are required to join as a guest.');
+        if (!guestStartAlertedRef.current) {
+          guestStartAlertedRef.current = true;
+          Alert.alert(
+            'Permissions required',
+            'Enable Camera and Microphone permissions to join as a guest, then tap Join again.'
+          );
+        }
+        return;
+      }
+
+      const slotIndex = typeof req?.slotIndex === 'number' ? req.slotIndex : guestSlotId;
+      if (typeof slotIndex !== 'number') {
+        throw new Error('Guest slot not assigned yet');
+      }
+
+      let sid = guestSessionIdRef.current;
+      if (!sid) {
+        sid = generateGuestSessionId();
+        guestSessionIdRef.current = sid;
+        setGuestSessionId(sid);
+      }
+
+      let guestTokenResp;
+      try {
+        guestTokenResp = await createGuestToken(streamId, sid);
+      } catch (e) {
+        // Self-heal stale slot: force leave then retry once.
+        const code = e?.code || e?.response?.code;
+        const msg = e?.message || '';
+        const looksStale = String(code || '').includes('GUEST_SESSION_ACTIVE') || String(msg).toLowerCase().includes('active');
+        if (looksStale) {
+          await leaveAsGuestAndCleanup('stale_slot_retry', { force: true });
+          guestTokenResp = await createGuestToken(streamId, sid);
+        } else {
+          throw e;
+        }
+      }
+
+      const { token, stageArn } = guestTokenResp;
+      setGuestStageArn(stageArn);
+      setGuestToken(token);
+      setGuestSlotId(slotIndex);
+
+      // IMPORTANT: Viewer mode uses the same native broadcast module as guest publish.
+      // Starting guest while still joined as viewer can implicitly tear down/recreate the stage,
+      // which shows up as the host video going black. So we stop the read-only viewer join first.
+      setSuspendViewerAutoJoin(true);
+      try {
+        const leaveFn = ivsSessionRef.current?.leaveStream;
+        if (typeof leaveFn === 'function') await leaveFn();
+      } catch (leaveErr) {
+        console.warn('[IVS_VIEWER][LEAVE_VIEWER_BEFORE_GUEST_FAILED]', leaveErr);
+      }
+
+      const nativeClient = getIVSNativeClient();
+      const startPromise = nativeClient.startGuestSession({
+        sessionId: streamId,
+        stageArn,
+        token,
+        slotIndex,
+      });
+
+      // Defensive: if native never invokes the callback, don't leave the UI stuck.
+      const timeoutPromise = new Promise((_, reject) => {
+        const t = setTimeout(() => {
+          clearTimeout(t);
+          reject(new Error('Guest start timed out. Tap Retry to try again.'));
+        }, GUEST_START_TIMEOUT_MS);
+      });
+
+      await Promise.race([startPromise, timeoutPromise]);
+
+      guestModeRef.current = true;
+      setGuestMode(true);
+      setGuestRequestStatus('idle');
+      setGuestJoinError(null);
+      guestStartAlertedRef.current = false;
+      // Request fulfilled — clear the Firestore mirror so it no longer shows
+      // as pending on the host.
+      clearGuestRequest(streamId, uid);
+    } catch (err) {
+      console.error('[IVS_VIEWER][GUEST_PUBLISH_ERROR]', err);
+      const message = err instanceof Error ? err.message : 'Unable to start guest session';
+      setGuestJoinError(message);
+
+      // If the switch to guest mode failed, re-enable viewer auto-join and
+      // best-effort rejoin as a viewer so the stream continues playing.
+      try {
+        setSuspendViewerAutoJoin(false);
+        const joinFn = ivsSessionRef.current?.joinStream;
+        if (typeof joinFn === 'function') await joinFn();
+      } catch (rejoinErr) {
+        console.warn('[IVS_VIEWER][GUEST_REJOIN_AS_VIEWER_FAILED]', rejoinErr);
+      }
+
+      if (!guestStartAlertedRef.current) {
+        guestStartAlertedRef.current = true;
+        Alert.alert('Guest publish failed', message);
+      }
+      // Keep request status as 'sent' so Join can be used to retry publishing.
+    } finally {
+      guestStartInFlightRef.current = false;
+    }
+  }, [streamId, guestMode, guestSlotId, generateGuestSessionId, leaveAsGuestAndCleanup]);
+
+  const ivsSession = useIVSViewerSession({
+    streamId: streamId || '',
+    enabled: !!streamId,
+    // Keep the viewer subscription active even in guestMode so the guest can still
+    // see the host/participants while publishing.
+    autoJoin: !suspendViewerAutoJoin && !guestMode,
+    displayName: viewerDisplayName,
+  });
+
+  useEffect(() => {
+    ivsSessionRef.current = ivsSession;
+  }, [ivsSession]);
+
+  // Real guest count = participants on stage excluding the host. Used to gate the
+  // guest tray so it only occupies the screen when there's actually someone to show.
+  const guestStreamCount = useMemo(() => {
+    const streams = ivsSession.visibleStreams || [];
+    if (streams.length <= 1) return 0;
+    const host = streams.find((s) => s?.isHost) || streams[0] || null;
+    return streams.filter(
+      (s) => s && s !== host && (!host || !s.participantId || s.participantId !== host.participantId)
+    ).length;
+  }, [ivsSession.visibleStreams]);
+
+  // Auto-manage the tray on guest-count transitions: open when guests arrive,
+  // collapse to full-bleed host when the stage empties. Manual swipes still work
+  // within a given guest-count state.
+  const prevGuestCountRef = useRef(0);
+  useEffect(() => {
+    const had = prevGuestCountRef.current;
+    if (had === 0 && guestStreamCount > 0) {
+      // Show the full guest grid by default when guests are on stage.
+      setGuestTrayMode('expanded');
+    } else if (had > 0 && guestStreamCount === 0 && !guestMode) {
+      setGuestTrayMode('collapsed');
+    }
+    prevGuestCountRef.current = guestStreamCount;
+  }, [guestStreamCount, guestMode]);
+
+  // When this user goes on stage as a guest, make sure their self-tile is visible.
+  useEffect(() => {
+    if (guestMode) setGuestTrayMode((prev) => (prev === 'hidden' ? 'collapsed' : prev));
+  }, [guestMode]);
+
+  useEffect(() => {
+    console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_MOUNT]');
+    return () => console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_UNMOUNT]');
+  }, []);
+
+  // Centralized IVS viewer session observability
+  useEffect(() => {
+    console.log('[LIVE][IVS_VIEWER_SESSION]', {
+      backend: 'ivs',
+      streamId,
+      connectionState: ivsSession.connectionState,
+      networkQuality: ivsSession.networkQuality,
+      remoteParticipants: ivsSession.remoteParticipants?.length ?? 0,
+      remoteVideoTracks: ivsSession.remoteVideoTracks,
+      isReceivingVideo: ivsSession.isReceivingVideo,
+      error: ivsSession.error,
+      stageArnTail: ivsSession.stageArn ? String(ivsSession.stageArn).slice(-10) : null,
+      tokenLength: ivsSession.token ? String(ivsSession.token).length : 0,
+      guestMode,
+    });
+  }, [
+    streamId,
+    ivsSession.connectionState,
+    ivsSession.networkQuality,
+    ivsSession.remoteParticipants,
+    ivsSession.remoteVideoTracks,
+    ivsSession.isReceivingVideo,
+    ivsSession.error,
+    ivsSession.stageArn,
+    ivsSession.token,
+    guestMode,
+  ]);
+
+  useEffect(() => {
+    if (ivsSession.connectionState === 'connected') {
+      console.log('[IVS_VIEWER][MEDIA_STATE]', {
+        connectionState: ivsSession.connectionState,
+        remoteParticipants: ivsSession.remoteParticipants.length,
+        remoteVideoTracks: ivsSession.remoteVideoTracks,
+        isReceivingVideo: ivsSession.remoteVideoTracks > 0,
+      });
+    }
+  }, [ivsSession.connectionState, ivsSession.remoteParticipants.length, ivsSession.remoteVideoTracks]);
+
+  useEffect(() => {
+    if (ivsSession.error) {
+      console.error('[IVS_VIEWER] Error:', ivsSession.error);
+      if (onError) onError({ message: ivsSession.error });
+      setConnectionStatus('error');
+    } else if (ivsSession.connectionState === 'connected') {
+      setConnectionStatus('connected');
+    } else if (ivsSession.connectionState === 'disconnected') {
+      setConnectionStatus('disconnected');
+      if (onError) onError({ message: 'Stream has ended' });
+    }
+  }, [ivsSession.error, ivsSession.connectionState, onError]);
+
+  // Track view count on mount/unmount
+  useEffect(() => {
+    if (!streamId) return;
+
+    let cancelled = false;
+    const joinedKey = uid ? `viewer_joined:${streamId}:${uid}` : null;
+    const hasDecrementedRef = { current: false };
+
+    const decrementOnce = async (reason) => {
+      if (hasDecrementedRef.current) return;
+      hasDecrementedRef.current = true;
+      if (!joinedKey) return;
+      try {
+        const existing = await AsyncStorage.getItem(joinedKey);
+        if (!existing) return;
+        await AsyncStorage.removeItem(joinedKey);
+      } catch { }
+
+      try {
+        incrementFirestoreViewer(streamId, -1).catch(() => { });
+        logStreamingEvent('VIEWER_LEAVE', {
+          backendId: 'IVS',
+          streamId,
+          userId: uid,
+          source: `viewer_ui_${reason}`,
+        });
+      } catch { }
+    };
+
+    logStreamingEvent('VIEWER_JOIN', {
+      backendId: 'IVS',
+      streamId,
+      userId: uid,
+      source: 'viewer_ui',
+    });
+
+    // IVS viewer counts are tracked on streams/{streamId}.viewerCount.
+    // This counter can get stuck high if the app is killed before unmount runs.
+    // Mitigation: track whether we've already incremented for this stream+uid.
+    (async () => {
+      if (!joinedKey) {
+        incrementFirestoreViewer(streamId, +1).catch(() => { });
+        return;
+      }
+      try {
+        const existing = await AsyncStorage.getItem(joinedKey);
+        if (cancelled) return;
+        if (existing) {
+          // We were already counted from a prior session; do not increment again.
+          return;
+        }
+        await AsyncStorage.setItem(joinedKey, String(Date.now()));
+      } catch {
+        // If storage fails, fall back to old behavior.
+      }
+      if (!cancelled) {
+        incrementFirestoreViewer(streamId, +1).catch(() => { });
+      }
+    })();
+
+    // Re-add the viewer to the count when the app returns to the foreground and
+    // we're still watching. Without this, backgrounding decremented the count
+    // but coming back never restored it, so the viewer count drifted too low.
+    const reincrementAfterForeground = async () => {
+      if (!hasDecrementedRef.current) return;
+      hasDecrementedRef.current = false;
+      if (cancelled) return;
+      if (!joinedKey) {
+        incrementFirestoreViewer(streamId, +1).catch(() => { });
+        return;
+      }
+      try {
+        await AsyncStorage.setItem(joinedKey, String(Date.now()));
+      } catch { }
+      if (!cancelled) {
+        incrementFirestoreViewer(streamId, +1).catch(() => { });
+        logStreamingEvent('VIEWER_JOIN', {
+          backendId: 'IVS',
+          streamId,
+          userId: uid,
+          source: 'viewer_ui_foreground',
+        });
+      }
+    };
+
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') {
+        // Best-effort decrement before the process dies.
+        decrementOnce('appstate').catch(() => { });
+      } else {
+        reincrementAfterForeground().catch(() => { });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      try {
+        appStateSub?.remove?.();
+      } catch { }
+      decrementOnce('unmount').catch(() => { });
+    };
+  }, [streamId, uid]);
+
+  // Keep latest leaveStream function without triggering cleanup on every render
+  const leaveStreamRef = useRef(null);
+  useEffect(() => {
+    leaveStreamRef.current = ivsSession?.leaveStream;
+  }, [ivsSession?.leaveStream]);
+
+  // Clean up IVS viewer session ONLY on real unmount (not on re-renders)
+  useEffect(() => {
+    console.log('[IVS_VIEWER][MOUNT] Component initialized');
+    return () => {
+      console.log('[IVS_VIEWER][UNMOUNT] Leaving viewer session');
+
+      // Best-effort cleanup: if we were a guest (or had a pending request), notify backend so
+      // re-join doesn't get blocked by a stale LIVE/REQUESTED record.
+      try {
+        const status = guestRequestStatusRef.current;
+        const needsCleanup = guestModeRef.current || status === 'sent' || status === 'sending';
+        const sid = guestSessionIdRef.current;
+        if (needsCleanup && streamId && sid) {
+          leaveGuest(streamId, sid, true).catch((e) => {
+            console.warn('[IVS_VIEWER][UNMOUNT_LEAVE_GUEST_FAILED]', e?.message || String(e));
+          });
+
+          try {
+            const nativeClient = getIVSNativeClient();
+            Promise.resolve(nativeClient.stopGuestSession()).catch(() => { });
+          } catch { }
+        }
+      } catch { }
+
+      const leaveFn = leaveStreamRef.current;
+      if (typeof leaveFn === 'function') {
+        Promise.resolve(leaveFn()).catch(err => {
+          console.error('[IVS_VIEWER][UNMOUNT_LEAVE_ERROR]', err);
+        });
+      }
+    };
+  }, []); // Empty deps = mount/unmount only
+
+  const requestToJoinAsGuest = useCallback(
+    async (slotId) => {
+      if (!streamId) return;
+      console.log('[IVS_VIEWER][REQUEST_JOIN]', { streamId, slotId, guestRequestStatus, guestMode });
+      if (guestRequestStatus === 'sending') return;
+      if (guestRequestStatus === 'sent') {
+        // Retry publish (cannot re-request due to backend conditional write).
+        setGuestJoinError(null);
+        await attemptStartGuestPublish();
+        return;
+      }
+
+      setGuestJoinError(null);
+      setSuspendViewerAutoJoin(false);
+
+      try {
+        setGuestRequestStatus('sending');
+        setGuestRequestedSlotId(slotId);
+        setGuestSlotId(slotId);
+        guestStartAlertedRef.current = false;
+
+        if (!guestSessionIdRef.current) {
+          const sid = generateGuestSessionId();
+          guestSessionIdRef.current = sid;
+          setGuestSessionId(sid);
+        }
+
+        // Create a guest request record. Host must accept before guest-token can be minted.
+        await requestGuestSlot(streamId, slotId);
+        // Mirror the request into Firestore so the host gets a reliable,
+        // instant real-time notification (the live-service poll alone proved
+        // flaky — host often "never saw" the request). Best-effort.
+        // Include the requester's display name so the host prompt can show it
+        // immediately (no userId flash while the host resolves the profile).
+        mirrorGuestRequest(streamId, { userId: uid, displayName: viewerDisplayName || null, slotIndex: slotId });
+        setGuestRequestStatus('sent');
+      } catch (err) {
+        console.error('[IVS_VIEWER][GUEST_JOIN_ERROR]', err);
+        setGuestRequestStatus('error');
+        const message = err instanceof Error ? err.message : 'Unable to join as guest';
+        setGuestJoinError(message);
+        Alert.alert('Guest join failed', message);
+      }
+    },
+    [guestRequestStatus, streamId, attemptStartGuestPublish, generateGuestSessionId]
+  );
+
+  // After requesting to join: poll for host approval (INVITED) and only then start guest publishing.
+  useEffect(() => {
+    if (!streamId) return;
+    if (guestMode) return;
+    if (guestRequestStatus !== 'sent') return;
+    // Slot index can be 0; only guard on non-number.
+    if (typeof guestSlotId !== 'number') return;
+
+    let cancelled = false;
+    let timer = null;
+
+    const tick = async () => {
+      try {
+        if (cancelled) return;
+        await attemptStartGuestPublish();
+      } catch (err) {
+        // Keep polling; transient network failures shouldn't break join.
+        console.warn('[IVS_VIEWER][GUEST_REQUEST_POLL_ERROR]', err);
+      }
+    };
+
+    timer = setInterval(() => {
+      tick();
+    }, 2000);
+
+    // Kick off immediately.
+    tick();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [streamId, guestMode, guestRequestStatus, guestSlotId, attemptStartGuestPublish]);
+
+  const leaveGuestMode = useCallback(async () => {
+    await leaveAsGuestAndCleanup('user_leave', { force: false });
+  }, [leaveAsGuestAndCleanup]);
+
+  // Rendering must bind to the currently-active IVS stage join.
+  // When in guestMode we use the guest token (publish+subscribe) to keep receiving remote video.
+  const stageArnForSurface = guestMode && guestStageArn ? guestStageArn : ivsSession.stageArn;
+  const tokenForSurface = guestMode && guestToken ? guestToken : ivsSession.token;
+  const hasStageCredentials = !!stageArnForSurface && !!tokenForSurface;
+  const showLoading = connectionStatus === 'connecting';
+  const showError = connectionStatus === 'error';
+  const showDisconnected = connectionStatus === 'disconnected';
+
+  console.log('[IVS_VIEWER][RENDER_PATH]', {
+    hasNativeView: !!NativeIVSRealTimeView,
+    hasCredentials: hasStageCredentials,
+    guestMode,
+    stageArn: stageArnForSurface ? stageArnForSurface.slice(-10) : null,
+    tokenLength: tokenForSurface ? tokenForSurface.length : 0,
+    state: ivsSession.connectionState,
+    remoteTracks: ivsSession.remoteVideoTracks,
+    willRenderRealTime: !!(
+      NativeIVSRealTimeView &&
+      hasStageCredentials &&
+      ivsSession.connectionState === 'connected' &&
+      ivsSession.remoteVideoTracks > 0
+    )
+  });
+
+  // Real-Time surface fed by viewer session credentials
+  // Keep the native views mounted once credentials exist; gate visibility by canRender
+  if (NativeIVSRealTimeView && hasStageCredentials) {
+    const renderableStreams = ivsSession.visibleStreams || [];
+    const hasRenderableStreams = renderableStreams.length > 0;
+    const showVideo = ivsSession.canRender && hasRenderableStreams;
+
+    const hostStream = renderableStreams.find((s) => s?.isHost) || renderableStreams[0] || null;
+    // Exclude the host both by object identity AND participantId, so a duplicate
+    // stream entry for the host (a second streamKey for the same participant) can
+    // never render a second copy of the host feed inside a guest tile mid-screen.
+    const guestStreams = renderableStreams.filter(
+      (s) =>
+        s &&
+        s !== hostStream &&
+        (!hostStream || !s.participantId || s.participantId !== hostStream.participantId)
+    );
+    // Guest slots are capped at the IVS publisher limit (host + 11 guests).
+    const guestSlotsTotal = MAX_GUEST_SLOTS;
+    const guestsPerPage = guestTrayMode === 'expanded' ? 8 : guestTrayMode === 'collapsed' ? 4 : 0;
+    const pageCount = guestsPerPage > 0 ? Math.max(1, Math.ceil(guestSlotsTotal / guestsPerPage)) : 0;
+
+    // Slot-aware tile mapping (single source of truth): place each guest in the
+    // box matching its host-assigned slotIndex so the host and all viewers agree.
+    // Falls back to legacy array-index mapping if no stream carries a slotIndex
+    // (older native that didn't surface the token slot) — never blanks the grid.
+    // AUTHORITATIVE placement: the host mirrors a roster (userId -> slotIndex) to
+    // Firestore that is identical on every device. Resolve each guest's box from
+    // that shared roster so the host and ALL viewers render the same guest in the
+    // same box. Falls back to the per-device native slotIndex (today's behavior)
+    // when the roster doesn't yet know this user, so it can never render worse.
+    const rosterSlotByUser = new Map();
+    const userBySlotIndex = new Map();
+    (guestRoster || []).forEach((g) => {
+      if (g && g.userId && typeof g.slotIndex === 'number' && g.slotIndex >= 1) {
+        rosterSlotByUser.set(String(g.userId), g.slotIndex);
+        userBySlotIndex.set(g.slotIndex, String(g.userId));
+      }
+    });
+    const userByParticipant = new Map();
+    (ivsSession.remoteParticipants || []).forEach((p) => {
+      if (p && p.participantId && p.userId) userByParticipant.set(p.participantId, String(p.userId));
+    });
+    const effectiveSlot = (s) => {
+      if (!s) return undefined;
+      const userId = userByParticipant.get(s.participantId);
+      const rosterSlot = userId ? rosterSlotByUser.get(userId) : undefined;
+      if (typeof rosterSlot === 'number') return rosterSlot;
+      return typeof s.slotIndex === 'number' && s.slotIndex >= 1 ? s.slotIndex : undefined;
+    };
+    const anySlotIndexed = guestStreams.some((s) => typeof effectiveSlot(s) === 'number');
+    const streamForSlot = (slot) => {
+      if (anySlotIndexed) {
+        return guestStreams.find((s) => s && effectiveSlot(s) === slot) || null;
+      }
+      // legacy: remote guests start at box 2 (box 1 was the reserved CTA/self tile)
+      return slot >= 2 ? guestStreams[slot - 2] || null : null;
+    };
+    const occupiedSlots = new Set();
+    if (typeof guestSlotId === 'number') occupiedSlots.add(guestSlotId);
+    if (anySlotIndexed) {
+      guestStreams.forEach((s) => {
+        const es = effectiveSlot(s);
+        if (typeof es === 'number') occupiedSlots.add(es);
+      });
+    }
+    const firstEmptySlot = (() => {
+      for (let i = 1; i <= guestSlotsTotal; i += 1) {
+        if (!occupiedSlots.has(i)) return i;
+      }
+      return null;
+    })();
+    // Non-guests get a Join CTA in the first empty box; legacy mode keeps it at 1.
+    const firstJoinSlotId = guestMode ? null : anySlotIndexed ? firstEmptySlot : 1;
+
+    // Keep a solid footer-colored band under the tiles so the area directly above
+    // the comments overlay never shows the black hostStage background.
+    const guestBottomStripHeight = guestTrayMode === 'hidden' ? 0 : 16;
+    // Coins gifted to a given user THIS stream (session tally from gift_event).
+    const coinsForUser = (userId) => {
+      if (!userId) return 0;
+      const t = giftTotalsByUser && giftTotalsByUser[userId];
+      const c = t ? Number(t.coins) : 0;
+      return c > 0 ? c : 0;
+    };
+    return (
+      <View
+        style={[styles.container, style]}
+        onLayout={(e) => {
+          ivsSession.markSurfaceReady();
+          setLayout(e.nativeEvent.layout);
+        }}
+      >
+        {/* Host stays prominent + fixed; only guests page */}
+        <View style={styles.hostStage}>
+          {hostStream ? (
+            <NativeIVSRealTimeView
+              style={styles.realTimeView}
+              stageArn={stageArnForSurface}
+              token={tokenForSurface}
+              sessionId={streamId}
+              slotId={0}
+              participantId={hostStream.participantId}
+              remoteTrackCount={ivsSession.remoteVideoTracks}
+              zoom={1.0}
+              testID="ivs-realtime-viewer-host"
+            />
+          ) : (
+            <View style={styles.hostPlaceholder}>
+              <Text style={styles.placeholderText}>Waiting for host…</Text>
+            </View>
+          )}
+
+          <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinStyles.hostPos} />
+
+          {guestMode && (
+            <View style={styles.guestModeBanner}>
+              <Text style={styles.guestModeText}>Guest mode</Text>
+              <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
+                <Text style={styles.leaveGuestText}>Leave guest</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {!!guestJoinError && (
+            <View style={styles.guestErrorBanner}>
+              <Text style={styles.guestErrorText}>{guestJoinError}</Text>
+            </View>
+          )}
+        </View>
+
+        {/*
+          Fill the small gap between guest tiles and the comments bar with the header/theme color.
+          Keeps the guest area itself transparent (no blue behind tiles).
+        */}
+        {overlayBottomInset > 0 && guestBottomStripHeight > 0 && (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.guestBottomStrip,
+              { bottom: overlayBottomInset || 0, height: guestBottomStripHeight },
+            ]}
+          />
+        )}
+
+        <View
+          {...guestTrayPanResponder.panHandlers}
+          style={[
+            styles.guestPager,
+            overlayBottomInset ? { bottom: overlayBottomInset } : null,
+            guestTrayMode === 'hidden'
+              ? { height: GUEST_TRAY_HIDDEN_TAB_HEIGHT, paddingBottom: 0 }
+              : guestGridHeight
+                ? { height: guestGridHeight + 16 }
+                : null,
+          ]}
+          onLayout={(e) => {
+            if (guestTrayMode === 'hidden') {
+              setGuestPagerMeasuredHeight(GUEST_TRAY_HIDDEN_TAB_HEIGHT);
+              if (typeof onGuestPagerLayout === 'function') {
+                onGuestPagerLayout(GUEST_TRAY_HIDDEN_TAB_HEIGHT);
+              }
+              return;
+            }
+            const h = e?.nativeEvent?.layout?.height || 0;
+            setGuestPagerMeasuredHeight(h);
+            if (typeof onGuestPagerLayout === 'function') {
+              onGuestPagerLayout(h);
+            }
+          }}
+        >
+          {guestTrayMode === 'hidden' ? (
+            <View style={styles.hiddenTrayHandle} pointerEvents="none">
+              <View style={styles.hiddenTrayPill} />
+              <Text style={styles.hiddenTrayText}>Swipe up</Text>
+            </View>
+          ) : (
+            <ScrollView
+              ref={guestPagerScrollRef}
+              contentContainerStyle={styles.guestPagerContent}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              scrollEnabled={pageCount > 1}
+            >
+              {Array.from({ length: pageCount }, (_, pageIdx) => {
+                const baseGuestIndex = pageIdx * guestsPerPage;
+                return (
+                  <View key={`guest-page-${pageIdx}`} style={[styles.guestPage, { width: layout.width || undefined }]}>
+                    <View style={styles.guestPageInner}>
+                      <View
+                        style={guestTrayMode === 'collapsed' ? styles.guestGridCollapsed : styles.guestGrid}
+                        onLayout={(e) => {
+                          const h = e?.nativeEvent?.layout?.height || 0;
+                          if (h) setGuestGridHeight(h);
+                        }}
+                      >
+                        {Array.from({ length: guestsPerPage }, (_, tileIdx) => {
+                          const globalSlotId = 1 + baseGuestIndex + tileIdx;
+                          const isOutOfRange = globalSlotId > guestSlotsTotal;
+                          // Place the guest whose host-assigned slotIndex matches this box,
+                          // so the same guest lands in the same box on host + every viewer.
+                          const stream =
+                            !(guestMode && guestSlotId === globalSlotId)
+                              ? streamForSlot(globalSlotId)
+                              : null;
+
+                          if (isOutOfRange) {
+                            return (
+                              <View
+                                key={`guest-empty-${globalSlotId}`}
+                                style={[
+                                  guestTrayMode === 'collapsed' ? styles.guestTileSquareCollapsed : styles.guestTileSquare,
+                                  styles.guestTileHidden,
+                                ]}
+                              />
+                            );
+                          }
+
+                          const tileUserId =
+                            guestMode && guestSlotId === globalSlotId
+                              ? uid
+                              : userBySlotIndex.get(globalSlotId) ||
+                                (stream ? userByParticipant.get(stream.participantId) : null) ||
+                                null;
+
+                          return (
+                            <View
+                              key={stream?.streamKey || stream?.participantId || `guest-slot-${globalSlotId}`}
+                              style={guestTrayMode === 'collapsed' ? styles.guestTileSquareCollapsed : styles.guestTileSquare}
+                            >
+                              <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinStyles.guestPos} />
+                              {guestMode && guestSlotId === globalSlotId ? (
+                                NativeIVSBroadcastView ? (
+                                  <View style={styles.tileVideoSurface}>
+                                    <NativeIVSBroadcastView zoom={GUEST_TILE_ZOOM} style={StyleSheet.absoluteFill} />
+                                  </View>
+                                ) : (
+                                  <View style={styles.tilePlaceholder}>
+                                    <Text style={styles.placeholderText}>Camera unavailable</Text>
+                                  </View>
+                                )
+                              ) : stream ? (
+                                <NativeIVSRealTimeView
+                                  style={styles.realTimeView}
+                                  stageArn={stageArnForSurface}
+                                  token={tokenForSurface}
+                                  sessionId={streamId}
+                                  slotId={globalSlotId}
+                                  participantId={stream.participantId}
+                                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                                  zoom={GUEST_TILE_ZOOM}
+                                  testID={`ivs-realtime-viewer-guest-${globalSlotId}`}
+                                />
+                              ) : (
+                                globalSlotId === firstJoinSlotId ? (
+                                  (() => {
+                                    const isQueued = guestRequestStatus === 'sent' && !guestJoinError;
+                                    const isSending = guestRequestStatus === 'sending';
+                                    return (
+                                      <TouchableOpacity
+                                        style={[styles.joinTile, isQueued && styles.joinTileQueued]}
+                                        activeOpacity={0.85}
+                                        onPress={() => requestToJoinAsGuest(globalSlotId)}
+                                        disabled={isSending || isQueued}
+                                      >
+                                        <View style={[styles.joinPlusCircle, isQueued && styles.joinPlusCircleQueued]}>
+                                          {isQueued ? (
+                                            <Icon name="time-outline" size={18} color="#0A0A0C" />
+                                          ) : (
+                                            <Text style={styles.joinPlusText}>+</Text>
+                                          )}
+                                        </View>
+                                        <Text style={[styles.joinLabelText, isQueued && styles.joinLabelTextQueued]}>
+                                          {isSending
+                                            ? 'Requesting…'
+                                            : isQueued
+                                              ? 'In queue'
+                                              : guestJoinError
+                                                ? 'Retry'
+                                                : 'Join'}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })()
+                                ) : (
+                                  <View style={styles.emptyTile}>
+                                    <View style={styles.emptyTileInner} />
+                                  </View>
+                                )
+                              )}
+
+                              {globalSlotId >= 2 && (
+                                <View pointerEvents="none" style={styles.slotNumberBadge}>
+                                  <Text style={styles.slotNumberText}>{globalSlotId}</Text>
+                                </View>
+                              )}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
+        {!hasRenderableStreams && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.statusText}>Preparing video...</Text>
+            {__DEV__ && (
+              <View style={styles.debugOverlay}>
+                <Text style={styles.debugText}>Stage: {ivsSession.stageArn}</Text>
+                <Text style={styles.debugText}>Session: {streamId}</Text>
+                <Text style={styles.debugText}>Status: {ivsSession.connectionState}</Text>
+                <Text style={styles.debugText}>Surface ready: {ivsSession.surfaceReady ? 'yes' : 'no'}</Text>
+                <Text style={styles.debugText}>First frame: {ivsSession.firstFrameSeen ? 'yes' : 'no'}</Text>
+                <Text style={styles.debugText}>Remote video tracks: {ivsSession.remoteVideoTracks}</Text>
+                <Text style={styles.debugText}>Visible streams: {renderableStreams.length}</Text>
+              </View>
+            )}
+          </View>
+        )}
+        {showLoading && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.statusText}>Connecting to live stream...</Text>
+          </View>
+        )}
+        {showError && (
+          <View style={styles.loadingOverlay}>
+            <Text style={styles.errorText}>Failed to connect to stream</Text>
+            <Text style={styles.statusText}>{ivsSession.error}</Text>
+          </View>
+        )}
+        {showDisconnected && (
+          <View style={styles.loadingOverlay}>
+            <Text style={styles.statusText}>Stream ended</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  // Fallback: legacy IVS Player (HLS) view
+  if (NativeIVSPlayerView) {
+    return (
+      <View style={[styles.container, style]}>
+        <NativeIVSPlayerView style={styles.playerView} />
+      </View>
+    );
+  }
+
+  // Fallback: Show connected status with debug info
+  return (
+    <View style={[styles.container, style]}>
+      <View style={styles.connectedPlaceholder}>
+        <Text style={styles.connectedTitle}>
+          {NativeIVSRealTimeView ? '⏳ Stream Loading...' : '❌ Error'}
+        </Text>
+        <Text style={styles.connectedSubtitle}>
+          {!NativeIVSRealTimeView && 'Real-Time view not available on this platform'}
+          {NativeIVSRealTimeView && !hasStageCredentials && 'Fetching stream credentials...'}
+          {NativeIVSRealTimeView && hasStageCredentials && ivsSession.connectionState !== 'connected' && `Connection: ${ivsSession.connectionState}`}
+          {NativeIVSRealTimeView && hasStageCredentials && ivsSession.connectionState === 'connected' && ivsSession.remoteVideoTracks === 0 && 'Waiting for broadcaster...'}
+        </Text>
+        <View style={styles.connectionInfo}>
+          <Text style={styles.infoLabel}>Stream ID</Text>
+          <Text style={styles.infoValue}>{streamId}</Text>
+          <Text style={styles.infoLabel}>Connection State</Text>
+          <Text style={styles.infoValue}>{ivsSession.connectionState}</Text>
+          <Text style={styles.infoLabel}>Participants</Text>
+          <Text style={styles.infoValue}>Connecting...</Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+/**
+ * HLS Live Stream Viewer (Legacy)
+ * Uses segmented HLS playback
+ */
+const HLSLiveStreamViewer = ({ streamId, onError, style }) => {
+  const { uid } = useAuth();
   const videoRef = useRef(null);
   const secondaryVideoRef = useRef(null);
-  
+  const [playbackUrl, setPlaybackUrl] = useState(null);
+
   // TikTok-style state management
   const [currentSegment, setCurrentSegment] = useState(-1);
   const [segmentBuffer, setSegmentBuffer] = useState(new Map());
@@ -44,7 +1414,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [streamData, setStreamData] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
-  
+
   // Advanced playback management
   const unsubscribeRef = useRef(null);
   const playbackQueueRef = useRef([]);
@@ -61,101 +1431,129 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const stallCounterRef = useRef(createSlidingWindowCounter(15000)); // 15s window
   const lastEstimatorEmitRef = useRef(0); // throttle ABR estimator analytics
 
-  // Kill switch: graceful early fallback (no subscriptions, timers)
-  if (!ENABLE_LIVE_FEATURES) {
-    return (
-      <View style={[styles.container, style, { justifyContent: 'center', alignItems: 'center' }]}> 
-        <Text style={{ color: 'white', fontSize: 16 }}>Live streaming is currently disabled.</Text>
-      </View>
-    );
-  }
-
-  // Segment source adapter (subcollection | legacyMap | playlist)
-  const segmentSource = decideSegmentSource();
-  // TODO(stage2-live-unification): Remove legacyMap fallback once all streams migrated.
-  // TODO(stage2-live-unification): Consolidate playlist ABR path with canonical segment window adapter.
-
   // TikTok-style segment subscription with intelligent buffering
   useEffect(() => {
     if (!streamId) return;
 
-  if (__DEV__) console.log(`🎬 TikTok-style viewer initializing for stream ${streamId}`);
+    if (__DEV__) console.log(`🎬 TikTok-style viewer initializing for stream ${streamId}`);
     setConnectionStatus('connecting');
-    
-    // Subscribe to stream updates with enhanced error handling
-    unsubscribeRef.current = HLSLiveStreamService.subscribeToStream(streamId, async (data) => {
+
+    // Log viewer subscribe request
+    logStreamingEvent('VIEWER_SUBSCRIBE_REQUEST', {
+      backendId: 'HLS',
+      streamId,
+      userId: uid || null,
+      source: 'viewer_ui',
+    });
+
+    // Subscribe to stream updates via streaming backend
+    const backend = getStreamingBackend();
+    unsubscribeRef.current = backend.subscribeToStream(streamId, async (snapshot) => {
+      // Backend returns ViewerStreamSnapshot | null
+      const data = snapshot;
       if (!data) {
         console.log('📡 Stream ended or connection lost');
         setConnectionStatus('ended');
+        logStreamingEvent('VIEWER_SUBSCRIBE_END', {
+          backendId: 'HLS',
+          streamId,
+          source: 'viewer_ui',
+        });
         handleStreamEnd();
         return; // End early when stream data unavailable
       }
 
+      // Log first successful snapshot (status=live)
+      if (connectionStatus === 'connecting' && data.status === 'live') {
+        logStreamingEvent('VIEWER_SUBSCRIBE_SNAPSHOT', {
+          backendId: 'HLS',
+          streamId,
+          status: 'live',
+          viewerCount: data.viewCount,
+          source: 'viewer_ui',
+        });
+      }
+
       setStreamData(data);
+
+      if (data.status === 'ended' || data.isLive === false) {
+        console.log('📡 Stream marked ended in snapshot');
+        setConnectionStatus('ended');
+        logStreamingEvent('VIEWER_SUBSCRIBE_END', {
+          backendId: 'HLS',
+          streamId,
+          status: data.status || 'ended',
+          source: 'viewer_ui',
+        });
+        handleStreamEnd();
+        return;
+      }
+
       setConnectionStatus('connected');
-      
+
+      // Capture playback URL if provided by backend
+      if (data?.playbackUrl) {
+        console.log('[LiveStreamViewer][PLAYBACK_URL] Received:', {
+          playbackUrl: data.playbackUrl,
+          status: data.status,
+          streamId: data.streamId,
+        });
+        setPlaybackUrl(data.playbackUrl);
+      } else {
+        console.warn('[LiveStreamViewer][NO_PLAYBACK_URL]', {
+          streamId,
+          status: data?.status,
+          dataKeys: data ? Object.keys(data) : 'null',
+        });
+      }
+
       // TikTok-style intelligent segment management
       if (data.currentSegment >= 0) {
         const latestSegment = data.currentSegment;
-        let windowSegments = [];
-        if (segmentSource === 'subcollection') {
-          // Subcollection window retrieval (adapter already handles size + recent ordering)
-          windowSegments = await StreamSegmentsAdapter.getWindow(streamId, 5);
-        } else if (segmentSource === 'legacyMap') {
-          // Legacy inline map fallback
-          // TODO(stage2-live-unification): Remove legacy map buffering logic.
-          const segs = [];
-          for (let i = Math.max(0, latestSegment - 4); i <= latestSegment; i++) {
-            const legacySeg = data.segments?.[i];
-            if (legacySeg && legacySeg.url) segs.push({ number: i, url: legacySeg.url });
-          }
-          windowSegments = segs;
-        } else if (segmentSource === 'playlist') {
-          // Playlist mode uses parsed segments below; treat here as empty initial buffer
-          windowSegments = [];
+        // Prefer adapter window (subcollection) fallback to legacy map
+        const windowSegments = await StreamSegmentsAdapter.getWindow(streamId, 5);
+        const newBuffer = new Map();
+        windowSegments.forEach(s => newBuffer.set(s.number, { ...s, timestamp: Date.now() }));
+        setSegmentBuffer(newBuffer);
+        if (currentSegment === -1 && latestSegment >= 0) {
+          // Initial playback start should not reference a quality adaptation decision yet.
+          // Cooldown logic applies only to subsequent quality switches handled in adaptation loop.
+          setCurrentSegment(Math.max(0, latestSegment - 1));
+          startPlayback();
         }
-        if (segmentSource !== 'playlist') {
-          const newBuffer = new Map();
-          windowSegments.forEach(s => newBuffer.set(s.number, { ...s, timestamp: Date.now() }));
-          setSegmentBuffer(newBuffer);
-          if (currentSegment === -1 && latestSegment >= 0 && newBuffer.size) {
-            setCurrentSegment(Math.max(0, latestSegment - 1));
-            startPlayback();
-          }
-        }
-        // Manifest / playlist handling (transitional ABR path)
-        if (segmentSource === 'playlist' && isManifestEnabled()) {
+        // Manifest feature flag instrumentation (transitional)
+        if (isManifestEnabled()) {
           try {
             let manifest = await ManifestService.generateLocalManifest(streamId);
             // Attempt remote master playlist fetch if playlist viewer mode enabled
-            if (ENABLE_PLAYLIST_MANIFEST_VIEWER && isPlaylistViewerEnabled()) {
+            if (isPlaylistViewerEnabled()) {
               const remoteMaster = await PlaylistFetchService.getMaster(streamId);
               if (remoteMaster) {
                 EnterpriseAnalyticsService.addEvent({ type: 'playlist_master_fetched', streamId, timestamp: Date.now() });
-                    lastQualitySwitchRef.current = Date.now();
+                lastQualitySwitchRef.current = Date.now();
                 // For now choose first variant listed or fallback to local manifest
-                  const masterParsed = PlaylistParserService.parseMaster(remoteMaster);
-                  variantsRef.current = masterParsed.variants || [];
-                  let chosenQuality = null;
-                  let networkType = 'unknown';
-                  try {
-                    const state = await NetInfo.fetch();
-                    networkType = state?.type || 'unknown';
-                  } catch {}
-                  try {
-                    chosenQuality = QualitySelectionService.chooseQuality(masterParsed.variants, networkType);
-                  } catch {}
+                const masterParsed = PlaylistParserService.parseMaster(remoteMaster);
+                variantsRef.current = masterParsed.variants || [];
+                let chosenQuality = null;
+                let networkType = 'unknown';
+                try {
+                  const state = await NetInfo.fetch();
+                  networkType = state?.type || 'unknown';
+                } catch { }
+                try {
+                  chosenQuality = QualitySelectionService.chooseQuality(masterParsed.variants, networkType);
+                } catch { }
                 const variantToUse = chosenQuality || masterParsed.variants[0]?.playlist;
                 if (variantToUse) {
-                  const qualityContent = await PlaylistFetchService.getQuality(streamId, variantToUse.replace('.m3u8',''));
+                  const qualityContent = await PlaylistFetchService.getQuality(streamId, variantToUse.replace('.m3u8', ''));
                   if (qualityContent) {
                     manifest = qualityContent; // treat quality playlist as playable segment list
-                      chosenQualityRef.current = variantToUse.replace('.m3u8','');
+                    chosenQualityRef.current = variantToUse.replace('.m3u8', '');
                     EnterpriseAnalyticsService.addEvent({
                       type: 'playlist_quality_selected',
                       streamId,
-                        quality: variantToUse.replace('.m3u8',''),
-                        experimentId: getFeatureFlags().playlistExperimentId,
+                      quality: variantToUse.replace('.m3u8', ''),
+                      experimentId: getFeatureFlags().playlistExperimentId,
                       timestamp: Date.now()
                     });
                   }
@@ -169,7 +1567,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
               timestamp: Date.now()
             });
             // Optional playlist viewer mode: parse quality playlist (simulate single quality)
-            if (ENABLE_PLAYLIST_MANIFEST_VIEWER && isPlaylistViewerEnabled() && manifest) {
+            if (isPlaylistViewerEnabled() && manifest) {
               // For transitional mode, treat entire manifest as single quality playlist
               const parsedSegments = PlaylistParserService.parseQuality(manifest);
               if (parsedSegments.length) {
@@ -210,9 +1608,9 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   // Update view count on mount/unmount
   useEffect(() => {
     if (!streamId) return;
-    HLSLiveStreamService.updateViewCount(streamId, true).catch(() => {});
+    HLSLiveStreamServiceInstance.updateViewCount(streamId, true).catch(() => { });
     return () => {
-      HLSLiveStreamService.updateViewCount(streamId, false).catch(() => {});
+      HLSLiveStreamServiceInstance.updateViewCount(streamId, false).catch(() => { });
     };
   }, [streamId]);
 
@@ -228,30 +1626,30 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
    */
   const managePlayback = useCallback(async () => {
     const targetSegment = segmentBuffer.get(currentSegment);
-    
+
     if (!targetSegment || !videoRef.current) {
       // Handle missing segment with TikTok-style recovery
-  if (__DEV__) console.log(`⚠️ Segment ${currentSegment} not available, attempting recovery...`);
+      if (__DEV__) console.log(`⚠️ Segment ${currentSegment} not available, attempting recovery...`);
       handleMissingSegment();
       return;
     }
 
-  if (__DEV__) console.log(`🎥 TikTok-style playback: segment ${currentSegment}`);
-    
+    if (__DEV__) console.log(`🎥 TikTok-style playback: segment ${currentSegment}`);
+
     try {
       setIsBuffering(false);
       setIsPlaying(true);
       retryCountRef.current = 0;
-      
+
       // TikTok optimization: preload while playing current
       preloadNextSegment();
       // Sample bandwidth (non-blocking) occasionally
       if (isPlaylistViewerEnabled() && SegmentBandwidthEstimatorService.shouldSample() && targetSegment?.url) {
         SegmentBandwidthEstimatorService.sample(targetSegment.url);
       }
-      
+
       const activeVideo = videoRef.current;
-      
+
       // Load segment with optimized settings
       await activeVideo.loadAsync(
         { uri: targetSegment.url },
@@ -264,10 +1662,10 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
         },
         false
       );
-      
+
       lastSegmentTimeRef.current = Date.now();
       lastPlaybackSegmentRef.current = currentSegment;
-      
+
     } catch (error) {
       console.error(`❌ Playback error for segment ${currentSegment}:`, error);
       handlePlaybackError(error);
@@ -280,7 +1678,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const preloadNextSegment = useCallback(() => {
     const nextSegment = segmentBuffer.get(currentSegment + 1);
     if (nextSegment && secondaryVideoRef.current) {
-  if (__DEV__) console.log(`📦 Preloading segment ${currentSegment + 1}`);
+      if (__DEV__) console.log(`📦 Preloading segment ${currentSegment + 1}`);
       secondaryVideoRef.current.loadAsync(
         { uri: nextSegment.url },
         { shouldPlay: false },
@@ -294,8 +1692,8 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
    */
   const handlePlaybackStatusUpdate = useCallback((status) => {
     if (status.didJustFinish) {
-  if (__DEV__) console.log(`✅ Segment ${currentSegment} completed, transitioning...`);
-      
+      if (__DEV__) console.log(`✅ Segment ${currentSegment} completed, transitioning...`);
+
       // TikTok-style seamless transition to next segment
       const nextSegmentNumber = currentSegment + 1;
       if (segmentBuffer.has(nextSegmentNumber)) {
@@ -311,7 +1709,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
     if (status.isBuffering !== isBuffering) {
       setIsBuffering(status.isBuffering);
     }
-    
+
     // Monitor playback health (TikTok-style)
     if (status.isLoaded && !status.isBuffering && !status.didJustFinish) {
       lastSegmentTimeRef.current = Date.now();
@@ -324,15 +1722,15 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
    */
   const handleMissingSegment = useCallback(() => {
     retryCountRef.current++;
-    
+
     if (retryCountRef.current > 3) {
       console.log('❌ Too many retry attempts, skipping segment');
       setCurrentSegment(prev => prev + 1);
       retryCountRef.current = 0;
       return;
     }
-    
-  if (__DEV__) console.log(`🔄 Retry ${retryCountRef.current}/3 for segment ${currentSegment}`);
+
+    if (__DEV__) console.log(`🔄 Retry ${retryCountRef.current}/3 for segment ${currentSegment}`);
     setTimeout(() => {
       if (segmentBuffer.has(currentSegment)) {
         managePlayback();
@@ -349,12 +1747,12 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
     if (segmentTimeoutRef.current) {
       clearTimeout(segmentTimeoutRef.current);
     }
-    
+
     segmentTimeoutRef.current = setTimeout(() => {
       if (segmentBuffer.has(segmentNumber)) {
         setCurrentSegment(segmentNumber);
       } else {
-  if (__DEV__) console.log(`⏰ Timeout waiting for segment ${segmentNumber}`);
+        if (__DEV__) console.log(`⏰ Timeout waiting for segment ${segmentNumber}`);
         // Try to skip to available segment
         const availableSegments = Array.from(segmentBuffer.keys()).sort((a, b) => a - b);
         const nextAvailable = availableSegments.find(s => s > currentSegment);
@@ -371,12 +1769,12 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const handlePlaybackError = useCallback((error) => {
     console.error('🚨 Playback error:', error);
     retryCountRef.current++;
-    
+
     if (retryCountRef.current > 2) {
       onError?.(new Error('Playback failed after retries'));
       return;
     }
-    
+
     setTimeout(() => {
       managePlayback();
     }, 2000);
@@ -386,7 +1784,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
    * Start initial playback
    */
   const startPlayback = useCallback(() => {
-  if (__DEV__) console.log('🎬 Starting TikTok-style playback');
+    if (__DEV__) console.log('🎬 Starting TikTok-style playback');
     setIsBuffering(false);
     setIsPlaying(true);
   }, []);
@@ -397,10 +1795,19 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
   const handleStreamEnd = useCallback(() => {
     setIsPlaying(false);
     setIsBuffering(false);
+
+    logStreamingEvent('VIEWER_ERROR', {
+      backendId: 'HLS',
+      streamId,
+      reason: 'STREAM_ENDED',
+      errorMessage: 'Stream has ended',
+      source: 'viewer_ui',
+    });
+
     // Ensure all subscriptions and timers are cleared on early termination
     cleanup();
     onError?.(new Error('Stream has ended'));
-  }, [onError]);
+  }, [onError, streamId]);
 
   /**
    * Cleanup function
@@ -439,7 +1846,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
           bitrate: 0,
           segmentUploadTime: 0,
           errorRate: retryCountRef.current / Math.max(1, currentSegment + 1),
-        }).catch(() => {});
+        }).catch(() => { });
         EnterpriseAnalyticsService.trackError(streamId, {
           type: 'stall',
           message: 'Playback stall detected',
@@ -450,7 +1857,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
           recoverySuccessful: false,
           recoveryMethod: 'auto-skip',
           recoveryTime: 0,
-        }).catch(() => {});
+        }).catch(() => { });
         // Attempt auto-skip if next segment exists
         const next = segmentBuffer.get(currentSegment + 1);
         if (next) {
@@ -474,7 +1881,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       try {
         const s = await NetInfo.fetch();
         networkType = s?.type || 'unknown';
-      } catch {}
+      } catch { }
       const metrics = {
         bufferSegments: segmentBuffer.size,
         stallCountWindow: stallCounterRef.current.count(),
@@ -512,7 +1919,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
         });
       }
       if (!chosenQualityRef.current) return;
-      const decision = decideNextQuality(chosenQualityRef.current, variantsRef.current.map(v => ({ name: v.playlist.replace('.m3u8','') })), metrics);
+      const decision = decideNextQuality(chosenQualityRef.current, variantsRef.current.map(v => ({ name: v.playlist.replace('.m3u8', '') })), metrics);
       // Handle skipped delta upgrade analytics
       if (decision && decision.skipped === true) {
         const type = decision.reason === 'delta_blocked'
@@ -533,7 +1940,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
         });
       }
       if (decision && !decision.skipped && decision.target !== chosenQualityRef.current) {
-        const direction = variantsRef.current.findIndex(v => v.playlist.replace('.m3u8','') === decision.target) > variantsRef.current.findIndex(v => v.playlist.replace('.m3u8','') === chosenQualityRef.current) ? 'upgrade' : 'downgrade';
+        const direction = variantsRef.current.findIndex(v => v.playlist.replace('.m3u8', '') === decision.target) > variantsRef.current.findIndex(v => v.playlist.replace('.m3u8', '') === chosenQualityRef.current) ? 'upgrade' : 'downgrade';
         try {
           const qualityContent = await PlaylistFetchService.getQuality(streamId, decision.target);
           if (qualityContent) {
@@ -586,6 +1993,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       <UnifiedVideo
         ref={videoRef}
         style={styles.video}
+        uri={playbackUrl || undefined}
         resizeMode="cover" // TikTok-style full coverage
         onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         shouldPlay={true}
@@ -593,7 +2001,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
         useNativeControls={false}
         isLooping={false}
       />
-      
+
       {/* Secondary video player for preloading (hidden) */}
       <UnifiedVideo
         ref={secondaryVideoRef}
@@ -607,7 +2015,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       {/* TikTok-style connection status */}
       {connectionStatus === 'connecting' && (
         <View style={styles.connectionContainer}>
-          <ActivityIndicator size="large" color="#FF1744" />
+          <ActivityIndicator size="large" color={COLORS.gradientEnd} />
           <Text style={styles.connectionText}>Connecting to live stream...</Text>
         </View>
       )}
@@ -615,7 +2023,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
       {/* Enhanced buffering indicator */}
       {isBuffering && connectionStatus === 'connected' && (
         <View style={styles.bufferingContainer}>
-          <ActivityIndicator size="large" color="#FF1744" />
+          <ActivityIndicator size="large" color={COLORS.gradientEnd} />
           <Text style={styles.bufferingText}>
             {segmentBuffer.size === 0 ? 'Loading stream...' : 'Buffering...'}
           </Text>
@@ -641,7 +2049,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
         <View style={[
           styles.qualityDot,
           {
-            backgroundColor: connectionStatus === 'connected' 
+            backgroundColor: connectionStatus === 'connected'
               ? (retryCountRef.current === 0 ? '#00FF00' : '#FFFF00')
               : '#FF0000'
           }
@@ -665,7 +2073,7 @@ const LiveStreamViewer = ({ streamId, onError, style }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,
   },
   video: {
     flex: 1,
@@ -682,6 +2090,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.9)',
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
   },
   connectionText: {
     color: 'white',
@@ -769,6 +2183,334 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'monospace',
     marginVertical: 1,
+  },
+  playerView: {
+    width: '100%',
+    height: '100%',
+  },
+  realTimeView: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  tile: {
+    width: '50%',
+    height: '33.333%',
+    padding: 4,
+  },
+  hostTile: {
+    borderColor: '#4ade80',
+    borderWidth: 1,
+  },
+  guestTile: {},
+  hostStage: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#000',
+  },
+  guestModeBanner: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  guestModeText: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  leaveGuestButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  leaveGuestText: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  guestErrorBanner: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  guestErrorText: {
+    color: COLORS.textPrimary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  hostPlaceholder: {
+    flex: 1,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guestPager: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingBottom: 16,
+    backgroundColor: 'transparent',
+    zIndex: 2,
+  },
+  hiddenTrayHandle: {
+    alignSelf: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 28,
+    paddingHorizontal: 12,
+  },
+  hiddenTrayPill: {
+    width: 54,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    marginBottom: 4,
+  },
+  hiddenTrayText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  slotNumberBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  slotNumberText: {
+    color: 'rgba(255, 255, 255, 0.92)',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  guestBottomStrip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: COLORS.background,
+    zIndex: 1,
+  },
+  guestPagerContent: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 0,
+  },
+  guestPageInner: {
+    paddingHorizontal: 8,
+  },
+  guestPage: {
+    width: '100%',
+  },
+  guestGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    width: '100%',
+    justifyContent: 'center',
+  },
+  guestGridCollapsed: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    width: '100%',
+    justifyContent: 'center',
+    paddingBottom: 12,
+  },
+  guestTileSquare: {
+    // 4 columns (2 rows) => 8 guest slots visible, matching host layout.
+    width: '23%',
+    marginHorizontal: '1%',
+    aspectRatio: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 190, 0.35)',
+  },
+  guestTileSquareCollapsed: {
+    // 4 columns (1 row) => 4 guest slots visible
+    width: '23%',
+    marginHorizontal: '1%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    marginBottom: 0,
+    borderWidth: 1,
+    borderColor: COLORS.backgroundLight,
+  },
+  guestTileHidden: {
+    opacity: 0,
+  },
+  emptyTile: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.45,
+  },
+  emptyTileInner: {
+    width: '70%',
+    height: '70%',
+    borderRadius: 10,
+    backgroundColor: COLORS.backgroundLight,
+    borderWidth: 1,
+    borderColor: COLORS.backgroundLight,
+  },
+  joinTile: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
+  },
+  joinPlusCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.backgroundLight,
+    borderWidth: 1,
+    borderColor: COLORS.backgroundLight,
+  },
+  joinPlusText: {
+    color: COLORS.textPrimary,
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: '700',
+    marginTop: -1,
+  },
+  joinLabelText: {
+    marginTop: 8,
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  // "In queue" state: teal-tinted tile so the viewer clearly sees they are
+  // waiting for the host to accept (not just a greyed-out "Waiting…").
+  joinTileQueued: {
+    backgroundColor: 'rgba(0,210,190,0.14)',
+    borderWidth: 1,
+    borderColor: '#00D2BE',
+  },
+  joinPlusCircleQueued: {
+    backgroundColor: '#00D2BE',
+    borderColor: '#00D2BE',
+  },
+  joinLabelTextQueued: {
+    color: '#00D2BE',
+  },
+  tilePlaceholder: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholderText: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tileVideoSurface: {
+    flex: 1,
+    backgroundColor: COLORS.black,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    overflow: 'hidden',
+  },
+  tileDebug: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    padding: 8,
+    borderRadius: 6,
+  },
+  debugOverlay: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 12,
+    borderRadius: 8,
+    minWidth: 160,
+  },
+  connectedPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    padding: 20,
+  },
+  connectedTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#4ade80',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  connectedSubtitle: {
+    fontSize: 14,
+    color: '#a0a0a0',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  connectionInfo: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(76, 222, 128, 0.2)',
+  },
+  infoLabel: {
+    fontSize: 12,
+    color: '#808080',
+    marginTop: 12,
+    marginBottom: 4,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  infoValue: {
+    fontSize: 13,
+    color: '#e0e0e0',
+    fontFamily: 'monospace',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    padding: 8,
+    borderRadius: 6,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 16,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: COLORS.error,
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
 

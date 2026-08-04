@@ -10,11 +10,13 @@ const iconMap = {
   person: Icons.User,
 };
 
-const TabBarIcon = ({ name, color, size = 24, badge }) => {
+const TabBarIcon = ({ name, color, size = 24, badge, focused = false }) => {
   const IconComp = iconMap[name] || Icons.Circle;
   return (
     <View style={styles.container}>
-      <IconComp size={size} color={color} />
+      <View style={[styles.iconShell, focused ? styles.iconShellActive : styles.iconShellInactive]}>
+        <IconComp size={focused ? size + 1 : size} color={color} />
+      </View>
       {badge && badge > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>
@@ -32,10 +34,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconShell: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  iconShellActive: {
+    backgroundColor: 'rgba(30,41,59,0.95)',
+    borderColor: 'rgba(255,255,255,0.22)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.32,
+    shadowRadius: 7,
+    elevation: 6,
+  },
+  iconShellInactive: {
+    backgroundColor: 'rgba(15,23,42,0.52)',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
   badge: {
     position: 'absolute',
-    right: -8,
-    top: -4,
+    right: -7,
+    top: -5,
     backgroundColor: '#DC2626',
     borderRadius: 10,
     minWidth: 20,

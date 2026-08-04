@@ -92,20 +92,20 @@ Use this checklist to deploy your new live streaming feature to production.
 - [ ] **Network interruption**: Turn off WiFi mid-stream
   - [ ] ✓ Recovers when reconnected
   - [ ] ✓ Viewers can rejoin
-  
+
 - [ ] **Background/Foreground**: Put app in background
   - [ ] ✓ Stream pauses appropriately
   - [ ] ✓ Resumes when app reopens
-  
+
 - [ ] **Multiple viewers**: Join with 3+ devices
   - [ ] ✓ View count accurate
   - [ ] ✓ All viewers see stream
   - [ ] ✓ Comments work for all
-  
+
 - [ ] **Late join**: Start stream, wait 30 seconds, then join
   - [ ] ✓ Viewer can join mid-stream
   - [ ] ✓ Playback starts from current segment
-  
+
 - [ ] **End stream**: Creator taps "End"
   - [ ] ✓ Stream status updates to "ended"
   - [ ] ✓ Viewers see "Stream Ended" message
@@ -302,12 +302,16 @@ import { LiveStreamsFeed } from './examples/LiveStreamIntegrationExamples';
 
 ### ✅ 15. Build for Production
 
-```powershell
-# Create production build
-eas build --platform android --profile production
+> HISTORICAL ONLY - NON-CANONICAL - DO NOT USE FOR RELEASE.
+> The only valid Android Play-upload AAB release path is:
+> `powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\release\\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>`
 
-# Wait for build to complete (15-30 minutes)
-# Download APK or AAB file
+```powershell
+# Canonical Android Play-upload AAB build
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <versionCode>
+
+# Optional submit after canonical build completes
+eas submit --platform android --profile production
 ```
 
 - [ ] Production build created

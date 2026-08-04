@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import Icon from '../components/Icon';
+import ScreenContainer from '../components/ScreenContainer';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
+import { COLORS } from '../styles/theme';
 
 const VoiceMemoScreen = () => {
   const navigation = useNavigation();
@@ -112,7 +113,8 @@ const VoiceMemoScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <ScreenContainer noSafeArea={true} style={styles.screenContainer}>
+      <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon  name="close" size={24} color="#9ca3af"  />
@@ -148,7 +150,7 @@ const VoiceMemoScreen = () => {
             activeOpacity={0.8}
           >
             <LinearGradient
-              colors={isRecording ? ['#ef4444', '#dc2626'] : ['#a855f7', '#d946ef', '#ec4899']}
+              colors={isRecording ? ['#ef4444', '#dc2626'] : ['#00D2BE', '#00D2BE', '#00A89E']}
               style={styles.recordGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
@@ -156,7 +158,7 @@ const VoiceMemoScreen = () => {
               <Icon  
                 name={isRecording ? 'stop' : 'mic'} 
                 size={48} 
-                color="white" 
+                color={isRecording ? 'white' : '#0A0A0C'} 
                />
             </LinearGradient>
           </TouchableOpacity>
@@ -172,7 +174,7 @@ const VoiceMemoScreen = () => {
               <Icon  
                 name={isPlaying ? 'pause' : 'play'} 
                 size={32} 
-                color="#a855f7" 
+                color="#00D2BE" 
                />
             </TouchableOpacity>
             
@@ -196,14 +198,18 @@ const VoiceMemoScreen = () => {
           </View>
         )}
       </View>
-    </SafeAreaView>
+      </View>
+    </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
+  screenContainer: {
+    paddingTop: 0,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -246,7 +252,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 100,
     borderWidth: 2,
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   pulseRing1: {
     width: 120,
@@ -291,12 +297,12 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#141418',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 32,
     borderWidth: 2,
-    borderColor: '#a855f7',
+    borderColor: '#00D2BE',
   },
   playbackActions: {
     flexDirection: 'row',
