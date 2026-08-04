@@ -54,7 +54,10 @@
         <action android:name="android.service.notification.NotificationListenerService"/>
       </intent-filter>
     </service>
-    <!-- Prefer our call handler over Expo's default FCM service for MESSAGING_EVENT. -->
+    <!-- Own FCM: Expo's service cannot start IncomingCallModule when JS is dead. -->
+    <service
+      android:name="expo.modules.notifications.service.ExpoFirebaseMessagingService"
+      tools:node="remove"/>
     <service
       android:name="com.blyp.mobile.calls.BlypCallMessagingService"
       android:exported="false"
