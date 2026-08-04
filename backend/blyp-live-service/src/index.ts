@@ -29,6 +29,19 @@ const port = (() => {
 
 const app = express();
 
+// Wallet polls every few seconds from the app. Express's default weak ETag makes
+// OkHttp send If-None-Match and receive HTTP 304 with an empty body. RN fetch
+// then fails JSON parse, so the UI keeps its initial balance of 0 even when
+// Postgres has coins. Disable ETags and force no-store for all JSON API GETs.
+app.set('etag', false);
+app.use((req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+  }
+  next();
+});
+
 // Security headers (safe defaults for a JSON API; CSP disabled since we serve no HTML).
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
 

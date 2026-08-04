@@ -69,9 +69,8 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
       checkDailyReward();
       return unsubscribe;
     }
-    // No uid yet; show zeros.
-    setBalance(0);
-    setGemBalance(0);
+    // No uid yet — keep last-known values (do not force 0; auth flicker +
+    // failed wallet poll previously stuck purchased balances at zero).
   }, [effectiveUid, authReady, isAuthenticated]);
 
   useEffect(() => {

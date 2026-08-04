@@ -89,6 +89,10 @@ export async function callEconomyBackend<T>(
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        // Prevent OkHttp / intermediaries from serving a stale empty 304 for
+        // /wallet after a purchase (balance would stick at the initial 0).
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
       body: method === 'GET' ? undefined : JSON.stringify(body),
       signal: controller.signal,
@@ -99,6 +103,11 @@ export async function callEconomyBackend<T>(
     throw new Error(`[ECONOMY_API] Network error for ${path}: ${msg}`);
   } finally {
     clearTimeout(timeoutId);
+  }
+
+  // HTTP 304 has no body — never treat it as a successful empty wallet.
+  if (res.status === 304) {
+    throw new Error(`[ECONOMY_API] Stale cache (HTTP 304) for ${path}`);
   }
 
   let json: any;

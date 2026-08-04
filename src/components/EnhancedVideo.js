@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { AppState, View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
 import { getPlayableVideoUri } from '../utils/videoCache';
 
@@ -8,14 +8,30 @@ function EnhancedVideo(props) {
   const [playableUri, setPlayableUri] = useState(null);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
 
   const remoteUri = props.uri || props.videoUrl;
-  const isFocused = props.shouldPlay ?? true;
+  // Navigation focus AND app foreground — leaving to the phone home screen
+  // does not blur React Navigation, so without AppState audio kept playing.
+  const isFocused = (props.shouldPlay ?? true) && appActive;
   // Only resolve/download + mount the video element when the row is near the
   // viewport. Off-screen items render just their poster (no network, no decode),
   // which keeps scrolling fast and avoids eagerly downloading every feed video.
   const shouldLoad = props.shouldLoad ?? true;
   const posterUri = props.poster;
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      setAppActive(next === 'active');
+    });
+    return () => {
+      try {
+        sub?.remove?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   // Resolve URI through cache helper — but only once this item should load.
   useEffect(() => {

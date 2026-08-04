@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, Image, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Image, ActivityIndicator, StyleSheet, AppState } from 'react-native';
 import { Audio } from 'expo-av';
 
 export default function AudioTile({ uri, user, title, style, autoPlay = false, shouldLoad = true }) {
@@ -37,6 +37,18 @@ export default function AudioTile({ uri, user, title, style, autoPlay = false, s
       unloadSound();
     };
   }, [loadSound, unloadSound]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (next) => {
+      if (next === 'active') return;
+      try {
+        await soundRef.current?.pauseAsync?.();
+      } catch {}
+    });
+    return () => {
+      try { sub?.remove?.(); } catch {}
+    };
+  }, []);
 
   const togglePlay = async () => {
     try {

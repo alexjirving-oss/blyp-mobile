@@ -528,9 +528,9 @@ const HomeScreen = ({ navigation, route }) => {
   // bandwidth and the per-change JS work on Home.
 
   useEffect(() => {
+    // Do NOT force balances to 0 while auth is still resolving — that race plus
+    // a failed/304 wallet poll permanently stuck the header at 0 after purchases.
     if (!authReady || !isAuthenticated || !uid) {
-      setCoinBalance(0);
-      setGemBalance(0);
       return;
     }
 

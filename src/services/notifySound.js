@@ -10,18 +10,20 @@ const BLYP_NOTIFY = require('../../assets/sounds/blyp_notify.wav');
 /** Silence between ringtone plays while a call is ringing. */
 export const RING_GAP_MS = 2000;
 
-let sharedModeReady = false;
+let ringModeActive = false;
 
-async function ensureAudioMode() {
-  if (sharedModeReady) return;
+async function setNotifyAudioMode({ background = false } = {}) {
   try {
     await Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
+      // Only stay active in background for looping call ringtone.
+      // Leaving this true after a message sting made feed video keep
+      // playing audio after the user left the app.
+      staysActiveInBackground: !!background,
       shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
     });
-    sharedModeReady = true;
+    ringModeActive = !!background;
   } catch {
     // Best-effort — still try to play.
   }
@@ -33,7 +35,7 @@ async function ensureAudioMode() {
  */
 export async function playBlypNotify({ looping = false, volume = 1, gapMs = RING_GAP_MS } = {}) {
   try {
-    await ensureAudioMode();
+    await setNotifyAudioMode({ background: !!looping });
     const { sound } = await Audio.Sound.createAsync(
       BLYP_NOTIFY,
       {
@@ -86,7 +88,12 @@ export async function playBlypNotify({ looping = false, volume = 1, gapMs = RING
 
 /** Stop and unload a sound instance (safe no-op). */
 export async function stopBlypNotify(sound) {
-  if (!sound) return;
+  if (!sound) {
+    if (ringModeActive) {
+      await setNotifyAudioMode({ background: false });
+    }
+    return;
+  }
   try {
     if (typeof sound.__blypRingCleanup === 'function') {
       sound.__blypRingCleanup();
@@ -104,6 +111,8 @@ export async function stopBlypNotify(sound) {
   } catch {
     // ignore
   }
+  // Restore foreground-only audio so feed video cannot keep playing on Home.
+  await setNotifyAudioMode({ background: false });
 }
 
 export const BLYP_NOTIFY_ASSET = BLYP_NOTIFY;

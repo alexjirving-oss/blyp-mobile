@@ -19,6 +19,7 @@ import BlypLogo from '../components/BlypLogo';
 import HeaderWalletBalances from '../components/HeaderWalletBalances';
 import { useAuth, hardLogout } from '../hooks/useCommon';
 import { getEconomyWallet } from '../api/economyLiveApi';
+import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { COLORS } from '../styles/theme';
@@ -42,14 +43,6 @@ const GamesScreen = ({ navigation }) => {
   const currentUser = auth.currentUser;
   const { uid, authReady, isAuthenticated } = useAuth();
   const walletUid = uid || currentUser?.uid || null;
-
-  const shouldUseLiveServiceWallet = () => {
-    const enabled =
-      typeof process !== 'undefined' && process?.env?.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET
-        ? String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET).toLowerCase()
-        : '';
-    return enabled === '1' || enabled === 'true';
-  };
 
   const tabs = [
     { id: 'browse', label: 'Browse', icon: 'game-controller-outline' },

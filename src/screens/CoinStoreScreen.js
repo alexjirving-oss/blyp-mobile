@@ -320,9 +320,8 @@ const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'co
   const loadBalance = async () => {
     if (uid) {
       try {
+        // Keep last-known balance while auth settles — never flash/force 0.
         if (!authReady || !isAuthenticated) {
-          setBalance(0);
-          setGemBalance(0);
           return;
         }
         await refreshLiveWallet();

@@ -22,6 +22,7 @@ import PlanStatusBanner from '../components/PlanStatusBanner';
 import { useEntitlement } from '../hooks/useEntitlement';
 import HeaderWalletBalances from '../components/HeaderWalletBalances';
 import { getEconomyWallet } from '../api/economyLiveApi';
+import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { useAuth, refreshAuthNow, hardLogout } from '../hooks/useCommon';
@@ -79,14 +80,6 @@ const formatCount = (n: number) => {
     if (!Number.isFinite(n)) return '0';
     return Intl.NumberFormat('en-US').format(n);
   } catch { return String(n ?? 0); }
-};
-
-const shouldUseLiveServiceWallet = () => {
-  const enabled =
-    typeof process !== 'undefined' && process?.env?.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET
-      ? String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET).toLowerCase()
-      : '';
-  return enabled === '1' || enabled === 'true';
 };
 
 // One page of posts at a time; older pages load as the user scrolls so every

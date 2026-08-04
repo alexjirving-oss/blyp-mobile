@@ -19,6 +19,7 @@ import { COLORS } from '../styles/theme';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { getEconomyWallet } from '../api/economyLiveApi';
+import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import ChatRoomService from '../services/ChatRoomService';
 import GameService from '../services/GameService';
 import LiveUsersTab from '../components/LiveUsersTab';
@@ -148,16 +149,6 @@ const ChatListScreen = ({ navigation }) => {
   const currentUser = auth.currentUser;
   const { uid: authUid, authReady, isAuthenticated } = useAuth();
   const walletUid = authUid || currentUser?.uid || null;
-
-  const shouldUseLiveServiceWallet = () => {
-    const enabled =
-      typeof process !== 'undefined' && process?.env?.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET
-        ? String(process.env.EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET).toLowerCase()
-        : '';
-    return enabled === '1' || enabled === 'true';
-  };
-
-
 
   useEffect(() => {
     if (!isFocused) return;
