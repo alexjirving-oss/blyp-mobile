@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { useFocusEffect } from '@react-navigation/native';
 import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../utils/scaleUtils';
 import { firestore as db, db as compatDb } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
@@ -106,6 +107,9 @@ const ChatScreen = ({ route, navigation }) => {
   const flatListRef = useRef(null);
   const initialLoadRef = useRef(true);
   const soundRef = useRef(null);
+  /** Message ids we have already alerted for — prevents re-sting on every snapshot. */
+  const alertedMessageIdsRef = useRef(new Set());
+  const playingAlertRef = useRef(false);
 
   // Initialize sound
   useEffect(() => {
@@ -133,52 +137,56 @@ const ChatScreen = ({ route, navigation }) => {
   }, []);
 
   const playMessageAlert = async () => {
+    if (playingAlertRef.current) return;
+    playingAlertRef.current = true;
     try {
-      console.log('ðŸ”Š Attempting to play message notification...');
-
-      // First trigger haptic feedback (vibration)
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      console.log('ðŸ“³ Haptic feedback triggered');
 
-      // Unload previous sound if exists
       if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+        try {
+          // eslint-disable-next-line global-require
+          const { stopBlypNotify } = require('../services/notifySound');
+          await stopBlypNotify(soundRef.current);
+        } catch {
+          try {
+            await soundRef.current.unloadAsync();
+          } catch {
+            // ignore
+          }
+        }
+        soundRef.current = null;
       }
 
-      // Try to play the shared Blyp notify sting
       try {
         // eslint-disable-next-line global-require
         const { playBlypNotify } = require('../services/notifySound');
         const sound = await playBlypNotify({ looping: false, volume: 0.8 });
         soundRef.current = sound;
-        console.log('Notification sound playing');
 
-        // Clean up sound after playing
         setTimeout(async () => {
           try {
-            if (soundRef.current) {
-              await soundRef.current.unloadAsync();
+            if (soundRef.current === sound) {
+              // eslint-disable-next-line global-require
+              const { stopBlypNotify } = require('../services/notifySound');
+              await stopBlypNotify(sound);
               soundRef.current = null;
             }
-          } catch (cleanupError) {
-            console.error('Error cleaning up sound:', cleanupError);
+          } catch {
+            // ignore
           }
-        }, 3000);
-
+        }, 2500);
       } catch (soundError) {
-        console.log('Sound failed, using haptics only:', soundError.message);
-        // Haptic feedback already triggered above as primary notification
+        console.log('Sound failed, using haptics only:', soundError?.message || soundError);
       }
-
     } catch (error) {
-      console.error('âŒ Complete notification alert failed:', error);
-      // Last resort: try a different haptic pattern
+      console.error('Complete notification alert failed:', error);
       try {
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        console.log('ðŸ“³ Fallback haptic feedback used');
-      } catch (hapticError) {
-        console.error('âŒ Even haptic feedback failed:', hapticError);
+      } catch {
+        // ignore
       }
+    } finally {
+      playingAlertRef.current = false;
     }
   };
 
@@ -198,36 +206,93 @@ const ChatScreen = ({ route, navigation }) => {
       return;
     }
 
-    console.log('ðŸ”„ Setting up messages listener for conversation:', conversationId);
+    console.log('Setting up messages listener for conversation:', conversationId);
+    // Reset per-thread alert memory when switching chats.
+    alertedMessageIdsRef.current = new Set();
+    initialLoadRef.current = true;
+
     const unsubscribe = conversationsMessagingService.subscribeToMessages(
       db,
       conversationId,
       (messagesList) => {
-        let hasNewIncomingMessage = false;
-        messagesList.forEach((m) => {
-          if (!initialLoadRef.current && uid && m.senderId !== uid && m.status === 'sent') {
-            hasNewIncomingMessage = true;
+        const list = Array.isArray(messagesList) ? messagesList : [];
+
+        if (initialLoadRef.current) {
+          // Seed seen ids so historical "sent" messages never re-trigger the sting.
+          list.forEach((m) => {
+            if (m?.id) alertedMessageIdsRef.current.add(String(m.id));
+          });
+          initialLoadRef.current = false;
+          setMessages(list);
+          setLoading(false);
+          return;
+        }
+
+        let shouldAlert = false;
+        list.forEach((m) => {
+          if (!m?.id || !uid) return;
+          const mid = String(m.id);
+          if (m.senderId === uid) {
+            alertedMessageIdsRef.current.add(mid);
+            return;
+          }
+          if (!alertedMessageIdsRef.current.has(mid)) {
+            alertedMessageIdsRef.current.add(mid);
+            shouldAlert = true;
           }
         });
 
-        setMessages(messagesList);
+        setMessages(list);
         setLoading(false);
 
-        if (hasNewIncomingMessage) {
+        if (shouldAlert) {
           playMessageAlert();
-        }
-        if (initialLoadRef.current) {
-          initialLoadRef.current = false;
         }
       },
       (e) => {
-        console.error('âŒ Error subscribing to messages:', e);
+        console.error('Error subscribing to messages:', e);
         setLoading(false);
       }
     );
 
-    return unsubscribe;
+    return () => {
+      try {
+        unsubscribe();
+      } catch {
+        // ignore
+      }
+    };
   }, [navigation, user.username, conversationId, uid]);
+
+  // Focus-aware: suppress tray sound while this chat is visible; clear tray on open.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!conversationId) return undefined;
+      try {
+        // eslint-disable-next-line global-require
+        const { setActiveConversationId, clearActiveConversationId } = require('../services/activeConversation');
+        setActiveConversationId(conversationId);
+      } catch {
+        // ignore
+      }
+      try {
+        // eslint-disable-next-line global-require
+        const { clearConversationNotifications } = require('../services/messagePushNative');
+        clearConversationNotifications(conversationId);
+      } catch {
+        // ignore
+      }
+      return () => {
+        try {
+          // eslint-disable-next-line global-require
+          const { clearActiveConversationId } = require('../services/activeConversation');
+          clearActiveConversationId(conversationId);
+        } catch {
+          // ignore
+        }
+      };
+    }, [conversationId]),
+  );
 
   useEffect(() => {
     // Auto scroll to bottom when messages change
@@ -249,6 +314,13 @@ const ChatScreen = ({ route, navigation }) => {
         await conversationsMessagingService.markThreadRead(db, conversationId, uid);
       } catch (error) {
         console.error('Error marking thread read:', error);
+      }
+      try {
+        // eslint-disable-next-line global-require
+        const { clearConversationNotifications } = require('../services/messagePushNative');
+        await clearConversationNotifications(conversationId);
+      } catch {
+        // ignore
       }
       // Best-effort per-message status (may be denied by rules — non-fatal).
       try {
@@ -356,53 +428,6 @@ const ChatScreen = ({ route, navigation }) => {
         </TouchableOpacity>
         <BlypLogo useGradientBackground={true} />
         <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={styles.headerActionButton}
-            onPress={async () => {
-              if (!participantUid || !uid) {
-                Alert.alert('Call', 'Cannot start call — missing user.');
-                return;
-              }
-              try {
-                // eslint-disable-next-line global-require
-                const callService = require('../services/callService');
-                const myName =
-                  authUser?.displayName ||
-                  authUser?.username ||
-                  authUser?.email ||
-                  'Someone';
-                const theirName =
-                  user?.displayName || user?.username || user?.name || 'Blyp user';
-                const res = await callService.startCall({
-                  callerId: uid,
-                  calleeId: participantUid,
-                  conversationId,
-                  callerName: myName,
-                  calleeName: theirName,
-                });
-                if (!res.ok) {
-                  Alert.alert(
-                    'Call',
-                    res.reason === 'mic-denied'
-                      ? 'Microphone permission is required for calls.'
-                      : 'Could not start call.',
-                  );
-                  return;
-                }
-                navigation.navigate('Call', {
-                  callId: res.callId,
-                  role: 'caller',
-                  peerName: theirName,
-                  peerAvatar: user?.photoURL || user?.avatar || user?.userPhotoURL || user?.photo,
-                });
-              } catch (e) {
-                Alert.alert('Call', e?.message || 'Could not start call.');
-              }
-            }}
-            accessibilityLabel="Start audio call"
-          >
-            <Icon name="call" size={24} color={T.textSecondary} />
-          </TouchableOpacity>
           {participantUid && participantUid !== uid ? (
             <TouchableOpacity
               style={styles.headerActionButton}

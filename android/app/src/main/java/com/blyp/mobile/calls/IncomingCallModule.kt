@@ -13,7 +13,6 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
-import com.blyp.mobile.MainActivity
 import com.blyp.mobile.R
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -21,8 +20,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 /**
- * Messenger-style incoming call: full-screen intent + Answer/Decline actions.
- * Ringtone lives in [IncomingCallForegroundService].
+ * Messenger-style incoming call: full-screen IncomingCallActivity + Answer/Decline.
+ * Ringtone lives in IncomingCallForegroundService. Telecom ConnectionService
+ * registers the call with the OS when possible.
  */
 class IncomingCallModule(private val reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
@@ -49,7 +49,6 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  /** Android 14+: if FSI is blocked, open the system settings page once. */
   @ReactMethod
   fun ensureFullScreenIntentPermission(promise: Promise) {
     try {
@@ -74,9 +73,37 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
+  /** JS tells native which chat is on screen so DM pushes stay silent for that thread. */
+  @ReactMethod
+  fun setActiveConversation(conversationId: String) {
+    try {
+      BlypCallMessagingService.setActiveConversation(
+        reactContext.applicationContext,
+        conversationId,
+      )
+    } catch (_: Exception) {
+      // never break JS
+    }
+  }
+
+  /** Cancel tray notifications for a conversation after the user opens/reads it. */
+  @ReactMethod
+  fun clearConversationNotifications(conversationId: String, promise: Promise) {
+    try {
+      BlypCallMessagingService.clearConversationNotifications(
+        reactContext.applicationContext,
+        conversationId,
+      )
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.reject("clear_failed", e.message, e)
+    }
+  }
+
   companion object {
     const val CHANNEL_ID = "blyp_calls"
     private const val NOTIF_BASE = 71001
+    @Volatile private var activeCallId: String = ""
 
     fun ensureChannel(context: Context) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -113,25 +140,15 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
       val appCtx = context.applicationContext
       val name = callerName.ifBlank { "Incoming call" }
 
-      val openUri = Uri.parse(
-        "blyp://call/$callId?action=open&peerName=${Uri.encode(name)}",
-      )
-      val openIntent = Intent(appCtx, MainActivity::class.java).apply {
-        action = Intent.ACTION_VIEW
-        data = openUri
-        putExtra("callId", callId)
-        putExtra("role", "callee")
-        putExtra("peerName", name)
-        addFlags(
-          Intent.FLAG_ACTIVITY_NEW_TASK or
-            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-            Intent.FLAG_ACTIVITY_SINGLE_TOP,
-        )
+      val fsiIntent = Intent(appCtx, IncomingCallActivity::class.java).apply {
+        putExtra(IncomingCallActivity.EXTRA_CALL_ID, callId)
+        putExtra(IncomingCallActivity.EXTRA_CALLER_NAME, name)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
       }
       val fullScreenPi = PendingIntent.getActivity(
         appCtx,
         callId.hashCode(),
-        openIntent,
+        fsiIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
 
@@ -195,22 +212,40 @@ class IncomingCallModule(private val reactContext: ReactApplicationContext) :
 
     fun show(context: Context, callId: String, callerName: String) {
       val name = callerName.ifBlank { "Incoming call" }
+      // Idempotent: same callId already ringing — do not restart MediaPlayer.
+      if (activeCallId == callId) {
+        try {
+          NotificationManagerCompat.from(context.applicationContext)
+            .notify(notifIdPublic(callId), buildCallNotification(context, callId, name))
+        } catch (_: Exception) {
+        }
+        return
+      }
+      activeCallId = callId
       IncomingCallForegroundService.start(context.applicationContext, callId, name)
       try {
         NotificationManagerCompat.from(context.applicationContext)
           .notify(notifIdPublic(callId), buildCallNotification(context, callId, name))
       } catch (_: Exception) {
       }
+      try {
+        BlypConnectionService.addIncomingCall(context.applicationContext, callId, name)
+      } catch (_: Exception) {
+      }
     }
 
     fun cancel(context: Context, callId: String) {
+      if (activeCallId == callId) activeCallId = ""
       IncomingCallForegroundService.stop(context.applicationContext)
       NotificationManagerCompat.from(context.applicationContext).cancel(notifIdPublic(callId))
+      BlypConnectionService.endIncoming(callId)
     }
 
     fun cancelAll(context: Context) {
+      activeCallId = ""
       IncomingCallForegroundService.stop(context.applicationContext)
       NotificationManagerCompat.from(context.applicationContext).cancelAll()
+      BlypConnectionService.endIncoming("")
     }
   }
 }

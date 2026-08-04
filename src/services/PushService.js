@@ -74,8 +74,27 @@ export function configureForegroundPresentation() {
   try {
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
-        const type = String(notification?.request?.content?.data?.type || '');
+        const data = notification?.request?.content?.data || {};
+        const type = String(data.type || '');
         const isCall = type === 'incoming_call' || type === 'call';
+        // Already looking at this thread → no tray / no second sting.
+        try {
+          // eslint-disable-next-line global-require
+          const { isActiveConversation } = require('./activeConversation');
+          if (
+            (type === 'message' || type === 'conversation') &&
+            isActiveConversation(data.conversationId)
+          ) {
+            return {
+              shouldShowBanner: false,
+              shouldShowList: false,
+              shouldPlaySound: false,
+              shouldSetBadge: false,
+            };
+          }
+        } catch {
+          // ignore
+        }
         return {
           shouldShowBanner: true,
           shouldShowList: true,
