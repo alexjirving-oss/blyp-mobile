@@ -83,12 +83,21 @@ export async function startCall({
 }
 
 export async function answerCall(callId, uid) {
-  const micOk = await ensureMicPermission();
-  if (!micOk) return { ok: false, reason: 'mic-denied' };
+  const micPromise = ensureMicPermission();
+  // Mint in parallel with mic + status write so Answer→audio is ~1s, not serial.
+  const mintPromise = mintLiveKitToken(callId);
+  const micOk = await micPromise;
+  if (!micOk) {
+    return { ok: false, reason: 'mic-denied' };
+  }
   await messengerExtrasService.updateCallStatus(db, callId, 'active', {
     answeredBy: uid,
   });
-  return { ok: true };
+  const minted = await mintPromise;
+  if (!minted.ok) {
+    return { ok: true, mint: minted };
+  }
+  return { ok: true, mint: minted };
 }
 
 export async function declineCall(callId, uid) {

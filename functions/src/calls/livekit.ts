@@ -12,6 +12,7 @@ import { AccessToken } from 'livekit-server-sdk';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { applyCors } from '../http/cors';
 import { enqueueNotification } from '../notifications/outbox';
+import { sendToUser } from '../notifications/sender';
 
 initFirebaseAdmin();
 
@@ -135,25 +136,49 @@ export const onCallCreate = functions.firestore
     if (!callId || !callerId || !calleeId || callerId === calleeId) return null;
 
     const callerName = String(call.callerName || '').trim() || 'Someone';
+    const payload = {
+      title: 'Incoming call',
+      body: `${callerName} is calling…`,
+      collapseKey: `call:${callId}`,
+      data: {
+        type: 'incoming_call',
+        callId,
+        callerId,
+        callerName,
+        conversationId: String(call.conversationId || ''),
+      },
+    };
 
     try {
-      await enqueueNotification({
-        userId: calleeId,
-        type: 'call',
-        title: 'Incoming call',
-        body: `${callerName} is calling…`,
-        dedupeKey: `call:${callId}:${calleeId}`,
-        collapseKey: `call:${callId}`,
-        data: {
-          type: 'incoming_call',
-          callId,
-          callerId,
-          callerName,
-          conversationId: String(call.conversationId || ''),
-        },
-      });
+      // Latency-critical: send FCM directly. Outbox is for chat/marketing.
+      const sent = await sendToUser(calleeId, payload);
+      if (sent.deviceCount === 0 || sent.successCount === 0) {
+        // Fallback enqueue so a later dispatcher retry can still wake the device.
+        await enqueueNotification({
+          userId: calleeId,
+          type: 'call',
+          title: payload.title,
+          body: payload.body,
+          dedupeKey: `call:${callId}:${calleeId}`,
+          collapseKey: payload.collapseKey,
+          data: payload.data,
+        });
+      }
     } catch (e: any) {
-      console.warn('[onCallCreate] enqueue failed', e?.message || String(e));
+      console.warn('[onCallCreate] direct FCM failed; enqueue fallback', e?.message || String(e));
+      try {
+        await enqueueNotification({
+          userId: calleeId,
+          type: 'call',
+          title: payload.title,
+          body: payload.body,
+          dedupeKey: `call:${callId}:${calleeId}`,
+          collapseKey: payload.collapseKey,
+          data: payload.data,
+        });
+      } catch (e2: any) {
+        console.warn('[onCallCreate] enqueue failed', e2?.message || String(e2));
+      }
     }
     return null;
   });

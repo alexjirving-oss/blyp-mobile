@@ -23,13 +23,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onCallCreate = exports.mintLiveKitToken = void 0;
 const functions = __importStar(require("firebase-functions"));
@@ -37,6 +47,7 @@ const livekit_server_sdk_1 = require("livekit-server-sdk");
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const cors_1 = require("../http/cors");
 const outbox_1 = require("../notifications/outbox");
+const sender_1 = require("../notifications/sender");
 (0, firebaseAdmin_1.initFirebaseAdmin)();
 function livekitConfig() {
     var _a, _b, _c, _d, _e, _f;
@@ -152,25 +163,50 @@ exports.onCallCreate = functions.firestore
     if (!callId || !callerId || !calleeId || callerId === calleeId)
         return null;
     const callerName = String(call.callerName || '').trim() || 'Someone';
+    const payload = {
+        title: 'Incoming call',
+        body: `${callerName} is calling…`,
+        collapseKey: `call:${callId}`,
+        data: {
+            type: 'incoming_call',
+            callId,
+            callerId,
+            callerName,
+            conversationId: String(call.conversationId || ''),
+        },
+    };
     try {
-        await (0, outbox_1.enqueueNotification)({
-            userId: calleeId,
-            type: 'call',
-            title: 'Incoming call',
-            body: `${callerName} is calling…`,
-            dedupeKey: `call:${callId}:${calleeId}`,
-            collapseKey: `call:${callId}`,
-            data: {
-                type: 'incoming_call',
-                callId,
-                callerId,
-                callerName,
-                conversationId: String(call.conversationId || ''),
-            },
-        });
+        // Latency-critical: send FCM directly. Outbox is for chat/marketing.
+        const sent = await (0, sender_1.sendToUser)(calleeId, payload);
+        if (sent.deviceCount === 0 || sent.successCount === 0) {
+            // Fallback enqueue so a later dispatcher retry can still wake the device.
+            await (0, outbox_1.enqueueNotification)({
+                userId: calleeId,
+                type: 'call',
+                title: payload.title,
+                body: payload.body,
+                dedupeKey: `call:${callId}:${calleeId}`,
+                collapseKey: payload.collapseKey,
+                data: payload.data,
+            });
+        }
     }
     catch (e) {
-        console.warn('[onCallCreate] enqueue failed', (e === null || e === void 0 ? void 0 : e.message) || String(e));
+        console.warn('[onCallCreate] direct FCM failed; enqueue fallback', (e === null || e === void 0 ? void 0 : e.message) || String(e));
+        try {
+            await (0, outbox_1.enqueueNotification)({
+                userId: calleeId,
+                type: 'call',
+                title: payload.title,
+                body: payload.body,
+                dedupeKey: `call:${callId}:${calleeId}`,
+                collapseKey: payload.collapseKey,
+                data: payload.data,
+            });
+        }
+        catch (e2) {
+            console.warn('[onCallCreate] enqueue failed', (e2 === null || e2 === void 0 ? void 0 : e2.message) || String(e2));
+        }
     }
     return null;
 });

@@ -23,6 +23,8 @@
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <!-- Block merge of USE_EXACT_ALARM from deps — Play restricts it to calendar/alarm apps. -->
   <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove"/>
+  <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
+  <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
@@ -50,6 +52,14 @@
         <data android:scheme="exp+blyp-mobile"/>
       </intent-filter>
     </activity>
+    <activity
+      android:name="com.blyp.mobile.calls.IncomingCallActivity"
+      android:exported="false"
+      android:excludeFromRecents="true"
+      android:showWhenLocked="true"
+      android:turnScreenOn="true"
+      android:launchMode="singleInstance"
+      android:theme="@android:style/Theme.DeviceDefault.NoActionBar"/>
     <service android:name="com.blyp.mobile.notifications.BlypNotificationListenerService" android:label="@string/app_name" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="false">
       <intent-filter>
         <action android:name="android.service.notification.NotificationListenerService"/>
@@ -72,6 +82,14 @@
       android:name="com.blyp.mobile.calls.IncomingCallForegroundService"
       android:exported="false"
       android:foregroundServiceType="mediaPlayback"/>
+    <service
+      android:name="com.blyp.mobile.calls.BlypConnectionService"
+      android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.telecom.ConnectionService"/>
+      </intent-filter>
+    </service>
     <receiver
       android:name="com.blyp.mobile.calls.IncomingCallActionReceiver"
       android:exported="false">

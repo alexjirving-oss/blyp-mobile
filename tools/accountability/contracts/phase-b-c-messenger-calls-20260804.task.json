@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "id": "phase-b-c-messenger-calls-20260804",
+  "title": "Phase B+C — Messenger-grade Android calls",
+  "objective": "Single ring owner; Answer parallel-mints LiveKit; onCallCreate sends direct FCM; IncomingCallActivity + ConnectionService for system call chrome.",
+  "baseRef": "HEAD",
+  "acceptanceCriteria": [
+    "IncomingCallModule.show is idempotent for the same callId.",
+    "answerCall mints LiveKit token in parallel with status update.",
+    "onCallCreate prefers sendToUser over outbox-only.",
+    "IncomingCallActivity and BlypConnectionService are registered in the manifest.",
+    "CallScreen defaults to earpiece (speakerOn false) and registers LiveKit globals on mount."
+  ],
+  "allowedPaths": [
+    "App.js",
+    "src/screens/CallScreen.js",
+    "src/services/callService.js",
+    "src/services/incomingCallNative.js",
+    "src/services/PushService.js",
+    "functions/src/calls/**",
+    "functions/src/notifications/**",
+    "android/app/src/main/**",
+    "tools/accountability/contracts/phase-b-c-messenger-calls-20260804.task.json"
+  ],
+  "forbiddenPaths": [
+    ".cursor/**",
+    ".accountability/**"
+  ],
+  "verification": [
+    {
+      "id": "functions-build",
+      "runner": "npm",
+      "args": ["run", "build"],
+      "cwd": "functions",
+      "timeoutMs": 300000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    }
+  ],
+  "roles": {
+    "analyst": { "readOnly": true },
+    "builder": { "isolatedWorktree": true },
+    "reviewer": { "readOnly": true }
+  }
+}
