@@ -16,6 +16,9 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ReactNativeHostWrapper
 
+import com.livekit.reactnative.LiveKitReactNative
+import com.livekit.reactnative.audio.AudioType
+
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
@@ -33,6 +36,9 @@ class MainApplication : Application(), ReactApplication {
               if (none { it is com.blyp.mobile.notifications.NotificationGlancePackage }) {
                 add(com.blyp.mobile.notifications.NotificationGlancePackage())
               }
+              if (none { it is com.blyp.mobile.calls.IncomingCallPackage }) {
+                add(com.blyp.mobile.calls.IncomingCallPackage())
+              }
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
@@ -47,6 +53,8 @@ class MainApplication : Application(), ReactApplication {
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
   override fun onCreate() {
+    // LiveKit audio calls — must run before other RN initialization.
+    LiveKitReactNative.setup(this, AudioType.CommunicationAudioType())
     super.onCreate()
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())

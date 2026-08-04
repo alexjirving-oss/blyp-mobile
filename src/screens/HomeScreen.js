@@ -38,7 +38,6 @@ import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, 
 import { subscribeToFollowingList } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
 import { requireAccount } from '../services/guestSessionService';
-import { rankPosts } from '../services/feedRankingService';
 import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
 import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
 import { setPostLiked } from '../services/LikeService';
@@ -112,15 +111,15 @@ const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
     if (isVideo) {
       return (
         <View style={[styles.carouselItemContainer, { width: winWidth }]}>
-          <EnhancedVideo
+          <PremiumFeedVideo
             uri={mediaUri}
             poster={item.thumbnail}
-            style={[styles.carouselMedia, { width: winWidth }, style]}
+            style={StyleSheet.absoluteFill}
             shouldPlay={isDiscoverItemActive ? isDiscoverItemActive(feedIndex) && index === currentIndex : index === currentIndex}
             shouldLoad={Math.abs(currentIndex - index) <= 1}
             isLooping={true}
             isMuted={true}
-            resizeMode="cover"
+            showChrome={false}
           />
         </View>
       );
@@ -197,14 +196,35 @@ const getPostGiftCoins = (post) => {
 
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 
-// How many posts we pull per page of the For You feed. The first page is a live
-// listener (so new posts / like counts update in realtime); subsequent pages are
-// fetched on demand as the viewer scrolls, making the feed effectively endless.
-const FEED_PAGE_SIZE = 30;
+// How many posts we pull per Firestore page. Many rows are images/silent clips
+// filtered out for For You, so we over-fetch and keep paging until we have enough
+// playable videos.
+const FEED_PAGE_SIZE = 50;
+const FEED_GATHER_TARGET = 12;
+const FEED_PREFETCH_REMAINING = 4;
 
 const isValidFeedPost = (p) => isForYouFeedPost(p);
 
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
+
+/** Temporary For You order until the ranking algorithm is configured. */
+function shufflePosts(posts) {
+  const next = Array.isArray(posts) ? [...posts] : [];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = next[i];
+    next[i] = next[j];
+    next[j] = tmp;
+  }
+  return next;
+}
+
+function stampFeedKeys(posts, cycle) {
+  return (posts || []).map((p) => ({
+    ...p,
+    feedKey: `${p.id}__${cycle}`,
+  }));
+}
 
 const HomeScreen = ({ navigation, route }) => {
   const [videos, setVideos] = useState([]);
@@ -267,6 +287,10 @@ const HomeScreen = ({ navigation, route }) => {
   const forYouAllCursorRef = useRef(null);
   const forYouAllHasMoreRef = useRef(true);
   const forYouShownIdsRef = useRef(new Set());
+  // When the corpus is exhausted we bump this and re-walk Firestore so the feed
+  // can loop forever with a fresh random order (feedKey keeps FlatList keys unique).
+  const forYouCycleRef = useRef(0);
+  const randomPostsRef = useRef([]);
   const [loadingMore, setLoadingMore] = useState(false);
 
   const { uid, authReady, isAuthenticated } = useAuth();
@@ -609,6 +633,7 @@ const HomeScreen = ({ navigation, route }) => {
                 forYouPhaseRef.current = 'date';
                 forYouAllCursorRef.current = null;
                 forYouAllHasMoreRef.current = true;
+                forYouCycleRef.current = 0;
                 forYouShownIdsRef.current = new Set(liveDocs.map((d) => d.id));
               }
               // Derive the Videos-tab feed from this same snapshot (previously a
@@ -633,16 +658,20 @@ const HomeScreen = ({ navigation, route }) => {
                 // Liking a post updates the doc, which triggers this snapshot; if we reshuffle
                 // every time, the feed appears to "jump" to a different post.
                 if (isInitialLoad) {
-                  // Personalized "For You" order: follows + interests + light
-                  // popularity, with a freshness jitter (falls back to shuffle).
-                  const ranked = rankPosts(validPosts, interestTermsRef.current, followingRef.current);
-                  setRandomPosts(ranked);
+                  // Temporary: random order each cold load / refresh until ranking ships.
+                  const shuffled = stampFeedKeys(shufflePosts(validPosts), forYouCycleRef.current);
+                  setRandomPosts(shuffled);
+                  randomPostsRef.current = shuffled;
                   // Reset the Videos-tab cursor on first load (previously done by
                   // the now-merged video listener).
                   setCurrentIndex(0);
                 } else {
                   setRandomPosts((prev) => {
-                    if (!Array.isArray(prev) || prev.length === 0) return validPosts;
+                    if (!Array.isArray(prev) || prev.length === 0) {
+                      const next = stampFeedKeys(shufflePosts(validPosts), forYouCycleRef.current);
+                      randomPostsRef.current = next;
+                      return next;
+                    }
 
                     const byId = new Map(validPosts.map((p) => [p.id, p]));
                     const next = [];
@@ -653,18 +682,20 @@ const HomeScreen = ({ navigation, route }) => {
                     prev.forEach((existing) => {
                       const updated = byId.get(existing.id);
                       if (updated) {
-                        next.push(updated);
+                        next.push({ ...updated, feedKey: existing.feedKey || `${updated.id}__${forYouCycleRef.current}` });
                         byId.delete(existing.id);
                       } else {
                         next.push(existing);
                       }
                     });
 
-                    // Append any brand new posts (in snapshot order).
-                    validPosts.forEach((p) => {
-                      if (byId.has(p.id)) next.push(p);
+                    // Append any brand new posts (shuffled among themselves).
+                    const brandNew = shufflePosts(validPosts.filter((p) => byId.has(p.id)));
+                    brandNew.forEach((p) => {
+                      next.push({ ...p, feedKey: `${p.id}__${forYouCycleRef.current}` });
                     });
 
+                    randomPostsRef.current = next;
                     return next;
                   });
                 }
@@ -737,7 +768,11 @@ const HomeScreen = ({ navigation, route }) => {
   const loadRandomPosts = useCallback(async () => {
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
       // Fall back to a local reshuffle if Firestore isn't available.
-      setRandomPosts((prev) => [...prev].sort(() => 0.5 - Math.random()));
+      setRandomPosts((prev) => {
+        const next = stampFeedKeys(shufflePosts(prev), forYouCycleRef.current);
+        randomPostsRef.current = next;
+        return next;
+      });
       return;
     }
     setLoading(true);
@@ -755,6 +790,7 @@ const HomeScreen = ({ navigation, route }) => {
       forYouPhaseRef.current = 'date';
       forYouAllCursorRef.current = null;
       forYouAllHasMoreRef.current = true;
+      forYouCycleRef.current += 1;
       forYouShownIdsRef.current = new Set(docs.map((d) => d.id));
 
       const fresh = filterBlocked(
@@ -764,11 +800,15 @@ const HomeScreen = ({ navigation, route }) => {
 
       if (fresh.length === 0) {
         setRandomPosts([]);
+        randomPostsRef.current = [];
         setIsEmptyFeed(true);
       } else {
-        const ranked = rankPosts(fresh, interestTermsRef.current, followingRef.current);
-        setRandomPosts(ranked);
+        const shuffled = stampFeedKeys(shufflePosts(fresh), forYouCycleRef.current);
+        setRandomPosts(shuffled);
+        randomPostsRef.current = shuffled;
         setIsEmptyFeed(false);
+        setCurrentDiscoverIndex(0);
+        currentDiscoverIndexRef.current = 0;
       }
     } catch (e) {
       console.warn('[HOME] pull-to-refresh failed', e?.message);
@@ -782,11 +822,13 @@ const HomeScreen = ({ navigation, route }) => {
   const appendFeedPosts = useCallback((newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    const ranked = rankPosts(newPosts, interestTermsRef.current, followingRef.current);
+    const stamped = stampFeedKeys(shufflePosts(newPosts), forYouCycleRef.current);
     setRandomPosts((prev) => {
-      const have = new Set((Array.isArray(prev) ? prev : []).map((p) => p.id));
-      const toAdd = ranked.filter((p) => !have.has(p.id));
-      return toAdd.length ? [...prev, ...toAdd] : prev;
+      const haveKeys = new Set((Array.isArray(prev) ? prev : []).map((p) => p.feedKey || p.id));
+      const toAdd = stamped.filter((p) => !haveKeys.has(p.feedKey));
+      const next = toAdd.length ? [...prev, ...toAdd] : prev;
+      randomPostsRef.current = next;
+      return next;
     });
     setVideos((prev) => {
       const have = new Set((Array.isArray(prev) ? prev : []).map((p) => p.id));
@@ -815,24 +857,39 @@ const HomeScreen = ({ navigation, route }) => {
     }
   }, [uid]);
 
+  const resetForYouCycle = useCallback(() => {
+    forYouCycleRef.current += 1;
+    forYouPhaseRef.current = 'date';
+    forYouCursorRef.current = null;
+    forYouHasMoreRef.current = true;
+    forYouAllCursorRef.current = null;
+    forYouAllHasMoreRef.current = true;
+    forYouShownIdsRef.current = new Set();
+  }, []);
+
   const loadMoreForYou = useCallback(async () => {
     if (loadingMoreRef.current) return;
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') return;
 
-    // Phase 1 (date): newest-first posts that have a `date`. When exhausted we
-    // flip to phase 2 instead of stopping.
-    if (forYouPhaseRef.current === 'date' && !forYouHasMoreRef.current) {
-      forYouPhaseRef.current = 'all';
-    }
-    if (forYouPhaseRef.current === 'all' && !forYouAllHasMoreRef.current) return; // truly done
-
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
-      if (forYouPhaseRef.current === 'date') {
-        const cursor = forYouCursorRef.current;
-        if (!cursor) { forYouPhaseRef.current = 'all'; }
-        else {
+      let gathered = [];
+      let safety = 0;
+
+      while (gathered.length < FEED_GATHER_TARGET && safety < 24) {
+        safety += 1;
+
+        if (forYouPhaseRef.current === 'date' && !forYouHasMoreRef.current) {
+          forYouPhaseRef.current = 'all';
+        }
+
+        if (forYouPhaseRef.current === 'date') {
+          const cursor = forYouCursorRef.current;
+          if (!cursor) {
+            forYouPhaseRef.current = 'all';
+            continue;
+          }
           const snap = await db
             .collection('posts')
             .orderBy('date', 'desc')
@@ -842,43 +899,79 @@ const HomeScreen = ({ navigation, route }) => {
           const docs = snap?.docs || [];
           if (docs.length > 0) forYouCursorRef.current = docs[docs.length - 1];
           forYouHasMoreRef.current = docs.length >= FEED_PAGE_SIZE;
-          const olderPosts = docs
-            .map((d) => ({ id: d.id, ...d.data() }))
+          const olderPosts = filterBlocked(
+            docs.map((d) => ({ id: d.id, ...d.data() })),
+            (p) => p.userId || p.uid,
+          )
             .filter((p) => !forYouShownIdsRef.current.has(p.id))
             .filter(isValidFeedPost);
-          appendFeedPosts(olderPosts);
-          return;
+          gathered = gathered.concat(olderPosts);
+          if (!forYouHasMoreRef.current) forYouPhaseRef.current = 'all';
+          continue;
         }
-      }
 
-      // Phase 2 (all): every remaining post by implicit document-id order, so
-      // posts WITHOUT a `date` field (which orderBy('date') hides) still appear.
-      // Loop a few pages per call so a run of already-seen posts doesn't look
-      // like the feed stopped.
-      let gathered = [];
-      let pages = 0;
-      while (gathered.length === 0 && pages < 6 && forYouAllHasMoreRef.current) {
-        pages += 1;
+        // Phase 2 (all): posts without `date` + anything missed earlier.
+        if (!forYouAllHasMoreRef.current && !forYouCursorRef.current) {
+          break;
+        }
+        if (!forYouAllHasMoreRef.current) break;
+
         let q = db.collection('posts').limit(FEED_PAGE_SIZE);
         if (forYouAllCursorRef.current) q = q.startAfter(forYouAllCursorRef.current);
         const snap = await q.get();
         const docs = snap?.docs || [];
         if (docs.length > 0) forYouAllCursorRef.current = docs[docs.length - 1];
         forYouAllHasMoreRef.current = docs.length >= FEED_PAGE_SIZE;
-        const fresh = docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((p) => !forYouShownIdsRef.current.has(p.id));
-        const blockedFiltered = filterBlocked(fresh, (p) => p.userId || p.uid).filter(isValidFeedPost);
-        gathered = gathered.concat(blockedFiltered);
+        const fresh = filterBlocked(
+          docs.map((d) => ({ id: d.id, ...d.data() })),
+          (p) => p.userId || p.uid,
+        )
+          .filter((p) => !forYouShownIdsRef.current.has(p.id))
+          .filter(isValidFeedPost);
+        gathered = gathered.concat(fresh);
       }
-      appendFeedPosts(gathered);
+
+      if (gathered.length > 0) {
+        appendFeedPosts(gathered);
+      } else if (
+        !forYouHasMoreRef.current &&
+        !forYouAllHasMoreRef.current &&
+        (randomPostsRef.current || []).length > 0
+      ) {
+        // Corpus exhausted — loop with a fresh random order so scroll never dead-ends.
+        resetForYouCycle();
+        const uniqueById = new Map();
+        randomPostsRef.current.forEach((p) => {
+          if (p?.id && !uniqueById.has(p.id)) {
+            const { feedKey: _feedKey, ...rest } = p;
+            uniqueById.set(p.id, rest);
+          }
+        });
+        const reshuffled = stampFeedKeys(
+          shufflePosts([...uniqueById.values()]),
+          forYouCycleRef.current,
+        );
+        reshuffled.forEach((p) => forYouShownIdsRef.current.add(p.id));
+        setRandomPosts((prev) => {
+          const next = [...prev, ...reshuffled];
+          randomPostsRef.current = next;
+          return next;
+        });
+      }
     } catch (e) {
       console.warn('[HOME] loadMoreForYou failed:', e?.message || String(e));
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [firebaseEnabled, uid, appendFeedPosts]);
+  }, [firebaseEnabled, appendFeedPosts, resetForYouCycle]);
+
+  // Keep the first screen full even when the opening Firestore page is mostly images.
+  useEffect(() => {
+    if (selectedTab !== 'A') return;
+    if (!randomPosts.length || randomPosts.length >= FEED_GATHER_TARGET) return;
+    loadMoreForYou();
+  }, [selectedTab, randomPosts.length, loadMoreForYou]);
 
   const handleLike = async (postId) => {
     if (requireAccount(navigation, 'like posts')) return;
@@ -1124,13 +1217,18 @@ const HomeScreen = ({ navigation, route }) => {
       const rawIndex = Math.round(y / feedHeight);
       const maxIndex = Math.max(0, (randomPosts?.length || 0) - 1);
       const nextIndex = Math.min(maxIndex, Math.max(0, rawIndex));
-      if (nextIndex === currentDiscoverIndexRef.current) return;
-      currentDiscoverIndexRef.current = nextIndex;
-      showDescriptionForIndex(nextIndex);
-      setCurrentDiscoverIndex(nextIndex);
-      setPausedFeedId(null);
+      if (nextIndex !== currentDiscoverIndexRef.current) {
+        currentDiscoverIndexRef.current = nextIndex;
+        showDescriptionForIndex(nextIndex);
+        setCurrentDiscoverIndex(nextIndex);
+        setPausedFeedId(null);
+      }
+      // Paging FlatLists often miss onEndReached — prefetch while a few clips remain.
+      if (maxIndex - nextIndex <= FEED_PREFETCH_REMAINING) {
+        loadMoreForYou();
+      }
     },
-    [feedHeight, randomPosts?.length, showDescriptionForIndex]
+    [feedHeight, randomPosts?.length, showDescriptionForIndex, loadMoreForYou]
   );
 
   // Active item resolver for #4ME feed
@@ -1505,12 +1603,15 @@ const HomeScreen = ({ navigation, route }) => {
           >
             <Icon name="grid-outline" size={20} color={HEADER_ICON_COLOR} />
           </TouchableOpacity>
-          {selectedTab !== 'home' ? (
-            <TouchableOpacity style={styles.headerSearchPill} onPress={() => navigation.navigate('Blyp')}>
-              <Icon name="search" size={16} color={HEADER_ICON_COLOR} />
-              <Text style={styles.headerSearchPillText} allowFontScaling={false}>blyp it</Text>
-            </TouchableOpacity>
-          ) : null}
+          <TouchableOpacity
+            style={styles.headerSearchPill}
+            onPress={() => navigation.navigate('Search')}
+            accessibilityRole="button"
+            accessibilityLabel="Search"
+          >
+            <Icon name="search" size={16} color={HEADER_ICON_COLOR} />
+            <Text style={styles.headerSearchPillText} allowFontScaling={false}>Search</Text>
+          </TouchableOpacity>
         </View>
       )}
       onLayout={(e) => {
@@ -1693,7 +1794,7 @@ const HomeScreen = ({ navigation, route }) => {
               ref={flatListRef}
               data={randomPosts}
               renderItem={(props) => renderRandomPostItem({ ...props, feedHeight })}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => item.feedKey || item.id}
               showsVerticalScrollIndicator={false}
               refreshing={loading}
               onRefresh={loadRandomPosts}

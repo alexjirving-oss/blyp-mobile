@@ -2,18 +2,26 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import BlypLogo, { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
-import { Alert, Dimensions, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, KeyboardAvoidingView, Linking, Modal, Platform, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { COLORS } from '../styles/theme';
-import { getEconomyWallet, verifyAndroidIapPurchase } from '../api/economyLiveApi';
+import {
+  getEconomyWallet,
+  getWithdrawEligibility,
+  makeIdempotencyKey,
+  requestWithdrawGems,
+  startWithdrawConnectOnboard,
+  verifyAndroidIapPurchase,
+} from '../api/economyLiveApi';
 import { useAuth } from '../hooks/useCommon';
 import { requireAccount } from '../services/guestSessionService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { launchAndroidPurchase, consumePurchase, getAndroidProductDetails, queryPurchases } from '../services/AndroidPlayBillingService';
 import {
   ENABLE_PURCHASES,
+  ENABLE_WITHDRAWALS,
   isClientEconomyMutationAllowed,
   shouldUseServerValidation
 } from '../config/economyModel';
@@ -83,7 +91,7 @@ const getGemPackages = () => [
   }
 ];
 
-const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
+const CoinStoreScreen = ({ navigation, route, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
   const insets = useSafeAreaInsets?.() || { top: 0, bottom: 0, left: 0, right: 0 };
   const scrollRef = useRef(null);
   const packagesSectionYRef = useRef(0);
@@ -130,13 +138,61 @@ const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', s
     setOverlayError('');
   };
 
-  const openWithdrawOverlay = () => {
+  const openWithdrawOverlay = async () => {
     if (!uid) {
       Alert.alert('Error', 'Please log in first');
       return;
     }
-    Alert.alert('Unavailable', 'Withdrawals are currently disabled.');
+    if (!ENABLE_WITHDRAWALS) {
+      Alert.alert('Unavailable', 'Withdrawals are currently disabled.');
+      return;
+    }
+    try {
+      const eligibility = await getWithdrawEligibility();
+      if (!eligibility?.connect?.linked || !eligibility?.connect?.payoutsEnabled) {
+        Alert.alert(
+          'Connect payout account',
+          'Creator earnings (gems) can be withdrawn after Stripe onboarding. Purchased coins are never cashable.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Continue',
+              onPress: async () => {
+                try {
+                  const link = await startWithdrawConnectOnboard({
+                    returnUrl: 'blyp://withdraw/connect-return',
+                    refreshUrl: 'blyp://withdraw/connect-refresh',
+                  });
+                  if (link?.url) await Linking.openURL(link.url);
+                } catch (e) {
+                  Alert.alert('Connect failed', e?.message || 'Could not start Stripe onboarding');
+                }
+              },
+            },
+          ],
+        );
+        return;
+      }
+      setOverlayType('withdraw');
+      setOverlayAmount(String(eligibility.minPayoutGems || 1000));
+      setOverlayError('');
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (/WITHDRAWALS_DISABLED|STRIPE_NOT_CONFIGURED|disabled/i.test(msg)) {
+        Alert.alert('Unavailable', 'Withdrawals are currently disabled on the server.');
+        return;
+      }
+      Alert.alert('Withdraw', msg);
+    }
   };
+
+  // Stripe Connect return deep link → resume withdraw flow.
+  useEffect(() => {
+    if (route?.params?.openWithdraw && uid) {
+      openWithdrawOverlay();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.openWithdraw, uid]);
 
   const refreshLiveWallet = async () => {
     try {
@@ -289,7 +345,36 @@ const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', s
     }
 
     if (overlayType === 'withdraw') {
-      setOverlayError('Withdrawals are currently disabled.');
+      if (!ENABLE_WITHDRAWALS) {
+        setOverlayError('Withdrawals are currently disabled.');
+        return;
+      }
+      if (amount > gemBalance) {
+        setOverlayError('You do not have that many gems.');
+        return;
+      }
+      try {
+        setOverlayError('');
+        const res = await requestWithdrawGems({
+          amountGems: amount,
+          idempotencyKey: makeIdempotencyKey('withdraw'),
+        });
+        closeOverlay();
+        await refreshLiveWallet();
+        const status = String(res?.status || '');
+        Alert.alert(
+          'Withdrawal',
+          status === 'paid'
+            ? `Paid out ${res.netGems} gems (fee ${res.feeGems}).`
+            : status === 'pending_review'
+              ? 'Submitted for review. Funds are reserved until approved.'
+              : `Request ${status}.`,
+        );
+      } catch (e) {
+        const detail = e?.detail?.reasons || e?.reasons;
+        const reasons = Array.isArray(detail) ? detail.join(', ') : '';
+        setOverlayError(reasons || e?.message || 'Withdrawal failed');
+      }
       return;
     }
 
@@ -593,7 +678,18 @@ const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', s
           </View>
 
           <View style={styles.heroActions}>
-            {/* Convert / withdraw are not live yet — hide dead CTAs. */}
+            {ENABLE_WITHDRAWALS ? (
+              <TouchableOpacity
+                style={[styles.heroActionButton, { marginBottom: 10 }]}
+                onPress={openWithdrawOverlay}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.heroActionInner, { backgroundColor: '#1A1A1E' }]}>
+                  <Text style={styles.heroActionText}>Withdraw earnings</Text>
+                </View>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               style={[styles.heroActionButton, styles.heroPrimaryActionButton]}
               onPress={handleBuyMoreCoins}
@@ -626,8 +722,8 @@ const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', s
               </Text>
               <Text style={styles.infoText}>
                 {selectedTab === 'coins'
-                  ? 'Send gifts to creators, unlock premium features, and show your support!'
-                  : 'Premium currency for exclusive features, rare gifts, and special perks!'
+                  ? 'Buy coins to send gifts and unlock features. Purchased coins are spendable only — they cannot be withdrawn as cash.'
+                  : 'Gems are creator earnings from gifts. After clearance they can be withdrawn to your bank via Stripe (platform fee applies).'
                 }
               </Text>
               {__DEV__ && shouldUseServerValidation() && !process.env.EXPO_PUBLIC_BILLING_VERIFY_URL && (
@@ -734,7 +830,7 @@ const CoinStoreScreen = ({ navigation, embedded = false, initialTab = 'coins', s
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
                     ? 'How many gems do you want to convert? (1 gem = 1 coin)'
-                    : 'How many gems do you want to cash out? (Minimum 500 gems)'}
+                    : 'Cash out cleared gem earnings (minimum 1000). Purchased coins are not cashable. 30% platform fee applies.'}
                 </Text>
 
                 <TextInput

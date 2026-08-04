@@ -68,26 +68,35 @@ export default function PremiumFeedVideo({
 
   const fillStyle = useMemo(() => {
     if (!isWide || !(aspect > 0)) return StyleSheet.absoluteFill;
-    // Wide: pin to top at natural height; leftover fades below.
-    return StyleSheet.absoluteFill;
+    // Wide landscape: pin to top at natural aspect; letterbox sits below.
+    return {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      width: '100%',
+      aspectRatio: aspect,
+    };
   }, [isWide, aspect]);
 
   return (
     <View style={[styles.root, style]}>
-      <EnhancedVideo
-        uri={uri}
-        poster={poster}
-        style={fillStyle}
-        resizeMode={resizeMode}
-        shouldPlay={playing}
-        shouldLoad={shouldLoad}
-        isLooping={isLooping}
-        isMuted={isMuted}
-        onNaturalSize={handleNaturalSize}
-        onError={onError}
-        onReady={onReady}
-        onPlaybackStatusUpdate={handleStatus}
-      />
+      <View style={isWide && aspect > 0 ? fillStyle : styles.videoHost}>
+        <EnhancedVideo
+          uri={uri}
+          poster={poster}
+          style={StyleSheet.absoluteFill}
+          resizeMode={resizeMode}
+          shouldPlay={playing}
+          shouldLoad={shouldLoad}
+          isLooping={isLooping}
+          isMuted={isMuted}
+          onNaturalSize={handleNaturalSize}
+          onError={onError}
+          onReady={onReady}
+          onPlaybackStatusUpdate={handleStatus}
+        />
+      </View>
 
       {showChrome && (
         <>
@@ -137,6 +146,9 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: COLORS.pageBackground,
     overflow: 'hidden',
+  },
+  videoHost: {
+    ...StyleSheet.absoluteFillObject,
   },
   topVignette: {
     ...StyleSheet.absoluteFillObject,

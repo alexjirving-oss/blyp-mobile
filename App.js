@@ -47,6 +47,15 @@ console.log('[BLYP][APP] PRELUDE?', global.BLYP_PRELUDE);
 // ============================================================================
 import './src/config/amplify';
 
+// LiveKit WebRTC globals (audio calls). Safe no-op if native module not yet linked.
+try {
+  // eslint-disable-next-line global-require
+  const { registerGlobals } = require('@livekit/react-native');
+  if (typeof registerGlobals === 'function') registerGlobals();
+} catch {
+  // Native LiveKit not in this binary yet — CallScreen will surface a clear error.
+}
+
 // Note: Other startup side-effects (pre-auth cleanup, Sentry, flags)
 // are deferred until after runtime is ready to avoid early WebSocket/runtime issues.
 
@@ -117,6 +126,7 @@ import ArtilleryGameScreen from './src/games/artillery/ArtilleryGameScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatConversationScreen from './src/screens/ChatConversationScreen';
 import MessengerScreen from './src/screens/MessengerScreen';
+import CallScreen from './src/screens/CallScreen';
 // Legacy Profile is kept for reference; new v3 replaces it
 // import ProfileScreen from './src/screens/ProfileScreen';
 import ProfileScreenV3 from './src/screens/ProfileScreen.v3';
@@ -379,9 +389,9 @@ function MainTabs() {
         listeners={makeDoubleTapResetListener('Messenger')}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <TabBarIcon name="paper-plane" color={color} size={size} focused={focused} badge={unreadCount > 0 ? unreadCount : null} />
+            <TabBarIcon name="call" color={color} size={size} focused={focused} badge={unreadCount > 0 ? unreadCount : null} />
           ),
-          tabBarLabel: 'Inbox',
+          tabBarLabel: 'Phone',
         }}
       />
       <Tab.Screen
@@ -462,6 +472,16 @@ function AppStack() {
         {(navProps) => (
           <ScreenErrorBoundary label="ChatConversation" onReset={() => { try { navProps.navigation.goBack(); } catch {} }}>
             <ChatConversationScreen {...navProps} />
+          </ScreenErrorBoundary>
+        )}
+      </Stack.Screen>
+      <Stack.Screen
+        name="Call"
+        options={{ headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false }}
+      >
+        {(navProps) => (
+          <ScreenErrorBoundary label="Call" onReset={() => { try { navProps.navigation.goBack(); } catch {} }}>
+            <CallScreen {...navProps} />
           </ScreenErrorBoundary>
         )}
       </Stack.Screen>
@@ -792,6 +812,20 @@ function AppInner() {
                 chatId: data.conversationId,
                 otherUser: { id: data.senderId, displayName: data.senderName, username: data.senderName },
               });
+            } else if ((data.type === 'incoming_call' || data.type === 'call') && data.callId) {
+              try {
+                // eslint-disable-next-line global-require
+                const { showIncomingCallNative } = require('./src/services/incomingCallNative');
+                showIncomingCallNative(data.callId, data.callerName || 'Incoming call');
+              } catch {
+                // ignore
+              }
+              routeWhenReady('Call', {
+                callId: data.callId,
+                role: 'callee',
+                peerName: data.callerName || 'Incoming call',
+                callerId: data.callerId,
+              });
             } else if (data.type === 'team') {
               // Team join request/decision/group message → open My Team.
               routeWhenReady('MyTeam');
@@ -801,6 +835,52 @@ function AppInner() {
       } catch { }
     })();
     return () => { try { detach(); } catch { } };
+  }, [uid]);
+
+  // Foreground incoming-call watcher (Firestore ringing docs where we are callee).
+  useEffect(() => {
+    const fbUid = firebaseAuth?.currentUser?.uid || uid || null;
+    if (!fbUid) return undefined;
+    let unsub = () => {};
+    const openCall = (params, tries = 0) => {
+      try {
+        if (navigationRef?.isReady?.()) {
+          // Avoid stacking duplicate Call screens for the same callId.
+          const state = navigationRef.getRootState?.();
+          const routes = state?.routes || [];
+          const top = routes[routes.length - 1];
+          if (top?.name === 'Call' && top?.params?.callId === params.callId) return;
+          navigationRef.navigate('Call', params);
+          return;
+        }
+      } catch { }
+      if (tries < 40) setTimeout(() => openCall(params, tries + 1), 400);
+    };
+    try {
+      // eslint-disable-next-line global-require
+      const callService = require('./src/services/callService');
+      unsub = callService.subscribeToIncomingCalls(fbUid, (incoming) => {
+        const first = Array.isArray(incoming) && incoming.length ? incoming[0] : null;
+        if (!first?.id) return;
+        try {
+          // eslint-disable-next-line global-require
+          const { showIncomingCallNative } = require('./src/services/incomingCallNative');
+          showIncomingCallNative(first.id, first.callerName || 'Incoming call');
+        } catch {
+          // ignore
+        }
+        openCall({
+          callId: first.id,
+          role: 'callee',
+          peerName: first.callerName || 'Incoming call',
+          peerAvatar: null,
+          callerId: first.callerId,
+        });
+      });
+    } catch {
+      // ignore
+    }
+    return () => { try { unsub(); } catch { } };
   }, [uid]);
 
   // ============================================================================
@@ -1049,6 +1129,25 @@ function AppInner() {
           case 'activity':
             navWhenReady('Activity');
             return;
+          case 'withdraw': {
+            // Stripe Connect return/refresh deep links → Coin Store withdraw UI.
+            navWhenReady('CoinStore', {
+              openWithdraw: true,
+              withdrawReturn: parsed.path || '',
+            });
+            return;
+          }
+          case 'call': {
+            const callId = parsed.path || parsed.query?.callId || parsed.query?.id;
+            if (!callId) return;
+            navWhenReady('Call', {
+              callId,
+              role: 'callee',
+              peerName: parsed.query?.peerName || parsed.query?.callerName || 'Incoming call',
+              callerId: parsed.query?.callerId,
+            });
+            return;
+          }
           default:
             return;
         }

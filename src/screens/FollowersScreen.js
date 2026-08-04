@@ -9,14 +9,13 @@ import {
   query,
   getDocs,
   doc,
-  setDoc,
-  deleteDoc,
   getDoc,
   onSnapshot,
   limit,
   startAfter,
-  orderBy
+  orderBy,
 } from 'firebase/firestore';
+import { followUser, unfollowUser } from '../utils/followUtils';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
 const FollowersScreen = () => {
@@ -157,19 +156,11 @@ const FollowersScreen = () => {
 
     try {
       const isFollowing = followingList.has(targetUserId);
-
-      if (isFollowing) {
-        // Unfollow
-        await deleteDoc(doc(db, 'users', currentUser.uid, 'following', targetUserId));
-        await deleteDoc(doc(db, 'users', targetUserId, 'followers', currentUser.uid));
-      } else {
-        // Follow
-        await setDoc(doc(db, 'users', currentUser.uid, 'following', targetUserId), {
-          timestamp: new Date()
-        });
-        await setDoc(doc(db, 'users', targetUserId, 'followers', currentUser.uid), {
-          timestamp: new Date()
-        });
+      const res = isFollowing
+        ? await unfollowUser(currentUser.uid, targetUserId)
+        : await followUser(currentUser.uid, targetUserId);
+      if (!res?.success) {
+        console.error('Error toggling follow:', res?.error?.message || res?.error);
       }
     } catch (error) {
       console.error('Error toggling follow:', error);

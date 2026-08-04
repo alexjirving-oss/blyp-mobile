@@ -62,30 +62,77 @@ export async function sendToUser(userId: string, payload: SendPayload): Promise<
   }
 
   const tokens = devices.map((d) => d.token);
-  const message: admin.messaging.MulticastMessage = {
-    tokens,
-    notification: { title: payload.title, body: payload.body },
-    data: payload.data || {},
-    android: {
-      priority: 'high',
-      collapseKey: payload.collapseKey,
-      notification: {
-        channelId: 'blyp',
-        // Resource in android/.../res/raw/blyp_notify.wav (filename, no extension).
-        sound: 'blyp_notify',
-      },
-    },
-    apns: {
-      headers: {
-        // Priority 10 = deliver immediately as a user-visible alert (the
-        // default of 5 lets iOS coalesce/delay for power, which reads as "slow").
-        'apns-priority': '10',
-        'apns-push-type': 'alert',
-        ...(payload.collapseKey ? { 'apns-collapse-id': payload.collapseKey } : {}),
-      },
-      payload: { aps: { sound: 'blyp_notify.wav' } },
-    },
+  const dataType = String(payload.data?.type || '').toLowerCase();
+  const isCall = dataType === 'incoming_call' || dataType === 'call';
+
+  // Incoming calls: data-first + dedicated MAX channel so lock-screen / pocket
+  // still rings loudly. Title/body also go in data so our native handler can
+  // build a full-screen call notification when the process is awake.
+  const data: Record<string, string> = {
+    ...(payload.data || {}),
+    title: payload.title,
+    body: payload.body,
   };
+
+  const message: admin.messaging.MulticastMessage = isCall
+    ? {
+        tokens,
+        data,
+        android: {
+          priority: 'high',
+          ttl: 60 * 1000,
+          collapseKey: payload.collapseKey,
+          notification: {
+            channelId: 'blyp_calls',
+            sound: 'blyp_notify',
+            priority: 'max',
+            visibility: 'public',
+            defaultVibrateTimings: true,
+            title: payload.title,
+            body: payload.body,
+            // Sticky-ish until answered — OS may still auto-dismiss.
+            sticky: true,
+            tag: payload.collapseKey || data.callId || 'blyp_call',
+          },
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert',
+            ...(payload.collapseKey ? { 'apns-collapse-id': payload.collapseKey } : {}),
+          },
+          payload: {
+            aps: {
+              alert: { title: payload.title, body: payload.body },
+              sound: 'blyp_notify.wav',
+              // Interruption level for loud ring when possible (iOS 15+).
+              'interruption-level': 'time-sensitive',
+            },
+            ...data,
+          },
+        },
+      }
+    : {
+        tokens,
+        notification: { title: payload.title, body: payload.body },
+        data,
+        android: {
+          priority: 'high',
+          collapseKey: payload.collapseKey,
+          notification: {
+            channelId: 'blyp',
+            sound: 'blyp_notify',
+          },
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert',
+            ...(payload.collapseKey ? { 'apns-collapse-id': payload.collapseKey } : {}),
+          },
+          payload: { aps: { sound: 'blyp_notify.wav' } },
+        },
+      };
 
   const resp = await admin.messaging().sendEachForMulticast(message);
 

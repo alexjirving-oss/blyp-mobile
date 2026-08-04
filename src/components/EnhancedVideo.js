@@ -111,16 +111,38 @@ function EnhancedVideo(props) {
     };
   }, [isFocused, videoLoaded, hasError]);
 
+  const emitNaturalSize = (raw) => {
+    if (!props.onNaturalSize || !raw || !(raw.width > 0) || !(raw.height > 0)) return;
+    let width = Number(raw.width);
+    let height = Number(raw.height);
+    const orientation = String(raw.orientation || '').toLowerCase();
+    // Some Android devices report swapped dimensions with orientation metadata.
+    if (
+      (orientation === 'left' || orientation === 'right') &&
+      width > 0 &&
+      height > 0 &&
+      width < height
+    ) {
+      const tmp = width;
+      width = height;
+      height = tmp;
+    }
+    props.onNaturalSize({ width, height, orientation: raw.orientation });
+  };
+
   const handleLoad = (status) => {
     if (__DEV__) {
       console.log('[EnhancedVideo] onLoad', {
         playableUri,
         durationMillis: status?.durationMillis,
+        naturalSize: status?.naturalSize,
       });
     }
     setVideoLoaded(true);
     setHasError(false);
     if (props.onReady) props.onReady();
+    // expo-av often reports naturalSize on load before onReadyForDisplay.
+    emitNaturalSize(status?.naturalSize);
   };
 
   const handleError = (error) => {
@@ -161,12 +183,7 @@ function EnhancedVideo(props) {
               console.log('[EnhancedVideo] onReadyForDisplay');
             }
             setVideoLoaded(true);
-            // Surface the video's intrinsic size so callers can top-anchor a
-            // "contain" video (the For You feed) instead of centering it.
-            const ns = event?.naturalSize;
-            if (props.onNaturalSize && ns && ns.width > 0 && ns.height > 0) {
-              props.onNaturalSize(ns);
-            }
+            emitNaturalSize(event?.naturalSize);
           }}
           onPlaybackStatusUpdate={(status) => {
             props.onPlaybackStatusUpdate?.(status);

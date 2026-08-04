@@ -34,32 +34,66 @@ async function loadDevices(userId) {
     return rows;
 }
 async function sendToUser(userId, payload) {
+    var _a;
     const devices = await loadDevices(userId);
     if (devices.length === 0) {
         return { deviceCount: 0, successCount: 0, failureCount: 0, prunedTokens: 0, retriable: false };
     }
     const tokens = devices.map((d) => d.token);
-    const message = {
-        tokens,
-        notification: { title: payload.title, body: payload.body },
-        data: payload.data || {},
-        android: {
-            priority: 'high',
-            collapseKey: payload.collapseKey,
-            notification: {
-                channelId: 'blyp',
-                // Resource in android/.../res/raw/blyp_notify.wav (filename, no extension).
-                sound: 'blyp_notify',
+    const dataType = String(((_a = payload.data) === null || _a === void 0 ? void 0 : _a.type) || '').toLowerCase();
+    const isCall = dataType === 'incoming_call' || dataType === 'call';
+    // Incoming calls: data-first + dedicated MAX channel so lock-screen / pocket
+    // still rings loudly. Title/body also go in data so our native handler can
+    // build a full-screen call notification when the process is awake.
+    const data = Object.assign(Object.assign({}, (payload.data || {})), { title: payload.title, body: payload.body });
+    const message = isCall
+        ? {
+            tokens,
+            data,
+            android: {
+                priority: 'high',
+                ttl: 60 * 1000,
+                collapseKey: payload.collapseKey,
+                notification: {
+                    channelId: 'blyp_calls',
+                    sound: 'blyp_notify',
+                    priority: 'max',
+                    visibility: 'public',
+                    defaultVibrateTimings: true,
+                    title: payload.title,
+                    body: payload.body,
+                    // Sticky-ish until answered — OS may still auto-dismiss.
+                    sticky: true,
+                    tag: payload.collapseKey || data.callId || 'blyp_call',
+                },
             },
-        },
-        apns: {
-            headers: Object.assign({ 
-                // Priority 10 = deliver immediately as a user-visible alert (the
-                // default of 5 lets iOS coalesce/delay for power, which reads as "slow").
-                'apns-priority': '10', 'apns-push-type': 'alert' }, (payload.collapseKey ? { 'apns-collapse-id': payload.collapseKey } : {})),
-            payload: { aps: { sound: 'blyp_notify.wav' } },
-        },
-    };
+            apns: {
+                headers: Object.assign({ 'apns-priority': '10', 'apns-push-type': 'alert' }, (payload.collapseKey ? { 'apns-collapse-id': payload.collapseKey } : {})),
+                payload: Object.assign({ aps: {
+                        alert: { title: payload.title, body: payload.body },
+                        sound: 'blyp_notify.wav',
+                        // Interruption level for loud ring when possible (iOS 15+).
+                        'interruption-level': 'time-sensitive',
+                    } }, data),
+            },
+        }
+        : {
+            tokens,
+            notification: { title: payload.title, body: payload.body },
+            data,
+            android: {
+                priority: 'high',
+                collapseKey: payload.collapseKey,
+                notification: {
+                    channelId: 'blyp',
+                    sound: 'blyp_notify',
+                },
+            },
+            apns: {
+                headers: Object.assign({ 'apns-priority': '10', 'apns-push-type': 'alert' }, (payload.collapseKey ? { 'apns-collapse-id': payload.collapseKey } : {})),
+                payload: { aps: { sound: 'blyp_notify.wav' } },
+            },
+        };
     const resp = await firebaseAdmin_1.admin.messaging().sendEachForMulticast(message);
     let pruned = 0;
     let transientFailures = 0;

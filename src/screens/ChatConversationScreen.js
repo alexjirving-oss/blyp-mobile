@@ -145,22 +145,13 @@ const ChatScreen = ({ route, navigation }) => {
         await soundRef.current.unloadAsync();
       }
 
-      // Try to play a notification sound
+      // Try to play the shared Blyp notify sting
       try {
-        // Use a simple tone generator for notification sound
-        const { sound } = await Audio.Sound.createAsync(
-          {
-            uri: 'https://www.soundjay.com/misc/sounds/bell-ringing-05.wav'
-          },
-          {
-            shouldPlay: true,
-            volume: 0.8,
-            isLooping: false
-          }
-        );
-
+        // eslint-disable-next-line global-require
+        const { playBlypNotify } = require('../services/notifySound');
+        const sound = await playBlypNotify({ looping: false, volume: 0.8 });
         soundRef.current = sound;
-        console.log('ðŸ”” Notification sound playing');
+        console.log('Notification sound playing');
 
         // Clean up sound after playing
         setTimeout(async () => {
@@ -168,7 +159,6 @@ const ChatScreen = ({ route, navigation }) => {
             if (soundRef.current) {
               await soundRef.current.unloadAsync();
               soundRef.current = null;
-              console.log('ðŸ”‡ Sound cleaned up');
             }
           } catch (cleanupError) {
             console.error('Error cleaning up sound:', cleanupError);
@@ -176,7 +166,7 @@ const ChatScreen = ({ route, navigation }) => {
         }, 3000);
 
       } catch (soundError) {
-        console.log('âš ï¸ Sound failed, using haptics only:', soundError.message);
+        console.log('Sound failed, using haptics only:', soundError.message);
         // Haptic feedback already triggered above as primary notification
       }
 
@@ -248,39 +238,39 @@ const ChatScreen = ({ route, navigation }) => {
     }
   }, [messages]);
 
-  // Mark messages as read and reset unread count when entering chat
+  // Clear Phone-tab badge as soon as the chat is opened/read — not only after a reply.
+  // Per-message status updates are blocked by Firestore rules; conversation.unreadCount
+  // is what drives the badge and is writable by participants.
   useEffect(() => {
-    if (!conversationId || !uid || messages.length === 0) return;
+    if (!conversationId || !uid) return undefined;
 
-    const markMessagesAsRead = async () => {
+    const markRead = async () => {
       try {
-        // Mark all unread messages from others as read
-        const unreadMessages = messages.filter(msg =>
-          msg.senderId !== uid && msg.status !== 'read'
+        await conversationsMessagingService.markThreadRead(db, conversationId, uid);
+      } catch (error) {
+        console.error('Error marking thread read:', error);
+      }
+      // Best-effort per-message status (may be denied by rules — non-fatal).
+      try {
+        const unreadMessages = (messages || []).filter(
+          (msg) => msg.senderId !== uid && msg.status !== 'read',
         );
-
         if (unreadMessages.length > 0) {
-          console.log('ðŸ‘€ Marking', unreadMessages.length, 'messages as read');
-
           await conversationsMessagingService.markMessagesRead(
             db,
             conversationId,
             uid,
             unreadMessages.map((m) => m.id),
           );
-
-          await conversationsMessagingService.markThreadRead(db, conversationId, uid);
-          console.log('âœ… Marked thread read for current user');
         }
-      } catch (error) {
-        console.error('âŒ Error marking messages as read:', error);
+      } catch {
+        // ignore
       }
     };
 
-    // Debounce to prevent excessive calls
-    const timeoutId = setTimeout(markMessagesAsRead, 500);
+    const timeoutId = setTimeout(markRead, 300);
     return () => clearTimeout(timeoutId);
-  }, [conversationId, uid, messages.length]); // Only depend on messages.length, not the entire messages array
+  }, [conversationId, uid, messages.length]);
 
   const sendMessage = async () => {
     if (!message.trim() || !conversationId) {
@@ -366,10 +356,51 @@ const ChatScreen = ({ route, navigation }) => {
         </TouchableOpacity>
         <BlypLogo useGradientBackground={true} />
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Icon name="videocam" size={24} color={T.textSecondary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionButton}>
+          <TouchableOpacity
+            style={styles.headerActionButton}
+            onPress={async () => {
+              if (!participantUid || !uid) {
+                Alert.alert('Call', 'Cannot start call — missing user.');
+                return;
+              }
+              try {
+                // eslint-disable-next-line global-require
+                const callService = require('../services/callService');
+                const myName =
+                  authUser?.displayName ||
+                  authUser?.username ||
+                  authUser?.email ||
+                  'Someone';
+                const theirName =
+                  user?.displayName || user?.username || user?.name || 'Blyp user';
+                const res = await callService.startCall({
+                  callerId: uid,
+                  calleeId: participantUid,
+                  conversationId,
+                  callerName: myName,
+                  calleeName: theirName,
+                });
+                if (!res.ok) {
+                  Alert.alert(
+                    'Call',
+                    res.reason === 'mic-denied'
+                      ? 'Microphone permission is required for calls.'
+                      : 'Could not start call.',
+                  );
+                  return;
+                }
+                navigation.navigate('Call', {
+                  callId: res.callId,
+                  role: 'caller',
+                  peerName: theirName,
+                  peerAvatar: user?.photoURL || user?.avatar || user?.userPhotoURL || user?.photo,
+                });
+              } catch (e) {
+                Alert.alert('Call', e?.message || 'Could not start call.');
+              }
+            }}
+            accessibilityLabel="Start audio call"
+          >
             <Icon name="call" size={24} color={T.textSecondary} />
           </TouchableOpacity>
           {participantUid && participantUid !== uid ? (

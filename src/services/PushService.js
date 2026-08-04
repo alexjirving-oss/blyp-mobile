@@ -16,6 +16,7 @@ const DEVICE_ID_KEY = 'blyp_push_device_id';
 // New channel id so existing installs pick up the custom Blyp jingle
 // (Android ignores sound changes on an already-created channel).
 export const DEFAULT_CHANNEL_ID = 'blyp';
+export const CALL_CHANNEL_ID = 'blyp_calls';
 export const DEFAULT_SOUND = 'blyp_notify.wav';
 
 // Lazy require so a build/environment without the native module degrades gracefully.
@@ -65,12 +66,20 @@ export function configureForegroundPresentation() {
   if (!Notifications || foregroundHandlerSet) return;
   try {
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-      }),
+      handleNotification: async (notification) => {
+        const type = String(notification?.request?.content?.data?.type || '');
+        const isCall = type === 'incoming_call' || type === 'call';
+        return {
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          // Incoming calls must interrupt even when DND-adjacent / focused.
+          priority: isCall
+            ? Notifications.AndroidNotificationPriority?.MAX
+            : Notifications.AndroidNotificationPriority?.HIGH,
+        };
+      },
     });
     foregroundHandlerSet = true;
   } catch {
@@ -78,17 +87,32 @@ export function configureForegroundPresentation() {
   }
 }
 
-/** Android requires an explicit channel; FCM sender uses channelId 'blyp'. */
+/** Android requires an explicit channel; FCM sender uses channelId 'blyp' / 'blyp_calls'. */
 export async function ensureAndroidChannel() {
   const Notifications = getNotifications();
   if (!Notifications || Platform.OS !== 'android') return;
   try {
+    const Importance = Notifications.AndroidImportance || {};
     await Notifications.setNotificationChannelAsync(DEFAULT_CHANNEL_ID, {
       name: 'Blyp',
-      importance: Notifications.AndroidImportance?.HIGH ?? 4,
+      importance: Importance.HIGH ?? 4,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#00D2BE',
       sound: DEFAULT_SOUND,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC,
+    });
+    await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
+      name: 'Incoming calls',
+      importance: Importance.MAX ?? 5,
+      vibrationPattern: [0, 500, 200, 500, 200, 500],
+      lightColor: '#00D2BE',
+      sound: DEFAULT_SOUND,
+      bypassDnd: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility?.PUBLIC,
+      audioAttributes: {
+        usage: Notifications.AndroidAudioUsage?.NOTIFICATION_RINGTONE,
+        contentType: Notifications.AndroidAudioContentType?.SONIFICATION,
+      },
     });
   } catch {
     // ignore

@@ -32,6 +32,7 @@ export type NotificationType =
   | 'battle'
   | 'message'
   | 'team'
+  | 'call'
   | 'system';
 
 export type NotificationStatus =

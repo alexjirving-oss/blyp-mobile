@@ -989,8 +989,8 @@ const MessengerScreen = ({ navigation }) => {
     <BlypHeaderFlow
       tabs={[
         { key: 'chats', label: 'Chats' },
-        { key: 'notifications', label: 'Notifications' },
         { key: 'calls', label: 'Calls' },
+        { key: 'notifications', label: 'Notifications' },
         { key: 'groups', label: 'Groups' },
         { key: 'status', label: 'Status' },
       ]}
@@ -1143,12 +1143,67 @@ const MessengerScreen = ({ navigation }) => {
         if (!calls || calls.length === 0) {
           return (
             <View style={styles.emptyState}>
-              <Icon name="call-outline" size={64} color={T.textDisabled} />
+              <View style={styles.callEmptyIconWrap}>
+                <Icon name="call" size={36} color={T.primary} />
+              </View>
               <Text style={styles.emptyTitle}>No recent calls</Text>
-              <Text style={styles.emptySubtitle}>Your call history will appear here</Text>
+              <Text style={styles.emptySubtitle}>
+                Call someone from a chat, or find people to start talking
+              </Text>
+              <TouchableOpacity
+                style={styles.newChatButton}
+                onPress={() => navigation.navigate('FindPeople')}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={[T.gradientStart, T.gradientMiddle || T.gradientEnd, T.gradientEnd]}
+                  style={styles.newChatButtonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Icon name="call" size={20} color={T.textPrimary} style={styles.newChatIcon} />
+                  <Text style={styles.newChatButtonText}>Call someone</Text>
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
           );
         }
+
+        const startCallWithPeer = async (otherId, label, avatarUri, conversationId) => {
+          if (!otherId || !uid) return;
+          try {
+            // eslint-disable-next-line global-require
+            const callService = require('../services/callService');
+            const myName =
+              currentUser?.displayName ||
+              currentUser?.username ||
+              'Someone';
+            const res = await callService.startCall({
+              callerId: uid,
+              calleeId: otherId,
+              conversationId: conversationId || null,
+              callerName: myName,
+              calleeName: label,
+            });
+            if (!res.ok) {
+              Alert.alert(
+                'Call',
+                res.reason === 'mic-denied'
+                  ? 'Microphone permission is required for calls.'
+                  : 'Could not start call.',
+              );
+              return;
+            }
+            navigation.navigate('Call', {
+              callId: res.callId,
+              role: 'caller',
+              peerName: label,
+              peerAvatar: avatarUri || null,
+            });
+          } catch (e) {
+            Alert.alert('Call', e?.message || 'Could not start call.');
+          }
+        };
 
         return (
           <FlatList
@@ -1158,25 +1213,95 @@ const MessengerScreen = ({ navigation }) => {
             removeClippedSubviews={false}
             contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
             renderItem={({ item }) => {
-              const isMissed = String(item.status || '').toLowerCase() === 'missed';
-              const startedAt = item.startedAt;
-              const time = startedAt?.toDate ? startedAt.toDate().toLocaleString() : '';
-              const otherId = Array.isArray(item.participantIds)
-                ? item.participantIds.find((id) => id && id !== uid)
-                : null;
+              const status = String(item.status || '').toLowerCase();
+              const isMissed = status === 'missed';
+              const isDeclined = status === 'declined';
+              const isOutgoing = item.callerId === uid;
+              const startedAt = item.createdAt || item.startedAt;
+              const timeDate = startedAt?.toDate
+                ? startedAt.toDate()
+                : item.createdAtMs
+                  ? new Date(item.createdAtMs)
+                  : null;
+              const time = timeDate ? formatLastMessageTime(timeDate) : '';
+              const participants = Array.isArray(item.participants)
+                ? item.participants
+                : Array.isArray(item.participantIds)
+                  ? item.participantIds
+                  : [];
+              const otherId =
+                participants.find((id) => id && id !== uid) ||
+                (isOutgoing ? item.calleeId : item.callerId) ||
+                null;
               const other = otherId ? allUsers.find((u) => u.id === otherId) : null;
-              const label = other?.username || other?.displayName || item.otherName || 'Unknown';
+              const label =
+                other?.username ||
+                other?.displayName ||
+                (isOutgoing ? item.calleeName : item.callerName) ||
+                item.otherName ||
+                'Unknown';
+              const avatarUri = other?.photoURL || other?.avatar || null;
+              const statusLabel =
+                isMissed
+                  ? 'Missed'
+                  : isDeclined
+                    ? 'Declined'
+                    : status === 'active'
+                      ? 'In progress'
+                      : status === 'ringing'
+                        ? 'Ringing'
+                        : isOutgoing
+                          ? 'Outgoing'
+                          : 'Incoming';
+              const accent = isMissed || isDeclined ? T.error : T.primary;
+              const directionIcon = isMissed
+                ? 'call-outline'
+                : isOutgoing
+                  ? 'arrow-up'
+                  : 'arrow-down';
 
               return (
-                <View style={styles.callRow}>
-                  <View style={styles.callRowLeft}>
-                    <Icon name={isMissed ? 'call-outline' : 'call'} size={18} color={isMissed ? T.error : T.textSecondary} />
+                <TouchableOpacity
+                  style={[
+                    styles.callRow,
+                    (isMissed || isDeclined) && styles.callRowMissed,
+                  ]}
+                  activeOpacity={0.7}
+                  onPress={() => startCallWithPeer(otherId, label, avatarUri, item.conversationId)}
+                >
+                  <View style={styles.callAvatarWrap}>
+                    <BlypAvatar
+                      uri={avatarUri}
+                      name={label}
+                      profile={other || undefined}
+                      size={50}
+                      showBadge={false}
+                    />
+                    <View style={[styles.callDirectionBadge, { backgroundColor: accent }]}>
+                      <Icon name={directionIcon} size={10} color="#0A0A0C" />
+                    </View>
                   </View>
                   <View style={styles.callRowBody}>
-                    <Text style={styles.callRowTitle} numberOfLines={1}>{label}</Text>
-                    <Text style={styles.callRowSubtitle} numberOfLines={1}>{time || String(item.type || 'Call')}</Text>
+                    <Text
+                      style={[styles.callRowTitle, (isMissed || isDeclined) && { color: T.error }]}
+                      numberOfLines={1}
+                    >
+                      {label}
+                    </Text>
+                    <Text style={styles.callRowSubtitle} numberOfLines={1}>
+                      {statusLabel}
+                      {time ? ` · ${time}` : ''}
+                    </Text>
                   </View>
-                </View>
+                  <TouchableOpacity
+                    style={styles.callBackBtn}
+                    onPress={() => startCallWithPeer(otherId, label, avatarUri, item.conversationId)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel={`Call ${label}`}
+                  >
+                    <Icon name="call" size={20} color={T.primary} />
+                  </TouchableOpacity>
+                </TouchableOpacity>
               );
             }}
           />
@@ -1280,7 +1405,7 @@ const MessengerScreen = ({ navigation }) => {
       default:
         return null;
     }
-  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, tabBarHeight]);
+  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, tabBarHeight, navigation, currentUser]);
 
   // Simple user list for messaging
   const renderSimpleChatList = () => {
@@ -1401,19 +1526,19 @@ const MessengerScreen = ({ navigation }) => {
         {renderTabContent}
       </View>
 
-      {/* Floating Action Button for Find People */}
+      {/* Floating Action Button for Find People / Call */}
       <TouchableOpacity
         style={[styles.fab, { bottom: tabBarHeight + 20 }]}
         onPress={() => {
-          console.log('ðŸš€ FAB pressed - navigating to FindPeople');
           navigation.navigate('FindPeople');
         }}
+        accessibilityLabel={selectedTab === 'calls' ? 'Find someone to call' : 'Find people'}
       >
         <LinearGradient
           colors={[T.gradientStart, T.gradientEnd]}
           style={styles.fabGradient}
         >
-          <Icon name="chatbubble" size={24} color={T.textPrimary} />
+          <Icon name={selectedTab === 'calls' ? 'call' : 'chatbubble'} size={24} color={T.textPrimary} />
         </LinearGradient>
       </TouchableOpacity>
 
@@ -1483,26 +1608,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: T.border,
+    backgroundColor: T.surface || 'transparent',
   },
-  callRowLeft: {
-    width: 28,
+  callRowMissed: {
+    backgroundColor: withAlpha(T.error || '#EF4444', 0.06),
+  },
+  callAvatarWrap: {
+    width: 50,
+    height: 50,
+    marginRight: 12,
+  },
+  callDirectionBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
-    marginRight: 10,
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: T.headerBackground || '#0A0A0C',
   },
   callRowBody: {
     flex: 1,
+    minWidth: 0,
   },
   callRowTitle: {
     color: T.textPrimary,
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
   },
   callRowSubtitle: {
-    marginTop: 2,
+    marginTop: 3,
     color: T.textMuted,
-    fontSize: 12,
+    fontSize: 13,
+  },
+  callBackBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: withAlpha(T.primary || '#00D2BE', 0.12),
+    marginLeft: 8,
+  },
+  callEmptyIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: withAlpha(T.primary || '#00D2BE', 0.12),
+    borderWidth: 1,
+    borderColor: withAlpha(T.primary || '#00D2BE', 0.28),
+    marginBottom: 8,
   },
 
   statusRow: {
