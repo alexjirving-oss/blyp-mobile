@@ -5,12 +5,20 @@
  *   icon.png          -> opaque near-black square (iOS rounds the corners)
  *   adaptive-icon.png -> wordmark on transparent (Android composites over the
  *                        adaptiveIcon.backgroundColor), sized into the safe zone
+ *   splash.png        -> full-bleed Expo splash (near-black + centered wordmark)
+ *   splashscreen_logo -> Android 12+ splash animated icon (per-density)
+ *   play-store/*      -> 512 icon + 1024x500 feature graphic for Console upload
  */
 const sharp = require('sharp');
 const path = require('path');
+const fs = require('fs');
 
-const OUT_ICON = path.resolve(__dirname, '..', 'assets', 'icon.png');
-const OUT_ADAPTIVE = path.resolve(__dirname, '..', 'assets', 'adaptive-icon.png');
+const ROOT = path.resolve(__dirname, '..');
+const OUT_ICON = path.join(ROOT, 'assets', 'icon.png');
+const OUT_ADAPTIVE = path.join(ROOT, 'assets', 'adaptive-icon.png');
+const OUT_SPLASH = path.join(ROOT, 'assets', 'splash.png');
+const OUT_PLAY_ICON = path.join(ROOT, 'assets', 'play-store', 'icon-512.png');
+const OUT_PLAY_FEATURE = path.join(ROOT, 'assets', 'play-store', 'feature-graphic-1024x500.png');
 
 const NEAR_BLACK = '#0A0A0C';
 const WHITE = '#F5F5F7';
@@ -128,6 +136,103 @@ async function writeNative() {
   console.log('wrote native android mipmaps');
 }
 
+// Android 12 splash icon sizes (288dp base × density).
+const SPLASH_LOGO = { mdpi: 288, hdpi: 432, xhdpi: 576, xxhdpi: 864, xxxhdpi: 1152 };
+
+async function writeSplashAssets() {
+  // Opaque near-black tile padded for the circular Android splash mask.
+  const splashIconPath = path.join(ROOT, 'assets', '_splash_icon_tmp.png');
+  await build({ outPath: splashIconPath, opaque: true, padRatio: 0.42 });
+  const splashIconBuf = await sharp(splashIconPath).png().toBuffer();
+
+  for (const [dpi, sz] of Object.entries(SPLASH_LOGO)) {
+    const dir = path.join(RES, `drawable-${dpi}`);
+    fs.mkdirSync(dir, { recursive: true });
+    await sharp(splashIconBuf)
+      .resize(sz, sz, { fit: 'fill' })
+      .png()
+      .toFile(path.join(dir, 'splashscreen_logo.png'));
+  }
+
+  // Expo splash: portrait canvas, centered wordmark.
+  const mark = await sharp(splashIconBuf).resize(720, 720, { fit: 'fill' }).png().toBuffer();
+  const splashW = 1284;
+  const splashH = 2778;
+  await sharp({
+    create: {
+      width: splashW,
+      height: splashH,
+      channels: 4,
+      background: { r: 10, g: 10, b: 12, alpha: 1 },
+    },
+  })
+    .composite([{
+      input: mark,
+      left: Math.round((splashW - 720) / 2),
+      top: Math.round((splashH - 720) / 2),
+    }])
+    .png()
+    .toFile(OUT_SPLASH);
+
+  fs.unlinkSync(splashIconPath);
+  console.log('wrote splash.png + native splashscreen_logo');
+}
+
+async function writePlayStoreAssets() {
+  fs.mkdirSync(path.dirname(OUT_PLAY_ICON), { recursive: true });
+  await sharp(OUT_ICON).resize(512, 512, { fit: 'fill' }).png().toFile(OUT_PLAY_ICON);
+
+  const tile = await sharp(OUT_ICON).resize(308, 308, { fit: 'fill' }).png().toBuffer();
+  const featureSvg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500">
+    <rect width="1024" height="500" fill="${NEAR_BLACK}"/>
+    <text x="456" y="210" font-family="Arial, Helvetica, sans-serif" font-weight="800"
+      font-size="72" letter-spacing="-2" fill="${WHITE}">blyp</text>
+    <circle cx="600" cy="188" r="14" fill="${TEAL}"/>
+    <text x="456" y="276" font-family="Arial, Helvetica, sans-serif" font-weight="600"
+      font-size="30" fill="#A1A1AA">Create · Discover · Go live</text>
+    <text x="456" y="326" font-family="Arial, Helvetica, sans-serif" font-weight="500"
+      font-size="22" fill="#71717A">Internal testing</text>
+  </svg>`);
+
+  await sharp(featureSvg)
+    .composite([{ input: tile, left: 96, top: 96 }])
+    .png()
+    .toFile(OUT_PLAY_FEATURE);
+
+  // Keep SVG sources in sync with the modern tile (Play Console still wants PNG).
+  fs.writeFileSync(
+    path.join(ROOT, 'assets', 'play-store', 'icon-512.svg'),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="${NEAR_BLACK}"/>
+  <text x="40" y="300" font-family="Arial, Helvetica, sans-serif" font-weight="800"
+    font-size="160" letter-spacing="-6" fill="${WHITE}">blyp</text>
+  <circle cx="430" cy="286" r="22" fill="${TEAL}"/>
+</svg>
+`,
+  );
+  fs.writeFileSync(
+    path.join(ROOT, 'assets', 'play-store', 'feature-graphic-1024x500.svg'),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="500" viewBox="0 0 1024 500">
+  <rect width="1024" height="500" fill="${NEAR_BLACK}"/>
+  <rect x="96" y="96" width="308" height="308" rx="68" fill="${NEAR_BLACK}" stroke="${TEAL}" stroke-width="3"/>
+  <text x="140" y="280" font-family="Arial, Helvetica, sans-serif" font-weight="800"
+    font-size="96" letter-spacing="-4" fill="${WHITE}">blyp</text>
+  <circle cx="360" cy="268" r="14" fill="${TEAL}"/>
+  <text x="456" y="210" font-family="Arial, Helvetica, sans-serif" font-weight="800"
+    font-size="88" letter-spacing="-2" fill="${WHITE}">blyp</text>
+  <circle cx="612" cy="198" r="12" fill="${TEAL}"/>
+  <text x="456" y="276" font-family="Arial, Helvetica, sans-serif" font-weight="600"
+    font-size="30" fill="#A1A1AA">Create · Discover · Go live</text>
+  <text x="456" y="326" font-family="Arial, Helvetica, sans-serif" font-weight="500"
+    font-size="22" fill="#71717A">Internal testing</text>
+</svg>
+`,
+  );
+  console.log('wrote play-store icon-512 + feature-graphic');
+}
+
 (async () => {
   // icon.png: opaque near-black tile, wordmark fills more of the tile.
   await build({ outPath: OUT_ICON, opaque: true, padRatio: 0.20 });
@@ -135,4 +240,6 @@ async function writeNative() {
   // safe zone so the launcher mask never clips the wordmark.
   await build({ outPath: OUT_ADAPTIVE, opaque: false, padRatio: 0.40 });
   await writeNative();
+  await writeSplashAssets();
+  await writePlayStoreAssets();
 })().catch((e) => { console.error(e); process.exit(1); });

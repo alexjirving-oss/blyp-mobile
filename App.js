@@ -1074,9 +1074,9 @@ function AppInner() {
         </Text>
         <TouchableOpacity
           onPress={() => setAppError(null)}
-          style={{ marginTop: 18, backgroundColor: '#7c3aed', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 }}
+          style={{ marginTop: 18, backgroundColor: COLORS.primary, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 }}
         >
-          <Text style={{ color: 'white', fontWeight: '700' }}>Continue</Text>
+          <Text style={{ color: COLORS.black, fontWeight: '700' }}>Continue</Text>
         </TouchableOpacity>
       </View>
     );
@@ -1089,7 +1089,7 @@ function AppInner() {
         <BlypLogo useGradientBackground={true} textStyle={{ fontSize: 48 }} />
         <ActivityIndicator
           size="large"
-          color="#a855f7"
+          color={COLORS.primary}
           style={{ marginTop: 20 }}
         />
       </View>
@@ -1115,7 +1115,7 @@ function AppInner() {
               // spinner instead of flashing the main app before onboarding.
               <View style={styles.loadingContainer}>
                 <BlypLogo useGradientBackground={true} textStyle={{ fontSize: 48 }} />
-                <ActivityIndicator size="large" color="#a855f7" style={{ marginTop: 20 }} />
+                <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 20 }} />
               </View>
             ) : onboarded === false ? (
               <OnboardingScreen uid={uid} onDone={() => setOnboarded(true)} />
@@ -1233,10 +1233,10 @@ export default function App() {
         <BlypLogo useGradientBackground={true} textStyle={{ fontSize: 48 }} />
         <ActivityIndicator
           size="large"
-          color="#a855f7"
+          color={COLORS.primary}
           style={{ marginTop: 20 }}
         />
-        <Text style={{ marginTop: 12, color: '#64748b', fontSize: 14, textAlign: 'center', maxWidth: '80%', alignSelf: 'center' }}>{loadingNote}</Text>
+        <Text style={{ marginTop: 12, color: COLORS.textMuted, fontSize: 14, textAlign: 'center', maxWidth: '80%', alignSelf: 'center' }}>{loadingNote}</Text>
       </View>
     );
   }
