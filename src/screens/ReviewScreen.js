@@ -193,6 +193,8 @@ const ReviewScreen = () => {
   
   const [caption, setCaption] = useState(transcript || '');
   const [isUploading, setIsUploading] = useState(false);
+  // Human-readable publish stage shown on the blocking upload overlay.
+  const [uploadStatusText, setUploadStatusText] = useState('Preparing your content…');
   // Track if Firebase Web API key appears suspended (auth error pattern)
   const [firebaseSuspended, setFirebaseSuspended] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -2333,11 +2335,12 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     });
   };
 
-  const uploadMedia = async (mediaUri, mediaType, fbUser) => {
+  const uploadMedia = async (mediaUri, mediaType, fbUser, statusCtx = {}) => {
     if (!fbUser || !fbUser.uid) {
       throw new Error('User not authenticated (no Firebase UID)');
     }
     const kind = String(mediaType || 'photo').toLowerCase();
+    const itemLabel = statusCtx.itemLabel || 'media';
     console.log('📤 Starting media upload...');
     console.log('📤 Media URI:', mediaUri);
     console.log('📤 Media type:', kind);
@@ -2354,7 +2357,15 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     let uploadUri = mediaUri;
     if (kind === 'video') {
       try {
-        const prepared = await prepareMediaForUpload(mediaUri, 'video');
+        setUploadStatusText(`Compressing ${itemLabel}…`);
+        const prepared = await prepareMediaForUpload(mediaUri, 'video', {
+          onProgress: (p) => {
+            const raw = Number(p) || 0;
+            // Compressor may report 0–1 or 0–100 depending on native build.
+            const pct = Math.min(100, Math.round(raw <= 1 ? raw * 100 : raw));
+            setUploadStatusText(`Compressing ${itemLabel}… ${pct}%`);
+          },
+        });
         if (prepared?.uri) uploadUri = prepared.uri;
         console.log('📤 Media prep', {
           compressed: !!prepared?.compressed,
@@ -2367,11 +2378,15 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       }
     }
 
+    setUploadStatusText(`Uploading ${itemLabel}…`);
     const uploadedPromise = uploadMediaToStorage({
       localUri: uploadUri,
       storagePath: filePath,
       contentType,
       timeoutMs: kind === 'video' ? 180000 : 90000,
+      onProgress: (pct) => {
+        setUploadStatusText(`Uploading ${itemLabel}… ${pct}%`);
+      },
     });
 
     let thumbnailUrl = null;
@@ -2487,6 +2502,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     }
 
     setIsUploading(true);
+    setUploadStatusText('Preparing your content…');
     
     try {
       let uploadedMedia = [];
@@ -2498,13 +2514,20 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
           const mediaItem = mediaItems[i];
           if (mediaItem.uri) {
             try {
+              const itemLabel =
+                mediaItems.length > 1
+                  ? `${i + 1}/${mediaItems.length}`
+                  : mediaItem.type === 'video'
+                    ? 'video'
+                    : 'photo';
               console.log(`📤 Uploading media ${i + 1}/${mediaItems.length}... Type: ${mediaItem.type}`);
               let mediaData;
               try {
-                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser);
+                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser, { itemLabel });
               } catch (firstErr) {
                 console.warn(`📤 Media ${i + 1} first attempt failed, retrying once…`, firstErr?.message);
-                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser);
+                setUploadStatusText(`Retrying ${itemLabel}…`);
+                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser, { itemLabel });
               }
               uploadedMedia.push(mediaData);
             } catch (uploadError) {
@@ -2627,7 +2650,8 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
 
       console.log('=== SAVING POST TO FIREBASE ===');
       console.log('Post data:', postData);
-      
+
+      setUploadStatusText('Publishing…');
       const docRef = await firestore.collection('posts').add(postData);
       
       console.log('✅ Post saved successfully with ID:', docRef.id);
@@ -3666,7 +3690,7 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 <Icon  name="cloud-upload" size={48} color="#00D2BE"  />
               </View>
               <Text style={styles.aiOverlayTitle}>Uploading Your Post</Text>
-              <Text style={styles.aiOverlaySubtitle}>Preparing your content...</Text>
+              <Text style={styles.aiOverlaySubtitle}>{uploadStatusText || 'Preparing your content…'}</Text>
               <View style={styles.aiLoadingContainer}>
                 <ActivityIndicator size="large" color="white" />
               </View>
