@@ -40,7 +40,8 @@ export default function PremiumFeedVideo({
   const playing = shouldPlay && !paused;
 
   const fitMode = mediaDisplay?.fitMode;
-  const userScale = Math.min(2.5, Math.max(1, Number(mediaDisplay?.scale) || 1));
+  // Zoom-out (0.5) through zoom-in (2.5) — must match VideoFramingSheet / postEditService.
+  const userScale = Math.min(2.5, Math.max(0.5, Number(mediaDisplay?.scale) || 1));
   const offsetX = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetX) || 0));
   const offsetY = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetY) || 0));
   const hasCustomFit = fitMode === 'cover' || fitMode === 'contain';
@@ -96,9 +97,17 @@ export default function PremiumFeedVideo({
   const framingTransform = useMemo(() => {
     if (!mediaDisplay) return null;
     // Map normalized offsets (-1..1) to real screen travel so drag/nudge
-    // actually repositions the clip, not a tiny 40px shim.
-    const overflowX = Math.max(FRAME_W * 0.28, (FRAME_W * (userScale - 1)) / 2);
-    const overflowY = Math.max(FRAME_H * 0.22, (FRAME_H * (userScale - 1)) / 2);
+    // actually repositions the clip. Use |scale - 1| so zoom-out (<1) gets
+    // a usable pan range (sliding the smaller video within the frame).
+    const scaleDelta = Math.abs(userScale - 1);
+    const overflowX = Math.max(
+      FRAME_W * (userScale < 1 ? 0.4 : 0.28),
+      (FRAME_W * scaleDelta) / 2,
+    );
+    const overflowY = Math.max(
+      FRAME_H * (userScale < 1 ? 0.32 : 0.22),
+      (FRAME_H * scaleDelta) / 2,
+    );
     const tx = offsetX * overflowX;
     const ty = offsetY * overflowY;
     if (userScale === 1 && tx === 0 && ty === 0 && !mediaDisplay?.fitMode) return null;

@@ -16,6 +16,10 @@ import { updatePostMediaDisplay } from '../services/postEditService';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
+/** Zoom-out floor through zoom-in ceiling (synced with postEditService / PremiumFeedVideo). */
+export const FRAMING_MIN_SCALE = 0.5;
+export const FRAMING_MAX_SCALE = 2.5;
+
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
@@ -23,15 +27,25 @@ function clamp(n, min, max) {
 function normalizeDisplay(raw) {
   return {
     fitMode: ['auto', 'cover', 'contain'].includes(raw?.fitMode) ? raw.fitMode : 'cover',
-    scale: clamp(Number(raw?.scale) || 1, 1, 2.5),
+    scale: clamp(Number(raw?.scale) || 1, FRAMING_MIN_SCALE, FRAMING_MAX_SCALE),
     offsetX: clamp(Number(raw?.offsetX) || 0, -1, 1),
     offsetY: clamp(Number(raw?.offsetY) || 0, -1, 1),
   };
 }
 
+function touchDistance(t0, t1) {
+  const dx = (t0?.pageX || 0) - (t1?.pageX || 0);
+  const dy = (t0?.pageY || 0) - (t1?.pageY || 0);
+  return Math.hypot(dx, dy);
+}
+
 /**
  * Owner-only sheet: change how a posted video sits in the frame (fit + pan/zoom).
  * Saves display metadata only — no re-encode.
+ *
+ * Gestures (PanResponder — RNGH is Metro-shimmed / native-disabled in this app):
+ * - one finger: pan
+ * - two fingers: pinch zoom (synced with +/−)
  */
 export default function VideoFramingSheet({
   visible,
@@ -49,8 +63,16 @@ export default function VideoFramingSheet({
   const [saving, setSaving] = useState(false);
 
   const dragStart = useRef({ x: 0, y: 0 });
+  const panOriginPage = useRef({ x: 0, y: 0 });
   const live = useRef({ x: offsetX, y: offsetY });
   live.current = { x: offsetX, y: offsetY };
+
+  const scaleLiveRef = useRef(scale);
+  const scaleBaseRef = useRef(scale);
+  scaleLiveRef.current = scale;
+
+  const gestureMode = useRef(null); // 'pan' | 'pinch' | null
+  const pinchStartDist = useRef(0);
 
   React.useEffect(() => {
     if (!visible) return;
@@ -59,6 +81,8 @@ export default function VideoFramingSheet({
     setScale(next.scale);
     setOffsetX(next.offsetX);
     setOffsetY(next.offsetY);
+    scaleBaseRef.current = next.scale;
+    scaleLiveRef.current = next.scale;
   }, [visible, post?.id]);
 
   const panResponder = useMemo(
@@ -66,14 +90,67 @@ export default function VideoFramingSheet({
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (e) => {
+          const touches = e.nativeEvent.touches || [];
           dragStart.current = { x: live.current.x, y: live.current.y };
+          scaleBaseRef.current = scaleLiveRef.current;
+          if (touches.length >= 2) {
+            pinchStartDist.current = touchDistance(touches[0], touches[1]) || 1;
+            gestureMode.current = 'pinch';
+          } else {
+            const t = touches[0];
+            panOriginPage.current = { x: t?.pageX || 0, y: t?.pageY || 0 };
+            gestureMode.current = 'pan';
+          }
         },
-        onPanResponderMove: (_e, g) => {
-          const nx = clamp(dragStart.current.x + g.dx / (SCREEN_W * 0.45), -1, 1);
-          const ny = clamp(dragStart.current.y + g.dy / (SCREEN_H * 0.45), -1, 1);
+        onPanResponderMove: (e) => {
+          const touches = e.nativeEvent.touches || [];
+
+          if (touches.length >= 2) {
+            const dist = touchDistance(touches[0], touches[1]);
+            if (gestureMode.current !== 'pinch') {
+              pinchStartDist.current = dist || 1;
+              scaleBaseRef.current = scaleLiveRef.current;
+              gestureMode.current = 'pinch';
+            }
+            if (pinchStartDist.current > 0 && dist > 0) {
+              const next = clamp(
+                scaleBaseRef.current * (dist / pinchStartDist.current),
+                FRAMING_MIN_SCALE,
+                FRAMING_MAX_SCALE,
+              );
+              scaleLiveRef.current = next;
+              setScale(Number(next.toFixed(2)));
+            }
+            return;
+          }
+
+          const t = touches[0];
+          if (!t) return;
+
+          // One finger: pan. Re-baseline after leaving a pinch so page deltas don't jump.
+          if (gestureMode.current !== 'pan') {
+            dragStart.current = { x: live.current.x, y: live.current.y };
+            panOriginPage.current = { x: t.pageX || 0, y: t.pageY || 0 };
+            gestureMode.current = 'pan';
+            return;
+          }
+
+          const dx = (t.pageX || 0) - panOriginPage.current.x;
+          const dy = (t.pageY || 0) - panOriginPage.current.y;
+          const nx = clamp(dragStart.current.x + dx / (SCREEN_W * 0.45), -1, 1);
+          const ny = clamp(dragStart.current.y + dy / (SCREEN_H * 0.45), -1, 1);
           setOffsetX(nx);
           setOffsetY(ny);
+        },
+        onPanResponderRelease: () => {
+          scaleBaseRef.current = scaleLiveRef.current;
+          gestureMode.current = null;
+        },
+        onPanResponderTerminate: () => {
+          scaleBaseRef.current = scaleLiveRef.current;
+          gestureMode.current = null;
         },
       }),
     [],
@@ -97,10 +174,27 @@ export default function VideoFramingSheet({
     }
   };
 
-  const bumpScale = (delta) => setScale((s) => clamp(Number((s + delta).toFixed(2)), 1, 2.5));
+  const bumpScale = (delta) => {
+    setScale((s) => {
+      const next = clamp(Number((s + delta).toFixed(2)), FRAMING_MIN_SCALE, FRAMING_MAX_SCALE);
+      scaleBaseRef.current = next;
+      scaleLiveRef.current = next;
+      return next;
+    });
+  };
+
   const nudge = (dx, dy) => {
     setOffsetX((x) => clamp(Number((x + dx).toFixed(3)), -1, 1));
     setOffsetY((y) => clamp(Number((y + dy).toFixed(3)), -1, 1));
+  };
+
+  const resetFraming = () => {
+    setScale(1);
+    setOffsetX(0);
+    setOffsetY(0);
+    setFitMode('cover');
+    scaleBaseRef.current = 1;
+    scaleLiveRef.current = 1;
   };
 
   return (
@@ -133,7 +227,7 @@ export default function VideoFramingSheet({
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.hint}>Drag preview to move · or use arrows · zoom with + / −</Text>
+          <Text style={styles.hint}>Pinch to zoom · drag to move · or use + / − and arrows</Text>
 
           <View style={styles.moveRow}>
             <TouchableOpacity style={styles.iconBtn} onPress={() => nudge(-0.12, 0)} accessibilityLabel="Move left">
@@ -179,15 +273,7 @@ export default function VideoFramingSheet({
             >
               <Icon name="add" size={20} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.iconBtn}
-              onPress={() => {
-                setScale(1);
-                setOffsetX(0);
-                setOffsetY(0);
-                setFitMode('cover');
-              }}
-            >
+            <TouchableOpacity style={styles.iconBtn} onPress={resetFraming} accessibilityLabel="Reset framing">
               <Icon name="refresh" size={18} color="#fff" />
             </TouchableOpacity>
           </View>
