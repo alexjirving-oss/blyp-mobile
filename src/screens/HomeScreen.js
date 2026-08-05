@@ -31,6 +31,7 @@ import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import FeedEmptyState from '../components/Feed/FeedEmptyState';
 import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
+import FeedTopStatPills from '../components/Feed/FeedTopStatPills';
 import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
 import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
@@ -1483,16 +1484,11 @@ const HomeScreen = ({ navigation, route }) => {
             </View>
           </View>
 
-          <View style={styles.topStatCluster} pointerEvents="none">
-            <View style={styles.topStatPill}>
-              <Icon name="eye-outline" size={14} color={COLORS.white} />
-              <Text style={styles.topStatText} allowFontScaling={false}>{formatCount(viewTotal)}</Text>
-            </View>
-            <View style={styles.topStatPill}>
-              <Icon name="gift" size={14} color={COLORS.white} />
-              <Text style={styles.topStatText} allowFontScaling={false}>{formatCount(giftTotal)}</Text>
-            </View>
-          </View>
+          <FeedTopStatPills
+            style={styles.topStatCluster}
+            views={viewTotal}
+            gifts={giftTotal}
+          />
         </View>
 
         {hasMultipleMedia ? (
@@ -2142,7 +2138,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     left: 12,
-    right: 72,
+    // Sit against the video frame right edge (action rail is mid-height).
+    right: 12,
     zIndex: 1200,
     elevation: 1200,
     flexDirection: 'row',
@@ -2151,31 +2148,10 @@ const styles = StyleSheet.create({
   },
   userPillInRow: {
     flexShrink: 1,
-    maxWidth: '62%',
+    maxWidth: '58%',
   },
   topStatCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
     marginLeft: 8,
-  },
-  topStatPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,10,12,0.62)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  topStatText: {
-    color: COLORS.white,
-    fontSize: 12,
-    fontWeight: '700',
-    includeFontPadding: false,
   },
   expandBtn: {
     width: 44,

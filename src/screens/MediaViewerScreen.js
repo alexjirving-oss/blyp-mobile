@@ -6,18 +6,19 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
-  Dimensions,
   Alert,
   StatusBar,
   Animated,
   FlatList,
   ActivityIndicator,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
+import FeedTopStatPills from '../components/Feed/FeedTopStatPills';
 import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
@@ -68,8 +69,6 @@ async function downloadRawVideo(remoteUrl) {
   }
   return true;
 }
-
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 // A value "looks like a raw id" (Cognito sub / UUID / opaque token) when we
 // should NOT show it as a human name. Used so the viewer never displays
@@ -179,6 +178,7 @@ const MediaViewerItem = ({
   isActive,
   shouldLoadVideo = true,
   pageHeight,
+  pageWidth,
   navigation,
   effectiveOwnerIds = [],
   followingSet,
@@ -187,6 +187,8 @@ const MediaViewerItem = ({
   // useAuth().uid is the app's primary identity id (Cognito user id)
   const { uid, authReady, isAuthenticated } = useAuth();
   const { isAdmin } = useIsAdmin();
+  const { width: liveWidth } = useWindowDimensions();
+  const frameWidth = pageWidth > 0 ? pageWidth : liveWidth;
 
   // Alias kept so the (large) body below continues to reference `post`.
   const post = actualPost;
@@ -872,7 +874,7 @@ const MediaViewerItem = ({
   };
 
   return (
-    <View style={[styles.container, { height: pageHeight, width: screenWidth }]}>
+    <View style={[styles.container, { height: pageHeight, width: frameWidth }]}>
       <StatusBar barStyle="light-content" backgroundColor="#000" translucent />
 
       {/* Full-Screen Media Background */}
@@ -956,24 +958,15 @@ const MediaViewerItem = ({
               </TouchableOpacity>
             )}
           </View>
-          <View style={styles.topStatCluster} pointerEvents="none">
-            <View style={styles.topStatPill}>
-              <Icon name="eye-outline" size={14} color={COLORS.white} />
-              <Text style={styles.topStatText} allowFontScaling={false}>
-                {formatCount(getPostViewCount(actualPost))}
-              </Text>
-            </View>
-            <View style={styles.topStatPill}>
-              <Icon name="gift" size={14} color={COLORS.white} />
-              <Text style={styles.topStatText} allowFontScaling={false}>
-                {formatCount(Math.max(
-                  Number(giftCoinsLocal) || 0,
-                  Number(actualPost?.giftCoins) || 0,
-                  Number(actualPost?.coinsReceived) || 0,
-                ))}
-              </Text>
-            </View>
-          </View>
+          <FeedTopStatPills
+            style={styles.topStatCluster}
+            views={getPostViewCount(actualPost)}
+            gifts={Math.max(
+              Number(giftCoinsLocal) || 0,
+              Number(actualPost?.giftCoins) || 0,
+              Number(actualPost?.coinsReceived) || 0,
+            )}
+          />
         </View>
 
         <TouchableOpacity
@@ -1401,8 +1394,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   textOnlyMedia: {
-    width: screenWidth,
-    height: screenHeight,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1568,28 +1560,8 @@ const styles = StyleSheet.create({
     maxWidth: '62%',
   },
   topStatCluster: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
-    marginLeft: 8,
-  },
-  topStatPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,10,12,0.62)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  topStatText: {
-    color: COLORS.white,
-    fontSize: 12,
-    fontWeight: '700',
-    includeFontPadding: false,
+    marginLeft: 'auto',
+    marginRight: 0,
   },
   creatorPill: {
     flexDirection: 'row',
@@ -1642,7 +1614,7 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
-    maxWidth: screenWidth * 0.45,
+    maxWidth: '45%',
   },
   userPillAvatar: {
     width: 30,
@@ -1799,8 +1771,19 @@ const MediaViewerScreen = ({ route, navigation }) => {
     if (!initialPost) navigation.goBack();
   }, [initialPost, navigation]);
 
-  const [pageHeight, setPageHeight] = useState(screenHeight);
+  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const [pageHeight, setPageHeight] = useState(winHeight);
+  const [pageWidth, setPageWidth] = useState(winWidth);
   const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (winWidth > 0) {
+      setPageWidth((prev) => (Math.abs(winWidth - prev) > 1 ? winWidth : prev));
+    }
+    if (winHeight > 0) {
+      setPageHeight((prev) => (Math.abs(winHeight - prev) > 1 ? winHeight : prev));
+    }
+  }, [winWidth, winHeight]);
   const [creatorVideos, setCreatorVideos] = useState([]);
   // Screen-level set of creators the user follows. Lives here (not per page) so
   // following one of a creator's videos persists as you swipe to their others.
@@ -1918,13 +1901,14 @@ const MediaViewerScreen = ({ route, navigation }) => {
           index === activeIndex + 3
         }
         pageHeight={pageHeight}
+        pageWidth={pageWidth}
         navigation={navigation}
         effectiveOwnerIds={effectiveOwnerIds}
         followingSet={followingSet}
         onToggleFollow={onToggleFollow}
       />
     ),
-    [activeIndex, pageHeight, navigation, effectiveOwnerIds, followingSet, onToggleFollow],
+    [activeIndex, pageHeight, pageWidth, navigation, effectiveOwnerIds, followingSet, onToggleFollow],
   );
 
   // Prefetch current + next 3 creator clips so swipe feels instant.
@@ -1965,8 +1949,9 @@ const MediaViewerScreen = ({ route, navigation }) => {
     <View
       style={{ flex: 1, backgroundColor: '#000' }}
       onLayout={(e) => {
-        const h = e.nativeEvent.layout.height;
+        const { height: h, width: w } = e.nativeEvent.layout;
         if (h && Math.abs(h - pageHeight) > 1) setPageHeight(h);
+        if (w && Math.abs(w - pageWidth) > 1) setPageWidth(w);
       }}
     >
       <FlatList

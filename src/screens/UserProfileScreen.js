@@ -9,9 +9,9 @@ import {
   Image,
   FlatList,
   ActivityIndicator,
-  Dimensions,
   StatusBar,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import ReportModal from '../components/ReportModal';
 import { blockUser, unblockUser, isBlockedCached, loadBlockedUsers, filterBlocked } from '../services/BlockService';
@@ -41,9 +41,9 @@ import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import useIsAdmin from '../hooks/useIsAdmin';
 import { adminBanUser, adminSetAccountFeedPriority, FEED_PRIORITY_TIERS } from '../api/adminLiveApi';
 
-const { width: screenWidth } = Dimensions.get('window');
-
 const PROFILE_PAGE_SIZE = 30;
+/** Keep profile readable on Fold unfold / tablet without leaving a left-stuck strip. */
+const PROFILE_CONTENT_MAX = 720;
 
 const UserProfileScreen = ({ route, navigation }) => {
   // Guard against a missing params object (deep links / malformed navigation),
@@ -51,6 +51,11 @@ const UserProfileScreen = ({ route, navigation }) => {
   const { userId, username } = route?.params || {};
   const { uid: cognitoUid, user: authUser, getDisplayName } = useAuth();
   const { isAdmin } = useIsAdmin();
+  const { width: winWidth } = useWindowDimensions();
+  const contentWidth = Math.min(winWidth, PROFILE_CONTENT_MAX);
+  const gridPad = 18;
+  const gridGap = 2;
+  const postCellWidth = (contentWidth - gridPad * 2 - gridGap * 2) / 3;
   const [userProfile, setUserProfile] = useState(null);
   const [userPosts, setUserPosts] = useState([]);
   const [postCount, setPostCount] = useState(null);
@@ -480,7 +485,7 @@ const UserProfileScreen = ({ route, navigation }) => {
     
     return (
       <TouchableOpacity 
-        style={styles.postItem}
+        style={[styles.postItem, { width: postCellWidth }]}
         onPress={() => handlePostPress(item)}
         activeOpacity={0.8}
       >
@@ -499,11 +504,11 @@ const UserProfileScreen = ({ route, navigation }) => {
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
             <View style={styles.postStat}>
-              <Icon  name="heart" size={12} color="#fff"  />
+              <Icon name="heart" size={13} color="#fff" fill="#fff" strokeWidth={1.5} />
               <Text style={styles.postStatText}>{formatNumber(item.likeCount || item.likes || item.likedBy?.length || 0)}</Text>
             </View>
             <View style={styles.postStat}>
-              <Icon  name="eye" size={12} color="#fff"  />
+              <Icon name="eye" size={13} color="#fff" fill="#fff" strokeWidth={1.5} />
               <Text style={styles.postStatText}>{formatNumber(item.viewCount || item.views || item.playCount || 0)}</Text>
             </View>
           </View>
@@ -529,6 +534,7 @@ const UserProfileScreen = ({ route, navigation }) => {
     <ScreenContainer>
       <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0A0C" />
+      <View style={[styles.foldColumn, { width: contentWidth }]}>
       
       {/* Header */}
       <View style={styles.header}>
@@ -685,6 +691,7 @@ const UserProfileScreen = ({ route, navigation }) => {
           <View style={styles.footerLoader}><ActivityIndicator size="small" color="#00D2BE" /></View>
         ) : null}
       />
+      </View>
       </SafeAreaView>
     </ScreenContainer>
   );
@@ -694,6 +701,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0A0A0C',
+    alignItems: 'center',
+  },
+  foldColumn: {
+    flex: 1,
+    width: '100%',
+    maxWidth: PROFILE_CONTENT_MAX,
+    alignSelf: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -881,13 +895,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   postItem: {
-    width: (screenWidth - 44) / 3,
-    aspectRatio: 3/4,
+    aspectRatio: 3 / 4,
     marginRight: 2,
     marginBottom: 2,
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
+    backgroundColor: COLORS.surface,
   },
   postThumbnail: {
     width: '100%',
@@ -908,25 +922,33 @@ const styles = StyleSheet.create({
   },
   postOverlay: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
-    padding: 8,
+    bottom: 6,
+    right: 6,
+    left: undefined,
+    alignItems: 'flex-end',
   },
   postStats: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   postStat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   postStatText: {
     color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '800',
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });
 
