@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AppState, View, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import UnifiedVideo from './UnifiedVideo';
 import { getPlayableVideoUri, invalidateCachedVideo, prefetchVideoToCache } from '../utils/videoCache';
+import { COLORS } from '../styles/theme';
 
 /**
  * Snappy + reliable playback:
@@ -10,6 +11,8 @@ import { getPlayableVideoUri, invalidateCachedVideo, prefetchVideoToCache } from
  * - Many Firebase phone uploads are moov-at-end (won't stream). When download
  *   finishes we switch to the local file if the stream hasn't painted yet, or
  *   on stream error.
+ * - Teal loading spiral while the focused cell is resolving/buffering to first
+ *   frame (poster may sit underneath). Hidden once ready/playing, or on error.
  */
 function EnhancedVideo(props) {
   const videoRef = useRef(null);
@@ -25,6 +28,10 @@ function EnhancedVideo(props) {
   const isFocused = (props.shouldPlay ?? true) && appActive;
   const shouldLoad = props.shouldLoad ?? true;
   const posterUri = props.poster;
+  // Active / playing intent: always show teal spiral until first frame.
+  // Off-screen preload with a poster: keep poster only (no stacked spinners).
+  // No poster: spiral even when off-screen so we never flash a dead black frame.
+  const showLoadingSpinner = shouldLoad && !videoLoaded && !hasError && (isFocused || !posterUri);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
@@ -243,6 +250,7 @@ function EnhancedVideo(props) {
             props.onPlaybackStatusUpdate?.(status);
             if (status?.isLoaded && (status.isPlaying || status.positionMillis > 0)) {
               paintedRef.current = true;
+              setVideoLoaded(true);
             }
           }}
         />
@@ -256,9 +264,9 @@ function EnhancedVideo(props) {
         />
       )}
 
-      {shouldLoad && !videoLoaded && !hasError && !posterUri && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator color="#00D2BE" />
+      {showLoadingSpinner && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
       )}
 
