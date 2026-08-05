@@ -1,31 +1,42 @@
 // rankingsService.js
 //
-// Client for the Rankings hub (Phase 0). Live boards hit the economy backend
-// (coin spend / gem earn / most followed). Battle glory deep-links the existing
+// Client for the Rankings hub (Phase 0+1). Live boards hit the economy backend
+// with optional day/week/month/year windows. Battle glory deep-links the existing
 // BattleLeaderboard screen. Remaining catalog tiles are Coming soon.
 
 import { callEconomyBackend } from '../api/economyLiveApi';
 
 /** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'battle_glory'} LiveBoardId */
+/** @typedef {'day'|'week'|'month'|'year'|'alltime'} RankingWindow */
+
+export const RANKING_WINDOWS = [
+  { id: 'day', label: 'Day' },
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
+  { id: 'year', label: 'Year' },
+  { id: 'alltime', label: 'All' },
+];
 
 export const LIVE_BOARDS = [
   {
     id: 'coin_spend',
     title: 'Top coin spenders',
-    blurb: 'All-time coins spent on gifts, promos and live.',
+    blurb: 'Coins spent on gifts, promos, live games and more.',
     icon: 'wallet',
     category: 'Economy',
     unit: 'coins',
     source: 'economy',
+    windows: true,
   },
   {
     id: 'gem_earn',
     title: 'Top gem earners',
-    blurb: 'All-time gems earned from gifts received.',
+    blurb: 'Gems earned from gifts received and team bonuses.',
     icon: 'diamond',
     category: 'Economy',
     unit: 'gems',
     source: 'economy',
+    windows: true,
   },
   {
     id: 'followers_total',
@@ -35,6 +46,7 @@ export const LIVE_BOARDS = [
     category: 'Social',
     unit: 'followers',
     source: 'economy',
+    windows: false,
   },
   {
     id: 'battle_glory',
@@ -45,14 +57,13 @@ export const LIVE_BOARDS = [
     unit: 'glory',
     source: 'navigate',
     route: 'BattleLeaderboard',
+    windows: false,
   },
 ];
 
 /** Coming-soon catalog so the hub feels full (names match product plan). */
 export const COMING_SOON_BOARDS = [
   { id: 'coin_earn', title: 'Highest coin earner', category: 'Economy', windows: 'Day · Week · Month · Year' },
-  { id: 'coin_spend_windowed', title: 'Coin spenders (windows)', category: 'Economy', windows: 'Day · Week · Month · Year' },
-  { id: 'gem_earn_windowed', title: 'Gem earners (windows)', category: 'Economy', windows: 'Day · Week · Month · Year' },
   { id: 'gifts_sent', title: 'Most gifts sent', category: 'Economy', windows: 'Day · Week · Month · Year' },
   { id: 'gifts_recv', title: 'Most gifted creator', category: 'Economy', windows: 'Day · Week · Month · Year' },
   { id: 'followers_delta', title: 'Most new followers', category: 'Social', windows: 'Day · Week · Month · Year' },
@@ -85,11 +96,12 @@ export const COMING_SOON_BOARDS = [
 
 /**
  * @param {string} board
- * @param {{ limit?: number }} [opts]
+ * @param {{ limit?: number, window?: RankingWindow }} [opts]
  */
 export async function fetchRankingBoard(board, opts = {}) {
   const limit = opts.limit || 25;
-  return callEconomyBackend('/economy/rankings', 'GET', { board, limit });
+  const window = opts.window || 'alltime';
+  return callEconomyBackend('/economy/rankings', 'GET', { board, limit, window });
 }
 
 export function formatScore(score, unit) {
@@ -98,4 +110,9 @@ export function formatScore(score, unit) {
   if (n >= 10_000) return `${Math.round(n / 1000)}k`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(Math.round(n));
+}
+
+export function windowLabel(windowId) {
+  const hit = RANKING_WINDOWS.find((w) => w.id === windowId);
+  return hit?.label || 'All';
 }

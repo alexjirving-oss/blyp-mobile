@@ -529,7 +529,7 @@ router.get('/economy/matchday/leaderboard', async (req: AuthedRequest, res) => {
   }
 });
 
-// Global rankings hub (Phase 0): denormalized wallet / follower counters.
+// Global rankings hub (Phase 0+1): all-time counters + windowed ledger aggregates.
 router.get('/economy/rankings/boards', async (req: AuthedRequest, res) => {
   try {
     if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
@@ -544,8 +544,9 @@ router.get('/economy/rankings', async (req: AuthedRequest, res) => {
   try {
     if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const board = typeof req.query?.board === 'string' ? req.query.board.trim() : '';
+    const window = typeof req.query?.window === 'string' ? req.query.window.trim() : 'alltime';
     const limit = req.query?.limit;
-    const out = await getRankingBoard(board, limit);
+    const out = await getRankingBoard(board, limit, window);
     res.json(out);
   } catch (e: any) {
     const err = toEconomyError(e);

@@ -1,8 +1,7 @@
 // RankingsHubScreen.js
 //
-// Phase 0 Rankings hub: live boards (coin spend, gem earn, most followed) plus
-// Coming soon tiles for the full catalog. Battle glory deep-links the existing
-// BattleLeaderboard screen.
+// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1),
+// Coming soon tiles for the full catalog. Battle glory deep-links BattleLeaderboard.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,6 +22,7 @@ import { useAuth } from '../hooks/useCommon';
 import {
   COMING_SOON_BOARDS,
   LIVE_BOARDS,
+  RANKING_WINDOWS,
   fetchRankingBoard,
   formatScore,
 } from '../services/rankingsService';
@@ -50,6 +50,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
   const { uid } = useAuth();
   const initialBoard = route?.params?.board || null;
   const [selected, setSelected] = useState(initialBoard);
+  const [windowId, setWindowId] = useState('alltime');
   const [entries, setEntries] = useState([]);
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -60,13 +61,16 @@ const RankingsHubScreen = ({ navigation, route }) => {
     [selected],
   );
 
-  const loadBoard = useCallback(async (boardId) => {
+  const supportsWindows = !!liveBoard?.windows;
+
+  const loadBoard = useCallback(async (boardId, win) => {
     const def = LIVE_BOARDS.find((b) => b.id === boardId);
     if (!def || def.source !== 'economy') return;
     setLoading(true);
     setError('');
     try {
-      const res = await fetchRankingBoard(boardId, { limit: 25 });
+      const effectiveWindow = def.windows ? win || 'alltime' : 'alltime';
+      const res = await fetchRankingBoard(boardId, { limit: 25, window: effectiveWindow });
       setEntries(Array.isArray(res?.entries) ? res.entries : []);
       setMeta(res || null);
     } catch (e) {
@@ -80,9 +84,9 @@ const RankingsHubScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     if (selected && liveBoard?.source === 'economy') {
-      loadBoard(selected);
+      loadBoard(selected, windowId);
     }
-  }, [selected, liveBoard, loadBoard]);
+  }, [selected, windowId, liveBoard, loadBoard]);
 
   const openBoard = useCallback(
     (board) => {
@@ -90,6 +94,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
         navigation.navigate(board.route);
         return;
       }
+      setWindowId('alltime');
       setSelected(board.id);
     },
     [navigation],
@@ -155,7 +160,33 @@ const RankingsHubScreen = ({ navigation, route }) => {
           <View style={styles.backBtn} />
         </View>
         <Text style={styles.boardBlurb}>{liveBoard.blurb}</Text>
-        <Text style={styles.windowChip}>All time · refreshed on open</Text>
+
+        {supportsWindows ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.windowRow}
+          >
+            {RANKING_WINDOWS.map((w) => {
+              const active = windowId === w.id;
+              return (
+                <TouchableOpacity
+                  key={w.id}
+                  style={[styles.windowChipBtn, active && styles.windowChipBtnActive]}
+                  onPress={() => setWindowId(w.id)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                    {w.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <Text style={styles.windowHint}>All time · refreshed on open</Text>
+        )}
+
         {loading ? (
           <View style={styles.centered}>
             <ActivityIndicator color={COLORS.primary} />
@@ -163,7 +194,10 @@ const RankingsHubScreen = ({ navigation, route }) => {
         ) : error ? (
           <View style={styles.centered}>
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => loadBoard(selected)}>
+            <TouchableOpacity
+              style={styles.retryBtn}
+              onPress={() => loadBoard(selected, windowId)}
+            >
               <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -207,7 +241,8 @@ const RankingsHubScreen = ({ navigation, route }) => {
 
       <ScrollView contentContainerStyle={styles.hubContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.hubLead}>
-          See who&apos;s leading across Blyp — economy, social, live and games. More boards unlock as we roll out server aggregates.
+          See who&apos;s leading across Blyp — economy, social, live and games. Switch Day / Week /
+          Month / Year on live economy boards.
         </Text>
 
         <Text style={styles.sectionTitle}>Live now</Text>
@@ -225,6 +260,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
               <Text style={styles.liveTitle}>{board.title}</Text>
               <Text style={styles.liveBlurb} numberOfLines={2}>
                 {board.blurb}
+                {board.windows ? ' · Day–Year windows' : ''}
               </Text>
             </View>
             <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
@@ -362,7 +398,33 @@ const styles = StyleSheet.create({
     fontSize: responsiveFont(13),
     color: COLORS.textSecondary,
   },
-  windowChip: {
+  windowRow: {
+    paddingHorizontal: responsiveSize(16),
+    paddingTop: responsiveSize(10),
+    paddingBottom: responsiveSize(8),
+    gap: 8,
+  },
+  windowChipBtn: {
+    paddingHorizontal: responsiveSize(14),
+    paddingVertical: responsiveSize(7),
+    borderRadius: 999,
+    backgroundColor: COLORS.surface || '#EEF0F3',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: COLORS.border || '#E5E7EB',
+  },
+  windowChipBtnActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  windowChipText: {
+    fontSize: responsiveFont(13),
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  windowChipTextActive: {
+    color: '#fff',
+  },
+  windowHint: {
     paddingHorizontal: responsiveSize(16),
     marginTop: 4,
     marginBottom: 8,
