@@ -31,6 +31,8 @@ import {
   filterPostsByCategory,
   normalizeProfileCategories,
 } from '../utils/profileCategories';
+import { conversationsMessagingService } from '../services/messaging';
+import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -40,7 +42,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   // Guard against a missing params object (deep links / malformed navigation),
   // which would otherwise throw on destructure and crash the screen.
   const { userId, username } = route?.params || {};
-  const { uid: cognitoUid } = useAuth();
+  const { uid: cognitoUid, user: authUser, getDisplayName } = useAuth();
   const [userProfile, setUserProfile] = useState(null);
   const [userPosts, setUserPosts] = useState([]);
   const [postCount, setPostCount] = useState(null);
@@ -51,6 +53,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [messagingBusy, setMessagingBusy] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState('all');
   const postsCursorRef = useRef(null);
   const postsHasMoreRef = useRef(true);
@@ -269,6 +272,91 @@ const UserProfileScreen = ({ route, navigation }) => {
     }
   };
 
+  const handleMessage = useCallback(async () => {
+    // Own-profile actions are already hidden in the UI; keep a hard no-op guard.
+    if (!userId || currentUserId === userId) return;
+
+    if (!currentUserId) {
+      Alert.alert('Sign in required', 'Please sign in to start a chat.');
+      return;
+    }
+
+    if (blocked) {
+      Alert.alert(
+        'User blocked',
+        'Unblock this user from the profile menu before messaging them.',
+      );
+      return;
+    }
+
+    if (messagingBusy) return;
+
+    try {
+      setMessagingBusy(true);
+
+      if (!__DEV__) {
+        try {
+          await ensureFirebaseAuthReady({ uid: currentUserId, timeoutMs: 15000 });
+        } catch (e) {
+          const code = e?.code || e?.name || 'FIREBASE_AUTH_ERROR';
+          const msg = e?.message || String(e);
+          const status = typeof e?.status === 'number' ? ` (HTTP ${e.status})` : '';
+          console.error('[CHAT][AUTH] Firebase auth bridge not ready', { code, msg, status, detail: e?.detail, url: e?.url });
+          Alert.alert('Auth Error', `Cannot start chat until Firebase auth is ready.\n\n${code}${status}\n${msg}`);
+          return;
+        }
+      }
+
+      const meName =
+        (typeof getDisplayName === 'function' ? getDisplayName() : null) ||
+        authUser?.displayName ||
+        authUser?.username ||
+        authUser?.email ||
+        'Unknown';
+      const otherName =
+        userProfile?.displayName ||
+        userProfile?.username ||
+        username ||
+        'Unknown';
+      const otherUser = {
+        id: userId,
+        username: userProfile?.username || username,
+        displayName: userProfile?.displayName || otherName,
+        photoURL: userProfile?.avatar || null,
+        avatar: userProfile?.avatar || null,
+      };
+
+      const conversationId = await conversationsMessagingService.createOrGetDirectThread(
+        db,
+        currentUserId,
+        userId,
+        meName,
+        otherName,
+      );
+
+      navigation.navigate('ChatConversation', {
+        conversationId,
+        chatId: conversationId,
+        otherUser,
+      });
+    } catch (error) {
+      console.error('Error starting chat from profile:', error);
+      Alert.alert('Error', 'Failed to start chat. Please try again.');
+    } finally {
+      setMessagingBusy(false);
+    }
+  }, [
+    userId,
+    currentUserId,
+    blocked,
+    messagingBusy,
+    getDisplayName,
+    authUser,
+    userProfile,
+    username,
+    navigation,
+  ]);
+
   const handleFollowToggle = async () => {
     if (!currentUserId) {
       Toast.show({
@@ -484,8 +572,18 @@ const UserProfileScreen = ({ route, navigation }) => {
                     </LinearGradient>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.messageButton}>
-                    <Icon  name="chatbubble-outline" size={20} color="#fff"  />
+                  <TouchableOpacity
+                    style={[styles.messageButton, messagingBusy && { opacity: 0.6 }]}
+                    onPress={handleMessage}
+                    disabled={messagingBusy}
+                    accessibilityLabel="Message user"
+                    accessibilityRole="button"
+                  >
+                    {messagingBusy ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Icon name="chatbubble-outline" size={20} color="#fff" />
+                    )}
                   </TouchableOpacity>
                 </View>
               )}
