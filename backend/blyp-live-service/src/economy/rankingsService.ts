@@ -1,5 +1,5 @@
 /**
- * Global rankings (Phase 0 + Phase 1 + P1.5 + P2 + P3).
+ * Global rankings (Phase 0 + Phase 1 + P1.5 + P2 + P3 + P4).
  *
  * All-time boards read denormalized wallet / Firestore / gift / stream tables.
  * Windowed day/week/month/year boards prefer durable rankings_snapshots
@@ -13,6 +13,10 @@
  * P3: battle_wins / battle_streak from Firestore battleStats; marble_wins from
  * users.marblePodiumWins; live_game_wins from ledger LIVE_GAME_PAYOUT (role=winner).
  * marble_podium / matchday_net stay deferred (no top-3 history / net rollup yet).
+ *
+ * P4: club_coin_spend / club_followers via Firestore users.profileClubs
+ * (array-contains) ∩ gift_events / followersCount. League + team agency boards
+ * stay deferred (no durable sport-page / monthly team rollups yet).
  */
 
 import { getEconomyInfra } from './infra';
@@ -31,7 +35,9 @@ export type RankingBoardId =
   | 'battle_wins'
   | 'battle_streak'
   | 'marble_wins'
-  | 'live_game_wins';
+  | 'live_game_wins'
+  | 'club_coin_spend'
+  | 'club_followers';
 
 export type RankingWindow = 'day' | 'week' | 'month' | 'year' | 'alltime';
 
@@ -62,10 +68,14 @@ export type RankingBoardResponse = {
     | 'firestore_battles'
     | 'firestore_marble'
     | 'ledger_live_games'
+    | 'club_gift_events'
+    | 'club_members'
     | 'cache'
     | 'snapshot';
   cacheTtlSec?: number;
   note?: string;
+  /** Club-scoped boards only. */
+  clubId?: string;
 };
 
 export type RankingMaterializeResult = {
@@ -167,6 +177,18 @@ const BOARD_META: Record<
     windows: 'all',
     note: 'Counts LIVE_GAME_PAYOUT ledger rows with metadata.role=winner.',
   },
+  club_coin_spend: {
+    metric: 'club_gift_coin_spend',
+    unit: 'coins',
+    windows: ['week', 'month', 'alltime'],
+    note: 'Club members (users.profileClubs) ranked by gift_events coin spend as sender.',
+  },
+  club_followers: {
+    metric: 'club_member_followers',
+    unit: 'followers',
+    windows: ['alltime'],
+    note: 'Most-followed club members via profileClubs. True rising (week/month deltas) needs membership join / follow-event history.',
+  },
 };
 
 /** Ledger types that count toward coin spend (amounts are typically negative). */
@@ -230,8 +252,14 @@ function boardSupportsWindow(board: RankingBoardId, window: RankingWindow): bool
   return meta.windows.includes(window);
 }
 
-function cacheKey(board: RankingBoardId, window: RankingWindow, limit: number): string {
-  return `rankings:v2:${board}:${window}:${limit}`;
+function cacheKey(
+  board: RankingBoardId,
+  window: RankingWindow,
+  limit: number,
+  clubId?: string,
+): string {
+  const scope = clubId ? `:club:${clubId}` : '';
+  return `rankings:v2:${board}:${window}:${limit}${scope}`;
 }
 
 async function cacheGet(key: string): Promise<RankingBoardResponse | null> {
@@ -971,6 +999,184 @@ async function liveGameWinsBoard(
   return out;
 }
 
+/** Curated club ids mirrored from mobile profileIdentityCatalog (P4). */
+const ALLOWED_CLUB_IDS = new Set([
+  'club_arsenal',
+  'club_chelsea',
+  'club_liverpool',
+  'club_man_city',
+  'club_man_united',
+  'club_tottenham',
+  'club_newcastle',
+  'club_aston_villa',
+  'club_marble_racing',
+]);
+
+const CLUB_MEMBER_FETCH_LIMIT = 200;
+
+type ClubMemberProfile = {
+  userId: string;
+  displayName: string;
+  photoURL: string;
+  handle: string;
+  followers: number;
+  optOut: boolean;
+};
+
+function parseClubId(raw: unknown): string {
+  const id = String(raw || '').trim();
+  if (!id || !ALLOWED_CLUB_IDS.has(id)) {
+    throw new EconomyError('INVALID_INPUT', 400, 'Unknown or missing clubId', {
+      clubId: raw,
+      allowed: [...ALLOWED_CLUB_IDS],
+    });
+  }
+  return id;
+}
+
+function isClubBoard(board: RankingBoardId): boolean {
+  return board === 'club_coin_spend' || board === 'club_followers';
+}
+
+/**
+ * Club membership from Firestore users.profileClubs (array-contains).
+ * Caps fetch size so gift_events IN-clauses stay practical.
+ */
+async function listClubMemberProfiles(clubId: string): Promise<ClubMemberProfile[]> {
+  const fsDb = getFirestore();
+  if (!fsDb) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Firestore unavailable for club rankings');
+  }
+
+  let snap;
+  try {
+    snap = await fsDb
+      .collection('users')
+      .where('profileClubs', 'array-contains', clubId)
+      .limit(CLUB_MEMBER_FETCH_LIMIT)
+      .get();
+  } catch (e: any) {
+    logger.warn({ err: e?.message || String(e), clubId }, '[rankings] club members query failed');
+    throw new EconomyError('PROVIDER_ERROR', 503, 'club members query failed', {
+      clubId,
+      detail: e?.message || String(e),
+    });
+  }
+
+  const out: ClubMemberProfile[] = [];
+  for (const doc of snap.docs) {
+    const data = (doc.data() || {}) as Record<string, unknown>;
+    out.push({
+      userId: doc.id,
+      displayName: str(data.displayName) || str(data.username) || str(data.handle) || 'Blyp user',
+      handle: str(data.username) || str(data.handle) || '',
+      photoURL: str(data.photoURL) || str(data.avatar) || str(data.profilePicture) || '',
+      followers: Number(data.followersCount ?? data.followers ?? 0) || 0,
+      optOut: data.leaderboardOptOut === true || data.privacyHideFromRankings === true,
+    });
+  }
+  return out;
+}
+
+async function clubCoinSpendBoard(
+  clubId: string,
+  window: RankingWindow,
+  limit: number,
+): Promise<RankingBoardResponse> {
+  const meta = BOARD_META.club_coin_spend;
+  const members = await listClubMemberProfiles(clubId);
+  const eligible = members.filter((m) => !m.optOut);
+  const memberIds = eligible.map((m) => m.userId);
+  const profileMap = new Map(eligible.map((m) => [m.userId, m]));
+
+  let entries: RankingEntry[] = [];
+  if (memberIds.length > 0) {
+    const { db } = getEconomyInfra();
+    let q = db('gift_events')
+      .select('sender_user_id')
+      .select(db.raw('SUM(coin_cost)::bigint AS score'))
+      .whereIn('sender_user_id', memberIds);
+
+    if (window !== 'alltime') {
+      const interval = WINDOW_INTERVAL[window as Exclude<RankingWindow, 'alltime'>];
+      q = q.where('created_at', '>=', db.raw(`NOW() - INTERVAL '${interval}'`));
+    }
+
+    const rows = await q
+      .groupBy('sender_user_id')
+      .havingRaw('SUM(coin_cost) > 0')
+      .orderBy('score', 'desc')
+      .limit(limit * 2);
+
+    entries = toEntries(
+      rows.map((r: any) => ({
+        user_id: String(r.sender_user_id || ''),
+        score: Number(r.score || 0),
+      })),
+      new Map(
+        [...profileMap.entries()].map(([id, m]) => [
+          id,
+          {
+            displayName: m.displayName,
+            photoURL: m.photoURL,
+            handle: m.handle,
+            optOut: false,
+          },
+        ]),
+      ),
+      limit,
+    );
+  }
+
+  return {
+    board: 'club_coin_spend',
+    window,
+    metric: window === 'alltime' ? meta.metric : `club_coin_spend_${window}`,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source: 'club_gift_events',
+    cacheTtlSec: CACHE_TTL_SEC[window],
+    clubId,
+    note: meta.note,
+  };
+}
+
+async function clubFollowersBoard(clubId: string, limit: number): Promise<RankingBoardResponse> {
+  const meta = BOARD_META.club_followers;
+  const members = await listClubMemberProfiles(clubId);
+  const rows = members
+    .filter((m) => !m.optOut && m.followers > 0)
+    .map((m) => ({ user_id: m.userId, score: m.followers }))
+    .sort((a, b) => b.score - a.score);
+
+  const profileMap = new Map(
+    members.map((m) => [
+      m.userId,
+      {
+        displayName: m.displayName,
+        photoURL: m.photoURL,
+        handle: m.handle,
+        optOut: m.optOut,
+      },
+    ]),
+  );
+  const entries = toEntries(rows, profileMap, limit);
+
+  return {
+    board: 'club_followers',
+    window: 'alltime',
+    metric: meta.metric,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source: 'club_members',
+    cacheTtlSec: CACHE_TTL_SEC.alltime,
+    clubId,
+    note: meta.note,
+  };
+}
+
 /**
  * Cron / admin materialization: recompute snapshot boards for
  * day/week/month/year into rankings_snapshots and warm Redis.
@@ -1053,6 +1259,7 @@ export async function getRankingBoard(
   boardRaw: string,
   limitRaw?: unknown,
   windowRaw?: unknown,
+  clubIdRaw?: unknown,
 ): Promise<RankingBoardResponse> {
   const board = String(boardRaw || '').trim() as RankingBoardId;
   if (!BOARD_META[board]) {
@@ -1063,18 +1270,23 @@ export async function getRankingBoard(
   }
   const limit = clampLimit(limitRaw);
   let window = parseWindow(windowRaw);
+  const clubId = isClubBoard(board) ? parseClubId(clubIdRaw) : undefined;
 
   // Boards without windowed history coerce to all-time.
   if (!boardSupportsWindow(board, window)) {
     window = 'alltime';
   }
 
-  const key = cacheKey(board, window, limit);
+  const key = cacheKey(board, window, limit, clubId);
   const cached = await cacheGet(key);
   if (cached) return cached;
 
   let result: RankingBoardResponse;
-  if (board === 'followers_total') {
+  if (board === 'club_coin_spend') {
+    result = await clubCoinSpendBoard(clubId!, window, limit);
+  } else if (board === 'club_followers') {
+    result = await clubFollowersBoard(clubId!, limit);
+  } else if (board === 'followers_total') {
     result = await followersBoard(limit);
   } else if (board === 'peak_viewers') {
     result = await peakViewersBoard(limit);
@@ -1115,6 +1327,7 @@ export function listRankingBoardsMeta() {
     metric: BOARD_META[id].metric,
     unit: BOARD_META[id].unit,
     status: 'live' as const,
+    requiresClubId: isClubBoard(id),
     note:
       BOARD_META[id].note ||
       (SNAPSHOT_BOARDS.includes(id)

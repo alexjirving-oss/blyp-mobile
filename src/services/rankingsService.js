@@ -1,12 +1,14 @@
 // rankingsService.js
 //
-// Client for the Rankings hub (Phase 0–3). Live boards hit the economy backend
-// with optional day/week/month/year windows. Battle glory deep-links the existing
-// BattleLeaderboard screen. Remaining catalog tiles are Coming soon (with notes).
+// Client for the Rankings hub (Phase 0–4). Live boards hit the economy backend
+// with optional day/week/month/year windows. Club boards require clubId
+// (profileClubs membership ∩ gift_events / followers). Battle glory deep-links
+// BattleLeaderboard. Remaining catalog tiles are Coming soon (with notes).
 
 import { callEconomyBackend } from '../api/economyLiveApi';
+import { CLUB_CATALOG, getClubById } from './profileIdentityCatalog';
 
-/** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'gifts_sent'|'gifts_recv'|'stream_earnings'|'peak_viewers'|'battle_glory'|'battle_wins'|'battle_streak'|'marble_wins'|'live_game_wins'} LiveBoardId */
+/** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'gifts_sent'|'gifts_recv'|'stream_earnings'|'peak_viewers'|'battle_glory'|'battle_wins'|'battle_streak'|'marble_wins'|'live_game_wins'|'club_coin_spend'|'club_followers'} LiveBoardId */
 /** @typedef {'day'|'week'|'month'|'year'|'alltime'} RankingWindow */
 
 export const RANKING_WINDOWS = [
@@ -14,6 +16,13 @@ export const RANKING_WINDOWS = [
   { id: 'week', label: 'Week' },
   { id: 'month', label: 'Month' },
   { id: 'year', label: 'Year' },
+  { id: 'alltime', label: 'All' },
+];
+
+/** Windows shown for club spend (server supports week/month/alltime). */
+export const CLUB_SPEND_WINDOWS = [
+  { id: 'week', label: 'Week' },
+  { id: 'month', label: 'Month' },
   { id: 'alltime', label: 'All' },
 ];
 
@@ -139,6 +148,28 @@ export const LIVE_BOARDS = [
     source: 'economy',
     windows: true,
   },
+  {
+    id: 'club_coin_spend',
+    title: 'Club: top spenders',
+    blurb: 'Gift coin spend among members of a club (profileClubs ∩ gift_events).',
+    icon: 'football',
+    category: 'Clubs',
+    unit: 'coins',
+    source: 'economy',
+    windows: 'club',
+    requiresClubId: true,
+  },
+  {
+    id: 'club_followers',
+    title: 'Club: rising members',
+    blurb: 'Most-followed members in a club via profileClubs (true rising deltas later).',
+    icon: 'people',
+    category: 'Clubs',
+    unit: 'followers',
+    source: 'economy',
+    windows: false,
+    requiresClubId: true,
+  },
 ];
 
 /** Coming-soon catalog so the hub feels full (names match product plan). */
@@ -184,11 +215,27 @@ export const COMING_SOON_BOARDS = [
     windows: 'Event · Season',
     note: 'Needs settled prediction PnL rollup beyond per-prediction rows.',
   },
-  { id: 'club_coin_spend', title: 'Club: top spenders', category: 'Clubs', windows: 'Week · Month' },
-  { id: 'club_followers', title: 'Club: rising members', category: 'Clubs', windows: 'Week · Month' },
-  { id: 'league_posts', title: 'League / sport: top posters', category: 'Leagues', windows: 'Week · Month' },
-  { id: 'league_live', title: 'League / sport: top live hosts', category: 'Leagues', windows: 'Week · Month' },
-  { id: 'team_earnings', title: 'Agency / team earnings', category: 'Teams', windows: 'Month' },
+  {
+    id: 'league_posts',
+    title: 'League / sport: top posters',
+    category: 'Leagues',
+    windows: 'Week · Month',
+    note: 'sportTags exist on posts, but no durable league-scoped poster rollup yet. Club membership is on profileClubs.',
+  },
+  {
+    id: 'league_live',
+    title: 'League / sport: top live hosts',
+    category: 'Leagues',
+    windows: 'Week · Month',
+    note: 'Needs sport-tagged stream rollups. Club membership is on profileClubs.',
+  },
+  {
+    id: 'team_earnings',
+    title: 'Agency / team earnings',
+    category: 'Teams',
+    windows: 'Month',
+    note: 'team_earnings table is cumulative (no monthly window yet); scoped agency board deferred.',
+  },
   { id: 'dating_matches', title: 'Most dating matches', category: 'Dating', windows: 'Week · Month' },
   { id: 'dating_likes_recv', title: 'Most dating likes received', category: 'Dating', windows: 'Week · Month' },
   { id: 'promote_spend', title: 'Promotion spenders', category: 'Economy', windows: 'Month' },
@@ -197,14 +244,18 @@ export const COMING_SOON_BOARDS = [
   { id: 'global_score', title: 'Blyp Score (composite)', category: 'Later', windows: 'Week' },
 ];
 
+export { CLUB_CATALOG, getClubById };
+
 /**
  * @param {string} board
- * @param {{ limit?: number, window?: RankingWindow }} [opts]
+ * @param {{ limit?: number, window?: RankingWindow, clubId?: string }} [opts]
  */
 export async function fetchRankingBoard(board, opts = {}) {
   const limit = opts.limit || 25;
   const window = opts.window || 'alltime';
-  return callEconomyBackend('/economy/rankings', 'GET', { board, limit, window });
+  const params = { board, limit, window };
+  if (opts.clubId) params.clubId = opts.clubId;
+  return callEconomyBackend('/economy/rankings', 'GET', params);
 }
 
 export function formatScore(score, unit) {

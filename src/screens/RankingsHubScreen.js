@@ -1,7 +1,8 @@
 // RankingsHubScreen.js
 //
-// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1–3),
-// Coming soon tiles (with data notes) for the rest. Battle glory deep-links BattleLeaderboard.
+// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1–4),
+// club-scoped boards with club picker (profileClubs), Coming soon tiles (with
+// data notes) for the rest. Battle glory deep-links BattleLeaderboard.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -20,12 +21,16 @@ import { COLORS } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
 import {
+  CLUB_CATALOG,
+  CLUB_SPEND_WINDOWS,
   COMING_SOON_BOARDS,
   LIVE_BOARDS,
   RANKING_WINDOWS,
   fetchRankingBoard,
   formatScore,
+  getClubById,
 } from '../services/rankingsService';
+import { getMyProfileClubs } from '../services/clubDiscoveryService';
 
 function Avatar({ uri, name, size = 40 }) {
   const base = [styles.avatar, { width: size, height: size, borderRadius: size / 2 }];
@@ -51,6 +56,8 @@ const RankingsHubScreen = ({ navigation, route }) => {
   const initialBoard = route?.params?.board || null;
   const [selected, setSelected] = useState(initialBoard);
   const [windowId, setWindowId] = useState('alltime');
+  const [clubId, setClubId] = useState(route?.params?.clubId || null);
+  const [myClubIds, setMyClubIds] = useState([]);
   const [entries, setEntries] = useState([]);
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -61,16 +68,66 @@ const RankingsHubScreen = ({ navigation, route }) => {
     [selected],
   );
 
+  const isClubBoard = !!liveBoard?.requiresClubId;
   const supportsWindows = !!liveBoard?.windows;
+  const windowOptions =
+    liveBoard?.windows === 'club' ? CLUB_SPEND_WINDOWS : RANKING_WINDOWS;
 
-  const loadBoard = useCallback(async (boardId, win) => {
+  const clubChips = useMemo(() => {
+    const mine = (myClubIds || [])
+      .map((id) => getClubById(id))
+      .filter(Boolean);
+    const mineIds = new Set(mine.map((c) => c.id));
+    const rest = CLUB_CATALOG.filter((c) => !mineIds.has(c.id));
+    return [...mine, ...rest];
+  }, [myClubIds]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!uid) return;
+      try {
+        const ids = await getMyProfileClubs(uid);
+        if (!cancelled) setMyClubIds(Array.isArray(ids) ? ids : []);
+      } catch {
+        if (!cancelled) setMyClubIds([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid]);
+
+  // Prefer the user's first club when opening a club board.
+  useEffect(() => {
+    if (!isClubBoard) return;
+    if (clubId) return;
+    if (myClubIds?.length) {
+      setClubId(myClubIds[0]);
+    } else if (CLUB_CATALOG[0]?.id) {
+      setClubId(CLUB_CATALOG[0].id);
+    }
+  }, [isClubBoard, clubId, myClubIds]);
+
+  const loadBoard = useCallback(async (boardId, win, scopeClubId) => {
     const def = LIVE_BOARDS.find((b) => b.id === boardId);
     if (!def || def.source !== 'economy') return;
+    if (def.requiresClubId && !scopeClubId) {
+      setEntries([]);
+      setMeta(null);
+      setError('Pick a club to see this board.');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError('');
     try {
       const effectiveWindow = def.windows ? win || 'alltime' : 'alltime';
-      const res = await fetchRankingBoard(boardId, { limit: 25, window: effectiveWindow });
+      const res = await fetchRankingBoard(boardId, {
+        limit: 25,
+        window: effectiveWindow,
+        clubId: def.requiresClubId ? scopeClubId : undefined,
+      });
       setEntries(Array.isArray(res?.entries) ? res.entries : []);
       setMeta(res || null);
     } catch (e) {
@@ -84,9 +141,10 @@ const RankingsHubScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     if (selected && liveBoard?.source === 'economy') {
-      loadBoard(selected, windowId);
+      if (liveBoard.requiresClubId && !clubId) return;
+      loadBoard(selected, windowId, clubId);
     }
-  }, [selected, windowId, liveBoard, loadBoard]);
+  }, [selected, windowId, clubId, liveBoard, loadBoard]);
 
   const openBoard = useCallback(
     (board) => {
@@ -94,10 +152,15 @@ const RankingsHubScreen = ({ navigation, route }) => {
         navigation.navigate(board.route);
         return;
       }
-      setWindowId('alltime');
+      if (board.windows === 'club') setWindowId('week');
+      else setWindowId('alltime');
       setSelected(board.id);
+      if (board.requiresClubId && !clubId) {
+        if (myClubIds?.length) setClubId(myClubIds[0]);
+        else if (CLUB_CATALOG[0]?.id) setClubId(CLUB_CATALOG[0].id);
+      }
     },
-    [navigation],
+    [navigation, clubId, myClubIds],
   );
 
   const renderRow = useCallback(
@@ -144,6 +207,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
   );
 
   if (selected && liveBoard?.source === 'economy') {
+    const clubLabel = clubId ? getClubById(clubId)?.label || clubId : '';
     return (
       <ScreenContainer>
         <View style={styles.topRow}>
@@ -159,7 +223,36 @@ const RankingsHubScreen = ({ navigation, route }) => {
           </Text>
           <View style={styles.backBtn} />
         </View>
-        <Text style={styles.boardBlurb}>{liveBoard.blurb}</Text>
+        <Text style={styles.boardBlurb}>
+          {liveBoard.blurb}
+          {isClubBoard && clubLabel ? ` · ${clubLabel}` : ''}
+        </Text>
+
+        {isClubBoard ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.windowRow}
+          >
+            {clubChips.map((c) => {
+              const active = clubId === c.id;
+              const mine = myClubIds.includes(c.id);
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.windowChipBtn, active && styles.windowChipBtnActive]}
+                  onPress={() => setClubId(c.id)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>
+                    {c.shortLabel || c.label}
+                    {mine ? ' ★' : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : null}
 
         {supportsWindows ? (
           <ScrollView
@@ -167,7 +260,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.windowRow}
           >
-            {RANKING_WINDOWS.map((w) => {
+            {windowOptions.map((w) => {
               const active = windowId === w.id;
               return (
                 <TouchableOpacity
@@ -184,7 +277,11 @@ const RankingsHubScreen = ({ navigation, route }) => {
             })}
           </ScrollView>
         ) : (
-          <Text style={styles.windowHint}>All time · refreshed on open</Text>
+          <Text style={styles.windowHint}>
+            {isClubBoard
+              ? 'All time · members via profileClubs'
+              : 'All time · refreshed on open'}
+          </Text>
         )}
 
         {loading ? (
@@ -196,7 +293,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity
               style={styles.retryBtn}
-              onPress={() => loadBoard(selected, windowId)}
+              onPress={() => loadBoard(selected, windowId, clubId)}
             >
               <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
@@ -208,7 +305,11 @@ const RankingsHubScreen = ({ navigation, route }) => {
             renderItem={renderRow}
             contentContainerStyle={styles.listContent}
             ListEmptyComponent={
-              <Text style={styles.empty}>No rankings yet — be the first.</Text>
+              <Text style={styles.empty}>
+                {isClubBoard
+                  ? 'No club rankings yet — join this club on your profile or send gifts.'
+                  : 'No rankings yet — be the first.'}
+              </Text>
             }
           />
         )}
@@ -241,8 +342,8 @@ const RankingsHubScreen = ({ navigation, route }) => {
 
       <ScrollView contentContainerStyle={styles.hubContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.hubLead}>
-          See who&apos;s leading across Blyp — economy, social, live and games. Switch Day / Week /
-          Month / Year on windowed boards.
+          See who&apos;s leading across Blyp — economy, social, live, games and clubs. Switch Day /
+          Week / Month / Year on windowed boards; pick a club for scoped boards.
         </Text>
 
         <Text style={styles.sectionTitle}>Live now</Text>
@@ -260,7 +361,13 @@ const RankingsHubScreen = ({ navigation, route }) => {
               <Text style={styles.liveTitle}>{board.title}</Text>
               <Text style={styles.liveBlurb} numberOfLines={2}>
                 {board.blurb}
-                {board.windows ? ' · Day–Year windows' : ''}
+                {board.windows === true
+                  ? ' · Day–Year windows'
+                  : board.windows === 'club'
+                    ? ' · Week · Month'
+                    : board.requiresClubId
+                      ? ' · Pick a club'
+                      : ''}
               </Text>
             </View>
             <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />

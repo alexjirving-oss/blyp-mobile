@@ -542,7 +542,7 @@ router.get('/economy/matchday/leaderboard', async (req: AuthedRequest, res) => {
   }
 });
 
-// Global rankings hub (Phase 0–3): economy + social/live + competitive/game boards.
+// Global rankings hub (Phase 0–4): economy + social/live + competitive/game + club-scoped boards.
 router.get('/economy/rankings/boards', async (req: AuthedRequest, res) => {
   try {
     if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
@@ -558,8 +558,9 @@ router.get('/economy/rankings', async (req: AuthedRequest, res) => {
     if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const board = typeof req.query?.board === 'string' ? req.query.board.trim() : '';
     const window = typeof req.query?.window === 'string' ? req.query.window.trim() : 'alltime';
+    const clubId = typeof req.query?.clubId === 'string' ? req.query.clubId.trim() : '';
     const limit = req.query?.limit;
-    const out = await getRankingBoard(board, limit, window);
+    const out = await getRankingBoard(board, limit, window, clubId || undefined);
     res.json(out);
   } catch (e: any) {
     const err = toEconomyError(e);
