@@ -7,6 +7,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSubscriptionState = getSubscriptionState;
 exports.ensureTrialIfMissing = ensureTrialIfMissing;
+exports.ensureTrialDocIfMissing = ensureTrialDocIfMissing;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("./types");
 const PAID_TIERS = new Set(['plus', 'plus_coins']);
@@ -59,9 +60,12 @@ async function getSubscriptionState(uid) {
 }
 /**
  * If the user has never received an entitlement doc, start the same 30-day
- * trial the mobile client expects. Does NOT renew expired free/expired docs.
+ * trial the mobile client expects. Does NOT renew expired / paid / free docs —
+ * once entitlements/{uid} exists, that clock is permanent for the account.
+ *
+ * Omits `store` / paid fields so the shape stays trial-only (matches client rules).
  */
-async function ensureTrialIfMissing(uid) {
+async function ensureTrialIfMissing(uid, source = 'server_bootstrap') {
     const db = firebaseAdmin_1.admin.firestore();
     const ref = db.collection(types_1.ASSISTANT_COLLECTIONS.entitlements).doc(uid);
     try {
@@ -74,9 +78,8 @@ async function ensureTrialIfMissing(uid) {
             status: 'trialing',
             trialStartedAt: now,
             trialEndsAt: now + TRIAL_DAYS * DAY_MS,
-            store: null,
             updatedAt: now,
-            source: 'geminiProxy_bootstrap',
+            source,
         };
         // create() fails if another request won the race — re-read either way.
         try {
@@ -91,6 +94,35 @@ async function ensureTrialIfMissing(uid) {
     }
     catch (_b) {
         return emptyState();
+    }
+}
+/** Raw entitlement payload for clients (once-per-account bootstrap). */
+async function ensureTrialDocIfMissing(uid, source = 'blypEnsureTrial') {
+    const db = firebaseAdmin_1.admin.firestore();
+    const ref = db.collection(types_1.ASSISTANT_COLLECTIONS.entitlements).doc(uid);
+    const snap = await ref.get();
+    if (snap.exists) {
+        return { created: false, entitlement: (snap.data() || {}) };
+    }
+    const now = Date.now();
+    const doc = {
+        tier: 'trial',
+        status: 'trialing',
+        trialStartedAt: now,
+        trialEndsAt: now + TRIAL_DAYS * DAY_MS,
+        updatedAt: now,
+        source,
+    };
+    try {
+        await ref.create(doc);
+        return { created: true, entitlement: doc };
+    }
+    catch (_a) {
+        const again = await ref.get();
+        if (again.exists) {
+            return { created: false, entitlement: (again.data() || {}) };
+        }
+        throw new Error('trial-create-failed');
     }
 }
 //# sourceMappingURL=entitlement.js.map

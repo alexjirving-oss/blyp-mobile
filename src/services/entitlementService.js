@@ -99,19 +99,73 @@ export function hasAICached() {
   return cache ? !!cache.capabilities.ai : false;
 }
 
-async function bootstrapTrial(uid) {
-  const now = Date.now();
-  const doc = {
+const FUNCTIONS_BASE = (
+  process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL || 'https://us-central1-blyp-master.cloudfunctions.net'
+).replace(/\/+$/, '');
+
+/** Keys allowed on client trial create — must match firestore entitlements create rules. */
+export function buildTrialDoc(now = Date.now()) {
+  return {
     tier: 'trial',
     status: 'trialing',
     trialStartedAt: now,
     trialEndsAt: now + TRIAL_DAYS * DAY,
-    store: null,
     updatedAt: now,
   };
+}
+
+async function firebaseIdToken() {
+  try {
+    // eslint-disable-next-line global-require
+    const cfg = require('../config/firebase');
+    const user = cfg?.auth?.currentUser;
+    if (user && typeof user.getIdToken === 'function') return await user.getIdToken();
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Server-authoritative once-per-account trial grant (Admin SDK create).
+ * Never renews an existing entitlements/{uid} doc — paid or expired stay put.
+ */
+async function ensureTrialViaServer() {
+  const token = await firebaseIdToken();
+  if (!token) return null;
+  try {
+    const resp = await fetch(`${FUNCTIONS_BASE}/blypEnsureTrial`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data?.ok && data?.entitlement) return data.entitlement;
+  } catch (e) {
+    console.warn('[entitlement] blypEnsureTrial failed', e?.message || String(e));
+  }
+  return null;
+}
+
+async function bootstrapTrial(uid) {
+  const now = Date.now();
   try {
     await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
-    await db.collection('entitlements').doc(uid).set(doc, { merge: false });
+  } catch {
+    /* continue — server/client paths still try */
+  }
+
+  // Prefer Admin SDK: create is atomic and bypasses client rule edge-cases.
+  const fromServer = await ensureTrialViaServer();
+  if (fromServer) return fromServer;
+
+  // Fallback: client create without forbidden keys (store/purchaseToken/currentPeriodEnd).
+  const doc = buildTrialDoc(now);
+  try {
+    const ref = db.collection('entitlements').doc(uid);
+    const existing = await ref.get();
+    if (snapExists(existing)) return snapData(existing);
+    await ref.set(doc, { merge: false });
     return doc;
   } catch (e) {
     console.warn('[entitlement] trial bootstrap failed (non-fatal)', e?.message || String(e));
@@ -170,6 +224,7 @@ export function subscribeEntitlement(uid, cb) {
 export default {
   TIERS,
   TRIAL_DAYS,
+  buildTrialDoc,
   getEntitlementCached,
   hasAICached,
   loadEntitlement,

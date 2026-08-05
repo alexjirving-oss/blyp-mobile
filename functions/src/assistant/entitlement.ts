@@ -72,9 +72,15 @@ export async function getSubscriptionState(uid: string): Promise<SubscriptionSta
 
 /**
  * If the user has never received an entitlement doc, start the same 30-day
- * trial the mobile client expects. Does NOT renew expired free/expired docs.
+ * trial the mobile client expects. Does NOT renew expired / paid / free docs —
+ * once entitlements/{uid} exists, that clock is permanent for the account.
+ *
+ * Omits `store` / paid fields so the shape stays trial-only (matches client rules).
  */
-export async function ensureTrialIfMissing(uid: string): Promise<SubscriptionState> {
+export async function ensureTrialIfMissing(
+  uid: string,
+  source = 'server_bootstrap',
+): Promise<SubscriptionState> {
   const db = admin.firestore();
   const ref = db.collection(ASSISTANT_COLLECTIONS.entitlements).doc(uid);
   try {
@@ -87,9 +93,8 @@ export async function ensureTrialIfMissing(uid: string): Promise<SubscriptionSta
       status: 'trialing',
       trialStartedAt: now,
       trialEndsAt: now + TRIAL_DAYS * DAY_MS,
-      store: null,
       updatedAt: now,
-      source: 'geminiProxy_bootstrap',
+      source,
     };
     // create() fails if another request won the race — re-read either way.
     try {
@@ -101,5 +106,37 @@ export async function ensureTrialIfMissing(uid: string): Promise<SubscriptionSta
     return computeFromDoc(doc);
   } catch {
     return emptyState();
+  }
+}
+
+/** Raw entitlement payload for clients (once-per-account bootstrap). */
+export async function ensureTrialDocIfMissing(
+  uid: string,
+  source = 'blypEnsureTrial',
+): Promise<{ created: boolean; entitlement: Record<string, unknown> | null }> {
+  const db = admin.firestore();
+  const ref = db.collection(ASSISTANT_COLLECTIONS.entitlements).doc(uid);
+  const snap = await ref.get();
+  if (snap.exists) {
+    return { created: false, entitlement: (snap.data() || {}) as Record<string, unknown> };
+  }
+  const now = Date.now();
+  const doc: Record<string, unknown> = {
+    tier: 'trial',
+    status: 'trialing',
+    trialStartedAt: now,
+    trialEndsAt: now + TRIAL_DAYS * DAY_MS,
+    updatedAt: now,
+    source,
+  };
+  try {
+    await ref.create(doc);
+    return { created: true, entitlement: doc };
+  } catch {
+    const again = await ref.get();
+    if (again.exists) {
+      return { created: false, entitlement: (again.data() || {}) as Record<string, unknown> };
+    }
+    throw new Error('trial-create-failed');
   }
 }

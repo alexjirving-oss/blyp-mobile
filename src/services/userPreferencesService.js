@@ -155,11 +155,22 @@ function emit(uid, prefs) {
 
 const canSync = (uid) => firebaseEnabled && !!db?.collection && !!uid && uid !== 'anon';
 
+async function ensureAuthForPrefs(uid) {
+  if (!canSync(uid)) return;
+  try {
+    const { ensureFirebaseAuthReady } = await import('../utils/firebaseAuthHelper');
+    await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+  } catch (e) {
+    console.warn('[PREFS] auth not ready', e?.message || String(e));
+  }
+}
+
 // Best-effort mirror to Firestore for cross-device sync. Namespaced under a
 // `blyp` map so it never collides with the user's profile fields.
 async function syncToRemote(uid, prefs) {
   if (!canSync(uid)) return;
   try {
+    await ensureAuthForPrefs(uid);
     await db.collection('users').doc(uid).set({ blyp: { prefs } }, { merge: true });
   } catch (e) {
     console.warn('[PREFS] remote sync failed', e?.message || String(e));
@@ -171,6 +182,7 @@ async function syncToRemote(uid, prefs) {
 async function hydrateFromRemote(uid) {
   if (!canSync(uid)) return;
   try {
+    await ensureAuthForPrefs(uid);
     const snap = await db.collection('users').doc(uid).get();
     const data = snap?.data?.();
     const remote = data?.blyp?.prefs;
@@ -280,14 +292,7 @@ export async function completeOnboarding(uid, interests) {
   };
   // Auth must be ready before the Firestore mirror, otherwise reinstall/new
   // device can't see onboarded=true and will restart the whole flow + trial.
-  if (canSync(uid)) {
-    try {
-      const { ensureFirebaseAuthReady } = await import('../utils/firebaseAuthHelper');
-      await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
-    } catch (e) {
-      console.warn('[PREFS] auth not ready before onboarding sync', e?.message || String(e));
-    }
-  }
+  await ensureAuthForPrefs(uid);
   const stamped = await persist(uid, next);
   try {
     await syncToRemote(uid, stamped);
@@ -325,7 +330,27 @@ export async function isOnboarded(uid) {
   // Local miss (reinstall / cleared storage): wait for Firestore before deciding.
   await hydrateFromRemote(uid);
   const after = cache.get(uid) || prefs;
-  return !!after.onboarded;
+  if (after.onboarded) return true;
+
+  // Secondary heal: an existing entitlements/{uid} means this account already
+  // completed first-run (trial or paid). Skip full onboarding and mirror the flag.
+  if (!canSync(uid)) return false;
+  try {
+    await ensureAuthForPrefs(uid);
+    const { snapExists } = await import('../utils/firestoreSnap');
+    const snap = await db.collection('entitlements').doc(uid).get();
+    if (snapExists(snap)) {
+      try {
+        await completeOnboarding(uid, after.interests);
+      } catch {
+        /* still treat as onboarded even if prefs heal fails */
+      }
+      return true;
+    }
+  } catch (e) {
+    console.warn('[PREFS] entitlement heal check failed', e?.message || String(e));
+  }
+  return false;
 }
 
 export function getEnabledPages(prefs) {

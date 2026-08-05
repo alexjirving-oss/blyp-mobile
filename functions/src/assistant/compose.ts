@@ -16,7 +16,7 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { applyCors } from '../http/cors';
-import { getSubscriptionState } from './entitlement';
+import { getSubscriptionState, ensureTrialIfMissing } from './entitlement';
 import { draftMessage } from './gemini';
 import { generateAndStoreImage } from './imageGen';
 import {
@@ -78,8 +78,12 @@ export const blypAssistantCompose = functions
       return;
     }
 
-    // 2) Premium gate (server-authoritative, fails closed)
-    const sub = await getSubscriptionState(uid);
+    // Premium gate (server-authoritative). Missing entitlement docs get a
+    // once-per-account trial bootstrap — never renewed on reinstall/login.
+    let sub = await getSubscriptionState(uid);
+    if (!sub.active) {
+      sub = await ensureTrialIfMissing(uid, 'compose_bootstrap');
+    }
     if (!sub.active) {
       res.status(402).json({ ok: false, reason: 'subscription_required' });
       return;

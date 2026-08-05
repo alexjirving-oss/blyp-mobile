@@ -156,7 +156,7 @@ exports.geminiProxy = functions
     // "disappeared" for brand-new accounts.
     let sub = await (0, entitlement_1.getSubscriptionState)(uid);
     if (!sub.active) {
-        sub = await (0, entitlement_1.ensureTrialIfMissing)(uid);
+        sub = await (0, entitlement_1.ensureTrialIfMissing)(uid, 'geminiProxy_bootstrap');
     }
     if (!sub.active) {
         res.status(402).json({ error: { message: 'subscription_required' } });
