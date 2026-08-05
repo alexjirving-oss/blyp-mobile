@@ -17,6 +17,7 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
+import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
 import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
@@ -852,6 +853,12 @@ const MediaViewerItem = ({
           <Text style={styles.descriptionInfoChipText} allowFontScaling={false}>Show details</Text>
         </TouchableOpacity>
       )}
+
+      <FeedCommentOverlay
+        postId={actualPost?.id}
+        active={isScreenFocused && !!actualPost?.id && !commentsVisible}
+        bottomInset={96}
+      />
 
       {/* Bottom action row — identical to the For You feed */}
       <Animated.View style={[styles.actionRow, { opacity: uiOpacity }]} pointerEvents="box-none">
