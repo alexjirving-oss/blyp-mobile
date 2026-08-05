@@ -28,6 +28,7 @@ import YourBlypContent from '../components/YourBlyp/YourBlypContent';
 import BattlesContent from '../components/Battles/BattlesContent';
 import TeamsContent from '../components/Teams/TeamsContent';
 import DatingScreen from './DatingScreen';
+import GamesContent from '../components/Games/GamesContent';
 import { useAuth, hardLogout } from '../hooks/useCommon';
 import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messaging/resolveMessengerUser';
 
@@ -838,6 +839,13 @@ const ChatListScreen = ({ navigation }) => {
         return <LiveUsersTab />;
       case 'battles': // Battles — head-to-head live battles
         return <BattlesContent navigation={navigation} />;
+      case 'games': // Live overlay games (Marble / Artillery) — not create-sheet lobby
+        return (
+          <GamesContent
+            navigation={navigation}
+            onSelectChatTab={(tab) => setSelectedTab(tab || 'battles')}
+          />
+        );
       case 'dating': // Dating — Plus/trial gated Discover + Matches
         return <DatingScreen navigation={navigation} embedded />;
       case 'yourblyp': // Your Blyp — personal recap
@@ -849,10 +857,10 @@ const ChatListScreen = ({ navigation }) => {
     }
   };
 
-  // Horizontal swipe to move between the Live / Battles / Dating / Your Blyp header tabs.
+  // Horizontal swipe across Live / Battles / Games / Dating / Your Blyp / Teams.
   // Built-in PanResponder (gesture-handler is shimmed); only a decisive
   // horizontal swipe is claimed, so inner scrolling is never hijacked.
-  const TAB_ORDER = ['notifications', 'battles', 'dating', 'yourblyp', 'teams'];
+  const TAB_ORDER = ['notifications', 'battles', 'games', 'dating', 'yourblyp', 'teams'];
   const selectedTabRef = useRef(selectedTab);
   useEffect(() => { selectedTabRef.current = selectedTab; }, [selectedTab]);
   const goToAdjacentTab = useCallback((dir) => {
@@ -877,6 +885,7 @@ const ChatListScreen = ({ navigation }) => {
   const useSectionGradient =
     selectedTab === 'notifications' ||
     selectedTab === 'battles' ||
+    selectedTab === 'games' ||
     selectedTab === 'dating' ||
     selectedTab === 'yourblyp' ||
     selectedTab === 'teams';
@@ -891,6 +900,7 @@ const ChatListScreen = ({ navigation }) => {
           tabs={[
             { key: 'notifications', label: 'Live' },
             { key: 'battles', label: 'Battles' },
+            { key: 'games', label: 'Games' },
             { key: 'dating', label: 'Dating' },
             { key: 'yourblyp', label: 'Your Blyp' },
             { key: 'teams', label: 'Teams' },

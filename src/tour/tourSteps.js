@@ -173,11 +173,12 @@ export function buildTourSteps({ hasDating = true, hasGames = false } = {}) {
     steps.push({
       id: 'games',
       title: 'Games',
-      body: 'Games live under Chat/Games and Home → Jump in. Team up, play, and climb when the lobby is open.',
+      body: 'Chat/Games → Games covers Marble Race (multi-guest live) and Battle game (Artillery). Classic lobby stay paused.',
       icon: 'game-controller',
-      navigate: { type: 'tab', name: 'Chat' },
-      targetZone: 'tab.chat',
-      preferredPlacement: 'above',
+      navigate: { type: 'chatTab', select: 'games' },
+      targetId: 'headerTab:games',
+      targetZone: 'header.tabs',
+      preferredPlacement: 'below',
     });
   }
 
