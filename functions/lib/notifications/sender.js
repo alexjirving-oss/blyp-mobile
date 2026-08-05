@@ -8,7 +8,7 @@
  * sent / retry / dead — it never swallows outcomes (the "never silent" rule).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendToUser = void 0;
+exports.sendToUser = sendToUser;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("./types");
 const PERMANENT_TOKEN_ERRORS = new Set([
@@ -130,5 +130,4 @@ async function sendToUser(userId, payload) {
         retriable: resp.successCount === 0 && transientFailures > 0,
     };
 }
-exports.sendToUser = sendToUser;
 //# sourceMappingURL=sender.js.map

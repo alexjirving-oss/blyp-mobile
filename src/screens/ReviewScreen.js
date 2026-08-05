@@ -511,24 +511,9 @@ const ReviewScreen = () => {
       setIsProcessingAllAI(true);
       console.log(`🎯 Generating descriptions for ${mediaItems.length} media items...`);
       console.log('📋 Media items to process:', mediaItems.map(item => ({ type: item.type, uri: item.uri?.substring(0, 50) + '...' })));
-      
-      // Test media description service connection first
-      const serviceOk = await mediaDescriptionService.testConnection();
-      if (!serviceOk) {
-        const last = mediaDescriptionService?.lastConnectionError;
-        const status = typeof last?.status === 'number' ? ` (HTTP ${last.status})` : '';
-        console.error('❌ Media description service connection failed', last);
-        Toast.show({
-          type: 'info',
-          text1: `AI unavailable${status}`,
-          text2: last?.code === 'NO_KEY'
-            ? 'Missing EXPO_PUBLIC_GEMINI_API_KEY'
-            : 'Check internet / quota / key validity',
-          position: 'bottom'
-        });
-        throw new Error('Media description service not available');
-      }
-      
+
+      // Do not preflight with testConnection — it adds a full AI round-trip and
+      // often 429s before the real caption call even starts.
       const descriptions = await mediaDescriptionService.generateMediaDescriptions(mediaItems);
       console.log('✅ Generated descriptions:', descriptions);
       setMediaDescriptions(descriptions);
@@ -1215,14 +1200,6 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
 
     try {
       setIsGeneratingContent(true);
-
-      // Test connection first
-      console.log('🧪 Testing AI connection for enhancement...');
-      const connectionOk = await aiService.testConnection();
-      
-      if (!connectionOk) {
-        throw new Error('AI service connection failed');
-      }
 
       // Format mediaItems for AI service
       const formattedMediaItems = mediaItems.map(item => ({

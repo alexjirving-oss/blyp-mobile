@@ -266,17 +266,6 @@ describe('mediaDescriptionService - Improved Reliability', () => {
 
   describe('Batch Processing with Null Handling', () => {
     it('should convert null descriptions to neutral fallbacks only as last resort', async () => {
-      // Mock test connection
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          candidates: [{
-            content: { parts: [{ text: "Hello, API is working!" }] }
-          }]
-        }),
-      });
-
       // First item: good description
       global.fetch.mockResolvedValueOnce({
         ok: true,

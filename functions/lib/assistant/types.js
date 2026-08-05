@@ -17,7 +17,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RATE_LIMIT_MAX = exports.RATE_LIMIT_WINDOW_MS = exports.DRAFT_TTL_MS = exports.ASSISTANT_COLLECTIONS = void 0;
 exports.ASSISTANT_COLLECTIONS = {
     drafts: 'assistantDrafts',
-    usage: 'assistantUsage',
+    usage: 'assistantUsage', // per-user rate-limit windows
     entitlements: 'entitlements',
 };
 exports.DRAFT_TTL_MS = 24 * 60 * 60 * 1000;

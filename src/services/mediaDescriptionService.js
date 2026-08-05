@@ -141,13 +141,13 @@ class MediaDescriptionService {
 
       // Some videos can't thumbnail at 1000ms (very short, keyframe placement, etc).
       // Try a few times and accept the first that works.
-      const candidateTimesMs = [0, 200, 500, 1000, 1500, 2000];
+      const candidateTimesMs = [0, 500];
 
       for (const time of candidateTimesMs) {
         try {
           const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, {
             time,
-            quality: 0.8,
+            quality: 0.55,
           });
 
           if (!uri) continue;
@@ -365,7 +365,7 @@ class MediaDescriptionService {
    * and transient (503) responses, plus a per-attempt timeout. Keeps bursty
    * AI flows alive against the free-tier per-minute rate limit.
    */
-  async postGeminiWithRetry(payload, { maxRetries = 2, baseDelayMs = 2500, timeoutMs = 20000 } = {}) {
+  async postGeminiWithRetry(payload, { maxRetries = 1, baseDelayMs = 1200, timeoutMs = 20000 } = {}) {
     const url = getApiUrl();
     const headers = await geminiAuthHeaders();
     let attempt = 0;
@@ -796,7 +796,8 @@ Return ONLY valid JSON.`;
    */
   async generatePostFromMedia(mediaItems = [], userIntent = '', options = {}) {
     const count = Math.max(2, Math.min(3, options.count || 3));
-    const maxImages = Math.max(1, Math.min(6, options.maxImages || 4));
+    // Fewer / smaller images = much faster OpenAI vision round-trip via geminiProxy.
+    const maxImages = Math.max(1, Math.min(3, options.maxImages || 2));
     const intent = (userIntent || '').trim();
     const items = Array.isArray(mediaItems) ? mediaItems.filter((m) => m?.uri) : [];
 
@@ -814,6 +815,7 @@ Return ONLY valid JSON.`;
 
     // Read up to maxImages images as inline base64 parts (videos → thumbnail frame).
     const imageParts = [];
+    const maxB64Chars = 450000; // ~330KB — enough for vision, cheap to upload
     for (let i = 0; i < items.length && imageParts.length < maxImages; i += 1) {
       try {
         const imageUri = await this.getImageUriForMedia(items[i]);
@@ -822,7 +824,7 @@ Return ONLY valid JSON.`;
           encoding: FileSystem.EncodingType.Base64,
         });
         if (!base64Data) continue;
-        if (base64Data.length > 2000000) {
+        if (base64Data.length > maxB64Chars) {
           this.log(`⚠️ Skipping oversized image ${i + 1} (${base64Data.length} b64 chars)`);
           continue;
         }
@@ -836,29 +838,26 @@ Return ONLY valid JSON.`;
       ? `The user described the post like this (THIS is the main point — lead with it):\n"${intent}"`
       : `The user did not add their own description, so infer a natural post from the photos alone.`;
 
-    const promptText = `You are helping someone post ONE social media update that includes ${imageParts.length || 'no'} photo(s).
+    const promptText = `You are helping someone post ONE social media update with ${imageParts.length || 0} photo(s).
 
 ${intentBlock}
 
-Do TWO things and return them as JSON:
-1. "perPhotoDescriptions": one short, casual, factual sentence describing EACH photo in order (for grounding only).
-2. "variants": ${count} DISTINCT caption options for this single post. Requirements:
-   - Lead with the user's intent/message; use the photos only as supporting detail.
-   - Make the ${count} options genuinely different in tone/angle (e.g. one punchy, one warm & authentic, one playful).
-   - Natural, human, first-person. Light emoji use is fine; do not overdo it.
-   - Each option max ~280 characters, with its own short catchy title (max 50 chars) and 4-6 relevant hashtags (no # symbol).
+Return JSON with "variants": ${count} DISTINCT caption options for this single post:
+- Lead with the user's intent; photos are supporting detail only.
+- Make options different in tone (punchy / warm / playful).
+- Natural first-person. Light emoji OK.
+- Each: description max ~220 chars, title max 50 chars, 4-6 hashtags (no #).
 Return ONLY valid JSON.`;
 
     const payload = {
       contents: [{ parts: [{ text: promptText }, ...imageParts] }],
       generationConfig: {
-        temperature: 0.9,
-        maxOutputTokens: 1400,
+        temperature: 0.7,
+        maxOutputTokens: 900,
         responseMimeType: 'application/json',
         responseSchema: {
           type: 'OBJECT',
           properties: {
-            perPhotoDescriptions: { type: 'ARRAY', items: { type: 'STRING' } },
             variants: {
               type: 'ARRAY',
               items: {
@@ -879,7 +878,11 @@ Return ONLY valid JSON.`;
 
     try {
       this.log(`✨ One-shot post generation: ${imageParts.length} image(s), hasIntent=${intent.length > 0}`);
-      const response = await this.postGeminiWithRetry(payload, { timeoutMs: 25000 });
+      const response = await this.postGeminiWithRetry(payload, {
+        maxRetries: 1,
+        baseDelayMs: 1000,
+        timeoutMs: 18000,
+      });
       if (!response || !response.ok) {
         const status = response?.status;
         let bodyText = '';
@@ -1250,14 +1253,18 @@ Make it fun and authentic based on what you see and the user's context: "${userP
     this.log('🎯 Generating descriptions for %d media items...', mediaItems.length);
     this.log('📋 Media items to process:', mediaItems);
 
-    // Tests expect this call to consume the first fetch mock
-    await this.testConnection();
+    // Skip testConnection — it doubles latency and fails closed on transient 429s.
+    // Real generateMediaDescription calls already surface auth/quota errors.
 
     const rawResults = [];
 
-    // Sequential to keep fetch order predictable
-    for (let i = 0; i < mediaItems.length; i += 1) {
+    // Cap sequential vision calls — one-shot generatePostFromMedia is preferred.
+    const limit = Math.min(mediaItems.length, 3);
+    for (let i = 0; i < limit; i += 1) {
       rawResults[i] = await this.generateMediaDescription(mediaItems[i], i);
+    }
+    for (let i = limit; i < mediaItems.length; i += 1) {
+      rawResults[i] = null;
     }
 
     const finalResults = rawResults.map((desc, index) => {

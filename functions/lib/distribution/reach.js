@@ -14,7 +14,12 @@
  * and shown to creators verbatim in the Transparency hub.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyReachDeltas = exports.reAuditionReach = exports.initialReach = exports.computeBlypScore = exports.emptyEngagements = exports.MAX_WAVE = exports.REST_SCORE = exports.PROMOTE_SCORE = exports.MIN_IMPRESSIONS_TO_JUDGE = exports.BOOSTED_AUDITION_EXPOSURE = exports.WAVE_EXPOSURE = void 0;
+exports.MAX_WAVE = exports.REST_SCORE = exports.PROMOTE_SCORE = exports.MIN_IMPRESSIONS_TO_JUDGE = exports.BOOSTED_AUDITION_EXPOSURE = exports.WAVE_EXPOSURE = void 0;
+exports.emptyEngagements = emptyEngagements;
+exports.computeBlypScore = computeBlypScore;
+exports.initialReach = initialReach;
+exports.reAuditionReach = reAuditionReach;
+exports.applyReachDeltas = applyReachDeltas;
 const types_1 = require("../platform/types");
 /** Per-wave audience exposure (share of eligible audience sampled). Transparent. */
 exports.WAVE_EXPOSURE = [0.08, 0.2, 0.45, 0.75, 1.0];
@@ -36,13 +41,12 @@ const W = {
     share: 4,
     save: 3,
     completion: 2,
-    dwellSecPerImpressionCap: 20,
+    dwellSecPerImpressionCap: 20, // cap avg dwell contribution so long videos don't dominate
     dwellWeight: 0.08,
 };
 function emptyEngagements() {
     return { likes: 0, comments: 0, shares: 0, saves: 0, completions: 0, dwellMsTotal: 0 };
 }
-exports.emptyEngagements = emptyEngagements;
 /**
  * The Blyp Score: positive engagement per impression, on a saturating 0..100 curve.
  * Pure and explainable — this exact computation is what creators see.
@@ -63,7 +67,6 @@ function computeBlypScore(impressions, e) {
     const score = 100 * (rate / (rate + SCORE_K));
     return Math.round(Math.max(0, Math.min(100, score)));
 }
-exports.computeBlypScore = computeBlypScore;
 function stageForWave(wave, resting) {
     if (resting)
         return 'resting';
@@ -91,14 +94,12 @@ function initialReach(now, boosted = false) {
         updatedAt: now,
     };
 }
-exports.initialReach = initialReach;
 /** Reset a post back to audition after an edit (no penalty — a fresh fair shot). */
 function reAuditionReach(prev, now) {
     const base = initialReach(now, false);
     base.version = ((prev === null || prev === void 0 ? void 0 : prev.version) || 1) + 1;
     return base;
 }
-exports.reAuditionReach = reAuditionReach;
 /**
  * Fold a batch of newly-counted signals into a post's reach state and re-judge it.
  * Returns the next PostReach. Pure — the caller owns the read/write transaction.
@@ -157,5 +158,4 @@ function applyReachDeltas(prev, deltas, now) {
         updatedAt: now,
     };
 }
-exports.applyReachDeltas = applyReachDeltas;
 //# sourceMappingURL=reach.js.map

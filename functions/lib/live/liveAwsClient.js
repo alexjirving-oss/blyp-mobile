@@ -12,7 +12,11 @@
  * - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY: AWS credentials (auto-loaded from environment)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPlaybackUrl = exports.createParticipantToken = exports.deleteStage = exports.createStage = exports.ivsClient = exports.ivsRealtimeClient = void 0;
+exports.ivsClient = exports.ivsRealtimeClient = void 0;
+exports.createStage = createStage;
+exports.deleteStage = deleteStage;
+exports.createParticipantToken = createParticipantToken;
+exports.getPlaybackUrl = getPlaybackUrl;
 const client_ivs_realtime_1 = require("@aws-sdk/client-ivs-realtime");
 const client_ivs_1 = require("@aws-sdk/client-ivs");
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
@@ -77,7 +81,6 @@ async function createStage(sessionId, displayName) {
         throw error;
     }
 }
-exports.createStage = createStage;
 /**
  * Delete an IVS Stage when session ends.
  *
@@ -97,7 +100,6 @@ async function deleteStage(stageArn) {
         throw error;
     }
 }
-exports.deleteStage = deleteStage;
 /**
  * Create a participant token for joining a stage.
  *
@@ -130,7 +132,6 @@ async function createParticipantToken(_stageArn, _userId, _capabilities, _durati
         'non-functional placeholder tokens. Use the blyp-live-service /api/live/* endpoints, ' +
         'which mint real IVS participant tokens.');
 }
-exports.createParticipantToken = createParticipantToken;
 /**
  * DEPRECATED / DISABLED. Previously returned a fabricated `*.example.com`
  * playback URL that never resolved to a real stream. Real playback comes from
@@ -141,5 +142,4 @@ function getPlaybackUrl(_stageArn) {
     throw new Error('[LIVE_AWS] Legacy getPlaybackUrl is disabled — it only ever produced a fake ' +
         'placeholder URL. Real playback is served from an IVS channel via composition.');
 }
-exports.getPlaybackUrl = getPlaybackUrl;
 //# sourceMappingURL=liveAwsClient.js.map

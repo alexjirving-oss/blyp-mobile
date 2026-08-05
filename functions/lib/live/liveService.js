@@ -25,15 +25,30 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.joinAsViewer = exports.leaveGuestSlot = exports.acceptGuestInvite = exports.inviteGuestToSession = exports.hostEndSession = exports.hostStartSession = void 0;
+exports.hostStartSession = hostStartSession;
+exports.hostEndSession = hostEndSession;
+exports.inviteGuestToSession = inviteGuestToSession;
+exports.acceptGuestInvite = acceptGuestInvite;
+exports.leaveGuestSlot = leaveGuestSlot;
+exports.joinAsViewer = joinAsViewer;
 const admin = __importStar(require("firebase-admin"));
 const liveAwsClient_1 = require("./liveAwsClient");
 const db = admin.firestore();
@@ -140,7 +155,6 @@ async function hostStartSession(hostUserId, req) {
         throw error;
     }
 }
-exports.hostStartSession = hostStartSession;
 /**
  * End a live session as host.
  *
@@ -198,7 +212,6 @@ async function hostEndSession(hostUserId, sessionId) {
         throw error;
     }
 }
-exports.hostEndSession = hostEndSession;
 /**
  * Invite a guest to join a live session.
  *
@@ -263,7 +276,6 @@ async function inviteGuestToSession(hostUserId, sessionId, guestUserId) {
         throw error;
     }
 }
-exports.inviteGuestToSession = inviteGuestToSession;
 /**
  * Accept a guest invitation and join session.
  *
@@ -340,7 +352,6 @@ async function acceptGuestInvite(guestUserId, sessionId) {
         throw error;
     }
 }
-exports.acceptGuestInvite = acceptGuestInvite;
 /**
  * Leave a guest slot (guest disconnects from session).
  *
@@ -405,7 +416,6 @@ async function leaveGuestSlot(guestUserId, sessionId) {
         throw error;
     }
 }
-exports.leaveGuestSlot = leaveGuestSlot;
 /**
  * Join session as viewer (read-only subscriber).
  *
@@ -459,5 +469,4 @@ async function joinAsViewer(viewerUserId, sessionId) {
         throw error;
     }
 }
-exports.joinAsViewer = joinAsViewer;
 //# sourceMappingURL=liveService.js.map

@@ -7,7 +7,7 @@
  * contactable location - the orchestrator uses that to decide on the hero card.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.placesProvider = void 0;
+exports.placesProvider = placesProvider;
 const net_1 = require("./net");
 function mapUrl(lat, lon) {
     return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`;
@@ -73,5 +73,4 @@ async function placesProvider(query, country, geohash5) {
     void geohash5;
     return { provider: 'osm', results, costMicros: 0 };
 }
-exports.placesProvider = placesProvider;
 //# sourceMappingURL=placesProvider.js.map

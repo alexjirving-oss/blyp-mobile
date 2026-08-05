@@ -22,22 +22,39 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.usdToMicros = exports.geohash = exports.fingerprint = exports.hostOf = exports.canonicalUrl = exports.queryHash = exports.normalizeQuery = exports.hashSession = exports.sha256 = void 0;
+exports.sha256 = sha256;
+exports.hashSession = hashSession;
+exports.normalizeQuery = normalizeQuery;
+exports.queryHash = queryHash;
+exports.canonicalUrl = canonicalUrl;
+exports.hostOf = hostOf;
+exports.fingerprint = fingerprint;
+exports.geohash = geohash;
+exports.usdToMicros = usdToMicros;
 const crypto = __importStar(require("crypto"));
 const SECRET_SALT = process.env.BLYP_HASH_SALT || 'blyp-default-salt';
 /** Stable sha256 hex of an input (optionally salted for PII). */
 function sha256(input) {
     return crypto.createHash('sha256').update(input).digest('hex');
 }
-exports.sha256 = sha256;
 /**
  * Hash a session identifier behind a server-side salt so the stored value can
  * never be reversed back to the raw id/device. This is the PII firewall.
@@ -45,7 +62,6 @@ exports.sha256 = sha256;
 function hashSession(rawSessionOrUser) {
     return sha256(`${SECRET_SALT}:${String(rawSessionOrUser || 'anon')}`).slice(0, 32);
 }
-exports.hashSession = hashSession;
 /** Normalise a query for caching/dedup: lowercase, collapse whitespace. */
 function normalizeQuery(q) {
     return String(q || '')
@@ -53,12 +69,10 @@ function normalizeQuery(q) {
         .toLowerCase()
         .replace(/\s+/g, ' ');
 }
-exports.normalizeQuery = normalizeQuery;
 /** Cache/dedup key for a query, scoped by coarse country so local results differ. */
 function queryHash(q, country) {
     return sha256(`${normalizeQuery(q)}|${(country || 'XX').toUpperCase()}`).slice(0, 24);
 }
-exports.queryHash = queryHash;
 /** Canonicalise a URL for dedup + provenance (strip tracking params, fragments). */
 function canonicalUrl(url) {
     try {
@@ -74,7 +88,6 @@ function canonicalUrl(url) {
         return String(url || '');
     }
 }
-exports.canonicalUrl = canonicalUrl;
 /** Host of a URL without scheme/www, for display + ownership. */
 function hostOf(url) {
     try {
@@ -87,7 +100,6 @@ function hostOf(url) {
         return '';
     }
 }
-exports.hostOf = hostOf;
 /**
  * Lightweight 64-bit simhash (hex) for near-duplicate detection. Good enough to
  * collapse near-identical snippets/pages in the corpus without a heavy dep.
@@ -117,7 +129,6 @@ function fingerprint(text) {
     }
     return out;
 }
-exports.fingerprint = fingerprint;
 const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 /** Encode lat/lon to a geohash of the given precision (default 5 ~ 5km cell). */
 function geohash(lat, lon, precision = 5) {
@@ -162,10 +173,8 @@ function geohash(lat, lon, precision = 5) {
     }
     return hash;
 }
-exports.geohash = geohash;
 /** Convert a USD amount to integer micro-USD (1 USD = 1_000_000) for the ledger. */
 function usdToMicros(usd) {
     return Math.round((usd || 0) * 1000000);
 }
-exports.usdToMicros = usdToMicros;
 //# sourceMappingURL=util.js.map

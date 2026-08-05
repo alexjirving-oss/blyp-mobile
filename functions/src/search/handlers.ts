@@ -23,7 +23,12 @@ function clientIp(req: functions.https.Request): string | undefined {
 }
 
 export const blypSearch = functions
-  .runWith({ memory: '512MB', timeoutSeconds: 30 })
+  .runWith({
+    memory: '512MB',
+    timeoutSeconds: 30,
+    // Same OpenAI secret as geminiProxy — search answers use gpt-4o.
+    secrets: ['OPENAI_API_KEY'],
+  })
   .https.onRequest(async (req, res) => {
     applyCors(req, res, { methods: 'POST, OPTIONS' });
     if (req.method === 'OPTIONS') {

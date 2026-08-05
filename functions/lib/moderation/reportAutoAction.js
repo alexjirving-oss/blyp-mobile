@@ -19,7 +19,7 @@
  * Never throws.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.evaluateAutoAction = void 0;
+exports.evaluateAutoAction = evaluateAutoAction;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const AUTO_HIDE_THRESHOLD = 3;
 const CRITICAL_REASONS = new Set(['child_safety']);
@@ -134,5 +134,4 @@ async function evaluateAutoAction(db, input) {
         }
     }
 }
-exports.evaluateAutoAction = evaluateAutoAction;
 //# sourceMappingURL=reportAutoAction.js.map

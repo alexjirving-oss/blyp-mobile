@@ -9,7 +9,10 @@
  * Every provider returns provenance so results can be harvested into our corpus.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ddgProvider = exports.wikipediaProvider = exports.braveProvider = exports.blypIndexProvider = void 0;
+exports.blypIndexProvider = blypIndexProvider;
+exports.braveProvider = braveProvider;
+exports.wikipediaProvider = wikipediaProvider;
+exports.ddgProvider = ddgProvider;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("../platform/types");
 const util_1 = require("../platform/util");
@@ -67,7 +70,6 @@ async function blypIndexProvider(query, limit = 8) {
         return { provider: 'blypIndex', results: [], costMicros: 0 };
     }
 }
-exports.blypIndexProvider = blypIndexProvider;
 async function braveProvider(query, country, limit = 10) {
     var _a;
     const key = process.env.BRAVE_SEARCH_API_KEY;
@@ -84,7 +86,6 @@ async function braveProvider(query, country, limit = 10) {
     // Brave Data-for-Search is ~$5/1000 queries => 5000 micro-USD per call.
     return { provider: 'brave', results, costMicros: results.length ? 5000 : 0 };
 }
-exports.braveProvider = braveProvider;
 async function wikipediaProvider(query, limit = 3) {
     var _a;
     const params = new URLSearchParams({
@@ -104,7 +105,6 @@ async function wikipediaProvider(query, limit = 3) {
     }));
     return { provider: 'wikipedia', results, costMicros: 0 };
 }
-exports.wikipediaProvider = wikipediaProvider;
 async function ddgProvider(query) {
     const params = new URLSearchParams({ q: query, format: 'json', no_html: '1', skip_disambig: '1' });
     const data = await (0, net_1.fetchJson)(`https://api.duckduckgo.com/?${params.toString()}`);
@@ -123,5 +123,4 @@ async function ddgProvider(query) {
     });
     return { provider: 'ddg', results, costMicros: 0 };
 }
-exports.ddgProvider = ddgProvider;
 //# sourceMappingURL=webProviders.js.map

@@ -11,7 +11,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.draftMessage = void 0;
+exports.draftMessage = draftMessage;
 const node_fetch_1 = __importDefault(require("node-fetch"));
 const MODEL = process.env.BLYP_GEMINI_MODEL || 'gemini-1.5-flash';
 const PROMPT = (input) => `You are Blyp's message-writing assistant. A user wants you to write a short, ready-to-send personal message to someone they know, and you will also suggest an image to attach.
@@ -85,7 +85,7 @@ async function draftMessage(input) {
             recipientName: typeof parsed.recipientName === 'string' ? parsed.recipientName.trim() : '',
             messages,
             imagePrompt: typeof parsed.imagePrompt === 'string' ? parsed.imagePrompt.trim() : '',
-            safe: parsed.safe !== false,
+            safe: parsed.safe !== false, // default safe unless explicitly false
             refusalReason: typeof parsed.refusalReason === 'string' ? parsed.refusalReason.trim() : '',
         };
     }
@@ -93,5 +93,4 @@ async function draftMessage(input) {
         return null;
     }
 }
-exports.draftMessage = draftMessage;
 //# sourceMappingURL=gemini.js.map

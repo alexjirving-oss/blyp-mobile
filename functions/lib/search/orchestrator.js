@@ -8,7 +8,7 @@
  * corpus so the index grows and the paid dependency shrinks over time.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runBlypSearch = void 0;
+exports.runBlypSearch = runBlypSearch;
 const types_1 = require("../platform/types");
 const util_1 = require("../platform/util");
 const substrate_1 = require("../platform/substrate");
@@ -109,7 +109,6 @@ async function runBlypSearch(input) {
     void (0, cache_1.setCache)(qhash, response);
     return response;
 }
-exports.runBlypSearch = runBlypSearch;
 /** Flatten sections into the order the user is most likely to see, for de-biasing. */
 function orderForLogging(r) {
     if (r.intent === 'place')

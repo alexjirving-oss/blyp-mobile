@@ -28,7 +28,7 @@ exports.COLLECTIONS = {
     // Search corpus (Phase 1/2)
     searchQueries: 'searchQueries',
     searchResultsServed: 'searchResultsServed',
-    searchEvents: 'searchEvents',
+    searchEvents: 'searchEvents', // clicks + page snapshots
     searchCache: 'searchCache',
     blypIndexDocs: 'blypIndexDocs',
     // Unit economics (Phase 0/2/7)

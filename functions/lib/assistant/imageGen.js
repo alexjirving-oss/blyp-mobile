@@ -11,7 +11,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateAndStoreImage = void 0;
+exports.generateAndStoreImage = generateAndStoreImage;
 const node_fetch_1 = __importDefault(require("node-fetch"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const IMAGE_MODEL = process.env.BLYP_IMAGE_MODEL || 'imagen-3.0-generate-002';
@@ -68,5 +68,4 @@ async function generateAndStoreImage(uid, draftId, prompt) {
         return null;
     }
 }
-exports.generateAndStoreImage = generateAndStoreImage;
 //# sourceMappingURL=imageGen.js.map

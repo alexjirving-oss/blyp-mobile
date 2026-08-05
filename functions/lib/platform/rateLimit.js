@@ -12,7 +12,9 @@
  * the request (never break search because the guard hiccuped).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkRateLimit = exports.callerKey = exports.SEARCH_RATE_LIMIT = void 0;
+exports.SEARCH_RATE_LIMIT = void 0;
+exports.callerKey = callerKey;
+exports.checkRateLimit = checkRateLimit;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("./types");
 const util_1 = require("./util");
@@ -27,7 +29,6 @@ function callerKey(ip, session) {
     const raw = `${ip || 'noip'}|${session || 'anon'}`;
     return (0, util_1.sha256)(raw).slice(0, 32);
 }
-exports.callerKey = callerKey;
 /**
  * Atomically increment the fixed-window counter for `key` and decide whether the
  * request is allowed. One Firestore doc per key; the window resets in place, so the
@@ -65,5 +66,4 @@ async function checkRateLimit(key, opts = exports.SEARCH_RATE_LIMIT) {
         return { allowed: true, retryAfterSec: 0, remaining: opts.max };
     }
 }
-exports.checkRateLimit = checkRateLimit;
 //# sourceMappingURL=rateLimit.js.map

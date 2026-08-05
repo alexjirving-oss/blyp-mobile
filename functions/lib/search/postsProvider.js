@@ -8,7 +8,8 @@
  * the results to fill space.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.searchCreators = exports.searchPosts = void 0;
+exports.searchPosts = searchPosts;
+exports.searchCreators = searchCreators;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const GENERIC = new Set([
     'the', 'a', 'an', 'of', 'for', 'to', 'in', 'on', 'and', 'or', 'with', 'best', 'top',
@@ -64,7 +65,6 @@ async function searchPosts(query, limit = 8) {
         return [];
     }
 }
-exports.searchPosts = searchPosts;
 async function searchCreators(query, limit = 6) {
     const terms = coreTerms(query);
     if (!terms.length)
@@ -98,5 +98,4 @@ async function searchCreators(query, limit = 6) {
         return [];
     }
 }
-exports.searchCreators = searchCreators;
 //# sourceMappingURL=postsProvider.js.map

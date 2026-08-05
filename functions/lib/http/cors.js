@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyCors = void 0;
+exports.applyCors = applyCors;
 function parseAllowedOrigins(raw) {
     const set = new Set();
     const s = String(raw || '').trim();
@@ -27,5 +27,4 @@ function applyCors(req, res, opts) {
     res.set('Access-Control-Allow-Methods', opts.methods);
     res.set('Access-Control-Allow-Headers', opts.allowHeaders || 'Content-Type, Authorization');
 }
-exports.applyCors = applyCors;
 //# sourceMappingURL=cors.js.map

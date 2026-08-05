@@ -5,7 +5,8 @@
  * trialEndsAt is in the future.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ensureTrialIfMissing = exports.getSubscriptionState = void 0;
+exports.getSubscriptionState = getSubscriptionState;
+exports.ensureTrialIfMissing = ensureTrialIfMissing;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("./types");
 const PAID_TIERS = new Set(['plus', 'plus_coins']);
@@ -56,7 +57,6 @@ async function getSubscriptionState(uid) {
         return emptyState();
     }
 }
-exports.getSubscriptionState = getSubscriptionState;
 /**
  * If the user has never received an entitlement doc, start the same 30-day
  * trial the mobile client expects. Does NOT renew expired free/expired docs.
@@ -93,5 +93,4 @@ async function ensureTrialIfMissing(uid) {
         return emptyState();
     }
 }
-exports.ensureTrialIfMissing = ensureTrialIfMissing;
 //# sourceMappingURL=entitlement.js.map

@@ -13,7 +13,9 @@
  * - IvsViewerService: Playback URL provisioning for viewers
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getIvsViewer = exports.ivsViewer = exports.ivsRealtime = exports.IvsViewerService = exports.IvsRealtimeService = exports.getRegionFromStageArn = void 0;
+exports.ivsViewer = exports.ivsRealtime = exports.IvsViewerService = exports.IvsRealtimeService = void 0;
+exports.getRegionFromStageArn = getRegionFromStageArn;
+exports.getIvsViewer = getIvsViewer;
 const client_ivs_realtime_1 = require("@aws-sdk/client-ivs-realtime");
 /**
  * Extract AWS region from an IVS stage ARN.
@@ -45,7 +47,6 @@ function getRegionFromStageArn(stageArn) {
     }
     return region;
 }
-exports.getRegionFromStageArn = getRegionFromStageArn;
 /**
  * IVS Real-Time service wrapper for AWS SDK.
  * Handles participant token generation for hosts and guests.
@@ -231,5 +232,4 @@ function initializeViewerService() {
 function getIvsViewer() {
     return initializeViewerService();
 }
-exports.getIvsViewer = getIvsViewer;
 //# sourceMappingURL=ivsService.js.map

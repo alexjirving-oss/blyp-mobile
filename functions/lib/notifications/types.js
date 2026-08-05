@@ -13,7 +13,8 @@
  *    the catch-up surface, so a missed push still reconciles on next app open.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.backoffMs = exports.DEFAULT_MAX_ATTEMPTS = exports.DISPATCH_HEARTBEAT_DOC = exports.NOTIF_COLLECTIONS = void 0;
+exports.DEFAULT_MAX_ATTEMPTS = exports.DISPATCH_HEARTBEAT_DOC = exports.NOTIF_COLLECTIONS = void 0;
+exports.backoffMs = backoffMs;
 exports.NOTIF_COLLECTIONS = {
     /** Durable outbox + inbox. One doc per (recipient, event). */
     notifications: 'notifications',
@@ -31,5 +32,4 @@ function backoffMs(attempt) {
     const ms = base * Math.pow(2, Math.max(0, attempt - 1));
     return Math.min(ms, 30 * 60000); // cap at 30 min
 }
-exports.backoffMs = backoffMs;
 //# sourceMappingURL=types.js.map

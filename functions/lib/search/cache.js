@@ -4,7 +4,8 @@
  * queries instant. Keyed by queryHash (query + coarse country).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.setCache = exports.getCache = void 0;
+exports.getCache = getCache;
+exports.setCache = setCache;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("../platform/types");
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 min
@@ -26,7 +27,6 @@ async function getCache(queryHash) {
         return null;
     }
 }
-exports.getCache = getCache;
 async function setCache(queryHash, payload, ttlMs = DEFAULT_TTL_MS) {
     try {
         (0, firebaseAdmin_1.initFirebaseAdmin)();
@@ -43,5 +43,4 @@ async function setCache(queryHash, payload, ttlMs = DEFAULT_TTL_MS) {
         // cache write failures are non-fatal
     }
 }
-exports.setCache = setCache;
 //# sourceMappingURL=cache.js.map

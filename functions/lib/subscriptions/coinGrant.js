@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.creditSubscriptionCoinsViaLiveService = void 0;
+exports.creditSubscriptionCoinsViaLiveService = creditSubscriptionCoinsViaLiveService;
 /**
  * Subscription coin grant -> live-service Postgres wallet.
  *
@@ -50,5 +50,4 @@ async function creditSubscriptionCoinsViaLiveService(params) {
         return { ok: false, granted: 0 };
     }
 }
-exports.creditSubscriptionCoinsViaLiveService = creditSubscriptionCoinsViaLiveService;
 //# sourceMappingURL=coinGrant.js.map

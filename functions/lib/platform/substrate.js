@@ -8,7 +8,12 @@
  * minimum kept longer than needed).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logCostRevenue = exports.logPostEvents = exports.logSearchEvent = exports.logResultsServed = exports.logSearchQuery = exports.RETENTION = void 0;
+exports.RETENTION = void 0;
+exports.logSearchQuery = logSearchQuery;
+exports.logResultsServed = logResultsServed;
+exports.logSearchEvent = logSearchEvent;
+exports.logPostEvents = logPostEvents;
+exports.logCostRevenue = logCostRevenue;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const types_1 = require("./types");
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -24,7 +29,7 @@ exports.RETENTION = {
     searchQueriesDays: 180,
     resultsServedDays: 180,
     searchEventsDays: 180,
-    impressionEventsDays: 30,
+    impressionEventsDays: 30, // raw post signals are short-lived; merit is kept on the post
     ledgerDays: 1825, // 5y - unit economics are kept for audited transparency
 };
 function db() {
@@ -62,7 +67,6 @@ async function logSearchQuery(params) {
         console.warn('[substrate] logSearchQuery failed', e === null || e === void 0 ? void 0 : e.message);
     }
 }
-exports.logSearchQuery = logSearchQuery;
 async function logResultsServed(params) {
     try {
         const doc = {
@@ -93,7 +97,6 @@ async function logResultsServed(params) {
         console.warn('[substrate] logResultsServed failed', e === null || e === void 0 ? void 0 : e.message);
     }
 }
-exports.logResultsServed = logResultsServed;
 async function logSearchEvent(doc) {
     try {
         const full = clean(Object.assign(Object.assign({}, doc), { schemaVersion: types_1.SCHEMA_VERSION, ts: Date.now(), retentionExpiresAt: expiry(exports.RETENTION.searchEventsDays) }));
@@ -103,7 +106,6 @@ async function logSearchEvent(doc) {
         console.warn('[substrate] logSearchEvent failed', e === null || e === void 0 ? void 0 : e.message);
     }
 }
-exports.logSearchEvent = logSearchEvent;
 /**
  * Persist a batch of post interaction signals (impressions/likes/shares/etc.) that
  * feed the earn-your-reach engine. PII firewall: sessionHash only. Fire-and-forget.
@@ -136,7 +138,6 @@ async function logPostEvents(events) {
         console.warn('[substrate] logPostEvents failed', e === null || e === void 0 ? void 0 : e.message);
     }
 }
-exports.logPostEvents = logPostEvents;
 async function logCostRevenue(params) {
     try {
         const doc = clean({
@@ -154,5 +155,4 @@ async function logCostRevenue(params) {
         console.warn('[substrate] logCostRevenue failed', e === null || e === void 0 ? void 0 : e.message);
     }
 }
-exports.logCostRevenue = logCostRevenue;
 //# sourceMappingURL=substrate.js.map

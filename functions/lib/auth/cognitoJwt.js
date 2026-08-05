@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyCognitoIdToken = exports.extractBearerToken = void 0;
+exports.extractBearerToken = extractBearerToken;
+exports.verifyCognitoIdToken = verifyCognitoIdToken;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const jwks_rsa_1 = __importDefault(require("jwks-rsa"));
 const getCognitoVerifier = (() => {
@@ -53,7 +54,6 @@ function extractBearerToken(authHeader) {
     }
     return match[1];
 }
-exports.extractBearerToken = extractBearerToken;
 async function verifyCognitoIdToken(idToken) {
     if (!idToken || typeof idToken !== 'string') {
         throw new Error('Invalid Cognito token');
@@ -76,5 +76,4 @@ async function verifyCognitoIdToken(idToken) {
     }
     return decoded;
 }
-exports.verifyCognitoIdToken = verifyCognitoIdToken;
 //# sourceMappingURL=cognitoJwt.js.map

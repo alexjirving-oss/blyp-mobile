@@ -16,7 +16,9 @@
  *  - NEVER throw — moderation must not break the write pipeline.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sanitizeText = exports.isBlockedText = exports.inspectText = void 0;
+exports.inspectText = inspectText;
+exports.isBlockedText = isBlockedText;
+exports.sanitizeText = sanitizeText;
 // Hard-blocked content. Each entry maps a category to leet-tolerant patterns.
 // Patterns run against BOTH the raw text and a normalized form (see normalize()),
 // so "n i g g e r", "n1gg3r", "n.i.g.g.e.r" all collapse to the same match.
@@ -129,14 +131,11 @@ function inspectText(input) {
         categories: [],
     };
 }
-exports.inspectText = inspectText;
 function isBlockedText(input) {
     return inspectText(input).blocked;
 }
-exports.isBlockedText = isBlockedText;
 function sanitizeText(input) {
     return inspectText(input).clean;
 }
-exports.sanitizeText = sanitizeText;
 exports.default = { inspectText, isBlockedText, sanitizeText };
 //# sourceMappingURL=textFilter.js.map
