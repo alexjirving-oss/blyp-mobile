@@ -19,9 +19,10 @@ function maxBytesForContentType(contentType) {
  * @param {string} args.storagePath - e.g. users/{uid}/media/photo-123.jpg
  * @param {string} args.contentType
  * @param {number} [args.timeoutMs]
+ * @param {(pct: number, meta?: { sent?: number, total?: number }) => void} [args.onProgress]
  * @returns {Promise<{ downloadURL: string, fullPath: string, bucket: string }>}
  */
-export async function uploadMediaToStorage({ localUri, storagePath, contentType, timeoutMs }) {
+export async function uploadMediaToStorage({ localUri, storagePath, contentType, timeoutMs, onProgress }) {
   if (!localUri || typeof localUri !== 'string') {
     throw new Error('uploadMediaToStorage: missing localUri');
   }
