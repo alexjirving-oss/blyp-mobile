@@ -50,6 +50,14 @@ import {
   normalizeProfileBadges,
   normalizeProfileClubs,
 } from '../services/profileIdentityCatalog';
+import {
+  getCachedOwnProfile,
+  loadOwnProfileFromStorage,
+  setOwnProfileCache,
+  subscribeOwnProfile,
+  hydrateOwnProfile,
+  clearOwnProfileCache,
+} from '../services/ownProfileCache';
 
 type ProfileCategory = { id: string; label: string; order: number };
 type ProfileCategoryChip = { id: string; label: string; count: number };
@@ -168,8 +176,16 @@ const ProfileScreenV3: React.FC = () => {
   // Double-tap the Profile tab → reset to the first sub-page ("My Profile").
   useTabReset('Profile', () => setActiveTab('My Profile'));
   const [headerHeight, setHeaderHeight] = useState(0);
-  const [profile, setProfile] = useState<any>(null);
-  const [stats, setStats] = useState<{ followers: StatValue; following: StatValue; likes: StatValue; posts: StatValue; lives: StatValue }>({ followers: 0, following: 0, likes: 0, posts: 0, lives: 0 });
+  // Seed from early-hydrate cache so the header never flashes "User" / zeros.
+  const cachedBootstrap = uid ? getCachedOwnProfile(uid) : null;
+  const [profile, setProfile] = useState<any>(() => cachedBootstrap?.basics || null);
+  const [stats, setStats] = useState<{ followers: StatValue; following: StatValue; likes: StatValue; posts: StatValue; lives: StatValue }>(() => ({
+    followers: cachedBootstrap?.stats?.followers ?? 0,
+    following: cachedBootstrap?.stats?.following ?? 0,
+    likes: cachedBootstrap?.stats?.likes ?? 0,
+    posts: cachedBootstrap?.stats?.posts ?? 0,
+    lives: cachedBootstrap?.stats?.lives ?? 0,
+  }));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -272,6 +288,41 @@ const ProfileScreenV3: React.FC = () => {
 
   // Ensure streaming flag primed once
   useEffect(() => { try { primeStreamingFlag(); } catch { } }, []);
+
+  // Apply early-hydrate / AsyncStorage cache before loadAll finishes so the
+  // header paints with real name/avatar/stats instead of "User".
+  useEffect(() => {
+    if (!uid) return undefined;
+    let cancelled = false;
+    profileHydratedRef.current = false;
+
+    const applyCache = (cached: any) => {
+      if (cancelled || !cached) return;
+      if (profileHydratedRef.current) return;
+      if (cached.basics) {
+        setProfile((prev: any) => prev || cached.basics);
+      }
+      if (cached.stats) {
+        setStats({
+          followers: cached.stats.followers ?? 0,
+          following: cached.stats.following ?? 0,
+          likes: cached.stats.likes ?? 0,
+          posts: cached.stats.posts ?? 0,
+          lives: cached.stats.lives ?? 0,
+        });
+      }
+    };
+
+    applyCache(getCachedOwnProfile(uid));
+    loadOwnProfileFromStorage(uid).then(applyCache).catch(() => {});
+    const unsub = subscribeOwnProfile(uid, applyCache);
+    hydrateOwnProfile(uid).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      try { unsub(); } catch { }
+    };
+  }, [uid]);
 
   // Preserve header tab UI behavior and map selection to internal profileTab state.
   useEffect(() => {
@@ -441,7 +492,19 @@ const ProfileScreenV3: React.FC = () => {
         try { console.warn('[PROFILE][WARN] lives load failed', e?.message); } catch { }
         lives = null;
       }
-      setStats({ followers, following, likes, posts, lives });
+      const nextStats = { followers, following, likes, posts, lives };
+      setStats(nextStats);
+      // Keep the early-hydrate cache warm for the next cold start / tab open.
+      void setOwnProfileCache(uid, {
+        basics,
+        stats: {
+          followers: followers ?? 0,
+          following: following ?? 0,
+          likes: likes ?? 0,
+          posts: posts ?? 0,
+          lives: lives ?? 0,
+        },
+      });
 
       setBusy(false);
       setErr(null);
@@ -807,6 +870,7 @@ const ProfileScreenV3: React.FC = () => {
     setStats({ followers: 0, following: 0, likes: 0, posts: 0, lives: 0 });
     setErr(null);
     setBusy(false);
+    try { clearOwnProfileCache(uid || undefined); } catch { }
 
     // Reset to root so App-level auth gate can render AuthScreen immediately.
     try { (nav as any).reset?.({ index: 0, routes: [{ name: 'MainTabs' }] }); return; } catch { }

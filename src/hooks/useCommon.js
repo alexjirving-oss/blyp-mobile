@@ -10,6 +10,7 @@ import { snapData } from '../utils/firestoreSnap';
 import awsconfig from '../aws-exports';
 import { ensureFirebaseAuth, setFirebaseAuthBridgeContext } from '../utils/firebaseAuthHelper';
 import { ensureUserProfile } from '../services/LiveService';
+import { hydrateOwnProfile, clearOwnProfileCache } from '../services/ownProfileCache';
 
 export const userPool = new CognitoUserPool({
   UserPoolId: awsconfig.aws_user_pools_id,
@@ -90,6 +91,7 @@ export const hardLogout = async () => {
       await firebaseAuth.signOut();
     }
   } catch { }
+  try { clearOwnProfileCache(); } catch { }
   applyAuthUpdate({ user: null, uid: null, loading: false, authReady: true });
   notifyAuthListeners();
 };
@@ -462,6 +464,14 @@ async function runFirebaseBridge(uid, user) {
       email: emailFromToken || undefined,
       username: preferredUsername || undefined,
     });
+
+    // Prefetch own profile header (avatar / name / stats) so Profile paints
+    // with real data on first open instead of flashing "User" placeholders.
+    try {
+      hydrateOwnProfile(uid).catch((e) => {
+        console.warn('[AUTH][OWN_PROFILE] hydrate failed', e?.message || String(e));
+      });
+    } catch { /* best-effort */ }
   } catch (e) {
     console.warn('[AUTH][FIREBASE_BRIDGE] failed', e?.message || String(e));
     // Allow a retry on the next poll if the bridge didn't actually establish.

@@ -253,7 +253,9 @@ const HomeScreen = ({ navigation, route }) => {
   const uidRef = useRef(null);
   const [prefs, setPrefs] = useState(null);
   const [randomPosts, setRandomPosts] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Start true so first paint / fresh install shows the teal spinner instead of
+  // a dead frame or a premature "feed is quiet" empty state while we fetch.
+  const [loading, setLoading] = useState(true);
   const [currentDiscoverIndex, setCurrentDiscoverIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [isTitleBarMinimized, setIsTitleBarMinimized] = useState(false);
@@ -585,7 +587,12 @@ const HomeScreen = ({ navigation, route }) => {
   }, [selectedTab]);
 
   useEffect(() => {
-    if (!authReady || !isAuthenticated || !uid) {
+    if (!authReady) {
+      // Stay in the loading state until auth resolves — avoid a frozen blank frame.
+      setLoading(true);
+      return;
+    }
+    if (!isAuthenticated || !uid) {
       setRandomPosts([]);
       setIsEmptyFeed(false);
       setLoading(false);
@@ -604,6 +611,8 @@ const HomeScreen = ({ navigation, route }) => {
     let mounted = true;
     let isInitialLoad = true;
     let unsubscribe = null;
+    // Show spinner until first content (or confirmed empty) is ready.
+    setLoading(true);
 
     (async () => {
       try {
@@ -1777,7 +1786,9 @@ const HomeScreen = ({ navigation, route }) => {
       case 'following':
         return <FollowingFeedPanel navigation={navigation} uid={uid} />;
       case 'A':
-        if (loading || !feedHeight) {
+        // Spinner while measuring layout OR while the initial fetch/rank is in
+        // flight with no posts yet. Never leave a dead frozen frame.
+        if (!feedHeight || (loading && randomPosts.length === 0)) {
           return <FeedEmptyState mode="loading" />;
         }
         if (isEmptyFeed || randomPosts.length === 0) {
