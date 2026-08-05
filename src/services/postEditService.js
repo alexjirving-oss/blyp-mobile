@@ -83,7 +83,8 @@ export async function updatePostMediaDisplay(postId, display) {
   const fitMode = ['auto', 'cover', 'contain'].includes(display?.fitMode)
     ? display.fitMode
     : 'auto';
-  const scale = Math.min(2.5, Math.max(1, Number(display?.scale) || 1));
+  // Allow zoom-out (0.5) through zoom-in (2.5) — matches VideoFramingSheet / PremiumFeedVideo.
+  const scale = Math.min(2.5, Math.max(0.5, Number(display?.scale) || 1));
   const offsetX = Math.min(1, Math.max(-1, Number(display?.offsetX) || 0));
   const offsetY = Math.min(1, Math.max(-1, Number(display?.offsetY) || 0));
 
