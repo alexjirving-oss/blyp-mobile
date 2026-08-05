@@ -238,8 +238,8 @@ const HomeScreen = ({ navigation, route }) => {
   const [pausedFeedId, setPausedFeedId] = useState(null);
   const [commentCounts, setCommentCounts] = useState({});
   const [following, setFollowing] = useState({});
-  const [selectedTab, setSelectedTab] = useState('home');
-  const selectedTabRef = useRef('home');
+  const [selectedTab, setSelectedTab] = useState('A');
+  const selectedTabRef = useRef('A');
   const uidRef = useRef(null);
   const [prefs, setPrefs] = useState(null);
   const [randomPosts, setRandomPosts] = useState([]);
@@ -366,10 +366,9 @@ const HomeScreen = ({ navigation, route }) => {
     }
   }, [enabledPages, selectedTab]);
 
-  // Double-tap the Home tab → jump back to the first sub-page ("For You") and
-  // scroll to the top.
+  // Double-tap the Home tab → jump back to For You and scroll to the top.
   useTabReset('Home', () => {
-    setSelectedTab(enabledPages?.[0]?.key || 'home');
+    setSelectedTab('A');
     setCurrentIndex(0);
     setCurrentDiscoverIndex(0);
     try { flatListRef.current?.scrollToOffset?.({ offset: 0, animated: true }); } catch { }

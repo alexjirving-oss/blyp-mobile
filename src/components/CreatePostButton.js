@@ -190,20 +190,6 @@ const CreatePostButton = () => {
               ) : null}
             </View>
 
-            {(__DEV__ ||
-              /^(1|true|yes|on)$/i.test(String(process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED || '').trim())) && (
-              <TouchableOpacity
-                style={[styles.menuItem, { marginTop: 4 }]}
-                onPress={() => {
-                  setShowMenu(false);
-                  navigation.navigate('Games');
-                }}
-              >
-                <View style={[styles.menuItemGradient, { backgroundColor: '#00D2BE' }]}>
-                  <Text style={[styles.menuItemTextMain, { color: COLORS.black }]}>Games — Coming soon</Text>
-                </View>
-              </TouchableOpacity>
-            )}
           </View>
         </TouchableOpacity>
       </Modal>

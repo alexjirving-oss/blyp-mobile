@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
+import { View, StyleSheet, Animated, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import EnhancedVideo from '../EnhancedVideo';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
+
+const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
 
 /**
  * PremiumFeedVideo — full-bleed TikTok-style playback chrome.
@@ -89,9 +91,13 @@ export default function PremiumFeedVideo({
 
   const framingTransform = useMemo(() => {
     if (!mediaDisplay) return null;
-    const tx = offsetX * 40;
-    const ty = offsetY * 40;
-    if (userScale === 1 && tx === 0 && ty === 0) return null;
+    // Map normalized offsets (-1..1) to real screen travel so drag/nudge
+    // actually repositions the clip, not a tiny 40px shim.
+    const overflowX = Math.max(FRAME_W * 0.28, (FRAME_W * (userScale - 1)) / 2);
+    const overflowY = Math.max(FRAME_H * 0.22, (FRAME_H * (userScale - 1)) / 2);
+    const tx = offsetX * overflowX;
+    const ty = offsetY * overflowY;
+    if (userScale === 1 && tx === 0 && ty === 0 && !mediaDisplay?.fitMode) return null;
     return [{ translateX: tx }, { translateY: ty }, { scale: userScale }];
   }, [mediaDisplay, offsetX, offsetY, userScale]);
 

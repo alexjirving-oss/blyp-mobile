@@ -55,7 +55,7 @@ import ReminderEditSheet from '../components/ReminderEditSheet';
 import LocationPermissionOverlay from '../components/LocationPermissionOverlay';
 import { resolveWatch, findUsersByName, addWatch, watchTypeLabel } from '../services/userWatchService';
 import { resolveEventWatch, addEventWatch, eventWatchLabel } from '../services/eventWatchService';
-import { needsLocationForQuery } from '../services/locationService';
+import { needsLocationForQuery, getCurrentGeo } from '../services/locationService';
 import { resolveBattle } from '../services/battleIntentService';
 
 const SUGGESTIONS = [
@@ -101,6 +101,8 @@ const BlypScreen = ({ navigation, route }) => {
   const [blypItVisible, setBlypItVisible] = useState(false);
   const [editReminder, setEditReminder] = useState(null);
   const [locationPrompt, setLocationPrompt] = useState(null);
+  const [sessionGeo, setSessionGeo] = useState(null);
+  const [locationBusy, setLocationBusy] = useState(false);
   const [speakingTurnId, setSpeakingTurnId] = useState(null);
   const inputRef = useRef(null);
   const scrollRef = useRef(null);
@@ -117,6 +119,39 @@ const BlypScreen = ({ navigation, route }) => {
       stopTts();
     };
   }, []);
+
+  // Ask for location when opening Blyp search so local results work without
+  // waiting for an explicit "near me" phrase.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      setLocationBusy(true);
+      try {
+        const res = await getCurrentGeo();
+        if (active && res?.ok) setSessionGeo(res.geo);
+      } finally {
+        if (active) setLocationBusy(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const requestToolbarLocation = useCallback(async () => {
+    setLocationBusy(true);
+    try {
+      const res = await getCurrentGeo();
+      if (res?.ok) {
+        setSessionGeo(res.geo);
+        return res.geo;
+      }
+      setLocationPrompt({ query: query || 'places near you' });
+      return null;
+    } finally {
+      setLocationBusy(false);
+    }
+  }, [query]);
 
   const stopSpeaking = useCallback(() => {
     stopTts();
@@ -171,7 +206,8 @@ const BlypScreen = ({ navigation, route }) => {
       setQuery(q);
       stopSpeaking();
 
-      if (needsLocationForQuery(q) && !geo) {
+      const effectiveGeo = geo || sessionGeo || null;
+      if (needsLocationForQuery(q) && !effectiveGeo) {
         setLocationPrompt({ query: q });
         return;
       }
@@ -316,13 +352,13 @@ const BlypScreen = ({ navigation, route }) => {
         let content = null;
         if (isBackendSearchEnabled()) {
           try {
-            content = await backendSearch(q, { session: uid || 'anon', geo });
+            content = await backendSearch(q, { session: uid || 'anon', geo: effectiveGeo });
           } catch (e) {
             console.warn('[BLYP] backendSearch failed', e?.message || e);
           }
         }
         if (!content) {
-          content = await blypContent(q, { geo });
+          content = await blypContent(q, { geo: effectiveGeo });
         }
         setTurns((prev) => [
           ...prev,
@@ -377,7 +413,7 @@ const BlypScreen = ({ navigation, route }) => {
         setTimeout(() => scrollRef.current?.scrollTo?.({ y: 0, animated: false }), 50);
       }
     },
-    [uid, navigation, aiEntitled, stopSpeaking]
+    [uid, navigation, aiEntitled, stopSpeaking, sessionGeo]
   );
 
   // The user tapped a candidate on a "which person did you mean?" card. Carry out
@@ -432,6 +468,7 @@ const BlypScreen = ({ navigation, route }) => {
 
   const onLocationGranted = useCallback(
     (geo) => {
+      if (geo) setSessionGeo(geo);
       const pending = locationPrompt?.query;
       setLocationPrompt(null);
       if (pending) runSearch(pending, geo);
@@ -1171,6 +1208,22 @@ const BlypScreen = ({ navigation, route }) => {
             </TouchableOpacity>
           )}
           <TouchableOpacity
+            style={[styles.micBtn, !!sessionGeo && styles.locBtnActive]}
+            onPress={requestToolbarLocation}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={sessionGeo ? 'Location on' : 'Enable location'}
+          >
+            {locationBusy ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <Icon
+                name={sessionGeo ? 'location' : 'location-outline'}
+                size={18}
+                color={sessionGeo ? COLORS.primary : COLORS.textMuted}
+              />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[styles.micBtn, listening && styles.micBtnActive]}
             onPress={toggleVoice}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -1405,6 +1458,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,210,190,0.12)',
   },
   micBtnActive: { backgroundColor: COLORS.primary },
+  locBtnActive: { backgroundColor: 'rgba(0,210,190,0.22)' },
   listeningHint: { color: COLORS.textSecondary, fontSize: responsiveFont(12), textAlign: 'center', marginTop: 8 },
   scrollContent: { paddingHorizontal: 12, paddingTop: 14, paddingBottom: 120 },
 

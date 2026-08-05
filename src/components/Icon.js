@@ -104,6 +104,7 @@ const map = {
 
   // location/visibility
   location: 'MapPin',
+  'location-outline': 'MapPin',
   eye: 'Eye',
   'eye-off': 'EyeOff',
 

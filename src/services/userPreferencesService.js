@@ -48,8 +48,8 @@ export const INTEREST_CATALOG = [
 // tabs so the feed engine keeps working untouched. `home` is the new base.
 // `fixed` pages can be reordered but not hidden.
 export const DEFAULT_PAGES = [
-  { key: 'home', label: 'Home', fixed: true, enabled: true },
   { key: 'A', label: 'For You', fixed: true, enabled: true },
+  { key: 'home', label: 'Home', fixed: true, enabled: true },
   { key: 'following', label: 'Following', enabled: true },
   { key: 'B', label: "What's Hot", enabled: true },
   { key: 'C', label: 'Categories', enabled: true },
@@ -113,7 +113,17 @@ function reconcilePages(storedPages) {
   for (const def of DEFAULT_PAGES) {
     if (!seen.has(def.key)) result.push({ ...def });
   }
-  return result;
+  // Keep fixed core tabs in DEFAULT_PAGES order so For You stays first for everyone.
+  const defOrder = DEFAULT_PAGES.map((p) => p.key);
+  const fixedKeys = new Set(DEFAULT_PAGES.filter((p) => p.fixed).map((p) => p.key));
+  const fixed = [];
+  const rest = [];
+  for (const p of result) {
+    if (fixedKeys.has(p.key)) fixed.push(p);
+    else rest.push(p);
+  }
+  fixed.sort((a, b) => defOrder.indexOf(a.key) - defOrder.indexOf(b.key));
+  return [...fixed, ...rest];
 }
 
 function normalize(raw) {

@@ -98,6 +98,10 @@ export default function VideoFramingSheet({
   };
 
   const bumpScale = (delta) => setScale((s) => clamp(Number((s + delta).toFixed(2)), 1, 2.5));
+  const nudge = (dx, dy) => {
+    setOffsetX((x) => clamp(Number((x + dx).toFixed(3)), -1, 1));
+    setOffsetY((y) => clamp(Number((y + dy).toFixed(3)), -1, 1));
+  };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -129,7 +133,24 @@ export default function VideoFramingSheet({
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.hint}>Drag to reposition · zoom with + / −</Text>
+          <Text style={styles.hint}>Drag preview to move · or use arrows · zoom with + / −</Text>
+
+          <View style={styles.moveRow}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => nudge(-0.12, 0)} accessibilityLabel="Move left">
+              <Icon name="chevron-back" size={22} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.moveCol}>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => nudge(0, -0.12)} accessibilityLabel="Move up">
+                <Icon name="chevron-up" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => nudge(0, 0.12)} accessibilityLabel="Move down">
+                <Icon name="chevron-down" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => nudge(0.12, 0)} accessibilityLabel="Move right">
+              <Icon name="chevron-forward" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.modeRow}>
             {['cover', 'contain'].map((mode) => (
@@ -203,7 +224,15 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 16, fontWeight: '700' },
   cancel: { color: 'rgba(255,255,255,0.7)', fontSize: 15 },
   save: { color: COLORS.primary, fontSize: 15, fontWeight: '700' },
-  hint: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginBottom: 12 },
+  hint: { color: 'rgba(255,255,255,0.45)', fontSize: 12, marginBottom: 10 },
+  moveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  moveCol: { gap: 8 },
   modeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   modeBtn: {
     paddingHorizontal: 14,
