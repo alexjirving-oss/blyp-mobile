@@ -3,6 +3,7 @@
 // Curated clubs + badges for profile identity (Phase 0+).
 // Catalog is client-side for now; unknown ids are stripped on normalize.
 // Entitlement caps (Phase 1): Free 3 clubs / 1 badge; Plus/trial 8 / 3.
+// Phase 3: earn:'server' badges require a badgeAwards mint; pick badges are free.
 // Do not conflate with avatarFrame (admin-only) or StandingBadge (trust).
 
 export const MAX_PROFILE_CLUBS_FREE = 3;
@@ -25,7 +26,7 @@ export function getProfileIdentityCaps(hasPlus) {
 }
 
 /** @typedef {{ id: string, label: string, kind: 'football'|'game'|'community', icon: string, shortLabel?: string }} ClubDef */
-/** @typedef {{ id: string, label: string, icon: string, rarity: 'common'|'rare'|'seasonal' }} BadgeDef */
+/** @typedef {{ id: string, label: string, icon: string, rarity: 'common'|'rare'|'seasonal', earn: 'pick'|'server' }} BadgeDef */
 
 /** @type {readonly ClubDef[]} */
 export const CLUB_CATALOG = Object.freeze([
@@ -42,12 +43,13 @@ export const CLUB_CATALOG = Object.freeze([
 
 /** @type {readonly BadgeDef[]} */
 export const BADGE_CATALOG = Object.freeze([
-  { id: 'badge_early_blyper', label: 'Early Blyper', icon: 'sparkles', rarity: 'rare' },
-  { id: 'badge_matchday', label: 'Matchday', icon: 'football', rarity: 'common' },
-  { id: 'badge_marble_racer', label: 'Marble Racer', icon: 'speedometer', rarity: 'common' },
-  { id: 'badge_live_host', label: 'Live Host', icon: 'radio', rarity: 'common' },
-  { id: 'badge_creator', label: 'Creator', icon: 'color-wand', rarity: 'common' },
-  { id: 'badge_community', label: 'Community', icon: 'people', rarity: 'common' },
+  { id: 'badge_early_blyper', label: 'Early Blyper', icon: 'sparkles', rarity: 'rare', earn: 'server' },
+  { id: 'badge_matchday', label: 'Matchday', icon: 'football', rarity: 'common', earn: 'pick' },
+  { id: 'badge_marble_racer', label: 'Marble Racer', icon: 'speedometer', rarity: 'common', earn: 'pick' },
+  { id: 'badge_marble_podium', label: 'Marble Podium', icon: 'trophy', rarity: 'rare', earn: 'server' },
+  { id: 'badge_live_host', label: 'Live Host', icon: 'radio', rarity: 'common', earn: 'server' },
+  { id: 'badge_creator', label: 'Creator', icon: 'color-wand', rarity: 'common', earn: 'pick' },
+  { id: 'badge_community', label: 'Community', icon: 'people', rarity: 'common', earn: 'pick' },
 ]);
 
 const clubById = new Map(CLUB_CATALOG.map((c) => [c.id, c]));
@@ -59,6 +61,12 @@ export function getClubById(id) {
 
 export function getBadgeById(id) {
   return badgeById.get(String(id || '')) || null;
+}
+
+/** True when the badge requires a server mint before equip. */
+export function isServerEarnedBadge(id) {
+  const b = getBadgeById(id);
+  return !!(b && b.earn === 'server');
 }
 
 /**
@@ -83,6 +91,7 @@ export function normalizeProfileClubs(raw, max = MAX_PROFILE_CLUBS_PLUS) {
 }
 
 /**
+ * Normalize equipped badges (catalog only). Prefer normalizeEquippableBadges for Phase 3.
  * @param {unknown} raw
  * @param {number} [max]
  * @returns {string[]}
@@ -95,6 +104,49 @@ export function normalizeProfileBadges(raw, max = MAX_PROFILE_BADGES_EQUIPPED) {
   for (const item of raw) {
     const id = typeof item === 'string' ? item.trim() : String(item?.id || '').trim();
     if (!id || seen.has(id) || !badgeById.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Normalize earned award ids (server catalog subset only).
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeEarnedBadgeIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = typeof item === 'string' ? item.trim() : String(item?.id || '').trim();
+    if (!id || seen.has(id) || !isServerEarnedBadge(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Equip only pickable badges or server badges the user has earned.
+ * @param {unknown} raw
+ * @param {unknown} earnedRaw
+ * @param {number} [max]
+ * @returns {string[]}
+ */
+export function normalizeEquippableBadges(raw, earnedRaw, max = MAX_PROFILE_BADGES_EQUIPPED) {
+  const earned = new Set(normalizeEarnedBadgeIds(earnedRaw));
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  const limit = Math.max(0, Number(max) || MAX_PROFILE_BADGES_EQUIPPED);
+  for (const item of raw) {
+    const id = typeof item === 'string' ? item.trim() : String(item?.id || '').trim();
+    if (!id || seen.has(id) || !badgeById.has(id)) continue;
+    const def = badgeById.get(id);
+    if (def.earn === 'server' && !earned.has(id)) continue;
     seen.add(id);
     out.push(id);
     if (out.length >= limit) break;

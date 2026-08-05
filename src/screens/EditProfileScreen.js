@@ -15,11 +15,13 @@ import {
   BADGE_CATALOG,
   CLUB_CATALOG,
   getProfileIdentityCaps,
-  normalizeProfileBadges,
+  isServerEarnedBadge,
+  normalizeEquippableBadges,
   normalizeProfileClubs,
   toggleIdInList,
 } from '../services/profileIdentityCatalog';
 import { syncClubMembershipIndex } from '../services/clubDiscoveryService';
+import { fetchEarnedBadgeIds, syncBadgeAwards } from '../services/badgeAwardsService';
 
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
@@ -33,8 +35,15 @@ const EditProfileScreen = ({ navigation, route }) => {
   const [profileClubs, setProfileClubs] = useState(() =>
     normalizeProfileClubs(profileFromRoute?.profileClubs, getProfileIdentityCaps(false).maxClubs)
   );
+  const [earnedBadgeIds, setEarnedBadgeIds] = useState(() =>
+    Array.isArray(profileFromRoute?.earnedBadgeIds) ? profileFromRoute.earnedBadgeIds : []
+  );
   const [profileBadges, setProfileBadges] = useState(() =>
-    normalizeProfileBadges(profileFromRoute?.profileBadges, getProfileIdentityCaps(false).maxBadges)
+    normalizeEquippableBadges(
+      profileFromRoute?.profileBadges,
+      profileFromRoute?.earnedBadgeIds,
+      getProfileIdentityCaps(false).maxBadges
+    )
   );
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -101,7 +110,27 @@ const EditProfileScreen = ({ navigation, route }) => {
           const loadedClubs = normalizeProfileClubs(userData.profileClubs, identityCaps.maxClubs);
           setProfileClubs(loadedClubs);
           setSavedProfileClubs(loadedClubs);
-          setProfileBadges(normalizeProfileBadges(userData.profileBadges, identityCaps.maxBadges));
+          let earned = Array.isArray(userData.earnedBadgeIds) ? userData.earnedBadgeIds : [];
+          try {
+            const synced = await syncBadgeAwards();
+            if (synced.earned?.length) earned = synced.earned;
+            else {
+              const fromStore = await fetchEarnedBadgeIds(uid);
+              if (fromStore.length) earned = fromStore;
+            }
+          } catch (badgeErr) {
+            console.warn('[EditProfile] badge sync skipped', badgeErr?.message || String(badgeErr));
+            try {
+              const fromStore = await fetchEarnedBadgeIds(uid);
+              if (fromStore.length) earned = fromStore;
+            } catch {
+              /* keep denorm */
+            }
+          }
+          setEarnedBadgeIds(earned);
+          setProfileBadges(
+            normalizeEquippableBadges(userData.profileBadges, earned, identityCaps.maxBadges)
+          );
         }
       } catch (error) {
         console.error('Error loading user profile:', error);
@@ -118,8 +147,10 @@ const EditProfileScreen = ({ navigation, route }) => {
   // Enforce entitlement caps on selection (Plus → free, or after load with Plus fail-open).
   useEffect(() => {
     setProfileClubs((prev) => normalizeProfileClubs(prev, identityCaps.maxClubs));
-    setProfileBadges((prev) => normalizeProfileBadges(prev, identityCaps.maxBadges));
-  }, [identityCaps.maxClubs, identityCaps.maxBadges]);
+    setProfileBadges((prev) =>
+      normalizeEquippableBadges(prev, earnedBadgeIds, identityCaps.maxBadges)
+    );
+  }, [identityCaps.maxClubs, identityCaps.maxBadges, earnedBadgeIds]);
 
   // Keep displayName synced to username (requirement: always match).
   useEffect(() => {
@@ -293,9 +324,13 @@ const EditProfileScreen = ({ navigation, route }) => {
       }
 
       // Save profile data to Firestore using Cognito uid.
-      // Never write avatarFrame / feedPriority / admin fields here.
+      // Never write avatarFrame / feedPriority / earnedBadgeIds / admin fields here.
       const clubsToSave = normalizeProfileClubs(profileClubs, identityCaps.maxClubs);
-      const badgesToSave = normalizeProfileBadges(profileBadges, identityCaps.maxBadges);
+      const badgesToSave = normalizeEquippableBadges(
+        profileBadges,
+        earnedBadgeIds,
+        identityCaps.maxBadges
+      );
       const userDocRef = doc(db, 'users', uid);
       await setDoc(userDocRef, {
         displayName: normalizedUsername,
@@ -493,41 +528,51 @@ const EditProfileScreen = ({ navigation, route }) => {
               <Text style={styles.label}>Badges</Text>
               <Text style={styles.helperText}>
                 Equip up to {identityCaps.maxBadges} on your profile ({profileBadges.length}/{identityCaps.maxBadges}).
+                Earnable badges unlock after Live Host, Marble Podium, or Early Blyper.
               </Text>
               <View style={styles.chipGrid}>
                 {BADGE_CATALOG.map((badge) => {
                   const selected = profileBadges.includes(badge.id);
+                  const needsEarn = isServerEarnedBadge(badge.id) && !earnedBadgeIds.includes(badge.id);
                   const atCap = !selected && profileBadges.length >= identityCaps.maxBadges;
+                  const disabled = needsEarn || atCap;
                   return (
                     <TouchableOpacity
                       key={badge.id}
                       style={[
                         styles.pickChip,
                         selected && styles.pickChipBadgeSelected,
-                        atCap && styles.pickChipDisabled,
+                        disabled && styles.pickChipDisabled,
+                        needsEarn && styles.pickChipLocked,
                       ]}
-                      onPress={() =>
+                      onPress={() => {
+                        if (needsEarn) return;
                         setProfileBadges((prev) =>
                           toggleIdInList(prev, badge.id, identityCaps.maxBadges)
-                        )
-                      }
-                      disabled={atCap}
+                        );
+                      }}
+                      disabled={disabled}
                       accessibilityRole="button"
-                      accessibilityState={{ selected, disabled: atCap }}
-                      accessibilityLabel={`${badge.label} badge`}
+                      accessibilityState={{ selected, disabled }}
+                      accessibilityLabel={
+                        needsEarn
+                          ? `${badge.label} badge locked — earn to unlock`
+                          : `${badge.label} badge`
+                      }
                     >
                       <Icon
                         name={badge.icon}
                         size={14}
-                        color={selected ? '#C4B5FD' : '#9ca3af'}
+                        color={selected ? '#C4B5FD' : needsEarn ? '#6b7280' : '#9ca3af'}
                       />
                       <Text
                         style={[
                           styles.pickChipText,
                           selected && styles.pickChipBadgeTextSelected,
+                          needsEarn && styles.pickChipLockedText,
                         ]}
                       >
-                        {badge.label}
+                        {needsEarn ? `${badge.label} · Earn` : badge.label}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -724,6 +769,14 @@ const styles = StyleSheet.create({
   },
   pickChipDisabled: {
     opacity: 0.4,
+  },
+  pickChipLocked: {
+    opacity: 0.55,
+    borderStyle: 'dashed',
+  },
+  pickChipLockedText: {
+    color: '#9ca3af',
+    fontWeight: '500',
   },
   pickChipText: {
     color: '#d1d5db',

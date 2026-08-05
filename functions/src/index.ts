@@ -62,6 +62,8 @@ export { onBattleComplete } from './battles/battleStats';
 export { blypAssistantCompose } from './assistant/compose';
 // Dating — mutual-match like write (server-owned datingMatches)
 export { blypDatingLike } from './dating/handlers';
+// Clubs Phase 3 — server-minted earnable badges (live host / marble podium / early)
+export { blypSyncBadgeAwards, onLiveSessionBadgeAward } from './badges/handlers';
 // Gemini proxy (P7.4): keep the API key server-side; client calls authenticated relay
 export { geminiProxy } from './assistant/geminiProxy';
 // Server-authoritative daily streak engine + reminder sweep
