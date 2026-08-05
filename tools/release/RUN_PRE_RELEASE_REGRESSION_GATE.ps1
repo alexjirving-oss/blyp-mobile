@@ -186,12 +186,14 @@ $streamingFlagPath = Join-Path $RepoRoot 'src\config\StreamingFeatureFlag.js'
 $createPostText = Get-Content -Raw -LiteralPath $createPostButtonPath
 $streamingFlagText = Get-Content -Raw -LiteralPath $streamingFlagPath
 
+# Go Live entry stays visible in Create sheet; streaming kill-switch is enforced on press.
 $liveButtonWired =
-  ($createPostText -match 'canShowGoLive\s*=\s*streamingEnabled') -and
-  ($createPostText -match "handleMenuOption\('live'\)") -and
-  ($createPostText -match 'isLiveStreamingEnabled')
+  ($createPostText -match 'isLiveStreamingEnabled') -and
+  ($createPostText -match 'canShowGoLive\s*=\s*true') -and
+  ($createPostText -match 'if\s*\(\s*!streamingEnabled\s*\)') -and
+  ($createPostText -match 'Live streaming disabled')
 if (-not $liveButtonWired) {
-  Add-Fail 'B.liveButtonGate: CreatePostButton live visibility/action no longer wired to streaming flag expectation'
+  Add-Fail 'B.liveButtonGate: CreatePostButton Go Live entry/on-press streaming kill-switch no longer matches release expectation'
 }
 
 $streamingFlagWired =
