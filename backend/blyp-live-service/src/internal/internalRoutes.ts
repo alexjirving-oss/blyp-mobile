@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { creditSubscriptionCoins, purgeUserData } from '../economy/economyService';
 import { toEconomyError } from '../economy/economyErrors';
 import { materializeRankingsSnapshots } from '../economy/rankingsService';
+import { applyBattleGiftPledges, refundBattleGiftPledges } from '../economy/battleGiftPledgeService';
+import { battleGiftPledgesApplySchema, battleGiftPledgesRefundSchema } from '../economy/economySchemas';
 import { deleteCognitoUserBySub } from '../admin/adminCognitoDirectory';
 import { logger } from '../config/logger';
 
@@ -118,6 +120,42 @@ router.post('/internal/cron/rankings-materialize', requireInternalSecret, async 
     const err = toEconomyError(e);
     if (err.code === 'INTERNAL') {
       logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/rankings-materialize');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+/** Apply pre-arranged battle gifts when match clock starts (Cloud Function). */
+router.post('/internal/battle/gift-pledges/apply', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = battleGiftPledgesApplySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await applyBattleGiftPledges(parsed.data);
+    return res.json({ ok: true, ...out.response });
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/battle/gift-pledges/apply');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+/** Refund held battle gift pledges when a battle is cancelled/rejected. */
+router.post('/internal/battle/gift-pledges/refund', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = battleGiftPledgesRefundSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await refundBattleGiftPledges(parsed.data);
+    return res.json({ ok: true, ...out.response });
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/battle/gift-pledges/refund');
     }
     return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }

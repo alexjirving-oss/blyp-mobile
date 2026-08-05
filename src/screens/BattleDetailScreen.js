@@ -1,6 +1,5 @@
-// BattleDetailScreen — view a battle, respond to an invite, set a reminder, or
-// jump into the live room. Adapts to who is viewing (creator, opponent, viewer)
-// and the battle's status.
+// BattleDetailScreen — view a battle, respond to an invite, set a reminder,
+// schedule a gift for match start, or jump into the live room.
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -15,6 +14,8 @@ import {
   subscribeBattle, acceptBattle, rejectBattle, cancelBattle, setBattleReminder,
   isStaked, battleSideFor, BATTLE_STATUS, JOIN_GRACE_MS,
 } from '../services/battleService';
+import ScheduleBattleGiftModal from '../components/Battles/ScheduleBattleGiftModal';
+import { listBattleGiftPledges } from '../api/economyLiveApi';
 
 function fullWhen(ms) {
   try {
@@ -41,6 +42,8 @@ const BattleDetailScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [reminderSet, setReminderSet] = useState(false);
+  const [giftModalOpen, setGiftModalOpen] = useState(false);
+  const [pledgeSummary, setPledgeSummary] = useState({ heldCount: 0, heldCoins: 0 });
 
   useEffect(() => {
     if (!battleId) return undefined;
@@ -51,6 +54,23 @@ const BattleDetailScreen = ({ navigation, route }) => {
     return () => { try { unsub && unsub(); } catch {} };
   }, [battleId]);
 
+  const refreshPledges = useCallback(async () => {
+    if (!battleId || !uid) return;
+    try {
+      const res = await listBattleGiftPledges(battleId);
+      setPledgeSummary({
+        heldCount: Number(res?.heldCount || 0),
+        heldCoins: Number(res?.heldCoins || 0),
+      });
+    } catch {
+      /* economy optional while browsing */
+    }
+  }, [battleId, uid]);
+
+  useEffect(() => {
+    refreshPledges();
+  }, [refreshPledges, battle?.status, battle?.liveStartedAt]);
+
   const side = battle ? battleSideFor(battle, uid) : null;
   const isParticipant = !!side;
   const isInvitee = battle && battle.opponentUid === uid && battle.status === BATTLE_STATUS.PENDING;
@@ -58,8 +78,6 @@ const BattleDetailScreen = ({ navigation, route }) => {
 
   const goLive = useCallback(() => {
     if (!battle) return;
-    // Both participants PUBLISH to one shared stage: the creator creates it, the
-    // opponent joins the creator's session. Opponent must wait for the stage.
     if (side === 'opponent' && !battle.liveStreamId) {
       Alert.alert('Waiting for host', `${battle.creatorName} needs to start the battle first.`);
       return;
@@ -100,19 +118,25 @@ const BattleDetailScreen = ({ navigation, route }) => {
   }, [battle, uid, navigation]);
 
   const onCancel = useCallback(() => {
-    Alert.alert('Cancel battle?', isStaked(battle) ? 'Deposits will be refunded in coins.' : 'This will withdraw the battle.', [
-      { text: 'Keep it', style: 'cancel' },
-      {
-        text: 'Cancel battle',
-        style: 'destructive',
-        onPress: async () => {
-          setBusy(true);
-          await cancelBattle(battle, uid);
-          setBusy(false);
-          navigation.goBack();
+    Alert.alert(
+      'Cancel battle?',
+      isStaked(battle)
+        ? 'Deposits and scheduled gifts will be refunded in coins.'
+        : 'Scheduled gifts will be refunded. This will withdraw the battle.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Cancel battle',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            await cancelBattle(battle, uid);
+            setBusy(false);
+            navigation.goBack();
+          },
         },
-      },
-    ]);
+      ]
+    );
   }, [battle, uid, navigation]);
 
   const onRemind = useCallback(async () => {
@@ -151,6 +175,7 @@ const BattleDetailScreen = ({ navigation, route }) => {
   const opponentWon = completed && battle.winnerUid === battle.opponentUid;
   const canCancel = isParticipant && (pending || scheduled);
   const canRemind = (scheduled || pending) && !!uid;
+  const canScheduleGift = !!uid && (pending || scheduled) && !live && !completed;
 
   return (
     <ScreenContainer>
@@ -206,6 +231,15 @@ const BattleDetailScreen = ({ navigation, route }) => {
               </Text>
             </View>
           )}
+          {pledgeSummary.heldCount > 0 && (scheduled || pending) && (
+            <View style={styles.infoRow}>
+              <Icon name="gift-outline" size={responsiveFont(16)} color={COLORS.primary} />
+              <Text style={[styles.infoText, { color: COLORS.primary }]}>
+                {pledgeSummary.heldCount} scheduled gift{pledgeSummary.heldCount === 1 ? '' : 's'}
+                {' '}({pledgeSummary.heldCoins} coins) ready for match start
+              </Text>
+            </View>
+          )}
           {completed && (
             <View style={styles.infoRow}>
               <Icon name="trophy-outline" size={responsiveFont(16)} color={COLORS.textSecondary} />
@@ -214,7 +248,6 @@ const BattleDetailScreen = ({ navigation, route }) => {
           )}
         </View>
 
-        {/* Actions */}
         {isInvitee && (
           <View style={styles.actionsRow}>
             <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={onReject} disabled={busy}>
@@ -248,11 +281,17 @@ const BattleDetailScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         )}
 
-        {/* Viewer / participant reminder */}
         {!isInvitee && live && !isParticipant && (
           <TouchableOpacity style={styles.primaryBtn} onPress={watchLive}>
             <Icon name="eye" size={responsiveFont(18)} color="#0A0A0C" />
             <Text style={styles.primaryText}>Watch battle</Text>
+          </TouchableOpacity>
+        )}
+
+        {canScheduleGift && (
+          <TouchableOpacity style={styles.giftBtn} onPress={() => setGiftModalOpen(true)}>
+            <Icon name="gift-outline" size={responsiveFont(18)} color="#0A0A0C" />
+            <Text style={styles.primaryText}>Schedule a gift</Text>
           </TouchableOpacity>
         )}
 
@@ -277,6 +316,14 @@ const BattleDetailScreen = ({ navigation, route }) => {
           <View style={styles.waitCard}><Text style={styles.muted}>This battle has ended.</Text></View>
         )}
       </ScrollView>
+
+      <ScheduleBattleGiftModal
+        visible={giftModalOpen}
+        battle={battle}
+        uid={uid}
+        onClose={() => setGiftModalOpen(false)}
+        onPledged={() => refreshPledges()}
+      />
     </ScreenContainer>
   );
 };
@@ -312,6 +359,7 @@ const styles = StyleSheet.create({
   rejectBtn: { backgroundColor: COLORS.backgroundCard },
   rejectText: { color: COLORS.textSecondary, fontWeight: '700', fontSize: responsiveFont(15) },
   primaryBtn: { flexDirection: 'row', gap: responsiveSize(8), backgroundColor: COLORS.primary, borderRadius: responsiveSize(14), paddingVertical: responsiveSize(15), alignItems: 'center', justifyContent: 'center', marginTop: responsiveSize(22) },
+  giftBtn: { flexDirection: 'row', gap: responsiveSize(8), backgroundColor: COLORS.primary, borderRadius: responsiveSize(14), paddingVertical: responsiveSize(15), alignItems: 'center', justifyContent: 'center', marginTop: responsiveSize(14) },
   primaryBtnDone: { backgroundColor: '#9ca3af' },
   primaryText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
   waitCard: { backgroundColor: COLORS.backgroundCard, borderRadius: responsiveSize(12), padding: responsiveSize(16), marginTop: responsiveSize(22), alignItems: 'center' },

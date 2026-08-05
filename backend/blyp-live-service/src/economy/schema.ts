@@ -235,6 +235,33 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
+        // Pre-arranged gifts for upcoming battles: coins debited at pledge time
+        // (HELD), converted to gems + gift_events when match starts (APPLIED),
+        // or refunded if the battle is cancelled (REFUNDED).
+        `CREATE TABLE IF NOT EXISTS battle_gift_pledges (
+          pledge_id text PRIMARY KEY,
+          battle_id text NOT NULL,
+          pledger_uid text NOT NULL,
+          side text NOT NULL,
+          receiver_uid text NOT NULL,
+          gift_id text NOT NULL,
+          quantity integer NOT NULL DEFAULT 1,
+          coin_cost bigint NOT NULL,
+          status text NOT NULL DEFAULT 'HELD',
+          stream_id text,
+          gift_event_id text,
+          score_coins bigint NOT NULL DEFAULT 0,
+          idempotency_key text NOT NULL,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          applied_at timestamptz,
+          refunded_at timestamptz,
+          UNIQUE (pledger_uid, idempotency_key)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_battle_gift_pledges_battle_status ON battle_gift_pledges (battle_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_battle_gift_pledges_pledger ON battle_gift_pledges (pledger_uid, created_at DESC)`,
+
         `CREATE TABLE IF NOT EXISTS payout_accounts (
           user_id text PRIMARY KEY,
           stripe_account_id text NOT NULL UNIQUE,

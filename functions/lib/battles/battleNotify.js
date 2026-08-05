@@ -46,6 +46,7 @@ exports.onBattleReminderCreate = exports.onBattleStatusChange = exports.onBattle
 const functions = __importStar(require("firebase-functions"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const outbox_1 = require("../notifications/outbox");
+const battleGiftPledges_1 = require("./battleGiftPledges");
 const ENQUEUE_CHUNK = 50;
 const MAX_FOLLOWERS_FANOUT = 5000;
 async function resolveName(uid) {
@@ -184,6 +185,15 @@ exports.onBattleStatusChange = functions.firestore
     const before = change.before.data() || {};
     const after = change.after.data() || {};
     const battleId = context.params.battleId;
+    // Match clock started → deliver any pre-arranged gifts (coins already held).
+    const beforeLiveAt = Number(before.liveStartedAt || 0);
+    const afterLiveAt = Number(after.liveStartedAt || 0);
+    if (!beforeLiveAt && afterLiveAt) {
+        await (0, battleGiftPledges_1.applyBattleGiftPledgesFromFunction)({
+            battleId,
+            streamId: after.liveStreamId || null,
+        }).catch((e) => console.error('[battleNotify] gift pledge apply failed', e === null || e === void 0 ? void 0 : e.message));
+    }
     if (before.status === after.status)
         return null;
     // Accepted -> notify creator + (optionally) fan out to both fanbases.
@@ -209,8 +219,9 @@ exports.onBattleStatusChange = functions.firestore
         }
         return null;
     }
-    // Declined -> notify creator.
+    // Declined -> notify creator + refund any held gift pledges.
     if (before.status === 'pending' && after.status === 'rejected') {
+        await (0, battleGiftPledges_1.refundBattleGiftPledgesFromFunction)(battleId).catch((e) => console.error('[battleNotify] gift pledge refund failed', e === null || e === void 0 ? void 0 : e.message));
         const opponentName = after.opponentName || (await resolveName(after.opponentUid));
         await (0, outbox_1.enqueueNotification)({
             userId: after.creatorUid,
@@ -223,11 +234,11 @@ exports.onBattleStatusChange = functions.firestore
         });
         return null;
     }
-    // Cancelled -> notify the other participant.
+    // Cancelled -> notify the other participant + refund held gift pledges.
     if ((before.status === 'pending' || before.status === 'scheduled') && after.status === 'cancelled') {
-        // Notify both participants; idempotent dedupe keys keep it clean.
+        await (0, battleGiftPledges_1.refundBattleGiftPledgesFromFunction)(battleId).catch((e) => console.error('[battleNotify] gift pledge refund failed', e === null || e === void 0 ? void 0 : e.message));
         const title = 'Battle cancelled';
-        const body = `${after.creatorName} vs ${after.opponentName} was called off.`;
+        const body = `${after.creatorName} vs ${after.opponentName} was called off. Gift pledges were refunded.`;
         await Promise.all([
             (0, outbox_1.enqueueNotification)({
                 userId: after.creatorUid, type: 'battle', title, body,

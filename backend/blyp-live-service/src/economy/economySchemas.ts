@@ -172,6 +172,40 @@ export const battleSettleSchema = z
   })
   .strict();
 
+export const battleGiftPledgeCreateSchema = z
+  .object({
+    idempotencyKey: z.string().min(1).max(120),
+    battleId: z.string().min(1).max(120),
+    side: z.enum(['creator', 'opponent']),
+    giftId: z.string().min(1).max(64),
+    quantity: z.coerce.number().int().min(1).max(99).default(1),
+    creatorUid: z.string().min(1).max(128),
+    opponentUid: z.string().min(1).max(128),
+  })
+  .strict();
+
+export const battleGiftPledgeCancelSchema = z
+  .object({
+    idempotencyKey: z.string().min(1).max(120),
+    pledgeId: z.string().min(1).max(120),
+  })
+  .strict();
+
+export const battleGiftPledgesApplySchema = z
+  .object({
+    idempotencyKey: z.string().min(1).max(120),
+    battleId: z.string().min(1).max(120),
+    streamId: z.string().min(1).max(160).optional(),
+  })
+  .strict();
+
+export const battleGiftPledgesRefundSchema = z
+  .object({
+    idempotencyKey: z.string().min(1).max(120),
+    battleId: z.string().min(1).max(120),
+  })
+  .strict();
+
 export type GiftSendInput = z.infer<typeof giftSendSchema>;
 export type IapVerifyInput = z.infer<typeof iapVerifySchema>;
 export type AdminCreditCoinsInput = z.infer<typeof adminCreditCoinsSchema>;
@@ -185,6 +219,10 @@ export type MatchdayReactInput = z.infer<typeof matchdayReactSchema>;
 export type BattleDepositInput = z.infer<typeof battleDepositSchema>;
 export type BattleCancelRefundInput = z.infer<typeof battleCancelRefundSchema>;
 export type BattleSettleInput = z.infer<typeof battleSettleSchema>;
+export type BattleGiftPledgeCreateInput = z.infer<typeof battleGiftPledgeCreateSchema>;
+export type BattleGiftPledgeCancelInput = z.infer<typeof battleGiftPledgeCancelSchema>;
+export type BattleGiftPledgesApplyInput = z.infer<typeof battleGiftPledgesApplySchema>;
+export type BattleGiftPledgesRefundInput = z.infer<typeof battleGiftPledgesRefundSchema>;
 
 export const withdrawRequestSchema = z
   .object({

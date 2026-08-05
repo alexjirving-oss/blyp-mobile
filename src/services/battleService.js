@@ -23,6 +23,8 @@ import {
   battleDeposit as apiBattleDeposit,
   battleCancelRefund as apiBattleCancelRefund,
   battleSettle as apiBattleSettle,
+  applyBattleGiftPledges as apiApplyBattleGiftPledges,
+  refundBattleGiftPledges as apiRefundBattleGiftPledges,
   makeIdempotencyKey,
 } from '../api/economyLiveApi';
 import { createReminder } from './reminderService';
@@ -247,6 +249,7 @@ export async function rejectBattle(battle, uid) {
   if (!battle?.id || battle.opponentUid !== uid) return { ok: false, reason: 'not_invitee' };
   if (battle.status !== BATTLE_STATUS.PENDING) return { ok: false, reason: 'not_pending' };
   await refundIfStaked(battle);
+  await refundGiftPledgesIfAny(battle);
   try {
     await battleRef(battle.id).update({ status: BATTLE_STATUS.REJECTED, updatedAt: Date.now() });
     return { ok: true };
@@ -262,6 +265,7 @@ export async function cancelBattle(battle, uid) {
     return { ok: false, reason: 'too_late' };
   }
   await refundIfStaked(battle);
+  await refundGiftPledgesIfAny(battle);
   try {
     await battleRef(battle.id).update({ status: BATTLE_STATUS.CANCELLED, updatedAt: Date.now() });
     return { ok: true };
@@ -274,6 +278,15 @@ async function refundIfStaked(battle) {
   if (!isStaked(battle)) return;
   if (!battle.creatorPaid && !battle.opponentPaid) return;
   await apiBattleCancelRefund({ battleId: battle.id, idempotencyKey: makeIdempotencyKey('btlrefund') }).catch(() => {});
+}
+
+/** Refund any viewer gift pledges held for this battle (cancel / reject). */
+async function refundGiftPledgesIfAny(battle) {
+  if (!battle?.id) return;
+  await apiRefundBattleGiftPledges({
+    battleId: battle.id,
+    idempotencyKey: makeIdempotencyKey('btlgiftrefund'),
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +313,27 @@ export async function markJoined(battle, uid, { liveStreamId, stageArn } = {}) {
   }
 }
 
+/**
+ * Deliver any held pre-arranged gifts and bump the scoreboard.
+ * Safe to call repeatedly — economy apply is idempotent per held pledge.
+ */
+export async function deliverBattleGiftPledges(battle) {
+  if (!battle?.id) return { ok: false, reason: 'missing' };
+  try {
+    const res = await apiApplyBattleGiftPledges({
+      battleId: battle.id,
+      streamId: battle.liveStreamId || undefined,
+      idempotencyKey: `btlgiftapply:${battle.id}`,
+    });
+    const delta = res?.scoreDelta || { creator: 0, opponent: 0 };
+    if (delta.creator > 0) await addGiftScore(battle.id, 'creator', delta.creator);
+    if (delta.opponent > 0) await addGiftScore(battle.id, 'opponent', delta.opponent);
+    return { ok: true, appliedCount: Number(res?.appliedCount || 0), scoreDelta: delta };
+  } catch (e) {
+    return { ok: false, reason: String(e?.message || e || 'apply_failed') };
+  }
+}
+
 /** Start the timed match clock (gift/vote scoring window). Participant-only. */
 export async function startMatch(battle, uid) {
   const side = battleSideFor(battle, uid);
@@ -307,13 +341,17 @@ export async function startMatch(battle, uid) {
   if (![BATTLE_STATUS.SCHEDULED, BATTLE_STATUS.LIVE].includes(battle.status)) {
     return { ok: false, reason: 'bad_status' };
   }
-  if (battle.liveStartedAt) return { ok: true, already: true };
+  if (battle.liveStartedAt) {
+    await deliverBattleGiftPledges(battle);
+    return { ok: true, already: true };
+  }
   try {
     await battleRef(battle.id).update({
       status: BATTLE_STATUS.LIVE,
       liveStartedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    await deliverBattleGiftPledges(battle);
     return { ok: true };
   } catch {
     return { ok: false, reason: 'write_failed' };
@@ -596,6 +634,7 @@ export default {
   cancelBattle,
   markJoined,
   startMatch,
+  deliverBattleGiftPledges,
   endBattle,
   voteBattle,
   addGiftScore,

@@ -523,6 +523,83 @@ export async function battleSettle(input: { battleId: string; idempotencyKey: st
   return await callEconomyBackend<BattleSettleResponse>('/economy/battle/settle', 'POST', input);
 }
 
+// ----------------------------------------------------------------------------
+// Pre-arranged battle gifts — debit now, deliver when match starts.
+// ----------------------------------------------------------------------------
+
+export interface BattleGiftPledgeInput {
+  battleId: string;
+  side: 'creator' | 'opponent';
+  giftId: string;
+  quantity?: number;
+  creatorUid: string;
+  opponentUid: string;
+  idempotencyKey: string;
+}
+
+export interface BattleGiftPledge {
+  pledgeId: string;
+  battleId: string;
+  pledgerUid: string;
+  side: 'creator' | 'opponent';
+  receiverUid: string;
+  giftId: string;
+  quantity: number;
+  coinCost: number;
+  status: string;
+  scoreCoins?: number;
+  createdAt?: string;
+  appliedAt?: string | null;
+  refundedAt?: string | null;
+  newBalances?: { coinBalance: number; bonusCoinBalance: number };
+}
+
+export interface BattleGiftPledgesApplyResponse {
+  battleId: string;
+  streamId: string;
+  applied: BattleGiftPledge[];
+  scoreDelta: { creator: number; opponent: number };
+  appliedCount: number;
+}
+
+export async function createBattleGiftPledge(input: BattleGiftPledgeInput): Promise<BattleGiftPledge> {
+  return await callEconomyBackend<BattleGiftPledge>('/economy/battle/gift-pledge', 'POST', input);
+}
+
+export async function cancelBattleGiftPledge(input: {
+  pledgeId: string;
+  idempotencyKey: string;
+}): Promise<BattleGiftPledge & { refunded?: boolean }> {
+  return await callEconomyBackend('/economy/battle/gift-pledge/cancel', 'POST', input);
+}
+
+export async function listBattleGiftPledges(
+  battleId: string,
+  opts: { mine?: boolean } = {}
+): Promise<{ battleId: string; pledges: BattleGiftPledge[]; heldCount: number; heldCoins: number }> {
+  const q = opts.mine ? '?mine=1' : '';
+  return await callEconomyBackend(`/economy/battle/${encodeURIComponent(battleId)}/gift-pledges${q}`, 'GET');
+}
+
+export async function applyBattleGiftPledges(input: {
+  battleId: string;
+  streamId?: string;
+  idempotencyKey: string;
+}): Promise<BattleGiftPledgesApplyResponse> {
+  return await callEconomyBackend<BattleGiftPledgesApplyResponse>(
+    '/economy/battle/gift-pledges/apply',
+    'POST',
+    input
+  );
+}
+
+export async function refundBattleGiftPledges(input: {
+  battleId: string;
+  idempotencyKey: string;
+}): Promise<{ battleId: string; refundedCount: number; refundedCoins: number }> {
+  return await callEconomyBackend('/economy/battle/gift-pledges/refund', 'POST', input);
+}
+
 export interface WithdrawEligibility {
   enabled: boolean;
   currency: string;
