@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../hooks/useCommon';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import { requireAccount } from '../services/guestSessionService';
-import { COLORS } from '../styles/theme';
+import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import PressableLift from './motion/PressableLift';
 
 export const COMPOSE_DRAFT_KEY = 'blyp_compose_draft_v1';
@@ -233,11 +233,18 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 8,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    ...SHADOWS.glow,
+  },
+  fabSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '48%',
+    backgroundColor: SURFACE_DEPTH.sheen,
   },
   modalBackdrop: {
     flex: 1,
@@ -252,7 +259,8 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: COLORS.border,
+    borderTopColor: SURFACE_DEPTH.highlightBorderStrong,
+    ...SHADOWS.large,
   },
   menuHandle: {
     width: 40,
@@ -319,7 +327,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#27272E',
+    borderColor: SURFACE_DEPTH.highlightBorder,
+    ...SHADOWS.small,
   },
   postOptionIconContainer: {
     width: 56,
@@ -329,8 +338,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 10,
-    borderWidth: 2,
-    borderColor: '#3F3F46',
+    borderWidth: 1.5,
+    borderColor: SURFACE_DEPTH.highlightBorderStrong,
   },
   liveIconContainer: {
     borderColor: '#7F1D1D',

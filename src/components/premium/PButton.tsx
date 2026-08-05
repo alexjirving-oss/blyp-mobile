@@ -1,7 +1,6 @@
 import React from 'react';
 import {
     ActivityIndicator,
-    Pressable,
     View,
     type StyleProp,
     type TextStyle,
@@ -9,6 +8,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../styles/ThemeProvider';
+import { SURFACE_DEPTH } from '../../styles/designSystem/palettes';
+import PressableLift from '../motion/PressableLift';
 import { PText } from './PText';
 
 type Variant = 'primary' | 'electric' | 'solid' | 'ghost';
@@ -23,7 +24,6 @@ interface PButtonProps {
     textStyle?: StyleProp<TextStyle>;
     disabled?: boolean;
     loading?: boolean;
-    /** optional leading element (e.g. an icon) */
     leading?: React.ReactNode;
     fullWidth?: boolean;
     testID?: string;
@@ -35,11 +35,6 @@ const SIZES: Record<Size, { height: number; px: number; font: number }> = {
     lg: { height: 56, px: 28, font: 16 },
 };
 
-/**
- * PButton — Premium CTA. Gradient + neon glow primary/electric variants, a
- * solid brand fill, and a glass ghost variant. Theme-aware (light + dark),
- * with a subtle press-scale for a tactile, 3D feel.
- */
 export function PButton({
     title,
     onPress,
@@ -55,7 +50,6 @@ export function PButton({
 }: PButtonProps) {
     const { colors, radius, shadows } = useTheme();
     const dims = SIZES[size];
-
     const base: ViewStyle = {
         height: dims.height,
         borderRadius: radius.pill,
@@ -64,108 +58,63 @@ export function PButton({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        alignSelf: fullWidth ? 'stretch' : 'flex-start',
+        overflow: 'hidden',
     };
-
     const label = (
         <>
             {leading}
             {loading ? (
                 <ActivityIndicator color={variant === 'ghost' ? colors.primary : colors.onBrand} />
             ) : (
-                <PText
-                    variant="btn"
-                    tone={variant === 'ghost' ? 'brand' : 'onBrand'}
-                    style={[{ fontSize: dims.font }, textStyle]}
-                >
+                <PText variant="btn" tone={variant === 'ghost' ? 'brand' : 'onBrand'} style={[{ fontSize: dims.font }, textStyle]}>
                     {title}
                 </PText>
             )}
         </>
     );
-
+    const sheen = (
+        <View
+            pointerEvents="none"
+            style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '48%',
+                borderTopLeftRadius: radius.pill,
+                borderTopRightRadius: radius.pill,
+                backgroundColor: SURFACE_DEPTH.sheen,
+            }}
+        />
+    );
+    const wrapStyle: StyleProp<ViewStyle> = [
+        { alignSelf: fullWidth ? 'stretch' : 'flex-start', opacity: disabled ? 0.5 : 1 },
+        style,
+    ];
     if (variant === 'ghost') {
         return (
-            <Pressable
-                testID={testID}
-                disabled={disabled || loading}
-                onPress={onPress}
-                style={({ pressed }) => [
-                    base,
-                    {
-                        backgroundColor: colors.card,
-                        borderWidth: 1,
-                        borderColor: colors.borderStrong,
-                        opacity: disabled ? 0.5 : 1,
-                        transform: [{ scale: pressed ? 0.97 : 1 }],
-                    },
-                    style,
-                ]}
-            >
-                {label}
-            </Pressable>
+            <PressableLift testID={testID} disabled={disabled || loading} onPress={onPress} pressedScale={0.97} lifted={false}
+                style={[wrapStyle, base, { backgroundColor: colors.card, borderWidth: 1, borderColor: SURFACE_DEPTH.highlightBorderStrong }]}>
+                {sheen}{label}
+            </PressableLift>
         );
     }
-
     if (variant === 'solid') {
         return (
-            <Pressable
-                testID={testID}
-                disabled={disabled || loading}
-                onPress={onPress}
-                style={({ pressed }) => [
-                    base,
-                    shadows.sm,
-                    {
-                        backgroundColor: colors.surfaceAlt,
-                        borderWidth: 1,
-                        borderColor: colors.border,
-                        opacity: disabled ? 0.5 : 1,
-                        transform: [{ scale: pressed ? 0.97 : 1 }],
-                    },
-                    style,
-                ]}
-            >
-                {label}
-            </Pressable>
+            <PressableLift testID={testID} disabled={disabled || loading} onPress={onPress} pressedScale={0.97} lifted={!disabled}
+                style={[wrapStyle, base, { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: SURFACE_DEPTH.highlightBorder }]}>
+                {sheen}{label}
+            </PressableLift>
         );
     }
-
-    const gradient =
-        variant === 'electric'
-            ? [colors.electricGradient[0], colors.electricGradient[1]]
-            : colors.brandGradient;
+    const gradient = variant === 'electric' ? [colors.electricGradient[0], colors.electricGradient[1]] : colors.brandGradient;
     const glow = variant === 'electric' ? shadows.glowElectric : shadows.glow;
-
     return (
-        <Pressable
-            testID={testID}
-            disabled={disabled || loading}
-            onPress={onPress}
-            style={({ pressed }) => [
-                { alignSelf: fullWidth ? 'stretch' : 'flex-start' },
-                disabled ? shadows.none : glow,
-                { opacity: disabled ? 0.5 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] },
-                style,
-            ]}
-        >
+        <PressableLift testID={testID} disabled={disabled || loading} onPress={onPress} pressedScale={0.97} lifted={false}
+            style={[wrapStyle, disabled ? shadows.none : glow]}>
             <LinearGradient colors={gradient as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={base}>
-                {/* top sheen for the glossy 3D highlight */}
-                <View
-                    pointerEvents="none"
-                    style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: '52%',
-                        borderTopLeftRadius: radius.pill,
-                        borderTopRightRadius: radius.pill,
-                        backgroundColor: 'rgba(255,255,255,0.18)',
-                    }}
-                />
-                {label}
+                {sheen}{label}
             </LinearGradient>
-        </Pressable>
+        </PressableLift>
     );
 }

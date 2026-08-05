@@ -1,4 +1,4 @@
-﻿// BlypAvatar.js — avatar + standing badge; optional pulse ring for live/active.
+﻿// BlypAvatar.js
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import StandingBadge from './StandingBadge';
@@ -14,21 +14,12 @@ const initialsOf = (name) => {
 };
 
 const BlypAvatar = ({
-  uri,
-  name,
-  profile,
-  size = 44,
-  showBadge = true,
-  frame,
-  pulse = false,
-  pulseTone = 'brand',
-  style,
+  uri, name, profile, size = 44, showBadge = true, frame, pulse = false, pulseTone = 'brand', style,
 }) => {
   const badgeSize = Math.max(14, Math.round(size * 0.38));
   const frameId = frame || profile?.avatarFrame || null;
   const framed = !!frameId;
   const outerSize = framed ? size + 14 : pulse ? size + 10 : size;
-
   const avatarBody = (
     <View style={{ width: size, height: size }}>
       {uri ? (
@@ -38,20 +29,14 @@ const BlypAvatar = ({
           <Text style={[styles.initials, { fontSize: size * 0.4 }]}>{initialsOf(name)}</Text>
         </View>
       )}
-      {showBadge && (
-        <StandingBadge profile={profile} variant="dot" size={badgeSize} style={styles.badgeOverlay} />
-      )}
+      {showBadge ? <StandingBadge profile={profile} variant="dot" size={badgeSize} style={styles.badgeOverlay} /> : null}
     </View>
   );
-
   const content = framed ? (
     <AvatarFrame frameId={frameId} size={size}>{avatarBody}</AvatarFrame>
   ) : pulse ? (
     <AvatarRing variant={pulseTone} animated size={size} ringWidth={2}>{avatarBody}</AvatarRing>
-  ) : (
-    avatarBody
-  );
-
+  ) : avatarBody;
   return (
     <View style={[{ width: outerSize, height: outerSize, alignItems: 'center', justifyContent: 'center' }, style]}>
       {content}
@@ -60,14 +45,8 @@ const BlypAvatar = ({
 };
 
 const styles = StyleSheet.create({
-  img: { backgroundColor: COLORS.backgroundCard },
-  fallback: {
-    backgroundColor: COLORS.backgroundCard,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
+  img: { backgroundColor: COLORS.backgroundCard, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)' },
+  fallback: { backgroundColor: COLORS.backgroundCard, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
   initials: { color: COLORS.textPrimary, fontWeight: '800' },
   badgeOverlay: { position: 'absolute', right: -2, bottom: -2 },
 });

@@ -1395,7 +1395,20 @@ const HomeScreen = ({ navigation, route }) => {
               activeOpacity={0.88}
               onPress={() => handleUserProfilePress(item.user, item)}
             >
-              <AvatarRing variant="brand" animated={isActive} size={34} ringWidth={1.5}>
+              {isActive ? (
+                <AvatarRing variant="brand" animated size={34} ringWidth={1.5}>
+                  <Image
+                    source={{
+                      uri:
+                        item.userPhotoURL ||
+                        item.user?.avatar ||
+                        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+                    }}
+                    style={styles.creatorAvatar}
+                    resizeMethod="resize"
+                  />
+                </AvatarRing>
+              ) : (
                 <Image
                   source={{
                     uri:
@@ -1406,7 +1419,7 @@ const HomeScreen = ({ navigation, route }) => {
                   style={styles.creatorAvatar}
                   resizeMethod="resize"
                 />
-              </AvatarRing>
+              )}
               <View style={styles.creatorMeta}>
                 <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
                   @{item.userDisplayName || item.user?.displayName || item.user?.username || item.username || 'user'}

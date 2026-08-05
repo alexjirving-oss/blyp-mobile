@@ -9,3 +9,4 @@ export { SPACING } from './spacing';
 export { RADIUS } from './radius';
 export { ELEVATION } from './elevation';
 export { TYPE } from './typography';
+export { SURFACE_DEPTH, makeShadows } from './palettes';

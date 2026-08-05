@@ -20,31 +20,20 @@ const TabBarIcon = ({ name, color, size = 24, badge, focused = false }) => {
         {focused ? <View pointerEvents="none" style={styles.shellSheen} /> : null}
         <IconComp size={focused ? size + 1 : size} color={color} />
       </View>
-      {badge && badge > 0 && (
+      {badge && badge > 0 ? (
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>
-            {badge > 99 ? '99+' : badge.toString()}
-          </Text>
+          <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge.toString()}</Text>
         </View>
-      )}
+      ) : null}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  container: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
   iconShell: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    overflow: 'hidden',
+    width: 38, height: 38, borderRadius: 19,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, overflow: 'hidden',
   },
   iconShellActive: {
     backgroundColor: 'rgba(0,210,190,0.14)',
@@ -58,35 +47,16 @@ const styles = StyleSheet.create({
     borderColor: SURFACE_DEPTH.highlightBorder,
   },
   shellSheen: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '45%',
+    position: 'absolute', top: 0, left: 0, right: 0, height: '45%',
     backgroundColor: SURFACE_DEPTH.sheen,
   },
   badge: {
-    position: 'absolute',
-    right: -7,
-    top: -5,
-    backgroundColor: '#DC2626',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-    elevation: 3,
-    shadowColor: '#DC2626',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
+    position: 'absolute', right: -7, top: -5, backgroundColor: '#DC2626',
+    borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 4, elevation: 3, shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 3,
   },
-  badgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 });
 
 export default TabBarIcon;

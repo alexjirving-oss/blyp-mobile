@@ -27,7 +27,7 @@ import {
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import BlypItModal from '../components/BlypItModal';
-import { COLORS } from '../styles/theme';
+import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { blypContent, blypAnswer, postThumbnail, isBlypAiAvailable } from '../services/blypAiService';
 import speechToTextService from '../services/speechToTextService';
@@ -1446,6 +1446,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderWidth: 1.5,
     borderColor: COLORS.primary,
+    ...SHADOWS.small,
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.2,
   },
   blypMark: { color: COLORS.primary, fontWeight: '800', fontSize: responsiveFont(15) },
   input: { flex: 1, color: COLORS.textPrimary, fontSize: responsiveFont(15), paddingVertical: 0 },
@@ -1456,6 +1459,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,210,190,0.12)',
+    borderWidth: 1,
+    borderColor: SURFACE_DEPTH.highlightBorder,
   },
   micBtnActive: { backgroundColor: COLORS.primary },
   locBtnActive: { backgroundColor: 'rgba(0,210,190,0.22)' },
