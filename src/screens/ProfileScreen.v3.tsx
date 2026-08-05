@@ -801,6 +801,12 @@ const ProfileScreenV3: React.FC = () => {
     try { console.log('📈 profile_hub_tap', { userId: uid, source: 'profile_self' }); } catch { }
   }, [nav, uid]);
 
+  const onDating = useCallback(() => {
+    if (!uid) return;
+    try { nav.navigate('Dating' as never); } catch { }
+    try { console.log('📈 profile_dating_tap', { userId: uid, source: 'profile_self' }); } catch { }
+  }, [nav, uid]);
+
   const onReplayTour = useCallback(() => {
     if (!uid) return;
     requestReplayTour({ source: 'profile' });
@@ -1586,6 +1592,7 @@ const ProfileScreenV3: React.FC = () => {
                 onTransparency={onTransparency}
                 onImport={onImport}
                 onHub={onHub}
+                onDating={onDating}
                 onReplayTour={onReplayTour}
                 onLogout={onLogout}
                 styles={styles}
@@ -2806,7 +2813,7 @@ const ProfileLogout: React.FC<{ onLogout: () => void; styles: any }> = ({ onLogo
   );
 };
 
-const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void; onTransparency?: () => void; onImport?: () => void; onHub?: () => void; onReplayTour?: () => void; onLogout: () => void; styles: any }> = ({ onEditProfile, onPlans, onTransparency, onImport, onHub, onReplayTour, onLogout, styles }) => {
+const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void; onTransparency?: () => void; onImport?: () => void; onHub?: () => void; onDating?: () => void; onReplayTour?: () => void; onLogout: () => void; styles: any }> = ({ onEditProfile, onPlans, onTransparency, onImport, onHub, onDating, onReplayTour, onLogout, styles }) => {
   const ent = useEntitlement();
   const planLabel = (() => {
     if (!ent) return 'Manage your plan';
@@ -2833,6 +2840,18 @@ const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void
           <View style={{ flex: 1 }}>
             <Text style={styles.tabMenuItemText}>Subscription &amp; plan</Text>
             <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 2 }}>{planLabel}</Text>
+          </View>
+          <Text style={styles.tabMenuChevron}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.tabMenuItem} onPress={onDating} activeOpacity={0.85}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tabMenuItemText}>Dating</Text>
+            <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 2 }}>
+              {ent?.trialing || ent?.effectiveTier === 'plus' || ent?.effectiveTier === 'plus_coins'
+                ? 'Discover & matches'
+                : 'Included with Plus / trial'}
+            </Text>
           </View>
           <Text style={styles.tabMenuChevron}>›</Text>
         </TouchableOpacity>

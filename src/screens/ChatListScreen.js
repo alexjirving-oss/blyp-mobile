@@ -924,6 +924,16 @@ const ChatListScreen = ({ navigation }) => {
                 style={styles.getMoreButton}
                 onPress={() => {
                   setMenuVisible(false);
+                  navigation.navigate('Dating');
+                }}
+              >
+                <Text style={styles.menuButtonText}>Dating</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.getMoreButton}
+                onPress={() => {
+                  setMenuVisible(false);
                   navigation.navigate('HowBlypWorks', { mode: 'review' });
                 }}
               >

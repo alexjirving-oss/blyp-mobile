@@ -35,6 +35,7 @@ import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
 import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
 import FollowingFeedPanel from '../components/HomeBase/FollowingFeedPanel';
+import ScreenErrorBoundary from '../components/ScreenErrorBoundary';
 import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, INTEREST_CATALOG, consumeLandingPageKey } from '../services/userPreferencesService';
 import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
@@ -1678,6 +1679,10 @@ const HomeScreen = ({ navigation, route }) => {
       matchHomePadding={true}
       activeKey={selectedTab}
       onTabChange={setSelectedTab}
+      // Keep For You + Home always visible — after For You-first, HomeBase was
+      // easy to miss when interest pages overflowed the chip strip, and the
+      // vertical feed blocks swipe-to-Home.
+      pinnedKeys={['A', 'home']}
       onMenuPress={() => setMenuVisible(true)}
       searchLabel="blyp it"
       onSearchPress={() => navigation.navigate('Blyp')}
@@ -1859,14 +1864,16 @@ const HomeScreen = ({ navigation, route }) => {
     switch (selectedTab) {
       case 'home':
         return (
-          <HomeBasePanel
-            navigation={navigation}
-            uid={uid}
-            interests={prefs?.interests || []}
-            pages={enabledPages}
-            onOpenPage={(key) => setSelectedTab(key)}
-            onEditPages={() => navigation.navigate('PagesEditor')}
-          />
+          <ScreenErrorBoundary label="HomeBase" onReset={() => setSelectedTab('A')}>
+            <HomeBasePanel
+              navigation={navigation}
+              uid={uid}
+              interests={prefs?.interests || []}
+              pages={enabledPages}
+              onOpenPage={(key) => setSelectedTab(key)}
+              onEditPages={() => navigation.navigate('PagesEditor')}
+            />
+          </ScreenErrorBoundary>
         );
       case 'following':
         return <FollowingFeedPanel navigation={navigation} uid={uid} />;
@@ -2008,6 +2015,26 @@ const HomeScreen = ({ navigation, route }) => {
                 <Icon name="close" size={24} color="#d1d5db" />
               </TouchableOpacity>
               <Text style={styles.menuTitle}>Menu</Text>
+
+              <TouchableOpacity
+                style={styles.menuActionButton}
+                onPress={() => {
+                  setMenuVisible(false);
+                  setSelectedTab('home');
+                }}
+              >
+                <Text style={styles.menuButtonText}>Home</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuActionButton}
+                onPress={() => {
+                  setMenuVisible(false);
+                  navigation.navigate('Dating');
+                }}
+              >
+                <Text style={styles.menuButtonText}>Dating</Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.menuActionButton}

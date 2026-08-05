@@ -117,8 +117,8 @@ const INTEREST_PROMPTS = {
 const QUICK_ACTIONS = [
   { id: 'blyp', label: 'blyp it', icon: 'sparkles', route: 'Blyp' },
   { id: 'live', label: 'Go live', icon: 'radio', route: 'LiveStreamScreen', params: { mode: 'host', source: 'home_base' } },
+  { id: 'dating', label: 'Dating', icon: 'heart', route: 'Dating', plus: true },
   { id: 'rankings', label: 'Rankings', icon: 'trophy', route: 'Rankings' },
-  { id: 'dating', label: 'Dating', icon: 'heart', route: 'Dating' },
   { id: 'games', label: 'Games', icon: 'game-controller', route: 'Games' },
   { id: 'saved', label: 'Saved', icon: 'bookmark', route: 'Saved' },
   { id: 'people', label: 'Find people', icon: 'person-add', route: 'FindPeople' },
@@ -567,9 +567,11 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
 
   const openAction = (action) => {
     try {
+      // Dating always opens the screen — free users see the Plus upsell there;
+      // Plus/trial users get Discover. Never swallow navigation failures silently.
       navigation.navigate(action.route, action.params);
-    } catch {
-      /* route may be gated; ignore */
+    } catch (e) {
+      console.warn('[home] openAction failed', action?.route, e?.message || String(e));
     }
   };
 
@@ -1185,8 +1187,16 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           <TouchableOpacity key={a.id} style={styles.actionTile} activeOpacity={0.85} onPress={() => openAction(a)}>
             <View style={styles.actionIcon}>
               <Icon name={a.icon} size={22} color={COLORS.primary} />
+              {a.plus ? (
+                <View style={styles.actionPlusBadge}>
+                  <Text style={styles.actionPlusText}>Plus</Text>
+                </View>
+              ) : null}
             </View>
             <Text style={styles.actionLabel}>{a.label}</Text>
+            {a.plus && !aiEntitled ? (
+              <Text style={styles.actionHint}>Free trial / Plus</Text>
+            ) : null}
           </TouchableOpacity>
         ))}
       </View>
@@ -1494,8 +1504,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
+    position: 'relative',
+  },
+  actionPlusBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -10,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 6,
+    backgroundColor: COLORS.primary,
+  },
+  actionPlusText: {
+    color: COLORS.black,
+    fontSize: responsiveFont(9),
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   actionLabel: { color: COLORS.textSecondary, fontSize: responsiveFont(12), fontWeight: '600' },
+  actionHint: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(9),
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'center',
+  },
 
   interestWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   interestChip: {

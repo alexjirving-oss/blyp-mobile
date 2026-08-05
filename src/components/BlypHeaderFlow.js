@@ -31,6 +31,7 @@ import { COLORS } from "../styles/theme";
  *  - onSearchPress   : () => void              (optional)
  *  - rightAction     : ReactNode               (optional, overrides search icon)
  *  - onLayout        : (e) => void             (optional)
+ *  - pinnedKeys      : string[]                (optional, always-visible tab keys)
  *  - testIDBase      : string (default "blyp")
  */
 export default function BlypHeaderFlow({
@@ -44,6 +45,7 @@ export default function BlypHeaderFlow({
     headerLeftExtra = null,
     onLayout,
     matchHomePadding = true,
+    pinnedKeys = undefined,
     testIDBase = "blyp",
 }) {
     const base = testIDBase;
@@ -98,6 +100,7 @@ export default function BlypHeaderFlow({
                         onChange={onTabChange}
                         testIDPrefix={`${base}_tab`}
                         align="center"
+                        pinnedKeys={pinnedKeys}
                     />
 
                 </View>

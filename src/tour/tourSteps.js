@@ -31,7 +31,7 @@ export function buildTourSteps({ hasDating = true } = {}) {
     {
       id: 'forYou',
       title: 'For You',
-      body: 'Your personalized feed lives on Home → For You. Swipe, watch, and discover creators matched to your interests.',
+      body: 'Your personalized feed opens first. Tap the pinned Home chip beside For You to open your Home base hub (Jump in, Dating, live rails).',
       icon: 'flame',
       navigate: { type: 'homeForYou' },
     },
@@ -83,7 +83,7 @@ export function buildTourSteps({ hasDating = true } = {}) {
     steps.push({
       id: 'dating',
       title: 'Dating',
-      body: 'Meet people who share your world. Likes and matches live here — curated for Blyp Plus.',
+      body: 'Meet people who share your world. Open Dating from Home → Jump in, Profile → Menu, or the Chat menu. Included with Plus / trial.',
       icon: 'heart',
       navigate: { type: 'stack', name: 'Dating' },
     });
@@ -91,7 +91,7 @@ export function buildTourSteps({ hasDating = true } = {}) {
     steps.push({
       id: 'dating',
       title: 'Dating (Plus)',
-      body: 'Dating is included with Blyp Plus. When you’re ready, upgrade from Profile → Subscription to unlock matching.',
+      body: 'Dating is on Home → Jump in, Profile → Menu, or Chat → menu. Free users see plans; Plus / trial unlocks Discover.',
       icon: 'heart',
       soft: true,
       navigate: { type: 'tab', name: 'Profile' },
