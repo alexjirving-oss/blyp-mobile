@@ -1,7 +1,7 @@
 // RankingsHubScreen.js
 //
-// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1),
-// Coming soon tiles for the full catalog. Battle glory deep-links BattleLeaderboard.
+// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1–2),
+// Coming soon tiles (with data notes) for the rest. Battle glory deep-links BattleLeaderboard.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -242,7 +242,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
       <ScrollView contentContainerStyle={styles.hubContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.hubLead}>
           See who&apos;s leading across Blyp — economy, social, live and games. Switch Day / Week /
-          Month / Year on live economy boards.
+          Month / Year on windowed boards.
         </Text>
 
         <Text style={styles.sectionTitle}>Live now</Text>
@@ -276,6 +276,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
                 <View style={styles.soonText}>
                   <Text style={styles.soonTitle}>{b.title}</Text>
                   <Text style={styles.soonWindows}>{b.windows}</Text>
+                  {!!b.note && <Text style={styles.soonNote}>{b.note}</Text>}
                 </View>
                 <View style={styles.soonPill}>
                   <Text style={styles.soonPillText}>Soon</Text>
@@ -381,6 +382,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: responsiveFont(11),
     color: COLORS.textMuted,
+  },
+  soonNote: {
+    marginTop: 3,
+    fontSize: responsiveFont(11),
+    lineHeight: responsiveFont(15),
+    color: COLORS.textSecondary,
   },
   soonPill: {
     paddingHorizontal: 8,

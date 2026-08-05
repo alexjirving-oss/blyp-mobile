@@ -1,10 +1,14 @@
 /**
- * Global rankings (Phase 0 + Phase 1 + P1.5).
+ * Global rankings (Phase 0 + Phase 1 + P1.5 + P2).
  *
- * All-time boards read denormalized wallet / Firestore counters.
+ * All-time boards read denormalized wallet / Firestore / gift / stream tables.
  * Windowed day/week/month/year boards prefer durable rankings_snapshots
- * (cron-materialized), falling back to query-time ledger aggregates with
- * Redis TTL cache and best-effort snapshot writes.
+ * (cron-materialized), falling back to query-time aggregates with Redis TTL
+ * cache and best-effort snapshot writes.
+ *
+ * P2: gifts_sent / gifts_recv / stream_earnings from Postgres gift_events +
+ * stream_earnings; peak_viewers from Firestore stream telemetry (all-time).
+ * watch_time stays deferred — no durable watch-duration ledger yet.
  */
 
 import { getEconomyInfra } from './infra';
@@ -12,7 +16,14 @@ import { EconomyError } from './economyErrors';
 import { getFirestore } from '../admin/firestoreAdmin';
 import { logger } from '../config/logger';
 
-export type RankingBoardId = 'coin_spend' | 'gem_earn' | 'followers_total';
+export type RankingBoardId =
+  | 'coin_spend'
+  | 'gem_earn'
+  | 'followers_total'
+  | 'gifts_sent'
+  | 'gifts_recv'
+  | 'stream_earnings'
+  | 'peak_viewers';
 
 export type RankingWindow = 'day' | 'week' | 'month' | 'year' | 'alltime';
 
@@ -33,8 +44,17 @@ export type RankingBoardResponse = {
   entries: RankingEntry[];
   computedAt: string;
   /** How the board was produced (for clients / ops). */
-  source: 'wallets' | 'ledger_window' | 'firestore' | 'cache' | 'snapshot';
+  source:
+    | 'wallets'
+    | 'ledger_window'
+    | 'gift_events'
+    | 'stream_earnings'
+    | 'firestore'
+    | 'firestore_streams'
+    | 'cache'
+    | 'snapshot';
   cacheTtlSec?: number;
+  note?: string;
 };
 
 export type RankingMaterializeResult = {
@@ -50,28 +70,66 @@ const WINDOWS: RankingWindow[] = ['day', 'week', 'month', 'year', 'alltime'];
 
 const WINDOWED: Array<Exclude<RankingWindow, 'alltime'>> = ['day', 'week', 'month', 'year'];
 
-const ECONOMY_BOARDS: Array<'coin_spend' | 'gem_earn'> = ['coin_spend', 'gem_earn'];
+/** Boards that cron materializes into rankings_snapshots. */
+const SNAPSHOT_BOARDS: RankingBoardId[] = [
+  'coin_spend',
+  'gem_earn',
+  'gifts_sent',
+  'gifts_recv',
+  'stream_earnings',
+];
 
 /** Snapshot rollup depth (cron + durable reads). */
 export const RANKINGS_SNAPSHOT_LIMIT = 50;
 
 const BOARD_META: Record<
   RankingBoardId,
-  { metric: string; unit: string; walletColumn?: 'lifetime_spend_coins' | 'lifetime_earned_gems' }
+  {
+    metric: string;
+    unit: string;
+    walletColumn?: 'lifetime_spend_coins' | 'lifetime_earned_gems';
+    windows: RankingWindow[] | 'all';
+    note?: string;
+  }
 > = {
   coin_spend: {
     metric: 'lifetime_spend_coins',
     unit: 'coins',
     walletColumn: 'lifetime_spend_coins',
+    windows: 'all',
   },
   gem_earn: {
     metric: 'lifetime_earned_gems',
     unit: 'gems',
     walletColumn: 'lifetime_earned_gems',
+    windows: 'all',
   },
   followers_total: {
     metric: 'followersCount',
     unit: 'followers',
+    windows: ['alltime'],
+    note: 'Windowed followers_delta needs follow-event history (deferred).',
+  },
+  gifts_sent: {
+    metric: 'gift_quantity_sent',
+    unit: 'gifts',
+    windows: 'all',
+  },
+  gifts_recv: {
+    metric: 'gift_quantity_received',
+    unit: 'gifts',
+    windows: 'all',
+  },
+  stream_earnings: {
+    metric: 'stream_coins_received',
+    unit: 'coins',
+    windows: 'all',
+  },
+  peak_viewers: {
+    metric: 'peakViewerCount',
+    unit: 'viewers',
+    windows: ['alltime'],
+    note: 'Best single-stream peak per host from Firestore streams telemetry. Windowed host rollups need durable session metrics.',
   },
 };
 
@@ -130,8 +188,14 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
+function boardSupportsWindow(board: RankingBoardId, window: RankingWindow): boolean {
+  const meta = BOARD_META[board];
+  if (meta.windows === 'all') return true;
+  return meta.windows.includes(window);
+}
+
 function cacheKey(board: RankingBoardId, window: RankingWindow, limit: number): string {
-  return `rankings:v1:${board}:${window}:${limit}`;
+  return `rankings:v2:${board}:${window}:${limit}`;
 }
 
 async function cacheGet(key: string): Promise<RankingBoardResponse | null> {
@@ -159,7 +223,6 @@ async function cacheSet(key: string, value: RankingBoardResponse, ttlSec: number
 async function cacheInvalidateBoard(board: RankingBoardId, window: RankingWindow): Promise<void> {
   try {
     const { redis } = getEconomyInfra();
-    // Common client limits; keys are small so fan-out is fine.
     const keys = [10, 25, 50].map((n) => cacheKey(board, window, n));
     if (keys.length) await redis.del(...keys);
   } catch {
@@ -350,6 +413,80 @@ async function aggregateLedgerWindow(
   );
 }
 
+async function aggregateGiftEvents(
+  board: 'gifts_sent' | 'gifts_recv' | 'stream_earnings',
+  window: RankingWindow,
+  limit: number,
+): Promise<RankingEntry[]> {
+  const { db } = getEconomyInfra();
+  const userCol = board === 'gifts_sent' ? 'sender_user_id' : 'receiver_user_id';
+  // gifts_* count gift units; stream_earnings ranks coin volume to creators.
+  const scoreExpr =
+    board === 'stream_earnings'
+      ? db.raw('SUM(coin_cost)::bigint AS score')
+      : db.raw('SUM(quantity)::bigint AS score');
+
+  let q = db('gift_events').select(userCol).select(scoreExpr);
+
+  if (window !== 'alltime') {
+    const interval = WINDOW_INTERVAL[window];
+    q = q.where('created_at', '>=', db.raw(`NOW() - INTERVAL '${interval}'`));
+  }
+
+  const rows = await q
+    .groupBy(userCol)
+    .havingRaw(board === 'stream_earnings' ? 'SUM(coin_cost) > 0' : 'SUM(quantity) > 0')
+    .orderBy('score', 'desc')
+    .limit(limit * 2);
+
+  const ids = rows.map((r: any) => String(r[userCol] || '')).filter(Boolean);
+  const profiles = await enrichProfiles(ids);
+  return toEntries(
+    rows.map((r: any) => ({
+      user_id: String(r[userCol] || ''),
+      score: Number(r.score || 0),
+    })),
+    profiles,
+    limit,
+  );
+}
+
+async function streamEarningsAlltime(limit: number): Promise<RankingEntry[]> {
+  const { db } = getEconomyInfra();
+  const rows = await db('stream_earnings')
+    .select('creator_user_id')
+    .select(db.raw('SUM(coins_received)::bigint AS score'))
+    .groupBy('creator_user_id')
+    .havingRaw('SUM(coins_received) > 0')
+    .orderBy('score', 'desc')
+    .limit(limit * 2);
+
+  const ids = rows.map((r: any) => String(r.creator_user_id || '')).filter(Boolean);
+  const profiles = await enrichProfiles(ids);
+  return toEntries(
+    rows.map((r: any) => ({
+      user_id: String(r.creator_user_id || ''),
+      score: Number(r.score || 0),
+    })),
+    profiles,
+    limit,
+  );
+}
+
+async function computeSnapshotEntries(
+  board: RankingBoardId,
+  window: Exclude<RankingWindow, 'alltime'>,
+  limit: number,
+): Promise<RankingEntry[]> {
+  if (board === 'coin_spend' || board === 'gem_earn') {
+    return aggregateLedgerWindow(board, window, limit);
+  }
+  if (board === 'gifts_sent' || board === 'gifts_recv' || board === 'stream_earnings') {
+    return aggregateGiftEvents(board, window, limit);
+  }
+  throw new EconomyError('INVALID_INPUT', 400, 'Board is not snapshot-materializable', { board });
+}
+
 async function ledgerWindowBoard(
   board: 'coin_spend' | 'gem_earn',
   window: Exclude<RankingWindow, 'alltime'>,
@@ -369,14 +506,51 @@ async function ledgerWindowBoard(
     cacheTtlSec: CACHE_TTL_SEC[window],
   };
 
-  // Durable rollup for ops / cron consumers (best-effort on query path).
   void persistSnapshot(board, window, entries);
+  return out;
+}
+
+async function giftOrEarningsBoard(
+  board: 'gifts_sent' | 'gifts_recv' | 'stream_earnings',
+  window: RankingWindow,
+  limit: number,
+): Promise<RankingBoardResponse> {
+  const meta = BOARD_META[board];
+  let entries: RankingEntry[];
+  let source: RankingBoardResponse['source'];
+
+  if (board === 'stream_earnings' && window === 'alltime') {
+    entries = await streamEarningsAlltime(limit);
+    source = 'stream_earnings';
+  } else {
+    entries = await aggregateGiftEvents(board, window, limit);
+    source = 'gift_events';
+  }
+
+  const out: RankingBoardResponse = {
+    board,
+    window,
+    metric: window === 'alltime' ? meta.metric : `${board}_${window}`,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source,
+    cacheTtlSec: CACHE_TTL_SEC[window],
+    note:
+      board === 'stream_earnings' && window !== 'alltime'
+        ? 'Windowed stream earnings use gift_events coin volume to creators (stream_earnings has no event time).'
+        : undefined,
+  };
+
+  if (window !== 'alltime') {
+    void persistSnapshot(board, window, entries);
+  }
 
   return out;
 }
 
 async function readSnapshotBoard(
-  board: 'coin_spend' | 'gem_earn',
+  board: RankingBoardId,
   window: Exclude<RankingWindow, 'alltime'>,
   limit: number,
 ): Promise<RankingBoardResponse | null> {
@@ -485,16 +659,72 @@ async function followersBoard(limit: number): Promise<RankingBoardResponse> {
     entries,
     computedAt: new Date().toISOString(),
     source: 'firestore',
+    note: meta.note,
   };
 }
 
 /**
- * Cron / admin materialization: recompute coin_spend + gem_earn for
+ * Best single-stream peak viewers per host from Firestore streams telemetry.
+ * Practical MVP: orderBy peakViewerCount, fold to max-per-host.
+ */
+async function peakViewersBoard(limit: number): Promise<RankingBoardResponse> {
+  const meta = BOARD_META.peak_viewers;
+  const fs = getFirestore();
+  if (!fs) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Firestore unavailable for peak viewers rankings');
+  }
+
+  const byHost = new Map<string, number>();
+  const collections = ['streams', 'liveStreams'] as const;
+
+  for (const col of collections) {
+    try {
+      const snap = await fs.collection(col).orderBy('peakViewerCount', 'desc').limit(200).get();
+      for (const doc of snap.docs) {
+        const data = (doc.data() || {}) as Record<string, unknown>;
+        const host = str(data.hostUid) || str(data.userId);
+        if (!host) continue;
+        const peak = Number(data.peakViewerCount ?? 0);
+        if (!Number.isFinite(peak) || peak <= 0) continue;
+        const prev = byHost.get(host) || 0;
+        if (peak > prev) byHost.set(host, peak);
+      }
+      if (byHost.size > 0) break;
+    } catch (e: any) {
+      logger.warn(
+        { err: e?.message || String(e), collection: col },
+        '[rankings] peak_viewers query failed',
+      );
+    }
+  }
+
+  const rows = [...byHost.entries()]
+    .map(([user_id, score]) => ({ user_id, score }))
+    .sort((a, b) => b.score - a.score);
+
+  const ids = rows.map((r) => r.user_id);
+  const profiles = await enrichProfiles(ids);
+  const entries = toEntries(rows, profiles, limit);
+
+  return {
+    board: 'peak_viewers',
+    window: 'alltime',
+    metric: meta.metric,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source: 'firestore_streams',
+    note: meta.note,
+  };
+}
+
+/**
+ * Cron / admin materialization: recompute snapshot boards for
  * day/week/month/year into rankings_snapshots and warm Redis.
  */
 export async function materializeRankingsSnapshots(opts?: {
   limit?: number;
-  boards?: Array<'coin_spend' | 'gem_earn'>;
+  boards?: RankingBoardId[];
   windows?: Array<Exclude<RankingWindow, 'alltime'>>;
 }): Promise<{
   ok: boolean;
@@ -504,7 +734,9 @@ export async function materializeRankingsSnapshots(opts?: {
 }> {
   const started = Date.now();
   const limit = Math.max(1, Math.min(RANKINGS_SNAPSHOT_LIMIT, Math.floor(opts?.limit || RANKINGS_SNAPSHOT_LIMIT)));
-  const boards = opts?.boards?.length ? opts.boards : ECONOMY_BOARDS;
+  const boards = (opts?.boards?.length ? opts.boards : SNAPSHOT_BOARDS).filter((b) =>
+    SNAPSHOT_BOARDS.includes(b),
+  );
   const windows = opts?.windows?.length ? opts.windows : WINDOWED;
   const results: RankingMaterializeResult[] = [];
 
@@ -514,7 +746,7 @@ export async function materializeRankingsSnapshots(opts?: {
     for (const window of windows) {
       const computedAt = new Date().toISOString();
       try {
-        const entries = await aggregateLedgerWindow(board, window, limit);
+        const entries = await computeSnapshotEntries(board, window, limit);
         await persistSnapshot(board, window, entries, { throwOnError: true });
         await cacheInvalidateBoard(board, window);
 
@@ -529,7 +761,6 @@ export async function materializeRankingsSnapshots(opts?: {
           source: 'snapshot',
           cacheTtlSec: CACHE_TTL_SEC[window],
         };
-        // Warm common client limits from the same rollup.
         for (const warmLimit of [10, 25, 50]) {
           if (warmLimit > limit) continue;
           await cacheSet(
@@ -580,8 +811,8 @@ export async function getRankingBoard(
   const limit = clampLimit(limitRaw);
   let window = parseWindow(windowRaw);
 
-  // Followers delta needs a follow-event ledger (P2+). Total followers is all-time only.
-  if (board === 'followers_total' && window !== 'alltime') {
+  // Boards without windowed history coerce to all-time.
+  if (!boardSupportsWindow(board, window)) {
     window = 'alltime';
   }
 
@@ -592,6 +823,15 @@ export async function getRankingBoard(
   let result: RankingBoardResponse;
   if (board === 'followers_total') {
     result = await followersBoard(limit);
+  } else if (board === 'peak_viewers') {
+    result = await peakViewersBoard(limit);
+  } else if (board === 'gifts_sent' || board === 'gifts_recv' || board === 'stream_earnings') {
+    if (window === 'alltime') {
+      result = await giftOrEarningsBoard(board, 'alltime', limit);
+    } else {
+      const fromSnap = await readSnapshotBoard(board, window, limit);
+      result = fromSnap || (await giftOrEarningsBoard(board, window, limit));
+    }
   } else if (window === 'alltime') {
     result = await walletBoard(board, limit);
   } else {
@@ -607,14 +847,15 @@ export async function getRankingBoard(
 export function listRankingBoardsMeta() {
   return (Object.keys(BOARD_META) as RankingBoardId[]).map((id) => ({
     board: id,
-    windows: id === 'followers_total' ? (['alltime'] as RankingWindow[]) : WINDOWS,
+    windows: BOARD_META[id].windows === 'all' ? WINDOWS : BOARD_META[id].windows,
     metric: BOARD_META[id].metric,
     unit: BOARD_META[id].unit,
     status: 'live' as const,
     note:
-      id === 'followers_total'
-        ? 'Windowed followers_delta needs follow-event history (P2+).'
-        : 'Windowed boards prefer cron rankings_snapshots; fall back to ledger aggregates + Redis.',
+      BOARD_META[id].note ||
+      (SNAPSHOT_BOARDS.includes(id)
+        ? 'Windowed boards prefer cron rankings_snapshots; fall back to query-time aggregates + Redis.'
+        : undefined),
   }));
 }
 

@@ -98,7 +98,8 @@ const rankingsMaterializeSchema = z
   .optional();
 
 /**
- * Precompute rankings_snapshots for coin_spend + gem_earn × day/week/month/year.
+ * Precompute rankings_snapshots for snapshot boards × day/week/month/year
+ * (coin_spend, gem_earn, gifts_sent, gifts_recv, stream_earnings).
  * Invoked by Cloud Scheduler (or manually) with x-internal-secret.
  */
 router.post('/internal/cron/rankings-materialize', requireInternalSecret, async (req, res) => {

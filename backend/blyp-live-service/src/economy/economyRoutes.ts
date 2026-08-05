@@ -529,7 +529,7 @@ router.get('/economy/matchday/leaderboard', async (req: AuthedRequest, res) => {
   }
 });
 
-// Global rankings hub (Phase 0+1): all-time counters + windowed ledger aggregates.
+// Global rankings hub (Phase 0–2): wallets/ledger + gift_events + stream_earnings + peak viewers.
 router.get('/economy/rankings/boards', async (req: AuthedRequest, res) => {
   try {
     if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });

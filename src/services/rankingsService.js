@@ -1,12 +1,12 @@
 // rankingsService.js
 //
-// Client for the Rankings hub (Phase 0+1). Live boards hit the economy backend
+// Client for the Rankings hub (Phase 0–2). Live boards hit the economy backend
 // with optional day/week/month/year windows. Battle glory deep-links the existing
-// BattleLeaderboard screen. Remaining catalog tiles are Coming soon.
+// BattleLeaderboard screen. Remaining catalog tiles are Coming soon (with notes).
 
 import { callEconomyBackend } from '../api/economyLiveApi';
 
-/** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'battle_glory'} LiveBoardId */
+/** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'gifts_sent'|'gifts_recv'|'stream_earnings'|'peak_viewers'|'battle_glory'} LiveBoardId */
 /** @typedef {'day'|'week'|'month'|'year'|'alltime'} RankingWindow */
 
 export const RANKING_WINDOWS = [
@@ -39,12 +39,52 @@ export const LIVE_BOARDS = [
     windows: true,
   },
   {
+    id: 'gifts_sent',
+    title: 'Most gifts sent',
+    blurb: 'Gift units sent across live streams.',
+    icon: 'gift',
+    category: 'Economy',
+    unit: 'gifts',
+    source: 'economy',
+    windows: true,
+  },
+  {
+    id: 'gifts_recv',
+    title: 'Most gifted creator',
+    blurb: 'Creators who received the most gift units.',
+    icon: 'heart',
+    category: 'Economy',
+    unit: 'gifts',
+    source: 'economy',
+    windows: true,
+  },
+  {
+    id: 'stream_earnings',
+    title: 'Top stream earnings',
+    blurb: 'Coins received as a live creator (gift volume).',
+    icon: 'star',
+    category: 'Economy',
+    unit: 'coins',
+    source: 'economy',
+    windows: true,
+  },
+  {
     id: 'followers_total',
     title: 'Most followed',
     blurb: 'Creators with the most followers right now.',
     icon: 'people',
     category: 'Social',
     unit: 'followers',
+    source: 'economy',
+    windows: false,
+  },
+  {
+    id: 'peak_viewers',
+    title: 'Highest peak viewers',
+    blurb: 'Best single-stream peak concurrent viewers per host.',
+    icon: 'eye',
+    category: 'Live',
+    unit: 'viewers',
     source: 'economy',
     windows: false,
   },
@@ -64,16 +104,31 @@ export const LIVE_BOARDS = [
 /** Coming-soon catalog so the hub feels full (names match product plan). */
 export const COMING_SOON_BOARDS = [
   { id: 'coin_earn', title: 'Highest coin earner', category: 'Economy', windows: 'Day · Week · Month · Year' },
-  { id: 'gifts_sent', title: 'Most gifts sent', category: 'Economy', windows: 'Day · Week · Month · Year' },
-  { id: 'gifts_recv', title: 'Most gifted creator', category: 'Economy', windows: 'Day · Week · Month · Year' },
-  { id: 'followers_delta', title: 'Most new followers', category: 'Social', windows: 'Day · Week · Month · Year' },
+  {
+    id: 'followers_delta',
+    title: 'Most new followers',
+    category: 'Social',
+    windows: 'Day · Week · Month · Year',
+    note: 'Needs follow-event history — deferred.',
+  },
   { id: 'following_growth', title: 'Fastest growing', category: 'Social', windows: 'Week · Month' },
   { id: 'posts_created', title: 'Most posts', category: 'Social', windows: 'Day · Week · Month · Year' },
   { id: 'likes_recv', title: 'Most likes received', category: 'Social', windows: 'Day · Week · Month · Year' },
   { id: 'comments_recv', title: 'Most comments received', category: 'Social', windows: 'Day · Week · Month · Year' },
-  { id: 'watch_time', title: 'Most watch time', category: 'Live', windows: 'Day · Week · Month · Year' },
-  { id: 'live_hours', title: 'Most hours live', category: 'Live', windows: 'Day · Week · Month · Year' },
-  { id: 'peak_viewers', title: 'Highest peak viewers', category: 'Live', windows: 'Day · Week · Month · Year' },
+  {
+    id: 'watch_time',
+    title: 'Most watch time',
+    category: 'Live',
+    windows: 'Day · Week · Month · Year',
+    note: 'No durable watch-duration telemetry yet (watchHistory is continue-watching only).',
+  },
+  {
+    id: 'live_hours',
+    title: 'Most hours live',
+    category: 'Live',
+    windows: 'Day · Week · Month · Year',
+    note: 'Needs host session duration rollups beyond per-stream docs.',
+  },
   { id: 'avg_viewers', title: 'Highest avg concurrent', category: 'Live', windows: 'Week · Month' },
   { id: 'battle_wins', title: 'Battles won', category: 'Competitive', windows: 'Week · Month · All time' },
   { id: 'battle_streak', title: 'Longest battle streak', category: 'Competitive', windows: 'All time' },

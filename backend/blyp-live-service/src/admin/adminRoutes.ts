@@ -761,7 +761,7 @@ router.get('/admin/metrics/overview', requireAdmin, async (_req: AuthedRequest, 
 });
 
 /**
- * Manually materialize rankings_snapshots (coin_spend + gem_earn windows).
+ * Manually materialize rankings_snapshots (economy + gift boards × windows).
  * Same work as Cloud Scheduler → POST /internal/cron/rankings-materialize.
  */
 router.post('/admin/rankings/materialize', requireAdmin, async (req: AuthedRequest, res: Response) => {
