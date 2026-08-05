@@ -138,7 +138,7 @@ export default function Safety() {
                       </Badge>
                     </td>
                     <td>
-                      <div>{r.targetType || "—"}</div>
+                      <div>{r.targetType || "—"}{r.surface ? ` · ${r.surface}` : ""}</div>
                       <div className="muted" style={{ fontSize: 11, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
                         {r.targetId}
                       </div>
