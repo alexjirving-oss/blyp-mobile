@@ -407,6 +407,49 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Dating (subscription-package surface). Prefs + passes are client-writable
+    // for the owner; likes may be written by owner OR Admin SDK (blypDatingLike);
+    // matches are server-only.
+    match /datingPrefs/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasAll([
+          'optedIn', 'adultConfirmed', 'adultConfirmedAt', 'bio', 'updatedAt'
+        ])
+        && request.resource.data.optedIn is bool
+        && request.resource.data.adultConfirmed is bool;
+      allow delete: if isOwner(uid);
+    }
+
+    match /datingPasses/{passId} {
+      allow read: if isSignedIn()
+        && resource.data.fromUid == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.keys().hasAll(['fromUid', 'toUid', 'createdAt'])
+        && request.resource.data.fromUid != request.resource.data.toUid;
+      allow update, delete: if isSignedIn()
+        && resource.data.fromUid == request.auth.uid;
+    }
+
+    match /datingLikes/{likeId} {
+      allow read: if isSignedIn()
+        && (resource.data.fromUid == request.auth.uid
+          || resource.data.toUid == request.auth.uid);
+      // Client may write own outgoing likes; mutual-match CF uses Admin SDK.
+      allow create: if isSignedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.keys().hasAll(['fromUid', 'toUid', 'createdAt'])
+        && request.resource.data.fromUid != request.resource.data.toUid;
+      allow update, delete: if false;
+    }
+
+    match /datingMatches/{matchId} {
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.members;
+      allow write: if false;
+    }
+
     // Deny-by-default for everything else (keeps Wave 0 lockdown).
     match /{document=**} {
       allow read, write: if false;

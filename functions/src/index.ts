@@ -60,6 +60,8 @@ export { onBattleCreate, onBattleStatusChange, onBattleReminderCreate } from './
 export { onBattleComplete } from './battles/battleStats';
 // "Blyp it" — premium AI compose-and-send assistant
 export { blypAssistantCompose } from './assistant/compose';
+// Dating — mutual-match like write (server-owned datingMatches)
+export { blypDatingLike } from './dating/handlers';
 // Gemini proxy (P7.4): keep the API key server-side; client calls authenticated relay
 export { geminiProxy } from './assistant/geminiProxy';
 // Server-authoritative daily streak engine + reminder sweep
