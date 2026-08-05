@@ -1,6 +1,6 @@
 // RankingsHubScreen.js
 //
-// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1–2),
+// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1–3),
 // Coming soon tiles (with data notes) for the rest. Battle glory deep-links BattleLeaderboard.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';

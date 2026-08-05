@@ -1,5 +1,5 @@
 /**
- * Global rankings (Phase 0 + Phase 1 + P1.5 + P2).
+ * Global rankings (Phase 0 + Phase 1 + P1.5 + P2 + P3).
  *
  * All-time boards read denormalized wallet / Firestore / gift / stream tables.
  * Windowed day/week/month/year boards prefer durable rankings_snapshots
@@ -9,6 +9,10 @@
  * P2: gifts_sent / gifts_recv / stream_earnings from Postgres gift_events +
  * stream_earnings; peak_viewers from Firestore stream telemetry (all-time).
  * watch_time stays deferred — no durable watch-duration ledger yet.
+ *
+ * P3: battle_wins / battle_streak from Firestore battleStats; marble_wins from
+ * users.marblePodiumWins; live_game_wins from ledger LIVE_GAME_PAYOUT (role=winner).
+ * marble_podium / matchday_net stay deferred (no top-3 history / net rollup yet).
  */
 
 import { getEconomyInfra } from './infra';
@@ -23,7 +27,11 @@ export type RankingBoardId =
   | 'gifts_sent'
   | 'gifts_recv'
   | 'stream_earnings'
-  | 'peak_viewers';
+  | 'peak_viewers'
+  | 'battle_wins'
+  | 'battle_streak'
+  | 'marble_wins'
+  | 'live_game_wins';
 
 export type RankingWindow = 'day' | 'week' | 'month' | 'year' | 'alltime';
 
@@ -51,6 +59,9 @@ export type RankingBoardResponse = {
     | 'stream_earnings'
     | 'firestore'
     | 'firestore_streams'
+    | 'firestore_battles'
+    | 'firestore_marble'
+    | 'ledger_live_games'
     | 'cache'
     | 'snapshot';
   cacheTtlSec?: number;
@@ -77,6 +88,7 @@ const SNAPSHOT_BOARDS: RankingBoardId[] = [
   'gifts_sent',
   'gifts_recv',
   'stream_earnings',
+  'live_game_wins',
 ];
 
 /** Snapshot rollup depth (cron + durable reads). */
@@ -130,6 +142,30 @@ const BOARD_META: Record<
     unit: 'viewers',
     windows: ['alltime'],
     note: 'Best single-stream peak per host from Firestore streams telemetry. Windowed host rollups need durable session metrics.',
+  },
+  battle_wins: {
+    metric: 'battleStats.wins',
+    unit: 'wins',
+    windows: ['week', 'alltime'],
+    note: 'From Firestore battleStats aggregates. Week uses weeklyWins; day/month/year need per-battle history.',
+  },
+  battle_streak: {
+    metric: 'battleStats.bestStreak',
+    unit: 'streak',
+    windows: ['alltime'],
+    note: 'Longest win streak from battleStats.bestStreak (all-time only).',
+  },
+  marble_wins: {
+    metric: 'marblePodiumWins',
+    unit: 'wins',
+    windows: ['alltime'],
+    note: 'Race winners from users.marblePodiumWins (marble room podium evidence). Windowed race history not stored yet.',
+  },
+  live_game_wins: {
+    metric: 'live_game_winner_count',
+    unit: 'wins',
+    windows: 'all',
+    note: 'Counts LIVE_GAME_PAYOUT ledger rows with metadata.role=winner.',
   },
 };
 
@@ -484,6 +520,9 @@ async function computeSnapshotEntries(
   if (board === 'gifts_sent' || board === 'gifts_recv' || board === 'stream_earnings') {
     return aggregateGiftEvents(board, window, limit);
   }
+  if (board === 'live_game_wins') {
+    return aggregateLiveGameWins(window, limit);
+  }
   throw new EconomyError('INVALID_INPUT', 400, 'Board is not snapshot-materializable', { board });
 }
 
@@ -718,6 +757,220 @@ async function peakViewersBoard(limit: number): Promise<RankingBoardResponse> {
   };
 }
 
+
+/** ISO-week key (UTC, Monday-start) — mirrors functions/src/battles/battleStats.ts. */
+function weekKeyFor(ms: number = Date.now()): string {
+  const d = new Date(ms);
+  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const dayNum = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const week =
+    1 +
+    Math.round(
+      ((date.getTime() - firstThursday.getTime()) / 86400000 -
+        3 +
+        ((firstThursday.getUTCDay() + 6) % 7)) /
+        7,
+    );
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * Battle wins / streak from Firestore battleStats aggregates
+ * (written by onBattleComplete Cloud Function).
+ */
+async function battleStatsBoard(
+  board: 'battle_wins' | 'battle_streak',
+  window: RankingWindow,
+  limit: number,
+): Promise<RankingBoardResponse> {
+  const meta = BOARD_META[board];
+  const fsDb = getFirestore();
+  if (!fsDb) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Firestore unavailable for battle rankings');
+  }
+
+  const useWeek = board === 'battle_wins' && window === 'week';
+  const field =
+    board === 'battle_streak' ? 'bestStreak' : useWeek ? 'weeklyWins' : 'wins';
+  const fetchSize = useWeek ? limit * 3 : limit * 2;
+  const wk = useWeek ? weekKeyFor() : '';
+
+  let snap;
+  try {
+    snap = await fsDb.collection('battleStats').orderBy(field, 'desc').limit(fetchSize).get();
+  } catch (e: any) {
+    logger.warn({ err: e?.message || String(e), field }, '[rankings] battleStats query failed');
+    throw new EconomyError('PROVIDER_ERROR', 503, 'battleStats query failed', {
+      field,
+      detail: e?.message || String(e),
+    });
+  }
+
+  const entries: RankingEntry[] = [];
+  for (const doc of snap.docs) {
+    const data = (doc.data() || {}) as Record<string, unknown>;
+    if (useWeek && str(data.weekKey) !== wk) continue;
+    const score = Number(data[field] ?? 0);
+    if (!Number.isFinite(score) || score <= 0) continue;
+    entries.push({
+      rank: 0,
+      userId: doc.id,
+      score,
+      displayName: str(data.displayName) || 'Blyp user',
+      photoURL: str(data.photoURL),
+      handle: str(data.handle),
+    });
+    if (entries.length >= limit) break;
+  }
+  entries.forEach((e, i) => {
+    e.rank = i + 1;
+  });
+
+  return {
+    board,
+    window: useWeek ? 'week' : 'alltime',
+    metric: useWeek ? 'battleStats.weeklyWins' : meta.metric,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source: 'firestore_battles',
+    note: meta.note,
+  };
+}
+
+/**
+ * Marble race wins from users.marblePodiumWins (written when a marble room
+ * finishes and records podium evidence for the race winner).
+ */
+async function marbleWinsBoard(limit: number): Promise<RankingBoardResponse> {
+  const meta = BOARD_META.marble_wins;
+  const fsDb = getFirestore();
+  if (!fsDb) {
+    throw new EconomyError('PROVIDER_ERROR', 503, 'Firestore unavailable for marble rankings');
+  }
+
+  let snap;
+  try {
+    snap = await fsDb
+      .collection('users')
+      .orderBy('marblePodiumWins', 'desc')
+      .limit(limit * 2)
+      .get();
+  } catch (e: any) {
+    try {
+      snap = await fsDb
+        .collection('users')
+        .orderBy('marblePodiumCount', 'desc')
+        .limit(limit * 2)
+        .get();
+    } catch (e2: any) {
+      logger.warn(
+        { err: e2?.message || String(e2) },
+        '[rankings] marble_wins query failed',
+      );
+      throw new EconomyError('PROVIDER_ERROR', 503, 'marble wins query failed', {
+        detail: e2?.message || e?.message || String(e2),
+      });
+    }
+  }
+
+  const entries: RankingEntry[] = [];
+  for (const doc of snap.docs) {
+    const data = (doc.data() || {}) as Record<string, unknown>;
+    if (data.leaderboardOptOut === true || data.privacyHideFromRankings === true) continue;
+    const score = Number(data.marblePodiumWins ?? data.marblePodiumCount ?? 0);
+    if (!Number.isFinite(score) || score <= 0) continue;
+    const displayName =
+      str(data.displayName) || str(data.username) || str(data.handle) || 'Blyp user';
+    const handle = str(data.username) || str(data.handle) || '';
+    const photoURL =
+      str(data.photoURL) || str(data.avatar) || str(data.profilePicture) || '';
+    entries.push({
+      rank: 0,
+      userId: doc.id,
+      score,
+      displayName,
+      photoURL,
+      handle,
+    });
+    if (entries.length >= limit) break;
+  }
+  entries.forEach((e, i) => {
+    e.rank = i + 1;
+  });
+
+  return {
+    board: 'marble_wins',
+    window: 'alltime',
+    metric: meta.metric,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source: 'firestore_marble',
+    note: meta.note,
+  };
+}
+
+async function aggregateLiveGameWins(
+  window: RankingWindow,
+  limit: number,
+): Promise<RankingEntry[]> {
+  const { db } = getEconomyInfra();
+  let q = db('ledger_entries')
+    .select('user_id')
+    .select(db.raw('COUNT(*)::bigint AS score'))
+    .where({ entry_type: 'LIVE_GAME_PAYOUT' })
+    .whereIn('status', ['POSTED', 'PENDING'])
+    .whereRaw("metadata->>'role' = ?", ['winner']);
+
+  if (window !== 'alltime') {
+    const interval = WINDOW_INTERVAL[window];
+    q = q.where('created_at', '>=', db.raw(`NOW() - INTERVAL '${interval}'`));
+  }
+
+  const rows = await q
+    .groupBy('user_id')
+    .havingRaw('COUNT(*) > 0')
+    .orderBy('score', 'desc')
+    .limit(limit * 2);
+
+  const ids = rows.map((r: any) => String(r.user_id || '')).filter(Boolean);
+  const profiles = await enrichProfiles(ids);
+  return toEntries(
+    rows.map((r: any) => ({ user_id: String(r.user_id || ''), score: Number(r.score || 0) })),
+    profiles,
+    limit,
+  );
+}
+
+async function liveGameWinsBoard(
+  window: RankingWindow,
+  limit: number,
+): Promise<RankingBoardResponse> {
+  const meta = BOARD_META.live_game_wins;
+  const entries = await aggregateLiveGameWins(window, limit);
+
+  const out: RankingBoardResponse = {
+    board: 'live_game_wins',
+    window,
+    metric: window === 'alltime' ? meta.metric : `live_game_wins_${window}`,
+    unit: meta.unit,
+    entries,
+    computedAt: new Date().toISOString(),
+    source: 'ledger_live_games',
+    cacheTtlSec: CACHE_TTL_SEC[window],
+    note: meta.note,
+  };
+
+  if (window !== 'alltime') {
+    void persistSnapshot('live_game_wins', window, entries);
+  }
+
+  return out;
+}
+
 /**
  * Cron / admin materialization: recompute snapshot boards for
  * day/week/month/year into rankings_snapshots and warm Redis.
@@ -825,6 +1078,17 @@ export async function getRankingBoard(
     result = await followersBoard(limit);
   } else if (board === 'peak_viewers') {
     result = await peakViewersBoard(limit);
+  } else if (board === 'battle_wins' || board === 'battle_streak') {
+    result = await battleStatsBoard(board, window, limit);
+  } else if (board === 'marble_wins') {
+    result = await marbleWinsBoard(limit);
+  } else if (board === 'live_game_wins') {
+    if (window === 'alltime') {
+      result = await liveGameWinsBoard('alltime', limit);
+    } else {
+      const fromSnap = await readSnapshotBoard(board, window, limit);
+      result = fromSnap || (await liveGameWinsBoard(window, limit));
+    }
   } else if (board === 'gifts_sent' || board === 'gifts_recv' || board === 'stream_earnings') {
     if (window === 'alltime') {
       result = await giftOrEarningsBoard(board, 'alltime', limit);

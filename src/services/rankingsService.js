@@ -1,12 +1,12 @@
 // rankingsService.js
 //
-// Client for the Rankings hub (Phase 0–2). Live boards hit the economy backend
+// Client for the Rankings hub (Phase 0–3). Live boards hit the economy backend
 // with optional day/week/month/year windows. Battle glory deep-links the existing
 // BattleLeaderboard screen. Remaining catalog tiles are Coming soon (with notes).
 
 import { callEconomyBackend } from '../api/economyLiveApi';
 
-/** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'gifts_sent'|'gifts_recv'|'stream_earnings'|'peak_viewers'|'battle_glory'} LiveBoardId */
+/** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'gifts_sent'|'gifts_recv'|'stream_earnings'|'peak_viewers'|'battle_glory'|'battle_wins'|'battle_streak'|'marble_wins'|'live_game_wins'} LiveBoardId */
 /** @typedef {'day'|'week'|'month'|'year'|'alltime'} RankingWindow */
 
 export const RANKING_WINDOWS = [
@@ -99,6 +99,46 @@ export const LIVE_BOARDS = [
     route: 'BattleLeaderboard',
     windows: false,
   },
+  {
+    id: 'battle_wins',
+    title: 'Battles won',
+    blurb: 'Wins from battleStats (week + all-time).',
+    icon: 'flash',
+    category: 'Competitive',
+    unit: 'wins',
+    source: 'economy',
+    windows: true,
+  },
+  {
+    id: 'battle_streak',
+    title: 'Longest battle streak',
+    blurb: 'Best win streak from battleStats.',
+    icon: 'flame',
+    category: 'Competitive',
+    unit: 'streak',
+    source: 'economy',
+    windows: false,
+  },
+  {
+    id: 'marble_wins',
+    title: 'Marble race wins',
+    blurb: 'Race winners from marblePodiumWins evidence.',
+    icon: 'ellipse',
+    category: 'Games',
+    unit: 'wins',
+    source: 'economy',
+    windows: false,
+  },
+  {
+    id: 'live_game_wins',
+    title: 'Live mini-game wins',
+    blurb: 'Wins settled via live-game payout ledger.',
+    icon: 'game-controller',
+    category: 'Games',
+    unit: 'wins',
+    source: 'economy',
+    windows: true,
+  },
 ];
 
 /** Coming-soon catalog so the hub feels full (names match product plan). */
@@ -130,12 +170,20 @@ export const COMING_SOON_BOARDS = [
     note: 'Needs host session duration rollups beyond per-stream docs.',
   },
   { id: 'avg_viewers', title: 'Highest avg concurrent', category: 'Live', windows: 'Week · Month' },
-  { id: 'battle_wins', title: 'Battles won', category: 'Competitive', windows: 'Week · Month · All time' },
-  { id: 'battle_streak', title: 'Longest battle streak', category: 'Competitive', windows: 'All time' },
-  { id: 'marble_wins', title: 'Marble race wins', category: 'Games', windows: 'Day · Week · Month · Year' },
-  { id: 'marble_podium', title: 'Marble podium finishes', category: 'Games', windows: 'Week · Month' },
-  { id: 'live_game_wins', title: 'Live mini-game wins', category: 'Games', windows: 'Day · Week · Month' },
-  { id: 'matchday_net', title: 'Matchday prediction net', category: 'Games', windows: 'Event · Season' },
+  {
+    id: 'marble_podium',
+    title: 'Marble podium finishes',
+    category: 'Games',
+    windows: 'Week · Month',
+    note: 'Only race-winner counters exist (marblePodiumWins); top-3 podium history not stored yet.',
+  },
+  {
+    id: 'matchday_net',
+    title: 'Matchday prediction net',
+    category: 'Games',
+    windows: 'Event · Season',
+    note: 'Needs settled prediction PnL rollup beyond per-prediction rows.',
+  },
   { id: 'club_coin_spend', title: 'Club: top spenders', category: 'Clubs', windows: 'Week · Month' },
   { id: 'club_followers', title: 'Club: rising members', category: 'Clubs', windows: 'Week · Month' },
   { id: 'league_posts', title: 'League / sport: top posters', category: 'Leagues', windows: 'Week · Month' },
