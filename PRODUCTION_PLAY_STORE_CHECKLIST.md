@@ -58,6 +58,8 @@ Steps:
 
 ---
 ## 4. Data Safety & Privacy
+**Source of truth for Play form mapping:** [`PLAY_DATA_SAFETY.md`](./PLAY_DATA_SAFETY.md). Policy HTML: `legal/privacy-policy.html`, `blyp-landing/privacy.html`.
+
 1. Draft / Update Privacy Policy (host on website or GitHub Pages) covering:
    - Data collected: email, profile media, stream content (ephemeral vs stored), likes/comments.
    - Purpose: social interaction & content sharing.

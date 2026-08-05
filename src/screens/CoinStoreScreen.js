@@ -698,7 +698,9 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
               <Text style={styles.infoText}>
                 {selectedTab === 'coins'
                   ? 'Buy coins to send gifts and unlock features. Purchased coins are spendable only — they cannot be withdrawn as cash.'
-                  : 'Gems are creator earnings from gifts. After clearance they can be withdrawn to your bank via Stripe (platform fee applies).'
+                  : ENABLE_WITHDRAWALS
+                    ? 'Gems are creator earnings from gifts. After clearance they can be withdrawn to your bank via Stripe (platform fee applies).'
+                    : 'Gems are creator earnings from gifts. Cash-out is not available yet — balances are tracked for when withdrawals open.'
                 }
               </Text>
               {__DEV__ && shouldUseServerValidation() && !process.env.EXPO_PUBLIC_BILLING_VERIFY_URL && (

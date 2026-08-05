@@ -12,8 +12,21 @@ import { db, firebaseEnabled } from '../config/firebase';
 import { fixStorageUrl } from '../utils/urlUtils';
 import { rankPosts } from './feedRankingService';
 import { filterForYouPosts } from '../utils/forYouFeedFilter';
+import { filterBlocked, loadBlockedUsers } from './BlockService';
 
 const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+
+/** Drop blocked authors and moderation.hidden posts before any HomeBase rail renders. */
+async function visiblePosts(posts) {
+  await loadBlockedUsers().catch(() => {});
+  return filterBlocked(posts || [], (p) => p?.userId || p?.uid || p?.authorId);
+}
+
+/** Drop blocked creators from suggestion rails. */
+async function visibleUsers(users) {
+  await loadBlockedUsers().catch(() => {});
+  return filterBlocked(users || [], (u) => u?.id || u?.uid || u?.userId);
+}
 
 function engagement(post) {
   // `likes` and `likeCount` are kept in sync by LikeService, and `views`/`viewCount`
@@ -45,10 +58,11 @@ export async function getTrendingPosts(limit = 10, interestTerms = []) {
       return { p, score };
     });
 
-    return scored
+    const ranked = scored
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
       .map((x) => x.p);
+    // Over-fetch then filter so hidden/blocked posts do not shrink the rail below `limit`.
+    return (await visiblePosts(ranked)).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] trending failed', e?.message || String(e));
     return [];
@@ -63,7 +77,7 @@ export async function getTopicPosts(terms = [], limit = 30) {
   try {
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(120).get();
     const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
-    return all
+    const ranked = all
       .map((p) => {
         const hay = [p.title, p.caption, p.description, p.category, (p.hashtags || []).join(' '), p.username, p.userDisplayName]
           .filter(Boolean)
@@ -75,8 +89,8 @@ export async function getTopicPosts(terms = [], limit = 30) {
       })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score || engagement(b.p) - engagement(a.p))
-      .slice(0, limit)
       .map((x) => x.p);
+    return (await visiblePosts(ranked)).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] topic posts failed', e?.message || String(e));
     return [];
@@ -88,7 +102,7 @@ export async function getForYouPosts(terms = [], followingIds = [], limit = 12) 
   if (!firebaseEnabled || !db?.collection) return [];
   try {
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(80).get();
-    const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
+    const all = await visiblePosts((snap?.docs || []).map((d) => ({ id: d.id, ...d.data() })));
     const ranked = rankPosts(all, terms, new Set((followingIds || []).filter(Boolean)));
     return filterForYouPosts(ranked).slice(0, limit);
   } catch (e) {
@@ -105,7 +119,8 @@ export async function getFollowingPosts(ownerIds = [], limit = 40) {
   try {
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(150).get();
     const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
-    return all.filter((p) => owners.has(p.userId || p.uid || p.authorId)).slice(0, limit);
+    const owned = all.filter((p) => owners.has(p.userId || p.uid || p.authorId));
+    return (await visiblePosts(owned)).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] following posts failed', e?.message || String(e));
     return [];
@@ -120,7 +135,7 @@ export async function getSuggestedCreators(limit = 12, interestTerms = [], exclu
     const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
     const terms = (interestTerms || []).map((t) => String(t).toLowerCase()).filter(Boolean);
 
-    return all
+    const ranked = all
       .filter((u) => (excludeUid ? u.id !== excludeUid : true))
       .filter((u) => u.username || u.displayName || u.name)
       .map((u) => {
@@ -135,8 +150,8 @@ export async function getSuggestedCreators(limit = 12, interestTerms = [], exclu
         return { u, score };
       })
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
       .map((x) => x.u);
+    return (await visibleUsers(ranked)).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] creators failed', e?.message || String(e));
     return [];
@@ -151,7 +166,7 @@ export async function getLiveNow(limit = 10) {
     if (!svc?.getActiveStreams) return [];
     const streams = await svc.getActiveStreams(limit);
     if (!Array.isArray(streams)) return [];
-    const { filterBlocked } = await import('./BlockService');
+    await loadBlockedUsers().catch(() => {});
     return filterBlocked(streams, (s) => s?.hostUid || s?.userId || s?.user?.uid);
   } catch (e) {
     console.warn('[DISCOVERY] live now failed', e?.message || String(e));

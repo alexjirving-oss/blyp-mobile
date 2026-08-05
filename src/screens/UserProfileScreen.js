@@ -14,7 +14,7 @@ import {
   Alert,
 } from 'react-native';
 import ReportModal from '../components/ReportModal';
-import { blockUser, unblockUser, isBlockedCached, loadBlockedUsers } from '../services/BlockService';
+import { blockUser, unblockUser, isBlockedCached, loadBlockedUsers, filterBlocked } from '../services/BlockService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc, orderBy, limit, startAfter, getCountFromServer } from 'firebase/firestore';
 import { auth, firestore as db } from '../config/firebase';
@@ -197,7 +197,9 @@ const UserProfileScreen = ({ route, navigation }) => {
       postsCursorRef.current = docs.length ? docs[docs.length - 1] : null;
       postsHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
       const posts = docs.map(d => ({ id: d.id, ...d.data() }));
-      setUserPosts(posts);
+      await loadBlockedUsers().catch(() => {});
+      // Hide admin/report takedowns from public profile grids.
+      setUserPosts(filterBlocked(posts, (p) => p.userId || p.uid));
       console.log(`📱 UserProfile: Loaded first ${posts.length} posts for user ${userId}`);
     } catch (error) {
       console.error('Error fetching user posts:', error);
@@ -238,9 +240,11 @@ const UserProfileScreen = ({ route, navigation }) => {
       postsHasMoreRef.current = docs.length >= PROFILE_PAGE_SIZE;
       const older = docs.map(d => ({ id: d.id, ...d.data() }));
       if (older.length) {
+        await loadBlockedUsers().catch(() => {});
+        const visible = filterBlocked(older, (p) => p.userId || p.uid);
         setUserPosts(prev => {
           const have = new Set(prev.map(p => p.id));
-          const add = older.filter(p => !have.has(p.id));
+          const add = visible.filter(p => !have.has(p.id));
           return add.length ? [...prev, ...add] : prev;
         });
       }

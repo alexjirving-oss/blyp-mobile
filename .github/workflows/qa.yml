@@ -1,8 +1,11 @@
 name: QA
 on: [push, pull_request]
 jobs:
-  audit:
+  # Code gate (AGENTS.md): lint + typecheck + jest + functions + backend + admin.
+  # Replaces the broken prod_audit path under gitignored `_reports/`.
+  verified-forward:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -10,8 +13,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - run: node _reports/prod_audit_v2/run_audit.js
-      - run: node scripts/qa-gate.js
+      - run: npm run verify:forward
 
   accountability:
     runs-on: ubuntu-latest
