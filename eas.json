@@ -68,6 +68,7 @@
         "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3",
         "EXPO_PUBLIC_API_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
         "EXPO_PUBLIC_FUNCTIONS_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
+        "EXPO_PUBLIC_BLYP_SEARCH_URL": "https://us-central1-blyp-master.cloudfunctions.net/blypSearch",
         "EXPO_PUBLIC_ENABLE_GUEST_PUBLISH": "1",
         "EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL": "https://us-central1-blyp-master.cloudfunctions.net",
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyAScxM-7tnuD0532VhY6bvaXvoWVEyDSF8",
