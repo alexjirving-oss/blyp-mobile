@@ -7,7 +7,7 @@
     - Must satisfy P0 acceptance checklist
 */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, StatusBar, FlatList, Alert, Modal, Platform, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, StatusBar, FlatList, Alert, Modal, Platform, useWindowDimensions, BackHandler } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
@@ -43,6 +43,8 @@ import {
   filterPostsByCategory,
   normalizeProfileCategories,
 } from '../utils/profileCategories';
+import { updatePostCategory } from '../services/postEditService';
+import { sharePosts } from '../services/shareService';
 
 type ProfileCategory = { id: string; label: string; order: number };
 type ProfileCategoryChip = { id: string; label: string; count: number };
@@ -174,6 +176,9 @@ const ProfileScreenV3: React.FC = () => {
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [manageCategoriesVisible, setManageCategoriesVisible] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Record<string, true>>({});
+  const [bulkBusy, setBulkBusy] = useState(false);
   const extracting = useRef(false);
   const lastBackfillSig = useRef<string>('');
   const profileHydratedRef = useRef(false);
@@ -849,29 +854,189 @@ const ProfileScreenV3: React.FC = () => {
     return false;
   }, [uid, legacyUserId]);
 
-  const handleDeletePost = useCallback((post: any) => {
-    if (!uid) return;
-    if (!firebaseEnabled) return;
-    if (!post?.id) return;
-    if (!canDeletePost(post)) return;
+  const selectedCount = useMemo(() => Object.keys(selectedIds).length, [selectedIds]);
+  const selectedPosts = useMemo(
+    () => userPosts.filter((p) => p?.id && selectedIds[p.id]),
+    [userPosts, selectedIds],
+  );
 
-    Alert.alert('Delete post', 'Delete this post permanently?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await db.collection('posts').doc(post.id).delete();
-            setUserPosts((prev) => prev.filter((p) => p.id !== post.id));
-            setStats((prev) => ({ ...prev, posts: Math.max(0, safeNumber(prev.posts) - 1) }));
-          } catch (e: any) {
-            Alert.alert('Error', e?.message || 'Failed to delete post');
-          }
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds({});
+    setBulkBusy(false);
+  }, []);
+
+  const enterSelectMode = useCallback((postId?: string) => {
+    setSelectMode(true);
+    if (postId) setSelectedIds({ [postId]: true });
+  }, []);
+
+  const togglePostSelected = useCallback((postId: string) => {
+    if (!postId) return;
+    setSelectedIds((prev) => {
+      const next = { ...prev };
+      if (next[postId]) delete next[postId];
+      else next[postId] = true;
+      return next;
+    });
+  }, []);
+
+  // Android back exits multi-select instead of leaving the tab.
+  useEffect(() => {
+    if (!selectMode) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      exitSelectMode();
+      return true;
+    });
+    return () => sub.remove();
+  }, [selectMode, exitSelectMode]);
+
+  // Leaving My Profile clears selection so Promote/Wallet don't keep a stale bar.
+  useEffect(() => {
+    if (profileTab !== 'myProfile' && selectMode) exitSelectMode();
+  }, [profileTab, selectMode, exitSelectMode]);
+
+  const handleBulkDelete = useCallback(() => {
+    if (!uid || !firebaseEnabled || bulkBusy) return;
+    const ids = Object.keys(selectedIds);
+    if (ids.length === 0) return;
+    const deletable = selectedPosts.filter(canDeletePost);
+    if (deletable.length === 0) {
+      Alert.alert('Nothing to delete', 'None of the selected posts can be deleted.');
+      return;
+    }
+    const n = deletable.length;
+    Alert.alert(
+      'Delete posts',
+      `Delete ${n} selected post${n === 1 ? '' : 's'} permanently? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setBulkBusy(true);
+            let failed = 0;
+            const deletedIds: string[] = [];
+            for (const post of deletable) {
+              try {
+                await db.collection('posts').doc(post.id).delete();
+                deletedIds.push(post.id);
+              } catch {
+                failed += 1;
+              }
+            }
+            if (deletedIds.length > 0) {
+              const gone = new Set(deletedIds);
+              setUserPosts((prev) => prev.filter((p) => !gone.has(p.id)));
+              setStats((prev) => ({
+                ...prev,
+                posts: Math.max(0, safeNumber(prev.posts) - deletedIds.length),
+              }));
+            }
+            setBulkBusy(false);
+            exitSelectMode();
+            if (failed > 0) {
+              Alert.alert(
+                'Partial delete',
+                `Deleted ${deletedIds.length} post${deletedIds.length === 1 ? '' : 's'}; ${failed} failed.`,
+              );
+            }
+          },
         },
-      },
-    ]);
-  }, [uid, firebaseEnabled, canDeletePost]);
+      ],
+    );
+  }, [uid, firebaseEnabled, bulkBusy, selectedIds, selectedPosts, canDeletePost, exitSelectMode]);
+
+  const handleBulkMoveToCategory = useCallback(() => {
+    if (bulkBusy) return;
+    const ids = Object.keys(selectedIds);
+    if (ids.length === 0) return;
+    if (!profileCategories.length) {
+      Alert.alert(
+        'No categories yet',
+        'Tap Manage under your post shelves to create categories first.',
+      );
+      return;
+    }
+    Alert.alert(
+      'Move to category',
+      `Assign ${ids.length} selected post${ids.length === 1 ? '' : 's'} to a shelf`,
+      [
+        ...profileCategories.map((c) => ({
+          text: c.label,
+          onPress: async () => {
+            setBulkBusy(true);
+            let failed = 0;
+            for (const id of ids) {
+              const res = await updatePostCategory(id, c.id);
+              if (!res?.ok) failed += 1;
+              else {
+                setUserPosts((prev) =>
+                  prev.map((p) => (p.id === id ? { ...p, categoryId: c.id } : p)),
+                );
+              }
+            }
+            setBulkBusy(false);
+            exitSelectMode();
+            if (failed > 0) {
+              Alert.alert('Partial update', `${ids.length - failed} moved; ${failed} failed.`);
+            }
+          },
+        })),
+        {
+          text: 'Clear category',
+          style: 'destructive' as const,
+          onPress: async () => {
+            setBulkBusy(true);
+            let failed = 0;
+            for (const id of ids) {
+              const res = await updatePostCategory(id, null);
+              if (!res?.ok) failed += 1;
+              else {
+                setUserPosts((prev) =>
+                  prev.map((p) => (p.id === id ? { ...p, categoryId: null } : p)),
+                );
+              }
+            }
+            setBulkBusy(false);
+            exitSelectMode();
+            if (failed > 0) {
+              Alert.alert('Partial update', `${ids.length - failed} cleared; ${failed} failed.`);
+            }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  }, [bulkBusy, selectedIds, profileCategories, exitSelectMode]);
+
+  const handleBulkShare = useCallback(async () => {
+    if (bulkBusy || selectedPosts.length === 0) return;
+    setBulkBusy(true);
+    try {
+      await sharePosts(selectedPosts);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [bulkBusy, selectedPosts]);
+
+  const onPostCardPress = useCallback((post: any) => {
+    if (selectMode) {
+      togglePostSelected(post.id);
+      return;
+    }
+    handlePostPress(post);
+  }, [selectMode, togglePostSelected, handlePostPress]);
+
+  const onPostCardLongPress = useCallback((post: any) => {
+    if (!canDeletePost(post)) return;
+    if (selectMode) {
+      togglePostSelected(post.id);
+      return;
+    }
+    enterSelectMode(post.id);
+  }, [canDeletePost, selectMode, togglePostSelected, enterSelectMode]);
 
   const renderPostItem = useCallback(({ item: post }: { item: any }) => {
     // TikTok-style cover: always show a still image (the video's poster frame),
@@ -884,12 +1049,13 @@ const ProfileScreenV3: React.FC = () => {
       : pickStr(post.imageUrl, post.thumbnail, post.media?.[0]?.url, post.mediaUrl);
 
     const title = String(post?.title || post?.captionTitle || '').trim();
+    const isSelected = !!(post?.id && selectedIds[post.id]);
 
     return (
       <TouchableOpacity
-        style={styles.postCard}
-        onPress={() => handlePostPress(post)}
-        onLongPress={() => handleDeletePost(post)}
+        style={[styles.postCard, selectMode && isSelected && styles.postCardSelected]}
+        onPress={() => onPostCardPress(post)}
+        onLongPress={() => onPostCardLongPress(post)}
         delayLongPress={400}
         activeOpacity={0.8}
       >
@@ -900,12 +1066,20 @@ const ProfileScreenV3: React.FC = () => {
             <Icon name={"image" as any} size={24} color={theme.colors.textMuted} style={{}} strokeWidth={undefined} />
           </View>
         )}
-        <View style={styles.postOverlay}>
-          <View pointerEvents="none" style={styles.postOverlayBg} />
-          {post.type === 'video' && (
-            <Icon name={"play-circle" as any} size={20} color={theme.colors.textPrimary} style={{}} strokeWidth={undefined} />
-          )}
-        </View>
+        {selectMode ? (
+          <View style={[styles.selectCheck, isSelected && styles.selectCheckOn]}>
+            {isSelected ? (
+              <Icon name={"checkmark" as any} size={14} color="#fff" style={{}} strokeWidth={undefined} />
+            ) : null}
+          </View>
+        ) : (
+          <View style={styles.postOverlay}>
+            <View pointerEvents="none" style={styles.postOverlayBg} />
+            {post.type === 'video' && (
+              <Icon name={"play-circle" as any} size={20} color={theme.colors.textPrimary} style={{}} strokeWidth={undefined} />
+            )}
+          </View>
+        )}
         <View style={styles.postMeta}>
           <View pointerEvents="none" style={styles.postMetaBg} />
           {!!title && (
@@ -926,7 +1100,7 @@ const ProfileScreenV3: React.FC = () => {
         </View>
       </TouchableOpacity>
     );
-  }, [handlePostPress, styles, theme]);
+  }, [onPostCardPress, onPostCardLongPress, selectedIds, selectMode, styles, theme]);
 
   // For the virtualized posts grid: pad the last row to a multiple of 3 with
   // invisible placeholders so 3-up cells never stretch on a short final row.
@@ -1127,7 +1301,13 @@ const ProfileScreenV3: React.FC = () => {
             keyExtractor={(item: any) => item.id}
             numColumns={3}
             columnWrapperStyle={styles.profileGridRow}
-            contentContainerStyle={[styles.scrollContent, { paddingTop: 8, paddingBottom: tabBarHeight + theme.spacing.xl }]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              {
+                paddingTop: 8,
+                paddingBottom: tabBarHeight + theme.spacing.xl + (selectMode ? 72 : 0),
+              },
+            ]}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />}
             showsVerticalScrollIndicator={false}
             onEndReached={() => { void loadMorePosts(); }}
@@ -1180,13 +1360,28 @@ const ProfileScreenV3: React.FC = () => {
                 />
 
                 <View style={styles.postsSectionHeader}>
-                  <Text style={styles.postsSectionTitle}>My Posts</Text>
-                  <View style={styles.postsCountBadge}>
-                    <Text style={styles.postsCountText}>
-                      {filteredPosts.length}
-                    </Text>
-                  </View>
+                  <Text style={styles.postsSectionTitle}>
+                    {selectMode ? `${selectedCount} selected` : 'My Posts'}
+                  </Text>
+                  {selectMode ? (
+                    <TouchableOpacity
+                      onPress={exitSelectMode}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      style={styles.selectDoneBtn}
+                    >
+                      <Text style={styles.selectDoneText}>Done</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.postsCountBadge}>
+                      <Text style={styles.postsCountText}>
+                        {filteredPosts.length}
+                      </Text>
+                    </View>
+                  )}
                 </View>
+                {!selectMode && filteredPosts.length > 0 ? (
+                  <Text style={styles.selectHint}>Long-press a post to select</Text>
+                ) : null}
               </>
             )}
             ListEmptyComponent={(
@@ -1237,6 +1432,51 @@ const ProfileScreenV3: React.FC = () => {
               setProfile((prev: any) => ({ ...(prev || {}), profileCategories: next }));
             }}
           />
+          {selectMode ? (
+            <View style={[styles.bulkBar, { bottom: tabBarHeight }]}>
+              <TouchableOpacity
+                style={styles.bulkAction}
+                onPress={handleBulkMoveToCategory}
+                disabled={bulkBusy || selectedCount === 0}
+                accessibilityLabel="Move selected to category"
+              >
+                <Icon name={"pricetag" as any} size={20} color={theme.colors.textPrimary} style={{}} strokeWidth={undefined} />
+                <Text style={styles.bulkActionText}>Category</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.bulkAction}
+                onPress={handleBulkShare}
+                disabled={bulkBusy || selectedCount === 0}
+                accessibilityLabel="Share selected"
+              >
+                <Icon name={"share-outline" as any} size={20} color={theme.colors.textPrimary} style={{}} strokeWidth={undefined} />
+                <Text style={styles.bulkActionText}>Share</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.bulkAction}
+                onPress={handleBulkDelete}
+                disabled={bulkBusy || selectedCount === 0}
+                accessibilityLabel="Delete selected"
+              >
+                <Icon name={"trash-outline" as any} size={20} color={theme.colors.accent} style={{}} strokeWidth={undefined} />
+                <Text style={[styles.bulkActionText, { color: theme.colors.accent }]}>Delete</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.bulkAction}
+                onPress={exitSelectMode}
+                disabled={bulkBusy}
+                accessibilityLabel="Cancel selection"
+              >
+                <Icon name={"close" as any} size={20} color={theme.colors.textMuted} style={{}} strokeWidth={undefined} />
+                <Text style={[styles.bulkActionText, { color: theme.colors.textMuted }]}>Cancel</Text>
+              </TouchableOpacity>
+              {bulkBusy ? (
+                <View style={styles.bulkBusyOverlay}>
+                  <ActivityIndicator color={theme.colors.accent} size="small" />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
           </>
         ) : (
           <ScrollView
@@ -1815,6 +2055,81 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
     color: theme.colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
+  },
+  selectDoneBtn: {
+    marginLeft: 'auto' as any,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  selectDoneText: {
+    color: theme.colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  selectHint: {
+    color: theme.colors.textMuted,
+    fontSize: 12,
+    paddingHorizontal: 20,
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  postCardSelected: {
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+  },
+  selectCheck: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  selectCheckOn: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  bulkBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    backgroundColor: theme.colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border,
+    zIndex: 20,
+  },
+  bulkAction: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    minWidth: 64,
+    paddingVertical: 4,
+  },
+  bulkActionText: {
+    color: theme.colors.textPrimary,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  bulkBusyOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   postsEmptyState: {
     alignItems: 'center',

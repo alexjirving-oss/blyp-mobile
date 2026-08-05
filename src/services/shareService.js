@@ -74,6 +74,21 @@ export async function sharePost(post) {
   });
 }
 
+/** Share one or many posts in a single sheet (combined links when multi). */
+export async function sharePosts(posts) {
+  const list = (Array.isArray(posts) ? posts : []).filter((p) => p?.id);
+  if (list.length === 0) return false;
+  if (list.length === 1) return sharePost(list[0]);
+  const lines = list.map((post) => {
+    const title = post.title || post.captionTitle || post.caption || post.description || 'a post';
+    return `• "${title}"\n${postWebUrl(post)}`;
+  });
+  return safeShare({
+    title: 'Share posts',
+    message: `Check out these posts on Blyp\n\n${lines.join('\n\n')}`,
+  });
+}
+
 export async function shareProfile(user) {
   const id = user?.id || user?.uid || user?.userId;
   if (!id) return false;
@@ -101,4 +116,4 @@ export async function shareUrl(url, title) {
   return safeShare({ title: 'Share link', message: `${lead}${u}`, url: u });
 }
 
-export default { postUrl, postWebUrl, userUrl, blypUrl, sharePost, shareProfile, shareBlyp, shareUrl };
+export default { postUrl, postWebUrl, userUrl, blypUrl, sharePost, sharePosts, shareProfile, shareBlyp, shareUrl };
