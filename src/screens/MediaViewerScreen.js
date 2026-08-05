@@ -798,6 +798,24 @@ const MediaViewerItem = ({
               </TouchableOpacity>
             )}
           </TouchableOpacity>
+          <View style={styles.topStatCluster} pointerEvents="none">
+            <View style={styles.topStatPill}>
+              <Icon name="eye-outline" size={14} color={COLORS.white} />
+              <Text style={styles.topStatText} allowFontScaling={false}>
+                {formatCount(getPostViewCount(actualPost))}
+              </Text>
+            </View>
+            <View style={styles.topStatPill}>
+              <Icon name="gift" size={14} color={COLORS.white} />
+              <Text style={styles.topStatText} allowFontScaling={false}>
+                {formatCount(Math.max(
+                  Number(giftCoinsLocal) || 0,
+                  Number(actualPost?.giftCoins) || 0,
+                  Number(actualPost?.coinsReceived) || 0,
+                ))}
+              </Text>
+            </View>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -861,10 +879,6 @@ const MediaViewerItem = ({
           >
             <Icon name="share" size={28} color={COLORS.white} />
           </FeedActionButton>
-
-          <FeedStatBadge count={getPostViewCount(actualPost)}>
-            <Icon name="eye-outline" size={26} color={COLORS.white} />
-          </FeedStatBadge>
 
           <View style={styles.giftSlot}>
             <GiftSystem
@@ -1296,14 +1310,41 @@ const styles = StyleSheet.create({
   // ----- Creator pill in the top row (mirrors For You's userPillTopLeft) -----
   userPillWrap: {
     flex: 1,
-    alignItems: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginHorizontal: 10,
+    minWidth: 0,
+  },
+  topStatCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  topStatPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,10,12,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  topStatText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '700',
+    includeFontPadding: false,
   },
   creatorPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    maxWidth: '100%',
+    flexShrink: 1,
+    maxWidth: '58%',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,

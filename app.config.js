@@ -150,6 +150,7 @@ module.exports = () => {
       bundler: 'metro',
     },
     plugins: [
+      'react-native-compressor',
       [
         'expo-camera',
         {

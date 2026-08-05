@@ -31,6 +31,7 @@ import { normalizeProfileCategories } from '../utils/profileCategories';
 import { useHasAI, useEntitlement } from '../hooks/useEntitlement';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { uploadMediaToStorage } from '../utils/uploadMediaToStorage';
+import { prepareMediaForUpload } from '../utils/prepareMediaForUpload';
 import Toast from 'react-native-toast-message';
 import BlypLogo from '../components/BlypLogo';
 import aiService from '../services/aiService';
@@ -1401,6 +1402,8 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
         mediaTypes: ImagePicker.MediaTypeOptions.All,
         allowsMultipleSelection: true,
         quality: 0.8,
+        // Cap capture length so uploads stay TikTok-ish in size/time.
+        videoMaxDuration: 60,
       });
 
       if (!result.canceled && result.assets?.length > 0) {
@@ -2243,6 +2246,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
         quality: 0.8,
+        videoMaxDuration: 60,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -2346,46 +2350,68 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     const contentType =
       kind === 'video' ? 'video/mp4' : kind === 'audio' ? 'audio/m4a' : 'image/jpeg';
 
-    const uploaded = await uploadMediaToStorage({
-      localUri: mediaUri,
+    // Compress large videos before Storage (TikTok-style client prep). Soft-fails.
+    let uploadUri = mediaUri;
+    if (kind === 'video') {
+      try {
+        const prepared = await prepareMediaForUpload(mediaUri, 'video');
+        if (prepared?.uri) uploadUri = prepared.uri;
+        console.log('📤 Media prep', {
+          compressed: !!prepared?.compressed,
+          originalBytes: prepared?.originalBytes,
+          compressedBytes: prepared?.compressedBytes,
+          reason: prepared?.reason,
+        });
+      } catch (prepErr) {
+        console.warn('📤 Media prep skipped', prepErr?.message || prepErr);
+      }
+    }
+
+    const uploadedPromise = uploadMediaToStorage({
+      localUri: uploadUri,
       storagePath: filePath,
       contentType,
       timeoutMs: kind === 'video' ? 180000 : 90000,
     });
-    const downloadURL = uploaded.downloadURL;
-    console.log('📤 Upload complete, download URL:', downloadURL);
 
     let thumbnailUrl = null;
 
-    // Generate thumbnail for videos (short budget — never block publish).
+    // TikTok-style: don't serialize thumb after the full video upload — generate
+    // + upload thumb in parallel with the main media so publish isn't 2x wait.
+    let thumbWork = Promise.resolve(null);
     if (kind === 'video') {
-      try {
-        console.log('🎬 Generating video thumbnail...');
-        const thumbnailPromise = VideoThumbnails.getThumbnailAsync(mediaUri, {
-          time: 0,
-          quality: 0.6,
-        });
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Thumbnail generation timeout')), 5000)
-        );
-        const { uri: thumbnailUri } = await Promise.race([thumbnailPromise, timeoutPromise]);
-        console.log('✅ Thumbnail generated:', thumbnailUri);
-
-        const thumbnailFileName = `thumbnail-${Date.now()}.jpg`;
-        const thumbPath = `users/${fbUser.uid}/thumbnails/${thumbnailFileName}`;
-        const thumbUploaded = await uploadMediaToStorage({
-          localUri: thumbnailUri,
-          storagePath: thumbPath,
-          contentType: 'image/jpeg',
-          timeoutMs: 30000,
-        });
-        thumbnailUrl = thumbUploaded.downloadURL;
-        console.log('✅ Thumbnail uploaded:', thumbnailUrl);
-      } catch (error) {
-        console.error('⚠️ Failed to generate thumbnail:', error);
-        console.log('📱 Continuing without thumbnail...');
-      }
+      thumbWork = (async () => {
+        try {
+          console.log('🎬 Generating video thumbnail (parallel with upload)...');
+          const thumbnailPromise = VideoThumbnails.getThumbnailAsync(mediaUri, {
+            time: 0,
+            quality: 0.55,
+          });
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Thumbnail generation timeout')), 5000)
+          );
+          const { uri: thumbnailUri } = await Promise.race([thumbnailPromise, timeoutPromise]);
+          const thumbnailFileName = `thumbnail-${Date.now()}.jpg`;
+          const thumbPath = `users/${fbUser.uid}/thumbnails/${thumbnailFileName}`;
+          const thumbUploaded = await uploadMediaToStorage({
+            localUri: thumbnailUri,
+            storagePath: thumbPath,
+            contentType: 'image/jpeg',
+            timeoutMs: 30000,
+          });
+          return thumbUploaded.downloadURL;
+        } catch (error) {
+          console.error('⚠️ Failed to generate thumbnail:', error);
+          return null;
+        }
+      })();
     }
+
+    const [uploaded, thumbResult] = await Promise.all([uploadedPromise, thumbWork]);
+    const downloadURL = uploaded.downloadURL;
+    thumbnailUrl = thumbResult;
+    console.log('📤 Upload complete, download URL:', downloadURL);
+    if (thumbnailUrl) console.log('✅ Thumbnail uploaded:', thumbnailUrl);
 
     let normalizedType = 'image';
     if (kind === 'video') normalizedType = 'video';

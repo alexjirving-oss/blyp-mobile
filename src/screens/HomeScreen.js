@@ -28,6 +28,7 @@ import HeaderWalletBalances from '../components/HeaderWalletBalances';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import FeedEmptyState from '../components/Feed/FeedEmptyState';
+import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
 import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
@@ -255,7 +256,7 @@ const HomeScreen = ({ navigation, route }) => {
   const [selectedPost, setSelectedPost] = useState(null);
   // Header height state (measured). Use a default until first layout pass.
   const [headerHeight, setHeaderHeight] = useState(0);
-  const [descriptionVisibleIndex, setDescriptionVisibleIndex] = useState(0); // active index showing full description
+  const [descriptionVisibleIndex, setDescriptionVisibleIndex] = useState(null); // only after "Show details"
   const descriptionHideTimeout = useRef(null);
   const [userPillLayout, setUserPillLayout] = useState({ width: 0, height: 0 });
   const [feedHeight, setFeedHeight] = useState(0);
@@ -431,6 +432,7 @@ const HomeScreen = ({ navigation, route }) => {
     currentDiscoverIndexRef.current = currentDiscoverIndex;
   }, [currentDiscoverIndex]);
 
+  // Details stay off by default. "Show details" reveals them briefly, then hides again.
   const showDescriptionForIndex = useCallback((index) => {
     setDescriptionVisibleIndex(index);
     if (descriptionHideTimeout.current) {
@@ -438,26 +440,23 @@ const HomeScreen = ({ navigation, route }) => {
     }
     descriptionHideTimeout.current = setTimeout(() => {
       setDescriptionVisibleIndex(null);
-    }, 2000);
+    }, 3500);
   }, []);
 
   const handleShowDescription = (index) => {
     showDescriptionForIndex(index);
   };
 
-  // Ensure the active #4ME post shows details immediately when the tab/screen becomes active.
+  // Clear any open details overlay when leaving For You / losing focus.
   useEffect(() => {
-    if (selectedTab !== 'A' || !isScreenFocused) return;
-    if (randomPosts.length === 0) return;
-    showDescriptionForIndex(currentDiscoverIndex);
-
-    return () => {
+    if (selectedTab !== 'A' || !isScreenFocused) {
+      setDescriptionVisibleIndex(null);
       if (descriptionHideTimeout.current) {
         clearTimeout(descriptionHideTimeout.current);
         descriptionHideTimeout.current = null;
       }
-    };
-  }, [selectedTab, isScreenFocused, randomPosts.length, currentDiscoverIndex, showDescriptionForIndex]);
+    }
+  }, [selectedTab, isScreenFocused]);
 
   useEffect(() => {
     const animateComments = () => {
@@ -1156,7 +1155,7 @@ const HomeScreen = ({ navigation, route }) => {
     });
     const first = viewableItems[0];
     if (typeof first.index === 'number') {
-      showDescriptionForIndex(first.index);
+      setDescriptionVisibleIndex(null);
       setCurrentDiscoverIndex(first.index);
       console.log('ðŸŽ¯ #4ME active index updated', first.index);
     }
@@ -1173,7 +1172,7 @@ const HomeScreen = ({ navigation, route }) => {
       const nextIndex = Math.min(maxIndex, Math.max(0, rawIndex));
       if (nextIndex !== currentDiscoverIndexRef.current) {
         currentDiscoverIndexRef.current = nextIndex;
-        showDescriptionForIndex(nextIndex);
+        setDescriptionVisibleIndex(null);
         setCurrentDiscoverIndex(nextIndex);
         setPausedFeedId(null);
       }
@@ -1182,7 +1181,7 @@ const HomeScreen = ({ navigation, route }) => {
         loadMoreForYou();
       }
     },
-    [feedHeight, randomPosts?.length, showDescriptionForIndex, loadMoreForYou]
+    [feedHeight, randomPosts?.length, loadMoreForYou]
   );
 
   // Active item resolver for #4ME feed
@@ -1266,61 +1265,67 @@ const HomeScreen = ({ navigation, route }) => {
     const hasMultipleMedia = mediaItems.length > 1;
     const isActive = isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex;
     const showFullDescription = isActive && descriptionVisibleIndex === index;
+    const giftTotal = giftCoinCounts?.[item.id] ?? getPostGiftCoins(item);
+    const viewTotal = getPostViewCount(item);
     const pillTop = 12;
     const pillLeft = 12;
-    const pillRightGap = 10;
     const showDetailsTop = pillTop + (userPillLayout?.height || 0) + 10;
-    const reservedLeft = pillLeft + (userPillLayout?.width || 0) + pillRightGap;
-    const availableRightSpace = screenWidth - reservedLeft - 12;
-    const canPlaceDescriptionRight = availableRightSpace >= 160;
 
     // Full-bleed premium player: cover for portrait, smart contain for wide.
     const cellHeight = feedHeight || screenHeight;
 
     return (
       <View style={[styles.videoContainer, { height: cellHeight }]}>
-        <View
-          style={styles.userPillTopLeft}
-          pointerEvents="box-none"
-          onLayout={
-            isActive
-              ? (e) => {
-                const { width, height } = e?.nativeEvent?.layout || {};
-                if (!width || !height) return;
-                setUserPillLayout((prev) => {
-                  if (prev.width === width && prev.height === height) return prev;
-                  return { width, height };
-                });
-              }
-              : undefined
-          }
-        >
-          <TouchableOpacity
-            style={styles.creatorPill}
-            activeOpacity={0.88}
-            onPress={() => handleUserProfilePress(item.user, item)}
+        <View style={styles.topMetaRow} pointerEvents="box-none">
+          <View
+            style={styles.userPillInRow}
+            pointerEvents="box-none"
+            onLayout={
+              isActive
+                ? (e) => {
+                  const { width, height } = e?.nativeEvent?.layout || {};
+                  if (!width || !height) return;
+                  setUserPillLayout((prev) => {
+                    if (prev.width === width && prev.height === height) return prev;
+                    return { width, height };
+                  });
+                }
+                : undefined
+            }
           >
-            <Image
-              source={{
-                uri:
-                  item.userPhotoURL ||
-                  item.user?.avatar ||
-                  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-              }}
-              style={styles.creatorAvatar}
-              resizeMethod="resize"
-            />
-            <View style={styles.creatorMeta}>
-              <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
-                @{item.userDisplayName || item.user?.displayName || item.user?.username || item.username || 'user'}
-              </Text>
-              {(item.title || item.captionTitle) ? (
-                <Text style={styles.creatorCaption} allowFontScaling={false} numberOfLines={1}>
-                  {item.title || item.captionTitle}
+            <TouchableOpacity
+              style={styles.creatorPill}
+              activeOpacity={0.88}
+              onPress={() => handleUserProfilePress(item.user, item)}
+            >
+              <Image
+                source={{
+                  uri:
+                    item.userPhotoURL ||
+                    item.user?.avatar ||
+                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+                }}
+                style={styles.creatorAvatar}
+                resizeMethod="resize"
+              />
+              <View style={styles.creatorMeta}>
+                <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
+                  @{item.userDisplayName || item.user?.displayName || item.user?.username || item.username || 'user'}
                 </Text>
-              ) : null}
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.topStatCluster} pointerEvents="none">
+            <View style={styles.topStatPill}>
+              <Icon name="eye-outline" size={14} color={COLORS.white} />
+              <Text style={styles.topStatText} allowFontScaling={false}>{formatCount(viewTotal)}</Text>
             </View>
-          </TouchableOpacity>
+            <View style={styles.topStatPill}>
+              <Icon name="gift" size={14} color={COLORS.white} />
+              <Text style={styles.topStatText} allowFontScaling={false}>{formatCount(giftTotal)}</Text>
+            </View>
+          </View>
         </View>
 
         {hasMultipleMedia ? (
@@ -1426,17 +1431,13 @@ const HomeScreen = ({ navigation, route }) => {
             <Icon name="share" size={26} color={COLORS.white} />
           </FeedActionButton>
 
-          <FeedStatBadge count={getPostViewCount(item)}>
-            <Icon name="eye-outline" size={24} color={COLORS.white} />
-          </FeedStatBadge>
-
           <View style={styles.actionButton}>
             <GiftSystem
               postId={item.id}
               creatorId={item.uid || item.userId}
               creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
               triggerVariant="feed"
-              giftCoins={giftCoinCounts?.[item.id] ?? getPostGiftCoins(item)}
+              giftCoins={giftTotal}
               onGiftSent={({ postId, coinSpent }) => {
                 const id = String(postId || item.id);
                 const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
@@ -1459,14 +1460,24 @@ const HomeScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Full description overlay (auto hides after 2s) */}
+        <FeedCommentOverlay
+          postId={item.id}
+          active={isActive}
+          bottomInset={96}
+          onCountChange={(postId, count) => {
+            setCommentCounts((prev) => {
+              if (prev?.[postId] === count) return prev;
+              return { ...prev, [postId]: count };
+            });
+          }}
+        />
+
+        {/* Full description overlay — only after Show details */}
         {showFullDescription && (
           <View
             style={[
               styles.descriptionOverlayTop,
-              canPlaceDescriptionRight
-                ? { top: pillTop, left: reservedLeft, right: 72 }
-                : { top: showDetailsTop, right: 72 },
+              { top: showDetailsTop, left: 12, right: 88 },
             ]}
           >
             <Text style={styles.postTitle} numberOfLines={1} allowFontScaling={false}>
@@ -1480,7 +1491,7 @@ const HomeScreen = ({ navigation, route }) => {
           </View>
         )}
 
-        {/* Collapsed info chip */}
+        {/* Collapsed info chip — default state */}
         {isActive && !showFullDescription && (
           <TouchableOpacity
             style={[
@@ -1929,6 +1940,46 @@ const styles = StyleSheet.create({
     elevation: 1000,
     alignItems: 'center',
     gap: 14,
+    maxHeight: '48%',
+    justifyContent: 'flex-end',
+  },
+  topMetaRow: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    right: 72,
+    zIndex: 1200,
+    elevation: 1200,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  userPillInRow: {
+    flexShrink: 1,
+    maxWidth: '62%',
+  },
+  topStatCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  topStatPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,10,12,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  topStatText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '700',
+    includeFontPadding: false,
   },
   expandBtn: {
     width: 44,

@@ -93,11 +93,43 @@ export async function uploadMediaToStorage({ localUri, storagePath, contentType,
   });
 
   const runUpload = async (authHeader) => {
-    const uploadPromise = FileSystem.uploadAsync(uploadUrl, fileUri, {
-      httpMethod: 'POST',
-      uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-      headers: { Authorization: authHeader, 'Content-Type': ctype },
-    });
+    // Progress-aware upload for large media (cancelable task). Not true byte-resume
+    // across process death — that needs GCS resumable sessions — but avoids silent stalls.
+    const useTask =
+      typeof FileSystem.createUploadTask === 'function' &&
+      info.size != null &&
+      Number(info.size) >= 2 * 1024 * 1024;
+
+    const uploadPromise = useTask
+      ? new Promise((resolve, reject) => {
+          let lastPct = -1;
+          const task = FileSystem.createUploadTask(
+            uploadUrl,
+            fileUri,
+            {
+              httpMethod: 'POST',
+              uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+              headers: { Authorization: authHeader, 'Content-Type': ctype },
+            },
+            (data) => {
+              const total = Number(data?.totalBytesExpectedToSend || info.size || 0);
+              const sent = Number(data?.totalBytesSent || 0);
+              if (!(total > 0)) return;
+              const pct = Math.min(100, Math.round((sent / total) * 100));
+              if (pct >= lastPct + 10 || pct === 100) {
+                lastPct = pct;
+                console.log('[STORAGE_UPLOAD] progress', { storagePath, pct, sent, total });
+              }
+            },
+          );
+          task.uploadAsync().then(resolve).catch(reject);
+        })
+      : FileSystem.uploadAsync(uploadUrl, fileUri, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: { Authorization: authHeader, 'Content-Type': ctype },
+        });
+
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(
         () => reject(new Error(`Upload timed out after ${Math.round(limitMs / 1000)}s. Check your connection and try again.`)),
@@ -107,74 +139,71 @@ export async function uploadMediaToStorage({ localUri, storagePath, contentType,
     return Promise.race([uploadPromise, timeoutPromise]);
   };
 
-  // Firebase Storage REST accepts either "Firebase <token>" or "Bearer <token>".
-  const attemptHeaders = () => [
-    `Firebase ${token}`,
-    `Bearer ${token}`,
-  ];
-
+  // Prefer Firebase ID-token auth. Only re-upload after a real 401 with a refreshed
+  // token — never retry Bearer/Firebase schemes that each ship the full video again.
   let lastErr = null;
+  let authHeader = `Firebase ${token}`;
   for (let round = 0; round < 2; round += 1) {
-    for (let i = 0; i < attemptHeaders().length; i += 1) {
-      const authHeader = attemptHeaders()[i];
+    try {
+      const result = await runUpload(authHeader);
+
+      const status = Number(result?.status || 0);
+      let body = null;
       try {
-        const result = await runUpload(authHeader);
-
-        const status = Number(result?.status || 0);
-        let body = null;
-        try {
-          body = result?.body ? JSON.parse(result.body) : null;
-        } catch {
-          body = { raw: String(result?.body || '').slice(0, 300) };
-        }
-
-        if (status === 401 || status === 403) {
-          lastErr = new Error(
-            body?.error?.message || body?.error || body?.raw || `HTTP ${status}`,
-          );
-          console.warn('[STORAGE_UPLOAD] auth/forbidden', { attempt: i + 1, status });
-          if (status === 401 && round === 0) {
-            token = await user.getIdToken(true);
-          }
-          continue;
-        }
-
-        if (status < 200 || status >= 300) {
-          const msg =
-            body?.error?.message ||
-            body?.error ||
-            body?.raw ||
-            `HTTP ${status}`;
-          lastErr = new Error(`storage_upload_http_${status}: ${msg}`);
-          console.warn('[STORAGE_UPLOAD] attempt failed', {
-            attempt: i + 1,
-            status,
-            msg: String(msg).slice(0, 200),
-          });
-          continue;
-        }
-
-        const downloadToken =
-          body?.downloadTokens ||
-          body?.downloadToken ||
-          (typeof body?.metadata?.downloadTokens === 'string'
-            ? body.metadata.downloadTokens
-            : null);
-
-        const encodedPath = encodeURIComponent(storagePath).replace(/%2F/g, '%2F');
-        const downloadURL = downloadToken
-          ? `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${downloadToken}`
-          : `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media`;
-
-        console.log('[STORAGE_UPLOAD] ok', { storagePath, status, hasToken: !!downloadToken });
-        return { downloadURL, fullPath: storagePath, bucket, meta: body };
-      } catch (e) {
-        lastErr = e instanceof Error ? e : new Error(String(e));
-        console.warn('[STORAGE_UPLOAD] attempt threw', {
-          attempt: i + 1,
-          message: lastErr.message,
-        });
+        body = result?.body ? JSON.parse(result.body) : null;
+      } catch {
+        body = { raw: String(result?.body || '').slice(0, 300) };
       }
+
+      if (status === 401 || status === 403) {
+        lastErr = new Error(
+          body?.error?.message || body?.error || body?.raw || `HTTP ${status}`,
+        );
+        console.warn('[STORAGE_UPLOAD] auth/forbidden', { round: round + 1, status });
+        if (status === 401 && round === 0) {
+          token = await user.getIdToken(true);
+          authHeader = `Firebase ${token}`;
+          continue;
+        }
+        break;
+      }
+
+      if (status < 200 || status >= 300) {
+        const msg =
+          body?.error?.message ||
+          body?.error ||
+          body?.raw ||
+          `HTTP ${status}`;
+        lastErr = new Error(`storage_upload_http_${status}: ${msg}`);
+        console.warn('[STORAGE_UPLOAD] failed', {
+          round: round + 1,
+          status,
+          msg: String(msg).slice(0, 200),
+        });
+        break;
+      }
+
+      const downloadToken =
+        body?.downloadTokens ||
+        body?.downloadToken ||
+        (typeof body?.metadata?.downloadTokens === 'string'
+          ? body.metadata.downloadTokens
+          : null);
+
+      const encodedPath = encodeURIComponent(storagePath).replace(/%2F/g, '%2F');
+      const downloadURL = downloadToken
+        ? `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media&token=${downloadToken}`
+        : `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodedPath}?alt=media`;
+
+      console.log('[STORAGE_UPLOAD] ok', { storagePath, status, hasToken: !!downloadToken });
+      return { downloadURL, fullPath: storagePath, bucket, meta: body };
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      console.warn('[STORAGE_UPLOAD] threw', {
+        round: round + 1,
+        message: lastErr.message,
+      });
+      break;
     }
   }
 
