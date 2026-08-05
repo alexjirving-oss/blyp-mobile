@@ -33,6 +33,8 @@ import {
 } from '../utils/profileCategories';
 import { conversationsMessagingService } from '../services/messaging';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+import useIsAdmin from '../hooks/useIsAdmin';
+import { adminBanUser, adminSetAccountFeedPriority, FEED_PRIORITY_TIERS } from '../api/adminLiveApi';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -43,6 +45,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   // which would otherwise throw on destructure and crash the screen.
   const { userId, username } = route?.params || {};
   const { uid: cognitoUid, user: authUser, getDisplayName } = useAuth();
+  const { isAdmin } = useIsAdmin();
   const [userProfile, setUserProfile] = useState(null);
   const [userPosts, setUserPosts] = useState([]);
   const [postCount, setPostCount] = useState(null);
@@ -86,7 +89,7 @@ const UserProfileScreen = ({ route, navigation }) => {
             text: 'Unblock user',
             onPress: async () => {
               try { await unblockUser(userId); setBlocked(false); Toast.show({ type: 'success', text1: 'Unblocked', position: 'bottom' }); }
-              catch (e) { Alert.alert('Couldn’t unblock', e?.message || 'Please try again.'); }
+              catch (e) { Alert.alert('Could not unblock', e?.message || 'Please try again.'); }
             },
           }
         : {
@@ -95,7 +98,7 @@ const UserProfileScreen = ({ route, navigation }) => {
             onPress: () => {
               Alert.alert(
                 'Block user',
-                'You won’t see their posts, comments or messages, and they won’t be able to message you. You can unblock them from their profile.',
+                'You will not see their posts, comments or messages, and they will not be able to message you. You can unblock them from their profile.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   {
@@ -103,17 +106,67 @@ const UserProfileScreen = ({ route, navigation }) => {
                     style: 'destructive',
                     onPress: async () => {
                       try { await blockUser(userId); setBlocked(true); Toast.show({ type: 'success', text1: 'Blocked', position: 'bottom' }); }
-                      catch (e) { Alert.alert('Couldn’t block', e?.message || 'Please try again.'); }
+                      catch (e) { Alert.alert('Could not block', e?.message || 'Please try again.'); }
                     },
                   },
                 ]
               );
             },
           },
-      { text: 'Cancel', style: 'cancel' },
     ];
+    if (isAdmin) {
+      actions.push({
+        text: 'Admin · account feed priority',
+        onPress: () => {
+          Alert.alert(
+            'Account feed priority',
+            'Set this users For You / discovery weight (all their posts). Combines additively with per-post priority.',
+            [
+              ...FEED_PRIORITY_TIERS.map((tier) => ({
+                text: `${tier.label} (${tier.hint})`,
+                onPress: async () => {
+                  try {
+                    await adminSetAccountFeedPriority(userId, tier.value);
+                    Toast.show({ type: 'success', text1: 'Account priority updated', text2: tier.label, position: 'bottom', visibilityTime: 1500 });
+                  } catch (e) {
+                    const code = String(e?.code || '');
+                    const msg = code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
+                      ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS.'
+                      : e?.message || 'Could not update account priority.';
+                    Alert.alert('Admin action failed', msg);
+                  }
+                },
+              })),
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+        },
+      });
+      actions.push({
+        text: 'Admin · ban user',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('Ban user (admin)', 'Ban this user platform-wide?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Ban',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await adminBanUser(userId, { reason: 'Banned from mobile profile admin' });
+                  Toast.show({ type: 'success', text1: 'User banned', position: 'bottom' });
+                } catch (e) {
+                  Alert.alert('Admin action failed', e?.message || 'Could not ban user.');
+                }
+              },
+            },
+          ]);
+        },
+      });
+    }
+    actions.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert(userProfile?.displayName || 'Options', '', actions);
-  }, [userId, currentUserId, blocked, userProfile?.displayName]);
+  }, [userId, currentUserId, blocked, userProfile?.displayName, isAdmin]);
 
   const fetchUserProfile = async () => {
     try {

@@ -45,7 +45,7 @@ import { isVideoPost } from '../utils/mediaViewerPlaylist';
 import { updatePostCategory } from '../services/postEditService';
 import { normalizeProfileCategories } from '../utils/profileCategories';
 import useIsAdmin from '../hooks/useIsAdmin';
-import { adminBanUser, adminRemovePost, adminSetFeedPriority } from '../api/adminLiveApi';
+import { adminBanUser, adminRemovePost, adminSetFeedPriority, adminSetAccountFeedPriority, FEED_PRIORITY_TIERS } from '../api/adminLiveApi';
 
 async function downloadRawVideo(remoteUrl) {
   const url = fixStorageUrl(remoteUrl);
@@ -369,8 +369,9 @@ const MediaViewerItem = ({
 
   const runAdminSetPriority = (priority) => {
     closeOptions();
-    const label = priority === 'high' ? 'High' : priority === 'less' ? 'Less' : 'Standard';
-    Alert.alert('Feed priority', `Set this post to ${label} in For You?`, [
+    const tier = FEED_PRIORITY_TIERS.find((t) => t.value === priority);
+    const label = tier?.label || priority;
+    Alert.alert('Post feed priority', `Set this post to ${label} in For You?\n(${tier?.hint || ''})`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: `Set ${label}`,
@@ -379,7 +380,7 @@ const MediaViewerItem = ({
             await adminSetFeedPriority(actualPost.id, priority);
             Toast.show({
               type: 'success',
-              text1: 'Priority updated',
+              text1: 'Post priority updated',
               text2: label,
               position: 'bottom',
               visibilityTime: 1500,
@@ -395,6 +396,46 @@ const MediaViewerItem = ({
         },
       },
     ]);
+  };
+
+  const runAdminSetAccountPriority = (priority) => {
+    closeOptions();
+    const author = String(actualPost?.userId || '').trim();
+    if (!author) {
+      Alert.alert('Unavailable', 'This post has no author id.');
+      return;
+    }
+    const tier = FEED_PRIORITY_TIERS.find((t) => t.value === priority);
+    const label = tier?.label || priority;
+    Alert.alert(
+      'Account feed priority',
+      `Set this author's account-wide For You weight to ${label}?\n(${tier?.hint || ''})\nApplies to all their posts (combined with per-post priority).`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Set ${label}`,
+          onPress: async () => {
+            try {
+              await adminSetAccountFeedPriority(author, priority);
+              Toast.show({
+                type: 'success',
+                text1: 'Account priority updated',
+                text2: label,
+                position: 'bottom',
+                visibilityTime: 1500,
+              });
+            } catch (e) {
+              const code = String(e?.code || '');
+              const msg =
+                code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
+                  ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS (dashboard allowlist).'
+                  : e?.message || 'Could not update account priority.';
+              Alert.alert('Admin action failed', msg);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const runAdminRemovePost = () => {
@@ -1257,19 +1298,52 @@ const MediaViewerItem = ({
             {isAdmin ? (
               <>
                 <View style={styles.optionsAdminDivider} />
-                <Text style={styles.optionsAdminLabel}>Admin</Text>
-                <TouchableOpacity style={styles.optionsRow} onPress={() => runAdminSetPriority('high')}>
-                  <Icon name="arrow-up" size={20} color="#5EEAD4" />
-                  <Text style={[styles.optionsRowText, { color: '#5EEAD4' }]}>Priority: High</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.optionsRow} onPress={() => runAdminSetPriority('standard')}>
-                  <Icon name="remove" size={20} color="#fff" />
-                  <Text style={styles.optionsRowText}>Priority: Standard</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.optionsRow} onPress={() => runAdminSetPriority('less')}>
-                  <Icon name="arrow-down" size={20} color="#FCD34D" />
-                  <Text style={[styles.optionsRowText, { color: '#FCD34D' }]}>Priority: Less</Text>
-                </TouchableOpacity>
+                <Text style={styles.optionsAdminLabel}>Admin · this post</Text>
+                {FEED_PRIORITY_TIERS.map((tier) => (
+                  <TouchableOpacity
+                    key={`post-${tier.value}`}
+                    style={styles.optionsRow}
+                    onPress={() => runAdminSetPriority(tier.value)}
+                  >
+                    <Icon
+                      name={tier.value === 'boost' || tier.value === 'high' ? 'arrow-up' : tier.value === 'suppress' || tier.value === 'low' ? 'arrow-down' : 'remove'}
+                      size={20}
+                      color={tier.value === 'boost' || tier.value === 'high' ? '#5EEAD4' : tier.value === 'suppress' ? '#FB7185' : tier.value === 'low' ? '#FCD34D' : '#fff'}
+                    />
+                    <Text
+                      style={[
+                        styles.optionsRowText,
+                        tier.value === 'boost' || tier.value === 'high'
+                          ? { color: '#5EEAD4' }
+                          : tier.value === 'suppress'
+                            ? { color: '#FB7185' }
+                            : tier.value === 'low'
+                              ? { color: '#FCD34D' }
+                              : null,
+                      ]}
+                    >
+                      Post: {tier.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                {String(actualPost?.userId || '').trim() ? (
+                  <>
+                    <View style={styles.optionsAdminDivider} />
+                    <Text style={styles.optionsAdminLabel}>Admin · author account</Text>
+                    {FEED_PRIORITY_TIERS.map((tier) => (
+                      <TouchableOpacity
+                        key={`acct-${tier.value}`}
+                        style={styles.optionsRow}
+                        onPress={() => runAdminSetAccountPriority(tier.value)}
+                      >
+                        <Icon name="person" size={20} color="#A5B4FC" />
+                        <Text style={[styles.optionsRowText, { color: '#A5B4FC' }]}>
+                          Account: {tier.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </>
+                ) : null}
                 {!canDeletePost ? (
                   <TouchableOpacity style={styles.optionsRow} onPress={runAdminRemovePost}>
                     <Icon name="trash" size={20} color="#FB7185" />

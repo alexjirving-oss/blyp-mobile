@@ -9,7 +9,23 @@
 import { getCognitoJwtForApi } from './getCognitoJwtForApi';
 import { resolveLiveServiceUrl } from './economyLiveApi';
 
-export type FeedPriority = 'less' | 'standard' | 'high';
+/** Canonical 5-tier feed priority (post + account). Legacy `less` ≡ `low`. */
+export type FeedPriority = 'suppress' | 'low' | 'standard' | 'high' | 'boost';
+export type AccountFeedPriority = FeedPriority;
+/** Accepted by the posts API (maps to low on write). */
+export type FeedPriorityInput = FeedPriority | 'less';
+
+export const FEED_PRIORITY_TIERS: Array<{
+  value: FeedPriority;
+  label: string;
+  hint: string;
+}> = [
+  { value: 'suppress', label: 'Suppress', hint: 'Practically do not show' },
+  { value: 'low', label: 'Low', hint: 'Decreased' },
+  { value: 'standard', label: 'Standard', hint: 'Default' },
+  { value: 'high', label: 'High', hint: 'Increased' },
+  { value: 'boost', label: 'Boost', hint: 'Maximum priority' },
+];
 
 async function callAdminBackend<T>(
   path: string,
@@ -77,7 +93,7 @@ export async function adminRemovePost(
 
 export async function adminSetFeedPriority(
   postId: string,
-  priority: FeedPriority,
+  priority: FeedPriorityInput,
   opts: { reason?: string } = {},
 ): Promise<{ ok: boolean; feedPriority?: FeedPriority }> {
   const id = String(postId || '').trim();
@@ -85,5 +101,18 @@ export async function adminSetFeedPriority(
   return callAdminBackend(`/admin/posts/${encodeURIComponent(id)}/feed-priority`, 'POST', {
     priority,
     reason: opts.reason || `Set feed priority to ${priority}`,
+  });
+}
+
+export async function adminSetAccountFeedPriority(
+  userId: string,
+  priority: AccountFeedPriority,
+  opts: { reason?: string } = {},
+): Promise<{ ok: boolean; feedPriorityAccount?: AccountFeedPriority }> {
+  const id = String(userId || '').trim();
+  if (!id) throw new Error('missing userId');
+  return callAdminBackend(`/admin/users/${encodeURIComponent(id)}/feed-priority`, 'POST', {
+    priority,
+    reason: opts.reason || `Set account feed priority to ${priority}`,
   });
 }
