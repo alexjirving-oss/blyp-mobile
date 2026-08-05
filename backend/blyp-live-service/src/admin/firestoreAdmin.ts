@@ -360,25 +360,56 @@ function photoFromUserData(data: Record<string, unknown>): string | null {
   );
 }
 
+/** Account-wide For You / discovery weight (users/{uid}.feedPriorityAccount). */
+export type AccountFeedPriority = 'suppress' | 'low' | 'standard' | 'high' | 'boost';
+
+const ACCOUNT_FEED_PRIORITIES = new Set<AccountFeedPriority>([
+  'suppress',
+  'low',
+  'standard',
+  'high',
+  'boost',
+]);
+
+export function normalizeAccountFeedPriority(raw: unknown): AccountFeedPriority {
+  const v = String(raw || 'standard').trim().toLowerCase();
+  if (v === 'less') return 'low';
+  if (ACCOUNT_FEED_PRIORITIES.has(v as AccountFeedPriority)) return v as AccountFeedPriority;
+  return 'standard';
+}
+
 /** Read display fields stored on the canonical Firestore user doc. */
 export async function getFirestoreUserPublicFields(
   userId: string,
-): Promise<{ avatarFrame: string | null; photoURL: string | null }> {
+): Promise<{
+  avatarFrame: string | null;
+  photoURL: string | null;
+  feedPriorityAccount: AccountFeedPriority;
+}> {
   const fs = getFirestore();
-  if (!fs) return { avatarFrame: null, photoURL: null };
+  if (!fs) {
+    return { avatarFrame: null, photoURL: null, feedPriorityAccount: 'standard' };
+  }
   const id = String(userId || '').trim();
-  if (!id) return { avatarFrame: null, photoURL: null };
+  if (!id) {
+    return { avatarFrame: null, photoURL: null, feedPriorityAccount: 'standard' };
+  }
   try {
     const snap = await fs.collection('users').doc(id).get();
-    if (!snap.exists) return { avatarFrame: null, photoURL: null };
+    if (!snap.exists) {
+      return { avatarFrame: null, photoURL: null, feedPriorityAccount: 'standard' };
+    }
     const data = snap.data() || {};
     const frame = data.avatarFrame ? String(data.avatarFrame) : '';
     return {
       avatarFrame: frame || null,
       photoURL: photoFromUserData(data as Record<string, unknown>),
+      feedPriorityAccount: normalizeAccountFeedPriority(
+        data.feedPriorityAccount || data.creatorFeedWeight,
+      ),
     };
   } catch {
-    return { avatarFrame: null, photoURL: null };
+    return { avatarFrame: null, photoURL: null, feedPriorityAccount: 'standard' };
   }
 }
 
@@ -782,21 +813,35 @@ export async function incrementPostGiftTotals(
   }
 }
 
-/** Admin feed ranking: less | standard | high. Read by mobile For You / HomeBase. */
-export type FeedPriority = 'less' | 'standard' | 'high';
+/**
+ * Per-post For You priority.
+ * Canonical 5: suppress | low | standard | high | boost.
+ * Legacy `less` is accepted by the API and normalized to `low` on write.
+ */
+export type FeedPriority = 'suppress' | 'low' | 'standard' | 'high' | 'boost';
+
+export function normalizePostFeedPriority(raw: unknown): FeedPriority {
+  const v = String(raw || 'standard').trim().toLowerCase();
+  if (v === 'less') return 'low';
+  if (v === 'suppress' || v === 'low' || v === 'standard' || v === 'high' || v === 'boost') {
+    return v;
+  }
+  return 'standard';
+}
 
 export async function setPostFeedPriorityFs(
   postId: string,
-  priority: FeedPriority,
+  priority: FeedPriority | 'less',
   actorUserId?: string | null,
 ): Promise<{ ok: boolean; detail?: string }> {
   const fs = getFirestore();
   const id = String(postId || '').trim();
+  const normalized = normalizePostFeedPriority(priority);
   if (!fs) return { ok: false, detail: 'firestore_unavailable' };
   if (!id) return { ok: false, detail: 'missing_post_id' };
   try {
     const payload: Record<string, unknown> = {
-      feedPriority: priority,
+      feedPriority: normalized,
       feedPriorityUpdatedAt: FieldValue.serverTimestamp(),
     };
     if (actorUserId) payload.feedPriorityUpdatedBy = String(actorUserId);
@@ -804,7 +849,39 @@ export async function setPostFeedPriorityFs(
     return { ok: true };
   } catch (e: any) {
     const detail = e?.message || String(e);
-    logger.error({ err: detail, postId: id, priority }, '[firestore-admin] setPostFeedPriorityFs failed');
+    logger.error(
+      { err: detail, postId: id, priority: normalized },
+      '[firestore-admin] setPostFeedPriorityFs failed',
+    );
+    return { ok: false, detail };
+  }
+}
+
+/** Account-wide feed weight on users/{uid} — read by For You / discovery. */
+export async function setUserFeedPriorityFs(
+  userId: string,
+  priority: AccountFeedPriority,
+  actorUserId?: string | null,
+): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(userId || '').trim();
+  const normalized = normalizeAccountFeedPriority(priority);
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!id) return { ok: false, detail: 'missing_user_id' };
+  try {
+    const payload: Record<string, unknown> = {
+      feedPriorityAccount: normalized,
+      feedPriorityAccountUpdatedAt: FieldValue.serverTimestamp(),
+    };
+    if (actorUserId) payload.feedPriorityAccountUpdatedBy = String(actorUserId);
+    await fs.collection('users').doc(id).set({ sub: id, ...payload }, { merge: true });
+    return { ok: true };
+  } catch (e: any) {
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, userId: id, priority: normalized },
+      '[firestore-admin] setUserFeedPriorityFs failed',
+    );
     return { ok: false, detail };
   }
 }

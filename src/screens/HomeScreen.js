@@ -51,6 +51,12 @@ import {
 import { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
 import { useAuth, hardLogout } from '../hooks/useCommon';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+import {
+  attachAccountFeedPriority,
+  filterSuppressedAccounts,
+  shufflePostsByFeedPriority,
+  isAccountFeedSuppressed,
+} from '../services/feedRankingService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -206,29 +212,15 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /** Temporary For You order until the ranking algorithm is configured.
- *  Still honour admin `feedPriority` (high → front, less → back) within shuffle. */
-function shuffleBucket(posts) {
-  const next = Array.isArray(posts) ? [...posts] : [];
-  for (let i = next.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = next[i];
-    next[i] = next[j];
-    next[j] = tmp;
-  }
-  return next;
+ *  Honour admin account + post feed priority (boost → … → suppress) within shuffle. */
+function shufflePosts(posts) {
+  return shufflePostsByFeedPriority(posts);
 }
 
-function shufflePosts(posts) {
-  const high = [];
-  const standard = [];
-  const less = [];
-  for (const p of posts || []) {
-    const pri = String(p?.feedPriority || p?.adminPriority || 'standard').toLowerCase();
-    if (pri === 'high') high.push(p);
-    else if (pri === 'less' || pri === 'low') less.push(p);
-    else standard.push(p);
-  }
-  return [...shuffleBucket(high), ...shuffleBucket(standard), ...shuffleBucket(less)];
+/** Hydrate author account tiers, drop suppress accounts, then bucket-shuffle. */
+async function prepareForYouOrder(posts) {
+  const withAccount = await attachAccountFeedPriority(posts || []);
+  return shufflePosts(filterSuppressedAccounts(withAccount));
 }
 
 function stampFeedKeys(posts, cycle) {
@@ -623,51 +615,64 @@ const HomeScreen = ({ navigation, route }) => {
                 // IMPORTANT: Keep a stable random order while the user is browsing.
                 // Liking a post updates the doc, which triggers this snapshot; if we reshuffle
                 // every time, the feed appears to "jump" to a different post.
-                if (isInitialLoad) {
-                  // Temporary: random order each cold load / refresh until ranking ships.
-                  const shuffled = stampFeedKeys(shufflePosts(validPosts), forYouCycleRef.current);
-                  setRandomPosts(shuffled);
-                  randomPostsRef.current = shuffled;
-                  // Reset the Videos-tab cursor on first load (previously done by
-                  // the now-merged video listener).
-                  setCurrentIndex(0);
-                } else {
-                  setRandomPosts((prev) => {
-                    if (!Array.isArray(prev) || prev.length === 0) {
-                      const next = stampFeedKeys(shufflePosts(validPosts), forYouCycleRef.current);
-                      randomPostsRef.current = next;
-                      return next;
-                    }
-
-                    const byId = new Map(validPosts.map((p) => [p.id, p]));
-                    const next = [];
-
-                    // Preserve the existing visual order, refreshing doc data for
-                    // posts in the live page and keeping older paginated posts
-                    // (not in this snapshot) so the feed doesn't snap back to 30.
-                    prev.forEach((existing) => {
-                      const updated = byId.get(existing.id);
-                      if (updated) {
-                        next.push({ ...updated, feedKey: existing.feedKey || `${updated.id}__${forYouCycleRef.current}` });
-                        byId.delete(existing.id);
-                      } else {
-                        next.push(existing);
-                      }
-                    });
-
-                    // Append any brand new posts (shuffled among themselves).
-                    const brandNew = shufflePosts(validPosts.filter((p) => byId.has(p.id)));
-                    brandNew.forEach((p) => {
-                      next.push({ ...p, feedKey: `${p.id}__${forYouCycleRef.current}` });
-                    });
-
-                    randomPostsRef.current = next;
-                    return next;
-                  });
-                }
-                setIsEmptyFeed(false);
-                setLoading(false);
+                const cycle = forYouCycleRef.current;
+                const initial = isInitialLoad;
                 isInitialLoad = false;
+                (async () => {
+                  try {
+                    if (initial) {
+                      const ordered = await prepareForYouOrder(validPosts);
+                      if (!mounted) return;
+                      const shuffled = stampFeedKeys(ordered, cycle);
+                      setRandomPosts(shuffled);
+                      randomPostsRef.current = shuffled;
+                      setCurrentIndex(0);
+                    } else {
+                      const withAccount = await attachAccountFeedPriority(validPosts);
+                      if (!mounted) return;
+                      const visible = filterSuppressedAccounts(withAccount);
+                      setRandomPosts((prev) => {
+                        if (!Array.isArray(prev) || prev.length === 0) {
+                          const next = stampFeedKeys(shufflePosts(visible), cycle);
+                          randomPostsRef.current = next;
+                          return next;
+                        }
+
+                        const byId = new Map(visible.map((p) => [p.id, p]));
+                        const next = [];
+
+                        prev.forEach((existing) => {
+                          const updated = byId.get(existing.id);
+                          if (updated) {
+                            next.push({
+                              ...updated,
+                              feedKey: existing.feedKey || `${updated.id}__${cycle}`,
+                            });
+                            byId.delete(existing.id);
+                          } else if (!isAccountFeedSuppressed(existing)) {
+                            next.push(existing);
+                          }
+                        });
+
+                        const brandNew = shufflePosts(visible.filter((p) => byId.has(p.id)));
+                        brandNew.forEach((p) => {
+                          next.push({ ...p, feedKey: `${p.id}__${cycle}` });
+                        });
+
+                        randomPostsRef.current = next;
+                        return next;
+                      });
+                    }
+                    if (!mounted) return;
+                    setIsEmptyFeed(false);
+                    setLoading(false);
+                  } catch (e) {
+                    console.warn('HOME: For You priority hydrate failed', e?.message || String(e));
+                    if (!mounted) return;
+                    setIsEmptyFeed(false);
+                    setLoading(false);
+                  }
+                })();
               }
               if (uid) {
                 // Don't overwrite a post whose like is mid-flight: a snapshot

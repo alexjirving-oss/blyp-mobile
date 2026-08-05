@@ -40,9 +40,21 @@ export const moderatePostSchema = z.object({
     userId: cognitoSubSchema.optional(),
 });
 
-/** In-app / dashboard For You priority boost (writes Firestore `feedPriority`). */
+/**
+ * Per-post For You priority (writes Firestore posts.feedPriority).
+ * Canonical 5 tiers; `less` accepted as alias for `low`.
+ */
 export const adminFeedPrioritySchema = z.object({
-    priority: z.enum(['less', 'standard', 'high']),
+    priority: z.enum(['suppress', 'low', 'less', 'standard', 'high', 'boost']),
+    reason: z.string().trim().min(1).max(500).optional(),
+});
+
+/**
+ * Account-wide For You / discovery weight (writes users.feedPriorityAccount
+ * + Postgres user_admin_state.metadata.feedPriorityAccount).
+ */
+export const adminAccountFeedPrioritySchema = z.object({
+    priority: z.enum(['suppress', 'low', 'standard', 'high', 'boost']),
     reason: z.string().trim().min(1).max(500).optional(),
 });
 

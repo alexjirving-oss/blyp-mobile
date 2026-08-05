@@ -10,7 +10,7 @@
 
 import { db, firebaseEnabled } from '../config/firebase';
 import { fixStorageUrl } from '../utils/urlUtils';
-import { rankPosts } from './feedRankingService';
+import { rankPosts, attachAccountFeedPriority, filterSuppressedAccounts } from './feedRankingService';
 import { filterForYouPosts } from '../utils/forYouFeedFilter';
 import { filterBlocked, loadBlockedUsers } from './BlockService';
 
@@ -61,8 +61,10 @@ export async function getTrendingPosts(limit = 10, interestTerms = []) {
     const ranked = scored
       .sort((a, b) => b.score - a.score)
       .map((x) => x.p);
-    // Over-fetch then filter so hidden/blocked posts do not shrink the rail below `limit`.
-    return (await visiblePosts(ranked)).slice(0, limit);
+    const visible = await visiblePosts(ranked);
+    const withAccount = await attachAccountFeedPriority(visible);
+    // Over-fetch then filter so hidden/blocked/suppressed posts do not shrink the rail below `limit`.
+    return filterSuppressedAccounts(withAccount).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] trending failed', e?.message || String(e));
     return [];
@@ -90,7 +92,9 @@ export async function getTopicPosts(terms = [], limit = 30) {
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score || engagement(b.p) - engagement(a.p))
       .map((x) => x.p);
-    return (await visiblePosts(ranked)).slice(0, limit);
+    const visible = await visiblePosts(ranked);
+    const withAccount = await attachAccountFeedPriority(visible);
+    return filterSuppressedAccounts(withAccount).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] topic posts failed', e?.message || String(e));
     return [];
@@ -103,7 +107,8 @@ export async function getForYouPosts(terms = [], followingIds = [], limit = 12) 
   try {
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(80).get();
     const all = await visiblePosts((snap?.docs || []).map((d) => ({ id: d.id, ...d.data() })));
-    const ranked = rankPosts(all, terms, new Set((followingIds || []).filter(Boolean)));
+    const withAccount = await attachAccountFeedPriority(all);
+    const ranked = rankPosts(withAccount, terms, new Set((followingIds || []).filter(Boolean)));
     return filterForYouPosts(ranked).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] for-you failed', e?.message || String(e));
@@ -138,8 +143,16 @@ export async function getSuggestedCreators(limit = 12, interestTerms = [], exclu
     const ranked = all
       .filter((u) => (excludeUid ? u.id !== excludeUid : true))
       .filter((u) => u.username || u.displayName || u.name)
+      .filter((u) => {
+        const tier = String(u.feedPriorityAccount || u.creatorFeedWeight || 'standard').toLowerCase();
+        return tier !== 'suppress';
+      })
       .map((u) => {
         let score = num(u.followersCount) + num(u.followers) * 1;
+        const tier = String(u.feedPriorityAccount || u.creatorFeedWeight || 'standard').toLowerCase();
+        if (tier === 'boost') score += 80;
+        else if (tier === 'high') score += 40;
+        else if (tier === 'low' || tier === 'less') score -= 30;
         if (terms.length) {
           const hay = [u.bio, u.category, (u.interests || []).join(' ')]
             .filter(Boolean)

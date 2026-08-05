@@ -1,9 +1,17 @@
 // feedRankingService.js
 //
-// Pure, dependency-free ranking for the "For You" feed. Orders posts by a blend
-// of: who you follow, your interests, light engagement, and a small freshness
-// jitter so the feed never feels static. Falls back to a plain shuffle when we
-// have no personalization signal yet (preserves prior behavior).
+// Pure ranking for the "For You" feed. Orders posts by a blend of: who you
+// follow, your interests, light engagement, earn-your-reach, and admin
+// feed priority (account-wide + per-post).
+//
+// Admin priority rule (documented):
+//   effectiveAdjust = accountAdjust(feedPriorityAccount) + postAdjust(feedPriority)
+//   Tiers (both account + post): suppress | low | standard | high | boost
+//   Legacy aliases: less → low; creatorFeedWeight on user docs also accepted.
+//   Account `suppress` ≈ practically don't show (filtered from For You /
+//   discovery rails; remaining weight is extreme bottom if still present).
+
+import { db, firebaseEnabled } from '../config/firebase';
 
 function engagement(post) {
   return (
@@ -15,9 +23,37 @@ function engagement(post) {
 const AUDITION_BOOST = 18; // guaranteed early sampling for fresh posts
 const AUDITION_SETTLE = 40; // impressions over which the audition boost fades
 
-/** Admin For You priority (Firestore `feedPriority`: less | standard | high). */
-const FEED_PRIORITY_HIGH = 80;
-const FEED_PRIORITY_LESS = -60;
+/** Score weights for the 5 admin feed tiers. */
+export const FEED_PRIORITY_WEIGHTS = Object.freeze({
+  suppress: -500,
+  low: -60,
+  standard: 0,
+  high: 80,
+  boost: 150,
+});
+
+const ACCOUNT_CACHE_TTL_MS = 60_000;
+/** @type {Map<string, { tier: string, at: number }>} */
+const accountPriorityCache = new Map();
+
+/**
+ * Normalize any raw admin priority string to a canonical 5-tier value.
+ * @param {unknown} raw
+ * @returns {'suppress'|'low'|'standard'|'high'|'boost'}
+ */
+export function normalizeFeedPriorityTier(raw) {
+  const v = String(raw || 'standard').trim().toLowerCase();
+  if (v === 'less') return 'low';
+  if (v === 'suppress' || v === 'low' || v === 'standard' || v === 'high' || v === 'boost') {
+    return v;
+  }
+  return 'standard';
+}
+
+export function feedPriorityWeight(tier) {
+  const t = normalizeFeedPriorityTier(tier);
+  return FEED_PRIORITY_WEIGHTS[t] ?? 0;
+}
 
 /**
  * Earn-your-reach adjustment (see BLYP_CHARTER.md). This is what makes reach EARNED:
@@ -41,12 +77,120 @@ export function reachAdjust(post) {
   return score * 0.25;
 }
 
-/** Score bump from admin feed priority (in-app / dashboard moderation). */
+/** Per-post admin priority bump. */
+export function postFeedPriorityAdjust(post) {
+  return feedPriorityWeight(post?.feedPriority || post?.adminPriority || 'standard');
+}
+
+/** Account-wide admin priority bump (expects feedPriorityAccount on the post). */
+export function accountFeedPriorityAdjust(post) {
+  return feedPriorityWeight(
+    post?.feedPriorityAccount || post?.creatorFeedWeight || 'standard',
+  );
+}
+
+/**
+ * Combined admin bump: account + post (additive).
+ * A boost account + high post stacks; suppress + high still lands near the bottom.
+ */
 export function feedPriorityAdjust(post) {
-  const raw = String(post?.feedPriority || post?.adminPriority || 'standard').toLowerCase();
-  if (raw === 'high') return FEED_PRIORITY_HIGH;
-  if (raw === 'less' || raw === 'low') return FEED_PRIORITY_LESS;
-  return 0;
+  return accountFeedPriorityAdjust(post) + postFeedPriorityAdjust(post);
+}
+
+/** True when the author's account tier is suppress (practically don't show). */
+export function isAccountFeedSuppressed(post) {
+  return normalizeFeedPriorityTier(post?.feedPriorityAccount || post?.creatorFeedWeight) === 'suppress';
+}
+
+/**
+ * Effective shuffle bucket after combining account + post.
+ * Uses the stronger absolute demotion, else the stronger promotion.
+ * @returns {'boost'|'high'|'standard'|'low'|'suppress'}
+ */
+export function effectiveFeedBucket(post) {
+  const account = normalizeFeedPriorityTier(
+    post?.feedPriorityAccount || post?.creatorFeedWeight || 'standard',
+  );
+  const postTier = normalizeFeedPriorityTier(post?.feedPriority || post?.adminPriority || 'standard');
+  const a = feedPriorityWeight(account);
+  const p = feedPriorityWeight(postTier);
+  const combined = a + p;
+  if (combined <= FEED_PRIORITY_WEIGHTS.suppress / 2) return 'suppress';
+  if (combined <= FEED_PRIORITY_WEIGHTS.low / 2) return 'low';
+  if (combined >= FEED_PRIORITY_WEIGHTS.boost) return 'boost';
+  if (combined >= FEED_PRIORITY_WEIGHTS.high / 2) return 'high';
+  return 'standard';
+}
+
+/**
+ * Batch-attach authors' feedPriorityAccount onto posts (cached ~60s).
+ * Safe no-op when Firebase is disabled.
+ * @param {any[]} posts
+ * @returns {Promise<any[]>}
+ */
+export async function attachAccountFeedPriority(posts) {
+  if (!Array.isArray(posts) || posts.length === 0) return posts || [];
+  if (!firebaseEnabled || !db?.collection) {
+    return posts.map((p) => ({
+      ...p,
+      feedPriorityAccount: normalizeFeedPriorityTier(p?.feedPriorityAccount || 'standard'),
+    }));
+  }
+
+  const now = Date.now();
+  const authorIds = [
+    ...new Set(
+      posts
+        .map((p) => String(p?.userId || p?.uid || p?.authorId || '').trim())
+        .filter(Boolean),
+    ),
+  ];
+  const missing = authorIds.filter((id) => {
+    const hit = accountPriorityCache.get(id);
+    return !hit || now - hit.at > ACCOUNT_CACHE_TTL_MS;
+  });
+
+  try {
+    for (let i = 0; i < missing.length; i += 30) {
+      const chunk = missing.slice(i, i + 30);
+      const refs = chunk.map((id) => db.collection('users').doc(id));
+      // Prefer getAll when available (RN Firebase / web admin); else sequential get.
+      let snaps = [];
+      if (typeof db.getAll === 'function') {
+        snaps = await db.getAll(...refs);
+      } else {
+        snaps = await Promise.all(refs.map((ref) => ref.get()));
+      }
+      for (let j = 0; j < chunk.length; j += 1) {
+        const snap = snaps[j];
+        const data = snap?.exists
+          ? typeof snap.data === 'function'
+            ? snap.data() || {}
+            : snap.data || {}
+          : {};
+        const tier = normalizeFeedPriorityTier(
+          data.feedPriorityAccount || data.creatorFeedWeight || 'standard',
+        );
+        accountPriorityCache.set(chunk[j], { tier, at: now });
+      }
+    }
+  } catch (e) {
+    console.warn('[FEED_RANK] account priority hydrate failed', e?.message || String(e));
+  }
+
+  return posts.map((p) => {
+    const authorId = String(p?.userId || p?.uid || p?.authorId || '').trim();
+    const cached = authorId ? accountPriorityCache.get(authorId) : null;
+    const tier = cached?.tier
+      || normalizeFeedPriorityTier(p?.feedPriorityAccount || p?.creatorFeedWeight || 'standard');
+    return { ...p, feedPriorityAccount: tier };
+  });
+}
+
+/** Drop account-suppressed authors from discovery / For You candidate sets. */
+export function filterSuppressedAccounts(posts) {
+  if (!Array.isArray(posts)) return [];
+  return posts.filter((p) => !isAccountFeedSuppressed(p));
 }
 
 function scorePost(post, terms, following) {
@@ -68,7 +212,7 @@ function scorePost(post, terms, following) {
   }
   s += Math.min(engagement(post), 24) * 0.5; // mild popularity nudge
   s += reachAdjust(post); // earn-your-reach: audition lift / earned score / resting
-  s += feedPriorityAdjust(post); // admin less / standard / high
+  s += feedPriorityAdjust(post); // account + post admin tiers
   s += Math.random() * 6; // freshness jitter
   return s;
 }
@@ -80,18 +224,67 @@ function scorePost(post, terms, following) {
  */
 export function rankPosts(posts, terms = [], following = new Set()) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
+  const visible = filterSuppressedAccounts(posts);
   const noSignal = (!terms || terms.length === 0) && (!following || following.size === 0);
   if (noSignal) {
     // Still honour earn-your-reach + admin priority when we have no personalization.
-    return [...posts]
+    return [...visible]
       .map((p) => ({ p, s: reachAdjust(p) + feedPriorityAdjust(p) + Math.random() * 12 }))
       .sort((a, b) => b.s - a.s)
       .map((x) => x.p);
   }
-  return [...posts]
+  return [...visible]
     .map((p) => ({ p, s: scorePost(p, terms, following) }))
     .sort((a, b) => b.s - a.s)
     .map((x) => x.p);
 }
 
-export default { rankPosts, reachAdjust, feedPriorityAdjust };
+/**
+ * Bucketed shuffle for Home For You: boost → high → standard → low → suppress.
+ * Prefer filtering suppress via attachAccountFeedPriority + filterSuppressedAccounts
+ * before calling; leftover suppress still lands in the bottom bucket.
+ */
+export function shufflePostsByFeedPriority(posts) {
+  const buckets = {
+    boost: [],
+    high: [],
+    standard: [],
+    low: [],
+    suppress: [],
+  };
+  for (const p of posts || []) {
+    const bucket = effectiveFeedBucket(p);
+    buckets[bucket].push(p);
+  }
+  const shuffleBucket = (arr) => {
+    const next = [...arr];
+    for (let i = next.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = next[i];
+      next[i] = next[j];
+      next[j] = tmp;
+    }
+    return next;
+  };
+  return [
+    ...shuffleBucket(buckets.boost),
+    ...shuffleBucket(buckets.high),
+    ...shuffleBucket(buckets.standard),
+    ...shuffleBucket(buckets.low),
+    ...shuffleBucket(buckets.suppress),
+  ];
+}
+
+export default {
+  rankPosts,
+  reachAdjust,
+  feedPriorityAdjust,
+  postFeedPriorityAdjust,
+  accountFeedPriorityAdjust,
+  attachAccountFeedPriority,
+  filterSuppressedAccounts,
+  shufflePostsByFeedPriority,
+  normalizeFeedPriorityTier,
+  effectiveFeedBucket,
+  FEED_PRIORITY_WEIGHTS,
+};

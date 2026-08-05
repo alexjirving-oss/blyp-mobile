@@ -8,8 +8,12 @@ import {
     syncAvatarFrameToFirestore,
     getFirestoreUserPublicFields,
     setPostFeedPriorityFs,
+    setUserFeedPriorityFs,
     setPostModerationHiddenFs,
+    normalizePostFeedPriority,
+    normalizeAccountFeedPriority,
     type FeedPriority,
+    type AccountFeedPriority,
 } from './firestoreAdmin';
 import { invalidateBanCache } from './banGuard';
 import { invalidateLiveRestrictionCache } from './liveRestrictionGuard';
@@ -72,6 +76,7 @@ type AdminUserDetail = {
     restrictions: AdminRestrictions;
     avatarFrame: string | null;
     photoURL: string | null;
+    feedPriorityAccount: AccountFeedPriority;
     createdAt: string | null;
     updatedAt: string | null;
     recentActions: Array<{
@@ -1175,12 +1180,13 @@ export async function restorePostByAdmin(input: { actorUserId: string; targetPos
 export async function setFeedPriorityByAdmin(input: {
     actorUserId: string;
     targetPostId: string;
-    priority: FeedPriority;
+    priority: FeedPriority | 'less';
     reason: string | null;
-}): Promise<{ firestoreOk: boolean; detail?: string }> {
+}): Promise<{ firestoreOk: boolean; feedPriority: FeedPriority; detail?: string }> {
+    const priority = normalizePostFeedPriority(input.priority);
     const fsResult = await setPostFeedPriorityFs(
         input.targetPostId,
-        input.priority,
+        priority,
         input.actorUserId,
     );
 
@@ -1190,7 +1196,7 @@ export async function setFeedPriorityByAdmin(input: {
         targetType: 'post',
         targetId: input.targetPostId,
         metadata: {
-            priority: input.priority,
+            priority,
             reason: input.reason,
             firestoreOk: fsResult.ok,
             detail: fsResult.detail || null,
@@ -1203,7 +1209,64 @@ export async function setFeedPriorityByAdmin(input: {
         throw err;
     }
 
-    return { firestoreOk: true };
+    return { firestoreOk: true, feedPriority: priority };
+}
+
+/**
+ * Account-wide feed weight.
+ * Persists to Firestore users/{uid}.feedPriorityAccount (read by mobile ranking)
+ * and mirrors into Postgres user_admin_state.metadata for admin detail/audit.
+ */
+export async function setAccountFeedPriorityByAdmin(input: {
+    actorUserId: string;
+    targetUserId: string;
+    priority: AccountFeedPriority;
+    reason: string | null;
+}): Promise<{
+    firestoreOk: boolean;
+    feedPriorityAccount: AccountFeedPriority;
+    detail?: string;
+}> {
+    const priority = normalizeAccountFeedPriority(input.priority);
+    const targetUserId = String(input.targetUserId || '').trim();
+    if (!isCanonicalSubUserId(targetUserId)) {
+        const err: any = new Error('INVALID_SUB');
+        err.code = 'INVALID_SUB';
+        throw err;
+    }
+
+    const fsResult = await setUserFeedPriorityFs(targetUserId, priority, input.actorUserId);
+
+    const state = await getAdminStateRow(targetUserId);
+    const metadata = parseJson(state?.metadata);
+    const nextMetadata = {
+        ...metadata,
+        feedPriorityAccount: priority,
+        feedPriorityAccountUpdatedAt: new Date().toISOString(),
+        feedPriorityAccountUpdatedBy: input.actorUserId,
+    };
+    await writeUserMetadata(targetUserId, nextMetadata);
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: 'user_feed_priority',
+        targetType: 'user',
+        targetId: targetUserId,
+        metadata: {
+            priority,
+            reason: input.reason,
+            firestoreOk: fsResult.ok,
+            detail: fsResult.detail || null,
+        },
+    });
+
+    if (!fsResult.ok) {
+        const err: any = new Error(fsResult.detail || 'FEED_PRIORITY_FIRESTORE_FAILED');
+        err.code = 'FEED_PRIORITY_FIRESTORE_FAILED';
+        throw err;
+    }
+
+    return { firestoreOk: true, feedPriorityAccount: priority };
 }
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {
@@ -1233,7 +1296,11 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
             `,
             [userId]
         ),
-        getFirestoreUserPublicFields(userId).catch(() => ({ avatarFrame: null, photoURL: null })),
+        getFirestoreUserPublicFields(userId).catch(() => ({
+            avatarFrame: null,
+            photoURL: null,
+            feedPriorityAccount: 'standard' as AccountFeedPriority,
+        })),
     ]);
 
     const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
@@ -1252,6 +1319,12 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         body: asString(r.body),
         createdAt: toIso(r.created_at),
     }));
+
+    const metaPriority = normalizeAccountFeedPriority(metadata.feedPriorityAccount);
+    const fsPriority = normalizeAccountFeedPriority(publicFields.feedPriorityAccount);
+    // Prefer live Firestore value (what the feed reads); fall back to Postgres mirror.
+    const feedPriorityAccount =
+        fsPriority !== 'standard' || !metadata.feedPriorityAccount ? fsPriority : metaPriority;
 
     return {
         userId,
@@ -1275,6 +1348,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         restrictions: buildRestrictions(metadata),
         avatarFrame: publicFields.avatarFrame || null,
         photoURL: publicFields.photoURL || null,
+        feedPriorityAccount,
         createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
         updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
         recentActions,
