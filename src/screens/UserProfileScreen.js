@@ -569,6 +569,7 @@ const UserProfileScreen = ({ route, navigation }) => {
       ) : null}
 
       <FlatList
+        key={`profile-grid-${Math.round(contentWidth)}`}
         style={styles.content}
         data={filteredPosts}
         renderItem={renderPostItem}

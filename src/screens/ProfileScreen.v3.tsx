@@ -1165,7 +1165,6 @@ const ProfileScreenV3: React.FC = () => {
           </View>
         )}
         <View style={styles.postMeta}>
-          <View pointerEvents="none" style={styles.postMetaBg} />
           {!!title && (
             <Text style={styles.postTitleText} numberOfLines={1}>
               {title}
@@ -1173,12 +1172,12 @@ const ProfileScreenV3: React.FC = () => {
           )}
           <View style={styles.postMetricsRow}>
             <View style={styles.postMetric}>
-              <Icon name={"heart" as any} size={12} color={theme.colors.accent} style={{}} strokeWidth={undefined} />
+              <Icon name={"heart" as any} size={13} color="#fff" fill="#fff" strokeWidth={1.5} style={{}} />
               <Text style={styles.postMetricText}>{post.likes || post.likeCount || 0}</Text>
             </View>
             <View style={styles.postMetric}>
-              <Icon name={"chatbubble" as any} size={12} color={theme.colors.primary} style={{}} strokeWidth={undefined} />
-              <Text style={styles.postMetricText}>{post.comments?.length || post.commentCount || 0}</Text>
+              <Icon name={"eye" as any} size={13} color="#fff" fill="#fff" strokeWidth={1.5} style={{}} />
+              <Text style={styles.postMetricText}>{post.viewCount || post.views || post.playCount || 0}</Text>
             </View>
           </View>
         </View>
@@ -1675,6 +1674,9 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
   contentShell: {
     flex: 1,
     position: 'relative',
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
   },
   sectionGradientBackground: {
     ...StyleSheet.absoluteFillObject,
@@ -2355,13 +2357,12 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
   },
   postMeta: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'column',
+    bottom: 6,
+    right: 6,
+    left: undefined,
+    alignItems: 'flex-end',
     gap: 4,
-    padding: 6,
-    overflow: 'hidden',
+    maxWidth: '92%',
   },
   postMetaBg: {
     ...StyleSheet.absoluteFillObject,
@@ -2369,17 +2370,24 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
     opacity: 0.75,
   },
   postTitleText: {
-    color: theme.colors.textPrimary,
+    color: '#fff',
     fontSize: 10,
     fontWeight: '700',
-    textShadowColor: theme.colors.shadow,
+    textAlign: 'right',
+    textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 3,
   },
   postMetricsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   postMetric: {
     flexDirection: 'row',
@@ -2387,10 +2395,10 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
     gap: 3,
   },
   postMetricText: {
-    color: theme.colors.textPrimary,
-    fontSize: 10,
-    fontWeight: '600',
-    textShadowColor: theme.colors.shadow,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+    textShadowColor: 'rgba(0,0,0,0.85)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
