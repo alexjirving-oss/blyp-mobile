@@ -135,9 +135,13 @@ module.exports = () => {
         'android.permission.ACCESS_COARSE_LOCATION',
         'android.permission.ACCESS_FINE_LOCATION',
         'android.permission.POST_NOTIFICATIONS',
+        // Incoming voice/video calls: full-screen ringing UI when the phone is locked.
         'android.permission.USE_FULL_SCREEN_INTENT',
         'android.permission.FOREGROUND_SERVICE',
-        'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+        // Incoming-call ringtone FGS (IncomingCallForegroundService) — mediaPlayback only.
+        // Do NOT declare FOREGROUND_SERVICE_MICROPHONE: no service uses type=microphone;
+        // mic-typed FGS is also killed on API 34+ when the mic is not actively captured.
+        'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
         'android.permission.RECEIVE_BOOT_COMPLETED',
         // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM —
         // Play only allows that for calendar/alarm-clock core apps (Blyp is neither).
