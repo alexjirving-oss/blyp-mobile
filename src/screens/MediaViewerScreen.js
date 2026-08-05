@@ -1017,7 +1017,7 @@ const MediaViewerItem = ({
         bottomInset={96}
       />
 
-      {/* Bottom action row — identical to the For You feed */}
+      {/* Mid-screen action rail — identical to the For You feed */}
       <Animated.View style={[styles.actionRow, { opacity: uiOpacity }]} pointerEvents="box-none">
         <View style={styles.actionRowInner}>
           <Animated.View style={{ transform: [{ scale: likeAnimation }] }}>
@@ -1716,13 +1716,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.gradientEnd,
   },
-  // ----- Bottom action row (identical to For You's profileMenuBar) -----
+  // ----- Mid-screen action rail (TikTok-style, matches For You) -----
   actionRow: {
     position: 'absolute',
     right: 10,
-    bottom: 88,
+    top: 0,
+    bottom: 0,
     zIndex: 1000,
     elevation: 1000,
+    justifyContent: 'center',
   },
   actionRowInner: {
     flexDirection: 'column',

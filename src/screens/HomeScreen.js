@@ -2070,13 +2070,13 @@ const styles = StyleSheet.create({
   actionRail: {
     position: 'absolute',
     right: 10,
-    bottom: 88,
+    top: 0,
+    bottom: 0,
     zIndex: 1000,
     elevation: 1000,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 14,
-    maxHeight: '48%',
-    justifyContent: 'flex-end',
   },
   topMetaRow: {
     position: 'absolute',
