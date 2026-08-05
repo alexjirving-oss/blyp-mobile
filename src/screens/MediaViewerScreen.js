@@ -1762,7 +1762,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
     );
   }
 
-  const { post, postId, posts } = route.params;
+  const { post, postId, posts, initialIndex: initialIndexParam } = route.params;
   const { uid } = useAuth();
 
   const initialPost = post || (posts && postId ? posts.find((p) => p.id === postId) : null);
@@ -1774,7 +1774,22 @@ const MediaViewerScreen = ({ route, navigation }) => {
   const { width: winWidth, height: winHeight } = useWindowDimensions();
   const [pageHeight, setPageHeight] = useState(winHeight);
   const [pageWidth, setPageWidth] = useState(winWidth);
-  const [activeIndex, setActiveIndex] = useState(0);
+
+  // Open at the tapped item in the caller-supplied playlist (profile grid order).
+  const resolvedInitialIndex = useMemo(() => {
+    if (!initialPost) return 0;
+    if (Array.isArray(posts) && posts.length > 1) {
+      const fromParam = Number(initialIndexParam);
+      if (Number.isFinite(fromParam) && fromParam >= 0 && fromParam < posts.length) {
+        return fromParam;
+      }
+      const found = posts.findIndex((p) => p && p.id === initialPost.id);
+      return found >= 0 ? found : 0;
+    }
+    return 0;
+  }, [initialPost, posts, initialIndexParam]);
+
+  const [activeIndex, setActiveIndex] = useState(resolvedInitialIndex);
 
   useEffect(() => {
     if (winWidth > 0) {
@@ -1871,13 +1886,19 @@ const MediaViewerScreen = ({ route, navigation }) => {
     };
   }, [initialPost?.id, initialPost?.userId, posts]);
 
-  // The tapped video is always first; the creator's other videos follow.
+  // Prefer caller playlist (profile/feed order + initialIndex). Fallback: tapped
+  // clip first, then the rest of that creator's videos loaded on demand.
   const items = useMemo(() => {
     if (!initialPost) return [];
     if (Array.isArray(posts) && posts.length > 1) return posts;
     const rest = creatorVideos.filter((p) => p.id !== initialPost.id);
     return [initialPost, ...rest];
   }, [initialPost, creatorVideos, posts]);
+
+  const safeInitialIndex = useMemo(() => {
+    if (!items.length) return 0;
+    return Math.min(Math.max(0, resolvedInitialIndex), items.length - 1);
+  }, [items.length, resolvedInitialIndex]);
 
   const onViewRef = useRef(({ viewableItems }) => {
     if (viewableItems && viewableItems.length > 0) {
@@ -1965,10 +1986,11 @@ const MediaViewerScreen = ({ route, navigation }) => {
         snapToAlignment="start"
         decelerationRate="fast"
         disableIntervalMomentum
+        initialScrollIndex={safeInitialIndex > 0 ? safeInitialIndex : undefined}
         onViewableItemsChanged={onViewRef.current}
         viewabilityConfig={viewConfigRef.current}
         windowSize={3}
-        initialNumToRender={1}
+        initialNumToRender={2}
         maxToRenderPerBatch={2}
         removeClippedSubviews
       />
