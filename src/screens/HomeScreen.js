@@ -2100,7 +2100,7 @@ const styles = StyleSheet.create({
     elevation: 1200,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
   },
   userPillInRow: {
     flexShrink: 1,
@@ -2111,6 +2111,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+    marginLeft: 8,
   },
   topStatPill: {
     flexDirection: 'row',

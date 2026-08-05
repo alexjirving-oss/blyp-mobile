@@ -1555,7 +1555,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     marginHorizontal: 10,
     minWidth: 0,
   },
@@ -1565,13 +1565,14 @@ const styles = StyleSheet.create({
     gap: 8,
     flexShrink: 1,
     minWidth: 0,
-    maxWidth: '72%',
+    maxWidth: '62%',
   },
   topStatCluster: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+    marginLeft: 8,
   },
   topStatPill: {
     flexDirection: 'row',
@@ -1955,7 +1956,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
   if (!initialPost) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
-        <ActivityIndicator color={COLORS.gradientEnd} />
+        <ActivityIndicator size="large" color={COLORS.primary} />
       </View>
     );
   }
