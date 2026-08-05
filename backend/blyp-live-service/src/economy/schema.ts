@@ -304,6 +304,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_gift_events_sender_user_id ON gift_events (sender_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_gift_events_receiver_user_id ON gift_events (receiver_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_promotions_user_id ON promotions (user_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_promotions_active_window ON promotions (status, starts_at, ends_at)`,
         `CREATE INDEX IF NOT EXISTS idx_live_games_stream_id ON live_games (stream_id)`,
         `CREATE INDEX IF NOT EXISTS idx_live_games_host_user_id ON live_games (host_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_live_game_entries_game_id ON live_game_entries (game_id)`,

@@ -61,7 +61,9 @@ import {
   filterSuppressedAccounts,
   shufflePostsByFeedPriority,
   isAccountFeedSuppressed,
+  prepareRankedFeed,
 } from '../services/feedRankingService';
+import { attachPromoteBoost } from '../services/promoteBoostService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -217,15 +219,15 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /** Temporary For You order until the ranking algorithm is configured.
- *  Honour admin account + post feed priority (boost → … → suppress) within shuffle. */
+ *  Honour admin account + post feed priority (boost → … → suppress) and
+ *  active coin-promote boosts (fair-capped) within shuffle. */
 function shufflePosts(posts) {
   return shufflePostsByFeedPriority(posts);
 }
 
-/** Hydrate author account tiers, drop suppress accounts, then bucket-shuffle. */
+/** Hydrate author tiers + active promote boosts, drop suppress, fair-cap shuffle. */
 async function prepareForYouOrder(posts) {
-  const withAccount = await attachAccountFeedPriority(posts || []);
-  return shufflePosts(filterSuppressedAccounts(withAccount));
+  return prepareRankedFeed(posts || [], { mode: 'shuffle' });
 }
 
 function stampFeedKeys(posts, cycle) {
@@ -702,8 +704,9 @@ const HomeScreen = ({ navigation, route }) => {
                       setCurrentIndex(0);
                     } else {
                       const withAccount = await attachAccountFeedPriority(validPosts);
+                      const withPromote = await attachPromoteBoost(withAccount);
                       if (!mounted) return;
-                      const visible = filterSuppressedAccounts(withAccount);
+                      const visible = filterSuppressedAccounts(withPromote);
                       setRandomPosts((prev) => {
                         if (!Array.isArray(prev) || prev.length === 0) {
                           const next = stampFeedKeys(shufflePosts(visible), cycle);
@@ -720,6 +723,11 @@ const HomeScreen = ({ navigation, route }) => {
                             next.push({
                               ...updated,
                               feedKey: existing.feedKey || `${updated.id}__${cycle}`,
+                              promoteType: updated.promoteType ?? existing.promoteType ?? null,
+                              promoteBoostWeight:
+                                updated.promoteBoostWeight ?? existing.promoteBoostWeight ?? 0,
+                              promoteBattleRef:
+                                updated.promoteBattleRef ?? existing.promoteBattleRef ?? null,
                             });
                             byId.delete(existing.id);
                           } else if (!isAccountFeedSuppressed(existing)) {
@@ -847,7 +855,8 @@ const HomeScreen = ({ navigation, route }) => {
         randomPostsRef.current = [];
         setIsEmptyFeed(true);
       } else {
-        const shuffled = stampFeedKeys(shufflePosts(fresh), forYouCycleRef.current);
+        const ordered = await prepareForYouOrder(fresh);
+        const shuffled = stampFeedKeys(ordered, forYouCycleRef.current);
         setRandomPosts(shuffled);
         randomPostsRef.current = shuffled;
         setIsEmptyFeed(false);
@@ -863,10 +872,11 @@ const HomeScreen = ({ navigation, route }) => {
 
   // Load the next (older) page of the For You feed and append it. Called as the
   // viewer nears the end of the list, which makes the feed effectively endless.
-  const appendFeedPosts = useCallback((newPosts) => {
+  const appendFeedPosts = useCallback(async (newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    const stamped = stampFeedKeys(shufflePosts(newPosts), forYouCycleRef.current);
+    const ordered = await prepareForYouOrder(newPosts);
+    const stamped = stampFeedKeys(ordered, forYouCycleRef.current);
     setRandomPosts((prev) => {
       const haveKeys = new Set((Array.isArray(prev) ? prev : []).map((p) => p.feedKey || p.id));
       const toAdd = stamped.filter((p) => !haveKeys.has(p.feedKey));
@@ -976,7 +986,7 @@ const HomeScreen = ({ navigation, route }) => {
       }
 
       if (gathered.length > 0) {
-        appendFeedPosts(gathered);
+        await appendFeedPosts(gathered);
       } else if (
         !forYouHasMoreRef.current &&
         !forYouAllHasMoreRef.current &&
@@ -991,8 +1001,9 @@ const HomeScreen = ({ navigation, route }) => {
             uniqueById.set(p.id, rest);
           }
         });
+        const ordered = await prepareForYouOrder([...uniqueById.values()]);
         const reshuffled = stampFeedKeys(
-          shufflePosts([...uniqueById.values()]),
+          ordered,
           forYouCycleRef.current,
         );
         reshuffled.forEach((p) => forYouShownIdsRef.current.add(p.id));

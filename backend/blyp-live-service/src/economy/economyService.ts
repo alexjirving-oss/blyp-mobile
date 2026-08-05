@@ -410,6 +410,51 @@ export async function getSpotlightAvailability(durationKey: '1h' | '24h' | '7d')
   return { durationKey, availableStartsAt: out };
 }
 
+/**
+ * Currently-valid promotions for discovery / For You ranking.
+ * Window: status ACTIVE and starts_at <= now < ends_at.
+ */
+export async function getActivePromotions(limit = 200) {
+  const { db } = getEconomyInfra();
+  const cap = clampInt(Number(limit) || 200, 1, 500);
+  const now = nowIso();
+
+  const rows = await db('promotions')
+    .select({
+      promotionId: 'promotion_id',
+      userId: 'user_id',
+      promotionType: 'promotion_type',
+      status: 'status',
+      startsAt: 'starts_at',
+      endsAt: 'ends_at',
+      metadata: 'metadata',
+    })
+    .where({ status: 'ACTIVE' })
+    .andWhere('starts_at', '<=', now)
+    .andWhere('ends_at', '>', now)
+    .orderBy('ends_at', 'asc')
+    .limit(cap);
+
+  return {
+    asOf: now,
+    promotions: (rows || []).map((r: any) => {
+      const meta = r?.metadata && typeof r.metadata === 'object' ? r.metadata : {};
+      const battleRef =
+        meta?.battleRef != null && String(meta.battleRef).trim()
+          ? String(meta.battleRef).trim()
+          : null;
+      return {
+        promotionId: String(r.promotionId),
+        userId: String(r.userId),
+        promotionType: String(r.promotionType || '').toUpperCase(),
+        startsAt: new Date(r.startsAt).toISOString(),
+        endsAt: new Date(r.endsAt).toISOString(),
+        battleRef,
+      };
+    }),
+  };
+}
+
 export async function purchasePromoteBattle(userId: string, input: PromoteBattleInput) {
   const { db } = getEconomyInfra();
   const pricing = await getPromotePricing();

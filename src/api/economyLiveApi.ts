@@ -194,6 +194,20 @@ export type PromotePurchaseResponse = {
   newBalances: { coinBalance: number; bonusCoinBalance: number };
 };
 
+export type ActivePromotion = {
+  promotionId: string;
+  userId: string;
+  promotionType: string;
+  startsAt: string;
+  endsAt: string;
+  battleRef: string | null;
+};
+
+export type ActivePromotionsResponse = {
+  asOf: string;
+  promotions: ActivePromotion[];
+};
+
 export interface SendGiftInput {
   streamId: string;
   receiverUserId: string;
@@ -289,6 +303,11 @@ export async function sendEconomyGift(input: SendGiftInput): Promise<SendGiftRes
 
 export async function getPromotePricing(): Promise<PromotePricing> {
   return await callEconomyBackend<PromotePricing>('/promote/pricing', 'GET');
+}
+
+/** Currently-valid promote windows for discovery / For You ranking. */
+export async function getActivePromotions(): Promise<ActivePromotionsResponse> {
+  return await callEconomyBackend<ActivePromotionsResponse>('/promote/active', 'GET');
 }
 
 export async function promoteBattle(input: { idempotencyKey: string; battleRef?: string }): Promise<PromotePurchaseResponse> {

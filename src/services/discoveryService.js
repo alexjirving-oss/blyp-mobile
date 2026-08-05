@@ -11,6 +11,11 @@
 import { db, firebaseEnabled } from '../config/firebase';
 import { fixStorageUrl } from '../utils/urlUtils';
 import { rankPosts, attachAccountFeedPriority, filterSuppressedAccounts } from './feedRankingService';
+import {
+  attachPromoteBoost,
+  applyPromoteFairCap,
+  promoteBoostAdjust,
+} from './promoteBoostService';
 import { filterForYouPosts } from '../utils/forYouFeedFilter';
 import { filterBlocked, loadBlockedUsers } from './BlockService';
 
@@ -46,7 +51,10 @@ export async function getTrendingPosts(limit = 10, interestTerms = []) {
     const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
     const terms = (interestTerms || []).map((t) => String(t).toLowerCase()).filter(Boolean);
 
-    const scored = all.map((p) => {
+    const visible = await visiblePosts(all);
+    const withAccount = await attachAccountFeedPriority(visible);
+    const withPromote = await attachPromoteBoost(withAccount);
+    const scored = withPromote.map((p) => {
       let score = engagement(p);
       if (terms.length) {
         const hay = [p.title, p.caption, p.description, p.category, (p.hashtags || []).join(' ')]
@@ -55,16 +63,15 @@ export async function getTrendingPosts(limit = 10, interestTerms = []) {
           .toLowerCase();
         for (const t of terms) if (hay.includes(t)) score += 25; // interest boost
       }
+      score += promoteBoostAdjust(p);
       return { p, score };
     });
 
-    const ranked = scored
-      .sort((a, b) => b.score - a.score)
-      .map((x) => x.p);
-    const visible = await visiblePosts(ranked);
-    const withAccount = await attachAccountFeedPriority(visible);
+    const ranked = applyPromoteFairCap(
+      scored.sort((a, b) => b.score - a.score).map((x) => x.p),
+    );
     // Over-fetch then filter so hidden/blocked/suppressed posts do not shrink the rail below `limit`.
-    return filterSuppressedAccounts(withAccount).slice(0, limit);
+    return filterSuppressedAccounts(ranked).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] trending failed', e?.message || String(e));
     return [];
@@ -103,7 +110,7 @@ export async function getTopicPosts(terms = [], limit = 30, opts = {}) {
       }
     }
 
-    const ranked = Array.from(byId.values())
+    const matched = Array.from(byId.values())
       .map((p) => {
         const hay = [p.title, p.caption, p.description, p.category, (p.hashtags || []).join(' '), p.username, p.userDisplayName]
           .filter(Boolean)
@@ -117,12 +124,22 @@ export async function getTopicPosts(terms = [], limit = 30, opts = {}) {
         for (const tid of postTeams) if (teamIds.has(tid)) score += 12;
         return { p, score };
       })
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score || engagement(b.p) - engagement(a.p))
-      .map((x) => x.p);
-    const visible = await visiblePosts(ranked);
+      .filter((x) => x.score > 0);
+    const visible = await visiblePosts(matched.map((x) => x.p));
     const withAccount = await attachAccountFeedPriority(visible);
-    return filterSuppressedAccounts(withAccount).slice(0, limit);
+    const withPromote = await attachPromoteBoost(withAccount);
+    const scoreById = new Map(matched.map((x) => [x.p.id, x.score]));
+    const ranked = applyPromoteFairCap(
+      withPromote
+        .map((p) => ({
+          p,
+          score: (scoreById.get(p.id) || 0) + promoteBoostAdjust(p),
+          eng: engagement(p),
+        }))
+        .sort((a, b) => b.score - a.score || b.eng - a.eng)
+        .map((x) => x.p),
+    );
+    return filterSuppressedAccounts(ranked).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] topic posts failed', e?.message || String(e));
     return [];
@@ -136,7 +153,12 @@ export async function getForYouPosts(terms = [], followingIds = [], limit = 12) 
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(80).get();
     const all = await visiblePosts((snap?.docs || []).map((d) => ({ id: d.id, ...d.data() })));
     const withAccount = await attachAccountFeedPriority(all);
-    const ranked = rankPosts(withAccount, terms, new Set((followingIds || []).filter(Boolean)));
+    const withPromote = await attachPromoteBoost(withAccount);
+    const ranked = rankPosts(
+      withPromote,
+      terms,
+      new Set((followingIds || []).filter(Boolean)),
+    );
     return filterForYouPosts(ranked).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] for-you failed', e?.message || String(e));
@@ -168,8 +190,11 @@ export async function getSuggestedCreators(limit = 12, interestTerms = [], exclu
     const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
     const terms = (interestTerms || []).map((t) => String(t).toLowerCase()).filter(Boolean);
 
-    const ranked = all
-      .filter((u) => (excludeUid ? u.id !== excludeUid : true))
+    const withPromote = await attachPromoteBoost(
+      all.map((u) => ({ ...u, userId: u.id || u.uid || u.userId })),
+    );
+    const ranked = withPromote
+      .filter((u) => (excludeUid ? (u.id || u.userId) !== excludeUid : true))
       .filter((u) => u.username || u.displayName || u.name)
       .filter((u) => {
         const tier = String(u.feedPriorityAccount || u.creatorFeedWeight || 'standard').toLowerCase();
@@ -181,6 +206,7 @@ export async function getSuggestedCreators(limit = 12, interestTerms = [], exclu
         if (tier === 'boost') score += 80;
         else if (tier === 'high') score += 40;
         else if (tier === 'low' || tier === 'less') score -= 30;
+        score += promoteBoostAdjust(u);
         if (terms.length) {
           const hay = [u.bio, u.category, (u.interests || []).join(' ')]
             .filter(Boolean)
@@ -192,7 +218,7 @@ export async function getSuggestedCreators(limit = 12, interestTerms = [], exclu
       })
       .sort((a, b) => b.score - a.score)
       .map((x) => x.u);
-    return (await visibleUsers(ranked)).slice(0, limit);
+    return applyPromoteFairCap(await visibleUsers(ranked)).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] creators failed', e?.message || String(e));
     return [];

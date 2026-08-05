@@ -1,8 +1,8 @@
 // feedRankingService.js
 //
 // Pure ranking for the "For You" feed. Orders posts by a blend of: who you
-// follow, your interests, light engagement, earn-your-reach, and admin
-// feed priority (account-wide + per-post).
+// follow, your interests, light engagement, earn-your-reach, admin
+// feed priority (account-wide + per-post), and active coin-promote boosts.
 //
 // Admin priority rule (documented):
 //   effectiveAdjust = accountAdjust(feedPriorityAccount) + postAdjust(feedPriority)
@@ -10,8 +10,17 @@
 //   Legacy aliases: less → low; creatorFeedWeight on user docs also accepted.
 //   Account `suppress` ≈ practically don't show (filtered from For You /
 //   discovery rails; remaining weight is extreme bottom if still present).
+//
+// Promote boost (paid): attachPromoteBoost → promoteBoostAdjust; fair-capped
+// via applyPromoteFairCap so organic content is not buried.
 
 import { db, firebaseEnabled } from '../config/firebase';
+import {
+  attachPromoteBoost,
+  applyPromoteFairCap,
+  promoteBoostAdjust,
+  isPromotedPost,
+} from './promoteBoostService';
 
 function engagement(post) {
   return (
@@ -213,6 +222,7 @@ function scorePost(post, terms, following) {
   s += Math.min(engagement(post), 24) * 0.5; // mild popularity nudge
   s += reachAdjust(post); // earn-your-reach: audition lift / earned score / resting
   s += feedPriorityAdjust(post); // account + post admin tiers
+  s += promoteBoostAdjust(post); // paid promote (battle / slot / spotlight)
   s += Math.random() * 6; // freshness jitter
   return s;
 }
@@ -221,30 +231,51 @@ function scorePost(post, terms, following) {
  * @param {any[]} posts
  * @param {string[]} terms  lowercased interest terms
  * @param {Set<string>} following  ids the user follows
+ * @param {{ fairCap?: boolean }} [opts]
  */
-export function rankPosts(posts, terms = [], following = new Set()) {
+export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
   const visible = filterSuppressedAccounts(posts);
   const noSignal = (!terms || terms.length === 0) && (!following || following.size === 0);
+  let ranked;
   if (noSignal) {
-    // Still honour earn-your-reach + admin priority when we have no personalization.
-    return [...visible]
-      .map((p) => ({ p, s: reachAdjust(p) + feedPriorityAdjust(p) + Math.random() * 12 }))
+    // Still honour earn-your-reach + admin priority + promote when we have no personalization.
+    ranked = [...visible]
+      .map((p) => ({
+        p,
+        s: reachAdjust(p) + feedPriorityAdjust(p) + promoteBoostAdjust(p) + Math.random() * 12,
+      }))
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.p);
+  } else {
+    ranked = [...visible]
+      .map((p) => ({ p, s: scorePost(p, terms, following) }))
       .sort((a, b) => b.s - a.s)
       .map((x) => x.p);
   }
-  return [...visible]
-    .map((p) => ({ p, s: scorePost(p, terms, following) }))
-    .sort((a, b) => b.s - a.s)
-    .map((x) => x.p);
+  if (opts.fairCap === false) return ranked;
+  return applyPromoteFairCap(ranked);
+}
+
+/**
+ * Bucket for shuffle: paid promote lifts into `high` (not admin `boost`) so
+ * organic + admin-boosted content can still lead, then fair-cap interleaves.
+ */
+export function effectiveOrderBucket(post) {
+  const admin = effectiveFeedBucket(post);
+  if (admin === 'suppress' || admin === 'low') return admin;
+  if (admin === 'boost') return 'boost';
+  if (isPromotedPost(post)) return 'high';
+  return admin;
 }
 
 /**
  * Bucketed shuffle for Home For You: boost → high → standard → low → suppress.
  * Prefer filtering suppress via attachAccountFeedPriority + filterSuppressedAccounts
  * before calling; leftover suppress still lands in the bottom bucket.
+ * Applies promote fair-cap after the bucket shuffle.
  */
-export function shufflePostsByFeedPriority(posts) {
+export function shufflePostsByFeedPriority(posts, opts = {}) {
   const buckets = {
     boost: [],
     high: [],
@@ -253,7 +284,7 @@ export function shufflePostsByFeedPriority(posts) {
     suppress: [],
   };
   for (const p of posts || []) {
-    const bucket = effectiveFeedBucket(p);
+    const bucket = effectiveOrderBucket(p);
     buckets[bucket].push(p);
   }
   const shuffleBucket = (arr) => {
@@ -266,13 +297,31 @@ export function shufflePostsByFeedPriority(posts) {
     }
     return next;
   };
-  return [
+  const ordered = [
     ...shuffleBucket(buckets.boost),
     ...shuffleBucket(buckets.high),
     ...shuffleBucket(buckets.standard),
     ...shuffleBucket(buckets.low),
     ...shuffleBucket(buckets.suppress),
   ];
+  if (opts.fairCap === false) return ordered;
+  return applyPromoteFairCap(ordered);
+}
+
+/**
+ * Hydrate admin account tiers + active promote boosts, drop suppress, then
+ * bucket-shuffle with fair promote caps. Shared by Home For You + discovery.
+ */
+export async function prepareRankedFeed(posts, opts = {}) {
+  const withAccount = await attachAccountFeedPriority(posts || []);
+  const withPromote = await attachPromoteBoost(withAccount);
+  const visible = filterSuppressedAccounts(withPromote);
+  if (opts.mode === 'rank') {
+    return rankPosts(visible, opts.terms || [], opts.following || new Set(), {
+      fairCap: opts.fairCap !== false,
+    });
+  }
+  return shufflePostsByFeedPriority(visible, { fairCap: opts.fairCap !== false });
 }
 
 export default {
@@ -284,7 +333,9 @@ export default {
   attachAccountFeedPriority,
   filterSuppressedAccounts,
   shufflePostsByFeedPriority,
+  prepareRankedFeed,
   normalizeFeedPriorityTier,
   effectiveFeedBucket,
+  effectiveOrderBucket,
   FEED_PRIORITY_WEIGHTS,
 };

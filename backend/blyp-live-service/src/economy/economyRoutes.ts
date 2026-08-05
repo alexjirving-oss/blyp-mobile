@@ -31,6 +31,7 @@ import {
   finalizeLiveGame,
   getCatalog,
   getLedger,
+  getActivePromotions,
   getPromotePricing,
   getSpotlightAvailability,
   getStreamSummary,
@@ -98,6 +99,18 @@ router.get('/promote/spotlight/availability', async (req: AuthedRequest, res) =>
     if (!durationKey) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
 
     const result = await getSpotlightAvailability(durationKey);
+    res.json(result);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+
+/** Active promote windows for feed ranking (battle / time slot / spotlight). */
+router.get('/promote/active', async (_req: AuthedRequest, res) => {
+  try {
+    const result = await getActivePromotions();
     res.json(result);
   } catch (e: any) {
     const err = toEconomyError(e);
