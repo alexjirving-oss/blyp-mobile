@@ -104,7 +104,7 @@ export function GuidedTourProvider({ children, navigationRef }) {
 
   const [active, setActive] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
-  const [steps, setSteps] = useState(() => buildTourSteps({ hasDating: true }));
+  const [steps, setSteps] = useState(() => buildTourSteps({ hasDating: true, hasGames: true }));
   const [prefs, setPrefs] = useState(null);
   const [targetRevision, setTargetRevision] = useState(0);
 
@@ -187,7 +187,7 @@ export function GuidedTourProvider({ children, navigationRef }) {
       if (active && !opts.force) return;
 
       const dating = opts.hasDating != null ? !!opts.hasDating : !!hasAI;
-      const games = opts.hasGames != null ? !!opts.hasGames : false;
+      const games = opts.hasGames != null ? !!opts.hasGames : true;
       const nextSteps = buildTourSteps({ hasDating: dating, hasGames: games });
       setSteps(nextSteps);
       setStepIndex(0);
