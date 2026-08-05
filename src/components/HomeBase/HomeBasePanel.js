@@ -3,7 +3,7 @@
 // The "Blyp home base" — the personalized landing surface. It leads with the
 // Blyp AI bar, then surfaces smart suggestions, recent searches, live-now,
 // trending and suggested-creator rails (real Firestore data), the user's
-// interests (each a one-tap blyp search), quick actions into the rest of the
+// interests (each opens its topic/sport page), quick actions into the rest of the
 // app, and a shortcut into their pages.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -55,7 +55,13 @@ import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import speechToTextService from '../../services/speechToTextService';
 import geminiSpeechService from '../../services/geminiSpeechService';
 import { useHasAI } from '../../hooks/useEntitlement';
-import { INTEREST_CATALOG, getPreferences } from '../../services/userPreferencesService';
+import {
+  INTEREST_CATALOG,
+  TOPIC_PREFIX,
+  getPreferences,
+  addPage as addPagePref,
+  topicPageForInterest,
+} from '../../services/userPreferencesService';
 import {
   getLiveNow,
   getTrendingPosts,
@@ -626,6 +632,28 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     return (interests || []).map((id) => byId.get(id)).filter(Boolean);
   }, [interests]);
 
+  const openInterestPage = useCallback(
+    async (interest) => {
+      if (!interest?.id) return;
+      const key = `${TOPIC_PREFIX}${interest.id}`;
+      const page = topicPageForInterest(interest);
+      const already = (pages || []).some((p) => p.key === key);
+      if (!already && page && uid) {
+        try {
+          await addPagePref(uid, page);
+        } catch {
+          /* best effort — still try to open */
+        }
+      }
+      if (onOpenPage) {
+        onOpenPage(key);
+        return;
+      }
+      blyp(INTEREST_PROMPTS[interest.id] || interest.label);
+    },
+    [pages, uid, onOpenPage, blyp]
+  );
+
   const smartSuggestions = useMemo(() => {
     const fromInterests = (interests || [])
       .map((id) => INTEREST_PROMPTS[id])
@@ -1178,7 +1206,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                 key={i.id}
                 style={styles.interestChip}
                 activeOpacity={0.85}
-                onPress={() => blyp(INTEREST_PROMPTS[i.id] || i.label)}
+                onPress={() => openInterestPage(i)}
               >
                 <Icon name={i.icon} size={15} color={COLORS.textPrimary} />
                 <Text style={styles.interestText}>{i.label}</Text>

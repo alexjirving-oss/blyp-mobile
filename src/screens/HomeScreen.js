@@ -35,7 +35,7 @@ import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
 import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
 import FollowingFeedPanel from '../components/HomeBase/FollowingFeedPanel';
-import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, INTEREST_CATALOG } from '../services/userPreferencesService';
+import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, INTEREST_CATALOG, consumeLandingPageKey } from '../services/userPreferencesService';
 import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
 import { requireAccount } from '../services/guestSessionService';
@@ -338,6 +338,19 @@ const HomeScreen = ({ navigation, route }) => {
     const unsub = subscribePreferences(uid, setPrefs);
     return unsub;
   }, [uid]);
+
+  // After onboarding, open the seeded interest/sport page once (football/F1 preferred).
+  const landingConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!uid || landingConsumedRef.current) return;
+    if (!prefs?.landingPageKey) return;
+    const key = prefs.landingPageKey;
+    const keys = enabledPages.map((p) => p.key);
+    if (!keys.includes(key)) return;
+    landingConsumedRef.current = true;
+    setSelectedTab(key);
+    consumeLandingPageKey(uid).catch(() => {});
+  }, [uid, prefs?.landingPageKey, enabledPages]);
 
   // Tie the earn-your-reach session to this user (hashed server-side) and make sure
   // any queued post signals are flushed when the feed unmounts.

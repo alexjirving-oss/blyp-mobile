@@ -58,10 +58,15 @@ export const DEFAULT_PAGES = [
 
 const MAX_RECENT_SEARCHES = 12;
 
+/** Interests that render SportPagePanel (fixtures + team follow) instead of TopicFeedPanel. */
+export const SPORT_PAGE_IDS = ['football', 'f1'];
+
 const DEFAULT_PREFS = {
   interests: [],
   pages: DEFAULT_PAGES,
   onboarded: false,
+  /** One-shot Home tab to open after onboarding (e.g. topic:football). Cleared on consume. */
+  landingPageKey: null,
   recentSearches: [],
   lastSeenActivityAt: 0,
   updatedAt: 0,
@@ -71,6 +76,35 @@ const DEFAULT_PREFS = {
 export function topicPageForInterest(interest) {
   if (!interest || !interest.id) return null;
   return { key: `${TOPIC_PREFIX}${interest.id}`, label: interest.label, enabled: true, removable: true };
+}
+
+/** Prefer football/F1, else first selected interest, as the post-onboarding landing tab. */
+export function preferredLandingPageKey(interestIds) {
+  const ids = Array.isArray(interestIds) ? interestIds : [];
+  const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i]));
+  for (const sportId of SPORT_PAGE_IDS) {
+    if (ids.includes(sportId) && byId.has(sportId)) {
+      return `${TOPIC_PREFIX}${sportId}`;
+    }
+  }
+  for (const id of ids) {
+    if (byId.has(id)) return `${TOPIC_PREFIX}${id}`;
+  }
+  return null;
+}
+
+/** Ensure every selected interest has a Home topic page tab. */
+export function pagesWithInterestTopics(pages, interestIds) {
+  const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i]));
+  let next = Array.isArray(pages) ? [...pages] : [];
+  for (const id of interestIds || []) {
+    const interest = byId.get(id);
+    if (!interest) continue;
+    const page = topicPageForInterest(interest);
+    if (!page || next.some((p) => p.key === page.key)) continue;
+    next.push(page);
+  }
+  return reconcilePages(next);
 }
 
 const cache = new Map(); // uid -> prefs
@@ -129,10 +163,13 @@ function reconcilePages(storedPages) {
 function normalize(raw) {
   const base = clone(DEFAULT_PREFS);
   if (!raw || typeof raw !== 'object') return base;
+  const interests = Array.isArray(raw.interests) ? raw.interests : [];
   return {
-    interests: Array.isArray(raw.interests) ? raw.interests : [],
-    pages: reconcilePages(raw.pages),
+    interests,
+    // Heal: interests picked at onboarding historically did not create pages.
+    pages: pagesWithInterestTopics(reconcilePages(raw.pages), interests),
     onboarded: !!raw.onboarded,
+    landingPageKey: typeof raw.landingPageKey === 'string' ? raw.landingPageKey : null,
     recentSearches: Array.isArray(raw.recentSearches)
       ? raw.recentSearches.filter((s) => typeof s === 'string').slice(0, MAX_RECENT_SEARCHES)
       : [],
@@ -256,7 +293,12 @@ export function subscribePreferences(uid, cb) {
 
 export async function setInterests(uid, interests) {
   const prev = await getPreferences(uid);
-  const next = { ...prev, interests: Array.isArray(interests) ? interests : [] };
+  const ids = Array.isArray(interests) ? interests : [];
+  const next = {
+    ...prev,
+    interests: ids,
+    pages: pagesWithInterestTopics(prev.pages, ids),
+  };
   return persist(uid, next);
 }
 
@@ -284,9 +326,13 @@ export async function removePage(uid, key) {
 
 export async function completeOnboarding(uid, interests) {
   const prev = await getPreferences(uid);
+  const ids = Array.isArray(interests) ? interests : prev.interests;
+  const pages = pagesWithInterestTopics(prev.pages, ids);
   const next = {
     ...prev,
-    interests: Array.isArray(interests) ? interests : prev.interests,
+    interests: ids,
+    pages,
+    landingPageKey: preferredLandingPageKey(ids),
     onboarded: true,
     updatedAt: Date.now(),
   };
@@ -300,6 +346,15 @@ export async function completeOnboarding(uid, interests) {
     /* already logged inside syncToRemote */
   }
   return stamped;
+}
+
+/** Read-and-clear the one-shot post-onboarding Home tab. */
+export async function consumeLandingPageKey(uid) {
+  const prev = await getPreferences(uid);
+  const key = prev.landingPageKey || null;
+  if (!key) return null;
+  await persist(uid, { ...prev, landingPageKey: null });
+  return key;
 }
 
 export async function addRecentSearch(uid, queryText) {
@@ -368,10 +423,13 @@ export function interestLabels(ids) {
 export default {
   INTEREST_CATALOG,
   DEFAULT_PAGES,
+  SPORT_PAGE_IDS,
   TOPIC_PREFIX,
   isTopicPageKey,
   topicIdFromKey,
   topicPageForInterest,
+  preferredLandingPageKey,
+  pagesWithInterestTopics,
   getPreferences,
   subscribePreferences,
   setInterests,
@@ -379,6 +437,7 @@ export default {
   addPage,
   removePage,
   completeOnboarding,
+  consumeLandingPageKey,
   addRecentSearch,
   clearRecentSearches,
   setActivitySeen,

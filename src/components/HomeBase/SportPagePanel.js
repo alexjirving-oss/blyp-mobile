@@ -38,6 +38,7 @@ import {
   addFollowedTeam,
   removeFollowedTeam,
 } from '../../services/teamPreferencesService';
+import { isMatchdayLiveEnabled } from '../../services/matchdayService';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
 
 const SPORTS = {
@@ -144,8 +145,6 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
   const [pickerResults, setPickerResults] = useState([]);
   const [pickerLoading, setPickerLoading] = useState(false);
 
-  const termsKey = cfg.terms.join(',');
-
   useEffect(() => {
     if (!uid) return undefined;
     const unsub = subscribeToFollowingList(uid, (ids) => setFollowingSet(new Set(ids || [])));
@@ -162,6 +161,22 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
     if (cfg.kind === 'football') return teams.filter((t) => (t.sport || 'Soccer') !== 'F1');
     return [];
   }, [teams, cfg.kind]);
+
+  // Sport terms + followed club/constructor names so the rail prefers team content.
+  const contentTerms = useMemo(() => {
+    const base = [...(cfg.terms || [])];
+    for (const t of myTeams) {
+      const name = String(t.name || '')
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 2);
+      base.push(...name);
+      if (t.shortName) base.push(String(t.shortName).toLowerCase());
+    }
+    return Array.from(new Set(base));
+  }, [cfg.terms, myTeams]);
+
+  const termsKey = contentTerms.join(',');
 
   // Football: fetch next/last per followed team.
   useEffect(() => {
@@ -196,8 +211,8 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
   const load = useMemo(
     () => async () => {
       const [p, c] = await Promise.all([
-        getTopicPosts(cfg.terms, 40),
-        getSuggestedCreators(12, cfg.terms, uid),
+        getTopicPosts(contentTerms, 40),
+        getSuggestedCreators(12, contentTerms, uid),
       ]);
       setPosts(p);
       setCreators(c);
@@ -293,7 +308,36 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
     }
   };
 
-  const rail = posts.slice(0, 10);
+  const isVideoPost = (p) => p?.type === 'video' || !!p?.videoUrl;
+  // Prefer videos for the horizontal rail; fill with other topic posts if thin.
+  const rail = useMemo(() => {
+    const videos = posts.filter(isVideoPost);
+    if (videos.length >= 8) return videos.slice(0, 10);
+    const rest = posts.filter((p) => !isVideoPost(p));
+    return [...videos, ...rest].slice(0, 10);
+  }, [posts]);
+
+  const openMatchday = (ev, team) => {
+    if (!ev?.id) return;
+    if (!isMatchdayLiveEnabled()) {
+      askBlyp(`${team?.name || 'Match'} matchday`);
+      return;
+    }
+    navigation.navigate('MatchdayRoom', {
+      eventId: String(ev.id),
+      teamId: team?.id ? String(team.id) : undefined,
+      eventMeta: {
+        id: ev.id,
+        name: ev.name,
+        homeTeam: ev.homeTeam,
+        awayTeam: ev.awayTeam,
+        timestamp: ev.timestamp,
+        date: ev.date,
+        time: ev.time,
+        league: ev.league,
+      },
+    });
+  };
 
   // ---- Football team card ----
   const FootballTeamCard = ({ team }) => {
@@ -333,6 +377,18 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
             <Text style={styles.teamRowMuted}>{m ? 'No recent result' : 'Loading…'}</Text>
           )}
         </View>
+        {!!m?.next?.id && (
+          <TouchableOpacity
+            style={[styles.teamAsk, { marginBottom: 6 }]}
+            activeOpacity={0.85}
+            onPress={() => openMatchday(m.next, team)}
+          >
+            <Icon name="radio" size={13} color={cfg.accent} />
+            <Text style={[styles.teamAskText, { color: cfg.accent }]}>
+              {isMatchdayLiveEnabled() ? 'Open Matchday Live' : 'Matchday preview'}
+            </Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.teamAsk} activeOpacity={0.85} onPress={() => askBlyp(`${team.name} latest news`)}>
           <Icon name="sparkles" size={13} color={cfg.accent} />
           <Text style={[styles.teamAskText, { color: cfg.accent }]}>Ask Blyp about {team.name}</Text>
@@ -471,7 +527,9 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       {/* Trending rail */}
       {rail.length > 0 && (
         <>
-          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Trending in {cfg.title}</Text>
+          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
+            {myTeams.length > 0 ? `Videos for you` : `Trending in ${cfg.title}`}
+          </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
             {rail.map((p) => {
               const uri = postThumbnail(p);

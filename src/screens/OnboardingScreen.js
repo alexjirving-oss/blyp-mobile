@@ -4,10 +4,11 @@
 // the topics they care about, and seeds their personalized Home. Saved via
 // userPreferencesService and gated by the `onboarded` flag in App.js.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   Linking,
   ScrollView,
@@ -22,7 +23,7 @@ import Icon from '../components/Icon';
 import BlypLogo from '../components/BlypLogo';
 import { COLORS } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
-import { INTEREST_CATALOG, completeOnboarding } from '../services/userPreferencesService';
+import { INTEREST_CATALOG, SPORT_PAGE_IDS, completeOnboarding } from '../services/userPreferencesService';
 import { getSuggestedCreators, creatorAvatar } from '../services/discoveryService';
 import { followUser, unfollowUser } from '../utils/followUtils';
 import { PLANS } from '../services/transparencyService';
@@ -30,6 +31,9 @@ import { loadEntitlement } from '../services/entitlementService';
 import { startCheckout } from '../services/subscriptionService';
 import { HOW_BLYP_WORKS, LAYER_2_NOTE, recordAcceptance } from '../services/termsService';
 import { requestImport, normalizeHandle, isValidHandle } from '../services/socialImportService';
+import { searchFootballTeams } from '../services/footballDataService';
+import { getF1Teams } from '../services/formula1DataService';
+import { addFollowedTeam } from '../services/teamPreferencesService';
 
 const MIN_PICKS = 3;
 // Where the full, formal Terms live (Layer-2). Update when legal review lands.
@@ -48,6 +52,13 @@ const OnboardingScreen = ({ uid, onDone }) => {
   const [importOwns, setImportOwns] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [importMsg, setImportMsg] = useState('');
+  const [teamSport, setTeamSport] = useState(null); // 'football' | 'f1'
+  const [teamQuery, setTeamQuery] = useState('');
+  const [teamResults, setTeamResults] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [pickedTeams, setPickedTeams] = useState([]);
+
+  const sportInterests = selected.filter((id) => SPORT_PAGE_IDS.includes(id));
 
   const submitImport = async () => {
     const h = normalizeHandle(importHandle);
@@ -85,6 +96,69 @@ const OnboardingScreen = ({ uid, onDone }) => {
     } finally {
       setLoadingCreators(false);
     }
+  };
+
+  const goAfterInterests = () => {
+    if (sportInterests.length > 0) {
+      const first = sportInterests.includes('football') ? 'football' : sportInterests[0];
+      setTeamSport(first);
+      setTeamQuery('');
+      setTeamResults([]);
+      setStep(6);
+      return;
+    }
+    goToFollows();
+  };
+
+  useEffect(() => {
+    if (step !== 6 || !teamSport) return undefined;
+    let cancelled = false;
+    (async () => {
+      setTeamLoading(true);
+      try {
+        let res = [];
+        if (teamSport === 'football') {
+          res = await searchFootballTeams(teamQuery);
+        } else {
+          const all = await getF1Teams();
+          const needle = String(teamQuery || '').trim().toLowerCase();
+          res = needle ? all.filter((t) => (t.name || '').toLowerCase().includes(needle)) : all;
+        }
+        if (!cancelled) setTeamResults(res || []);
+      } catch {
+        if (!cancelled) setTeamResults([]);
+      } finally {
+        if (!cancelled) setTeamLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, teamSport, teamQuery]);
+
+  const pickTeam = async (team) => {
+    if (!team?.id) return;
+    if (pickedTeams.some((t) => t.id === team.id)) return;
+    setPickedTeams((prev) => [...prev, team]);
+    try {
+      await addFollowedTeam(uid, team);
+    } catch {
+      /* local follow is best-effort */
+    }
+  };
+
+  const finishTeamStep = () => {
+    // If both football + F1 selected and we only did football, offer F1 next.
+    if (teamSport === 'football' && sportInterests.includes('f1')) {
+      const alreadyDidF1 = pickedTeams.some((t) => t.sport === 'F1');
+      if (!alreadyDidF1) {
+        setTeamSport('f1');
+        setTeamQuery('');
+        setTeamResults([]);
+        return;
+      }
+    }
+    goToFollows();
   };
 
   const toggleFollow = async (user) => {
@@ -489,6 +563,99 @@ const OnboardingScreen = ({ uid, onDone }) => {
     );
   }
 
+  if (step === 6) {
+    const title = teamSport === 'f1' ? 'Pick your F1 team' : 'Pick your club';
+    const sub =
+      teamSport === 'f1'
+        ? 'Follow a constructor — race weekends land on your Formula 1 page.'
+        : 'Follow your club — fixtures and football videos land on your Football page.';
+    return (
+      <ScreenContainer>
+        <View style={styles.pickWrap}>
+          <Text style={styles.eyebrow}>YOUR TEAM</Text>
+          <Text style={styles.pickTitle}>{title}</Text>
+          <Text style={styles.pickSub}>{sub}</Text>
+
+          <View style={styles.teamSearchBox}>
+            <Icon name="search" size={16} color={COLORS.textMuted} />
+            <TextInput
+              style={styles.teamSearchInput}
+              value={teamQuery}
+              onChangeText={setTeamQuery}
+              placeholder={teamSport === 'f1' ? 'Search constructors…' : 'Search clubs…'}
+              placeholderTextColor={COLORS.textMuted}
+              autoCorrect={false}
+            />
+          </View>
+
+          {pickedTeams.length > 0 && (
+            <View style={styles.pickedRow}>
+              {pickedTeams.map((t) => (
+                <View key={t.id} style={styles.pickedChip}>
+                  {!!t.badge && <Image source={{ uri: t.badge }} style={styles.pickedBadge} />}
+                  <Text style={styles.pickedText} numberOfLines={1}>{t.name}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {teamLoading ? (
+            <View style={styles.creatorsLoading}>
+              <ActivityIndicator size="large" color={COLORS.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={teamResults}
+              keyExtractor={(item) => String(item.id)}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: 12 }}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => {
+                const on = pickedTeams.some((t) => t.id === item.id);
+                return (
+                  <TouchableOpacity
+                    style={[styles.teamRow, on && styles.teamRowOn]}
+                    activeOpacity={0.85}
+                    onPress={() => pickTeam(item)}
+                    disabled={on}
+                  >
+                    {item.badge ? (
+                      <Image source={{ uri: item.badge }} style={styles.teamBadge} resizeMode="contain" />
+                    ) : (
+                      <View style={[styles.teamBadge, styles.teamBadgeFallback]}>
+                        <Icon name={teamSport === 'f1' ? 'flag' : 'football'} size={18} color={COLORS.textMuted} />
+                      </View>
+                    )}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.teamName} numberOfLines={1}>{item.name}</Text>
+                      {!!item.league && <Text style={styles.teamLeague} numberOfLines={1}>{item.league}</Text>}
+                    </View>
+                    <Icon name={on ? 'checkmark-circle' : 'add-circle-outline'} size={22} color={on ? COLORS.primary : COLORS.textMuted} />
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <Text style={styles.noCreators}>No teams found — try another search.</Text>
+              }
+            />
+          )}
+
+          <View style={styles.footer}>
+            <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.9} onPress={finishTeamStep}>
+              <Text style={styles.primaryBtnText}>
+                {pickedTeams.length > 0 ? `Continue (${pickedTeams.length} team${pickedTeams.length === 1 ? '' : 's'})` : 'Continue'}
+              </Text>
+              <Icon name="arrow-forward" size={18} color={COLORS.black} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={goToFollows} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.skipText}>Skip for now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScreenContainer>
+    );
+  }
+
   const enough = selected.length >= MIN_PICKS;
 
   return (
@@ -520,7 +687,7 @@ const OnboardingScreen = ({ uid, onDone }) => {
             style={[styles.primaryBtn, !enough && styles.primaryBtnDisabled]}
             activeOpacity={0.9}
             disabled={!enough}
-            onPress={goToFollows}
+            onPress={goAfterInterests}
           >
             <Text style={styles.primaryBtnText}>
               {enough ? `Continue (${selected.length})` : `Pick ${MIN_PICKS - selected.length} more`}
@@ -731,6 +898,50 @@ const styles = StyleSheet.create({
   termsBody: { color: COLORS.textSecondary, fontSize: responsiveFont(12.5), lineHeight: responsiveFont(18), marginTop: 4 },
   termsNote: { color: COLORS.textMuted, fontSize: responsiveFont(12.5), lineHeight: responsiveFont(18), marginTop: 18 },
   termsLink: { color: COLORS.primary, fontSize: responsiveFont(13.5), fontWeight: '800', marginTop: 12, textAlign: 'center' },
+  teamSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    height: 44,
+    marginBottom: 10,
+  },
+  teamSearchInput: { flex: 1, color: COLORS.textPrimary, fontSize: responsiveFont(14) },
+  pickedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  pickedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,210,190,0.12)',
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    maxWidth: '48%',
+  },
+  pickedBadge: { width: 18, height: 18, borderRadius: 4 },
+  pickedText: { color: COLORS.textPrimary, fontSize: responsiveFont(12), fontWeight: '700', flexShrink: 1 },
+  teamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+  },
+  teamRowOn: { opacity: 0.7 },
+  teamBadge: { width: 36, height: 36, borderRadius: 8 },
+  teamBadgeFallback: {
+    backgroundColor: COLORS.backgroundCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamName: { color: COLORS.textPrimary, fontSize: responsiveFont(14), fontWeight: '700' },
+  teamLeague: { color: COLORS.textMuted, fontSize: responsiveFont(12), marginTop: 2 },
 });
 
 export default OnboardingScreen;
