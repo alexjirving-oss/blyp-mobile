@@ -34,12 +34,12 @@ function envFlag(name: string, defaultValue: boolean): boolean {
 // - ENABLE_PURCHASES: true if backend is ready, false if not
 // - ALLOW_SIMULATED_CLIENT_TOPUPS: false (no client-side credits without server validation)
 // - REQUIRE_SERVER_RECEIPT_VALIDATION: true (all purchases must be validated server-side)
-// - ENABLE_WITHDRAWALS: false (not implemented, disabled until backend ready)
+// - ENABLE_WITHDRAWALS: false (CTA hidden until explicitly enabled; backend kill-switch separate)
 //
 // DEVELOPMENT MODE (with EXPO_PUBLIC_DEV_MODE=1):
 // - ALLOW_SIMULATED_CLIENT_TOPUPS: true (for testing without billing backend)
 // - REQUIRE_SERVER_RECEIPT_VALIDATION: false (for testing with mock tokens)
-// - ENABLE_WITHDRAWALS: false (always off until implemented)
+// - ENABLE_WITHDRAWALS: false (still off unless EXPO_PUBLIC_ENABLE_WITHDRAWALS=1)
 //
 // ============================================================================
 
@@ -69,9 +69,10 @@ export function isClientEconomyMutationAllowed(): boolean {
   return CLIENT_ECONOMY_MUTATIONS_ENABLED;
 }
 
-// Withdrawals: on by default once Stripe Connect backend is deployed; set
-// EXPO_PUBLIC_ENABLE_WITHDRAWALS=0 to force-hide the client CTA.
-export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', true);
+// Withdrawals: OFF by default — prod live-service kill-switch is off until
+// Stripe Connect is explicitly enabled. Set EXPO_PUBLIC_ENABLE_WITHDRAWALS=1
+// to show the client CTA (backend must also allow withdrawals).
+export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', false);
 
 // Helper: determine unsafe simulation mode (client credits without server receipt)
 // In production, this should ALWAYS be false

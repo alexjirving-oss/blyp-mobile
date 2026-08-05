@@ -78,11 +78,12 @@ module.exports = () => {
     EXPO_PUBLIC_LIVE_SERVICE_URL:
       process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
       'https://blyp-live-service-innn3d7yqq-uc.a.run.app',
+    // Default OFF — matches live-service withdrawal kill-switch. Opt in with =1.
     EXPO_PUBLIC_ENABLE_WITHDRAWALS:
-      process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS === '0' ||
-      String(process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS || '').toLowerCase() === 'false'
-        ? '0'
-        : '1',
+      process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS === '1' ||
+      String(process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS || '').toLowerCase() === 'true'
+        ? '1'
+        : '0',
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
