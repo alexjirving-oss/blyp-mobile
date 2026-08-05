@@ -781,3 +781,63 @@ export async function incrementPostGiftTotals(
     return false;
   }
 }
+
+/** Admin feed ranking: less | standard | high. Read by mobile For You / HomeBase. */
+export type FeedPriority = 'less' | 'standard' | 'high';
+
+export async function setPostFeedPriorityFs(
+  postId: string,
+  priority: FeedPriority,
+  actorUserId?: string | null,
+): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(postId || '').trim();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!id) return { ok: false, detail: 'missing_post_id' };
+  try {
+    const payload: Record<string, unknown> = {
+      feedPriority: priority,
+      feedPriorityUpdatedAt: FieldValue.serverTimestamp(),
+    };
+    if (actorUserId) payload.feedPriorityUpdatedBy = String(actorUserId);
+    await fs.collection('posts').doc(id).set(payload, { merge: true });
+    return { ok: true };
+  } catch (e: any) {
+    const detail = e?.message || String(e);
+    logger.error({ err: detail, postId: id, priority }, '[firestore-admin] setPostFeedPriorityFs failed');
+    return { ok: false, detail };
+  }
+}
+
+/**
+ * Soft-hide / unhide a post for all mobile feeds (`filterBlocked` drops
+ * `moderation.hidden === true`). Complements Postgres `post_admin_state`.
+ */
+export async function setPostModerationHiddenFs(
+  postId: string,
+  hidden: boolean,
+  reason?: string | null,
+  actorUserId?: string | null,
+): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(postId || '').trim();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!id) return { ok: false, detail: 'missing_post_id' };
+  try {
+    const moderation: Record<string, unknown> = {
+      hidden: hidden === true,
+      hiddenAt: hidden ? FieldValue.serverTimestamp() : null,
+      hiddenReason: hidden ? String(reason || '').trim() || null : null,
+      hiddenBy: hidden && actorUserId ? String(actorUserId) : null,
+    };
+    await fs.collection('posts').doc(id).set({ moderation }, { merge: true });
+    return { ok: true };
+  } catch (e: any) {
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, postId: id, hidden },
+      '[firestore-admin] setPostModerationHiddenFs failed',
+    );
+    return { ok: false, detail };
+  }
+}

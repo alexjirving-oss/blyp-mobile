@@ -3,7 +3,12 @@ import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
-import { syncUserRoleToFirestore } from './firestoreAdmin';
+import {
+    syncUserRoleToFirestore,
+    setPostFeedPriorityFs,
+    setPostModerationHiddenFs,
+    type FeedPriority,
+} from './firestoreAdmin';
 
 // Updated to accept UUID versions 1-7 (was previously 1-5 only, which rejected UUIDv7 from Cognito)
 const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -997,6 +1002,21 @@ export async function removePostByAdmin(input: { actorUserId: string; targetPost
         [input.targetPostId, input.reason, input.actorUserId]
     );
 
+    // Mirror into Firestore so mobile For You / discovery drop the post immediately
+    // via filterBlocked → moderation.hidden (Postgres-only remove left feeds intact).
+    const hide = await setPostModerationHiddenFs(
+        input.targetPostId,
+        true,
+        input.reason,
+        input.actorUserId,
+    );
+    if (!hide.ok) {
+        logger.warn(
+            { postId: input.targetPostId, detail: hide.detail },
+            '[admin] post_remove: Firestore hide incomplete; Postgres state was still updated',
+        );
+    }
+
     await writeAdminAudit({
         actorUserId: input.actorUserId,
         action: 'post_remove',
@@ -1005,6 +1025,7 @@ export async function removePostByAdmin(input: { actorUserId: string; targetPost
         metadata: {
             reason: input.reason,
             userId: input.userId || null,
+            firestoreHidden: hide.ok,
         },
     });
 }
@@ -1026,6 +1047,19 @@ export async function restorePostByAdmin(input: { actorUserId: string; targetPos
         [input.targetPostId]
     );
 
+    const unhide = await setPostModerationHiddenFs(
+        input.targetPostId,
+        false,
+        input.reason,
+        input.actorUserId,
+    );
+    if (!unhide.ok) {
+        logger.warn(
+            { postId: input.targetPostId, detail: unhide.detail },
+            '[admin] post_restore: Firestore unhide incomplete; Postgres state was still updated',
+        );
+    }
+
     await writeAdminAudit({
         actorUserId: input.actorUserId,
         action: 'post_restore',
@@ -1034,8 +1068,44 @@ export async function restorePostByAdmin(input: { actorUserId: string; targetPos
         metadata: {
             reason: input.reason,
             userId: input.userId || null,
+            firestoreHidden: false,
+            firestoreUnhideOk: unhide.ok,
         },
     });
+}
+
+export async function setFeedPriorityByAdmin(input: {
+    actorUserId: string;
+    targetPostId: string;
+    priority: FeedPriority;
+    reason: string | null;
+}): Promise<{ firestoreOk: boolean; detail?: string }> {
+    const fsResult = await setPostFeedPriorityFs(
+        input.targetPostId,
+        input.priority,
+        input.actorUserId,
+    );
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: 'post_feed_priority',
+        targetType: 'post',
+        targetId: input.targetPostId,
+        metadata: {
+            priority: input.priority,
+            reason: input.reason,
+            firestoreOk: fsResult.ok,
+            detail: fsResult.detail || null,
+        },
+    });
+
+    if (!fsResult.ok) {
+        const err: any = new Error(fsResult.detail || 'FEED_PRIORITY_FIRESTORE_FAILED');
+        err.code = 'FEED_PRIORITY_FIRESTORE_FAILED';
+        throw err;
+    }
+
+    return { firestoreOk: true };
 }
 
 export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail> {

@@ -15,6 +15,10 @@ function engagement(post) {
 const AUDITION_BOOST = 18; // guaranteed early sampling for fresh posts
 const AUDITION_SETTLE = 40; // impressions over which the audition boost fades
 
+/** Admin For You priority (Firestore `feedPriority`: less | standard | high). */
+const FEED_PRIORITY_HIGH = 80;
+const FEED_PRIORITY_LESS = -60;
+
 /**
  * Earn-your-reach adjustment (see BLYP_CHARTER.md). This is what makes reach EARNED:
  *  - a brand-new post gets a temporary "audition" lift so it is actually seen,
@@ -37,6 +41,14 @@ export function reachAdjust(post) {
   return score * 0.25;
 }
 
+/** Score bump from admin feed priority (in-app / dashboard moderation). */
+export function feedPriorityAdjust(post) {
+  const raw = String(post?.feedPriority || post?.adminPriority || 'standard').toLowerCase();
+  if (raw === 'high') return FEED_PRIORITY_HIGH;
+  if (raw === 'less' || raw === 'low') return FEED_PRIORITY_LESS;
+  return 0;
+}
+
 function scorePost(post, terms, following) {
   let s = 0;
   const owner = post.userId || post.uid || post.authorId;
@@ -56,6 +68,7 @@ function scorePost(post, terms, following) {
   }
   s += Math.min(engagement(post), 24) * 0.5; // mild popularity nudge
   s += reachAdjust(post); // earn-your-reach: audition lift / earned score / resting
+  s += feedPriorityAdjust(post); // admin less / standard / high
   s += Math.random() * 6; // freshness jitter
   return s;
 }
@@ -69,10 +82,9 @@ export function rankPosts(posts, terms = [], following = new Set()) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
   const noSignal = (!terms || terms.length === 0) && (!following || following.size === 0);
   if (noSignal) {
-    // Still honour earn-your-reach when we have no personalization: audition posts
-    // get sampled, resting posts sink, but the order stays lively and varied.
+    // Still honour earn-your-reach + admin priority when we have no personalization.
     return [...posts]
-      .map((p) => ({ p, s: reachAdjust(p) + Math.random() * 12 }))
+      .map((p) => ({ p, s: reachAdjust(p) + feedPriorityAdjust(p) + Math.random() * 12 }))
       .sort((a, b) => b.s - a.s)
       .map((x) => x.p);
   }
@@ -82,4 +94,4 @@ export function rankPosts(posts, terms = [], following = new Set()) {
     .map((x) => x.p);
 }
 
-export default { rankPosts, reachAdjust };
+export default { rankPosts, reachAdjust, feedPriorityAdjust };

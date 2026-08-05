@@ -205,8 +205,9 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
-/** Temporary For You order until the ranking algorithm is configured. */
-function shufflePosts(posts) {
+/** Temporary For You order until the ranking algorithm is configured.
+ *  Still honour admin `feedPriority` (high → front, less → back) within shuffle. */
+function shuffleBucket(posts) {
   const next = Array.isArray(posts) ? [...posts] : [];
   for (let i = next.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -215,6 +216,19 @@ function shufflePosts(posts) {
     next[j] = tmp;
   }
   return next;
+}
+
+function shufflePosts(posts) {
+  const high = [];
+  const standard = [];
+  const less = [];
+  for (const p of posts || []) {
+    const pri = String(p?.feedPriority || p?.adminPriority || 'standard').toLowerCase();
+    if (pri === 'high') high.push(p);
+    else if (pri === 'less' || pri === 'low') less.push(p);
+    else standard.push(p);
+  }
+  return [...shuffleBucket(high), ...shuffleBucket(standard), ...shuffleBucket(less)];
 }
 
 function stampFeedKeys(posts, cycle) {

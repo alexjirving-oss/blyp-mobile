@@ -20,6 +20,7 @@ import {
     banUserSchema,
 
     moderatePostSchema,
+    adminFeedPrioritySchema,
     unbanUserSchema,
 } from './adminSchemas';
 import {
@@ -34,6 +35,7 @@ import {
     removePostByAdmin,
     restorePostByAdmin,
     setAdminUserCapabilities,
+    setFeedPriorityByAdmin,
     unbanUserByAdmin,
     writeAdminAudit,
 } from './adminService';
@@ -642,6 +644,41 @@ router.post('/admin/posts/:postId/restore', requireAdmin, async (req: AuthedRequ
         return res.json({ ok: true, postId: targetPostId, isRemoved: false });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/posts/:postId/restore failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/posts/:postId/feed-priority', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetPostId = String(req.params?.postId || '').trim();
+        if (!targetPostId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminFeedPrioritySchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        await setFeedPriorityByAdmin({
+            actorUserId,
+            targetPostId,
+            priority: parsed.data.priority,
+            reason: parsed.data.reason || null,
+        });
+
+        return res.json({ ok: true, postId: targetPostId, feedPriority: parsed.data.priority });
+    } catch (e: any) {
+        const code = String(e?.code || '');
+        if (code === 'FEED_PRIORITY_FIRESTORE_FAILED') {
+            return res.status(502).json({
+                error: 'FIRESTORE_WRITE_FAILED',
+                code: 'FEED_PRIORITY_FIRESTORE_FAILED',
+                detail: e?.message || String(e),
+            });
+        }
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/posts/:postId/feed-priority failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });

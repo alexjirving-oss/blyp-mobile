@@ -31,6 +31,12 @@ export const moderatePostSchema = z.object({
     userId: cognitoSubSchema.optional(),
 });
 
+/** In-app / dashboard For You priority boost (writes Firestore `feedPriority`). */
+export const adminFeedPrioritySchema = z.object({
+    priority: z.enum(['less', 'standard', 'high']),
+    reason: z.string().trim().min(1).max(500).optional(),
+});
+
 export const adminSetCapabilitiesSchema = z.object({
     verified: z.coerce.boolean().default(false),
     role: z.enum(['user', 'admin', 'manager']).optional(),

@@ -44,6 +44,8 @@ import { getPlayableVideoUri } from '../utils/videoCache';
 import { isVideoPost } from '../utils/mediaViewerPlaylist';
 import { updatePostCategory } from '../services/postEditService';
 import { normalizeProfileCategories } from '../utils/profileCategories';
+import useIsAdmin from '../hooks/useIsAdmin';
+import { adminBanUser, adminRemovePost, adminSetFeedPriority } from '../api/adminLiveApi';
 
 async function downloadRawVideo(remoteUrl) {
   const url = fixStorageUrl(remoteUrl);
@@ -183,6 +185,7 @@ const MediaViewerItem = ({
 }) => {
   // useAuth().uid is the app's primary identity id (Cognito user id)
   const { uid, authReady, isAuthenticated } = useAuth();
+  const { isAdmin } = useIsAdmin();
 
   // Alias kept so the (large) body below continues to reference `post`.
   const post = actualPost;
@@ -363,6 +366,110 @@ const MediaViewerItem = ({
   })();
 
   const closeOptions = () => setOptionsVisible(false);
+
+  const runAdminSetPriority = (priority) => {
+    closeOptions();
+    const label = priority === 'high' ? 'High' : priority === 'less' ? 'Less' : 'Standard';
+    Alert.alert('Feed priority', `Set this post to ${label} in For You?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: `Set ${label}`,
+        onPress: async () => {
+          try {
+            await adminSetFeedPriority(actualPost.id, priority);
+            Toast.show({
+              type: 'success',
+              text1: 'Priority updated',
+              text2: label,
+              position: 'bottom',
+              visibilityTime: 1500,
+            });
+          } catch (e) {
+            const code = String(e?.code || '');
+            const msg =
+              code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
+                ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS (dashboard allowlist).'
+                : e?.message || 'Could not update priority.';
+            Alert.alert('Admin action failed', msg);
+          }
+        },
+      },
+    ]);
+  };
+
+  const runAdminRemovePost = () => {
+    closeOptions();
+    Alert.alert(
+      'Remove post (admin)',
+      'Hide this post from feeds for everyone? (soft remove + moderation.hidden)',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const author = String(actualPost?.userId || '').trim();
+              await adminRemovePost(actualPost.id, {
+                reason: 'Removed from mobile admin',
+                userId: author || undefined,
+              });
+              Toast.show({
+                type: 'success',
+                text1: 'Removed',
+                text2: 'Post hidden from feeds',
+                position: 'bottom',
+                visibilityTime: 1500,
+              });
+              navigation.goBack();
+            } catch (e) {
+              const code = String(e?.code || '');
+              const msg =
+                code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
+                  ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS (dashboard allowlist).'
+                  : e?.message || 'Could not remove post.';
+              Alert.alert('Admin action failed', msg);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const runAdminBanAuthor = () => {
+    closeOptions();
+    const author = String(actualPost?.userId || '').trim();
+    if (!author) {
+      Alert.alert('Unavailable', 'This post has no author id.');
+      return;
+    }
+    Alert.alert('Ban user (admin)', 'Ban the author of this post platform-wide?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Ban',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await adminBanUser(author, { reason: 'Banned from mobile admin' });
+            Toast.show({
+              type: 'success',
+              text1: 'User banned',
+              position: 'bottom',
+              visibilityTime: 1500,
+            });
+            navigation.goBack();
+          } catch (e) {
+            const code = String(e?.code || '');
+            const msg =
+              code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
+                ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS (dashboard allowlist).'
+                : e?.message || 'Could not ban user.';
+            Alert.alert('Admin action failed', msg);
+          }
+        },
+      },
+    ]);
+  };
 
   const handleDownloadVideo = async () => {
     if (!videoDownloadUrl) {
@@ -1147,6 +1254,37 @@ const MediaViewerItem = ({
               </>
             )}
 
+            {isAdmin ? (
+              <>
+                <View style={styles.optionsAdminDivider} />
+                <Text style={styles.optionsAdminLabel}>Admin</Text>
+                <TouchableOpacity style={styles.optionsRow} onPress={() => runAdminSetPriority('high')}>
+                  <Icon name="arrow-up" size={20} color="#5EEAD4" />
+                  <Text style={[styles.optionsRowText, { color: '#5EEAD4' }]}>Priority: High</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.optionsRow} onPress={() => runAdminSetPriority('standard')}>
+                  <Icon name="remove" size={20} color="#fff" />
+                  <Text style={styles.optionsRowText}>Priority: Standard</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.optionsRow} onPress={() => runAdminSetPriority('less')}>
+                  <Icon name="arrow-down" size={20} color="#FCD34D" />
+                  <Text style={[styles.optionsRowText, { color: '#FCD34D' }]}>Priority: Less</Text>
+                </TouchableOpacity>
+                {!canDeletePost ? (
+                  <TouchableOpacity style={styles.optionsRow} onPress={runAdminRemovePost}>
+                    <Icon name="trash" size={20} color="#FB7185" />
+                    <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>Remove post (admin)</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {!isOwnPost && String(actualPost?.userId || '').trim() ? (
+                  <TouchableOpacity style={styles.optionsRow} onPress={runAdminBanAuthor}>
+                    <Icon name="ban" size={20} color="#FB7185" />
+                    <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>Ban author</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            ) : null}
+
             <TouchableOpacity style={[styles.optionsRow, styles.optionsCancel]} onPress={closeOptions}>
               <Text style={styles.optionsCancelText}>Cancel</Text>
             </TouchableOpacity>
@@ -1301,6 +1439,21 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '500',
+  },
+  optionsAdminDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  optionsAdminLabel: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    paddingHorizontal: 4,
+    paddingVertical: 6,
   },
   optionsCancel: {
     borderBottomWidth: 0,
