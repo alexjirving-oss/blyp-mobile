@@ -878,11 +878,28 @@ Return ONLY valid JSON.`;
 
     try {
       this.log(`✨ One-shot post generation: ${imageParts.length} image(s), hasIntent=${intent.length > 0}`);
-      const response = await this.postGeminiWithRetry(payload, {
+      let response = await this.postGeminiWithRetry(payload, {
         maxRetries: 1,
         baseDelayMs: 1000,
         timeoutMs: 18000,
       });
+
+      // Vision often 502s (openai_empty). One text-only retry still yields usable captions.
+      if ((!response || !response.ok) && imageParts.length > 0) {
+        const status = response?.status;
+        if (status === 502 || status === 500 || status === 503) {
+          this.log(`⚠️ One-shot HTTP ${status} with images — retrying text-only`);
+          const textOnlyPayload = {
+            ...payload,
+            contents: [{ parts: [{ text: promptText }] }],
+          };
+          response = await this.postGeminiWithRetry(textOnlyPayload, {
+            maxRetries: 0,
+            timeoutMs: 15000,
+          });
+        }
+      }
+
       if (!response || !response.ok) {
         const status = response?.status;
         let bodyText = '';

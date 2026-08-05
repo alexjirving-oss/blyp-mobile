@@ -128,7 +128,7 @@ exports.geminiProxy = functions
     secrets: ['OPENAI_API_KEY'],
 })
     .https.onRequest(async (req, res) => {
-    var _a;
+    var _a, _b, _c, _d, _e;
     (0, cors_1.applyCors)(req, res, { methods: 'POST, OPTIONS' });
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
@@ -147,7 +147,7 @@ exports.geminiProxy = functions
         const decoded = await firebaseAdmin_1.admin.auth().verifyIdToken(idToken);
         uid = decoded.uid;
     }
-    catch (_b) {
+    catch (_f) {
         res.status(401).json({ error: { message: 'unauthenticated' } });
         return;
     }
@@ -195,12 +195,26 @@ exports.geminiProxy = functions
             snippet: String(primary.body || '').slice(0, 160),
         });
         if (geminiKey) {
-            const backup = await callGemini(body, model, geminiKey);
-            if (backup.status >= 200 && backup.status < 300) {
-                send(backup.status, backup.body, 'gemini');
-                return;
+            // Prefer text-only backup when OpenAI emptied on vision — large inline
+            // images often make Gemini fail the same way (or exceed free-tier limits).
+            const primaryEmpty = String(primary.body || '').includes('openai_empty');
+            const backupBodies = primaryEmpty
+                ? [(0, openaiFallback_1.stripInlineMediaFromGeminiBody)(body), body]
+                : [body];
+            for (const backupBody of backupBodies) {
+                const backup = await callGemini(backupBody, model, geminiKey);
+                if (backup.status >= 200 && backup.status < 300) {
+                    send(backup.status, backup.body, 'gemini');
+                    return;
+                }
+                console.warn('[geminiProxy] Gemini backup failed', {
+                    uid,
+                    status: backup.status,
+                    textOnly: !!((_e = (_d = (_c = (_b = backupBody === null || backupBody === void 0 ? void 0 : backupBody.contents) === null || _b === void 0 ? void 0 : _b[0]) === null || _c === void 0 ? void 0 : _c.parts) === null || _d === void 0 ? void 0 : _d.every) === null || _e === void 0 ? void 0 : _e.call(_d, (p) => !((p === null || p === void 0 ? void 0 : p.inlineData) || (p === null || p === void 0 ? void 0 : p.inline_data)))),
+                    snippet: String(backup.body || '').slice(0, 160),
+                });
             }
-            send(primary.status || backup.status, primary.body || backup.body, 'openai');
+            send(primary.status, primary.body, 'openai');
             return;
         }
         send(primary.status, primary.body, 'openai');

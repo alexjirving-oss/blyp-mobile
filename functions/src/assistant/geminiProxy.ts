@@ -24,6 +24,7 @@ import {
   canUseOpenAiForBody,
   hasOpenAiFallback,
   shouldUseOpenAiFallback,
+  stripInlineMediaFromGeminiBody,
 } from './openaiFallback';
 import { getSubscriptionState, ensureTrialIfMissing } from './entitlement';
 
@@ -177,12 +178,29 @@ export const geminiProxy = functions
       });
 
       if (geminiKey) {
-        const backup = await callGemini(body, model, geminiKey);
-        if (backup.status >= 200 && backup.status < 300) {
-          send(backup.status, backup.body, 'gemini');
-          return;
+        // Prefer text-only backup when OpenAI emptied on vision — large inline
+        // images often make Gemini fail the same way (or exceed free-tier limits).
+        const primaryEmpty = String(primary.body || '').includes('openai_empty');
+        const backupBodies = primaryEmpty
+          ? [stripInlineMediaFromGeminiBody(body), body]
+          : [body];
+
+        for (const backupBody of backupBodies) {
+          const backup = await callGemini(backupBody as any, model, geminiKey);
+          if (backup.status >= 200 && backup.status < 300) {
+            send(backup.status, backup.body, 'gemini');
+            return;
+          }
+          console.warn('[geminiProxy] Gemini backup failed', {
+            uid,
+            status: backup.status,
+            textOnly: !!(backupBody as any)?.contents?.[0]?.parts?.every?.(
+              (p: any) => !(p?.inlineData || p?.inline_data),
+            ),
+            snippet: String(backup.body || '').slice(0, 160),
+          });
         }
-        send(primary.status || backup.status, primary.body || backup.body, 'openai');
+        send(primary.status, primary.body, 'openai');
         return;
       }
 

@@ -2280,23 +2280,24 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     if (!fbUser || !fbUser.uid) {
       throw new Error('User not authenticated (no Firebase UID)');
     }
+    const kind = String(mediaType || 'photo').toLowerCase();
     console.log('📤 Starting media upload...');
     console.log('📤 Media URI:', mediaUri);
-    console.log('📤 Media type:', mediaType);
+    console.log('📤 Media type:', kind);
     console.log('📤 Using Firebase UID:', fbUser.uid);
 
     const fileExtension =
-      mediaType === 'video' ? 'mp4' : mediaType === 'audio' ? 'm4a' : 'jpg';
-    const fileName = `${mediaType}-${Date.now()}.${fileExtension}`;
+      kind === 'video' ? 'mp4' : kind === 'audio' ? 'm4a' : 'jpg';
+    const fileName = `${kind}-${Date.now()}.${fileExtension}`;
     const filePath = `users/${fbUser.uid}/media/${fileName}`;
     const contentType =
-      mediaType === 'video' ? 'video/mp4' : mediaType === 'audio' ? 'audio/m4a' : 'image/jpeg';
+      kind === 'video' ? 'video/mp4' : kind === 'audio' ? 'audio/m4a' : 'image/jpeg';
 
     const uploaded = await uploadMediaToStorage({
       localUri: mediaUri,
       storagePath: filePath,
       contentType,
-      timeoutMs: mediaType === 'video' ? 180000 : 90000,
+      timeoutMs: kind === 'video' ? 180000 : 90000,
     });
     const downloadURL = uploaded.downloadURL;
     console.log('📤 Upload complete, download URL:', downloadURL);
@@ -2304,7 +2305,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     let thumbnailUrl = null;
 
     // Generate thumbnail for videos (short budget — never block publish).
-    if (mediaType === 'video') {
+    if (kind === 'video') {
       try {
         console.log('🎬 Generating video thumbnail...');
         const thumbnailPromise = VideoThumbnails.getThumbnailAsync(mediaUri, {
@@ -2334,8 +2335,8 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     }
 
     let normalizedType = 'image';
-    if (mediaType === 'video') normalizedType = 'video';
-    else if (mediaType === 'audio') normalizedType = 'audio';
+    if (kind === 'video') normalizedType = 'video';
+    else if (kind === 'audio') normalizedType = 'audio';
 
     return {
       url: downloadURL,
@@ -2419,12 +2420,19 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
           if (mediaItem.uri) {
             try {
               console.log(`📤 Uploading media ${i + 1}/${mediaItems.length}... Type: ${mediaItem.type}`);
-              const mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser);
+              let mediaData;
+              try {
+                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser);
+              } catch (firstErr) {
+                console.warn(`📤 Media ${i + 1} first attempt failed, retrying once…`, firstErr?.message);
+                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser);
+              }
               uploadedMedia.push(mediaData);
             } catch (uploadError) {
               // Expanded diagnostics for storage/unknown issues
               const errObj = uploadError || {};
               const customData = errObj.customData || errObj._customData || null;
+              const reason = String(errObj.message || errObj.code || 'unknown error').slice(0, 180);
               const diag = {
                 index: i + 1,
                 code: errObj.code,
@@ -2444,7 +2452,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
               const continueWithoutMedia = await new Promise((resolve) => {
                 Alert.alert(
                   'Upload Failed',
-                  `Media upload ${i + 1} failed. Would you like to continue?`,
+                  `Media upload ${i + 1} failed:\n${reason}\n\nContinue without this file?`,
                   [
                     { text: 'Cancel All', onPress: () => resolve(false) },
                     { text: 'Skip This Media', onPress: () => resolve(true) }

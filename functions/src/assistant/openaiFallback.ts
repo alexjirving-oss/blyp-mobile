@@ -72,8 +72,9 @@ function mimeToFilename(mime: string): string {
   if (m.includes('mpeg') || m.includes('mp3')) return 'audio.mp3';
   if (m.includes('webm')) return 'audio.webm';
   if (m.includes('ogg')) return 'audio.ogg';
+  if (m.includes('3gpp') || m.includes('3gp')) return 'audio.3gp';
   if (m.includes('aac')) return 'audio.aac';
-  if (m.includes('caf')) return 'audio.caf';
+  if (m.includes('caf')) return 'audio.wav'; // Whisper rejects caf — remux name; bytes still fail often
   // Default: iOS/Android push-to-talk recordings are usually m4a/mp4.
   return 'audio.m4a';
 }
@@ -298,33 +299,47 @@ export function shouldUseOpenAiFallback(status: number, bodyText: string): boole
   return shouldFallbackStatus(status, bodyText);
 }
 
-export async function callOpenAiAsGemini(
-  geminiBody: GeminiBody,
-  { timeoutMs = 28000 }: { timeoutMs?: number } = {},
-): Promise<{ status: number; body: string }> {
-  const key = openaiKey();
-  if (!key) {
-    return {
-      status: 503,
-      body: JSON.stringify({ error: { message: 'openai_unavailable' } }),
-    };
+function messageHasImages(messages: any[]): boolean {
+  for (const m of messages || []) {
+    if (!Array.isArray(m?.content)) continue;
+    if (m.content.some((b: any) => b?.type === 'image_url')) return true;
   }
+  return false;
+}
 
-  const model = String(process.env.BLYP_OPENAI_MODEL || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim()
-    || DEFAULT_OPENAI_MODEL;
-  const messages = geminiBodyToOpenAiMessages(geminiBody);
-  const gen = geminiBody.generationConfig || {};
-  const wantsJson = String(gen.responseMimeType || '').includes('json');
+function stripImagesFromMessages(messages: any[]): any[] {
+  return (messages || []).map((m) => {
+    if (!Array.isArray(m?.content)) return m;
+    const next = m.content.filter((b: any) => b?.type !== 'image_url');
+    if (next.length === 0) {
+      return { ...m, content: 'Describe a social post from the text instructions only.' };
+    }
+    if (next.length === 1 && next[0].type === 'text') {
+      return { ...m, content: next[0].text };
+    }
+    return { ...m, content: next };
+  });
+}
 
-  const payload: any = {
-    model,
-    messages,
-    temperature: typeof gen.temperature === 'number' ? gen.temperature : 0.7,
-    max_tokens: typeof gen.maxOutputTokens === 'number' ? Math.min(gen.maxOutputTokens, 4096) : 1024,
-  };
-  if (typeof gen.topP === 'number') payload.top_p = gen.topP;
-  if (wantsJson) payload.response_format = { type: 'json_object' };
+/** Drop inline images from a Gemini-shaped body (backup / text-only retry). */
+export function stripInlineMediaFromGeminiBody(body: GeminiBody | any): GeminiBody {
+  const cloned: any = { ...(body || {}) };
+  cloned.contents = Array.isArray(body?.contents)
+    ? body.contents.map((c: any) => ({
+        ...c,
+        parts: Array.isArray(c?.parts)
+          ? c.parts.filter((p: any) => !(p?.inlineData || p?.inline_data))
+          : [],
+      }))
+    : [];
+  return cloned;
+}
 
+async function openAiChatOnce(
+  key: string,
+  payload: any,
+  timeoutMs: number,
+): Promise<{ status: number; body: string; text?: string; meta?: any }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -354,17 +369,26 @@ export async function callOpenAiAsGemini(
       };
     }
 
-    const text = String(parsed?.choices?.[0]?.message?.content || '').trim();
+    const choice = parsed?.choices?.[0];
+    const text = String(
+      choice?.message?.content || choice?.message?.refusal || '',
+    ).trim();
     if (!text) {
+      console.warn('[openaiFallback] empty content', {
+        finish_reason: choice?.finish_reason,
+        hasRefusal: !!choice?.message?.refusal,
+      });
       return {
         status: 502,
         body: JSON.stringify({ error: { message: 'openai_empty' } }),
+        meta: { finish_reason: choice?.finish_reason },
       };
     }
 
     return {
       status: 200,
       body: JSON.stringify(openAiToGeminiResponse(text)),
+      text,
     };
   } catch (e: any) {
     console.warn('[openaiFallback] request error', e?.message || String(e));
@@ -373,4 +397,67 @@ export async function callOpenAiAsGemini(
       body: JSON.stringify({ error: { message: 'openai_upstream_error' } }),
     };
   }
+}
+
+export async function callOpenAiAsGemini(
+  geminiBody: GeminiBody,
+  { timeoutMs = 28000 }: { timeoutMs?: number } = {},
+): Promise<{ status: number; body: string }> {
+  const key = openaiKey();
+  if (!key) {
+    return {
+      status: 503,
+      body: JSON.stringify({ error: { message: 'openai_unavailable' } }),
+    };
+  }
+
+  const model = String(process.env.BLYP_OPENAI_MODEL || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL).trim()
+    || DEFAULT_OPENAI_MODEL;
+  const messages = geminiBodyToOpenAiMessages(geminiBody);
+  const gen = geminiBody.generationConfig || {};
+  const wantsJson = String(gen.responseMimeType || '').includes('json');
+  const maxTokens =
+    typeof gen.maxOutputTokens === 'number' ? Math.min(Math.max(gen.maxOutputTokens, 600), 4096) : 1024;
+
+  const buildPayload = (msgs: any[], jsonMode: boolean) => {
+    const payload: any = {
+      model,
+      messages: msgs,
+      temperature: typeof gen.temperature === 'number' ? gen.temperature : 0.7,
+      max_tokens: maxTokens,
+    };
+    if (typeof gen.topP === 'number') payload.top_p = gen.topP;
+    if (jsonMode) payload.response_format = { type: 'json_object' };
+    return payload;
+  };
+
+  // 1) Full multimodal attempt
+  let result = await openAiChatOnce(key, buildPayload(messages, wantsJson), timeoutMs);
+  if (result.status >= 200 && result.status < 300) return result;
+
+  // 2) Vision often returns empty / filtered — retry text-only (caption from intent still works)
+  if (
+    result.body?.includes('openai_empty') &&
+    messageHasImages(messages)
+  ) {
+    console.warn('[openaiFallback] retrying text-only after openai_empty');
+    result = await openAiChatOnce(
+      key,
+      buildPayload(stripImagesFromMessages(messages), wantsJson),
+      Math.min(timeoutMs, 20000),
+    );
+    if (result.status >= 200 && result.status < 300) return result;
+  }
+
+  // 3) Last try: drop strict json_object (some empty replies recover as plain text)
+  if (wantsJson && result.body?.includes('openai_empty')) {
+    console.warn('[openaiFallback] retrying without response_format after openai_empty');
+    result = await openAiChatOnce(
+      key,
+      buildPayload(stripImagesFromMessages(messages), false),
+      Math.min(timeoutMs, 15000),
+    );
+  }
+
+  return result;
 }
