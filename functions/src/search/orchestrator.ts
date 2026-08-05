@@ -10,7 +10,7 @@
 import { BlypSearchResponse, GeoBucket, NormalizedResult, SCHEMA_VERSION, RANKER_VERSION } from '../platform/types';
 import { queryHash, hashSession, normalizeQuery } from '../platform/util';
 import { logSearchQuery, logResultsServed, logCostRevenue } from '../platform/substrate';
-import { answerProvider } from './answerProvider';
+import { answerProvider, heuristicIntent } from './answerProvider';
 import { blypIndexProvider, braveProvider, wikipediaProvider, ddgProvider } from './webProviders';
 import { placesProvider } from './placesProvider';
 import { searchPosts, searchCreators } from './postsProvider';
@@ -62,7 +62,8 @@ export interface BlypSearchInput {
 export async function runBlypSearch(input: BlypSearchInput): Promise<BlypSearchResponse> {
   const query = normalizeQuery(input.query);
   const country = input.geo?.country;
-  const qhash = queryHash(query, country);
+  const geohash5 = input.geo?.geohash5;
+  const qhash = queryHash(query, country, geohash5);
   const sessionHash = hashSession(input.session || 'anon');
 
   // Always log the query (corpus + transparency); cheap and high-value.
@@ -75,12 +76,15 @@ export async function runBlypSearch(input: BlypSearchInput): Promise<BlypSearchR
   }
 
   const answer = await answerProvider(query);
-  const intent = answer.intent;
+  // Don't let a soft LLM "info" miss block place lookup for near-me / shop queries.
+  const heuristic = heuristicIntent(query);
+  const intent = answer.intent === 'info' && heuristic === 'place' ? 'place' : answer.intent;
+  const wantPlaces = intent === 'place' || heuristic === 'place';
 
   const [webGathered, places, posts, creators] = await Promise.all([
     gatherWeb(query, country),
-    intent === 'place'
-      ? placesProvider(answer.placeName || query, country, input.geo?.geohash5)
+    wantPlaces
+      ? placesProvider(answer.placeName || query, country, geohash5)
       : Promise.resolve<ProviderRun>({ provider: 'osm', results: [], costMicros: 0 }),
     searchPosts(query),
     searchCreators(query),
@@ -97,9 +101,12 @@ export async function runBlypSearch(input: BlypSearchInput): Promise<BlypSearchR
     }
   }
 
+  // If we found a place, surface place intent so the client shows the contact card.
+  const resolvedIntent = places.results.length && intent !== 'content' ? 'place' : intent;
+
   const response: BlypSearchResponse = {
     query,
-    intent,
+    intent: resolvedIntent,
     answer: answer.answer,
     related: answer.related,
     web: webGathered.web.slice(0, 12),

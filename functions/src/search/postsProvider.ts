@@ -35,11 +35,28 @@ export async function searchPosts(query: string, limit = 8): Promise<NormalizedR
   if (!terms.length) return [];
   try {
     initFirebaseAdmin();
-    const snap = await admin.firestore().collection('posts').orderBy('createdAt', 'desc').limit(200).get();
+    // App posts are indexed by `date` (see HomeScreen / discoveryService). Fall
+    // back to createdAt only if the primary orderBy fails.
+    let snap;
+    try {
+      snap = await admin.firestore().collection('posts').orderBy('date', 'desc').limit(200).get();
+    } catch {
+      snap = await admin.firestore().collection('posts').orderBy('createdAt', 'desc').limit(200).get();
+    }
     const scored: Array<{ score: number; r: NormalizedResult }> = [];
     snap.docs.forEach((d) => {
       const data = d.data() as any;
-      const hay = [data.caption, data.title, data.description, (data.tags || []).join(' '), (data.hashtags || []).join(' ')]
+      const hay = [
+        data.caption,
+        data.title,
+        data.captionTitle,
+        data.description,
+        data.username,
+        data.userDisplayName,
+        data.category,
+        (data.tags || []).join(' '),
+        (data.hashtags || []).join(' '),
+      ]
         .filter(Boolean)
         .join(' ');
       const score = scoreText(hay, terms);
@@ -48,7 +65,7 @@ export async function searchPosts(query: string, limit = 8): Promise<NormalizedR
         score,
         r: {
           kind: 'post',
-          title: data.caption || data.title || 'Untitled',
+          title: data.caption || data.title || data.captionTitle || 'Untitled',
           snippet: data.description || '',
           entityId: d.id,
           entity: { id: d.id, ...data },

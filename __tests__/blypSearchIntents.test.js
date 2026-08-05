@@ -7,11 +7,37 @@ describe('locationService', () => {
   it('detects near-me queries', () => {
     expect(needsLocationForQuery('takeaways near me')).toBe(true);
     expect(needsLocationForQuery('coffee nearby')).toBe(true);
+    expect(needsLocationForQuery('nearest mcdonalds')).toBe(true);
+    expect(needsLocationForQuery('closest pharmacy')).toBe(true);
     expect(needsLocationForQuery('funny football clips')).toBe(false);
   });
 
   it('strips proximity phrases', () => {
     expect(stripNearMePhrases('takeaways near me')).toBe('takeaways');
+    expect(stripNearMePhrases('nearest mcdonalds')).toBe('mcdonalds');
+  });
+});
+
+describe('mergeSearchResults', () => {
+  const { mergeSearchResults } = require('../src/services/blypAiService');
+
+  it('fills posts from local when backend is sparse', () => {
+    const merged = mergeSearchResults(
+      { query: 'q', intent: 'content', web: [{ title: 'W', url: 'https://a.com' }], posts: [], creators: [], place: null },
+      { query: 'q', intent: 'content', web: [], posts: [{ id: 'p1' }], creators: [{ id: 'c1' }], place: null }
+    );
+    expect(merged.web).toHaveLength(1);
+    expect(merged.posts).toEqual([{ id: 'p1' }]);
+    expect(merged.creators).toEqual([{ id: 'c1' }]);
+  });
+
+  it('keeps place and promotes place intent', () => {
+    const merged = mergeSearchResults(
+      { query: 'q', intent: 'info', web: [], posts: [], creators: [], place: null },
+      { query: 'q', intent: 'place', web: [], posts: [], creators: [], place: { name: 'Cafe' } }
+    );
+    expect(merged.place.name).toBe('Cafe');
+    expect(merged.intent).toBe('place');
   });
 });
 

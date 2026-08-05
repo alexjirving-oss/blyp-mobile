@@ -60,7 +60,8 @@ async function runBlypSearch(input) {
     var _a, _b;
     const query = (0, util_1.normalizeQuery)(input.query);
     const country = (_a = input.geo) === null || _a === void 0 ? void 0 : _a.country;
-    const qhash = (0, util_1.queryHash)(query, country);
+    const geohash5 = (_b = input.geo) === null || _b === void 0 ? void 0 : _b.geohash5;
+    const qhash = (0, util_1.queryHash)(query, country, geohash5);
     const sessionHash = (0, util_1.hashSession)(input.session || 'anon');
     // Always log the query (corpus + transparency); cheap and high-value.
     void (0, substrate_1.logSearchQuery)({ query, queryHash: qhash, intent: 'info', sessionHash, geo: input.geo });
@@ -70,11 +71,14 @@ async function runBlypSearch(input) {
         return Object.assign(Object.assign({}, cached), { meta: Object.assign(Object.assign({}, cached.meta), { cacheHit: true }) });
     }
     const answer = await (0, answerProvider_1.answerProvider)(query);
-    const intent = answer.intent;
+    // Don't let a soft LLM "info" miss block place lookup for near-me / shop queries.
+    const heuristic = (0, answerProvider_1.heuristicIntent)(query);
+    const intent = answer.intent === 'info' && heuristic === 'place' ? 'place' : answer.intent;
+    const wantPlaces = intent === 'place' || heuristic === 'place';
     const [webGathered, places, posts, creators] = await Promise.all([
         gatherWeb(query, country),
-        intent === 'place'
-            ? (0, placesProvider_1.placesProvider)(answer.placeName || query, country, (_b = input.geo) === null || _b === void 0 ? void 0 : _b.geohash5)
+        wantPlaces
+            ? (0, placesProvider_1.placesProvider)(answer.placeName || query, country, geohash5)
             : Promise.resolve({ provider: 'osm', results: [], costMicros: 0 }),
         (0, postsProvider_1.searchPosts)(query),
         (0, postsProvider_1.searchCreators)(query),
@@ -90,9 +94,11 @@ async function runBlypSearch(input) {
             costMicros += run.costMicros;
         }
     }
+    // If we found a place, surface place intent so the client shows the contact card.
+    const resolvedIntent = places.results.length && intent !== 'content' ? 'place' : intent;
     const response = {
         query,
-        intent,
+        intent: resolvedIntent,
         answer: answer.answer,
         related: answer.related,
         web: webGathered.web.slice(0, 12),

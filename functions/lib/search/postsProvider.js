@@ -36,11 +36,29 @@ async function searchPosts(query, limit = 8) {
         return [];
     try {
         (0, firebaseAdmin_1.initFirebaseAdmin)();
-        const snap = await firebaseAdmin_1.admin.firestore().collection('posts').orderBy('createdAt', 'desc').limit(200).get();
+        // App posts are indexed by `date` (see HomeScreen / discoveryService). Fall
+        // back to createdAt only if the primary orderBy fails.
+        let snap;
+        try {
+            snap = await firebaseAdmin_1.admin.firestore().collection('posts').orderBy('date', 'desc').limit(200).get();
+        }
+        catch (_a) {
+            snap = await firebaseAdmin_1.admin.firestore().collection('posts').orderBy('createdAt', 'desc').limit(200).get();
+        }
         const scored = [];
         snap.docs.forEach((d) => {
             const data = d.data();
-            const hay = [data.caption, data.title, data.description, (data.tags || []).join(' '), (data.hashtags || []).join(' ')]
+            const hay = [
+                data.caption,
+                data.title,
+                data.captionTitle,
+                data.description,
+                data.username,
+                data.userDisplayName,
+                data.category,
+                (data.tags || []).join(' '),
+                (data.hashtags || []).join(' '),
+            ]
                 .filter(Boolean)
                 .join(' ');
             const score = scoreText(hay, terms);
@@ -50,7 +68,7 @@ async function searchPosts(query, limit = 8) {
                 score,
                 r: {
                     kind: 'post',
-                    title: data.caption || data.title || 'Untitled',
+                    title: data.caption || data.title || data.captionTitle || 'Untitled',
                     snippet: data.description || '',
                     entityId: d.id,
                     entity: Object.assign({ id: d.id }, data),
@@ -61,7 +79,7 @@ async function searchPosts(query, limit = 8) {
         scored.sort((a, b) => b.score - a.score);
         return scored.slice(0, limit).map((s) => s.r);
     }
-    catch (_a) {
+    catch (_b) {
         return [];
     }
 }

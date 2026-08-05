@@ -29,10 +29,15 @@ Rules:
 - "placeName": clean business name if intent is place; else null.
 Treat the provided local timestamp as "now" / "today". Never invent an outdated year.`;
 
-function heuristicIntent(q: string): SearchIntent {
+/** Exported for orchestrator so proximity queries always trigger places lookup. */
+export function heuristicIntent(q: string): SearchIntent {
   const s = q.toLowerCase();
   if (/\b(video|videos|clip|funny|watch|tiktok|reel|recipe|tutorial|how to)\b/.test(s)) return 'content';
-  if (/\b(shop|store|near me|open|opening|phone|address|directions|restaurant|cafe|b&q|tesco|nando)\b/.test(s)) {
+  if (
+    /\b(shop|store|near\s*me|nearby|nearest|closest|around\s*me|open|opening|phone|address|directions|restaurant|cafe|takeaway|pharmacy|supermarket|b&q|tesco|nando|mcdonald'?s?)\b/.test(
+      s
+    )
+  ) {
     return 'place';
   }
   return 'info';

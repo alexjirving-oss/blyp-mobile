@@ -29,7 +29,7 @@ import Icon from '../components/Icon';
 import BlypItModal from '../components/BlypItModal';
 import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
-import { blypContent, blypAnswer, postThumbnail, isBlypAiAvailable } from '../services/blypAiService';
+import { blypContent, blypAnswer, mergeSearchResults, postThumbnail, isBlypAiAvailable } from '../services/blypAiService';
 import speechToTextService from '../services/speechToTextService';
 import geminiSpeechService from '../services/geminiSpeechService';
 import { useAuth } from '../hooks/useCommon';
@@ -197,6 +197,40 @@ const BlypScreen = ({ navigation, route }) => {
     };
   }, [uid]);
 
+  const commitSoftFail = useCallback(
+    async (q, reason) => {
+      const keepQuery = false;
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: `t_${Date.now()}`,
+          query: q,
+          answer: '',
+          usedAI: false,
+          related: [],
+          posts: [],
+          creators: [],
+          web: [],
+          sources: [],
+          intent: 'place',
+          place: null,
+          emptyReason: reason || 'none',
+        },
+      ]);
+      setQuery('');
+      setLoading(false);
+      try {
+        const updated = await addRecentSearch(uid, q);
+        if (updated) setRecent(updated.recentSearches || []);
+      } catch {
+        /* ignore */
+      }
+      setTimeout(() => scrollRef.current?.scrollTo?.({ y: 0, animated: false }), 50);
+      void keepQuery;
+    },
+    [uid]
+  );
+
   const runSearch = useCallback(
     async (text, geo, opts = {}) => {
       const q = String(text ?? '').trim();
@@ -206,8 +240,25 @@ const BlypScreen = ({ navigation, route }) => {
       setQuery(q);
       stopSpeaking();
 
-      const effectiveGeo = geo || sessionGeo || null;
+      let effectiveGeo = geo || sessionGeo || null;
       if (needsLocationForQuery(q) && !effectiveGeo) {
+        // Warm-up may still be in flight — try once before prompting.
+        setLocationBusy(true);
+        try {
+          const res = await getCurrentGeo();
+          if (res?.ok) {
+            effectiveGeo = res.geo;
+            setSessionGeo(res.geo);
+          }
+        } finally {
+          setLocationBusy(false);
+        }
+      }
+      if (needsLocationForQuery(q) && !effectiveGeo) {
+        if (opts?.locationDenied) {
+          await commitSoftFail(q, 'location_denied');
+          return;
+        }
         setLocationPrompt({ query: q });
         return;
       }
@@ -343,32 +394,41 @@ const BlypScreen = ({ navigation, route }) => {
         return;
       }
 
-      // Capture conversation history BEFORE we push this turn.
-      const history = turnsRef.current.map((t) => ({ q: t.query, a: t.answer || '' }));
-      // Prefer Blyp backend (web + places + in-app). Fall back to local Firestore scan.
+      // Prefer Blyp backend (web + places + in-app). Always merge on-device
+      // posts/creators/place so a sparse backend response never blanks the UI.
       const wantAnswer = false;
       const turnId = `t_${Date.now()}`;
       try {
-        let content = null;
+        const forcePlace = needsLocationForQuery(q);
+        const localPromise = blypContent(q, { geo: effectiveGeo, forcePlace });
+        let backend = null;
         if (isBackendSearchEnabled()) {
           try {
-            content = await backendSearch(q, { session: uid || 'anon', geo: effectiveGeo });
+            backend = await backendSearch(q, { session: uid || 'anon', geo: effectiveGeo });
           } catch (e) {
             console.warn('[BLYP] backendSearch failed', e?.message || e);
           }
         }
-        if (!content) {
-          content = await blypContent(q, { geo: effectiveGeo });
-        }
+        const local = await localPromise;
+        const content = mergeSearchResults(backend, local);
+        const hasAny =
+          (content.web?.length || 0) > 0 ||
+          (content.posts?.length || 0) > 0 ||
+          (content.creators?.length || 0) > 0 ||
+          !!content.place ||
+          !!content.answer;
         setTurns((prev) => [
           ...prev,
           {
             id: turnId,
+            query: q,
             ...content,
             answering: wantAnswer,
-            // Keep related/answer from backend when present.
             related: Array.isArray(content?.related) ? content.related : [],
             web: Array.isArray(content?.web) ? content.web : [],
+            posts: Array.isArray(content?.posts) ? content.posts : [],
+            creators: Array.isArray(content?.creators) ? content.creators : [],
+            emptyReason: hasAny ? undefined : 'none',
           },
         ]);
         if (!keepQuery) setQuery('');
@@ -381,7 +441,7 @@ const BlypScreen = ({ navigation, route }) => {
 
         // 2) Stream the conversational answer in afterwards (Plus only).
         if (wantAnswer) {
-          blypAnswer(q, { history, posts: content.posts, creators: content.creators })
+          blypAnswer(q, { history: turnsRef.current.map((t) => ({ q: t.query, a: t.answer || '' })), posts: content.posts, creators: content.creators })
             .then((ans) => {
               const answerText = ans.text || '';
               setTurns((prev) =>
@@ -398,7 +458,6 @@ const BlypScreen = ({ navigation, route }) => {
                     : t
                 )
               );
-              // Auto-TTS off by default — user taps the speaker to hear answers.
             })
             .catch(() => {
               setTurns((prev) => prev.map((t) => (t.id === turnId ? { ...t, answering: false } : t)));
@@ -407,13 +466,25 @@ const BlypScreen = ({ navigation, route }) => {
       } catch (e) {
         setTurns((prev) => [
           ...prev,
-          { id: turnId, query: q, answer: '', usedAI: false, related: [], posts: [], creators: [], sources: [], web: [], answering: false },
+          {
+            id: turnId,
+            query: q,
+            answer: '',
+            usedAI: false,
+            related: [],
+            posts: [],
+            creators: [],
+            sources: [],
+            web: [],
+            answering: false,
+            emptyReason: 'error',
+          },
         ]);
         setLoading(false);
         setTimeout(() => scrollRef.current?.scrollTo?.({ y: 0, animated: false }), 50);
       }
     },
-    [uid, navigation, aiEntitled, stopSpeaking, sessionGeo]
+    [uid, navigation, aiEntitled, stopSpeaking, sessionGeo, commitSoftFail]
   );
 
   // The user tapped a candidate on a "which person did you mean?" card. Carry out
@@ -460,11 +531,12 @@ const BlypScreen = ({ navigation, route }) => {
   useEffect(() => {
     const q = route?.params?.initialQuery;
     const geo = route?.params?.geo;
+    const locationDenied = !!route?.params?.locationDenied;
     if (q && !ranInitial.current) {
       ranInitial.current = true;
-      runSearch(q, geo, { keepQuery: true });
+      runSearch(q, geo, { keepQuery: true, locationDenied });
     }
-  }, [route?.params?.initialQuery, route?.params?.geo, runSearch]);
+  }, [route?.params?.initialQuery, route?.params?.geo, route?.params?.locationDenied, runSearch]);
 
   const onLocationGranted = useCallback(
     (geo) => {
@@ -475,6 +547,14 @@ const BlypScreen = ({ navigation, route }) => {
     },
     [locationPrompt, runSearch]
   );
+
+  const onLocationDismiss = useCallback(() => {
+    const pending = locationPrompt?.query;
+    setLocationPrompt(null);
+    if (pending) {
+      void commitSoftFail(pending, 'location_denied');
+    }
+  }, [locationPrompt, commitSoftFail]);
 
   const onClearRecent = async () => {
     await clearRecentSearches(uid);
@@ -725,7 +805,8 @@ const BlypScreen = ({ navigation, route }) => {
 
   const intent = lastTurn?.intent || 'info';
   const place = lastTurn?.place || null;
-  const isPlace = intent === 'place';
+  // Prefer place layout whenever we have a place card, even if intent drifted.
+  const isPlace = intent === 'place' || !!place;
 
   const seeAllPosts = (title) =>
     navigation.navigate('BlypResults', {
@@ -1085,7 +1166,7 @@ const BlypScreen = ({ navigation, route }) => {
       )}
 
       {/* Hero: for a place/business, the actionable contact card comes first. */}
-      {turn.intent === 'place' && turn.place && renderPlaceCard(turn.place)}
+      {!!turn.place && renderPlaceCard(turn.place)}
 
       {/* AI answer is streaming in after the (already shown) results. */}
       {aiEntitled && turn.answering && !turn.answer && (
@@ -1095,15 +1176,7 @@ const BlypScreen = ({ navigation, route }) => {
         </View>
       )}
 
-      {!aiEntitled && !!turn.answer && (
-        <TouchableOpacity style={styles.answerUpsell} activeOpacity={0.85} onPress={() => navigation.navigate('Plans')}>
-          <Icon name="sparkles" size={13} color={COLORS.primary} />
-          <Text style={styles.answerUpsellText}>Blyp AI answers are a Plus feature. Your results below are real and complete.</Text>
-          <Text style={styles.answerUpsellCta}>See plans</Text>
-        </TouchableOpacity>
-      )}
-
-      {aiEntitled && !!turn.answer && (
+      {!!turn.answer && (
         <View style={styles.answerBlock}>
           <View style={styles.answerHeader}>
             <Icon name="sparkles" size={11} color={COLORS.textMuted} />
@@ -1346,9 +1419,37 @@ const BlypScreen = ({ navigation, route }) => {
 
               {!lastHasResults && (
                 <View style={styles.emptyWrap}>
-                  <Icon name="search-outline" size={40} color={COLORS.textMuted} />
-                  <Text style={styles.emptyText}>No matches yet for “{lastTurn.query}”.</Text>
-                  <Text style={styles.emptySub}>Try different words or ask a question.</Text>
+                  <Icon
+                    name={lastTurn.emptyReason === 'location_denied' ? 'location-outline' : 'search-outline'}
+                    size={40}
+                    color={COLORS.textMuted}
+                  />
+                  <Text style={styles.emptyText}>
+                    {lastTurn.emptyReason === 'location_denied'
+                      ? 'Location is needed for that search'
+                      : lastTurn.emptyReason === 'error'
+                      ? 'Something went wrong searching'
+                      : `No matches yet for “${lastTurn.query}”.`}
+                  </Text>
+                  <Text style={styles.emptySub}>
+                    {lastTurn.emptyReason === 'location_denied'
+                      ? 'Turn on location (pin icon) and try again — or ask without “near me” / “nearest”.'
+                      : lastTurn.emptyReason === 'error'
+                      ? 'Check your connection and try again.'
+                      : 'Try different words, a person on Blyp, or a place near you.'}
+                  </Text>
+                  {lastTurn.emptyReason === 'location_denied' && (
+                    <TouchableOpacity
+                      style={styles.emptyLocBtn}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        setLocationPrompt({ query: lastTurn.query });
+                      }}
+                    >
+                      <Icon name="location" size={16} color={COLORS.black} />
+                      <Text style={styles.emptyLocBtnText}>Enable location</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
             </>
@@ -1369,7 +1470,7 @@ const BlypScreen = ({ navigation, route }) => {
         <LocationPermissionOverlay
           visible={!!locationPrompt}
           query={locationPrompt?.query}
-          onClose={() => setLocationPrompt(null)}
+          onClose={onLocationDismiss}
           onGranted={onLocationGranted}
         />
       </View>
@@ -1796,9 +1897,20 @@ const styles = StyleSheet.create({
   plannerTask: { color: COLORS.textPrimary, fontSize: responsiveFont(14), fontWeight: '700' },
   plannerWhen: { color: COLORS.textMuted, fontSize: responsiveFont(12), marginTop: 2 },
 
-  emptyWrap: { alignItems: 'center', paddingVertical: 50, gap: 8 },
+  emptyWrap: { alignItems: 'center', paddingVertical: 50, gap: 8, paddingHorizontal: 24 },
   emptyText: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '600', textAlign: 'center' },
   emptySub: { color: COLORS.textMuted, fontSize: responsiveFont(13), textAlign: 'center' },
+  emptyLocBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  emptyLocBtnText: { color: COLORS.black, fontSize: responsiveFont(14), fontWeight: '800' },
 });
 
 export default BlypScreen;

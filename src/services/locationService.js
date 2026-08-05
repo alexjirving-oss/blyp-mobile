@@ -6,7 +6,7 @@
 import { Linking } from 'react-native';
 
 const NEAR_ME =
-  /\b(near\s*me|nearby|around\s*me|close\s*to\s*me|in\s*my\s*area|closest\s+to\s+me)\b/i;
+  /\b(near\s*me|nearby|around\s*me|close\s*to\s*me|in\s*my\s*area|closest(?:\s+to\s+me)?|nearest)\b/i;
 
 /** True when the query needs the user's coordinates to answer well. */
 export function needsLocationForQuery(query) {
@@ -17,7 +17,7 @@ export function needsLocationForQuery(query) {
 export function stripNearMePhrases(query) {
   return String(query || '')
     .replace(
-      /\b(near\s*me|nearby|around\s*me|close\s*to\s*me|in\s*my\s*area|closest\s+to\s+me)\b/gi,
+      /\b(near\s*me|nearby|around\s*me|close\s*to\s*me|in\s*my\s*area|closest(?:\s+to\s+me)?|nearest)\b/gi,
       ' '
     )
     .replace(/\s{2,}/g, ' ')

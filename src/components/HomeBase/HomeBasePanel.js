@@ -422,12 +422,11 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           // Keep spoken/typed text visible in the bar.
           return;
         }
-        // Keep the query in the bar so the user can see what was spoken/typed
-        // while Search opens. Prefer real people/posts search over the old
-        // assistant answers (those were often outdated / unhelpful).
-        navigation.navigate('Search', { initialQuery: text });
+        // Full Blyp assistant: web + places + people/posts. (People-only
+        // discovery stays on the Search tab / people icon.)
+        navigation.navigate('Blyp', { initialQuery: text, geo: geo || undefined });
       } catch {
-        navigation.navigate('Search', { initialQuery: text });
+        navigation.navigate('Blyp', { initialQuery: text });
       } finally {
         setSubmitting(false);
       }
@@ -440,7 +439,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       const pending = locationPrompt?.query;
       setLocationPrompt(null);
       if (pending) {
-        // Places still open Blyp with geo so local results can use location.
         navigation.navigate('Blyp', { initialQuery: pending, geo });
       }
     },
@@ -772,7 +770,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           value={queryText}
           onChangeText={setQueryText}
           onSubmitEditing={onSubmitQuery}
-          placeholder="Search people & posts, or “remind me…”"
+          placeholder="Ask Blyp, find places, or “remind me…”"
           placeholderTextColor={COLORS.textMuted}
           returnKeyType="search"
           blurOnSubmit
@@ -1314,7 +1312,13 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     <LocationPermissionOverlay
       visible={!!locationPrompt}
       query={locationPrompt?.query}
-      onClose={() => setLocationPrompt(null)}
+      onClose={() => {
+        const pending = locationPrompt?.query;
+        setLocationPrompt(null);
+        // Soft-fail: still open Blyp so the user gets a clear empty state,
+        // not a silent blank after dismissing the permission sheet.
+        if (pending) navigation.navigate('Blyp', { initialQuery: pending, locationDenied: true });
+      }}
       onGranted={onLocationGranted}
     />
     </>

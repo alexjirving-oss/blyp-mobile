@@ -48,6 +48,30 @@ const orchestrator_1 = require("./orchestrator");
 const substrate_1 = require("../platform/substrate");
 const util_1 = require("../platform/util");
 const rateLimit_1 = require("../platform/rateLimit");
+/**
+ * Normalize client geo. Apps send precise {lat,lon}; we immediately bucket to
+ * geohash5 (+ optional country) so precise coords never enter the substrate.
+ */
+function normalizeGeo(raw) {
+    if (!raw || typeof raw !== 'object')
+        return undefined;
+    const out = {};
+    if (typeof raw.country === 'string' && raw.country.trim()) {
+        out.country = raw.country.trim().toUpperCase().slice(0, 2);
+    }
+    if (typeof raw.region === 'string' && raw.region.trim()) {
+        out.region = raw.region.trim().slice(0, 64);
+    }
+    if (typeof raw.geohash5 === 'string' && raw.geohash5.trim()) {
+        out.geohash5 = raw.geohash5.trim().toLowerCase().slice(0, 5);
+    }
+    const lat = Number(raw.lat);
+    const lon = Number(raw.lon);
+    if (!out.geohash5 && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        out.geohash5 = (0, util_1.geohash)(lat, lon, 5);
+    }
+    return out.country || out.region || out.geohash5 ? out : undefined;
+}
 /** Best-effort client IP behind the Cloud Functions proxy. */
 function clientIp(req) {
     const fwd = req.headers['x-forwarded-for'];
@@ -88,7 +112,7 @@ exports.blypSearch = functions
             res.status(429).json({ error: 'rate_limited', retryAfter: rl.retryAfterSec });
             return;
         }
-        const geo = body.geo && typeof body.geo === 'object' ? body.geo : undefined;
+        const geo = normalizeGeo(body.geo);
         const response = await (0, orchestrator_1.runBlypSearch)({ query, session: body.session, geo });
         res.status(200).json(response);
     }

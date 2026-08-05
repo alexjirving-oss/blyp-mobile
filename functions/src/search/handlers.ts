@@ -11,8 +11,33 @@ import * as functions from 'firebase-functions';
 import { applyCors } from '../http/cors';
 import { runBlypSearch } from './orchestrator';
 import { logSearchEvent } from '../platform/substrate';
-import { hashSession, queryHash, canonicalUrl, fingerprint, sha256 } from '../platform/util';
+import { GeoBucket } from '../platform/types';
+import { hashSession, queryHash, canonicalUrl, fingerprint, sha256, geohash } from '../platform/util';
 import { checkRateLimit, callerKey, SEARCH_RATE_LIMIT } from '../platform/rateLimit';
+
+/**
+ * Normalize client geo. Apps send precise {lat,lon}; we immediately bucket to
+ * geohash5 (+ optional country) so precise coords never enter the substrate.
+ */
+function normalizeGeo(raw: any): GeoBucket | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: GeoBucket = {};
+  if (typeof raw.country === 'string' && raw.country.trim()) {
+    out.country = raw.country.trim().toUpperCase().slice(0, 2);
+  }
+  if (typeof raw.region === 'string' && raw.region.trim()) {
+    out.region = raw.region.trim().slice(0, 64);
+  }
+  if (typeof raw.geohash5 === 'string' && raw.geohash5.trim()) {
+    out.geohash5 = raw.geohash5.trim().toLowerCase().slice(0, 5);
+  }
+  const lat = Number(raw.lat);
+  const lon = Number(raw.lon);
+  if (!out.geohash5 && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+    out.geohash5 = geohash(lat, lon, 5);
+  }
+  return out.country || out.region || out.geohash5 ? out : undefined;
+}
 
 /** Best-effort client IP behind the Cloud Functions proxy. */
 function clientIp(req: functions.https.Request): string | undefined {
@@ -55,7 +80,7 @@ export const blypSearch = functions
         return;
       }
 
-      const geo = body.geo && typeof body.geo === 'object' ? body.geo : undefined;
+      const geo = normalizeGeo(body.geo);
       const response = await runBlypSearch({ query, session: body.session, geo });
       res.status(200).json(response);
     } catch (e) {

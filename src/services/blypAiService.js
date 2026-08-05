@@ -34,7 +34,7 @@ const GENERIC_TERMS = new Set([
 // Words that signal the user wants in-app posts/videos rather than a place/site.
 const CONTENT_HINT = /\b(video|videos|clip|clips|funny|meme|memes|watch|highlight|highlights|tutorial|how to|recipe|recipes|song|songs|music|dance|trend|trending|creator|creators|tiktok|reel|reels|vlog|gameplay)\b/i;
 // Words that signal a place / business / local intent.
-const PLACE_HINT = /\b(shop|store|restaurant|cafe|coffee|pub|bar|hotel|near me|nearby|address|directions|phone number|opening hours|open now|branch|store near|petrol|garage|pharmacy|supermarket|takeaway|menu)\b/i;
+const PLACE_HINT = /\b(shop|store|restaurant|cafe|coffee|pub|bar|hotel|near\s*me|nearby|nearest|closest|around\s*me|address|directions|phone number|opening hours|open now|branch|store near|petrol|garage|pharmacy|supermarket|takeaway|menu|mcdonald'?s?)\b/i;
 
 function tokenize(text) {
   return String(text || '')
@@ -364,7 +364,7 @@ function buildSources(creators, posts) {
 export async function blypContent(queryText, options = {}) {
   const query = String(queryText || '').trim();
   if (!query) {
-    return { query: '', posts: [], creators: [], sources: [], intent: 'info', place: null };
+    return { query: '', posts: [], creators: [], sources: [], web: [], intent: 'info', place: null };
   }
   const terms = tokenize(query);
   const [posts, creators] = await Promise.all([
@@ -373,10 +373,46 @@ export async function blypContent(queryText, options = {}) {
   ]);
   const intent = guessIntent(query);
   let place = null;
-  if (intent === 'place') {
+  if (intent === 'place' || options.forcePlace) {
     place = await searchPlace(query, options.geo);
   }
-  return { query, posts, creators, sources: buildSources(creators, posts), intent, place };
+  return {
+    query,
+    posts,
+    creators,
+    sources: buildSources(creators, posts),
+    web: [],
+    intent: place ? 'place' : intent,
+    place,
+  };
+}
+
+/**
+ * Merge backend + on-device results so a sparse/failed section never blanks the UI.
+ * Prefer backend web/answer/place; fill posts/creators/place from local when missing.
+ */
+export function mergeSearchResults(backend, local) {
+  if (!backend && !local) {
+    return { query: '', posts: [], creators: [], sources: [], web: [], intent: 'info', place: null };
+  }
+  if (!backend) return { ...local, web: local?.web || [] };
+  if (!local) return backend;
+  const posts = backend.posts?.length ? backend.posts : local.posts || [];
+  const creators = backend.creators?.length ? backend.creators : local.creators || [];
+  const place = backend.place || local.place || null;
+  const web = Array.isArray(backend.web) ? backend.web : [];
+  let intent = backend.intent || local.intent || 'info';
+  if (place && intent !== 'content') intent = 'place';
+  return {
+    ...backend,
+    posts,
+    creators,
+    place,
+    web,
+    intent,
+    sources: backend.sources?.length ? backend.sources : local.sources || [],
+    related: backend.related?.length ? backend.related : local.related || [],
+  };
 }
 
 /**
@@ -445,4 +481,4 @@ export async function blypIt(queryText, options = {}) {
 
 export const isBlypAiAvailable = () => Boolean(geminiApiKey && geminiApiUrl);
 
-export default { blypIt, blypContent, blypAnswer, postThumbnail, isBlypAiAvailable };
+export default { blypIt, blypContent, blypAnswer, mergeSearchResults, postThumbnail, isBlypAiAvailable };

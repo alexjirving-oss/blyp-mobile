@@ -7,7 +7,18 @@
  */
 
 import { NormalizedResult } from '../platform/types';
+import { geohashBounds } from '../platform/util';
 import { fetchJson, ProviderRun } from './net';
+
+const NEAR_PHRASE =
+  /\b(near\s*me|nearby|around\s*me|close\s*to\s*me|in\s*my\s*area|closest(?:\s+to\s+me)?|nearest)\b/gi;
+
+function stripNearMe(query: string): string {
+  return String(query || '')
+    .replace(NEAR_PHRASE, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
 function mapUrl(lat: string, lon: string): string {
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=18/${lat}/${lon}`;
@@ -17,8 +28,11 @@ function directionsUrl(lat: string, lon: string): string {
 }
 
 export async function placesProvider(query: string, country?: string, geohash5?: string): Promise<ProviderRun> {
+  const cleaned = stripNearMe(query) || String(query || '').trim();
+  if (!cleaned) return { provider: 'osm', results: [], costMicros: 0 };
+
   const params = new URLSearchParams({
-    q: query,
+    q: cleaned,
     format: 'jsonv2',
     addressdetails: '1',
     extratags: '1',
@@ -26,7 +40,39 @@ export async function placesProvider(query: string, country?: string, geohash5?:
     limit: '5',
   });
   if (country) params.set('countrycodes', country.toLowerCase());
-  const data = await fetchJson<any[]>(`https://nominatim.openstreetmap.org/search?${params.toString()}`, { timeoutMs: 7000 });
+
+  // Bias toward the user's coarse geohash cell (~5km). Prefer nearby hits; if the
+  // bounded search returns nothing, retry unbounded so we still surface a place.
+  const bounds = geohash5 ? geohashBounds(geohash5) : null;
+  if (bounds) {
+    // Expand ~1 cell so dense urban areas still match.
+    const padLat = Math.max(0.04, (bounds.latMax - bounds.latMin) * 1.5);
+    const padLon = Math.max(0.04, (bounds.lonMax - bounds.lonMin) * 1.5);
+    const lat = bounds.lat;
+    const lon = bounds.lon;
+    params.set('lat', String(lat));
+    params.set('lon', String(lon));
+    params.set(
+      'viewbox',
+      `${lon - padLon},${lat + padLat},${lon + padLon},${lat - padLat}`
+    );
+    params.set('bounded', '1');
+  }
+
+  let data = await fetchJson<any[]>(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    timeoutMs: 7000,
+  });
+
+  if ((!Array.isArray(data) || !data.length) && bounds) {
+    params.delete('viewbox');
+    params.delete('bounded');
+    params.delete('lat');
+    params.delete('lon');
+    data = await fetchJson<any[]>(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+      timeoutMs: 7000,
+    });
+  }
+
   if (!Array.isArray(data) || !data.length) return { provider: 'osm', results: [], costMicros: 0 };
 
   const results: NormalizedResult[] = data.slice(0, 5).map((d) => {
@@ -67,10 +113,6 @@ export async function placesProvider(query: string, country?: string, geohash5?:
       },
     };
   });
-
-  // bias note: geohash5 currently informs nothing beyond country; kept for future
-  // distance ranking once we store place geohashes.
-  void geohash5;
 
   return { provider: 'osm', results, costMicros: 0 };
 }

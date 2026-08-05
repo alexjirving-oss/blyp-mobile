@@ -31,9 +31,11 @@ export function normalizeQuery(q: string): string {
     .replace(/\s+/g, ' ');
 }
 
-/** Cache/dedup key for a query, scoped by coarse country so local results differ. */
-export function queryHash(q: string, country?: string): string {
-  return sha256(`${normalizeQuery(q)}|${(country || 'XX').toUpperCase()}`).slice(0, 24);
+/** Cache/dedup key for a query, scoped by coarse geo so local results differ. */
+export function queryHash(q: string, country?: string, geohash5?: string): string {
+  return sha256(
+    `${normalizeQuery(q)}|${(country || 'XX').toUpperCase()}|${geohash5 || ''}`
+  ).slice(0, 24);
 }
 
 /** Canonicalise a URL for dedup + provenance (strip tracking params, fragments). */
@@ -133,6 +135,49 @@ export function geohash(lat: number, lon: number, precision = 5): string {
     }
   }
   return hash;
+}
+
+/** Decode a geohash into a bounding box + center (for Nominatim viewbox bias). */
+export function geohashBounds(hash: string): {
+  latMin: number;
+  latMax: number;
+  lonMin: number;
+  lonMax: number;
+  lat: number;
+  lon: number;
+} | null {
+  const h = String(hash || '').toLowerCase().trim();
+  if (!h || !/^[0-9bcdefghjkmnpqrstuvwxyz]+$/.test(h)) return null;
+  let evenBit = true;
+  let latMin = -90;
+  let latMax = 90;
+  let lonMin = -180;
+  let lonMax = 180;
+  for (const ch of h) {
+    const idx = BASE32.indexOf(ch);
+    if (idx < 0) return null;
+    for (let n = 4; n >= 0; n -= 1) {
+      const bit = (idx >> n) & 1;
+      if (evenBit) {
+        const mid = (lonMin + lonMax) / 2;
+        if (bit) lonMin = mid;
+        else lonMax = mid;
+      } else {
+        const mid = (latMin + latMax) / 2;
+        if (bit) latMin = mid;
+        else latMax = mid;
+      }
+      evenBit = !evenBit;
+    }
+  }
+  return {
+    latMin,
+    latMax,
+    lonMin,
+    lonMax,
+    lat: (latMin + latMax) / 2,
+    lon: (lonMin + lonMax) / 2,
+  };
 }
 
 /** Convert a USD amount to integer micro-USD (1 USD = 1_000_000) for the ledger. */

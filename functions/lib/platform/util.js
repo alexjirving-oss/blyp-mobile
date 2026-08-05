@@ -48,6 +48,7 @@ exports.canonicalUrl = canonicalUrl;
 exports.hostOf = hostOf;
 exports.fingerprint = fingerprint;
 exports.geohash = geohash;
+exports.geohashBounds = geohashBounds;
 exports.usdToMicros = usdToMicros;
 const crypto = __importStar(require("crypto"));
 const SECRET_SALT = process.env.BLYP_HASH_SALT || 'blyp-default-salt';
@@ -69,9 +70,9 @@ function normalizeQuery(q) {
         .toLowerCase()
         .replace(/\s+/g, ' ');
 }
-/** Cache/dedup key for a query, scoped by coarse country so local results differ. */
-function queryHash(q, country) {
-    return sha256(`${normalizeQuery(q)}|${(country || 'XX').toUpperCase()}`).slice(0, 24);
+/** Cache/dedup key for a query, scoped by coarse geo so local results differ. */
+function queryHash(q, country, geohash5) {
+    return sha256(`${normalizeQuery(q)}|${(country || 'XX').toUpperCase()}|${geohash5 || ''}`).slice(0, 24);
 }
 /** Canonicalise a URL for dedup + provenance (strip tracking params, fragments). */
 function canonicalUrl(url) {
@@ -172,6 +173,48 @@ function geohash(lat, lon, precision = 5) {
         }
     }
     return hash;
+}
+/** Decode a geohash into a bounding box + center (for Nominatim viewbox bias). */
+function geohashBounds(hash) {
+    const h = String(hash || '').toLowerCase().trim();
+    if (!h || !/^[0-9bcdefghjkmnpqrstuvwxyz]+$/.test(h))
+        return null;
+    let evenBit = true;
+    let latMin = -90;
+    let latMax = 90;
+    let lonMin = -180;
+    let lonMax = 180;
+    for (const ch of h) {
+        const idx = BASE32.indexOf(ch);
+        if (idx < 0)
+            return null;
+        for (let n = 4; n >= 0; n -= 1) {
+            const bit = (idx >> n) & 1;
+            if (evenBit) {
+                const mid = (lonMin + lonMax) / 2;
+                if (bit)
+                    lonMin = mid;
+                else
+                    lonMax = mid;
+            }
+            else {
+                const mid = (latMin + latMax) / 2;
+                if (bit)
+                    latMin = mid;
+                else
+                    latMax = mid;
+            }
+            evenBit = !evenBit;
+        }
+    }
+    return {
+        latMin,
+        latMax,
+        lonMin,
+        lonMax,
+        lat: (latMin + latMax) / 2,
+        lon: (lonMin + lonMax) / 2,
+    };
 }
 /** Convert a USD amount to integer micro-USD (1 USD = 1_000_000) for the ledger. */
 function usdToMicros(usd) {
