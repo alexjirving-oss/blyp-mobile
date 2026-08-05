@@ -5,6 +5,8 @@
 import { randomUUID } from 'crypto';
 import { getEconomyInfra } from '../../economy/infra';
 import { logger } from '../../config/logger';
+import { FieldValue } from 'firebase-admin/firestore';
+import { getFirestore } from '../../admin/firestoreAdmin';
 import { listGuests } from '../../live/guestSlotStore';
 import { emitMarbleGameEvent } from '../../realtime/realtimeBus';
 import {
@@ -54,6 +56,55 @@ async function saveRoom(room: MarbleRoom): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+
+/** Best-effort Firestore evidence for badge_marble_podium mint (Cloud Functions). */
+async function recordMarblePodiumEvidence(room: MarbleRoom): Promise<void> {
+  try {
+    const fs = getFirestore();
+    if (!fs) return;
+    const points = room.state.placePoints || {};
+    let winnerId = '';
+    let best = -1;
+    for (const [uid, pts] of Object.entries(points)) {
+      const n = Number(pts) || 0;
+      if (n > best) {
+        best = n;
+        winnerId = uid;
+      }
+    }
+    if (!winnerId || best < 1) return;
+    const batch = fs.batch();
+    const userRef = fs.collection('users').doc(winnerId);
+    batch.set(
+      userRef,
+      {
+        marblePodiumWins: FieldValue.increment(1),
+        marblePodiumCount: FieldValue.increment(1),
+        marblePodiumLastSessionId: room.sessionId,
+        marblePodiumLastAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    const evidenceRef = fs.collection('marblePodiumResults').doc(winnerId);
+    batch.set(
+      evidenceRef,
+      {
+        uid: winnerId,
+        sessionId: room.sessionId,
+        placePoints: best,
+        lastAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    await batch.commit();
+  } catch (e: any) {
+    logger.warn(
+      { sessionId: room.sessionId, err: e?.message || String(e) },
+      '[marble] podium evidence write failed (non-fatal)',
+    );
+  }
+}
 
 async function withLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
   const key = lockKey(sessionId);
@@ -144,7 +195,10 @@ async function tickOnce(sessionId: string) {
     }
 
     emitMarbleGameEvent(sessionId, publicEvent(room, type));
-    if (nextState.phase === 'ended') stopTicks(sessionId);
+    if (nextState.phase === 'ended') {
+      void recordMarblePodiumEvidence(room);
+      stopTicks(sessionId);
+    }
   });
 }
 
@@ -248,6 +302,7 @@ export async function endRace(args: { sessionId: string; hostUserId: string }): 
     await saveRoom(room);
     stopTicks(sessionId);
     emitMarbleGameEvent(sessionId, publicEvent(room, 'ENDED'));
+    void recordMarblePodiumEvidence(room);
     setTimeout(() => {
       void redis().del(stateKey(sessionId)).catch(() => undefined);
     }, 30_000);
