@@ -9,9 +9,10 @@
  * Safety / rollout:
  *  - Gated behind ENABLE_MEDIA_MODERATION so it can be deployed dark and switched
  *    on once the Vision API + billing are confirmed.
- *  - The Vision client is lazily required, so a missing dependency or unconfigured
- *    API degrades to a no-op instead of crashing the function cold-start.
- *  - Never throws; any failure leaves the post visible (fail-open) and is logged.
+ *  - The Vision client is lazily required, so a missing dependency does not crash
+ *    cold-start; when the gate is ON, missing client / API failure fail-closed
+ *    (hide + admin alert) instead of leaving unscanned media public.
+ *  - Never throws out of the trigger; failures are logged and handled in-band.
  *  - Video is approximated by scanning its thumbnail (full-frame video moderation
  *    is a separate, heavier pipeline).
  */
@@ -76,6 +77,42 @@ async function hidePost(db: Db, postId: string, reason: string): Promise<void> {
   }
 }
 
+async function recordVisionHold(
+  db: Db,
+  postId: string,
+  data: any,
+  reason: string,
+  severity: 'high' | 'normal' = 'high'
+): Promise<void> {
+  await hidePost(db, postId, reason);
+  try {
+    await db.collection('moderationActions').add({
+      actorId: 'system',
+      source: 'auto_vision',
+      actionType: 'post_hidden',
+      targetType: 'post',
+      targetId: postId,
+      authorId: String(data?.userId || '').trim() || null,
+      decisionReason: reason,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    await db.collection('adminAlerts').add({
+      kind: 'media_moderation',
+      severity,
+      targetType: 'post',
+      targetId: postId,
+      authorId: String(data?.userId || '').trim() || null,
+      decisionReason: reason,
+      hidden: true,
+      status: 'open',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.error(`[ALERT][media_moderation] post/${postId} ${reason}`);
+  } catch (e) {
+    console.warn('[mediaModeration] audit/alert failed', (e as any)?.message || String(e));
+  }
+}
+
 export const moderatePostMedia = functions
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .firestore.document('posts/{postId}')
@@ -85,22 +122,31 @@ export const moderatePostMedia = functions
     const imageUri = pickImageUri(data);
     if (!imageUri) return null;
 
-    const client = getVisionClient();
-    if (!client) return null;
-
     const postId = String(context.params.postId || '');
     initFirebaseAdmin();
     const db = admin.firestore();
+
+    const client = getVisionClient();
+    if (!client) {
+      console.warn('[mediaModeration] Vision client unavailable (fail-closed)');
+      await recordVisionHold(db, postId, data, 'vision:client_unavailable');
+      return null;
+    }
 
     let safe: any = null;
     try {
       const [result] = await client.safeSearchDetection({ image: { source: { imageUri } } });
       safe = result?.safeSearchAnnotation || null;
     } catch (e) {
-      console.warn('[mediaModeration] safeSearch failed (fail-open)', (e as any)?.message || String(e));
+      console.warn('[mediaModeration] safeSearch failed (fail-closed)', (e as any)?.message || String(e));
+      await recordVisionHold(db, postId, data, 'vision:check_failed');
       return null;
     }
-    if (!safe) return null;
+    if (!safe) {
+      console.warn('[mediaModeration] safeSearch empty annotation (fail-closed)');
+      await recordVisionHold(db, postId, data, 'vision:annotation_missing');
+      return null;
+    }
 
     const adult = String(safe.adult || 'UNKNOWN');
     const violence = String(safe.violence || 'UNKNOWN');
@@ -116,33 +162,12 @@ export const moderatePostMedia = functions
     if (!flagged) return null;
 
     const reason = `vision:adult=${adult},violence=${violence},racy=${racy},medical=${medical}`;
-    await hidePost(db, postId, reason);
-
-    try {
-      await db.collection('moderationActions').add({
-        actorId: 'system',
-        source: 'auto_vision',
-        actionType: 'post_hidden',
-        targetType: 'post',
-        targetId: postId,
-        authorId: String(data?.userId || '').trim() || null,
-        decisionReason: reason,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      await db.collection('adminAlerts').add({
-        kind: 'media_moderation',
-        severity: HARD.has(adult) || HARD.has(violence) ? 'high' : 'normal',
-        targetType: 'post',
-        targetId: postId,
-        authorId: String(data?.userId || '').trim() || null,
-        decisionReason: reason,
-        hidden: true,
-        status: 'open',
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      console.error(`[ALERT][media_moderation] post/${postId} ${reason}`);
-    } catch (e) {
-      console.warn('[mediaModeration] audit/alert failed', (e as any)?.message || String(e));
-    }
+    await recordVisionHold(
+      db,
+      postId,
+      data,
+      reason,
+      HARD.has(adult) || HARD.has(violence) ? 'high' : 'normal'
+    );
     return null;
   });

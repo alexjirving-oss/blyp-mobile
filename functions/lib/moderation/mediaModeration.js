@@ -10,9 +10,10 @@
  * Safety / rollout:
  *  - Gated behind ENABLE_MEDIA_MODERATION so it can be deployed dark and switched
  *    on once the Vision API + billing are confirmed.
- *  - The Vision client is lazily required, so a missing dependency or unconfigured
- *    API degrades to a no-op instead of crashing the function cold-start.
- *  - Never throws; any failure leaves the post visible (fail-open) and is logged.
+ *  - The Vision client is lazily required, so a missing dependency does not crash
+ *    cold-start; when the gate is ON, missing client / API failure fail-closed
+ *    (hide + admin alert) instead of leaving unscanned media public.
+ *  - Never throws out of the trigger; failures are logged and handled in-band.
  *  - Video is approximated by scanning its thumbnail (full-frame video moderation
  *    is a separate, heavier pipeline).
  */
@@ -104,44 +105,7 @@ async function hidePost(db, postId, reason) {
         console.warn('[mediaModeration] hidePost failed', (e === null || e === void 0 ? void 0 : e.message) || String(e));
     }
 }
-exports.moderatePostMedia = functions
-    .runWith({ timeoutSeconds: 60, memory: '256MB' })
-    .firestore.document('posts/{postId}')
-    .onCreate(async (snap, context) => {
-    if (!ENABLED)
-        return null;
-    const data = snap.data() || {};
-    const imageUri = pickImageUri(data);
-    if (!imageUri)
-        return null;
-    const client = getVisionClient();
-    if (!client)
-        return null;
-    const postId = String(context.params.postId || '');
-    (0, firebaseAdmin_1.initFirebaseAdmin)();
-    const db = firebaseAdmin_1.admin.firestore();
-    let safe = null;
-    try {
-        const [result] = await client.safeSearchDetection({ image: { source: { imageUri } } });
-        safe = (result === null || result === void 0 ? void 0 : result.safeSearchAnnotation) || null;
-    }
-    catch (e) {
-        console.warn('[mediaModeration] safeSearch failed (fail-open)', (e === null || e === void 0 ? void 0 : e.message) || String(e));
-        return null;
-    }
-    if (!safe)
-        return null;
-    const adult = String(safe.adult || 'UNKNOWN');
-    const violence = String(safe.violence || 'UNKNOWN');
-    const racy = String(safe.racy || 'UNKNOWN');
-    const medical = String(safe.medical || 'UNKNOWN');
-    const flagged = HARD.has(adult) ||
-        HARD.has(violence) ||
-        racy === 'VERY_LIKELY' ||
-        medical === 'VERY_LIKELY';
-    if (!flagged)
-        return null;
-    const reason = `vision:adult=${adult},violence=${violence},racy=${racy},medical=${medical}`;
+async function recordVisionHold(db, postId, data, reason, severity = 'high') {
     await hidePost(db, postId, reason);
     try {
         await db.collection('moderationActions').add({
@@ -156,7 +120,7 @@ exports.moderatePostMedia = functions
         });
         await db.collection('adminAlerts').add({
             kind: 'media_moderation',
-            severity: HARD.has(adult) || HARD.has(violence) ? 'high' : 'normal',
+            severity,
             targetType: 'post',
             targetId: postId,
             authorId: String((data === null || data === void 0 ? void 0 : data.userId) || '').trim() || null,
@@ -170,6 +134,53 @@ exports.moderatePostMedia = functions
     catch (e) {
         console.warn('[mediaModeration] audit/alert failed', (e === null || e === void 0 ? void 0 : e.message) || String(e));
     }
+}
+exports.moderatePostMedia = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB' })
+    .firestore.document('posts/{postId}')
+    .onCreate(async (snap, context) => {
+    if (!ENABLED)
+        return null;
+    const data = snap.data() || {};
+    const imageUri = pickImageUri(data);
+    if (!imageUri)
+        return null;
+    const postId = String(context.params.postId || '');
+    (0, firebaseAdmin_1.initFirebaseAdmin)();
+    const db = firebaseAdmin_1.admin.firestore();
+    const client = getVisionClient();
+    if (!client) {
+        console.warn('[mediaModeration] Vision client unavailable (fail-closed)');
+        await recordVisionHold(db, postId, data, 'vision:client_unavailable');
+        return null;
+    }
+    let safe = null;
+    try {
+        const [result] = await client.safeSearchDetection({ image: { source: { imageUri } } });
+        safe = (result === null || result === void 0 ? void 0 : result.safeSearchAnnotation) || null;
+    }
+    catch (e) {
+        console.warn('[mediaModeration] safeSearch failed (fail-closed)', (e === null || e === void 0 ? void 0 : e.message) || String(e));
+        await recordVisionHold(db, postId, data, 'vision:check_failed');
+        return null;
+    }
+    if (!safe) {
+        console.warn('[mediaModeration] safeSearch empty annotation (fail-closed)');
+        await recordVisionHold(db, postId, data, 'vision:annotation_missing');
+        return null;
+    }
+    const adult = String(safe.adult || 'UNKNOWN');
+    const violence = String(safe.violence || 'UNKNOWN');
+    const racy = String(safe.racy || 'UNKNOWN');
+    const medical = String(safe.medical || 'UNKNOWN');
+    const flagged = HARD.has(adult) ||
+        HARD.has(violence) ||
+        racy === 'VERY_LIKELY' ||
+        medical === 'VERY_LIKELY';
+    if (!flagged)
+        return null;
+    const reason = `vision:adult=${adult},violence=${violence},racy=${racy},medical=${medical}`;
+    await recordVisionHold(db, postId, data, reason, HARD.has(adult) || HARD.has(violence) ? 'high' : 'normal');
     return null;
 });
 //# sourceMappingURL=mediaModeration.js.map
