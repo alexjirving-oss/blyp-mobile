@@ -13,6 +13,7 @@ module.exports = {
     '/diagnostics/',
     '/tools/accountability/',
     '/backend/',
+    '/functions/',
   ],
   modulePathIgnorePatterns: [
     '<rootDir>/#1/',
@@ -20,5 +21,6 @@ module.exports = {
     '<rootDir>/diagnostics/',
     '<rootDir>/tools/accountability/',
     '<rootDir>/backend/',
+    '<rootDir>/functions/',
   ],
 };
