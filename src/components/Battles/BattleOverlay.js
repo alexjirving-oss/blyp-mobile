@@ -1,19 +1,30 @@
 // BattleOverlay — TikTok-style live 1v1 match chrome.
 //
 // Top MatchBar pushes teal ↔ coral as gift/vote scores change. Participants
-// get Start match / End match; viewers get one free vote per side.
+// get Start match / End match; viewers get one free vote per side. Combo FX,
+// top-gifter avatars, win banner + rematch land here.
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image,
 } from 'react-native';
 import Icon from '../Icon';
-import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import {
-  subscribeBattle, voteBattle, endBattle, startMatch, battleSideFor, BATTLE_STATUS,
+  subscribeBattle,
+  voteBattle,
+  endBattle,
+  startMatch,
+  rematchBattle,
+  battleSideFor,
+  BATTLE_STATUS,
+  subscribeBattleContributors,
+  topGiftersForSide,
 } from '../../services/battleService';
-import MatchBar, { MATCH_BAR_LEFT, MATCH_BAR_RIGHT } from './MatchBar';
+import MatchBar, {
+  MATCH_BAR_LEFT, MATCH_BAR_RIGHT, COMBO_IDLE_MS, COMBO_MIN,
+} from './MatchBar';
+import MatchWinBanner from './MatchWinBanner';
 
 function fmtClock(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -48,13 +59,33 @@ function SideChip({ name, photo, accent, align = 'left' }) {
   );
 }
 
-export default function BattleOverlay({ battleId, currentUid, onEnded }) {
+/**
+ * @param {object} props
+ * @param {string} props.battleId
+ * @param {string} [props.currentUid]
+ * @param {() => void} [props.onEnded] — match ended (does not end the live)
+ * @param {(info: { battleId: string }) => void} [props.onRematchStarted]
+ * @param {string} [props.liveStreamId]
+ */
+export default function BattleOverlay({
+  battleId,
+  currentUid,
+  onEnded,
+  onRematchStarted,
+  liveStreamId,
+}) {
   const [battle, setBattle] = useState(null);
+  const [contributors, setContributors] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [myVote, setMyVote] = useState(null);
   const [ending, setEnding] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [rematching, setRematching] = useState(false);
+  const [combo, setCombo] = useState(null);
   const endedHandledRef = useRef(false);
+  const scoreRef = useRef({ creator: 0, opponent: 0 });
+  const comboSideRef = useRef({ side: null, streak: 0, at: 0 });
+  const comboClearTimer = useRef(null);
 
   useEffect(() => {
     if (!battleId) return undefined;
@@ -63,13 +94,65 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
   }, [battleId]);
 
   useEffect(() => {
+    if (!battleId) return undefined;
+    const unsub = subscribeBattleContributors(battleId, setContributors);
+    return () => { try { unsub && unsub(); } catch {} };
+  }, [battleId]);
+
+  useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Combo / multiplier pulse from rapid score bumps on one side.
+  useEffect(() => {
+    if (!battle) return;
+    const score = battle.score || { creator: 0, opponent: 0 };
+    const prev = scoreRef.current;
+    const dC = (Number(score.creator) || 0) - (Number(prev.creator) || 0);
+    const dO = (Number(score.opponent) || 0) - (Number(prev.opponent) || 0);
+    scoreRef.current = {
+      creator: Number(score.creator) || 0,
+      opponent: Number(score.opponent) || 0,
+    };
+    if (dC <= 0 && dO <= 0) return;
+    if (!battle.liveStartedAt || battle.status === BATTLE_STATUS.COMPLETED) return;
+
+    const side = dC >= dO ? 'left' : 'right';
+    const t = Date.now();
+    const prevCombo = comboSideRef.current;
+    let streak = 1;
+    if (prevCombo.side === side && t - prevCombo.at <= COMBO_IDLE_MS) {
+      streak = (prevCombo.streak || 0) + 1;
+    }
+    comboSideRef.current = { side, streak, at: t };
+    const mult = streak >= 5 ? 1.5 : streak >= 3 ? 1.2 : 1;
+    if (streak >= COMBO_MIN) {
+      setCombo({ side, streak, mult });
+    }
+    if (comboClearTimer.current) clearTimeout(comboClearTimer.current);
+    comboClearTimer.current = setTimeout(() => {
+      setCombo(null);
+      comboSideRef.current = { side: null, streak: 0, at: 0 };
+    }, COMBO_IDLE_MS);
+  }, [battle?.score?.creator, battle?.score?.opponent, battle?.liveStartedAt, battle?.status]);
+
+  useEffect(() => () => {
+    if (comboClearTimer.current) clearTimeout(comboClearTimer.current);
   }, []);
 
   const side = battle ? battleSideFor(battle, currentUid) : null;
   const isParticipant = !!side;
   const score = battle?.score || { creator: 0, opponent: 0 };
+
+  const leftGifters = useMemo(
+    () => topGiftersForSide(contributors, 'creator', 3),
+    [contributors]
+  );
+  const rightGifters = useMemo(
+    () => topGiftersForSide(contributors, 'opponent', 3),
+    [contributors]
+  );
 
   const startedAt = battle?.liveStartedAt || battle?.scheduledStartAt || now;
   const durationMs = (battle?.durationSec || 300) * 1000;
@@ -87,9 +170,12 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
     if (isParticipant && matchRunning && remaining <= 0) {
       endedHandledRef.current = true;
       setEnding(true);
-      endBattle(battle).finally(() => setEnding(false));
+      endBattle(battle).finally(() => {
+        setEnding(false);
+        onEnded && onEnded();
+      });
     }
-  }, [battle, completed, isParticipant, matchRunning, remaining]);
+  }, [battle, completed, isParticipant, matchRunning, remaining, onEnded]);
 
   const vote = useCallback(async (s) => {
     if (!currentUid || isParticipant || !matchRunning) return;
@@ -117,6 +203,24 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
     onEnded && onEnded();
   }, [battle, onEnded]);
 
+  const rematchNow = useCallback(async () => {
+    if (!battle || !currentUid) return;
+    setRematching(true);
+    try {
+      const res = await rematchBattle(battle, currentUid, {
+        liveStreamId: liveStreamId || battle.liveStreamId || null,
+      });
+      if (res.ok && res.id) {
+        endedHandledRef.current = false;
+        setMyVote(null);
+        setCombo(null);
+        onRematchStarted && onRematchStarted({ battleId: res.id });
+      }
+    } finally {
+      setRematching(false);
+    }
+  }, [battle, currentUid, liveStreamId, onRematchStarted]);
+
   if (!battle) return null;
 
   const winnerSide = completed
@@ -126,6 +230,12 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
         ? 'opponent'
         : null)
     : null;
+
+  const winnerTitle = winnerSide === 'creator'
+    ? `${battle.creatorName} wins!`
+    : winnerSide === 'opponent'
+      ? `${battle.opponentName} wins!`
+      : "It's a draw!";
 
   const clockLabel = completed
     ? 'ENDED'
@@ -161,21 +271,21 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
         <MatchBar
           leftScore={score.creator || 0}
           rightScore={score.opponent || 0}
+          leftGifters={leftGifters}
+          rightGifters={rightGifters}
+          combo={matchRunning ? combo : null}
           showScores
         />
       </View>
 
       {completed && (
-        <View style={styles.winnerBanner} pointerEvents="none">
-          <Icon name="trophy" size={responsiveFont(16)} color="#0A0A0C" />
-          <Text style={styles.winnerBannerText}>
-            {winnerSide === 'creator'
-              ? `${battle.creatorName} wins!`
-              : winnerSide === 'opponent'
-                ? `${battle.opponentName} wins!`
-                : "It's a draw!"}
-          </Text>
-        </View>
+        <MatchWinBanner
+          title={winnerTitle}
+          winnerSide={winnerSide}
+          canRematch={isParticipant}
+          rematching={rematching}
+          onRematch={rematchNow}
+        />
       )}
 
       {!completed && (
@@ -320,22 +430,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: responsiveFont(12),
     fontVariant: ['tabular-nums'],
-  },
-  winnerBanner: {
-    flexDirection: 'row',
-    alignSelf: 'center',
-    alignItems: 'center',
-    gap: responsiveSize(8),
-    backgroundColor: '#FFD54A',
-    borderRadius: responsiveSize(20),
-    paddingVertical: responsiveSize(8),
-    paddingHorizontal: responsiveSize(16),
-    marginTop: responsiveSize(14),
-  },
-  winnerBannerText: {
-    color: '#0A0A0C',
-    fontWeight: '800',
-    fontSize: responsiveFont(14),
   },
   controls: {
     position: 'absolute',

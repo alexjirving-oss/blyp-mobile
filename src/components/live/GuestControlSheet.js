@@ -92,6 +92,9 @@ export default function GuestControlSheet({
   onReport,
   onGift,
   onOpenProfile,
+  onChallenge,
+  canChallenge = false,
+  challengeBusy = false,
   giftTotalsByUser = {},
   joinedAtByUser = {},
 }) {
@@ -274,6 +277,26 @@ export default function GuestControlSheet({
             </TouchableOpacity>
           </View>
 
+          {canChallenge && typeof onChallenge === 'function' ? (
+            <TouchableOpacity
+              style={styles.challengeBtn}
+              onPress={() => onChallenge?.(selected)}
+              disabled={challengeBusy}
+              activeOpacity={0.85}
+            >
+              {challengeBusy ? (
+                <ActivityIndicator color="#0A0A0C" />
+              ) : (
+                <>
+                  <Icon name="flash" size={18} color="#0A0A0C" />
+                  <Text style={styles.challengeBtnText} allowFontScaling={false}>
+                    Challenge this guest
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : null}
+
           {/* Moderation */}
           <Text style={styles.sectionLabel} allowFontScaling={false}>Host controls</Text>
           <View style={styles.modRow}>
@@ -345,6 +368,17 @@ const styles = StyleSheet.create({
   giftBtnText: { color: '#0A0A0C', fontWeight: '800', fontSize: 15 },
   profileBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: SURFACE, borderWidth: 1, borderColor: BORDER, paddingVertical: 13, borderRadius: 14 },
   profileBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  challengeBtn: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FF5A45',
+    paddingVertical: 13,
+    borderRadius: 14,
+  },
+  challengeBtnText: { color: '#0A0A0C', fontWeight: '900', fontSize: 15 },
   sectionLabel: { color: '#71717A', fontSize: 12, fontWeight: '700', marginTop: 20, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   modRow: { flexDirection: 'row', justifyContent: 'space-between' },
   modBtn: { alignItems: 'center', flex: 1, gap: 6 },

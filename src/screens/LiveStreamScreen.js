@@ -51,7 +51,13 @@ import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
 import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
 import GuestControlSheet from '../components/live/GuestControlSheet';
 import LiveInviteGuestsModal from '../components/live/LiveInviteGuestsModal';
-import { markJoined as markBattleJoined, getBattle as getBattleDoc, addGiftScore as addBattleGiftScore } from '../services/battleService';
+import {
+  markJoined as markBattleJoined,
+  getBattle as getBattleDoc,
+  addGiftScore as addBattleGiftScore,
+  recordBattleGifterContribution,
+  challengeGuestInLive,
+} from '../services/battleService';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
 import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
@@ -84,6 +90,7 @@ import {
   heartbeatStream,
   setLiveGuests as mirrorLiveGuests,
   setGuestLayoutMode as mirrorGuestLayoutMode,
+  setActiveBattleId as mirrorActiveBattleId,
   subscribeToGuestRequests,
   setGuestRequestStatus as setGuestRequestStatusMirror,
   clearGuestRequest as clearGuestRequestMirror,
@@ -200,6 +207,13 @@ const LiveStreamScreen = (props) => {
     isBattleParticipant,
   } = useLiveStreamRouteParams(route);
 
+  // Mid-live challenge / rematch / viewer mirror — union of route + local + stream doc.
+  const [localBattleId, setLocalBattleId] = useState(null);
+  const [mirroredBattleId, setMirroredBattleId] = useState(null);
+  // localBattleId wins so rematch/challenge beats a stale route param until setParams lands.
+  const activeBattleId = localBattleId || routeBattleId || mirroredBattleId || null;
+  const [challengeBusy, setChallengeBusy] = useState(false);
+
   // Blyp Artillery battle-stage game (server-authoritative). Client toggle is
   // gated by EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED; the backend is independently
   // gated by LIVE_ARTILLERY_ENABLED so it ships dark until both are on.
@@ -220,7 +234,7 @@ const LiveStreamScreen = (props) => {
   // Floating toggle + full overlay for the artillery battle-stage game. Rendered
   // in both viewer and host battle branches. Opaque so the game reads over video.
   const renderArtilleryLayer = () => {
-    if (!routeBattleId || !ARTILLERY_ENABLED) return null;
+    if (!activeBattleId || !ARTILLERY_ENABLED) return null;
     const gameSessionId = routeStreamId || streamId;
     if (!gameSessionId) return null;
     if (showArtillery) {
@@ -230,7 +244,7 @@ const LiveStreamScreen = (props) => {
         >
           <NetworkedArtillery
             sessionId={gameSessionId}
-            battleId={routeBattleId}
+            battleId={activeBattleId}
             role={routeBattleRole || 'spectator'}
             onClose={() => setShowArtillery(false)}
           />
@@ -241,25 +255,25 @@ const LiveStreamScreen = (props) => {
     return null;
   };
 
-  const liveGamesAvailable = (!!routeBattleId && ARTILLERY_ENABLED) || (MARBLE_ENABLED && !routeBattleId);
+  const liveGamesAvailable = (!!activeBattleId && ARTILLERY_ENABLED) || (MARBLE_ENABLED && !activeBattleId);
 
   const openLiveGames = useCallback(() => {
-    if (routeBattleId && ARTILLERY_ENABLED) {
+    if (activeBattleId && ARTILLERY_ENABLED) {
       setShowArtillery(true);
       setGamesOpen(false);
       return;
     }
-    if (MARBLE_ENABLED && !routeBattleId) {
+    if (MARBLE_ENABLED && !activeBattleId) {
       setGamesOpen((v) => !v);
       return;
     }
     Alert.alert('Games', 'Live games are not available in this room yet.');
-  }, [routeBattleId, ARTILLERY_ENABLED, MARBLE_ENABLED]);
+  }, [activeBattleId, ARTILLERY_ENABLED, MARBLE_ENABLED]);
 
   // Marble Race translucent overlay on non-battle lives.
   // Host start chrome is gated by the Games bottom tab; active races always show.
   const renderMarbleLayer = () => {
-    if (!MARBLE_ENABLED || routeBattleId) return null;
+    if (!MARBLE_ENABLED || activeBattleId) return null;
     const gameSessionId = routeStreamId || streamId;
     if (!gameSessionId) return null;
     // Host path: prefer live only (session exists after Go Live).
@@ -1034,10 +1048,10 @@ const LiveStreamScreen = (props) => {
   // Scoring only applies once the match clock has started (liveStartedAt).
   const battlePartsRef = useRef(null);
   useEffect(() => {
-    if (!routeBattleId) { battlePartsRef.current = null; return; }
+    if (!activeBattleId) { battlePartsRef.current = null; return; }
     let cancelled = false;
     (async () => {
-      const b = await getBattleDoc(routeBattleId);
+      const b = await getBattleDoc(activeBattleId);
       if (!cancelled && b) {
         battlePartsRef.current = {
           creatorUid: b.creatorUid,
@@ -1047,15 +1061,15 @@ const LiveStreamScreen = (props) => {
       }
     })();
     return () => { cancelled = true; };
-  }, [routeBattleId]);
+  }, [activeBattleId]);
 
   // Keep liveStartedAt fresh via battle overlay subscription path (poll lightly).
   useEffect(() => {
-    if (!routeBattleId) return undefined;
+    if (!activeBattleId) return undefined;
     let cancelled = false;
     const tick = async () => {
       try {
-        const b = await getBattleDoc(routeBattleId);
+        const b = await getBattleDoc(activeBattleId);
         if (!cancelled && b && battlePartsRef.current) {
           battlePartsRef.current.liveStartedAt = b.liveStartedAt || null;
         }
@@ -1064,17 +1078,28 @@ const LiveStreamScreen = (props) => {
     const t = setInterval(tick, 2500);
     tick();
     return () => { cancelled = true; clearInterval(t); };
-  }, [routeBattleId]);
+  }, [activeBattleId]);
 
   const attributeBattleGift = useCallback((payload) => {
-    if (!routeBattleId || !payload) return;
+    if (!activeBattleId || !payload) return;
     const parts = battlePartsRef.current;
     if (!parts?.liveStartedAt) return;
     const receiver = payload.receiverUserId || payload.receiver?.userId || payload.creatorId;
     const coins = Number(payload.coinSpent || payload.coinCost || payload.coins || 0) || 1;
-    if (receiver === parts.creatorUid) addBattleGiftScore(routeBattleId, 'creator', coins);
-    else if (receiver === parts.opponentUid) addBattleGiftScore(routeBattleId, 'opponent', coins);
-  }, [routeBattleId]);
+    let side = null;
+    if (receiver === parts.creatorUid) side = 'creator';
+    else if (receiver === parts.opponentUid) side = 'opponent';
+    if (!side) return;
+    addBattleGiftScore(activeBattleId, side, coins);
+    const senderUid = payload?.sender?.userId || payload?.senderUserId;
+    if (senderUid) {
+      recordBattleGifterContribution(activeBattleId, side, {
+        uid: String(senderUid),
+        name: payload?.sender?.handle || payload?.sender?.displayName || 'Fan',
+        photoURL: payload?.sender?.avatarUrl || payload?.sender?.photoURL || '',
+      }, coins);
+    }
+  }, [activeBattleId]);
 
   const onBattleStarted = useCallback(async (info) => {
     try {
@@ -1097,6 +1122,14 @@ const LiveStreamScreen = (props) => {
     onBattleStarted: isBattleParticipant ? onBattleStarted : undefined,
   });
 
+  // Host: keep stream doc battle id in sync so viewers see MatchBar without a route param.
+  useEffect(() => {
+    if (isViewer || !isStreaming) return;
+    const sid = streamId || ivsHostSession?.sessionId || ivsHostSession?.streamId;
+    if (!sid || !activeBattleId) return;
+    mirrorActiveBattleId(sid, activeBattleId);
+  }, [isViewer, isStreaming, streamId, activeBattleId, ivsHostSession?.sessionId, ivsHostSession?.streamId]);
+
   // Number of real (remote) guests currently on stage for the host.
   const hostGuestCount = useMemo(() => {
     try {
@@ -1112,7 +1145,7 @@ const LiveStreamScreen = (props) => {
   // started solo/full-bleed isn't left with guests hidden behind the handle).
   // Battles use a dedicated side-by-side stage — keep the multi-guest tray closed.
   useEffect(() => {
-    if (routeBattleId) {
+    if (activeBattleId) {
       prevHostGuestCountRef.current = hostGuestCount;
       return;
     }
@@ -1120,16 +1153,16 @@ const LiveStreamScreen = (props) => {
       setHostGuestTrayMode((prev) => (prev === 'hidden' ? 'expanded' : prev));
     }
     prevHostGuestCountRef.current = hostGuestCount;
-  }, [hostGuestCount, routeBattleId]);
+  }, [hostGuestCount, activeBattleId]);
 
   // First remote publisher = battle opponent for the 1v1 split stage.
   const battleOpponentParticipant = useMemo(() => {
-    if (!routeBattleId) return null;
+    if (!activeBattleId) return null;
     const parts = ivsHostSession?.participants || [];
     return parts.find((p) => p && !p.isLocal && typeof p.slotIndex === 'number' && p.slotIndex >= 1)
       || parts.find((p) => p && !p.isLocal)
       || null;
-  }, [routeBattleId, ivsHostSession?.participants]);
+  }, [activeBattleId, ivsHostSession?.participants]);
 
   const didForceReattachSessionRef = useRef(null);
 
@@ -1515,6 +1548,8 @@ const LiveStreamScreen = (props) => {
       if (data && data.guestLayoutMode) {
         setGuestLayoutMode(normalizeLiveLayoutMode(data.guestLayoutMode));
       }
+      const bid = data?.activeBattleId ? String(data.activeBattleId) : null;
+      setMirroredBattleId(bid);
     });
     return () => { try { unsub && unsub(); } catch { /* ignore */ } };
   }, [isViewer, routeStreamId, streamId]);
@@ -3016,6 +3051,62 @@ const LiveStreamScreen = (props) => {
     confirmKickGuest(guest);
   };
 
+  const adoptBattleOnLive = useCallback(async (battleId, role = 'creator') => {
+    if (!battleId) return;
+    setLocalBattleId(String(battleId));
+    try {
+      navigation?.setParams?.({ battleId: String(battleId), battleRole: role });
+    } catch { /* ignore */ }
+    const sid = streamId || ivsHostSession?.sessionId || ivsHostSession?.streamId;
+    if (sid) {
+      mirrorActiveBattleId(sid, String(battleId));
+    }
+  }, [navigation, streamId, ivsHostSession?.sessionId, ivsHostSession?.streamId]);
+
+  const handleGuestChallenge = useCallback(async (guest) => {
+    if (!guest?.userId || !uid || challengeBusy) return;
+    if (activeBattleId) {
+      Alert.alert('Match already active', 'End the current match before challenging another guest.');
+      return;
+    }
+    setChallengeBusy(true);
+    try {
+      const hostName = getDisplayNameSafe() || 'Host';
+      const res = await challengeGuestInLive(
+        {
+          id: uid,
+          displayName: hostName,
+          username: hostName,
+          photoURL: '',
+        },
+        {
+          id: String(guest.userId),
+          displayName: guest.name || 'Guest',
+          username: guest.name || '',
+          photoURL: guest.photoUrl || guest.photoURL || '',
+        },
+        {
+          liveStreamId: streamId || ivsHostSession?.sessionId || ivsHostSession?.streamId || null,
+          durationSec: 300,
+        }
+      );
+      if (!res.ok) {
+        Alert.alert('Couldn’t start challenge', 'Please try again.');
+        return;
+      }
+      setGuestControlVisible(false);
+      await adoptBattleOnLive(res.id, 'creator');
+    } catch (e) {
+      console.warn('[LIVE][CHALLENGE_GUEST_FAILED]', e?.message || e);
+      Alert.alert('Couldn’t start challenge', 'Please try again.');
+    } finally {
+      setChallengeBusy(false);
+    }
+  }, [
+    uid, challengeBusy, activeBattleId, streamId,
+    ivsHostSession?.sessionId, ivsHostSession?.streamId, adoptBattleOnLive,
+  ]);
+
   // Host moderation: remove a guest from the stage.
   const confirmKickGuest = (guest) => {
     if (!guest) return;
@@ -3127,7 +3218,7 @@ const LiveStreamScreen = (props) => {
           guestRoster={liveGuests}
           guestLayoutMode={guestLayoutMode}
           giftTotalsByUser={giftTotalsByUser}
-          battleMode={!!routeBattleId}
+          battleMode={!!activeBattleId}
           style={styles.viewerVideo}
           overlayBottomInset={(viewerCommentsOverlayHeight || 0) + 8}
           onGuestPagerLayout={setViewerGuestPagerHeight}
@@ -3296,11 +3387,12 @@ const LiveStreamScreen = (props) => {
           incomingGiftEvent={incomingGiftEvent}
         />
 
-        {routeBattleId ? (
+        {activeBattleId ? (
           <BattleOverlay
-            battleId={routeBattleId}
+            battleId={activeBattleId}
             currentUid={uid}
-            onEnded={() => goToSummary()}
+            liveStreamId={routeStreamId || streamId || null}
+            onRematchStarted={({ battleId: nextId }) => adoptBattleOnLive(nextId, 'opponent')}
           />
         ) : null}
         {renderArtilleryLayer()}
@@ -3348,7 +3440,7 @@ const LiveStreamScreen = (props) => {
               guestRoster={liveGuests}
               guestLayoutMode={guestLayoutMode}
               giftTotalsByUser={giftTotalsByUser}
-              battleMode={!!routeBattleId}
+              battleMode={!!activeBattleId}
             />
           </View>
         ) : (
@@ -3425,18 +3517,18 @@ const LiveStreamScreen = (props) => {
               <View
                 style={[
                   styles.ivsHostStage,
-                  routeBattleId ? styles.ivsBattleStage : null,
-                  !routeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
+                  activeBattleId ? styles.ivsBattleStage : null,
+                  !activeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
                     ? styles.ivsComposeSide
                     : null,
-                  !routeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID
+                  !activeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID
                     ? styles.ivsComposeEqual
                     : null,
                 ]}
               >
                 <View
                   style={
-                    routeBattleId
+                    activeBattleId
                       ? styles.ivsBattlePane
                       : guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
                         ? styles.ivsComposeHostPaneSide
@@ -3445,7 +3537,7 @@ const LiveStreamScreen = (props) => {
                           : StyleSheet.absoluteFill
                   }
                 >
-                  {routeBattleId ? <View pointerEvents="none" style={styles.ivsBattleEdgeLeft} /> : null}
+                  {activeBattleId ? <View pointerEvents="none" style={styles.ivsBattleEdgeLeft} /> : null}
                   {isStreaming && NativeIVSBroadcastView ? (
                     <GestureHandlerRootView style={StyleSheet.absoluteFill}>
                       <PinchGestureHandler
@@ -3507,7 +3599,7 @@ const LiveStreamScreen = (props) => {
                   )}
                 </View>
 
-                {routeBattleId ? (
+                {activeBattleId ? (
                   <View style={styles.ivsBattlePane}>
                     <View pointerEvents="none" style={styles.ivsBattleEdgeRight} />
                     {isStreaming && battleOpponentParticipant && NativeIVSRealTimeView ? (
@@ -3529,7 +3621,7 @@ const LiveStreamScreen = (props) => {
                       </View>
                     )}
                   </View>
-                ) : !routeBattleId &&
+                ) : !activeBattleId &&
                   isStreaming &&
                   (guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID ||
                     guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE) ? (
@@ -3648,7 +3740,7 @@ const LiveStreamScreen = (props) => {
             )}
 
             {/* Host identity (top-left, over video) — hidden in battles (MatchBar owns names). */}
-            {!routeBattleId ? (
+            {!activeBattleId ? (
               <View
                 style={[
                   styles.hostIdentityOverlay,
@@ -3676,7 +3768,7 @@ const LiveStreamScreen = (props) => {
 
             {/* Host guest boxes (IVS only) — battles use side-by-side stage instead.
                 Equal / Split modes render sticky slots in the stage composition. */}
-            {backend === StreamingBackend.IVS && isStreaming && !routeBattleId && layoutUsesBottomTray(guestLayoutMode) && (
+            {backend === StreamingBackend.IVS && isStreaming && !activeBattleId && layoutUsesBottomTray(guestLayoutMode) && (
               <View
                 style={[
                   styles.ivsGuestTray,
@@ -4069,7 +4161,7 @@ const LiveStreamScreen = (props) => {
                       </TouchableOpacity>
                     ) : null}
 
-                    {!routeBattleId ? (
+                    {!activeBattleId ? (
                       <TouchableOpacity
                         style={styles.hostControl}
                         onPress={() => setShowLayoutSwitcher((v) => !v)}
@@ -4112,11 +4204,12 @@ const LiveStreamScreen = (props) => {
                   incomingGiftEvent={incomingGiftEvent}
                 />
 
-                {routeBattleId ? (
+                {activeBattleId ? (
                   <BattleOverlay
-                    battleId={routeBattleId}
+                    battleId={activeBattleId}
                     currentUid={uid}
-                    onEnded={() => goToSummary()}
+                    liveStreamId={streamId || ivsHostSession?.sessionId || null}
+                    onRematchStarted={({ battleId: nextId }) => adoptBattleOnLive(nextId, 'creator')}
                   />
                 ) : null}
                 {renderArtilleryLayer()}
@@ -4137,6 +4230,9 @@ const LiveStreamScreen = (props) => {
                   onReport={handleGuestReport}
                   onGift={handleGuestGift}
                   onOpenProfile={handleGuestProfile}
+                  onChallenge={handleGuestChallenge}
+                  canChallenge={isHost && isStreaming && !activeBattleId}
+                  challengeBusy={challengeBusy}
                   giftTotalsByUser={giftTotalsByUser}
                   joinedAtByUser={guestJoinedAt}
                 />

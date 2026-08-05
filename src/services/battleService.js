@@ -434,6 +434,198 @@ export async function addGiftScore(battleId, side, coinValue) {
   }
 }
 
+/**
+ * Record a viewer's gift contribution for top-gifter avatars on the MatchBar.
+ * Best-effort; never blocks scoring.
+ */
+export async function recordBattleGifterContribution(battleId, side, gifter, coinValue) {
+  if (!firebaseEnabled || !battleId || !gifter?.uid) return;
+  if (side !== 'creator' && side !== 'opponent') return;
+  const amount = Math.max(1, Math.round(Number(coinValue) || 0));
+  try {
+    await battleRef(battleId).collection('contributors').doc(String(gifter.uid)).set({
+      uid: String(gifter.uid),
+      side,
+      coins: increment(amount),
+      name: gifter.name || gifter.displayName || gifter.handle || 'Fan',
+      photoURL: gifter.photoURL || gifter.avatarUrl || gifter.photo || '',
+      updatedAt: Date.now(),
+    }, { merge: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Subscribe to battle gift contributors (for top 1–3 avatars per side). */
+export function subscribeBattleContributors(battleId, cb) {
+  if (!firebaseEnabled || !battleId) {
+    cb([]);
+    return () => {};
+  }
+  try {
+    return battleRef(battleId)
+      .collection('contributors')
+      .limit(40)
+      .onSnapshot(
+        (snap) => {
+          const rows = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
+          cb(rows);
+        },
+        () => cb([])
+      );
+  } catch {
+    cb([]);
+    return () => {};
+  }
+}
+
+/** Top N contributors for a side, sorted by coins desc. */
+export function topGiftersForSide(contributors, side, limit = 3) {
+  return (contributors || [])
+    .filter((c) => c && c.side === side && Number(c.coins) > 0)
+    .sort((a, b) => Number(b.coins || 0) - Number(a.coins || 0))
+    .slice(0, limit)
+    .map((c) => ({
+      uid: c.uid || c.id,
+      name: c.name || 'Fan',
+      photoURL: c.photoURL || '',
+      coins: Number(c.coins) || 0,
+    }));
+}
+
+/**
+ * Host challenges an on-stage guest mid-live: creates (or adopts) a free battle
+ * already in LIVE status with both sides joined. Match clock stays off until
+ * Start match. No stake / no pending invite.
+ */
+export async function challengeGuestInLive(host, guest, opts = {}) {
+  if (!firebaseEnabled || !db?.collection) return { ok: false, reason: 'unavailable' };
+  if (!host?.id || !guest?.id) return { ok: false, reason: 'missing_participants' };
+  if (host.id === guest.id) return { ok: false, reason: 'self' };
+
+  const liveStreamId = opts.liveStreamId || null;
+  const now = Date.now();
+  const durationSec = Math.max(60, Math.round(Number(opts.durationSec) || DEFAULT_DURATION_SEC));
+
+  // Adopt an existing open battle between these two on this stream, if any.
+  if (liveStreamId) {
+    try {
+      const snap = await db
+        .collection(BATTLES)
+        .where('liveStreamId', '==', liveStreamId)
+        .limit(12)
+        .get();
+      const open = (snap?.docs || [])
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .find((b) => {
+          if (![BATTLE_STATUS.PENDING, BATTLE_STATUS.SCHEDULED, BATTLE_STATUS.LIVE].includes(b.status)) {
+            return false;
+          }
+          if (b.liveStartedAt && b.status === BATTLE_STATUS.LIVE) return false;
+          const pair = new Set([b.creatorUid, b.opponentUid]);
+          return pair.has(host.id) && pair.has(guest.id);
+        });
+      if (open) {
+        await battleRef(open.id).update({
+          status: BATTLE_STATUS.LIVE,
+          creatorJoined: true,
+          opponentJoined: true,
+          liveStreamId,
+          durationSec: open.durationSec || durationSec,
+          updatedAt: now,
+          instantChallenge: true,
+        });
+        return { ok: true, id: open.id, battle: { ...open, status: BATTLE_STATUS.LIVE, liveStreamId }, adopted: true };
+      }
+    } catch {
+      /* fall through to create */
+    }
+  }
+
+  const id = newBattleId();
+  const hostName = host.displayName || host.username || host.name || 'Host';
+  const guestName = guest.displayName || guest.username || guest.name || 'Guest';
+  const battle = {
+    creatorUid: host.id,
+    creatorName: hostName,
+    creatorUsername: host.username || '',
+    creatorPhoto: host.photoURL || '',
+    opponentUid: guest.id,
+    opponentName: guestName,
+    opponentUsername: guest.username || '',
+    opponentPhoto: guest.photoURL || '',
+    participantsUids: [host.id, guest.id],
+    status: BATTLE_STATUS.LIVE,
+    title: String(opts.title || '').trim() || `${hostName} vs ${guestName}`,
+    scheduledStartAt: now,
+    durationSec,
+    depositMode: 'free',
+    stakeCoins: 0,
+    creatorPaid: false,
+    opponentPaid: false,
+    notifySupporters: false,
+    liveStreamId,
+    stageArn: opts.stageArn || null,
+    creatorJoined: true,
+    opponentJoined: true,
+    score: { creator: 0, opponent: 0 },
+    winnerUid: null,
+    settlement: null,
+    instantChallenge: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    await battleRef(id).set(battle);
+    return { ok: true, id, battle: { id, ...battle } };
+  } catch (e) {
+    console.warn('[battleService] challengeGuestInLive failed', e?.code || e?.message || e);
+    return { ok: false, reason: 'write_failed' };
+  }
+}
+
+/**
+ * Rematch after a completed battle: new free LIVE record on the same stream,
+ * scores reset, clock not started until Start match.
+ */
+export async function rematchBattle(prevBattle, uid, opts = {}) {
+  if (!prevBattle?.id) return { ok: false, reason: 'missing' };
+  if (!battleSideFor(prevBattle, uid)) return { ok: false, reason: 'not_participant' };
+  if (prevBattle.status !== BATTLE_STATUS.COMPLETED) return { ok: false, reason: 'not_completed' };
+
+  const host = {
+    id: prevBattle.creatorUid,
+    displayName: prevBattle.creatorName,
+    username: prevBattle.creatorUsername,
+    photoURL: prevBattle.creatorPhoto,
+  };
+  const guest = {
+    id: prevBattle.opponentUid,
+    displayName: prevBattle.opponentName,
+    username: prevBattle.opponentUsername,
+    photoURL: prevBattle.opponentPhoto,
+  };
+  // Keep creator/opponent roles stable across rematches.
+  const res = await challengeGuestInLive(host, guest, {
+    liveStreamId: opts.liveStreamId || prevBattle.liveStreamId || null,
+    stageArn: opts.stageArn || prevBattle.stageArn || null,
+    durationSec: opts.durationSec || prevBattle.durationSec || DEFAULT_DURATION_SEC,
+    title: prevBattle.title || `${host.displayName} vs ${guest.displayName}`,
+  });
+  if (res.ok) {
+    try {
+      await battleRef(prevBattle.id).update({
+        rematchBattleId: res.id,
+        updatedAt: Date.now(),
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  return res;
+}
+
 // ---------------------------------------------------------------------------
 // Reminders — a viewer asks to be reminded before a battle starts.
 // We schedule a local notification immediately (instant, offline) AND write an
@@ -642,6 +834,11 @@ export default {
   endBattle,
   voteBattle,
   addGiftScore,
+  recordBattleGifterContribution,
+  subscribeBattleContributors,
+  topGiftersForSide,
+  challengeGuestInLive,
+  rematchBattle,
   setBattleReminder,
   removeBattleReminder,
   getBattle,

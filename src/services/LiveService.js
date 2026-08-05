@@ -445,6 +445,23 @@ export async function setGuestLayoutMode(streamId, guestLayoutMode) {
   }
 }
 
+/**
+ * Mirror the active 1v1 match onto the stream doc so viewers (who joined without
+ * a battleId route param) pick up MatchBar / dual-stage chrome in real time.
+ * Pass null to clear after the live ends or the host dismisses the match UI.
+ */
+export async function setActiveBattleId(streamId, battleId) {
+  if (!streamId) return;
+  try {
+    await db.collection('liveStreams').doc(streamId).update({
+      activeBattleId: battleId ? String(battleId) : null,
+      activeBattleIdUpdatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    // Doc may be gone/ended; non-fatal.
+  }
+}
+
 // ---------- GUEST REQUESTS (Firestore mirror) ----------
 // The live-service owns the authoritative guest state machine, but the host's
 // only way of LEARNING about a new request was a 2.5s poll of that service —
