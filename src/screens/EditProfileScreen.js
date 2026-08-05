@@ -8,13 +8,13 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, limit as fsLimit } from 'firebase/firestore';
 import { storage, firestore as db } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
+import { useHasAI } from '../hooks/useEntitlement';
 import BlypLogo from '../components/BlypLogo';
 import { COLORS } from '../styles/theme';
 import {
   BADGE_CATALOG,
   CLUB_CATALOG,
-  MAX_PROFILE_BADGES_EQUIPPED,
-  MAX_PROFILE_CLUBS_PLUS,
+  getProfileIdentityCaps,
   normalizeProfileBadges,
   normalizeProfileClubs,
   toggleIdInList,
@@ -23,15 +23,17 @@ import {
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
   const { uid, user: authUser, isAuthenticated, hasUser, authReady, getDisplayName } = useAuth();
+  const hasPlus = useHasAI();
+  const identityCaps = useMemo(() => getProfileIdentityCaps(hasPlus), [hasPlus]);
   const [displayName, setDisplayName] = useState(profileFromRoute?.displayName ?? '');
   const [username, setUsername] = useState(profileFromRoute?.username ?? profileFromRoute?.handle ?? '');
   const [bio, setBio] = useState(profileFromRoute?.bio ?? '');
   const [profileImage, setProfileImage] = useState(profileFromRoute?.photoURL ?? '');
   const [profileClubs, setProfileClubs] = useState(() =>
-    normalizeProfileClubs(profileFromRoute?.profileClubs)
+    normalizeProfileClubs(profileFromRoute?.profileClubs, getProfileIdentityCaps(false).maxClubs)
   );
   const [profileBadges, setProfileBadges] = useState(() =>
-    normalizeProfileBadges(profileFromRoute?.profileBadges)
+    normalizeProfileBadges(profileFromRoute?.profileBadges, getProfileIdentityCaps(false).maxBadges)
   );
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -92,8 +94,8 @@ const EditProfileScreen = ({ navigation, route }) => {
           if (userData.username || userData.handle) setUsername((prev) => prev || (userData.username || userData.handle));
           if (userData.bio) setBio(userData.bio);
           if (userData.photoURL) setProfileImage((prev) => prev || userData.photoURL);
-          setProfileClubs(normalizeProfileClubs(userData.profileClubs));
-          setProfileBadges(normalizeProfileBadges(userData.profileBadges));
+          setProfileClubs(normalizeProfileClubs(userData.profileClubs, identityCaps.maxClubs));
+          setProfileBadges(normalizeProfileBadges(userData.profileBadges, identityCaps.maxBadges));
         }
       } catch (error) {
         console.error('Error loading user profile:', error);
@@ -103,7 +105,15 @@ const EditProfileScreen = ({ navigation, route }) => {
     };
 
     loadUserProfile();
+    // identityCaps applied after load via trim effect; omit from deps to avoid mid-edit refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, authUser, getDisplayName]);
+
+  // Enforce entitlement caps on selection (Plus → free, or after load with Plus fail-open).
+  useEffect(() => {
+    setProfileClubs((prev) => normalizeProfileClubs(prev, identityCaps.maxClubs));
+    setProfileBadges((prev) => normalizeProfileBadges(prev, identityCaps.maxBadges));
+  }, [identityCaps.maxClubs, identityCaps.maxBadges]);
 
   // Keep displayName synced to username (requirement: always match).
   useEffect(() => {
@@ -278,8 +288,8 @@ const EditProfileScreen = ({ navigation, route }) => {
 
       // Save profile data to Firestore using Cognito uid.
       // Never write avatarFrame / feedPriority / admin fields here.
-      const clubsToSave = normalizeProfileClubs(profileClubs, MAX_PROFILE_CLUBS_PLUS);
-      const badgesToSave = normalizeProfileBadges(profileBadges, MAX_PROFILE_BADGES_EQUIPPED);
+      const clubsToSave = normalizeProfileClubs(profileClubs, identityCaps.maxClubs);
+      const badgesToSave = normalizeProfileBadges(profileBadges, identityCaps.maxBadges);
       const userDocRef = doc(db, 'users', uid);
       await setDoc(userDocRef, {
         displayName: normalizedUsername,
@@ -414,22 +424,28 @@ const EditProfileScreen = ({ navigation, route }) => {
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Clubs</Text>
               <Text style={styles.helperText}>
-                Join teams and game clubs ({profileClubs.length}/{MAX_PROFILE_CLUBS_PLUS}). Curated catalog only.
+                Join teams and game clubs ({profileClubs.length}/{identityCaps.maxClubs}). Curated catalog only.
               </Text>
               <View style={styles.chipGrid}>
                 {CLUB_CATALOG.map((club) => {
                   const selected = profileClubs.includes(club.id);
+                  const atCap = !selected && profileClubs.length >= identityCaps.maxClubs;
                   return (
                     <TouchableOpacity
                       key={club.id}
-                      style={[styles.pickChip, selected && styles.pickChipSelected]}
+                      style={[
+                        styles.pickChip,
+                        selected && styles.pickChipSelected,
+                        atCap && styles.pickChipDisabled,
+                      ]}
                       onPress={() =>
                         setProfileClubs((prev) =>
-                          toggleIdInList(prev, club.id, MAX_PROFILE_CLUBS_PLUS)
+                          toggleIdInList(prev, club.id, identityCaps.maxClubs)
                         )
                       }
+                      disabled={atCap}
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      accessibilityState={{ selected, disabled: atCap }}
                       accessibilityLabel={`${club.label} club`}
                     >
                       <Icon
@@ -444,17 +460,31 @@ const EditProfileScreen = ({ navigation, route }) => {
                   );
                 })}
               </View>
+              {!hasPlus && profileClubs.length >= identityCaps.maxClubs ? (
+                <TouchableOpacity
+                  style={styles.upsellHint}
+                  onPress={() => navigation.navigate('Plans')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Unlock more clubs with Blyp Plus"
+                >
+                  <Icon name="sparkles" size={14} color="#00D2BE" />
+                  <Text style={styles.upsellHintText}>
+                    Free plan: {identityCaps.maxClubs} clubs. Blyp Plus unlocks up to 8.
+                  </Text>
+                  <Icon name="chevron-forward" size={14} color="#00D2BE" />
+                </TouchableOpacity>
+              ) : null}
             </View>
 
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Badges</Text>
               <Text style={styles.helperText}>
-                Equip up to {MAX_PROFILE_BADGES_EQUIPPED} to show on your profile ({profileBadges.length}/{MAX_PROFILE_BADGES_EQUIPPED}).
+                Equip up to {identityCaps.maxBadges} on your profile ({profileBadges.length}/{identityCaps.maxBadges}).
               </Text>
               <View style={styles.chipGrid}>
                 {BADGE_CATALOG.map((badge) => {
                   const selected = profileBadges.includes(badge.id);
-                  const atCap = !selected && profileBadges.length >= MAX_PROFILE_BADGES_EQUIPPED;
+                  const atCap = !selected && profileBadges.length >= identityCaps.maxBadges;
                   return (
                     <TouchableOpacity
                       key={badge.id}
@@ -465,7 +495,7 @@ const EditProfileScreen = ({ navigation, route }) => {
                       ]}
                       onPress={() =>
                         setProfileBadges((prev) =>
-                          toggleIdInList(prev, badge.id, MAX_PROFILE_BADGES_EQUIPPED)
+                          toggleIdInList(prev, badge.id, identityCaps.maxBadges)
                         )
                       }
                       disabled={atCap}
@@ -490,6 +520,20 @@ const EditProfileScreen = ({ navigation, route }) => {
                   );
                 })}
               </View>
+              {!hasPlus && profileBadges.length >= identityCaps.maxBadges ? (
+                <TouchableOpacity
+                  style={styles.upsellHint}
+                  onPress={() => navigation.navigate('Plans')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Unlock more badges with Blyp Plus"
+                >
+                  <Icon name="sparkles" size={14} color="#C4B5FD" />
+                  <Text style={styles.upsellHintText}>
+                    Free plan: {identityCaps.maxBadges} badge. Blyp Plus unlocks up to 3.
+                  </Text>
+                  <Icon name="chevron-forward" size={14} color="#C4B5FD" />
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
 
@@ -678,6 +722,25 @@ const styles = StyleSheet.create({
   },
   pickChipBadgeTextSelected: {
     color: '#F3EEFF',
+  },
+  upsellHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 190, 0.28)',
+    backgroundColor: 'rgba(0, 210, 190, 0.08)',
+  },
+  upsellHintText: {
+    flex: 1,
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
   },
   optionsSection: {
     paddingHorizontal: 16,

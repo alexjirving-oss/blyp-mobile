@@ -2,6 +2,10 @@ import {
   BADGE_CATALOG,
   CLUB_CATALOG,
   MAX_PROFILE_BADGES_EQUIPPED,
+  MAX_PROFILE_BADGES_FREE,
+  MAX_PROFILE_CLUBS_FREE,
+  MAX_PROFILE_CLUBS_PLUS,
+  getProfileIdentityCaps,
   normalizeProfileBadges,
   normalizeProfileClubs,
   toggleIdInList,
@@ -26,6 +30,25 @@ describe('profileIdentityCatalog', () => {
   test('normalize respects equip cap', () => {
     const many = BADGE_CATALOG.map((b) => b.id);
     expect(normalizeProfileBadges(many).length).toBe(MAX_PROFILE_BADGES_EQUIPPED);
+  });
+
+  test('getProfileIdentityCaps free vs plus', () => {
+    expect(getProfileIdentityCaps(false)).toEqual({
+      maxClubs: MAX_PROFILE_CLUBS_FREE,
+      maxBadges: MAX_PROFILE_BADGES_FREE,
+    });
+    expect(getProfileIdentityCaps(true)).toEqual({
+      maxClubs: MAX_PROFILE_CLUBS_PLUS,
+      maxBadges: MAX_PROFILE_BADGES_EQUIPPED,
+    });
+  });
+
+  test('normalize respects free caps', () => {
+    const free = getProfileIdentityCaps(false);
+    const clubs = CLUB_CATALOG.map((c) => c.id);
+    const badges = BADGE_CATALOG.map((b) => b.id);
+    expect(normalizeProfileClubs(clubs, free.maxClubs).length).toBe(MAX_PROFILE_CLUBS_FREE);
+    expect(normalizeProfileBadges(badges, free.maxBadges).length).toBe(MAX_PROFILE_BADGES_FREE);
   });
 
   test('toggle respects max', () => {

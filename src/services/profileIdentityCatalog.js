@@ -1,13 +1,28 @@
 // profileIdentityCatalog.js
 //
-// Curated clubs + badges for profile identity (Phase 0).
+// Curated clubs + badges for profile identity (Phase 0+).
 // Catalog is client-side for now; unknown ids are stripped on normalize.
+// Entitlement caps (Phase 1): Free 3 clubs / 1 badge; Plus/trial 8 / 3.
 // Do not conflate with avatarFrame (admin-only) or StandingBadge (trust).
 
 export const MAX_PROFILE_CLUBS_FREE = 3;
 export const MAX_PROFILE_CLUBS_PLUS = 8;
 export const MAX_PROFILE_BADGES_EQUIPPED = 3;
 export const MAX_PROFILE_BADGES_FREE = 1;
+
+/**
+ * Entitlement-aware hard caps for picker + save normalize.
+ * Plus / trial share the higher caps (same as useHasAI / capabilities.ai).
+ * @param {boolean} hasPlus
+ * @returns {{ maxClubs: number, maxBadges: number }}
+ */
+export function getProfileIdentityCaps(hasPlus) {
+  const entitled = !!hasPlus;
+  return {
+    maxClubs: entitled ? MAX_PROFILE_CLUBS_PLUS : MAX_PROFILE_CLUBS_FREE,
+    maxBadges: entitled ? MAX_PROFILE_BADGES_EQUIPPED : MAX_PROFILE_BADGES_FREE,
+  };
+}
 
 /** @typedef {{ id: string, label: string, kind: 'football'|'game'|'community', icon: string, shortLabel?: string }} ClubDef */
 /** @typedef {{ id: string, label: string, icon: string, rarity: 'common'|'rare'|'seasonal' }} BadgeDef */
