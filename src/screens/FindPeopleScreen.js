@@ -28,14 +28,21 @@ const withAlpha = (hex, alpha) => {
 
 const T = blypTheme.colors;
 
-const FindPeopleScreen = ({ navigation }) => {
-  const [searchText, setSearchText] = useState('');
+const FindPeopleScreen = ({ navigation, route }) => {
+  const initialQuery = String(route?.params?.initialQuery || route?.params?.clubId || '').trim();
+  const [searchText, setSearchText] = useState(initialQuery);
   const [allUsers, setAllUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [recommendedUsers, setRecommendedUsers] = useState([]);
   const [followingUserIds, setFollowingUserIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const { user: authUser, uid } = useAuth();
+
+  useEffect(() => {
+    const q = String(route?.params?.initialQuery || '').trim();
+    if (q && q !== searchText) setSearchText(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.initialQuery]);
 
   useEffect(() => {
     console.log('ðŸ” FIND PEOPLE: Screen active', { uidPresent: !!uid });

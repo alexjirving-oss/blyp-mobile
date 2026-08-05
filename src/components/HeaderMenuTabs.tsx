@@ -168,25 +168,28 @@ const createStyles = (theme: BlypTheme) =>
     pinnedRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingLeft: 16,
+      paddingLeft: 12,
+      minHeight: 40,
     },
     pinnedStrip: {
       flexDirection: 'row',
       alignItems: 'center',
       flexShrink: 0,
+      zIndex: 2,
     },
     tabPinnedLast: {
-      marginRight: 12,
-      paddingRight: 12,
+      marginRight: 10,
+      paddingRight: 10,
       borderRightWidth: StyleSheet.hairlineWidth,
       borderRightColor: theme.colors.border || 'rgba(255,255,255,0.12)',
     },
-    scrollFlex: { flex: 1 },
+    scrollFlex: { flex: 1, minWidth: 0 },
     tabSelectorScroll: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingRight: 16,
       paddingLeft: 4,
+      flexGrow: 1,
     },
     tabSelector: {
       flexDirection: 'row',

@@ -634,6 +634,64 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     return (interests || []).map((id) => byId.get(id)).filter(Boolean);
   }, [interests]);
 
+  // Club rails — Phase 2 wired the UI but never defined these helpers, which
+  // threw ReferenceError on every HomeBase render (blank / error-boundary hub).
+  const myClubDefs = useMemo(() => resolveClubs(myClubs), [myClubs]);
+  const exploreClubs = useMemo(() => {
+    const mine = myClubDefs.slice(0, 8);
+    if (mine.length >= 6) return mine;
+    const seen = new Set(mine.map((c) => c.id));
+    const extras = CLUB_CATALOG.filter((c) => !seen.has(c.id)).slice(0, 8 - mine.length);
+    return [...mine, ...extras];
+  }, [myClubDefs]);
+
+  useEffect(() => {
+    let active = true;
+    if (!uid) {
+      setMyClubs([]);
+      setClubPeople([]);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const clubs = await getMyProfileClubs(uid);
+        if (!active) return;
+        setMyClubs(clubs || []);
+        if (clubs?.length) {
+          const people = await getPeopleInSharedClubs(clubs, { limit: 12, excludeUid: uid });
+          if (active) setClubPeople(people || []);
+        } else if (active) {
+          setClubPeople([]);
+        }
+      } catch (e) {
+        console.warn('[home] club rails failed', e?.message || String(e));
+        if (active) {
+          setMyClubs([]);
+          setClubPeople([]);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [uid]);
+
+  const openClubPeople = useCallback(
+    (club) => {
+      if (!club?.id && !club?.label) {
+        navigation.navigate('FindPeople');
+        return;
+      }
+      const q = club.shortLabel || club.label || club.id;
+      try {
+        navigation.navigate('FindPeople', { initialQuery: q, clubId: club.id });
+      } catch {
+        navigation.navigate('FindPeople');
+      }
+    },
+    [navigation],
+  );
+
   const openInterestPage = useCallback(
     async (interest) => {
       if (!interest?.id) return;
@@ -1525,6 +1583,26 @@ const styles = StyleSheet.create({
   actionHint: {
     color: COLORS.textMuted,
     fontSize: responsiveFont(9),
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+
+  clubChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  clubChipText: { color: COLORS.textPrimary, fontSize: responsiveFont(13), fontWeight: '700' },
+  clubSharedHint: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(10),
     fontWeight: '600',
     marginTop: 2,
     textAlign: 'center',

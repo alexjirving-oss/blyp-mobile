@@ -1864,7 +1864,7 @@ const HomeScreen = ({ navigation, route }) => {
     switch (selectedTab) {
       case 'home':
         return (
-          <ScreenErrorBoundary label="HomeBase" onReset={() => setSelectedTab('A')}>
+          <ScreenErrorBoundary label="HomeBase" onReset={() => setSelectedTab('home')}>
             <HomeBasePanel
               navigation={navigation}
               uid={uid}

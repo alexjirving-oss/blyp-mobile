@@ -65,7 +65,8 @@ export default class ScreenErrorBoundary extends React.Component {
 
   render() {
     if (!this.state.hasError) {
-      return this.props.children;
+      // Keep a flex host so children like ScrollView (flex:1) fill the screen.
+      return <View style={styles.host}>{this.props.children}</View>;
     }
 
     return (
@@ -83,6 +84,7 @@ export default class ScreenErrorBoundary extends React.Component {
 }
 
 const styles = StyleSheet.create({
+  host: { flex: 1 },
   container: {
     flex: 1,
     backgroundColor: '#0b0b0f',

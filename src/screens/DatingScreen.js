@@ -76,9 +76,34 @@ const datingActionError = (code) => {
   }
 };
 
-const DatingScreen = ({ navigation }) => {
+const DatingScreen = ({ navigation, embedded = false }) => {
   const { uid, user: authUser, getDisplayName } = useAuth();
   const entitled = useHasAI();
+  const Shell = embedded ? View : ScreenContainer;
+  const shellProps = embedded ? { style: styles.embeddedRoot } : {};
+
+  const renderTopChrome = (title = 'Dating') => {
+    if (embedded) return null;
+    return (
+      <View style={styles.topRow}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Icon name="chevron-back" size={24} color={COLORS.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>{title}</Text>
+        <View style={styles.backBtn} />
+      </View>
+    );
+  };
+
+  const onDismissGate = () => {
+    if (embedded) return;
+    try { navigation.goBack(); } catch { /* ignore */ }
+  };
+
   const [tab, setTab] = useState('discover');
   const [loading, setLoading] = useState(true);
   const [prefs, setPrefs] = useState(null);
@@ -527,15 +552,9 @@ const DatingScreen = ({ navigation }) => {
 
   if (!entitled) {
     return (
-      <ScreenContainer>
+      <Shell {...shellProps}>
         <View style={styles.container}>
-          <View style={styles.topRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Icon name="chevron-back" size={24} color={COLORS.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.title}>Dating</Text>
-            <View style={styles.backBtn} />
-          </View>
+          {renderTopChrome()}
 
           <View style={styles.gateCard}>
             <View style={styles.gateIcon}>
@@ -554,31 +573,25 @@ const DatingScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
-      </ScreenContainer>
+      </Shell>
     );
   }
 
   if (loading || !prefs) {
     return (
-      <ScreenContainer>
+      <Shell {...shellProps}>
         <View style={[styles.container, styles.centered]}>
           <ActivityIndicator color={COLORS.primary} />
         </View>
-      </ScreenContainer>
+      </Shell>
     );
   }
 
   if (!prefs.adultConfirmed) {
     return (
-      <ScreenContainer>
+      <Shell {...shellProps}>
         <View style={styles.container}>
-          <View style={styles.topRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Icon name="chevron-back" size={24} color={COLORS.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.title}>Dating</Text>
-            <View style={styles.backBtn} />
-          </View>
+          {renderTopChrome()}
 
           <View style={styles.gateCard}>
             <View style={styles.gateIcon}>
@@ -596,12 +609,14 @@ const DatingScreen = ({ navigation }) => {
             >
               <Text style={styles.primaryBtnText}>I am 18 or older</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.goBack()}>
-              <Text style={styles.secondaryBtnText}>Not now</Text>
-            </TouchableOpacity>
+            {!embedded ? (
+              <TouchableOpacity style={styles.secondaryBtn} onPress={onDismissGate}>
+                <Text style={styles.secondaryBtnText}>Not now</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
-      </ScreenContainer>
+      </Shell>
     );
   }
 
@@ -655,15 +670,9 @@ const DatingScreen = ({ navigation }) => {
   };
 
   return (
-    <ScreenContainer>
+    <Shell {...shellProps}>
       <View style={styles.container}>
-        <View style={styles.topRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Icon name="chevron-back" size={24} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Dating</Text>
-          <View style={styles.backBtn} />
-        </View>
+        {renderTopChrome()}
 
         <View style={styles.tabRow}>
           {TABS.map((t) => {
@@ -1074,11 +1083,12 @@ const DatingScreen = ({ navigation }) => {
         reportedUserId={reportTarget?.id}
         surface="dating"
       />
-    </ScreenContainer>
+    </Shell>
   );
 };
 
 const styles = StyleSheet.create({
+  embeddedRoot: { flex: 1 },
   container: { flex: 1, paddingTop: responsiveSize(8) },
   centered: { alignItems: 'center', justifyContent: 'center' },
   topRow: {
