@@ -419,6 +419,45 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Prearranged 1v1 battles (client social mirror; coin escrow is live-service).
+    // Create fails without this block — deny-by-default rejects battles/*.set().
+    match /battles/{battleId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.creatorUid == request.auth.uid
+        && request.auth.uid in request.resource.data.participantsUids
+        && request.resource.data.creatorUid in request.resource.data.participantsUids
+        && request.resource.data.opponentUid in request.resource.data.participantsUids
+        && request.resource.data.keys().hasAll([
+          'creatorUid', 'opponentUid', 'participantsUids', 'status',
+          'scheduledStartAt', 'createdAt', 'updatedAt'
+        ]);
+      // Participants manage lifecycle; any signed-in viewer may bump score only
+      // (vote / gift-weight). Identity fields stay frozen.
+      allow update: if isSignedIn() && (
+        (
+          request.auth.uid in resource.data.participantsUids
+          && request.resource.data.creatorUid == resource.data.creatorUid
+          && request.resource.data.opponentUid == resource.data.opponentUid
+          && request.resource.data.participantsUids == resource.data.participantsUids
+        )
+        || request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['score', 'updatedAt'])
+      );
+      allow delete: if false;
+
+      match /votes/{voterUid} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == voterUid;
+        allow update, delete: if false;
+      }
+
+      match /reminders/{uid} {
+        allow read: if isSignedIn() && request.auth.uid == uid;
+        allow create, update, delete: if isSignedIn() && request.auth.uid == uid;
+      }
+    }
+
     // Dating (subscription-package surface). Phase 5: likes/passes via CF only;
     // optedIn requires self-reported birthYear. Matches remain server-only.
     // Phase 4 fields (not in hasAll): prompts[], photoRefs[], useProfilePhoto,

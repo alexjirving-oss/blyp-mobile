@@ -292,6 +292,42 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Prearranged 1v1 battles (keep in sync with firestore.wave0-live.rules).
+    match /battles/{battleId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.creatorUid == request.auth.uid
+        && request.auth.uid in request.resource.data.participantsUids
+        && request.resource.data.creatorUid in request.resource.data.participantsUids
+        && request.resource.data.opponentUid in request.resource.data.participantsUids
+        && request.resource.data.keys().hasAll([
+          'creatorUid', 'opponentUid', 'participantsUids', 'status',
+          'scheduledStartAt', 'createdAt', 'updatedAt'
+        ]);
+      allow update: if isSignedIn() && (
+        (
+          request.auth.uid in resource.data.participantsUids
+          && request.resource.data.creatorUid == resource.data.creatorUid
+          && request.resource.data.opponentUid == resource.data.opponentUid
+          && request.resource.data.participantsUids == resource.data.participantsUids
+        )
+        || request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['score', 'updatedAt'])
+      );
+      allow delete: if false;
+
+      match /votes/{voterUid} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && request.auth.uid == voterUid;
+        allow update, delete: if false;
+      }
+
+      match /reminders/{uid} {
+        allow read: if isSignedIn() && request.auth.uid == uid;
+        allow create, update, delete: if isSignedIn() && request.auth.uid == uid;
+      }
+    }
+
     // Deny-by-default for everything else (closes universal auth write).
     match /{document=**} {
       allow read, write: if false;

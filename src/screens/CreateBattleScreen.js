@@ -126,17 +126,27 @@ const CreateBattleScreen = ({ navigation, route }) => {
         notifySupporters,
       });
       if (!res.ok) {
-        const msg = res.reason === 'insufficient_funds'
-          ? 'You do not have enough coins for that forfeit stake.'
-          : res.reason === 'self'
-            ? 'You cannot challenge yourself.'
-            : 'Could not create the battle. Please try again.';
+        const msg =
+          res.reason === 'insufficient_funds'
+            ? 'You do not have enough coins for that forfeit stake.'
+            : res.reason === 'self'
+              ? 'You cannot challenge yourself.'
+              : res.reason === 'missing_participants'
+                ? 'Pick an opponent and try again.'
+                : res.reason === 'unavailable'
+                  ? 'Battles are temporarily unavailable. Check your connection and sign-in, then try again.'
+                  : res.reason === 'write_failed'
+                    ? 'Could not save the battle (cloud permissions). Please try again in a moment.'
+                    : res.reason === 'deposit_failed'
+                      ? 'Could not place the forfeit stake. Check your coin balance and try again.'
+                      : 'Could not create the battle. Please try again.';
         Alert.alert('Battle not created', msg);
         setSubmitting(false);
         return;
       }
       navigation.replace ? navigation.replace('BattleDetail', { battleId: res.id }) : navigation.navigate('BattleDetail', { battleId: res.id });
-    } catch {
+    } catch (e) {
+      console.warn('[CreateBattle] submit failed', e?.message || e);
       Alert.alert('Battle not created', 'Something went wrong. Please try again.');
       setSubmitting(false);
     }

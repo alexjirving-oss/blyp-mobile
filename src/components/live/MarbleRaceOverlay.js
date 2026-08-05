@@ -35,6 +35,8 @@ export default function MarbleRaceOverlay({
   liveGuestCount = 0,
   onInviteGuest,
   onClose,
+  /** When false, hide host start/invite chrome until Games tab opens (active race still shows). */
+  controlsVisible = true,
 }) {
   const [event, setEvent] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -230,26 +232,31 @@ export default function MarbleRaceOverlay({
         </View>
       ) : null}
 
-      {isHost && !active ? (
+      {isHost && !active && controlsVisible ? (
         <View style={styles.hostRaceCluster} pointerEvents="box-none">
-          {soloPractice ? (
-            <View style={styles.hintCard} pointerEvents="box-none">
-              <Text style={styles.hintText} allowFontScaling={false}>
-                Solo practice ready — or invite a guest to Race
-              </Text>
-              {typeof onInviteGuest === 'function' ? (
-                <TouchableOpacity
-                  style={styles.inviteBtn}
-                  onPress={onInviteGuest}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.inviteBtnText} allowFontScaling={false}>
-                    Invite a guest
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          ) : null}
+          <View style={styles.hintCard} pointerEvents="box-none">
+            <Text style={styles.hintText} allowFontScaling={false}>
+              {soloPractice
+                ? 'Marble Race — solo practice, or invite a guest'
+                : 'Marble Race — start when ready'}
+            </Text>
+            {typeof onInviteGuest === 'function' && soloPractice ? (
+              <TouchableOpacity
+                style={styles.inviteBtn}
+                onPress={onInviteGuest}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.inviteBtnText} allowFontScaling={false}>
+                  Invite a guest
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {typeof onClose === 'function' ? (
+              <TouchableOpacity style={styles.closeChip} onPress={onClose} activeOpacity={0.85}>
+                <Text style={styles.closeChipText} allowFontScaling={false}>Close</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           <TouchableOpacity
             style={styles.startFab}
             onPress={start}
@@ -262,7 +269,7 @@ export default function MarbleRaceOverlay({
               <ActivityIndicator color="#0A0A0C" />
             ) : (
               <Text style={styles.startFabText} allowFontScaling={false}>
-                {soloPractice ? 'Race' : 'Marble Race'}
+                {soloPractice ? 'Start Race' : 'Start Marble Race'}
               </Text>
             )}
           </TouchableOpacity>
@@ -382,6 +389,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   inviteBtnText: { color: '#FFB020', fontWeight: '800', fontSize: 12 },
+  closeChip: {
+    alignSelf: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  closeChipText: { color: 'rgba(244,247,250,0.7)', fontWeight: '700', fontSize: 11 },
   startFab: {
     backgroundColor: '#FFB020',
     paddingHorizontal: 16,

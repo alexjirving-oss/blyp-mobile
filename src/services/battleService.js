@@ -205,8 +205,12 @@ export async function createBattle(creator, opponent, opts = {}) {
 
   try {
     await battleRef(id).set(battle);
-    return { ok: true, id, battle: { id, ...battle } };
+    const created = { id, ...battle };
+    // Local + server reminder so the scheduled fight isn't missed.
+    await setBattleReminder(created, creator.id, 10).catch(() => {});
+    return { ok: true, id, battle: created };
   } catch (e) {
+    console.warn('[battleService] createBattle write failed', e?.code || e?.message || e);
     // Roll back the creator's deposit so they're not charged for a phantom battle.
     if (creatorPaid) {
       await apiBattleCancelRefund({ battleId: id, idempotencyKey: makeIdempotencyKey('btlrefund') }).catch(() => {});

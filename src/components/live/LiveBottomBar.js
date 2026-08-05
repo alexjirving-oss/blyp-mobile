@@ -4,7 +4,7 @@ import Icon from '../Icon';
 
 /**
  * Unified live bottom bar. A tappable comment field on the left opens the
- * composer; on the right, labeled circular actions (Like / Gift / Share)
+ * composer; on the right, labeled circular actions (Like / Gift / Games / Share)
  * match the approved design. Shared by host and viewer so the room reads as
  * one app.
  */
@@ -13,6 +13,9 @@ export default function LiveBottomBar({
   onPressLike,
   onPressShare,
   onPressGift,
+  onPressGames,
+  showGames = false,
+  gamesActive = false,
   likeScale,
 }) {
   const scaleStyle = likeScale ? { transform: [{ scale: likeScale }] } : null;
@@ -44,6 +47,15 @@ export default function LiveBottomBar({
           </View>
           <Text style={styles.actionLabel} allowFontScaling={false}>Gift</Text>
         </TouchableOpacity>
+
+        {showGames ? (
+          <TouchableOpacity style={styles.action} onPress={onPressGames} activeOpacity={0.8}>
+            <View style={[styles.actionButton, gamesActive && styles.gamesButtonActive]}>
+              <Icon name="game-controller" size={22} color={gamesActive ? '#0A0A0C' : '#FDE68A'} />
+            </View>
+            <Text style={styles.actionLabel} allowFontScaling={false}>Games</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity style={styles.action} onPress={onPressShare} activeOpacity={0.8}>
           <View style={styles.actionButton}>
@@ -105,6 +117,10 @@ const styles = StyleSheet.create({
   giftButton: {
     backgroundColor: 'rgba(0,210,190,0.18)',
     borderColor: 'rgba(0,210,190,0.55)',
+  },
+  gamesButtonActive: {
+    backgroundColor: '#FDE68A',
+    borderColor: '#FBBF24',
   },
   actionLabel: {
     color: 'rgba(255,255,255,0.85)',

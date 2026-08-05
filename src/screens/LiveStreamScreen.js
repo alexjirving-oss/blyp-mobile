@@ -211,6 +211,8 @@ const LiveStreamScreen = (props) => {
   const MARBLE_ENABLED = /^(1|true|yes|on)$/i.test(
     String(process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED || '').trim()
   );
+  // Games bottom-tab panel (Marble Race / battle game). Host starts Race from here.
+  const [gamesOpen, setGamesOpen] = useState(false);
 
   // Floating toggle + full overlay for the artillery battle-stage game. Rendered
   // in both viewer and host battle branches. Opaque so the game reads over video.
@@ -232,34 +234,27 @@ const LiveStreamScreen = (props) => {
         </View>
       );
     }
-    return (
-      <TouchableOpacity
-        onPress={() => setShowArtillery(true)}
-        activeOpacity={0.85}
-        style={{
-          position: 'absolute',
-          right: 14,
-          bottom: 150,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 6,
-          backgroundColor: '#00D2BE',
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          borderRadius: 22,
-          zIndex: 55,
-        }}
-      >
-        <Icon name="game-controller" size={18} color="#0A0A0C" />
-        <Text style={{ color: '#0A0A0C', fontWeight: '800', fontSize: 13 }} allowFontScaling={false}>
-          Battle game
-        </Text>
-      </TouchableOpacity>
-    );
+    // Entry is the Games bottom-tab control (not a floating FAB).
+    return null;
   };
 
-  // Marble Race translucent overlay on non-battle lives (host CTA when flag on).
-  // Host can start solo practice; LIVE guests join the grid when present (2–6).
+  const liveGamesAvailable = (!!routeBattleId && ARTILLERY_ENABLED) || (MARBLE_ENABLED && !routeBattleId);
+
+  const openLiveGames = useCallback(() => {
+    if (routeBattleId && ARTILLERY_ENABLED) {
+      setShowArtillery(true);
+      setGamesOpen(false);
+      return;
+    }
+    if (MARBLE_ENABLED && !routeBattleId) {
+      setGamesOpen((v) => !v);
+      return;
+    }
+    Alert.alert('Games', 'Live games are not available in this room yet.');
+  }, [routeBattleId, ARTILLERY_ENABLED, MARBLE_ENABLED]);
+
+  // Marble Race translucent overlay on non-battle lives.
+  // Host start chrome is gated by the Games bottom tab; active races always show.
   const renderMarbleLayer = () => {
     if (!MARBLE_ENABLED || routeBattleId) return null;
     const gameSessionId = routeStreamId || streamId;
@@ -277,12 +272,14 @@ const LiveStreamScreen = (props) => {
         currentUid={uid}
         hostName={resolvedHostName || 'Host'}
         liveGuestCount={guestCount}
+        controlsVisible={gamesOpen}
+        onClose={() => setGamesOpen(false)}
         onInviteGuest={
           isHost
             ? () => {
                 Alert.alert(
                   'Invite a guest to Race',
-                  'Tap a viewer in live chat and choose Invite to join. They appear on stage, then tap Race again — or start now for solo practice.',
+                  'Tap a viewer in live chat and choose Invite to join. They appear on stage, then tap Start Race — or start now for solo practice.',
                   [{ text: 'Got it' }]
                 );
               }
@@ -3244,6 +3241,9 @@ const LiveStreamScreen = (props) => {
             onPressLike={sendHeart}
             onPressShare={shareLive}
             onPressGift={promptGiftRecipient}
+            onPressGames={openLiveGames}
+            showGames={liveGamesAvailable}
+            gamesActive={gamesOpen || showArtillery}
             likeCount={heartCount}
             likeScale={scale}
           />
@@ -4026,6 +4026,24 @@ const LiveStreamScreen = (props) => {
                       </View>
                       <Text style={styles.hostControlLabel} allowFontScaling={false}>Chat</Text>
                     </TouchableOpacity>
+
+                    {liveGamesAvailable ? (
+                      <TouchableOpacity
+                        style={styles.hostControl}
+                        onPress={openLiveGames}
+                        activeOpacity={0.85}
+                        accessibilityLabel="Open live games"
+                      >
+                        <View style={[styles.hostControlCircle, (gamesOpen || showArtillery) && styles.hostControlCircleActive]}>
+                          <Icon
+                            name="game-controller"
+                            size={20}
+                            color={(gamesOpen || showArtillery) ? '#00D2BE' : '#FDE68A'}
+                          />
+                        </View>
+                        <Text style={styles.hostControlLabel} allowFontScaling={false}>Games</Text>
+                      </TouchableOpacity>
+                    ) : null}
 
                     {!routeBattleId ? (
                       <TouchableOpacity
