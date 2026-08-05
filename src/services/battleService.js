@@ -280,7 +280,11 @@ async function refundIfStaked(battle) {
 // Live lifecycle (mirrors the authoritative live-service attendance)
 // ---------------------------------------------------------------------------
 
-/** Mark this participant as having gone live, and flip the battle to live. */
+/**
+ * Mark this participant as having gone live on the shared stage.
+ * Does NOT start the match clock — call startMatch when both sides are ready
+ * (or when the host taps Start match).
+ */
 export async function markJoined(battle, uid, { liveStreamId, stageArn } = {}) {
   const side = battleSideFor(battle, uid);
   if (!side) return { ok: false, reason: 'not_participant' };
@@ -288,9 +292,28 @@ export async function markJoined(battle, uid, { liveStreamId, stageArn } = {}) {
   patch[side === 'creator' ? 'creatorJoined' : 'opponentJoined'] = true;
   if (liveStreamId) patch.liveStreamId = liveStreamId;
   if (stageArn) patch.stageArn = stageArn;
-  if (!battle.liveStartedAt) patch.liveStartedAt = Date.now();
   try {
     await battleRef(battle.id).update(patch);
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'write_failed' };
+  }
+}
+
+/** Start the timed match clock (gift/vote scoring window). Participant-only. */
+export async function startMatch(battle, uid) {
+  const side = battleSideFor(battle, uid);
+  if (!side || !battle?.id) return { ok: false, reason: 'not_participant' };
+  if (![BATTLE_STATUS.SCHEDULED, BATTLE_STATUS.LIVE].includes(battle.status)) {
+    return { ok: false, reason: 'bad_status' };
+  }
+  if (battle.liveStartedAt) return { ok: true, already: true };
+  try {
+    await battleRef(battle.id).update({
+      status: BATTLE_STATUS.LIVE,
+      liveStartedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
     return { ok: true };
   } catch {
     return { ok: false, reason: 'write_failed' };
@@ -572,6 +595,7 @@ export default {
   rejectBattle,
   cancelBattle,
   markJoined,
+  startMatch,
   endBattle,
   voteBattle,
   addGiftScore,

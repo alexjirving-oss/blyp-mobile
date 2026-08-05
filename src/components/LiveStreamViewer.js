@@ -93,6 +93,7 @@ const LiveStreamViewer = ({
   onGuestPagerLayout,
   guestRoster = [],
   giftTotalsByUser = {},
+  battleMode = false,
 }) => {
   const backend = streamingConfig.backend;
 
@@ -108,6 +109,7 @@ const LiveStreamViewer = ({
         onGuestPagerLayout={onGuestPagerLayout}
         guestRoster={guestRoster}
         giftTotalsByUser={giftTotalsByUser}
+        battleMode={battleMode}
       />
     );
   }
@@ -129,6 +131,7 @@ const IVSLiveStreamViewer = ({
   onGuestPagerLayout,
   guestRoster = [],
   giftTotalsByUser = {},
+  battleMode = false,
 }) => {
   // Center-crop guest tiles so video fills the box without stretching.
   // For a square tile, a 16:9 cover factor is ~1.78 (works well for typical phone video orientations).
@@ -1187,6 +1190,91 @@ const IVSLiveStreamViewer = ({
       const c = t ? Number(t.coins) : 0;
       return c > 0 ? c : 0;
     };
+    // TikTok-style 1v1 battle: host | opponent side-by-side, no guest tray.
+    if (battleMode) {
+      const opponentStream = guestStreams[0] || null;
+      const opponentUserId = opponentStream
+        ? userByParticipant.get(opponentStream.participantId)
+        : null;
+      return (
+        <View
+          style={[styles.container, style]}
+          onLayout={(e) => {
+            ivsSession.markSurfaceReady();
+            setLayout(e.nativeEvent.layout);
+            if (typeof onGuestPagerLayout === 'function') onGuestPagerLayout(0);
+          }}
+        >
+          <View style={styles.battleStage}>
+            <View style={styles.battlePane}>
+              <View pointerEvents="none" style={styles.battleEdgeLeft} />
+              {hostStream ? (
+                <NativeIVSRealTimeView
+                  style={styles.realTimeView}
+                  stageArn={stageArnForSurface}
+                  token={tokenForSurface}
+                  sessionId={streamId}
+                  slotId={0}
+                  participantId={hostStream.participantId}
+                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                  zoom={1.0}
+                  testID="ivs-realtime-battle-host"
+                />
+              ) : (
+                <View style={styles.hostPlaceholder}>
+                  <Text style={styles.placeholderText}>Waiting for host…</Text>
+                </View>
+              )}
+              <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinStyles.hostPos} />
+            </View>
+            <View style={styles.battlePane}>
+              <View pointerEvents="none" style={styles.battleEdgeRight} />
+              {opponentStream ? (
+                <NativeIVSRealTimeView
+                  style={styles.realTimeView}
+                  stageArn={stageArnForSurface}
+                  token={tokenForSurface}
+                  sessionId={streamId}
+                  slotId={typeof effectiveSlot(opponentStream) === 'number' ? effectiveSlot(opponentStream) : 1}
+                  participantId={opponentStream.participantId}
+                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                  zoom={1.0}
+                  testID="ivs-realtime-battle-opponent"
+                />
+              ) : (
+                <View style={styles.battleWaiting}>
+                  <Text style={styles.placeholderText}>Waiting for opponent…</Text>
+                </View>
+              )}
+              <TileCoinBadge coins={coinsForUser(opponentUserId)} style={tileCoinStyles.guestPos} />
+            </View>
+          </View>
+          {guestMode && (
+            <View style={[styles.guestModeBanner, { top: 12 }]}>
+              <Text style={styles.guestModeText}>On stage</Text>
+              <View style={styles.guestMediaControls}>
+                <TouchableOpacity
+                  style={[styles.guestMediaBtn, (!selfMicOn || mutedByHost) && styles.guestMediaBtnOff]}
+                  onPress={toggleSelfMic}
+                >
+                  <Icon name={(!selfMicOn || mutedByHost) ? 'mic-off' : 'mic'} size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.guestMediaBtn, (!selfCamOn || cameraOffByHost) && styles.guestMediaBtnOff]}
+                  onPress={toggleSelfCam}
+                >
+                  <Icon name={(!selfCamOn || cameraOffByHost) ? 'videocam-off' : 'videocam'} size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
+                  <Text style={styles.leaveGuestText}>Leave</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      );
+    }
+
     return (
       <View
         style={[styles.container, style]}
@@ -2366,6 +2454,42 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#000',
+  },
+  battleStage: {
+    flex: 1,
+    flexDirection: 'row',
+    width: '100%',
+    backgroundColor: '#0A0A0C',
+  },
+  battlePane: {
+    flex: 1,
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: '#0A0A0C',
+  },
+  battleEdgeLeft: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: 'rgba(0,210,190,0.85)',
+    zIndex: 5,
+  },
+  battleEdgeRight: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: 'rgba(255,90,69,0.85)',
+    zIndex: 5,
+  },
+  battleWaiting: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#121214',
   },
   guestModeBanner: {
     position: 'absolute',

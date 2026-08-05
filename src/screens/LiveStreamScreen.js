@@ -1010,21 +1010,45 @@ const LiveStreamScreen = (props) => {
   });
 
   // Cache the battle's two participant uids so we can attribute gifts to a side.
+  // Scoring only applies once the match clock has started (liveStartedAt).
   const battlePartsRef = useRef(null);
   useEffect(() => {
     if (!routeBattleId) { battlePartsRef.current = null; return; }
     let cancelled = false;
     (async () => {
       const b = await getBattleDoc(routeBattleId);
-      if (!cancelled && b) battlePartsRef.current = { creatorUid: b.creatorUid, opponentUid: b.opponentUid };
+      if (!cancelled && b) {
+        battlePartsRef.current = {
+          creatorUid: b.creatorUid,
+          opponentUid: b.opponentUid,
+          liveStartedAt: b.liveStartedAt || null,
+        };
+      }
     })();
     return () => { cancelled = true; };
+  }, [routeBattleId]);
+
+  // Keep liveStartedAt fresh via battle overlay subscription path (poll lightly).
+  useEffect(() => {
+    if (!routeBattleId) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const b = await getBattleDoc(routeBattleId);
+        if (!cancelled && b && battlePartsRef.current) {
+          battlePartsRef.current.liveStartedAt = b.liveStartedAt || null;
+        }
+      } catch { /* ignore */ }
+    };
+    const t = setInterval(tick, 2500);
+    tick();
+    return () => { cancelled = true; clearInterval(t); };
   }, [routeBattleId]);
 
   const attributeBattleGift = useCallback((payload) => {
     if (!routeBattleId || !payload) return;
     const parts = battlePartsRef.current;
-    if (!parts) return;
+    if (!parts?.liveStartedAt) return;
     const receiver = payload.receiverUserId || payload.receiver?.userId || payload.creatorId;
     const coins = Number(payload.coinSpent || payload.coinCost || payload.coins || 0) || 1;
     if (receiver === parts.creatorUid) addBattleGiftScore(routeBattleId, 'creator', coins);
@@ -1065,12 +1089,26 @@ const LiveStreamScreen = (props) => {
 
   // Auto-reveal the guest tray the moment the first guest joins (so a host who
   // started solo/full-bleed isn't left with guests hidden behind the handle).
+  // Battles use a dedicated side-by-side stage — keep the multi-guest tray closed.
   useEffect(() => {
+    if (routeBattleId) {
+      prevHostGuestCountRef.current = hostGuestCount;
+      return;
+    }
     if (hostGuestCount > 0 && prevHostGuestCountRef.current === 0) {
       setHostGuestTrayMode((prev) => (prev === 'hidden' ? 'expanded' : prev));
     }
     prevHostGuestCountRef.current = hostGuestCount;
-  }, [hostGuestCount]);
+  }, [hostGuestCount, routeBattleId]);
+
+  // First remote publisher = battle opponent for the 1v1 split stage.
+  const battleOpponentParticipant = useMemo(() => {
+    if (!routeBattleId) return null;
+    const parts = ivsHostSession?.participants || [];
+    return parts.find((p) => p && !p.isLocal && typeof p.slotIndex === 'number' && p.slotIndex >= 1)
+      || parts.find((p) => p && !p.isLocal)
+      || null;
+  }, [routeBattleId, ivsHostSession?.participants]);
 
   const didForceReattachSessionRef = useRef(null);
 
@@ -3028,6 +3066,7 @@ const LiveStreamScreen = (props) => {
           hostUid={hostUid}
           guestRoster={liveGuests}
           giftTotalsByUser={giftTotalsByUser}
+          battleMode={!!routeBattleId}
           style={styles.viewerVideo}
           overlayBottomInset={(viewerCommentsOverlayHeight || 0) + 8}
           onGuestPagerLayout={setViewerGuestPagerHeight}
@@ -3194,7 +3233,11 @@ const LiveStreamScreen = (props) => {
         />
 
         {routeBattleId ? (
-          <BattleOverlay battleId={routeBattleId} currentUid={uid} onEnded={() => goToSummary()} />
+          <BattleOverlay
+            battleId={routeBattleId}
+            currentUid={uid}
+            onEnded={() => goToSummary()}
+          />
         ) : null}
         {renderArtilleryLayer()}
         {renderMarbleLayer()}
@@ -3240,6 +3283,7 @@ const LiveStreamScreen = (props) => {
               hostUid={hostUid}
               guestRoster={liveGuests}
               giftTotalsByUser={giftTotalsByUser}
+              battleMode={!!routeBattleId}
             />
           </View>
         ) : (
@@ -3313,66 +3357,93 @@ const LiveStreamScreen = (props) => {
             </Modal>
 
             {backend === StreamingBackend.IVS ? (
-              <View style={styles.ivsHostStage}>
-                {isStreaming && NativeIVSBroadcastView ? (
-                  <GestureHandlerRootView style={StyleSheet.absoluteFill}>
-                    <PinchGestureHandler
-                      ref={pinchRef}
-                      simultaneousHandlers={[doubleTapRef, singleTapRef]}
-                      onGestureEvent={onHostPinchEvent}
-                      onHandlerStateChange={onHostPinchStateChange}
-                    >
-                      <View collapsable={false} style={StyleSheet.absoluteFill}>
-                        <TapGestureHandler
-                          ref={doubleTapRef}
-                          numberOfTaps={2}
-                          simultaneousHandlers={pinchRef}
-                          onActivated={flipCamera}
-                        >
-                          <View collapsable={false} style={StyleSheet.absoluteFill}>
-                            <TapGestureHandler
-                              ref={singleTapRef}
-                              numberOfTaps={1}
-                              waitFor={doubleTapRef}
-                              simultaneousHandlers={pinchRef}
-                              onActivated={() => triggerReaction(null)}
-                            >
-                              <View collapsable={false} style={StyleSheet.absoluteFill}>
-                                <NativeIVSBroadcastView
-                                  key={`host-preview-${hostPreviewEpoch}`}
-                                  style={StyleSheet.absoluteFill}
-                                  zoom={hostZoom}
-                                />
-                                {!(ivsHostSession?.isCameraEnabled ?? true) ? (
-                                  <View style={styles.hostCameraOffOverlay} pointerEvents="none">
-                                    {resolvedHostPhotoUrl ? (
-                                      <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.hostCameraOffAvatar} />
-                                    ) : (
-                                      <Icon name="videocam-off" size={42} color="rgba(255,255,255,0.85)" />
-                                    )}
-                                    <Text style={styles.hostCameraOffText} allowFontScaling={false}>Camera off</Text>
-                                  </View>
-                                ) : null}
-                              </View>
-                            </TapGestureHandler>
-                          </View>
-                        </TapGestureHandler>
+              <View style={[styles.ivsHostStage, routeBattleId ? styles.ivsBattleStage : null]}>
+                <View style={routeBattleId ? styles.ivsBattlePane : StyleSheet.absoluteFill}>
+                  {routeBattleId ? <View pointerEvents="none" style={styles.ivsBattleEdgeLeft} /> : null}
+                  {isStreaming && NativeIVSBroadcastView ? (
+                    <GestureHandlerRootView style={StyleSheet.absoluteFill}>
+                      <PinchGestureHandler
+                        ref={pinchRef}
+                        simultaneousHandlers={[doubleTapRef, singleTapRef]}
+                        onGestureEvent={onHostPinchEvent}
+                        onHandlerStateChange={onHostPinchStateChange}
+                      >
+                        <View collapsable={false} style={StyleSheet.absoluteFill}>
+                          <TapGestureHandler
+                            ref={doubleTapRef}
+                            numberOfTaps={2}
+                            simultaneousHandlers={pinchRef}
+                            onActivated={flipCamera}
+                          >
+                            <View collapsable={false} style={StyleSheet.absoluteFill}>
+                              <TapGestureHandler
+                                ref={singleTapRef}
+                                numberOfTaps={1}
+                                waitFor={doubleTapRef}
+                                simultaneousHandlers={pinchRef}
+                                onActivated={() => triggerReaction(null)}
+                              >
+                                <View collapsable={false} style={StyleSheet.absoluteFill}>
+                                  <NativeIVSBroadcastView
+                                    key={`host-preview-${hostPreviewEpoch}`}
+                                    style={StyleSheet.absoluteFill}
+                                    zoom={hostZoom}
+                                  />
+                                  {!(ivsHostSession?.isCameraEnabled ?? true) ? (
+                                    <View style={styles.hostCameraOffOverlay} pointerEvents="none">
+                                      {resolvedHostPhotoUrl ? (
+                                        <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.hostCameraOffAvatar} />
+                                      ) : (
+                                        <Icon name="videocam-off" size={42} color="rgba(255,255,255,0.85)" />
+                                      )}
+                                      <Text style={styles.hostCameraOffText} allowFontScaling={false}>Camera off</Text>
+                                    </View>
+                                  ) : null}
+                                </View>
+                              </TapGestureHandler>
+                            </View>
+                          </TapGestureHandler>
+                        </View>
+                      </PinchGestureHandler>
+                    </GestureHandlerRootView>
+                  ) : preLivePreview && cameraReady ? (
+                    <CameraView
+                      style={StyleSheet.absoluteFill}
+                      facing={facing}
+                      mode="video"
+                      mirror={facing === 'front'}
+                      onCameraReady={() => {
+                        console.log('[CAMERA] pre-live CameraView ready');
+                      }}
+                    />
+                  ) : (
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.background }]} />
+                  )}
+                </View>
+
+                {routeBattleId ? (
+                  <View style={styles.ivsBattlePane}>
+                    <View pointerEvents="none" style={styles.ivsBattleEdgeRight} />
+                    {isStreaming && battleOpponentParticipant && NativeIVSRealTimeView ? (
+                      <NativeIVSRealTimeView
+                        style={StyleSheet.absoluteFill}
+                        sessionId={ivsHostSession.sessionId || ivsHostSession.streamId || streamId}
+                        slotId={typeof battleOpponentParticipant.slotIndex === 'number' ? battleOpponentParticipant.slotIndex : 1}
+                        participantId={battleOpponentParticipant.participantId}
+                        remoteTrackCount={(ivsHostSession.participants || []).length}
+                        zoom={16 / 9}
+                        testID="ivs-host-battle-opponent"
+                      />
+                    ) : (
+                      <View style={styles.ivsBattleWaiting}>
+                        <Icon name="person-add-outline" size={28} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.ivsBattleWaitingText} allowFontScaling={false}>
+                          Waiting for opponent
+                        </Text>
                       </View>
-                    </PinchGestureHandler>
-                  </GestureHandlerRootView>
-                ) : preLivePreview && cameraReady ? (
-                  <CameraView
-                    style={StyleSheet.absoluteFill}
-                    facing={facing}
-                    mode="video"
-                    mirror={facing === 'front'}
-                    onCameraReady={() => {
-                      console.log('[CAMERA] pre-live CameraView ready');
-                    }}
-                  />
-                ) : (
-                  <View style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.background }]} />
-                )}
+                    )}
+                  </View>
+                ) : null}
               </View>
             ) : cameraReady ? (
               <CameraView
@@ -3396,33 +3467,35 @@ const LiveStreamScreen = (props) => {
               </View>
             )}
 
-            {/* Host identity (top-left, over video) */}
-            <View
-              style={[
-                styles.hostIdentityOverlay,
-                { top: LIVE_TOP_INSET },
-              ]}
-              pointerEvents="none"
-            >
-              <LinearGradient
-                colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.hostIdentityPill}
+            {/* Host identity (top-left, over video) — hidden in battles (MatchBar owns names). */}
+            {!routeBattleId ? (
+              <View
+                style={[
+                  styles.hostIdentityOverlay,
+                  { top: LIVE_TOP_INSET },
+                ]}
+                pointerEvents="none"
               >
-                <Text style={styles.hostIdentityText} numberOfLines={1} allowFontScaling={false}>
-                  {normalizeHandle(resolvedHostName || hostUid)}
-                </Text>
-                {resolvedHostPhotoUrl ? (
-                  <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.hostIdentityAvatar} />
-                ) : (
-                  <View style={styles.hostIdentityAvatarPlaceholder} />
-                )}
-              </LinearGradient>
-            </View>
+                <LinearGradient
+                  colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.hostIdentityPill}
+                >
+                  <Text style={styles.hostIdentityText} numberOfLines={1} allowFontScaling={false}>
+                    {normalizeHandle(resolvedHostName || hostUid)}
+                  </Text>
+                  {resolvedHostPhotoUrl ? (
+                    <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.hostIdentityAvatar} />
+                  ) : (
+                    <View style={styles.hostIdentityAvatarPlaceholder} />
+                  )}
+                </LinearGradient>
+              </View>
+            ) : null}
 
-            {/* Host guest boxes (IVS only) */}
-            {backend === StreamingBackend.IVS && isStreaming && (
+            {/* Host guest boxes (IVS only) — battles use side-by-side stage instead. */}
+            {backend === StreamingBackend.IVS && isStreaming && !routeBattleId && (
               <View
                 style={[
                   styles.ivsGuestTray,
@@ -3784,16 +3857,18 @@ const LiveStreamScreen = (props) => {
                       <Text style={styles.hostControlLabel} allowFontScaling={false}>Chat</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={styles.hostControl}
-                      onPress={() => setShowLayoutSwitcher((v) => !v)}
-                      activeOpacity={0.85}
-                    >
-                      <View style={[styles.hostControlCircle, showLayoutSwitcher && styles.hostControlCircleActive]}>
-                        <Icon name="grid" size={20} color={showLayoutSwitcher ? '#00D2BE' : '#fff'} />
-                      </View>
-                      <Text style={styles.hostControlLabel} allowFontScaling={false}>Layout</Text>
-                    </TouchableOpacity>
+                    {!routeBattleId ? (
+                      <TouchableOpacity
+                        style={styles.hostControl}
+                        onPress={() => setShowLayoutSwitcher((v) => !v)}
+                        activeOpacity={0.85}
+                      >
+                        <View style={[styles.hostControlCircle, showLayoutSwitcher && styles.hostControlCircleActive]}>
+                          <Icon name="grid" size={20} color={showLayoutSwitcher ? '#00D2BE' : '#fff'} />
+                        </View>
+                        <Text style={styles.hostControlLabel} allowFontScaling={false}>Layout</Text>
+                      </TouchableOpacity>
+                    ) : null}
 
                     <TouchableOpacity style={styles.hostControl} onPress={confirmExitLive} activeOpacity={0.85}>
                       <View style={[styles.hostControlCircle, styles.hostControlCircleDanger]}>
@@ -3826,7 +3901,11 @@ const LiveStreamScreen = (props) => {
                 />
 
                 {routeBattleId ? (
-                  <BattleOverlay battleId={routeBattleId} currentUid={uid} onEnded={() => goToSummary()} />
+                  <BattleOverlay
+                    battleId={routeBattleId}
+                    currentUid={uid}
+                    onEnded={() => goToSummary()}
+                  />
                 ) : null}
                 {renderArtilleryLayer()}
                 {renderMarbleLayer()}
@@ -3992,6 +4071,45 @@ const styles = StyleSheet.create({
   ivsHostStage: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  ivsBattleStage: {
+    flexDirection: 'row',
+  },
+  ivsBattlePane: {
+    flex: 1,
+    height: '100%',
+    overflow: 'hidden',
+    backgroundColor: '#0A0A0C',
+  },
+  ivsBattleEdgeLeft: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: 'rgba(0,210,190,0.85)',
+    zIndex: 5,
+  },
+  ivsBattleEdgeRight: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: 'rgba(255,90,69,0.85)',
+    zIndex: 5,
+  },
+  ivsBattleWaiting: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#121214',
+  },
+  ivsBattleWaitingText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    fontWeight: '700',
   },
   ivsGuestTray: {
     position: 'absolute',

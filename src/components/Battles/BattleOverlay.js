@@ -1,18 +1,19 @@
-// BattleOverlay — the scoreboard + countdown + voting layer for a live battle.
+// BattleOverlay — TikTok-style live 1v1 match chrome.
 //
-// Rendered on top of the shared live room. Bound to battles/{id}: shows each
-// side's score (votes + gift weight), a countdown to the end, a free one-per-
-// viewer vote, and the winner when it's done. Participants get an "End battle"
-// control which declares the winner (glory) and triggers coin settlement.
+// Top MatchBar pushes teal ↔ coral as gift/vote scores change. Participants
+// get Start match / End match; viewers get one free vote per side.
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import {
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image,
+} from 'react-native';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import {
-  subscribeBattle, voteBattle, endBattle, battleSideFor, BATTLE_STATUS,
+  subscribeBattle, voteBattle, endBattle, startMatch, battleSideFor, BATTLE_STATUS,
 } from '../../services/battleService';
+import MatchBar, { MATCH_BAR_LEFT, MATCH_BAR_RIGHT } from './MatchBar';
 
 function fmtClock(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -21,11 +22,38 @@ function fmtClock(ms) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+function SideChip({ name, photo, accent, align = 'left' }) {
+  return (
+    <View style={[styles.chip, align === 'right' && styles.chipRight]}>
+      {align === 'left' && (
+        photo ? (
+          <Image source={{ uri: photo }} style={[styles.chipAvatar, { borderColor: accent }]} />
+        ) : (
+          <View style={[styles.chipAvatarFallback, { borderColor: accent }]}>
+            <Text style={styles.chipInitial}>{String(name || '?').charAt(0).toUpperCase()}</Text>
+          </View>
+        )
+      )}
+      <Text style={styles.chipName} numberOfLines={1}>{name || 'Creator'}</Text>
+      {align === 'right' && (
+        photo ? (
+          <Image source={{ uri: photo }} style={[styles.chipAvatar, { borderColor: accent }]} />
+        ) : (
+          <View style={[styles.chipAvatarFallback, { borderColor: accent }]}>
+            <Text style={styles.chipInitial}>{String(name || '?').charAt(0).toUpperCase()}</Text>
+          </View>
+        )
+      )}
+    </View>
+  );
+}
+
 export default function BattleOverlay({ battleId, currentUid, onEnded }) {
   const [battle, setBattle] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [myVote, setMyVote] = useState(null);
   const [ending, setEnding] = useState(false);
+  const [starting, setStarting] = useState(false);
   const endedHandledRef = useRef(false);
 
   useEffect(() => {
@@ -47,23 +75,38 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
   const durationMs = (battle?.durationSec || 300) * 1000;
   const remaining = startedAt + durationMs - now;
   const completed = battle?.status === BATTLE_STATUS.COMPLETED;
+  const isLive = battle?.status === BATTLE_STATUS.LIVE;
+  const matchRunning = isLive && !!battle?.liveStartedAt;
+  const canStart = isParticipant && !completed && !matchRunning && (
+    battle?.status === BATTLE_STATUS.SCHEDULED || isLive
+  );
 
-  // A participant auto-ends when time runs out (first one to hit zero settles it).
+  // A participant auto-ends when the match clock hits zero.
   useEffect(() => {
     if (!battle || completed || endedHandledRef.current) return;
-    if (isParticipant && remaining <= 0 && battle.status === BATTLE_STATUS.LIVE) {
+    if (isParticipant && matchRunning && remaining <= 0) {
       endedHandledRef.current = true;
       setEnding(true);
       endBattle(battle).finally(() => setEnding(false));
     }
-  }, [battle, completed, isParticipant, remaining]);
+  }, [battle, completed, isParticipant, matchRunning, remaining]);
 
   const vote = useCallback(async (s) => {
-    if (!currentUid || isParticipant) return;
+    if (!currentUid || isParticipant || !matchRunning) return;
     setMyVote(s);
     const res = await voteBattle(battleId, currentUid, s);
     if (!res.ok && res.reason === 'already_voted') setMyVote(s);
-  }, [battleId, currentUid, isParticipant]);
+  }, [battleId, currentUid, isParticipant, matchRunning]);
+
+  const startNow = useCallback(async () => {
+    if (!battle || !currentUid) return;
+    setStarting(true);
+    try {
+      await startMatch(battle, currentUid);
+    } finally {
+      setStarting(false);
+    }
+  }, [battle, currentUid]);
 
   const endNow = useCallback(async () => {
     if (!battle) return;
@@ -76,61 +119,117 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
 
   if (!battle) return null;
 
-  const total = (score.creator || 0) + (score.opponent || 0);
-  const creatorPct = total > 0 ? Math.round((score.creator / total) * 100) : 50;
-  const winnerSide = completed ? (battle.winnerUid === battle.creatorUid ? 'creator' : battle.winnerUid === battle.opponentUid ? 'opponent' : null) : null;
+  const winnerSide = completed
+    ? (battle.winnerUid === battle.creatorUid
+      ? 'creator'
+      : battle.winnerUid === battle.opponentUid
+        ? 'opponent'
+        : null)
+    : null;
+
+  const clockLabel = completed
+    ? 'ENDED'
+    : matchRunning
+      ? fmtClock(Math.max(0, remaining))
+      : 'READY';
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
-      {/* Scoreboard header */}
-      <View style={styles.scoreboard} pointerEvents="none">
-        <View style={styles.scoreSide}>
-          <Text style={styles.scoreName} numberOfLines={1}>{battle.creatorName}</Text>
-          <Text style={[styles.scoreVal, winnerSide === 'creator' && styles.scoreWin]}>{score.creator}</Text>
-        </View>
-        {completed ? (
-          <View style={styles.centerBadge}><Text style={styles.endedText}>ENDED</Text></View>
-        ) : (
+      <View style={styles.header} pointerEvents="box-none">
+        <View style={styles.vsRow} pointerEvents="none">
+          <SideChip
+            name={battle.creatorName}
+            photo={battle.creatorPhoto}
+            accent={MATCH_BAR_LEFT}
+            align="left"
+          />
           <View style={styles.centerBadge}>
-            <Icon name="time-outline" size={responsiveFont(13)} color="#fff" />
-            <Text style={styles.clock}>{fmtClock(Math.max(0, remaining))}</Text>
+            <Text style={styles.vsText}>VS</Text>
+            <View style={styles.clockRow}>
+              {!completed && <Icon name="time-outline" size={responsiveFont(12)} color="rgba(255,255,255,0.85)" />}
+              <Text style={styles.clock}>{clockLabel}</Text>
+            </View>
           </View>
-        )}
-        <View style={styles.scoreSide}>
-          <Text style={[styles.scoreVal, winnerSide === 'opponent' && styles.scoreWin]}>{score.opponent}</Text>
-          <Text style={styles.scoreName} numberOfLines={1}>{battle.opponentName}</Text>
+          <SideChip
+            name={battle.opponentName}
+            photo={battle.opponentPhoto}
+            accent={MATCH_BAR_RIGHT}
+            align="right"
+          />
         </View>
-      </View>
 
-      {/* Momentum bar */}
-      <View style={styles.barTrack} pointerEvents="none">
-        <View style={[styles.barFill, { width: `${creatorPct}%` }]} />
+        <MatchBar
+          leftScore={score.creator || 0}
+          rightScore={score.opponent || 0}
+          showScores
+        />
       </View>
 
       {completed && (
         <View style={styles.winnerBanner} pointerEvents="none">
           <Icon name="trophy" size={responsiveFont(16)} color="#0A0A0C" />
           <Text style={styles.winnerBannerText}>
-            {winnerSide === 'creator' ? `${battle.creatorName} wins!` : winnerSide === 'opponent' ? `${battle.opponentName} wins!` : "It's a draw!"}
+            {winnerSide === 'creator'
+              ? `${battle.creatorName} wins!`
+              : winnerSide === 'opponent'
+                ? `${battle.opponentName} wins!`
+                : "It's a draw!"}
           </Text>
         </View>
       )}
 
-      {/* Bottom controls */}
       {!completed && (
-        <View style={styles.controls}>
+        <View style={styles.controls} pointerEvents="box-none">
           {isParticipant ? (
-            <TouchableOpacity style={styles.endBtn} onPress={endNow} disabled={ending}>
-              {ending ? <ActivityIndicator color="#fff" /> : <Text style={styles.endBtnText}>End battle</Text>}
-            </TouchableOpacity>
-          ) : (
+            <View style={styles.participantActions}>
+              {canStart ? (
+                <TouchableOpacity style={styles.startBtn} onPress={startNow} disabled={starting}>
+                  {starting ? (
+                    <ActivityIndicator color="#0A0A0C" />
+                  ) : (
+                    <>
+                      <Icon name="flash" size={responsiveFont(16)} color="#0A0A0C" />
+                      <Text style={styles.startBtnText}>Start match</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              ) : null}
+              {(isLive || canStart) ? (
+                <TouchableOpacity
+                  style={[styles.endBtn, canStart && styles.endBtnSecondary]}
+                  onPress={endNow}
+                  disabled={ending}
+                >
+                  {ending ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.endBtnText}>End match</Text>
+                  )}
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : matchRunning ? (
             <View style={styles.voteRow}>
-              <TouchableOpacity style={[styles.voteBtn, myVote === 'creator' && styles.voteBtnActive]} onPress={() => vote('creator')}>
-                <Text style={styles.voteBtnText} numberOfLines={1}>Vote {battle.creatorName}</Text>
+              <TouchableOpacity
+                style={[styles.voteBtn, styles.voteLeft, myVote === 'creator' && styles.voteBtnActiveLeft]}
+                onPress={() => vote('creator')}
+              >
+                <Text style={styles.voteBtnText} numberOfLines={1}>
+                  Support {battle.creatorName}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.voteBtn, myVote === 'opponent' && styles.voteBtnActive]} onPress={() => vote('opponent')}>
-                <Text style={styles.voteBtnText} numberOfLines={1}>Vote {battle.opponentName}</Text>
+              <TouchableOpacity
+                style={[styles.voteBtn, styles.voteRight, myVote === 'opponent' && styles.voteBtnActiveRight]}
+                onPress={() => vote('opponent')}
+              >
+                <Text style={styles.voteBtnText} numberOfLines={1}>
+                  Support {battle.opponentName}
+                </Text>
               </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.waitPill} pointerEvents="none">
+              <Text style={styles.waitPillText}>Waiting for match to start</Text>
             </View>
           )}
         </View>
@@ -140,38 +239,192 @@ export default function BattleOverlay({ battleId, currentUid, onEnded }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-start' },
-  scoreboard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: responsiveSize(70), marginHorizontal: responsiveSize(14),
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: responsiveSize(14), padding: responsiveSize(10),
+  wrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-start',
+    zIndex: 40,
   },
-  scoreSide: { flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: responsiveSize(6) },
-  scoreName: { color: '#fff', fontSize: responsiveFont(12), fontWeight: '700', maxWidth: responsiveSize(80) },
-  scoreVal: { color: COLORS.primary, fontSize: responsiveFont(20), fontWeight: '900' },
-  scoreWin: { color: '#FFD54A' },
-  centerBadge: { flexDirection: 'row', alignItems: 'center', gap: responsiveSize(4), paddingHorizontal: responsiveSize(8) },
-  clock: { color: '#fff', fontWeight: '800', fontSize: responsiveFont(14) },
-  endedText: { color: '#fff', fontWeight: '800', fontSize: responsiveFont(12) },
-  barTrack: {
-    height: responsiveSize(6), backgroundColor: '#ef4444', borderRadius: responsiveSize(3),
-    marginHorizontal: responsiveSize(14), marginTop: responsiveSize(8), overflow: 'hidden',
+  header: {
+    marginTop: responsiveSize(58),
+    marginHorizontal: responsiveSize(12),
+    paddingHorizontal: responsiveSize(12),
+    paddingTop: responsiveSize(10),
+    paddingBottom: responsiveSize(12),
+    borderRadius: responsiveSize(16),
+    backgroundColor: 'rgba(10,10,12,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
-  barFill: { height: '100%', backgroundColor: COLORS.primary },
+  vsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: responsiveSize(10),
+    gap: responsiveSize(6),
+  },
+  chip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(6),
+    minWidth: 0,
+  },
+  chipRight: {
+    justifyContent: 'flex-end',
+  },
+  chipAvatar: {
+    width: responsiveSize(28),
+    height: responsiveSize(28),
+    borderRadius: responsiveSize(14),
+    borderWidth: 2,
+  },
+  chipAvatarFallback: {
+    width: responsiveSize(28),
+    height: responsiveSize(28),
+    borderRadius: responsiveSize(14),
+    borderWidth: 2,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipInitial: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: responsiveFont(11),
+  },
+  chipName: {
+    flexShrink: 1,
+    color: '#fff',
+    fontSize: responsiveFont(12),
+    fontWeight: '700',
+  },
+  centerBadge: {
+    alignItems: 'center',
+    paddingHorizontal: responsiveSize(6),
+    minWidth: responsiveSize(56),
+  },
+  vsText: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: responsiveFont(13),
+    letterSpacing: 1,
+  },
+  clockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(3),
+    marginTop: responsiveSize(2),
+  },
+  clock: {
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '800',
+    fontSize: responsiveFont(12),
+    fontVariant: ['tabular-nums'],
+  },
   winnerBanner: {
-    flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: responsiveSize(8),
-    backgroundColor: '#FFD54A', borderRadius: responsiveSize(20),
-    paddingVertical: responsiveSize(8), paddingHorizontal: responsiveSize(16), marginTop: responsiveSize(16),
+    flexDirection: 'row',
+    alignSelf: 'center',
+    alignItems: 'center',
+    gap: responsiveSize(8),
+    backgroundColor: '#FFD54A',
+    borderRadius: responsiveSize(20),
+    paddingVertical: responsiveSize(8),
+    paddingHorizontal: responsiveSize(16),
+    marginTop: responsiveSize(14),
   },
-  winnerBannerText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(14) },
-  controls: { position: 'absolute', bottom: responsiveSize(120), left: 0, right: 0, alignItems: 'center', paddingHorizontal: responsiveSize(14) },
-  voteRow: { flexDirection: 'row', gap: responsiveSize(10), width: '100%' },
+  winnerBannerText: {
+    color: '#0A0A0C',
+    fontWeight: '800',
+    fontSize: responsiveFont(14),
+  },
+  controls: {
+    position: 'absolute',
+    bottom: responsiveSize(118),
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: responsiveSize(14),
+  },
+  participantActions: {
+    alignItems: 'center',
+    gap: responsiveSize(10),
+    width: '100%',
+  },
+  startBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(8),
+    backgroundColor: MATCH_BAR_LEFT,
+    borderRadius: responsiveSize(24),
+    paddingVertical: responsiveSize(13),
+    paddingHorizontal: responsiveSize(28),
+  },
+  startBtnText: {
+    color: '#0A0A0C',
+    fontWeight: '900',
+    fontSize: responsiveFont(15),
+  },
+  endBtn: {
+    backgroundColor: 'rgba(239,68,68,0.92)',
+    borderRadius: responsiveSize(24),
+    paddingVertical: responsiveSize(12),
+    paddingHorizontal: responsiveSize(32),
+  },
+  endBtnSecondary: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  endBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: responsiveFont(14),
+  },
+  voteRow: {
+    flexDirection: 'row',
+    gap: responsiveSize(10),
+    width: '100%',
+  },
   voteBtn: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: responsiveSize(24),
-    paddingVertical: responsiveSize(12), alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: responsiveSize(22),
+    paddingVertical: responsiveSize(12),
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
-  voteBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  voteBtnText: { color: '#fff', fontWeight: '700', fontSize: responsiveFont(13) },
-  endBtn: { backgroundColor: '#ef4444', borderRadius: responsiveSize(24), paddingVertical: responsiveSize(13), paddingHorizontal: responsiveSize(40) },
-  endBtnText: { color: '#fff', fontWeight: '800', fontSize: responsiveFont(15) },
+  voteLeft: {
+    borderColor: 'rgba(0,210,190,0.45)',
+  },
+  voteRight: {
+    borderColor: 'rgba(255,90,69,0.45)',
+  },
+  voteBtnActiveLeft: {
+    backgroundColor: MATCH_BAR_LEFT,
+    borderColor: MATCH_BAR_LEFT,
+  },
+  voteBtnActiveRight: {
+    backgroundColor: MATCH_BAR_RIGHT,
+    borderColor: MATCH_BAR_RIGHT,
+  },
+  voteBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: responsiveFont(12),
+    paddingHorizontal: responsiveSize(4),
+  },
+  waitPill: {
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: responsiveSize(20),
+    paddingVertical: responsiveSize(10),
+    paddingHorizontal: responsiveSize(18),
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  waitPillText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontWeight: '700',
+    fontSize: responsiveFont(13),
+  },
 });
