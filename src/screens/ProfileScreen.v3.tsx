@@ -38,6 +38,7 @@ import PromoteTab from '../components/PromoteTab';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import ProfileCategoryChips from '../components/ProfileCategoryChips';
 import ManageProfileCategoriesSheet from '../components/ManageProfileCategoriesSheet';
+import ProfileIdentityFlair from '../components/ProfileIdentityFlair';
 import {
   buildProfileCategoryChips,
   filterPostsByCategory,
@@ -45,6 +46,10 @@ import {
 } from '../utils/profileCategories';
 import { updatePostCategory } from '../services/postEditService';
 import { sharePosts } from '../services/shareService';
+import {
+  normalizeProfileBadges,
+  normalizeProfileClubs,
+} from '../services/profileIdentityCatalog';
 
 type ProfileCategory = { id: string; label: string; order: number };
 type ProfileCategoryChip = { id: string; label: string; count: number };
@@ -1338,6 +1343,12 @@ const ProfileScreenV3: React.FC = () => {
                     styles={styles}
                   />
 
+                  <ProfileIdentityFlair
+                    clubIds={normalizeProfileClubs(profile?.profileClubs)}
+                    badgeIds={normalizeProfileBadges(profile?.profileBadges)}
+                    style={styles.identityFlair}
+                  />
+
                   <ProfileStats stats={stats} styles={styles} />
 
                   <ProfileActions
@@ -1920,6 +1931,11 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
   bioContainer: {
     paddingHorizontal: 20,
     paddingTop: 16,
+    alignItems: 'center',
+  },
+  identityFlair: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
     alignItems: 'center',
   },
   bioText: {

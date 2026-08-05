@@ -26,11 +26,16 @@ import { useAuth } from '../hooks/useCommon';
 import { COLORS } from '../styles/theme';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import ProfileCategoryChips from '../components/ProfileCategoryChips';
+import ProfileIdentityFlair from '../components/ProfileIdentityFlair';
 import {
   buildProfileCategoryChips,
   filterPostsByCategory,
   normalizeProfileCategories,
 } from '../utils/profileCategories';
+import {
+  normalizeProfileBadges,
+  normalizeProfileClubs,
+} from '../services/profileIdentityCatalog';
 import { conversationsMessagingService } from '../services/messaging';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import useIsAdmin from '../hooks/useIsAdmin';
@@ -182,6 +187,8 @@ const UserProfileScreen = ({ route, navigation }) => {
           displayName: userData.displayName || userData.username || username.replace('@', ''),
           bio: userData.bio || `Welcome to ${userData.displayName || username}'s profile! 🎬✨`,
           profileCategories: normalizeProfileCategories(userData.profileCategories),
+          profileClubs: normalizeProfileClubs(userData.profileClubs),
+          profileBadges: normalizeProfileBadges(userData.profileBadges),
           avatar: userData.photoURL || userData.avatar || null,
           followers: 0, // Will be loaded separately with follow utils
           following: 0, // Will be loaded separately with follow utils
@@ -592,6 +599,12 @@ const UserProfileScreen = ({ route, navigation }) => {
                 <Text style={styles.bio}>{userProfile.bio}</Text>
               )}
 
+              <ProfileIdentityFlair
+                clubIds={userProfile?.profileClubs}
+                badgeIds={userProfile?.profileBadges}
+                style={styles.identityFlair}
+              />
+
               {/* Stats */}
               <View style={styles.statsContainer}>
                 <View style={styles.statItem}>
@@ -769,8 +782,12 @@ const styles = StyleSheet.create({
     color: '#E4E4E7',
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 8,
     lineHeight: 20,
+  },
+  identityFlair: {
+    marginBottom: 16,
+    alignItems: 'center',
   },
   statsContainer: {
     flexDirection: 'row',

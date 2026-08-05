@@ -10,6 +10,15 @@ import { storage, firestore as db } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
 import BlypLogo from '../components/BlypLogo';
 import { COLORS } from '../styles/theme';
+import {
+  BADGE_CATALOG,
+  CLUB_CATALOG,
+  MAX_PROFILE_BADGES_EQUIPPED,
+  MAX_PROFILE_CLUBS_PLUS,
+  normalizeProfileBadges,
+  normalizeProfileClubs,
+  toggleIdInList,
+} from '../services/profileIdentityCatalog';
 
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
@@ -18,6 +27,12 @@ const EditProfileScreen = ({ navigation, route }) => {
   const [username, setUsername] = useState(profileFromRoute?.username ?? profileFromRoute?.handle ?? '');
   const [bio, setBio] = useState(profileFromRoute?.bio ?? '');
   const [profileImage, setProfileImage] = useState(profileFromRoute?.photoURL ?? '');
+  const [profileClubs, setProfileClubs] = useState(() =>
+    normalizeProfileClubs(profileFromRoute?.profileClubs)
+  );
+  const [profileBadges, setProfileBadges] = useState(() =>
+    normalizeProfileBadges(profileFromRoute?.profileBadges)
+  );
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -77,6 +92,8 @@ const EditProfileScreen = ({ navigation, route }) => {
           if (userData.username || userData.handle) setUsername((prev) => prev || (userData.username || userData.handle));
           if (userData.bio) setBio(userData.bio);
           if (userData.photoURL) setProfileImage((prev) => prev || userData.photoURL);
+          setProfileClubs(normalizeProfileClubs(userData.profileClubs));
+          setProfileBadges(normalizeProfileBadges(userData.profileBadges));
         }
       } catch (error) {
         console.error('Error loading user profile:', error);
@@ -259,7 +276,10 @@ const EditProfileScreen = ({ navigation, route }) => {
         setIsUploading(false);
       }
 
-      // Save profile data to Firestore using Cognito uid
+      // Save profile data to Firestore using Cognito uid.
+      // Never write avatarFrame / feedPriority / admin fields here.
+      const clubsToSave = normalizeProfileClubs(profileClubs, MAX_PROFILE_CLUBS_PLUS);
+      const badgesToSave = normalizeProfileBadges(profileBadges, MAX_PROFILE_BADGES_EQUIPPED);
       const userDocRef = doc(db, 'users', uid);
       await setDoc(userDocRef, {
         displayName: normalizedUsername,
@@ -268,6 +288,8 @@ const EditProfileScreen = ({ navigation, route }) => {
         photoURL: photoURL,
         bio: bio.trim(),
         email: resolvedEmail,
+        profileClubs: clubsToSave,
+        profileBadges: badgesToSave,
         updatedAt: new Date(),
       }, { merge: true });
 
@@ -387,6 +409,87 @@ const EditProfileScreen = ({ navigation, route }) => {
                 placeholderTextColor="#6b7280"
               />
               <Text style={styles.helperText}>Email cannot be changed</Text>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Clubs</Text>
+              <Text style={styles.helperText}>
+                Join teams and game clubs ({profileClubs.length}/{MAX_PROFILE_CLUBS_PLUS}). Curated catalog only.
+              </Text>
+              <View style={styles.chipGrid}>
+                {CLUB_CATALOG.map((club) => {
+                  const selected = profileClubs.includes(club.id);
+                  return (
+                    <TouchableOpacity
+                      key={club.id}
+                      style={[styles.pickChip, selected && styles.pickChipSelected]}
+                      onPress={() =>
+                        setProfileClubs((prev) =>
+                          toggleIdInList(prev, club.id, MAX_PROFILE_CLUBS_PLUS)
+                        )
+                      }
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={`${club.label} club`}
+                    >
+                      <Icon
+                        name={club.icon}
+                        size={14}
+                        color={selected ? '#00D2BE' : '#9ca3af'}
+                      />
+                      <Text style={[styles.pickChipText, selected && styles.pickChipTextSelected]}>
+                        {club.shortLabel || club.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Badges</Text>
+              <Text style={styles.helperText}>
+                Equip up to {MAX_PROFILE_BADGES_EQUIPPED} to show on your profile ({profileBadges.length}/{MAX_PROFILE_BADGES_EQUIPPED}).
+              </Text>
+              <View style={styles.chipGrid}>
+                {BADGE_CATALOG.map((badge) => {
+                  const selected = profileBadges.includes(badge.id);
+                  const atCap = !selected && profileBadges.length >= MAX_PROFILE_BADGES_EQUIPPED;
+                  return (
+                    <TouchableOpacity
+                      key={badge.id}
+                      style={[
+                        styles.pickChip,
+                        selected && styles.pickChipBadgeSelected,
+                        atCap && styles.pickChipDisabled,
+                      ]}
+                      onPress={() =>
+                        setProfileBadges((prev) =>
+                          toggleIdInList(prev, badge.id, MAX_PROFILE_BADGES_EQUIPPED)
+                        )
+                      }
+                      disabled={atCap}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected, disabled: atCap }}
+                      accessibilityLabel={`${badge.label} badge`}
+                    >
+                      <Icon
+                        name={badge.icon}
+                        size={14}
+                        color={selected ? '#C4B5FD' : '#9ca3af'}
+                      />
+                      <Text
+                        style={[
+                          styles.pickChipText,
+                          selected && styles.pickChipBadgeTextSelected,
+                        ]}
+                      >
+                        {badge.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           </View>
 
@@ -536,6 +639,45 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 12,
     marginTop: 4,
+  },
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  pickChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+    backgroundColor: '#141418',
+  },
+  pickChipSelected: {
+    borderColor: 'rgba(0, 210, 190, 0.55)',
+    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+  },
+  pickChipBadgeSelected: {
+    borderColor: 'rgba(196, 181, 253, 0.5)',
+    backgroundColor: 'rgba(196, 181, 253, 0.12)',
+  },
+  pickChipDisabled: {
+    opacity: 0.4,
+  },
+  pickChipText: {
+    color: '#d1d5db',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pickChipTextSelected: {
+    color: '#E6FFFB',
+  },
+  pickChipBadgeTextSelected: {
+    color: '#F3EEFF',
   },
   optionsSection: {
     paddingHorizontal: 16,
