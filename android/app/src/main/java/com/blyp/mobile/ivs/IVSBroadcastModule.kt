@@ -1345,65 +1345,47 @@ class IVSBroadcastModule(
     }
 
     private fun assignSlot(participantId: String, attributes: Map<String, String>? = null): Int {
-        participantToSlot[participantId]?.let { return it }
-
-        val usedForAttr = participantToSlot.values.toSet()
-        // SINGLE SOURCE OF TRUTH: the host-assigned guest slot travels in the IVS
-        // token attributes and is visible to every device. Honor it so the host and
-        // ALL viewers render this guest in the SAME box. Falls back to join-order
-        // below if it's missing/invalid/taken, so this never breaks video.
-        val attrSlot = attributes?.get("slotIndex")?.toIntOrNull()
-        if (attrSlot != null && attrSlot in 1..MAX_REMOTE_VIDEO_STREAMS && !usedForAttr.contains(attrSlot)) {
-            participantToSlot[participantId] = attrSlot
-            Log.d(IVS_TAG, "[IVS_SLOT] slotFromAttr participant=$participantId slot=$attrSlot used=$usedForAttr")
-            return attrSlot
+        // Token attributes are the layout authority (visible to every participant).
+        // Resolve role/slotIndex BEFORE any cached or arrival-order mapping so the
+        // host never consumes guest box 1 and the first guest lands in box 1.
+        val role = attributes?.get("role")?.trim()?.lowercase()
+        val tokenSlot = attributes?.get("slotIndex")?.toIntOrNull()
+        val authoritativeSlot = when (role) {
+            "host" -> 0
+            "guest" -> tokenSlot?.takeIf { it in 1..MAX_REMOTE_VIDEO_STREAMS }
+            else -> null
         }
 
-        // IMPORTANT: JS UX reserves:
-        // - slot 1 for the CTA/local tile (viewer join tile / guest self tile)
-        // Slot 0 is special:
-        // - In HOST mode, slot 0 is the local host preview (never use for remote).
-        // - In VIEWER mode, slot 0 is the main host video surface (use for the FIRST remote participant).
-        // - In GUEST mode, we also keep the primary remote (host) in slot 0 so the guest still sees
-        //   the host full-screen while publishing.
-        val used = participantToSlot.values.toSet()
+        if (authoritativeSlot != null) {
+            participantToSlot[participantId] = authoritativeSlot
+            if (authoritativeSlot == 0) {
+                // Only the token-designated host owns the primary tile.
+                viewerParticipantId = participantId
+            }
+            Log.i(
+                IVS_TAG,
+                "[IVS_SLOT][AUTHORITATIVE] participant=$participantId role=$role slot=$authoritativeSlot"
+            )
+            return authoritativeSlot
+        }
 
-        // Hard rule: slot 0 is pinned for the primary remote video for the duration of a session.
-        // Once set, we never clear viewerParticipantId, and we never allow any other participant
-        // to be assigned slot 0 (even if the primary temporarily disconnects).
-        // Guest sticky boxes are 1..N on every device. Do NOT skip slot 1 on viewers —
-        // that compacted later guests when token attributes were missing.
+        participantToSlot[participantId]?.let { return it }
+
+        // Legacy/untagged participants: sticky guest boxes 1..N on every device.
+        // Never skip box 1 (that pushed the first real guest into box 2).
+        val used = participantToSlot.values.toSet()
         fun firstFreeGuestSlot(): Int {
-            val candidates = (1..MAX_REMOTE_VIDEO_STREAMS)
-            val free = candidates.firstOrNull { !used.contains(it) }
+            val free = (1..MAX_REMOTE_VIDEO_STREAMS).firstOrNull { !used.contains(it) }
             if (free != null) return free
-            // Extremely defensive: never overwrite an occupied sticky box.
             var spill = MAX_REMOTE_VIDEO_STREAMS + 1
             while (used.contains(spill)) spill += 1
             Log.w(IVS_TAG, "[IVS_SLOT] spillGuestSlot participant=$participantId slot=$spill used=$used")
             return spill
         }
 
-        val slotId = if (sessionMode == SessionMode.VIEWER || sessionMode == SessionMode.GUEST) {
-            if (viewerParticipantId == null) {
-                viewerParticipantId = participantId
-                Log.d(IVS_TAG, "[IVS_VIEWER] primaryRemotePinned participant=$participantId slot=0")
-            }
-
-            if (participantId == viewerParticipantId) {
-                0
-            } else {
-                firstFreeGuestSlot()
-            }
-        } else {
-            // Host devices:
-            // - slot 0 is the local host preview
-            // - guest boxes start at slot 1 (must match the guest device's local self tile = slot 1)
-            firstFreeGuestSlot()
-        }
-
+        val slotId = firstFreeGuestSlot()
         participantToSlot[participantId] = slotId
-        Log.d(IVS_TAG, "[IVS_SLOT] slotAssigned participant=$participantId slot=$slotId used=$used")
+        Log.w(IVS_TAG, "[IVS_SLOT][LEGACY_FALLBACK] participant=$participantId slot=$slotId used=$used")
         return slotId
     }
 
@@ -1853,12 +1835,13 @@ class IVSBroadcastModule(
                             "[IVS_BRIDGE][REMOTE_VIDEO_ADDED] participantId=${participant.participantId} slotIndex=${slotIndexForBridge ?: "null"} streamKey=$key"
                         )
 
-                        // Deterministic CI proof: host-side expected guest video should flow once it is mapped to a guest slot (2+).
+                        // Deterministic CI proof: host-side guest video once mapped to a guest box (1..N).
                         val slotIndex = slotIndexForBridge ?: -1
-                        if (sessionMode == SessionMode.HOST && slotIndex >= 2) {
+                        if (sessionMode == SessionMode.HOST && slotIndex >= 1) {
                             startNetRxDeltaProofIfNeeded("host", slotIndex, "REMOTE_VIDEO_ADDED_GUEST_SLOT")
                         }
 
+                        val roleAttr = participant.attributes?.get("role")
                         emit("IVS_REMOTE_VIDEO_ADDED", Arguments.createMap().apply {
                             putString("participantId", participant.participantId)
                             putString("userId", participant.userId)
@@ -1866,11 +1849,13 @@ class IVSBroadcastModule(
                             participant.participantId?.let { pid ->
                                 participantToSlot[pid]?.let { slot -> putInt("slotIndex", slot) }
                             }
+                            if (!roleAttr.isNullOrBlank()) putString("role", roleAttr)
                         })
-                        // Track first remote video participant for viewer mode
-                        if (viewerParticipantId == null && stream is RemoteStageStream) {
+                        // Primary tile is only for the token-designated host (assignSlot).
+                        // Do not pin whichever remote stream happened to arrive first.
+                        if (slotIndexForBridge == 0 && stream is RemoteStageStream) {
                             viewerParticipantId = participant.participantId
-                            Log.d(IVS_TAG, "[IVS_VIEWER] Tracking remote video from participant ${participant.participantId}")
+                            Log.d(IVS_TAG, "[IVS_VIEWER] Tracking authoritative host participant ${participant.participantId}")
                         }
                     }
                 }
@@ -2130,12 +2115,14 @@ class IVSBroadcastModule(
     }
 
     private fun emitRemoteJoined(participant: ParticipantInfo) {
+        val pid = participant.participantId ?: "unknown"
+        val slot = assignSlot(pid, participant.attributes)
+        val role = participant.attributes?.get("role")
         emit("IVS_REMOTE_PARTICIPANT_JOINED", Arguments.createMap().apply {
             putString("participantId", participant.participantId)
             putString("userId", participant.userId)
-            participant.participantId?.let { pid ->
-                participantToSlot[pid]?.let { slot -> putInt("slotIndex", slot) }
-            }
+            putInt("slotIndex", slot)
+            if (!role.isNullOrBlank()) putString("role", role)
         })
     }
 

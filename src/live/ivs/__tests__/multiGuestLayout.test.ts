@@ -38,6 +38,12 @@ describe('multiGuestLayout sticky slots', () => {
     expect(firstEmptyStickySlot([1, 2, 3], 3)).toBeNull();
   });
 
+  it('gives the first guest box 1 when the panel is empty (host is not a guest box)', () => {
+    expect(firstEmptyStickySlot([], MAX_GUEST_SLOTS)).toBe(1);
+    // Slot 0 (host primary) must never appear in the occupied guest set.
+    expect(firstEmptyStickySlot([0], MAX_GUEST_SLOTS)).toBe(1);
+  });
+
   it('normalizes layout modes and tray usage', () => {
     expect(normalizeLiveLayoutMode('equal_grid')).toBe(LIVE_LAYOUT_MODES.EQUAL_GRID);
     expect(normalizeLiveLayoutMode('nope')).toBe(LIVE_LAYOUT_MODES.BOTTOM_GRID);

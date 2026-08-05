@@ -378,7 +378,10 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
           return;
         }
         const participantMeta = participantMetaRef.current.get(payload.participantId);
-        const isHost = participantMeta?.role === 'host' || payload.role === 'host' || payload.slotIndex === 0;
+        const isHost =
+          participantMeta?.role === 'host' ||
+          payload.role === 'host' ||
+          payload.slotIndex === 0;
         const isMuted = participantMeta?.isMuted ?? false;
         upsertStream({
           participantId: payload.participantId,

@@ -3528,6 +3528,8 @@ const LiveStreamScreen = (props) => {
                         const guestBySlot = new Map();
                         (ivsHostSession.participants || []).forEach((p) => {
                           if (p?.isLocal) return;
+                          if (p?.role === 'host') return;
+                          if (typeof p?.slotIndex === 'number' && p.slotIndex === 0) return;
                           if (typeof p?.slotIndex === 'number' && p.slotIndex >= 1 && p.slotIndex <= MAX_GUEST_SLOTS) {
                             if (!guestBySlot.has(p.slotIndex) || guestBySlot.get(p.slotIndex)?.isLocal) {
                               guestBySlot.set(p.slotIndex, p);
@@ -3701,6 +3703,8 @@ const LiveStreamScreen = (props) => {
                         // If the SDK reports a local participant with a slotIndex, ignore it so the
                         // Invite tile stays visible unless a *guest* is actually in that box.
                         if (p?.isLocal) return;
+                        if (p?.role === 'host') return;
+                        if (typeof p?.slotIndex === 'number' && p.slotIndex === 0) return;
                         if (typeof p?.slotIndex === 'number' && p.slotIndex >= 1 && p.slotIndex <= guestSlotsTotal) {
                           // Prefer remote guests when duplicates appear
                           if (!guestBySlot.has(p.slotIndex) || guestBySlot.get(p.slotIndex)?.isLocal) {
@@ -3790,7 +3794,7 @@ const LiveStreamScreen = (props) => {
                                       </View>
                                     )}
 
-                                    {slotId >= 2 && (
+                                    {slotId >= 1 && (
                                       <View pointerEvents="none" style={styles.ivsSlotNumberBadge}>
                                         <Text style={styles.ivsSlotNumberText}>{slotId}</Text>
                                       </View>

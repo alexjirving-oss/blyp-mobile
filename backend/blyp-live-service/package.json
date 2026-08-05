@@ -12,7 +12,7 @@
     "worker:start": "node ./scripts/not-implemented.cjs worker:start",
     "migrate": "npm run build && node dist/scripts/ensureSchemaCli.js",
     "migrate:rollback": "node ./scripts/not-implemented.cjs migrate:rollback",
-    "test": "npm run build && node --test dist/auth/cognitoClaims.test.js dist/auth/cognitoSub.test.js dist/economy/withdrawalGuard.test.js dist/games/marble/engine.test.js",
+    "test": "npm run build && node --test dist/auth/cognitoClaims.test.js dist/auth/cognitoSub.test.js dist/economy/withdrawalGuard.test.js dist/games/marble/engine.test.js dist/live/guestSlotAllocator.test.js",
     "lint": "echo 'add eslint if needed'"
   },
   "dependencies": {

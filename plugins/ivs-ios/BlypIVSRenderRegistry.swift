@@ -107,7 +107,12 @@ final class BlypIVSRenderRegistry: NSObject {
         let used = Set(slotByParticipant.values)
 
         let role = attributes?["role"] ?? ""
+        // Host primary tile is slot 0 — never a guest box (1..11).
         if role == "host" {
+            slotByParticipant[participantId] = 0
+            return 0
+        }
+        if let attrRaw = attributes?["slotIndex"], let attrSlot = Int(attrRaw), attrSlot == 0 {
             slotByParticipant[participantId] = 0
             return 0
         }

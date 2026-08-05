@@ -1113,14 +1113,21 @@ const IVSLiveStreamViewer = ({
     const hasRenderableStreams = renderableStreams.length > 0;
     const showVideo = ivsSession.canRender && hasRenderableStreams;
 
-    const hostStream = renderableStreams.find((s) => s?.isHost) || renderableStreams[0] || null;
+    const hostStream =
+      renderableStreams.find((s) => s?.isHost) ||
+      renderableStreams.find((s) => typeof s?.slotIndex === 'number' && s.slotIndex === 0) ||
+      renderableStreams[0] ||
+      null;
     // Exclude the host both by object identity AND participantId, so a duplicate
     // stream entry for the host (a second streamKey for the same participant) can
     // never render a second copy of the host feed inside a guest tile mid-screen.
+    // Host is never a guest box — slot 0 / isHost must not occupy Join CTA box 1.
     const guestStreams = renderableStreams.filter(
       (s) =>
         s &&
         s !== hostStream &&
+        !s.isHost &&
+        !(typeof s.slotIndex === 'number' && s.slotIndex === 0) &&
         (!hostStream || !s.participantId || s.participantId !== hostStream.participantId)
     );
     // Guest slots are capped at the IVS publisher limit (host + 11 guests).
@@ -1190,21 +1197,22 @@ const IVSLiveStreamViewer = ({
       return null;
     };
     const occupiedSlots = new Set();
-    if (typeof guestSlotId === 'number') occupiedSlots.add(guestSlotId);
-    if (anySlotIndexed) {
-      guestStreams.forEach((s) => {
-        const es = effectiveSlot(s);
-        if (typeof es === 'number') occupiedSlots.add(es);
-      });
-    }
+    if (typeof guestSlotId === 'number' && guestSlotId >= 1) occupiedSlots.add(guestSlotId);
+    guestStreams.forEach((s) => {
+      const es = effectiveSlot(s);
+      if (typeof es === 'number' && es >= 1) occupiedSlots.add(es);
+    });
+    userBySlotIndex.forEach((_, slot) => {
+      if (typeof slot === 'number' && slot >= 1) occupiedSlots.add(slot);
+    });
     const firstEmptySlot = (() => {
       for (let i = 1; i <= guestSlotsTotal; i += 1) {
         if (!occupiedSlots.has(i)) return i;
       }
       return null;
     })();
-    // Non-guests get a Join CTA in the first empty box; legacy mode keeps it at 1.
-    const firstJoinSlotId = guestMode ? null : anySlotIndexed ? firstEmptySlot : 1;
+    // Join CTA always sits in the first empty guest box (box 1 when the panel is empty).
+    const firstJoinSlotId = guestMode ? null : firstEmptySlot;
 
     // Keep a solid footer-colored band under the tiles so the area directly above
     // the comments overlay never shows the black hostStage background.
@@ -1669,7 +1677,7 @@ const IVSLiveStreamViewer = ({
                                 </View>
                               ) : null}
 
-                              {globalSlotId >= 2 && (
+                              {globalSlotId >= 1 && (
                                 <View pointerEvents="none" style={styles.slotNumberBadge}>
                                   <Text style={styles.slotNumberText}>{globalSlotId}</Text>
                                 </View>

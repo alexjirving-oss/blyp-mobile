@@ -35,6 +35,11 @@ import { buildSafeStageName } from '../services/ivsStageName';
 import { markBattleAttendance, assertBattleParticipant, assertBattleCreator } from '../economy/battleEscrowService';
 import { emitRoomEvent } from '../realtime/realtimeBus';
 import { getStreamPlaybackForViewer } from '../admin/firestoreAdmin';
+import {
+  MAX_GUEST_SLOTS,
+  collectUsedGuestSlots,
+  pickSlotIndex,
+} from './guestSlotAllocator';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -46,15 +51,6 @@ function forbidden(message: string): Error & { code: string } {
   err.code = 'FORBIDDEN';
   return err;
 }
-
-/**
- * IVS Real-Time hard-caps a stage at 12 publishers (non-adjustable). The host
- * always publishes, so a single stage supports the host + 11 guest publishers.
- * Larger/cross-host panels require participant replication across stages, not
- * additional seats on one stage.
- */
-const MAX_PUBLISHERS_PER_STAGE = 12;
-const MAX_GUEST_SLOTS = MAX_PUBLISHERS_PER_STAGE - 1; // 11
 
 /** Coded error for when the on-stage publisher panel is full (host + 11 guests). */
 function panelFull(message: string): Error & { code: string } {
@@ -126,19 +122,6 @@ function isGuestStale(g: any): boolean {
   const last = isoToMs(g.lastHeartbeatAt);
   if (!last) return true;
   return Date.now() - last > GUEST_HEARTBEAT_TTL_MS;
-}
-
-function pickSlotIndex(used: Set<number>, preferred?: number): number {
-  const MIN = 1;
-  const MAX = MAX_GUEST_SLOTS;
-  if (typeof preferred === 'number' && preferred >= MIN && preferred <= MAX && !used.has(preferred)) {
-    return preferred;
-  }
-  for (let i = MIN; i <= MAX; i++) {
-    if (!used.has(i)) return i;
-  }
-  // Fallback (should never happen — callers guard against a full panel first).
-  return MIN;
 }
 
 type StartLiveSessionError = Error & {
@@ -246,7 +229,9 @@ export async function startLiveSession(hostUserId: string, title: string, region
     stageArn,
     userId: hostUserId,
     capabilities: ['PUBLISH', 'SUBSCRIBE'],
-    attributes: { role: 'host', sessionId, title },
+    // Slot 0 is the host primary tile — never a guest box. Visible to every
+    // participant so native can pin the host without arrival-order races.
+    attributes: { role: 'host', slotIndex: '0', sessionId, title },
     duration: 60, // minutes
   }));
 
@@ -390,13 +375,15 @@ export async function inviteGuest(sessionId: string, guestUserId: string, reques
   if (requesterUserId && session.hostUserId !== requesterUserId) {
     throw forbidden('Only the host can invite guests');
   }
+  if (guestUserId === session.hostUserId) {
+    throw new Error('Host cannot be invited as a guest');
+  }
 
   const allGuests = await listGuestsStore(sessionId);
-  const used = new Set<number>();
-  for (const g of allGuests) {
-    const active = g.state === 'INVITED' || (g.state === 'LIVE' && !isGuestStale(g));
-    if (active && typeof g.slotIndex === 'number') used.add(g.slotIndex);
-  }
+  const used = collectUsedGuestSlots(allGuests, {
+    hostUserId: session.hostUserId,
+    isStale: isGuestStale,
+  });
 
   // Enforce the IVS 12-publisher hard cap (host + 11 guests). The guest being
   // invited is still REQUESTED here, so they are not yet counted in `used`.
@@ -437,11 +424,10 @@ export async function hostInviteGuest(
   }
 
   const allGuests = await listGuestsStore(sessionId);
-  const used = new Set<number>();
-  for (const g of allGuests) {
-    const active = g.state === 'INVITED' || (g.state === 'LIVE' && !isGuestStale(g));
-    if (active && typeof g.slotIndex === 'number') used.add(g.slotIndex);
-  }
+  const used = collectUsedGuestSlots(allGuests, {
+    hostUserId: session.hostUserId,
+    isStale: isGuestStale,
+  });
   if (used.size >= MAX_GUEST_SLOTS) {
     throw panelFull(`Guest panel is full (max ${MAX_GUEST_SLOTS} guests)`);
   }

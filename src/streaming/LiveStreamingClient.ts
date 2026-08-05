@@ -24,7 +24,7 @@ export enum NetworkQuality {
 export interface StreamParticipant {
   participantId: string;          // IVS participant ID (unique per stage/session)
   userId?: string;                // Blyp user ID (if known)
-  slotIndex?: number;             // UI slot for layout (0 = host, 1..N = guests)
+  slotIndex?: number;             // UI slot: 0 = host primary tile; 1..11 = guest boxes only
   role?: 'host' | 'guest' | 'viewer';
   isLocal: boolean;               // true if this is the current user
   isMuted: boolean;               // microphone state
