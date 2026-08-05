@@ -546,11 +546,26 @@ const HomeScreen = ({ navigation, route }) => {
 
   const handleUserProfilePress = (user, post = null) => {
     const userId = post?.userId || user?.userId || user?.id || user?.username || Math.random().toString(36);
-    const username = user?.username || '@user';
-    console.log('ðŸ“± HomeScreen: Navigating to user profile:', { userId, username, userObj: user });
+    const username = user?.username || user?.displayName || '@user';
+    const postId = post?.id ? String(post.id) : null;
     navigation.navigate('UserProfile', {
-      userId: userId,
-      username: username,
+      userId,
+      username,
+      ...(postId
+        ? {
+            justWatchedPostId: postId,
+            justWatchedTitle:
+              post.title || post.captionTitle || post.caption || post.description || null,
+            justWatchedThumb:
+              post.thumbnail ||
+              post.imageUrl ||
+              post.media?.[0]?.thumbnail ||
+              post.media?.[0]?.url ||
+              null,
+            justWatchedVideoUrl: post.videoUrl || post.mediaUrl || post.media?.[0]?.url || null,
+            justWatchedType: post.type || (post.videoUrl ? 'video' : null),
+          }
+        : null),
     });
   };
 

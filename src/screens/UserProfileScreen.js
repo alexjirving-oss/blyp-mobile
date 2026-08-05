@@ -25,6 +25,7 @@ import ScreenContainer from '../components/ScreenContainer';
 import { useAuth } from '../hooks/useCommon';
 import { COLORS } from '../styles/theme';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
+import { getWatchHistory } from '../services/watchHistoryService';
 import ProfileCategoryChips from '../components/ProfileCategoryChips';
 import ProfileIdentityFlair from '../components/ProfileIdentityFlair';
 import {
@@ -45,10 +46,28 @@ const { width: screenWidth } = Dimensions.get('window');
 
 const PROFILE_PAGE_SIZE = 30;
 
+const pickPostTitle = (post) =>
+  post?.title || post?.captionTitle || post?.caption || post?.description || 'Video';
+
+const pickPostThumb = (post) =>
+  post?.thumbnail ||
+  post?.imageUrl ||
+  post?.media?.[0]?.thumbnail ||
+  post?.media?.[0]?.url ||
+  null;
+
 const UserProfileScreen = ({ route, navigation }) => {
   // Guard against a missing params object (deep links / malformed navigation),
   // which would otherwise throw on destructure and crash the screen.
-  const { userId, username } = route?.params || {};
+  const {
+    userId,
+    username,
+    justWatchedPostId,
+    justWatchedTitle,
+    justWatchedThumb,
+    justWatchedVideoUrl,
+    justWatchedType,
+  } = route?.params || {};
   const { uid: cognitoUid, user: authUser, getDisplayName } = useAuth();
   const { isAdmin } = useIsAdmin();
   const [userProfile, setUserProfile] = useState(null);
@@ -63,6 +82,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   const [blocked, setBlocked] = useState(false);
   const [messagingBusy, setMessagingBusy] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState('all');
+  const [recentWatchedFromCreator, setRecentWatchedFromCreator] = useState([]);
   const postsCursorRef = useRef(null);
   const postsHasMoreRef = useRef(true);
   const loadingMorePostsRef = useRef(false);
@@ -84,6 +104,35 @@ const UserProfileScreen = ({ route, navigation }) => {
       loadBlockedUsers().then(() => setBlocked(isBlockedCached(userId))).catch(() => {});
     }
   }, [isFocused, userId]);
+
+  // Light bonus: up to 3 recent watches from this creator (local history).
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentUserId || !userId) {
+      setRecentWatchedFromCreator([]);
+      return undefined;
+    }
+    getWatchHistory(currentUserId)
+      .then((list) => {
+        if (cancelled) return;
+        const skip = justWatchedPostId ? String(justWatchedPostId) : null;
+        const fromCreator = (Array.isArray(list) ? list : [])
+          .filter((w) => {
+            if (!w?.id) return false;
+            if (String(w.userId || '') !== String(userId)) return false;
+            if (skip && String(w.id) === skip) return false;
+            return true;
+          })
+          .slice(0, 3);
+        setRecentWatchedFromCreator(fromCreator);
+      })
+      .catch(() => {
+        if (!cancelled) setRecentWatchedFromCreator([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId, userId, justWatchedPostId]);
 
   const handleOpenProfileMenu = useCallback(() => {
     if (!userId || currentUserId === userId) return;
@@ -469,6 +518,52 @@ const UserProfileScreen = ({ route, navigation }) => {
     navigation.navigate('MediaViewer', mediaViewerParams(post, filteredPosts, { source: 'profile' }));
   };
 
+  const openWatchedPost = useCallback(
+    (entry) => {
+      if (!entry?.id) return;
+      const fromGrid = userPosts.find((p) => String(p.id) === String(entry.id));
+      if (fromGrid) {
+        navigation.navigate(
+          'MediaViewer',
+          mediaViewerParams(fromGrid, filteredPosts, { source: 'profile' }),
+        );
+        return;
+      }
+      navigation.navigate('MediaViewer', {
+        post: {
+          id: entry.id,
+          title: entry.title || 'Video',
+          thumbnail: entry.thumbnail || null,
+          videoUrl: entry.videoUrl || null,
+          type: entry.type || (entry.videoUrl ? 'video' : 'post'),
+          userId,
+          username: username || userProfile?.username,
+        },
+        source: 'profile-just-watched',
+      });
+    },
+    [userPosts, filteredPosts, navigation, userId, username, userProfile?.username],
+  );
+
+  const justWatchedEntry = useMemo(() => {
+    if (!justWatchedPostId) return null;
+    const fromGrid = userPosts.find((p) => String(p.id) === String(justWatchedPostId));
+    return {
+      id: String(justWatchedPostId),
+      title: justWatchedTitle || (fromGrid ? pickPostTitle(fromGrid) : 'Video'),
+      thumbnail: justWatchedThumb || (fromGrid ? pickPostThumb(fromGrid) : null),
+      videoUrl: justWatchedVideoUrl || fromGrid?.videoUrl || fromGrid?.mediaUrl || null,
+      type: justWatchedType || fromGrid?.type || 'video',
+    };
+  }, [
+    justWatchedPostId,
+    justWatchedTitle,
+    justWatchedThumb,
+    justWatchedVideoUrl,
+    justWatchedType,
+    userPosts,
+  ]);
+
   const formatNumber = (num) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
     if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
@@ -575,6 +670,60 @@ const UserProfileScreen = ({ route, navigation }) => {
         contentContainerStyle={styles.postsGrid}
         ListHeaderComponent={(
           <>
+            {justWatchedEntry ? (
+              <View style={styles.justWatchedSection}>
+                <Text style={styles.justWatchedLabel}>Just watched</Text>
+                <TouchableOpacity
+                  style={styles.justWatchedCard}
+                  onPress={() => openWatchedPost(justWatchedEntry)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open the video you just watched"
+                >
+                  {justWatchedEntry.thumbnail ? (
+                    <Image
+                      source={{ uri: justWatchedEntry.thumbnail }}
+                      style={styles.justWatchedThumb}
+                    />
+                  ) : (
+                    <View style={[styles.justWatchedThumb, styles.justWatchedThumbFallback]}>
+                      <Icon name="play" size={22} color="#9ca3af" />
+                    </View>
+                  )}
+                  <View style={styles.justWatchedMeta}>
+                    <Text style={styles.justWatchedTitle} numberOfLines={2}>
+                      {justWatchedEntry.title}
+                    </Text>
+                    <Text style={styles.justWatchedHint}>Tap to watch again</Text>
+                  </View>
+                  <Icon name="chevron-forward" size={18} color="#00D2BE" />
+                </TouchableOpacity>
+                {recentWatchedFromCreator.length > 0 ? (
+                  <View style={styles.recentWatchedRow}>
+                    {recentWatchedFromCreator.map((w) => (
+                      <TouchableOpacity
+                        key={w.id}
+                        style={styles.recentWatchedChip}
+                        onPress={() => openWatchedPost(w)}
+                        activeOpacity={0.85}
+                      >
+                        {w.thumbnail ? (
+                          <Image source={{ uri: w.thumbnail }} style={styles.recentWatchedThumb} />
+                        ) : (
+                          <View style={[styles.recentWatchedThumb, styles.justWatchedThumbFallback]}>
+                            <Icon name="play" size={14} color="#9ca3af" />
+                          </View>
+                        )}
+                        <Text style={styles.recentWatchedTitle} numberOfLines={1}>
+                          {w.title || 'Video'}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
             {/* Profile Info */}
             <View style={styles.profileSection}>
               <View style={styles.avatarContainer}>
@@ -740,6 +889,79 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  justWatchedSection: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 4,
+  },
+  justWatchedLabel: {
+    color: '#00D2BE',
+    fontSize: responsiveFont(12),
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  justWatchedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#141418',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.35)',
+    borderRadius: 12,
+    padding: 10,
+    gap: 12,
+  },
+  justWatchedThumb: {
+    width: 56,
+    height: 74,
+    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+  },
+  justWatchedThumbFallback: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  justWatchedMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  justWatchedTitle: {
+    color: '#ffffff',
+    fontSize: responsiveFont(15),
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  justWatchedHint: {
+    color: '#9ca3af',
+    fontSize: responsiveFont(12),
+  },
+  recentWatchedRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  recentWatchedChip: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: '#141418',
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#27272E',
+  },
+  recentWatchedThumb: {
+    width: '100%',
+    aspectRatio: 16 / 10,
+    backgroundColor: COLORS.surface,
+  },
+  recentWatchedTitle: {
+    color: '#d1d5db',
+    fontSize: responsiveFont(11),
+    fontWeight: '500',
+    paddingHorizontal: 6,
+    paddingVertical: 6,
   },
   profileSection: {
     alignItems: 'center',

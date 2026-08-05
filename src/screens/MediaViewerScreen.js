@@ -259,7 +259,31 @@ const MediaViewerItem = ({
   const openCreatorProfile = () => {
     if (!creatorId) return;
     try {
-      navigation.navigate('UserProfile', { userId: creatorId, username: displayName });
+      const postId = actualPost?.id ? String(actualPost.id) : null;
+      navigation.navigate('UserProfile', {
+        userId: creatorId,
+        username: displayName,
+        ...(postId
+          ? {
+              justWatchedPostId: postId,
+              justWatchedTitle:
+                actualPost.title ||
+                actualPost.captionTitle ||
+                actualPost.caption ||
+                actualPost.description ||
+                null,
+              justWatchedThumb:
+                actualPost.thumbnail ||
+                actualPost.imageUrl ||
+                actualPost.media?.[0]?.thumbnail ||
+                actualPost.media?.[0]?.url ||
+                null,
+              justWatchedVideoUrl:
+                actualPost.videoUrl || actualPost.mediaUrl || actualPost.media?.[0]?.url || null,
+              justWatchedType: actualPost.type || (actualPost.videoUrl ? 'video' : null),
+            }
+          : null),
+      });
     } catch { /* ignore */ }
   };
 
