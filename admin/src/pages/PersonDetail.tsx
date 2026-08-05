@@ -356,11 +356,13 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `admin-dash-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const res = await api.post<{ coinsCredited: number; newBalance: number }>(
+      const res = await api.post<{ coinsCredited: number; newBalance: number; currency?: string }>(
         `/admin/users/${encodeURIComponent(u.userId)}/credit-coins`,
         { coins: amount, reason: reason || undefined, idempotencyKey }
       );
-      setMsg(`Credited ${res.coinsCredited.toLocaleString()} coins. New balance: ${res.newBalance.toLocaleString()}.`);
+      setMsg(
+        `Credited ${res.coinsCredited.toLocaleString()} ${res.currency || "BONUS_COIN"} (non-withdrawable). Bonus balance: ${res.newBalance.toLocaleString()}.`
+      );
       setCoins(""); setReason(""); setConfirming(false);
       reload();
     } catch (e) {
@@ -372,12 +374,16 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 
   return (
     <div className="card stack">
-      <h3 className="panel-title">Wallet · add coins</h3>
+      <h3 className="panel-title">Wallet · add bonus coins</h3>
+      <p className="dim" style={{ fontSize: 12.5, marginTop: 0, lineHeight: 1.5 }}>
+        Credits land as <strong>BONUS_COIN</strong> (spendable, non-withdrawable). They are never mixed with
+        IAP-purchased COIN or creator GEM earnings.
+      </p>
       {msg && <div style={{ color: "var(--success)", fontSize: 13 }}>{msg}</div>}
       {err && <ErrorNote>{err}</ErrorNote>}
       <div className="row" style={{ gap: 12 }}>
         <div className="grow">
-          <label>Coins to add</label>
+          <label>Bonus coins to add</label>
           <input
             type="number" min={1} max={1000000} value={coins}
             onChange={(e) => { setCoins(e.target.value); setConfirming(false); }}
@@ -392,17 +398,17 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 
       {!confirming ? (
         <button className="btn" disabled={!validAmount} onClick={() => { setErr(null); setMsg(null); setConfirming(true); }}>
-          Add coins
+          Add bonus coins
         </button>
       ) : (
         <div className="stack" style={{ gap: 8 }}>
           <div className="muted" style={{ fontSize: 13 }}>
-            Confirm crediting <strong>{amount.toLocaleString()}</strong> coins to {u.displayName || u.username || u.userId}.
+            Confirm crediting <strong>{amount.toLocaleString()}</strong> non-withdrawable bonus coins to {u.displayName || u.username || u.userId}.
             This posts an audited ledger entry via your Cognito admin session.
           </div>
           <div className="row" style={{ gap: 8 }}>
             <button className="btn" disabled={busy} onClick={submit}>
-              {busy ? "Crediting…" : "Confirm & add coins"}
+              {busy ? "Crediting…" : "Confirm & add bonus coins"}
             </button>
             <button className="btn ghost" disabled={busy} onClick={() => setConfirming(false)}>
               Cancel

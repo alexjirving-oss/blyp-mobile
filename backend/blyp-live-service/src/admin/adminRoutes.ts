@@ -7,6 +7,11 @@ import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { creditCoinsAdmin } from '../economy/economyService';
+import {
+    approveWithdrawal,
+    listWithdrawals,
+    rejectWithdrawal,
+} from '../economy/withdrawalService';
 import { materializeRankingsSnapshots } from '../economy/rankingsService';
 import { EconomyError, toEconomyError } from '../economy/economyErrors';
 import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
@@ -20,6 +25,8 @@ import {
     adminCreditCoinsBodySchema,
     adminListReportsSchema,
     adminResolveReportSchema,
+    adminListWithdrawalsSchema,
+    adminRejectWithdrawalSchema,
     banUserSchema,
 
     moderatePostSchema,
@@ -747,6 +754,91 @@ router.post('/admin/users/:userId/feed-priority', requireAdmin, async (req: Auth
         }
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/feed-priority failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+/**
+ * Creator withdrawal queue (pending_review settle path).
+ * Approve executes Stripe transfer; reject restores reserved gems.
+ */
+router.get('/admin/withdrawals', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListWithdrawalsSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const out = await listWithdrawals(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
+        logger.error({ detail: err.detail, code: err.code }, '[admin] /admin/withdrawals failed');
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    }
+});
+
+router.post('/admin/withdrawals/:withdrawalId/approve', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const withdrawalId = String(req.params?.withdrawalId || '').trim();
+        if (!withdrawalId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+        const out = await approveWithdrawal(withdrawalId, actorUserId);
+        await writeAdminAudit({
+            actorUserId,
+            action: 'withdrawal_approve',
+            targetType: 'withdrawal',
+            targetId: withdrawalId,
+            metadata: {
+                status: out.status,
+                userId: out.userId,
+                amountGems: out.amountGems,
+                stripeTransferId: out.stripeTransferId || null,
+            },
+        }).catch((err) => {
+            logger.warn({ err: err?.message || String(err) }, '[admin] withdrawal approve audit failed');
+        });
+        return res.json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
+        if (err.code === 'INTERNAL' || err.code === 'PROVIDER_ERROR') {
+            logger.error({ detail: err.detail, code: err.code }, '[admin] withdrawal approve failed');
+        }
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    }
+});
+
+router.post('/admin/withdrawals/:withdrawalId/reject', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const withdrawalId = String(req.params?.withdrawalId || '').trim();
+        if (!withdrawalId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+        const parsed = adminRejectWithdrawalSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const out = await rejectWithdrawal(withdrawalId, actorUserId, parsed.data.reason);
+        await writeAdminAudit({
+            actorUserId,
+            action: 'withdrawal_reject',
+            targetType: 'withdrawal',
+            targetId: withdrawalId,
+            metadata: {
+                status: out.status,
+                userId: out.userId,
+                amountGems: out.amountGems,
+                reason: parsed.data.reason || null,
+            },
+        }).catch((err) => {
+            logger.warn({ err: err?.message || String(err) }, '[admin] withdrawal reject audit failed');
+        });
+        return res.json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
+        logger.error({ detail: err.detail, code: err.code }, '[admin] withdrawal reject failed');
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
     }
 });
 

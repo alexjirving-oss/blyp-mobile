@@ -40,6 +40,7 @@ services:
       - key: GEMS_PER_COIN_DEN
         value: 1
       - key: PENDING_GEMS_HOLD_SECONDS
-        value: 30
+        # 7 days — matches withdrawalPolicy HOLD_DURATION_MS. Do not use 30s in prod.
+        value: "604800"
       - key: IDEMPOTENCY_TTL_SECONDS
         value: 86400
