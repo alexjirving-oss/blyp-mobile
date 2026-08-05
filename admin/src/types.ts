@@ -72,6 +72,8 @@ export interface AdminUserDetail {
   restrictions: AdminRestrictions;
   avatarFrame: string | null;
   photoURL?: string | null;
+  /** Account-wide For You / discovery weight. */
+  feedPriorityAccount?: 'suppress' | 'low' | 'standard' | 'high' | 'boost';
   createdAt: string | null;
   updatedAt: string | null;
   recentActions: AdminAuditEntry[];

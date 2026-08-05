@@ -197,6 +197,10 @@ const RULES_PATH = path.join(__dirname, '..', 'firestore.wave0-live.rules');
     setDoc(doc(ownerDb, 'users', ownerId), { isAdmin: false, roles: [] }, { merge: true }),
     'owner cannot clear server-granted admin fields'
   );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', ownerId), { feedPriorityAccount: 'boost' }, { merge: true }),
+    'owner cannot set feedPriorityAccount'
+  );
   await expectAllow(
     setDoc(doc(ownerDb, 'users', ownerId), { bio: 'still me' }, { merge: true }),
     'owner can edit bio while admin fields stay frozen'

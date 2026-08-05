@@ -68,7 +68,13 @@ export default function PersonDetail() {
           </div>
 
           {tab === "overview" && <Overview u={u} />}
-          {tab === "controls" && <Controls key={`${u.userId}:${u.avatarFrame || ""}`} u={u} reload={detail.reload} />}
+          {tab === "controls" && (
+            <Controls
+              key={`${u.userId}:${u.avatarFrame || ""}:${u.feedPriorityAccount || "standard"}`}
+              u={u}
+              reload={detail.reload}
+            />
+          )}
           {tab === "posts" && <Posts userId={userId} />}
           {tab === "activity" && <Activity u={u} />}
         </>
@@ -101,6 +107,7 @@ function Overview({ u }: { u: AdminUserDetail }) {
           <Field label="Date of birth" value={u.dateOfBirth} />
           <Field label="Cognito status" value={u.userStatus} />
           <Field label="Role" value={u.role} />
+          <Field label="Feed priority" value={u.feedPriorityAccount || "standard"} />
         </div>
       </div>
       <div className="card">
@@ -132,6 +139,9 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   const [verificationNote, setVerificationNote] = useState(u.verification.note || "");
   const [role, setRole] = useState(u.role || "user");
   const [avatarFrame, setAvatarFrame] = useState<string>(u.avatarFrame || "");
+  const [feedPriorityAccount, setFeedPriorityAccount] = useState<
+    "suppress" | "low" | "standard" | "high" | "boost"
+  >(u.feedPriorityAccount || "standard");
   const [messagingRestricted, setMessaging] = useState(u.restrictions.messagingRestricted);
   const [liveRestricted, setLive] = useState(u.restrictions.liveRestricted);
   const [loginRestricted, setLogin] = useState(u.restrictions.loginRestricted);
@@ -233,6 +243,47 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
         </div>
 
         <div className="stack">
+          <div className="card stack">
+            <h3 className="panel-title">Account feed priority</h3>
+            <div className="muted" style={{ fontSize: 13 }}>
+              For You / discovery weight for all of this user&apos;s posts. Combines additively with per-post priority
+              (<code style={{ fontSize: 11 }}>effective = account + post</code>). Suppress practically hides them from
+              discovery rails.
+            </div>
+            <div>
+              <label>Priority</label>
+              <select
+                value={feedPriorityAccount}
+                onChange={(e) =>
+                  setFeedPriorityAccount(e.target.value as typeof feedPriorityAccount)
+                }
+              >
+                <option value="suppress">Suppress — practically don&apos;t show</option>
+                <option value="low">Low — decreased</option>
+                <option value="standard">Standard — default</option>
+                <option value="high">High — increased</option>
+                <option value="boost">Boost — maximum</option>
+              </select>
+            </div>
+            <button
+              className="btn"
+              disabled={busy === "feedPri"}
+              onClick={() =>
+                run(
+                  "feedPri",
+                  () =>
+                    api.post(`/admin/users/${encodeURIComponent(u.userId)}/feed-priority`, {
+                      priority: feedPriorityAccount,
+                      reason: `Dashboard set account feed priority to ${feedPriorityAccount}`,
+                    }),
+                  "Account feed priority saved.",
+                )
+              }
+            >
+              {busy === "feedPri" ? "Saving…" : "Save feed priority"}
+            </button>
+          </div>
+
           <div className="card stack">
             <h3 className="panel-title">Enforcement</h3>
             {u.isBanned ? (

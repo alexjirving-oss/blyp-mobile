@@ -13,14 +13,26 @@ service cloud.firestore {
     function userPrivFieldsFrozenOnCreate() {
       return request.resource.data.get('isAdmin', false) == false
         && request.resource.data.get('roles', []) == []
-        && !('adminRoleUpdatedAt' in request.resource.data);
+        && !('adminRoleUpdatedAt' in request.resource.data)
+        && !('feedPriorityAccount' in request.resource.data)
+        && !('feedPriorityAccountUpdatedAt' in request.resource.data)
+        && !('feedPriorityAccountUpdatedBy' in request.resource.data)
+        && !('creatorFeedWeight' in request.resource.data);
     }
 
     function userPrivFieldsFrozenOnUpdate() {
       return request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false)
         && request.resource.data.get('roles', []) == resource.data.get('roles', [])
         && request.resource.data.get('adminRoleUpdatedAt', null)
-          == resource.data.get('adminRoleUpdatedAt', null);
+          == resource.data.get('adminRoleUpdatedAt', null)
+        && request.resource.data.get('feedPriorityAccount', null)
+          == resource.data.get('feedPriorityAccount', null)
+        && request.resource.data.get('feedPriorityAccountUpdatedAt', null)
+          == resource.data.get('feedPriorityAccountUpdatedAt', null)
+        && request.resource.data.get('feedPriorityAccountUpdatedBy', null)
+          == resource.data.get('feedPriorityAccountUpdatedBy', null)
+        && request.resource.data.get('creatorFeedWeight', null)
+          == resource.data.get('creatorFeedWeight', null);
     }
 
     // Admin hide / priority on posts — clients cannot set or clear.
