@@ -85,7 +85,7 @@ export async function requestGuestSlot(
       await docClient.send(new UpdateCommand({
         TableName: TABLE_NAME,
         Key: { sessionId, userId },
-        UpdateExpression: 'SET #state = :state, disconnectedAt = :updatedAt, updatedAt = :updatedAt REMOVE guestSessionId',
+        UpdateExpression: 'SET #state = :state, disconnectedAt = :updatedAt, updatedAt = :updatedAt REMOVE guestSessionId, slotIndex',
         ExpressionAttributeNames: {
           '#state': 'state',
         },
@@ -270,7 +270,9 @@ export async function leaveGuestSession(
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: { sessionId, userId },
-    UpdateExpression: 'SET #state = :state, disconnectedAt = :updatedAt, updatedAt = :updatedAt REMOVE guestSessionId',
+    // REMOVE slotIndex so vacated sticky boxes are free for the next invite
+    // without renumbering remaining LIVE guests.
+    UpdateExpression: 'SET #state = :state, disconnectedAt = :updatedAt, updatedAt = :updatedAt REMOVE guestSessionId, slotIndex',
     ExpressionAttributeNames: exprNames,
     ExpressionAttributeValues: exprValues,
     ConditionExpression: condition,

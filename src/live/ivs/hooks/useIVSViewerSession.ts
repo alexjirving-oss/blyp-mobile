@@ -18,6 +18,7 @@ import {
 import { getIVSNativeClient } from '../../../streaming/IVSNativeClient';
 import { joinLiveRealtime, joinLiveMass } from '../../../api/ivsLiveApi';
 import { useIVSMultiGuestRegistry, StreamEntry } from './useIVSMultiGuestRegistry';
+import { MAX_STAGE_PUBLISHERS } from '../multiGuestLayout';
 
 export type IVSConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'disconnected';
 export type IVSViewerTransport = 'realtime' | 'playback';
@@ -79,11 +80,10 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
   const participantMetaRef = useRef<Map<string, { isMuted: boolean; role?: string }>>(new Map());
 
   const multiGuestRegistry = useIVSMultiGuestRegistry({
-    maxPublishers: 11,
-    // Render ALL on-stage participants (host + up to 11 guests). At 6 the extra
-    // guests fell into "overflow" and showed as blank tiles even though someone
-    // was in them, and the cap could even evict the host stream.
-    visibleSlots: 12,
+    // Host + 11 guests. Cap of 11 previously dropped the 11th guest when the
+    // host stream was also registered.
+    maxPublishers: MAX_STAGE_PUBLISHERS,
+    visibleSlots: MAX_STAGE_PUBLISHERS,
     overflowLimit: 0,
     batchWindowMs: 75,
   });

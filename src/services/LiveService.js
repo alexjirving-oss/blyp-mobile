@@ -432,6 +432,19 @@ export async function setLiveGuests(streamId, guests) {
   }
 }
 
+/** Host-selected multi-guest composition; mirrored so every viewer matches. */
+export async function setGuestLayoutMode(streamId, guestLayoutMode) {
+  if (!streamId || !guestLayoutMode) return;
+  try {
+    await db.collection('liveStreams').doc(streamId).update({
+      guestLayoutMode: String(guestLayoutMode),
+      guestLayoutModeUpdatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    // Doc may be gone/ended; non-fatal.
+  }
+}
+
 // ---------- GUEST REQUESTS (Firestore mirror) ----------
 // The live-service owns the authoritative guest state machine, but the host's
 // only way of LEARNING about a new request was a 2.5s poll of that service —

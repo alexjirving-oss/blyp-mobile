@@ -82,10 +82,18 @@ import {
   endStream as endFirestoreStream,
   heartbeatStream,
   setLiveGuests as mirrorLiveGuests,
+  setGuestLayoutMode as mirrorGuestLayoutMode,
   subscribeToGuestRequests,
   setGuestRequestStatus as setGuestRequestStatusMirror,
   clearGuestRequest as clearGuestRequestMirror,
 } from '../services/LiveService';
+import {
+  LIVE_LAYOUT_MODES,
+  LIVE_LAYOUT_OPTIONS,
+  normalizeLiveLayoutMode,
+  layoutUsesBottomTray,
+  guestsPerTrayPage,
+} from '../live/ivs/multiGuestLayout';
 import { useLiveStreamRouteParams } from './live/useLiveStreamRouteParams';
 
 import Toast from 'react-native-toast-message';
@@ -407,6 +415,8 @@ const LiveStreamScreen = (props) => {
   // Start hidden so a solo host is full-bleed (no empty guest tiles over their
   // face); auto-reveals when a guest actually joins (effect below).
   const [hostGuestTrayMode, setHostGuestTrayMode] = useState('hidden'); // expanded | collapsed | hidden
+  /** Compositional layout (sticky slots apply inside each mode). Mirrored to viewers. */
+  const [guestLayoutMode, setGuestLayoutMode] = useState(LIVE_LAYOUT_MODES.BOTTOM_GRID);
   const prevHostGuestCountRef = useRef(0);
   const [showLayoutSwitcher, setShowLayoutSwitcher] = useState(false);
   const hostGuestPagerScrollRef = useRef(null);
@@ -1491,9 +1501,19 @@ const LiveStreamScreen = (props) => {
     }
     const unsub = HLSLiveStreamServiceInstance.subscribeToStream(activeStreamId, (data) => {
       setLiveGuests(data && Array.isArray(data.guests) ? data.guests : []);
+      if (data && data.guestLayoutMode) {
+        setGuestLayoutMode(normalizeLiveLayoutMode(data.guestLayoutMode));
+      }
     });
     return () => { try { unsub && unsub(); } catch { /* ignore */ } };
   }, [isViewer, routeStreamId, streamId]);
+
+  // Host: mirror compositional layout so every viewer renders the same sticky layout.
+  useEffect(() => {
+    if (backend !== StreamingBackend.IVS) return;
+    if (isViewer || !isStreaming || !streamId) return;
+    mirrorGuestLayoutMode(streamId, guestLayoutMode);
+  }, [backend, isViewer, isStreaming, streamId, guestLayoutMode]);
 
   // HLS mode: host subscribes to its own stream stats while live (so host doesn't stay at 0).
   useEffect(() => {
@@ -3065,6 +3085,7 @@ const LiveStreamScreen = (props) => {
           streamId={routeStreamId}
           hostUid={hostUid}
           guestRoster={liveGuests}
+          guestLayoutMode={guestLayoutMode}
           giftTotalsByUser={giftTotalsByUser}
           battleMode={!!routeBattleId}
           style={styles.viewerVideo}
@@ -3282,6 +3303,7 @@ const LiveStreamScreen = (props) => {
               streamId={routeStreamId}
               hostUid={hostUid}
               guestRoster={liveGuests}
+              guestLayoutMode={guestLayoutMode}
               giftTotalsByUser={giftTotalsByUser}
               battleMode={!!routeBattleId}
             />
@@ -3357,8 +3379,29 @@ const LiveStreamScreen = (props) => {
             </Modal>
 
             {backend === StreamingBackend.IVS ? (
-              <View style={[styles.ivsHostStage, routeBattleId ? styles.ivsBattleStage : null]}>
-                <View style={routeBattleId ? styles.ivsBattlePane : StyleSheet.absoluteFill}>
+              <View
+                style={[
+                  styles.ivsHostStage,
+                  routeBattleId ? styles.ivsBattleStage : null,
+                  !routeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
+                    ? styles.ivsComposeSide
+                    : null,
+                  !routeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID
+                    ? styles.ivsComposeEqual
+                    : null,
+                ]}
+              >
+                <View
+                  style={
+                    routeBattleId
+                      ? styles.ivsBattlePane
+                      : guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
+                        ? styles.ivsComposeHostPaneSide
+                        : guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID
+                          ? styles.ivsComposeHostPaneEqual
+                          : StyleSheet.absoluteFill
+                  }
+                >
                   {routeBattleId ? <View pointerEvents="none" style={styles.ivsBattleEdgeLeft} /> : null}
                   {isStreaming && NativeIVSBroadcastView ? (
                     <GestureHandlerRootView style={StyleSheet.absoluteFill}>
@@ -3443,6 +3486,98 @@ const LiveStreamScreen = (props) => {
                       </View>
                     )}
                   </View>
+                ) : !routeBattleId &&
+                  isStreaming &&
+                  (guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID ||
+                    guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE) ? (
+                  <View
+                    style={
+                      guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
+                        ? styles.ivsComposeGuestPaneSide
+                        : styles.ivsComposeGuestPaneEqual
+                    }
+                  >
+                    <ScrollView
+                      style={styles.ivsComposeGuestScroll}
+                      contentContainerStyle={
+                        guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
+                          ? styles.ivsComposeGuestCol
+                          : styles.ivsComposeGuestGrid
+                      }
+                      showsVerticalScrollIndicator={false}
+                    >
+                      {(() => {
+                        const GUEST_TILE_ZOOM = 16 / 9;
+                        const guestBySlot = new Map();
+                        (ivsHostSession.participants || []).forEach((p) => {
+                          if (p?.isLocal) return;
+                          if (typeof p?.slotIndex === 'number' && p.slotIndex >= 1 && p.slotIndex <= MAX_GUEST_SLOTS) {
+                            if (!guestBySlot.has(p.slotIndex) || guestBySlot.get(p.slotIndex)?.isLocal) {
+                              guestBySlot.set(p.slotIndex, p);
+                            }
+                          }
+                        });
+                        return Array.from({ length: MAX_GUEST_SLOTS }, (_, i) => {
+                          const slotId = i + 1;
+                          const p = guestBySlot.get(slotId) || null;
+                          const rosterGuest = (liveGuests || []).find(
+                            (g) => g && (
+                              (typeof g.slotIndex === 'number' && g.slotIndex === slotId) ||
+                              (p?.userId && String(g.userId) === String(p.userId))
+                            )
+                          ) || null;
+                          const guestPhoto = rosterGuest?.photoUrl || rosterGuest?.photoURL || null;
+                          const guestUserId = rosterGuest?.userId || p?.userId || null;
+                          const hostForcedCamOff = !!(guestUserId && cameraOffGuestIds?.has?.(String(guestUserId)));
+                          const remoteCamOff = !!(p?.isCameraDisabled || hostForcedCamOff);
+                          return (
+                            <View
+                              key={`host-compose-slot-${slotId}`}
+                              style={
+                                guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
+                                  ? styles.ivsComposeTileSide
+                                  : styles.ivsComposeTileEqual
+                              }
+                            >
+                              {p && NativeIVSRealTimeView && !remoteCamOff ? (
+                                <NativeIVSRealTimeView
+                                  style={styles.ivsTileVideo}
+                                  sessionId={ivsHostSession.sessionId || ivsHostSession.streamId || streamId}
+                                  slotId={slotId}
+                                  participantId={p.participantId}
+                                  remoteTrackCount={(ivsHostSession.participants || []).length}
+                                  zoom={GUEST_TILE_ZOOM}
+                                  testID={`ivs-host-compose-guest-${slotId}`}
+                                />
+                              ) : p && remoteCamOff ? (
+                                <View style={[styles.ivsTileVideo, styles.hostGuestCamOffFill]}>
+                                  {guestPhoto ? (
+                                    <Image source={{ uri: guestPhoto }} style={styles.hostGuestCamOffAvatar} />
+                                  ) : (
+                                    <Icon name="person" size={28} color="rgba(255,255,255,0.85)" />
+                                  )}
+                                </View>
+                              ) : (
+                                <View style={styles.ivsEmptyTile}>
+                                  <View style={styles.ivsEmptyTileInner} />
+                                </View>
+                              )}
+                              <View pointerEvents="none" style={styles.ivsSlotNumberBadge}>
+                                <Text style={styles.ivsSlotNumberText}>{slotId}</Text>
+                              </View>
+                              {p && !p.isLocal ? (
+                                <TouchableOpacity
+                                  style={StyleSheet.absoluteFill}
+                                  activeOpacity={0.85}
+                                  onPress={() => openGuestControl(p)}
+                                />
+                              ) : null}
+                            </View>
+                          );
+                        });
+                      })()}
+                    </ScrollView>
+                  </View>
                 ) : null}
               </View>
             ) : cameraReady ? (
@@ -3494,14 +3629,18 @@ const LiveStreamScreen = (props) => {
               </View>
             ) : null}
 
-            {/* Host guest boxes (IVS only) — battles use side-by-side stage instead. */}
-            {backend === StreamingBackend.IVS && isStreaming && !routeBattleId && (
+            {/* Host guest boxes (IVS only) — battles use side-by-side stage instead.
+                Equal / Split modes render sticky slots in the stage composition. */}
+            {backend === StreamingBackend.IVS && isStreaming && !routeBattleId && layoutUsesBottomTray(guestLayoutMode) && (
               <View
                 style={[
                   styles.ivsGuestTray,
                   { bottom: hostCommentsOverlayHeight || 0 },
                   hostGuestTrayMode === 'hidden'
                     ? { height: HOST_GUEST_TRAY_HIDDEN_TAB_HEIGHT, paddingBottom: 0 }
+                    : null,
+                  guestLayoutMode === LIVE_LAYOUT_MODES.HOST_FOCUS
+                    ? styles.ivsGuestTrayFocus
                     : null,
                 ]}
                 {...hostGuestTrayPanResponder.panHandlers}
@@ -3531,7 +3670,13 @@ const LiveStreamScreen = (props) => {
                       const GUEST_TILE_ZOOM = 16 / 9;
                       // Guest slots are capped at the IVS publisher limit (host + 11 guests).
                       const guestSlotsTotal = MAX_GUEST_SLOTS;
-                      const guestsPerPage = hostGuestTrayMode === 'expanded' ? 8 : 4;
+                      const trayDensity =
+                        guestLayoutMode === LIVE_LAYOUT_MODES.HOST_FOCUS
+                          ? 'collapsed'
+                          : hostGuestTrayMode === 'expanded'
+                            ? 'expanded'
+                            : 'collapsed';
+                      const guestsPerPage = guestsPerTrayPage(guestLayoutMode, trayDensity);
                       const pageCount = Math.max(1, Math.ceil(guestSlotsTotal / guestsPerPage));
                       const guestBySlot = new Map();
                       (ivsHostSession.participants || []).forEach((p) => {
@@ -3792,18 +3937,22 @@ const LiveStreamScreen = (props) => {
                 >
                   {showLayoutSwitcher ? (
                     <View style={styles.layoutSwitcher}>
-                      {[
-                        { id: 'full', label: 'Full', icon: 'square-outline', mode: 'hidden' },
-                        { id: 'strip', label: 'Strip', icon: 'reorder-four-outline', mode: 'collapsed' },
-                        { id: 'grid', label: 'Grid', icon: 'grid-outline', mode: 'expanded' },
-                      ].map((opt) => {
-                        const active = hostGuestTrayMode === opt.mode;
+                      {LIVE_LAYOUT_OPTIONS.map((opt) => {
+                        const active = guestLayoutMode === opt.id;
                         return (
                           <TouchableOpacity
                             key={opt.id}
                             style={[styles.layoutOption, active && styles.layoutOptionActive]}
                             onPress={() => {
-                              setHostGuestTrayMode(opt.mode);
+                              setGuestLayoutMode(opt.id);
+                              if (opt.id === LIVE_LAYOUT_MODES.HOST_FOCUS) {
+                                setHostGuestTrayMode('collapsed');
+                              } else if (opt.id === LIVE_LAYOUT_MODES.BOTTOM_GRID) {
+                                setHostGuestTrayMode((prev) => (prev === 'hidden' ? 'collapsed' : prev));
+                              } else {
+                                // Equal / Split use the stage composition, not the bottom tray.
+                                setHostGuestTrayMode('hidden');
+                              }
                               setShowLayoutSwitcher(false);
                             }}
                           >
@@ -4071,6 +4220,73 @@ const styles = StyleSheet.create({
   ivsHostStage: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  ivsComposeSide: {
+    flexDirection: 'row',
+  },
+  ivsComposeEqual: {
+    flexDirection: 'column',
+  },
+  ivsComposeHostPaneSide: {
+    flex: 1.15,
+    height: '100%',
+    overflow: 'hidden',
+  },
+  ivsComposeHostPaneEqual: {
+    flex: 1.25,
+    width: '100%',
+    overflow: 'hidden',
+  },
+  ivsComposeGuestPaneSide: {
+    flex: 0.85,
+    height: '100%',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(10,10,12,0.55)',
+  },
+  ivsComposeGuestPaneEqual: {
+    flex: 1,
+    width: '100%',
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 8,
+    backgroundColor: 'rgba(10,10,12,0.45)',
+  },
+  ivsComposeGuestScroll: {
+    flex: 1,
+  },
+  ivsComposeGuestCol: {
+    flexGrow: 1,
+    gap: 8,
+  },
+  ivsComposeGuestGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  ivsComposeTileSide: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 190, 0.35)',
+  },
+  ivsComposeTileEqual: {
+    width: '30%',
+    marginHorizontal: '1.5%',
+    marginBottom: 10,
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 190, 0.35)',
+  },
+  ivsGuestTrayFocus: {
+    // Host-focus: keep the strip visually lighter above comments.
+    opacity: 1,
   },
   ivsBattleStage: {
     flexDirection: 'row',

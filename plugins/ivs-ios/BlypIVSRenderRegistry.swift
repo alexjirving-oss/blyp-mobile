@@ -98,12 +98,27 @@ final class BlypIVSRenderRegistry: NSObject {
 
     // MARK: - Slot assignment (parity with Android slotIndex)
 
-    @objc func assignSlot(forParticipant participantId: String) -> Int {
+    /// Sticky slot assignment. Honors host-assigned `slotIndex` from IVS token
+    /// attributes so host + all viewers keep the same box. On leave, the slot is
+    /// released but remaining guests are NOT compacted into lower indices.
+    @objc func assignSlot(forParticipant participantId: String, attributes: [String: String]? = nil) -> Int {
         lock.lock(); defer { lock.unlock() }
         if let existing = slotByParticipant[participantId] { return existing }
-        // Find the lowest free slot index so freed slots get reused.
         let used = Set(slotByParticipant.values)
-        var slot = 0
+
+        let role = attributes?["role"] ?? ""
+        if role == "host" {
+            slotByParticipant[participantId] = 0
+            return 0
+        }
+
+        if let attrRaw = attributes?["slotIndex"], let attrSlot = Int(attrRaw), attrSlot >= 1, attrSlot <= 11, !used.contains(attrSlot) {
+            slotByParticipant[participantId] = attrSlot
+            return attrSlot
+        }
+
+        // First free sticky guest box (1-based). Never reuse slot 0 (host).
+        var slot = 1
         while used.contains(slot) { slot += 1 }
         slotByParticipant[participantId] = slot
         return slot

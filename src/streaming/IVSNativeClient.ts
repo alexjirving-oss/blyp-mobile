@@ -351,10 +351,16 @@ export class IVSNativeClient implements LiveStreamingClient {
           isCameraDisabled: false,
         });
 
+        // iOS historically omitted streamKey; fall back to participantId so the
+        // multi-guest registry can still attach high slot counts.
+        const streamKey =
+          typeof data.streamKey === 'string' && data.streamKey.length > 0
+            ? data.streamKey
+            : participantId;
         this.emit('remoteVideoTrackAdded', {
           participantId,
           userId: data.userId,
-          streamKey: data.streamKey,
+          streamKey,
           slotIndex,
           role: data.role,
           videoTrackCount: next,

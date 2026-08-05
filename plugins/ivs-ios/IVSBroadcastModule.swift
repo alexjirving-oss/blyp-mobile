@@ -334,7 +334,12 @@ extension IVSBroadcastModule: IVSStageRenderer {
         }
         runOnMain { [weak self] in
             guard let self = self else { return }
-            let slot = BlypIVSRenderRegistry.shared.assignSlot(forParticipant: participant.participantId)
+            var attrs: [String: String] = [:]
+            for (k, v) in participant.attributes {
+                if let s = v as? String { attrs[k] = s }
+                else if let n = v as? NSNumber { attrs[k] = n.stringValue }
+            }
+            let slot = BlypIVSRenderRegistry.shared.assignSlot(forParticipant: participant.participantId, attributes: attrs)
             self.emit("IVS_REMOTE_PARTICIPANT_JOINED", [
                 "participantId": participant.participantId,
                 "userId": participant.attributes["userId"] as Any,
@@ -383,15 +388,27 @@ extension IVSBroadcastModule: IVSStageRenderer {
         runOnMain { [weak self] in
             guard let self = self else { return }
             let pid = participant.participantId
-            let slot = BlypIVSRenderRegistry.shared.slot(forParticipant: pid)
+            var attrs: [String: String] = [:]
+            for (k, v) in participant.attributes {
+                if let s = v as? String { attrs[k] = s }
+                else if let n = v as? NSNumber { attrs[k] = n.stringValue }
+            }
+            // Prefer sticky token slot; assign if join callback was missed.
+            let existing = BlypIVSRenderRegistry.shared.slot(forParticipant: pid)
+            let slot = existing >= 0
+                ? existing
+                : BlypIVSRenderRegistry.shared.assignSlot(forParticipant: pid, attributes: attrs)
             for stream in streams {
                 if let imageDevice = stream.device as? IVSImageDevice {
                     if let preview = try? imageDevice.previewView(with: .fill) {
                         BlypIVSRenderRegistry.shared.setRemotePreview(preview, forParticipant: pid)
                     }
+                    // streamKey required by JS multi-guest registry (Android parity).
+                    let streamKey = "\(pid):video"
                     self.emit("IVS_REMOTE_VIDEO_ADDED", [
                         "participantId": pid,
                         "userId": participant.attributes["userId"] as Any,
+                        "streamKey": streamKey,
                         "slotIndex": slot,
                         "role": participant.attributes["role"] ?? "guest",
                     ])

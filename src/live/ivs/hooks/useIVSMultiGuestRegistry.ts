@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { MAX_STAGE_PUBLISHERS } from '../multiGuestLayout';
 
 export type StreamEntry = {
   participantId: string;
@@ -45,13 +46,22 @@ type MultiGuestRegistry = {
   reset: () => void;
 };
 
-const DEFAULT_MAX_PUBLISHERS = 11;
-const DEFAULT_VISIBLE_SLOTS = 6;
-const DEFAULT_OVERFLOW_LIMIT = 5;
+/** Host + 11 guests. Dropping below this silently blanks high guest slots. */
+const DEFAULT_MAX_PUBLISHERS = MAX_STAGE_PUBLISHERS;
+/** Render every on-stage publisher; UI places by sticky slotIndex. */
+const DEFAULT_VISIBLE_SLOTS = MAX_STAGE_PUBLISHERS;
+const DEFAULT_OVERFLOW_LIMIT = 0;
 const DEFAULT_BATCH_WINDOW_MS = 75;
 
-const sortByPriority = (a: StreamEntry, b: StreamEntry) => {
-  if (a.isMuted !== b.isMuted) return a.isMuted ? 1 : -1;
+/**
+ * Sticky ordering: host first, then by authoritative slotIndex.
+ * Never re-rank by mute/join time — that compacted vacated boxes into lower tiles.
+ */
+const sortByStickySlot = (a: StreamEntry, b: StreamEntry) => {
+  if (a.isHost !== b.isHost) return a.isHost ? -1 : 1;
+  const sa = typeof a.slotIndex === 'number' && a.slotIndex >= 1 ? a.slotIndex : Number.MAX_SAFE_INTEGER;
+  const sb = typeof b.slotIndex === 'number' && b.slotIndex >= 1 ? b.slotIndex : Number.MAX_SAFE_INTEGER;
+  if (sa !== sb) return sa - sb;
   if (a.addedAt !== b.addedAt) return a.addedAt - b.addedAt;
   return a.streamKey.localeCompare(b.streamKey);
 };
@@ -63,7 +73,6 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
   const batchWindowMs = config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS;
 
   const registryRef = useRef<Map<string, StreamEntry>>(new Map());
-  const visibleKeysRef = useRef<string[]>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [visibleStreams, setVisibleStreams] = useState<StreamEntry[]>([]);
@@ -74,6 +83,7 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
     const registry = registryRef.current;
     if (registry.size <= maxPublishers) return;
 
+    // Drop newest non-host only — never evict the host stream.
     const nonHostEntries = Array.from(registry.values())
       .filter((entry) => !entry.isHost)
       .sort((a, b) => b.addedAt - a.addedAt);
@@ -97,49 +107,21 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
       const entries = Array.from(registry.values());
       let renderable = entries.filter((entry) => entry.hasFirstFrame);
 
-      // If first-frame events are missing, fall back to any entries so UI can render instead of stalling
+      // If first-frame events are missing, fall back so UI can render instead of stalling.
       if (renderable.length === 0 && entries.length > 0) {
         renderable = entries;
       }
 
-      const hostEntry = renderable.find((entry) => entry.isHost) || null;
-      const nextVisible: StreamEntry[] = [];
-      const used = new Set<string>();
+      // Sticky: keep every renderable stream in its slot order. Do NOT dense-fill
+      // vacated indices from a priority pool (that compacted box 3 into box 2).
+      const ordered = renderable.slice().sort(sortByStickySlot);
+      const nextVisible = ordered.slice(0, visibleSlots);
+      const used = new Set(nextVisible.map((e) => e.streamKey));
+      const overflowPool =
+        overflowLimit > 0
+          ? ordered.filter((entry) => !used.has(entry.streamKey)).slice(0, overflowLimit)
+          : [];
 
-      if (hostEntry) {
-        nextVisible.push(hostEntry);
-        used.add(hostEntry.streamKey);
-      }
-
-      // Preserve existing visible ordering (excluding host) when still eligible
-      visibleKeysRef.current.forEach((key) => {
-        if (used.has(key)) return;
-        const existing = registry.get(key);
-        if (!existing) return;
-        if (existing.isHost) return;
-        if (!existing.hasFirstFrame) return;
-        if (nextVisible.length >= visibleSlots) return;
-        nextVisible.push(existing);
-        used.add(key);
-      });
-
-      const candidatePool = renderable
-        .filter((entry) => !used.has(entry.streamKey) && !entry.isHost)
-        .sort(sortByPriority);
-
-      while (nextVisible.length < visibleSlots && candidatePool.length > 0) {
-        const entry = candidatePool.shift();
-        if (!entry) break;
-        nextVisible.push(entry);
-        used.add(entry.streamKey);
-      }
-
-      const overflowPool = renderable
-        .filter((entry) => !used.has(entry.streamKey) && !entry.isHost)
-        .sort(sortByPriority)
-        .slice(0, overflowLimit);
-
-      visibleKeysRef.current = nextVisible.map((entry) => entry.streamKey);
       setVisibleStreams(nextVisible);
       setOverflowStreams(overflowPool);
       setPublisherCount(entries.length);
@@ -257,7 +239,6 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
 
   const reset = useCallback(() => {
     registryRef.current = new Map();
-    visibleKeysRef.current = [];
     setVisibleStreams([]);
     setOverflowStreams([]);
     setPublisherCount(0);

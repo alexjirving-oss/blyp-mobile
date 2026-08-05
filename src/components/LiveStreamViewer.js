@@ -53,6 +53,12 @@ import { createGuestToken, requestGuestSlot, getMyGuestRequest, leaveGuest, gues
 import { requestCameraAndAudioPermission } from '../utils/permissions';
 import { getIVSNativeClient } from '../streaming/IVSNativeClient';
 import { subscribeToRoomEvents } from '../realtime/roomEventsSocket';
+import {
+  LIVE_LAYOUT_MODES,
+  normalizeLiveLayoutMode,
+  layoutUsesBottomTray,
+  guestsPerTrayPage,
+} from '../live/ivs/multiGuestLayout';
 
 import {
   getNativeIVSBroadcastView,
@@ -92,6 +98,7 @@ const LiveStreamViewer = ({
   overlayBottomInset = 0,
   onGuestPagerLayout,
   guestRoster = [],
+  guestLayoutMode = LIVE_LAYOUT_MODES.BOTTOM_GRID,
   giftTotalsByUser = {},
   battleMode = false,
 }) => {
@@ -108,6 +115,7 @@ const LiveStreamViewer = ({
         overlayBottomInset={overlayBottomInset}
         onGuestPagerLayout={onGuestPagerLayout}
         guestRoster={guestRoster}
+        guestLayoutMode={guestLayoutMode}
         giftTotalsByUser={giftTotalsByUser}
         battleMode={battleMode}
       />
@@ -130,6 +138,7 @@ const IVSLiveStreamViewer = ({
   overlayBottomInset = 0,
   onGuestPagerLayout,
   guestRoster = [],
+  guestLayoutMode: guestLayoutModeProp = LIVE_LAYOUT_MODES.BOTTOM_GRID,
   giftTotalsByUser = {},
   battleMode = false,
 }) => {
@@ -1115,8 +1124,19 @@ const IVSLiveStreamViewer = ({
         (!hostStream || !s.participantId || s.participantId !== hostStream.participantId)
     );
     // Guest slots are capped at the IVS publisher limit (host + 11 guests).
+    const guestLayoutMode = normalizeLiveLayoutMode(guestLayoutModeProp);
     const guestSlotsTotal = MAX_GUEST_SLOTS;
-    const guestsPerPage = guestTrayMode === 'expanded' ? 8 : guestTrayMode === 'collapsed' ? 4 : 0;
+    const useBottomTray = layoutUsesBottomTray(guestLayoutMode);
+    const trayDensity =
+      guestLayoutMode === LIVE_LAYOUT_MODES.HOST_FOCUS
+        ? 'collapsed'
+        : guestTrayMode === 'expanded'
+          ? 'expanded'
+          : 'collapsed';
+    const guestsPerPage =
+      useBottomTray && guestTrayMode !== 'hidden'
+        ? guestsPerTrayPage(guestLayoutMode, trayDensity)
+        : 0;
     const pageCount = guestsPerPage > 0 ? Math.max(1, Math.ceil(guestSlotsTotal / guestsPerPage)) : 0;
 
     // Slot-aware tile mapping (single source of truth): place each guest in the
@@ -1157,11 +1177,17 @@ const IVSLiveStreamViewer = ({
     };
     const anySlotIndexed = guestStreams.some((s) => typeof effectiveSlot(s) === 'number');
     const streamForSlot = (slot) => {
+      // Sticky placement only — never compact by array index when a middle box leaves.
       if (anySlotIndexed) {
         return guestStreams.find((s) => s && effectiveSlot(s) === slot) || null;
       }
-      // legacy: remote guests start at box 2 (box 1 was the reserved CTA/self tile)
-      return slot >= 2 ? guestStreams[slot - 2] || null : null;
+      // Roster can still place guests when native attrs are missing.
+      const rosterUserId = userBySlotIndex.get(slot);
+      if (rosterUserId) {
+        const pid = Array.from(userByParticipant.entries()).find(([, uid]) => uid === rosterUserId)?.[0];
+        if (pid) return guestStreams.find((s) => s && s.participantId === pid) || null;
+      }
+      return null;
     };
     const occupiedSlots = new Set();
     if (typeof guestSlotId === 'number') occupiedSlots.add(guestSlotId);
@@ -1275,6 +1301,72 @@ const IVSLiveStreamViewer = ({
       );
     }
 
+    const composeSide = guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE;
+    const composeEqual = guestLayoutMode === LIVE_LAYOUT_MODES.EQUAL_GRID;
+    const renderComposeGuestSlots = () => (
+      <ScrollView
+        style={styles.composeGuestScroll}
+        contentContainerStyle={composeSide ? styles.composeGuestCol : styles.composeGuestGrid}
+        showsVerticalScrollIndicator={false}
+      >
+        {Array.from({ length: guestSlotsTotal }, (_, i) => {
+          const globalSlotId = i + 1;
+          const stream =
+            !(guestMode && guestSlotId === globalSlotId) ? streamForSlot(globalSlotId) : null;
+          const tileUserId =
+            guestMode && guestSlotId === globalSlotId
+              ? uid
+              : userBySlotIndex.get(globalSlotId) ||
+                (stream ? userByParticipant.get(stream.participantId) : null) ||
+                null;
+          const isSelfTile = !!(guestMode && guestSlotId === globalSlotId);
+          const remoteCamOff = !!(stream && stream.isCameraDisabled);
+          const showAvatar =
+            (isSelfTile && !effectiveSelfCamOn) || (!isSelfTile && remoteCamOff);
+          return (
+            <View
+              key={`viewer-compose-slot-${globalSlotId}`}
+              style={composeSide ? styles.composeTileSide : styles.composeTileEqual}
+            >
+              <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinStyles.guestPos} />
+              {isSelfTile ? (
+                NativeIVSBroadcastView ? (
+                  <View style={styles.tileVideoSurface}>
+                    {!showAvatar ? (
+                      <NativeIVSBroadcastView zoom={GUEST_TILE_ZOOM} style={StyleSheet.absoluteFill} />
+                    ) : null}
+                  </View>
+                ) : (
+                  <View style={styles.tilePlaceholder}>
+                    <Text style={styles.placeholderText}>Camera unavailable</Text>
+                  </View>
+                )
+              ) : stream && !showAvatar ? (
+                <NativeIVSRealTimeView
+                  style={styles.realTimeView}
+                  stageArn={stageArnForSurface}
+                  token={tokenForSurface}
+                  sessionId={streamId}
+                  slotId={globalSlotId}
+                  participantId={stream.participantId}
+                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                  zoom={GUEST_TILE_ZOOM}
+                  testID={`ivs-realtime-compose-guest-${globalSlotId}`}
+                />
+              ) : (
+                <View style={styles.emptyTile}>
+                  <View style={styles.emptyTileInner} />
+                </View>
+              )}
+              <View pointerEvents="none" style={styles.slotNumberBadge}>
+                <Text style={styles.slotNumberText}>{globalSlotId}</Text>
+              </View>
+            </View>
+          );
+        })}
+      </ScrollView>
+    );
+
     return (
       <View
         style={[styles.container, style]}
@@ -1283,73 +1375,94 @@ const IVSLiveStreamViewer = ({
           setLayout(e.nativeEvent.layout);
         }}
       >
-        {/* Host stays prominent + fixed; only guests page */}
-        <View style={styles.hostStage}>
-          {hostStream ? (
-            <NativeIVSRealTimeView
-              style={styles.realTimeView}
-              stageArn={stageArnForSurface}
-              token={tokenForSurface}
-              sessionId={streamId}
-              slotId={0}
-              participantId={hostStream.participantId}
-              remoteTrackCount={ivsSession.remoteVideoTracks}
-              zoom={1.0}
-              testID="ivs-realtime-viewer-host"
-            />
-          ) : (
-            <View style={styles.hostPlaceholder}>
-              <Text style={styles.placeholderText}>Waiting for host…</Text>
-            </View>
-          )}
-
-          <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinStyles.hostPos} />
-
-          {guestMode && (
-            <View style={styles.guestModeBanner}>
-              <Text style={styles.guestModeText}>Guest mode</Text>
-              <View style={styles.guestMediaControls}>
-                <TouchableOpacity
-                  style={[styles.guestMediaBtn, (!selfMicOn || mutedByHost) && styles.guestMediaBtnOff]}
-                  onPress={toggleSelfMic}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Icon
-                    name={(!selfMicOn || mutedByHost) ? 'mic-off' : 'mic'}
-                    size={16}
-                    color="#fff"
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.guestMediaBtn, (!selfCamOn || cameraOffByHost) && styles.guestMediaBtnOff]}
-                  onPress={toggleSelfCam}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Icon
-                    name={(!selfCamOn || cameraOffByHost) ? 'videocam-off' : 'videocam'}
-                    size={16}
-                    color="#fff"
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
-                  <Text style={styles.leaveGuestText}>Leave guest</Text>
-                </TouchableOpacity>
+        {/* Host stays prominent + fixed; only guests page (or compose for Equal/Split). */}
+        <View
+          style={[
+            styles.hostStage,
+            composeSide ? styles.composeSide : null,
+            composeEqual ? styles.composeEqual : null,
+          ]}
+        >
+          <View
+            style={
+              composeSide
+                ? styles.composeHostPaneSide
+                : composeEqual
+                  ? styles.composeHostPaneEqual
+                  : StyleSheet.absoluteFill
+            }
+          >
+            {hostStream ? (
+              <NativeIVSRealTimeView
+                style={styles.realTimeView}
+                stageArn={stageArnForSurface}
+                token={tokenForSurface}
+                sessionId={streamId}
+                slotId={0}
+                participantId={hostStream.participantId}
+                remoteTrackCount={ivsSession.remoteVideoTracks}
+                zoom={1.0}
+                testID="ivs-realtime-viewer-host"
+              />
+            ) : (
+              <View style={styles.hostPlaceholder}>
+                <Text style={styles.placeholderText}>Waiting for host…</Text>
               </View>
-            </View>
-          )}
+            )}
 
-          {!!guestJoinError && (
-            <View style={styles.guestErrorBanner}>
-              <Text style={styles.guestErrorText}>{guestJoinError}</Text>
+            <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinStyles.hostPos} />
+
+            {guestMode && (
+              <View style={styles.guestModeBanner}>
+                <Text style={styles.guestModeText}>Guest mode</Text>
+                <View style={styles.guestMediaControls}>
+                  <TouchableOpacity
+                    style={[styles.guestMediaBtn, (!selfMicOn || mutedByHost) && styles.guestMediaBtnOff]}
+                    onPress={toggleSelfMic}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Icon
+                      name={(!selfMicOn || mutedByHost) ? 'mic-off' : 'mic'}
+                      size={16}
+                      color="#fff"
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.guestMediaBtn, (!selfCamOn || cameraOffByHost) && styles.guestMediaBtnOff]}
+                    onPress={toggleSelfCam}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Icon
+                      name={(!selfCamOn || cameraOffByHost) ? 'videocam-off' : 'videocam'}
+                      size={16}
+                      color="#fff"
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
+                    <Text style={styles.leaveGuestText}>Leave guest</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {!!guestJoinError && (
+              <View style={styles.guestErrorBanner}>
+                <Text style={styles.guestErrorText}>{guestJoinError}</Text>
+              </View>
+            )}
+          </View>
+          {(composeSide || composeEqual) ? (
+            <View style={composeSide ? styles.composeGuestPaneSide : styles.composeGuestPaneEqual}>
+              {renderComposeGuestSlots()}
             </View>
-          )}
+          ) : null}
         </View>
 
         {/*
           Fill the small gap between guest tiles and the comments bar with the header/theme color.
           Keeps the guest area itself transparent (no blue behind tiles).
         */}
-        {overlayBottomInset > 0 && guestBottomStripHeight > 0 && (
+        {useBottomTray && overlayBottomInset > 0 && guestBottomStripHeight > 0 && (
           <View
             pointerEvents="none"
             style={[
@@ -1359,6 +1472,7 @@ const IVSLiveStreamViewer = ({
           />
         )}
 
+        {useBottomTray ? (
         <View
           {...guestTrayPanResponder.panHandlers}
           style={[
@@ -1571,6 +1685,18 @@ const IVSLiveStreamViewer = ({
             </ScrollView>
           )}
         </View>
+        ) : (
+          // Equal / Split: guest chrome lives in the stage composition.
+          typeof onGuestPagerLayout === 'function' ? (
+            <View
+              style={{ height: 0 }}
+              onLayout={() => {
+                setGuestPagerMeasuredHeight(0);
+                onGuestPagerLayout(0);
+              }}
+            />
+          ) : null
+        )}
         {!hasRenderableStreams && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color="#fff" />
@@ -2454,6 +2580,69 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#000',
+  },
+  composeSide: {
+    flexDirection: 'row',
+  },
+  composeEqual: {
+    flexDirection: 'column',
+  },
+  composeHostPaneSide: {
+    flex: 1.15,
+    height: '100%',
+    overflow: 'hidden',
+  },
+  composeHostPaneEqual: {
+    flex: 1.25,
+    width: '100%',
+    overflow: 'hidden',
+  },
+  composeGuestPaneSide: {
+    flex: 0.85,
+    height: '100%',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(10,10,12,0.55)',
+  },
+  composeGuestPaneEqual: {
+    flex: 1,
+    width: '100%',
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 8,
+    backgroundColor: 'rgba(10,10,12,0.45)',
+  },
+  composeGuestScroll: {
+    flex: 1,
+  },
+  composeGuestCol: {
+    flexGrow: 1,
+    gap: 8,
+  },
+  composeGuestGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  composeTileSide: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 190, 0.35)',
+  },
+  composeTileEqual: {
+    width: '30%',
+    marginHorizontal: '1.5%',
+    marginBottom: 10,
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 210, 190, 0.35)',
   },
   battleStage: {
     flex: 1,

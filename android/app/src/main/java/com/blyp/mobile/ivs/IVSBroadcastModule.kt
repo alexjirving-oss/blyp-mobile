@@ -1371,6 +1371,19 @@ class IVSBroadcastModule(
         // Hard rule: slot 0 is pinned for the primary remote video for the duration of a session.
         // Once set, we never clear viewerParticipantId, and we never allow any other participant
         // to be assigned slot 0 (even if the primary temporarily disconnects).
+        // Guest sticky boxes are 1..N on every device. Do NOT skip slot 1 on viewers —
+        // that compacted later guests when token attributes were missing.
+        fun firstFreeGuestSlot(): Int {
+            val candidates = (1..MAX_REMOTE_VIDEO_STREAMS)
+            val free = candidates.firstOrNull { !used.contains(it) }
+            if (free != null) return free
+            // Extremely defensive: never overwrite an occupied sticky box.
+            var spill = MAX_REMOTE_VIDEO_STREAMS + 1
+            while (used.contains(spill)) spill += 1
+            Log.w(IVS_TAG, "[IVS_SLOT] spillGuestSlot participant=$participantId slot=$spill used=$used")
+            return spill
+        }
+
         val slotId = if (sessionMode == SessionMode.VIEWER || sessionMode == SessionMode.GUEST) {
             if (viewerParticipantId == null) {
                 viewerParticipantId = participantId
@@ -1380,15 +1393,13 @@ class IVSBroadcastModule(
             if (participantId == viewerParticipantId) {
                 0
             } else {
-                val candidates = (2..MAX_REMOTE_VIDEO_STREAMS)
-                candidates.firstOrNull { !used.contains(it) } ?: 2
+                firstFreeGuestSlot()
             }
         } else {
             // Host devices:
             // - slot 0 is the local host preview
             // - guest boxes start at slot 1 (must match the guest device's local self tile = slot 1)
-            val candidates = (1..MAX_REMOTE_VIDEO_STREAMS)
-            candidates.firstOrNull { !used.contains(it) } ?: 1
+            firstFreeGuestSlot()
         }
 
         participantToSlot[participantId] = slotId
