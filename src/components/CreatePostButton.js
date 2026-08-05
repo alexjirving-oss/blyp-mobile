@@ -9,6 +9,7 @@ import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import { requireAccount } from '../services/guestSessionService';
 import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import PressableLift from './motion/PressableLift';
+import TourTarget from '../tour/TourTarget';
 
 export const COMPOSE_DRAFT_KEY = 'blyp_compose_draft_v1';
 
@@ -119,7 +120,7 @@ const CreatePostButton = () => {
 
   return (
     <>
-      <View style={styles.container}>
+      <TourTarget id="create" style={styles.container}>
         <PressableLift
           style={styles.button}
           onPress={handlePress}
@@ -134,7 +135,7 @@ const CreatePostButton = () => {
             <Icon name="add" size={30} color={COLORS.black} />
           </View>
         </PressableLift>
-      </View>
+      </TourTarget>
 
       <Modal
         visible={showMenu}

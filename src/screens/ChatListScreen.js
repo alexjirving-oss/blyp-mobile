@@ -7,6 +7,7 @@ import { collection, query, orderBy, onSnapshot, where, doc, getDoc } from 'fire
 import { auth, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
+import { subscribeTourSelect } from '../tour/tourBus';
 import { useIsFocused } from '@react-navigation/native';
 import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import BlypAvatar from '../components/BlypAvatar';
@@ -117,6 +118,14 @@ const ChatListScreen = ({ navigation }) => {
   const [selectedTab, setSelectedTab] = useState('notifications');
   // Double-tap the Chat/Games tab → reset to the first sub-page ("Live").
   useTabReset('Chat', () => setSelectedTab('notifications'));
+
+  useEffect(() => {
+    return subscribeTourSelect((payload) => {
+      if (payload?.screen !== 'Chat' || !payload?.tab) return;
+      setSelectedTab(payload.tab);
+    });
+  }, []);
+
   const [chats, setChats] = useState([]);
   const [followingUsers, setFollowingUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');

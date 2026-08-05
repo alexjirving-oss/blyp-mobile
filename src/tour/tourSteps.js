@@ -3,72 +3,135 @@
  *
  * Each step can optionally navigate so the real surface is visible behind the
  * coach card. Dating is soft-mentioned for free users (no hard paywall push).
+ *
+ * targetId  — live measure from TourTarget (preferred)
+ * targetZone — heuristic spotlight when measure is missing
+ * preferredPlacement — hint for callout placement (above|below|left|right)
  */
 
-export const TOUR_VERSION = 1;
+export const TOUR_VERSION = 2;
 
 /**
- * @param {{ hasDating?: boolean }} opts
+ * @param {{ hasDating?: boolean, hasGames?: boolean }} opts
  * @returns {Array<{
  *   id: string,
  *   title: string,
  *   body: string,
  *   icon: string,
  *   accent?: string,
- *   navigate?: { type: 'tab' | 'stack' | 'homeForYou', name?: string, params?: object },
+ *   navigate?: { type: string, name?: string, params?: object, select?: string },
+ *   targetId?: string,
+ *   targetZone?: string,
+ *   preferredPlacement?: 'above' | 'below' | 'left' | 'right',
  *   soft?: boolean,
  * }>}
  */
-export function buildTourSteps({ hasDating = true } = {}) {
+export function buildTourSteps({ hasDating = true, hasGames = false } = {}) {
   const steps = [
     {
       id: 'welcome',
       title: 'Welcome to Blyp',
-      body: 'A quick tour of the places you’ll use every day. Skip anytime — you can replay it from Settings.',
+      body: 'A quick tour of the places you’ll use every day. Skip anytime — replay from Settings or Notifications.',
       icon: 'sparkles',
-      navigate: { type: 'tab', name: 'Home' },
+      navigate: { type: 'tab', name: 'Home', select: 'A' },
+      targetZone: 'center.soft',
+      preferredPlacement: 'below',
     },
     {
       id: 'forYou',
       title: 'For You',
-      body: 'Your personalized feed opens first. Tap the pinned Home chip beside For You to open your Home base hub (Jump in, Dating, live rails).',
+      body: 'Your personalized feed opens first. Swipe through clips and discover people who match your vibe.',
       icon: 'flame',
       navigate: { type: 'homeForYou' },
+      targetId: 'headerTab:A',
+      targetZone: 'header.forYou',
+      preferredPlacement: 'below',
+    },
+    {
+      id: 'forYouActions',
+      title: 'For You actions',
+      body: 'Use the side actions to like, comment, share, and save. That’s how you engage without leaving the feed.',
+      icon: 'heart',
+      navigate: { type: 'homeForYou' },
+      targetZone: 'foryou.actions',
+      preferredPlacement: 'left',
+    },
+    {
+      id: 'homeHub',
+      title: 'Home hub',
+      body: 'Tap the Home chip beside For You for your hub — Jump in, live rails, Dating, and quick shortcuts.',
+      icon: 'home',
+      navigate: { type: 'homeHub' },
+      targetId: 'headerTab:home',
+      targetZone: 'header.home',
+      preferredPlacement: 'below',
     },
     {
       id: 'create',
-      title: 'Create',
-      body: 'Tap the teal + in the tab bar to post a clip, photo, or story. That’s how you show up on Blyp.',
+      title: 'Create (+)',
+      body: 'Tap the teal + to open Create — photo, video, library, or resume a draft. This is how you post on Blyp.',
       icon: 'add-circle',
       navigate: { type: 'tab', name: 'Home' },
+      targetId: 'create',
+      targetZone: 'tab.create',
+      preferredPlacement: 'above',
+    },
+    {
+      id: 'goLive',
+      title: 'Go Live',
+      body: 'Inside Create, tap Go Live to start a stream. Hosts go live from the same + button.',
+      icon: 'radio',
+      navigate: { type: 'tab', name: 'Home' },
+      targetId: 'create',
+      targetZone: 'tab.create',
+      preferredPlacement: 'above',
     },
     {
       id: 'blypSearch',
       title: 'Ask Blyp',
-      body: 'Blyp is your AI search — ask about games, places, people, or what’s on. Open it anytime from Home or Search.',
+      body: 'Blyp is your AI search — ask about games, places, people, or what’s on. Open it from Home or Search.',
       icon: 'search',
       navigate: { type: 'stack', name: 'Blyp' },
+      targetZone: 'center.soft',
+      preferredPlacement: 'below',
     },
     {
       id: 'live',
-      title: 'Live & battles',
-      body: 'Chat/Games is where Live streams, battles, and team play live. Catch a stream or jump into a battle.',
-      icon: 'radio',
-      navigate: { type: 'tab', name: 'Chat' },
+      title: 'Live',
+      body: 'Chat/Games → Live shows who’s streaming now. Tap in to watch or chat with the room.',
+      icon: 'videocam',
+      navigate: { type: 'chatTab', select: 'notifications' },
+      targetId: 'headerTab:notifications',
+      targetZone: 'header.tabs',
+      preferredPlacement: 'below',
+    },
+    {
+      id: 'battlesPromote',
+      title: 'Battles & Promote',
+      body: 'Battles are head-to-head live matchups. Promote (coins) can boost battles or spotlight — use it lightly when you’re ready.',
+      icon: 'trophy',
+      navigate: { type: 'chatTab', select: 'battles' },
+      targetId: 'headerTab:battles',
+      targetZone: 'header.tabs',
+      preferredPlacement: 'below',
     },
     {
       id: 'messenger',
-      title: 'Messages & Rooms',
-      body: 'Messages keeps DMs and notifications. Rooms are voice hangouts with friends — open Rooms from here or Battles.',
+      title: 'Messages',
+      body: 'Messages holds DMs, calls, and notifications. Stay close with people you meet on Blyp.',
       icon: 'chatbubble',
-      navigate: { type: 'tab', name: 'Messenger' },
+      navigate: { type: 'tab', name: 'Messenger', select: 'chats' },
+      targetZone: 'tab.messenger',
+      preferredPlacement: 'above',
     },
     {
       id: 'rooms',
       title: 'Rooms',
-      body: 'Jump into a Room to talk live with people who share your vibe. Ambassadors help keep the energy high.',
+      body: 'Rooms are live voice hangouts. Jump in to talk with people who share your vibe — ambassadors help keep energy high.',
       icon: 'mic',
       navigate: { type: 'stack', name: 'Rooms' },
+      targetZone: 'center.soft',
+      preferredPlacement: 'below',
     },
     {
       id: 'profile',
@@ -76,6 +139,8 @@ export function buildTourSteps({ hasDating = true } = {}) {
       body: 'Edit your look, wallet, subscription, and settings from Profile. This is your home base on Blyp.',
       icon: 'person',
       navigate: { type: 'tab', name: 'Profile' },
+      targetZone: 'tab.profile',
+      preferredPlacement: 'above',
     },
   ];
 
@@ -83,18 +148,36 @@ export function buildTourSteps({ hasDating = true } = {}) {
     steps.push({
       id: 'dating',
       title: 'Dating',
-      body: 'Meet people who share your world. Open Dating from Home → Jump in, Profile → Menu, or the Chat menu. Included with Plus / trial.',
+      body: 'Meet people who share your world. Open Dating from Chat → Dating, Home → Jump in, or Profile → Menu. Included with Plus / trial.',
       icon: 'heart',
-      navigate: { type: 'stack', name: 'Dating' },
+      navigate: { type: 'chatTab', select: 'dating' },
+      targetId: 'headerTab:dating',
+      targetZone: 'header.tabs',
+      preferredPlacement: 'below',
     });
   } else {
     steps.push({
       id: 'dating',
       title: 'Dating (Plus)',
-      body: 'Dating is on Home → Jump in, Profile → Menu, or Chat → menu. Free users see plans; Plus / trial unlocks Discover.',
+      body: 'Dating lives on Chat → Dating, Home → Jump in, or Profile → Menu. Free users see plans; Plus / trial unlocks Discover.',
       icon: 'heart',
       soft: true,
-      navigate: { type: 'tab', name: 'Profile' },
+      navigate: { type: 'chatTab', select: 'dating' },
+      targetId: 'headerTab:dating',
+      targetZone: 'header.tabs',
+      preferredPlacement: 'below',
+    });
+  }
+
+  if (hasGames) {
+    steps.push({
+      id: 'games',
+      title: 'Games',
+      body: 'Games live under Chat/Games and Home → Jump in. Team up, play, and climb when the lobby is open.',
+      icon: 'game-controller',
+      navigate: { type: 'tab', name: 'Chat' },
+      targetZone: 'tab.chat',
+      preferredPlacement: 'above',
     });
   }
 
@@ -104,14 +187,18 @@ export function buildTourSteps({ hasDating = true } = {}) {
     body: 'See who’s climbing — gifts, streams, and glory boards. Rankings are open to everyone.',
     icon: 'trophy',
     navigate: { type: 'stack', name: 'Rankings' },
+    targetZone: 'center.soft',
+    preferredPlacement: 'below',
   });
 
   steps.push({
     id: 'done',
     title: 'You’re set',
-    body: 'That’s the tour. Explore at your own pace — and reopen this anytime from Notifications or Settings.',
+    body: 'That’s the tour. Explore at your own pace — reopen anytime from Notifications or Settings. Skip was always available too.',
     icon: 'checkmark-circle',
-    navigate: { type: 'tab', name: 'Home' },
+    navigate: { type: 'tab', name: 'Home', select: 'A' },
+    targetZone: 'center.soft',
+    preferredPlacement: 'below',
   });
 
   return steps;

@@ -39,6 +39,7 @@ import ScreenErrorBoundary from '../components/ScreenErrorBoundary';
 import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, INTEREST_CATALOG, consumeLandingPageKey } from '../services/userPreferencesService';
 import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
+import { subscribeTourSelect } from '../tour/tourBus';
 import { requireAccount } from '../services/guestSessionService';
 import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
 import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
@@ -407,6 +408,14 @@ const HomeScreen = ({ navigation, route }) => {
     setCurrentDiscoverIndex(0);
     try { flatListRef.current?.scrollToOffset?.({ offset: 0, animated: true }); } catch { }
   });
+
+  // Guided tour: jump to For You / Home hub without fighting local tab state.
+  useEffect(() => {
+    return subscribeTourSelect((payload) => {
+      if (payload?.screen !== 'Home' || !payload?.tab) return;
+      setSelectedTab(payload.tab);
+    });
+  }, []);
 
   // --- Horizontal swipe between header tabs --------------------------------
   // Gesture-handler is shimmed to a no-op for stability, so we use the built-in

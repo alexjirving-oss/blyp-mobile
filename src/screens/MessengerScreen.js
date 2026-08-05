@@ -26,6 +26,7 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, addDoc, updateDoc,
 import { firebaseEnabled, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList, subscribeToFollowersList, followUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
+import { subscribeTourSelect } from '../tour/tourBus';
 import BlypLogo from '../components/BlypLogo';
 import BlypAvatar from '../components/BlypAvatar';
 import HeaderMenuTabs from '../components/HeaderMenuTabs';
@@ -92,6 +93,14 @@ const MessengerScreen = ({ navigation }) => {
   const [selectedTab, setSelectedTab] = useState('chats');
   // Double-tap the Inbox tab → reset to the first sub-page ("Chats").
   useTabReset('Messenger', () => setSelectedTab('chats'));
+
+  useEffect(() => {
+    return subscribeTourSelect((payload) => {
+      if (payload?.screen !== 'Messenger' || !payload?.tab) return;
+      setSelectedTab(payload.tab);
+    });
+  }, []);
+
   const [chats, setChats] = useState([]);
   const [participantProfiles, setParticipantProfiles] = useState({});
   const [calls, setCalls] = useState([]);

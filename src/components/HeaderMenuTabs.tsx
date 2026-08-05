@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useTheme } from '../styles/useTheme';
+import TourTarget from '../tour/TourTarget';
 import type { BlypTheme } from '../styles/blypTheme';
 
 export type HeaderMenuTab = {
@@ -42,24 +43,26 @@ const TabButton: React.FC<TabButtonProps> = ({
   styles,
   style,
 }) => (
-  <TouchableOpacity
-    style={[styles.tab, style]}
-    onPress={() => onChange(tab.key)}
-    activeOpacity={0.7}
-    testID={testIDPrefix ? `${testIDPrefix}_${tab.key}` : undefined}
-    accessibilityLabel={testIDPrefix ? `${testIDPrefix}_${tab.key}` : undefined}
-  >
-    <View style={styles.pill}>
-      <Text
-        style={[styles.tabText, isActive && styles.activeTabText]}
-        allowFontScaling={false}
-        numberOfLines={1}
-      >
-        {tab.label}
-      </Text>
-    </View>
-    <View style={[styles.indicator, isActive && styles.indicatorActive]} />
-  </TouchableOpacity>
+  <TourTarget id={`headerTab:${tab.key}`} style={style}>
+    <TouchableOpacity
+      style={styles.tab}
+      onPress={() => onChange(tab.key)}
+      activeOpacity={0.7}
+      testID={testIDPrefix ? `${testIDPrefix}_${tab.key}` : undefined}
+      accessibilityLabel={testIDPrefix ? `${testIDPrefix}_${tab.key}` : undefined}
+    >
+      <View style={styles.pill}>
+        <Text
+          style={[styles.tabText, isActive && styles.activeTabText]}
+          allowFontScaling={false}
+          numberOfLines={1}
+        >
+          {tab.label}
+        </Text>
+      </View>
+      <View style={[styles.indicator, isActive && styles.indicatorActive]} />
+    </TouchableOpacity>
+  </TourTarget>
 );
 
 const HeaderMenuTabs: React.FC<Props> = ({
