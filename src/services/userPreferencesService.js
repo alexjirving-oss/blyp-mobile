@@ -69,6 +69,9 @@ const DEFAULT_PREFS = {
   landingPageKey: null,
   recentSearches: [],
   lastSeenActivityAt: 0,
+  /** Product tour — healed via Firestore like onboarded so reinstall doesn't re-nag forever. */
+  tourCompleted: false,
+  tourStartedAt: null,
   updatedAt: 0,
 };
 
@@ -164,6 +167,12 @@ function normalize(raw) {
   const base = clone(DEFAULT_PREFS);
   if (!raw || typeof raw !== 'object') return base;
   const interests = Array.isArray(raw.interests) ? raw.interests : [];
+  const tourStartedAt =
+    typeof raw.tourStartedAt === 'number' && Number.isFinite(raw.tourStartedAt)
+      ? raw.tourStartedAt
+      : raw.tourStartedAt
+        ? Number(raw.tourStartedAt) || null
+        : null;
   return {
     interests,
     // Heal: interests picked at onboarding historically did not create pages.
@@ -174,6 +183,8 @@ function normalize(raw) {
       ? raw.recentSearches.filter((s) => typeof s === 'string').slice(0, MAX_RECENT_SEARCHES)
       : [],
     lastSeenActivityAt: Number(raw.lastSeenActivityAt) || 0,
+    tourCompleted: !!raw.tourCompleted,
+    tourStartedAt: tourStartedAt && tourStartedAt > 0 ? tourStartedAt : null,
     updatedAt: Number(raw.updatedAt) || 0,
   };
 }
@@ -226,10 +237,11 @@ async function hydrateFromRemote(uid) {
     if (!remote) return;
     const local = cache.get(uid) || clone(DEFAULT_PREFS);
     const remoteNorm = normalize(remote);
-    // Never demote a completed account: remote onboarded wins even if clocks disagree.
+    // Never demote a completed account: remote onboarded / tourCompleted wins even if clocks disagree.
     const shouldAdopt =
       (remoteNorm.updatedAt || 0) > (local.updatedAt || 0) ||
-      (remoteNorm.onboarded && !local.onboarded);
+      (remoteNorm.onboarded && !local.onboarded) ||
+      (remoteNorm.tourCompleted && !local.tourCompleted);
     if (shouldAdopt) {
       cache.set(uid, remoteNorm);
       emit(uid, remoteNorm);
@@ -345,6 +357,12 @@ export async function completeOnboarding(uid, interests) {
   } catch {
     /* already logged inside syncToRemote */
   }
+  try {
+    const { ensureLocalWelcomeTourItem } = await import('../tour/welcomeTourInbox');
+    await ensureLocalWelcomeTourItem(uid, { force: true });
+  } catch {
+    /* non-fatal */
+  }
   return stamped;
 }
 
@@ -377,6 +395,37 @@ export async function setActivitySeen(uid) {
   const prev = await getPreferences(uid);
   const next = { ...prev, lastSeenActivityAt: Date.now() };
   return persist(uid, next);
+}
+
+/** Stamp tour start without completing (idempotent for startedAt). */
+export async function markTourStarted(uid) {
+  const prev = await getPreferences(uid);
+  if (prev.tourStartedAt && !prev.tourCompleted) return prev;
+  return persist(uid, {
+    ...prev,
+    tourStartedAt: prev.tourStartedAt || Date.now(),
+    tourCompleted: false,
+  });
+}
+
+/** Mark the product tour finished (Skip or Done). */
+export async function setTourCompleted(uid, completed = true) {
+  const prev = await getPreferences(uid);
+  return persist(uid, {
+    ...prev,
+    tourCompleted: !!completed,
+    tourStartedAt: prev.tourStartedAt || Date.now(),
+  });
+}
+
+/** Clear completion so Settings → Replay tour can run again. */
+export async function resetTour(uid) {
+  const prev = await getPreferences(uid);
+  return persist(uid, {
+    ...prev,
+    tourCompleted: false,
+    tourStartedAt: null,
+  });
 }
 
 export async function isOnboarded(uid) {
@@ -441,6 +490,9 @@ export default {
   addRecentSearch,
   clearRecentSearches,
   setActivitySeen,
+  markTourStarted,
+  setTourCompleted,
+  resetTour,
   isOnboarded,
   getEnabledPages,
   interestLabels,

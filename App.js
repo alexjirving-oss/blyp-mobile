@@ -184,6 +184,8 @@ import CreatePostButton from './src/components/CreatePostButton';
 import { useAuth, userPool, clearCognitoSessions, refreshAuthNow, hardLogout } from './src/hooks/useCommon';
 import { exitGuestMode, useGuestMode } from './src/services/guestSessionService';
 import { emitTabReset } from './src/utils/tabResetBus';
+import { GuidedTourProvider } from './src/tour/GuidedTourProvider';
+import { requestStartTour, isTourPayload } from './src/tour/tourBus';
 import { useUnreadCount } from './src/hooks/useUnreadCount';
 import { scalingConfig } from './src/utils/scaleUtils';
 const Tab = createBottomTabNavigator();
@@ -963,6 +965,8 @@ function AppInner() {
             } else if (data.type === 'team') {
               // Team join request/decision/group message → open My Team.
               routeWhenReady('MyTeam');
+            } else if (isTourPayload(data)) {
+              requestStartTour({ source: 'push', force: true });
             }
           } catch { }
         });
@@ -1360,7 +1364,9 @@ function AppInner() {
             ) : onboarded === false ? (
               <OnboardingScreen uid={uid} onDone={() => setOnboarded(true)} />
             ) : (
-              <AppStack />
+              <GuidedTourProvider navigationRef={navigationRef}>
+                <AppStack />
+              </GuidedTourProvider>
             )
           ) : (
             <AuthScreen />

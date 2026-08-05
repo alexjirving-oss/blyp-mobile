@@ -9,6 +9,7 @@ import { db, auth, firebaseEnabled } from '../config/firebase';
 import { creditEconomyCoinsAdmin, makeIdempotencyKey } from '../api/economyLiveApi';
 import { WALLETS_COLLECTION } from '../config/economyModel';
 import { useAuth, hardLogout } from '../hooks/useCommon';
+import { requestReplayTour } from '../tour/tourBus';
 
 declare const __DEV__: boolean;
 
@@ -383,6 +384,23 @@ export const SettingsStub = ({ navigation }: any) => {
             <View style={{ flex: 1 }}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Notification settings</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>Push permission for this device</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.rowPressable, { borderTopColor: colors.divider }]}
+            onPress={() => {
+              try {
+                navigation.goBack();
+              } catch { /* ignore */ }
+              setTimeout(() => {
+                requestReplayTour({ source: 'settings' });
+              }, 280);
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Replay tour</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>Walk through Home, Create, Live, Messages again</Text>
             </View>
           </TouchableOpacity>
 

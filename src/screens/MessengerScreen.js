@@ -46,6 +46,8 @@ import { messengerExtrasService } from '../services/messaging/messengerExtrasSer
 import { messengerUsersService } from '../services/messaging/messengerUsersService';
 import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messaging/resolveMessengerUser';
 import { subscribeNotifications, markNotificationRead } from '../services/notificationsInboxService';
+import { getLocalWelcomeTourItem, consumeLocalWelcomeTourItem, LOCAL_WELCOME_TOUR_ID } from '../tour/welcomeTourInbox';
+import { requestStartTour, isTourPayload } from '../tour/tourBus';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { theme as blypTheme } from '../styles/blypTheme';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
@@ -372,8 +374,27 @@ const MessengerScreen = ({ navigation }) => {
 
     // Subscribe to the durable notification inbox (team requests, battles, etc.).
     const unsubscribeNotifs = subscribeNotifications(uid, (items) => {
-      setNotifications(items);
-      setNotifLoading(false);
+      const mergeLocal = async () => {
+        let merged = Array.isArray(items) ? [...items] : [];
+        try {
+          const local = await getLocalWelcomeTourItem(uid);
+          if (local) {
+            const hasServerTour = merged.some(
+              (n) =>
+                isTourPayload(n?.data) ||
+                String(n?.dedupeKey || '').startsWith('welcome_tour:')
+            );
+            if (!hasServerTour) {
+              merged = [local, ...merged];
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        setNotifications(merged);
+        setNotifLoading(false);
+      };
+      mergeLocal();
     });
 
     return () => {
@@ -726,9 +747,18 @@ const MessengerScreen = ({ navigation }) => {
   };
 
   const onNotificationPress = (item) => {
-    try { markNotificationRead(item.id); } catch {}
+    try {
+      if (item?.id && item.id !== LOCAL_WELCOME_TOUR_ID) {
+        markNotificationRead(item.id);
+      }
+    } catch {}
     const data = item?.data || {};
     try {
+      if (isTourPayload(data) || item?.id === LOCAL_WELCOME_TOUR_ID) {
+        consumeLocalWelcomeTourItem(uid).catch(() => {});
+        requestStartTour({ source: 'notification', force: true });
+        return;
+      }
       if ((data.type === 'message' || data.type === 'conversation') && data.conversationId) {
         navigation.navigate('ChatConversation', {
           conversationId: data.conversationId,
@@ -751,6 +781,8 @@ const MessengerScreen = ({ navigation }) => {
       case 'message': return 'chatbubble-ellipses';
       case 'live': return 'radio';
       case 'team': return 'people';
+      case 'system':
+      case 'tour': return 'sparkles';
       default: return 'notifications';
     }
   };

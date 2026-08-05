@@ -27,6 +27,7 @@ import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { useAuth, refreshAuthNow, hardLogout } from '../hooks/useCommon';
+import { requestReplayTour } from '../tour/tourBus';
 import { useTabReset } from '../utils/tabResetBus';
 import { exitGuestMode, useGuestMode } from '../services/guestSessionService';
 import { useTheme } from '../styles/useTheme';
@@ -799,6 +800,11 @@ const ProfileScreenV3: React.FC = () => {
     try { nav.navigate('Hub' as never); } catch { }
     try { console.log('📈 profile_hub_tap', { userId: uid, source: 'profile_self' }); } catch { }
   }, [nav, uid]);
+
+  const onReplayTour = useCallback(() => {
+    if (!uid) return;
+    requestReplayTour({ source: 'profile' });
+  }, [uid]);
 
   // There is no 'Auth' route — AuthScreen renders at the app root when not
   // signed in. Dropping guest mode + hard sign-out flips the root gate to it.
@@ -1580,6 +1586,7 @@ const ProfileScreenV3: React.FC = () => {
                 onTransparency={onTransparency}
                 onImport={onImport}
                 onHub={onHub}
+                onReplayTour={onReplayTour}
                 onLogout={onLogout}
                 styles={styles}
               />
@@ -1620,6 +1627,18 @@ const ProfileScreenV3: React.FC = () => {
               >
                 <LinearGradient colors={BLYP_LOGO_GRADIENT_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.menuActionButtonGradient}>
                   <Text style={styles.menuButtonText}>Help</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.menuActionButton, { marginTop: 10 }]}
+                onPress={() => {
+                  setMenuVisible(false);
+                  requestReplayTour({ source: 'profile_menu' });
+                }}
+              >
+                <LinearGradient colors={BLYP_LOGO_GRADIENT_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.menuActionButtonGradient}>
+                  <Text style={styles.menuButtonText}>Replay tour</Text>
                 </LinearGradient>
               </TouchableOpacity>
 
@@ -2787,7 +2806,7 @@ const ProfileLogout: React.FC<{ onLogout: () => void; styles: any }> = ({ onLogo
   );
 };
 
-const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void; onTransparency?: () => void; onImport?: () => void; onHub?: () => void; onLogout: () => void; styles: any }> = ({ onEditProfile, onPlans, onTransparency, onImport, onHub, onLogout, styles }) => {
+const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void; onTransparency?: () => void; onImport?: () => void; onHub?: () => void; onReplayTour?: () => void; onLogout: () => void; styles: any }> = ({ onEditProfile, onPlans, onTransparency, onImport, onHub, onReplayTour, onLogout, styles }) => {
   const ent = useEntitlement();
   const planLabel = (() => {
     if (!ent) return 'Manage your plan';
@@ -2830,6 +2849,11 @@ const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void
 
         <TouchableOpacity style={styles.tabMenuItem} onPress={onTransparency} activeOpacity={0.85}>
           <Text style={styles.tabMenuItemText}>Transparency &amp; your data</Text>
+          <Text style={styles.tabMenuChevron}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.tabMenuItem} onPress={onReplayTour} activeOpacity={0.85}>
+          <Text style={styles.tabMenuItemText}>Replay tour</Text>
           <Text style={styles.tabMenuChevron}>›</Text>
         </TouchableOpacity>
 

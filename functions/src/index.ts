@@ -38,6 +38,8 @@ export { notificationDispatch, notificationOnCreate } from './notifications/disp
 export { onLiveStreamCreate, onLiveStreamGoLive } from './notifications/liveAlerts';
 // Direct-message push: new inbox message -> push to recipients (WhatsApp-style)
 export { onDirectMessageCreate } from './notifications/messageNotify';
+// Welcome product tour inbox item when onboarding completes
+export { onUserOnboardedWelcomeTour } from './notifications/welcomeTour';
 // Audio calls: LiveKit token mint + incoming-call push
 export { mintLiveKitToken, onCallCreate } from './calls/livekit';
 export {
