@@ -41,7 +41,7 @@ import {
 } from '../services/userPreferencesService';
 import { subscribeBookmarks, toggleBookmark } from '../services/bookmarkService';
 import { sharePost, shareBlyp } from '../services/shareService';
-import { reportSearchEvent } from '../services/blypSearchClient';
+import { backendSearch, isBackendSearchEnabled, reportSearchEvent } from '../services/blypSearchClient';
 import {
   resolveReminder,
   createReminder,
@@ -309,16 +309,31 @@ const BlypScreen = ({ navigation, route }) => {
 
       // Capture conversation history BEFORE we push this turn.
       const history = turnsRef.current.map((t) => ({ q: t.query, a: t.answer || '' }));
-      // Skip speculative Gemini prose answers — they were often outdated and not
-      // worth the wait. Surface real in-app posts/creators instead.
+      // Prefer Blyp backend (web + places + in-app). Fall back to local Firestore scan.
       const wantAnswer = false;
       const turnId = `t_${Date.now()}`;
       try {
-        // 1) Show real in-app results immediately — no waiting on the AI.
-        const content = await blypContent(q, { geo });
+        let content = null;
+        if (isBackendSearchEnabled()) {
+          try {
+            content = await backendSearch(q, { session: uid || 'anon', geo });
+          } catch (e) {
+            console.warn('[BLYP] backendSearch failed', e?.message || e);
+          }
+        }
+        if (!content) {
+          content = await blypContent(q, { geo });
+        }
         setTurns((prev) => [
           ...prev,
-          { id: turnId, ...content, answer: '', usedAI: false, related: [], web: [], answering: wantAnswer },
+          {
+            id: turnId,
+            ...content,
+            answering: wantAnswer,
+            // Keep related/answer from backend when present.
+            related: Array.isArray(content?.related) ? content.related : [],
+            web: Array.isArray(content?.web) ? content.web : [],
+          },
         ]);
         if (!keepQuery) setQuery('');
         setLoading(false);
@@ -356,7 +371,7 @@ const BlypScreen = ({ navigation, route }) => {
       } catch (e) {
         setTurns((prev) => [
           ...prev,
-          { id: turnId, query: q, answer: '', usedAI: false, related: [], posts: [], creators: [], sources: [], answering: false },
+          { id: turnId, query: q, answer: '', usedAI: false, related: [], posts: [], creators: [], sources: [], web: [], answering: false },
         ]);
         setLoading(false);
         setTimeout(() => scrollRef.current?.scrollTo?.({ y: 0, animated: false }), 50);
@@ -660,6 +675,7 @@ const BlypScreen = ({ navigation, route }) => {
     lastTurn &&
     (lastTurn.posts?.length > 0 ||
       lastTurn.creators?.length > 0 ||
+      lastTurn.web?.length > 0 ||
       !!lastTurn.answer ||
       !!lastTurn.answering ||
       !!lastTurn.place ||
@@ -790,28 +806,63 @@ const BlypScreen = ({ navigation, route }) => {
     );
   };
 
+  const renderWebSection = () => {
+    const web = Array.isArray(lastTurn?.web) ? lastTurn.web : [];
+    if (!web.length) return null;
+    return (
+      <View style={{ marginTop: 8, marginBottom: 12 }}>
+        <View style={styles.webHeaderRow}>
+          <Icon name="globe-outline" size={16} color={COLORS.textMuted} />
+          <Text style={styles.sectionTitle}>From the web</Text>
+          <Text style={styles.webCount}>{web.length}</Text>
+        </View>
+        {web.slice(0, 8).map((item, idx) => {
+          const key = String(item.url || item.title || idx);
+          return (
+            <TouchableOpacity
+              key={key}
+              style={styles.webRow}
+              activeOpacity={0.85}
+              onPress={() => item.url && openWeb(item.url, item.title || 'Web')}
+            >
+              {item.favicon ? (
+                <Image source={{ uri: item.favicon }} style={styles.webFaviconImg} />
+              ) : (
+                <View style={styles.webFavicon}>
+                  <Icon name="link-outline" size={14} color={COLORS.textMuted} />
+                </View>
+              )}
+              <View style={styles.webText}>
+                {!!item.source && <Text style={styles.webSource} numberOfLines={1}>{item.source}</Text>}
+                <Text style={styles.webTitle} numberOfLines={2}>{item.title || item.url}</Text>
+                {!!item.snippet && <Text style={styles.webSnippet} numberOfLines={2}>{item.snippet}</Text>}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  };
+
   // Intent-aware ordering, tuned per scenario:
   //  - place/retail  ("B&Q", "Nando's near me"): contact card → web → posts → creators
   //  - content       ("funny videos", "cooking creators"): posts → creators → web
-  //  - info/news     ("Arsenal latest news", "how tall is Everest"): the AI answer
-  //    is the headline; web sources come next, then any relevant in-app posts.
+  //  - info/news     ("Arsenal latest news", "how tall is Everest"): answer + web + in-app
   const renderResultSections = () => {
     if (isPlace) {
-      // The place card itself is rendered as the hero in renderAnswer (top of
-      // the turn). Here we just show any supporting in-app content beneath it.
       return (
         <>
+          {renderWebSection()}
           {renderPostsSection()}
           {renderCreatorsSection()}
         </>
       );
     }
-    // Conversational: the AI answer is the hero (rendered above); in-app posts
-    // and creators follow. No web-search results.
     return (
       <>
         {renderPostsSection()}
         {renderCreatorsSection()}
+        {renderWebSection()}
       </>
     );
   };

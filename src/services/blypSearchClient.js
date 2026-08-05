@@ -8,9 +8,19 @@
 // functions are deployed), backendSearch() returns null and blypAiService falls
 // back to the legacy on-device path. Nothing breaks.
 
-const SEARCH_URL = process.env.EXPO_PUBLIC_BLYP_SEARCH_URL || '';
+const FUNCTIONS_BASE = String(
+  process.env.EXPO_PUBLIC_FUNCTIONS_BASE_URL ||
+    process.env.EXPO_PUBLIC_FIREBASE_BRIDGE_BASE_URL ||
+    '',
+)
+  .trim()
+  .replace(/\/$/, '');
+
+const SEARCH_URL =
+  String(process.env.EXPO_PUBLIC_BLYP_SEARCH_URL || '').trim() ||
+  (FUNCTIONS_BASE ? `${FUNCTIONS_BASE}/blypSearch` : '');
 const EVENT_URL =
-  process.env.EXPO_PUBLIC_BLYP_SEARCH_EVENT_URL ||
+  String(process.env.EXPO_PUBLIC_BLYP_SEARCH_EVENT_URL || '').trim() ||
   (SEARCH_URL ? SEARCH_URL.replace(/blypSearch(?!Event)/, 'blypSearchEvent') : '');
 
 const TIMEOUT_MS = 12000;
