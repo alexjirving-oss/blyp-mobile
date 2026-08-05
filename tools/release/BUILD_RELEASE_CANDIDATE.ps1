@@ -330,6 +330,7 @@ Write-Host '=== 2) BUILD SIGNED AAB ==='
 $env:NODE_ENV = 'production'
 $env:CI = '1'
 $env:BLYP_CANONICAL_RELEASE = '1'
+$env:BLYP_RELEASE_BUILD = '1'
 $env:BLYP_EXPECTED_VERSION_CODE = [string]$ExpectedVersionCode
 
 $buildLog = Join-Path $packetRoot '06_gradle_bundleRelease.txt'
@@ -340,7 +341,7 @@ $buildCommand = 'cd /d android && gradlew.bat :app:clean :app:bundleRelease -Pan
 # 'Continue' only around the capture so authoritative success/failure comes from $LASTEXITCODE.
 $prevEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$buildOutput = cmd /c "set NODE_ENV=$env:NODE_ENV& set CI=$env:CI& set BLYP_CANONICAL_RELEASE=$env:BLYP_CANONICAL_RELEASE& set BLYP_EXPECTED_VERSION_CODE=$env:BLYP_EXPECTED_VERSION_CODE& $buildCommand" 2>&1
+$buildOutput = cmd /c "set NODE_ENV=$env:NODE_ENV& set CI=$env:CI& set BLYP_CANONICAL_RELEASE=$env:BLYP_CANONICAL_RELEASE& set BLYP_RELEASE_BUILD=$env:BLYP_RELEASE_BUILD& set BLYP_EXPECTED_VERSION_CODE=$env:BLYP_EXPECTED_VERSION_CODE& $buildCommand" 2>&1
 $buildExit = $LASTEXITCODE
 $ErrorActionPreference = $prevEap
 $buildOutput | Tee-Object -FilePath $buildLog | Out-Null

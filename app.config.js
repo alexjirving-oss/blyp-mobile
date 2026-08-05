@@ -7,10 +7,16 @@ const dotenv = require('dotenv');
 
 const buildProfile = String(
   process.env.BLYP_BUILD_PROFILE ||
-  process.env.EAS_BUILD_PROFILE ||
-  ''
+    process.env.EAS_BUILD_PROFILE ||
+    ''
 ).trim().toLowerCase();
-const isProductionProfile = buildProfile === 'production' || process.env.BLYP_RELEASE_BUILD === '1';
+// Canonical local Play AAB sets BLYP_CANONICAL_RELEASE=1 + NODE_ENV=production
+// (not always EAS_BUILD_PROFILE=production). Always load .env.production then.
+const isProductionProfile =
+  buildProfile === 'production' ||
+  process.env.BLYP_RELEASE_BUILD === '1' ||
+  process.env.BLYP_CANONICAL_RELEASE === '1' ||
+  String(process.env.NODE_ENV || '').toLowerCase() === 'production';
 const envFiles = isProductionProfile
   ? ['.env.production', '.env']
   : ['.env'];
