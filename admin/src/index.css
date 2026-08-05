@@ -1,4 +1,4 @@
-/* Blyp Admin — PETRONAS teal on editorial near-black (synced with app design system) */
+﻿/* Blyp Admin â€” PETRONAS teal on editorial near-black (synced with app design system) */
 :root {
   /* brand */
   --brand: #00D2BE;
@@ -74,10 +74,11 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
   color: var(--on-brand);
   background: linear-gradient(135deg, var(--brand), var(--brand-dim));
-  transition: transform 0.1s ease, opacity 0.15s ease, background 0.15s ease;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28), 0 1px 0 rgba(255, 255, 255, 0.12) inset;
+  transition: transform 0.12s ease, opacity 0.15s ease, background 0.15s ease, box-shadow 0.12s ease;
 }
-.btn:hover { transform: translateY(-1px); }
-.btn:active { transform: translateY(0); }
+.btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32), 0 1px 0 rgba(255, 255, 255, 0.14) inset; }
+.btn:active { transform: translateY(0) scale(0.98); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.22); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 .btn.ghost {
@@ -158,3 +159,4 @@ tbody tr.clickable { cursor: pointer; }
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+

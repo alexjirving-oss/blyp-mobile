@@ -1,12 +1,11 @@
-import React, { useCallback, useEffect, useState } from "react";
+﻿import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, FlatList, ScrollView, TouchableOpacity, Image, StyleSheet, ActivityIndicator, RefreshControl, Modal } from "react-native";
 import { subscribeToLiveStreams } from "../services/LiveService";
 import { useNavigation, CommonActions, StackActions } from "@react-navigation/native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from './Icon';
-import AvatarRingPulse from './motion/AvatarRingPulse';
-import PressableLift from './motion/PressableLift';
+import AvatarRing from './motion/AvatarRing';
 import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import { useAuth } from '../hooks/useCommon';
 import { isFollowing, followUser, unfollowUser, getFollowersCount } from '../utils/followUtils';
@@ -157,7 +156,7 @@ export default function LiveUsersTab() {
   }
 
   if (!liveUsers.length) {
-    console.log('âš ï¸ LiveUsersTab: No live users, showing empty state');
+    console.log('Ã¢Å¡Â Ã¯Â¸Â LiveUsersTab: No live users, showing empty state');
     return (
       <ScrollView
         contentContainerStyle={[styles.centerContainer, { flexGrow: 1, backgroundColor: 'transparent' }]}
@@ -172,7 +171,7 @@ export default function LiveUsersTab() {
     );
   }
 
-  console.log('âœ… LiveUsersTab: Rendering FlatList with', liveUsers.length, 'users');
+  console.log('Ã¢Å“â€¦ LiveUsersTab: Rendering FlatList with', liveUsers.length, 'users');
 
   const formatHandle = (handle) => {
     if (!handle) return null;
@@ -206,12 +205,12 @@ export default function LiveUsersTab() {
               activeOpacity={0.7}
             >
               <View style={styles.avatarContainer}>
-                <AvatarRingPulse active tone="live" size={60} ringWidth={2}>
+                <AvatarRing variant="live" size={60} ringWidth={2}>
                   <Image
                     source={{ uri: item.photoURL || "https://ui-avatars.com/api/?name=" + encodeURIComponent(displayName || "Live") }}
                     style={styles.avatar}
                   />
-                </AvatarRingPulse>
+                </AvatarRing>
                 <View style={styles.liveBadge}>
                   <Text style={styles.liveText}>LIVE</Text>
                 </View>
@@ -221,7 +220,7 @@ export default function LiveUsersTab() {
                   {displayName}
                 </Text>
                 <View style={styles.statusRow}>
-                  <Text style={styles.liveIndicator}>🔴</Text>
+                  <Text style={styles.liveIndicator}>ðŸ”´</Text>
                   <Text style={styles.status}>Broadcasting now</Text>
                 </View>
                 {item.title && (
@@ -231,14 +230,14 @@ export default function LiveUsersTab() {
                 )}
               </View>
               <View style={styles.chevron}>
-                <Text style={styles.chevronText}>›</Text>
+                <Text style={styles.chevronText}>â€º</Text>
               </View>
             </TouchableOpacity>
           );
         }}
       />
 
-      {/* Profile preview overlay — shown on tap, before entering the room. */}
+      {/* Profile preview overlay â€” shown on tap, before entering the room. */}
       <Modal
         visible={!!previewItem}
         transparent
@@ -266,11 +265,11 @@ export default function LiveUsersTab() {
                 ) : null}
                 <View style={styles.previewStatsRow}>
                   <View style={styles.previewStat}>
-                    <Text style={styles.previewStatValue}>{rel.loading ? '…' : rel.followers}</Text>
+                    <Text style={styles.previewStatValue}>{rel.loading ? 'â€¦' : rel.followers}</Text>
                     <Text style={styles.previewStatLabel}>Followers</Text>
                   </View>
                   <View style={styles.previewLivePill}>
-                    <Text style={styles.previewLivePillText}>● LIVE</Text>
+                    <Text style={styles.previewLivePillText}>â— LIVE</Text>
                   </View>
                 </View>
 
@@ -549,3 +548,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+

@@ -1,11 +1,11 @@
-import { StyleSheet } from 'react-native';
+﻿import { StyleSheet } from 'react-native';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
-// Common color palette — unified with the design system's DARK scheme
+// Common color palette â€” unified with the design system's DARK scheme
 // (see src/styles/designSystem/palettes.ts). Keep these keys in sync with the
 // dark scheme so legacy screens importing COLORS match the new look.
 export const COLORS = {
-  // Brand signal accent — Mercedes-AMG PETRONAS teal (used sparingly)
+  // Brand signal accent â€” Mercedes-AMG PETRONAS teal (used sparingly)
   primary: '#00D2BE',
   primaryDark: '#00A89E',
   primaryLight: '#7FEDE2',
@@ -51,7 +51,7 @@ export const COLORS = {
   gradientMiddle: '#00D2BE',
   gradientEnd: '#00A89E',
 
-  // Screen background — flat near-black (no colour wash).
+  // Screen background â€” flat near-black (no colour wash).
   screenGradientTop: '#0A0A0C',
   screenGradientMid: '#0A0A0C',
   screenGradientBot: '#0A0A0C',
@@ -96,36 +96,42 @@ export const BORDER_RADIUS = {
   round: responsiveSize(50),
 };
 
-// Shadow styles — deeper, punchier elevation + brand glow for CTAs
+// Soft layered depth + restrained teal tint (not neon)
+export const SURFACE_DEPTH = {
+  highlightBorder: 'rgba(255,255,255,0.12)',
+  highlightBorderStrong: 'rgba(255,255,255,0.18)',
+  sheen: 'rgba(255,255,255,0.10)',
+  insetShadow: 'rgba(0,0,0,0.35)',
+};
+
 export const SHADOWS = {
   small: {
     shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
   },
   medium: {
     shadowColor: COLORS.black,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 11 },
+    shadowOpacity: 0.26,
+    shadowRadius: 18,
+    elevation: 8,
   },
   large: {
     shadowColor: COLORS.black,
     shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.3,
-    shadowRadius: 26,
-    elevation: 12,
+    shadowOpacity: 0.32,
+    shadowRadius: 28,
+    elevation: 14,
   },
-  // Neon brand glow — use on primary CTAs for the 3D "punchy" feel.
   glow: {
     shadowColor: COLORS.glow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.55,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 8,
   },
 };
 
@@ -208,11 +214,13 @@ export const COMMON_STYLES = StyleSheet.create({
     borderColor: COLORS.primary,
   },
 
-  // Common cards
+  // Common cards â€” soft elevation + light edge highlight
   card: {
     backgroundColor: COLORS.backgroundCard,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: SURFACE_DEPTH.highlightBorder,
     ...SHADOWS.medium,
   },
 
@@ -241,7 +249,7 @@ export const COMMON_STYLES = StyleSheet.create({
   },
 });
 
-// Canonical screen background — flat near-black (editorial, no colour wash).
+// Canonical screen background â€” flat near-black (editorial, no colour wash).
 // Import this wherever a full-page background is needed.
 export const SCREEN_GRADIENT_COLORS = ['#0A0A0C', '#0A0A0C', '#0A0A0C'];
 
@@ -251,5 +259,7 @@ export default {
   FONT_SIZES,
   BORDER_RADIUS,
   SHADOWS,
+  SURFACE_DEPTH,
   COMMON_STYLES,
 };
+

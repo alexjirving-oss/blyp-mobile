@@ -1,5 +1,5 @@
-/**
- * Blyp Design System — Color Schemes (light + dark)
+﻿/**
+ * Blyp Design System â€” Color Schemes (light + dark)
  *
  * SINGLE SOURCE OF TRUTH for every colour in the app.
  *
@@ -20,7 +20,7 @@
 export interface ColorScheme {
   /** background base (solid) */
   background: string;
-  /** full-page gradient stops (top → mid → bottom) */
+  /** full-page gradient stops (top â†’ mid â†’ bottom) */
   bgGradient: [string, string, string];
   /** header / nav chrome (semi-translucent) */
   chrome: string;
@@ -81,13 +81,13 @@ export interface ColorScheme {
   transparent: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// "Pulse" — editorial near-black chrome + one electric signal accent.
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// "Pulse" â€” editorial near-black chrome + one electric signal accent.
 // Philosophy: quiet, neutral surfaces; content brings the colour; the accent
 // is a sparing "signal", never a wash. Designed dark-first for a young audience.
-// ─────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// Brand signal accent — Mercedes-AMG PETRONAS teal. Black text sits on top.
+// Brand signal accent â€” Mercedes-AMG PETRONAS teal. Black text sits on top.
 const BRAND = '#00D2BE';
 const BRAND_DIM = '#00A89E';
 const BRAND_LIGHT = '#7FEDE2';
@@ -219,43 +219,52 @@ export function makeShadows(c: ColorScheme) {
       shadowOffset: { width: 0, height: 0 },
     },
     sm: {
-      elevation: 3,
+      elevation: 4,
       shadowColor: c.shadow,
-      shadowOpacity: 0.16,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.2,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
     },
     md: {
-      elevation: 6,
+      elevation: 8,
       shadowColor: c.shadow,
-      shadowOpacity: 0.22,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.26,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
     },
     lg: {
-      elevation: 12,
+      elevation: 14,
       shadowColor: c.shadow,
-      shadowOpacity: 0.3,
-      shadowRadius: 26,
+      shadowOpacity: 0.32,
+      shadowRadius: 28,
       shadowOffset: { width: 0, height: 18 },
     },
-    /** brand-coloured neon glow for primary CTAs */
+    /** restrained brand-tint lift for primary CTAs */
     glow: {
-      elevation: 10,
+      elevation: 8,
       shadowColor: c.glow,
-      shadowOpacity: 0.55,
-      shadowRadius: 20,
-      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.28,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
     },
-    /** cyan glow for highlight/secondary elements */
+    /** soft cyan tint for highlight/secondary elements */
     glowElectric: {
-      elevation: 10,
+      elevation: 8,
       shadowColor: c.glowElectric,
-      shadowOpacity: 0.55,
-      shadowRadius: 20,
-      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.24,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
     },
   } as const;
 }
 
+/** Light edge / top sheen for raised surfaces (cards, pills, sheets). */
+export const SURFACE_DEPTH = {
+  highlightBorder: 'rgba(255,255,255,0.12)',
+  highlightBorderStrong: 'rgba(255,255,255,0.18)',
+  sheen: 'rgba(255,255,255,0.10)',
+  insetShadow: 'rgba(0,0,0,0.35)',
+} as const;
+
 export type ShadowSet = ReturnType<typeof makeShadows>;
+

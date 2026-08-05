@@ -1,8 +1,8 @@
-import React from 'react';
+﻿import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import * as Icons from 'lucide-react-native';
+import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 
-// Map existing names to lucide components
 const iconMap = {
   home: Icons.Home,
   'game-controller': Icons.Gamepad2 || Icons.Gamepad,
@@ -17,6 +17,7 @@ const TabBarIcon = ({ name, color, size = 24, badge, focused = false }) => {
   return (
     <View style={styles.container}>
       <View style={[styles.iconShell, focused ? styles.iconShellActive : styles.iconShellInactive]}>
+        {focused ? <View pointerEvents="none" style={styles.shellSheen} /> : null}
         <IconComp size={focused ? size + 1 : size} color={color} />
       </View>
       {badge && badge > 0 && (
@@ -43,19 +44,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+    overflow: 'hidden',
   },
   iconShellActive: {
-    backgroundColor: 'rgba(30,41,59,0.95)',
-    borderColor: 'rgba(255,255,255,0.22)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.32,
-    shadowRadius: 7,
-    elevation: 6,
+    backgroundColor: 'rgba(0,210,190,0.14)',
+    borderColor: 'rgba(0,210,190,0.45)',
+    ...SHADOWS.small,
+    shadowColor: COLORS.primary,
+    shadowOpacity: 0.22,
   },
   iconShellInactive: {
-    backgroundColor: 'rgba(15,23,42,0.52)',
-    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(20,20,24,0.72)',
+    borderColor: SURFACE_DEPTH.highlightBorder,
+  },
+  shellSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '45%',
+    backgroundColor: SURFACE_DEPTH.sheen,
   },
   badge: {
     position: 'absolute',
@@ -70,11 +78,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     elevation: 3,
     shadowColor: '#DC2626',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.4,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
     shadowRadius: 3,
   },
   badgeText: {

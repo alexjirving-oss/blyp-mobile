@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useState } from 'react';
 import Icon from './Icon';
 import { TouchableOpacity, StyleSheet, Modal, View, Text, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useCommon';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import { requireAccount } from '../services/guestSessionService';
 import { COLORS } from '../styles/theme';
+import PressableLift from './motion/PressableLift';
 
 export const COMPOSE_DRAFT_KEY = 'blyp_compose_draft_v1';
 
@@ -59,7 +60,7 @@ const CreatePostButton = () => {
     if (requireAccount(navigation, 'post or go live')) return;
     // Dominant path: single tap opens Library (TikTok-class). Long-press opens Create sheet.
     if (!ensureCanCreate('create a post')) return;
-    console.log('[POST][ENTRY] Plus tap → Library');
+    console.log('[POST][ENTRY] Plus tap â†’ Library');
     navigation.navigate('Review', { entryPoint: 'plus_fab', mode: 'library', source: 'gallery' });
   };
 
@@ -121,17 +122,18 @@ const CreatePostButton = () => {
   return (
     <>
       <View style={styles.container}>
-        <TouchableOpacity
+        <PressableLift
           style={styles.button}
           onPress={handlePress}
           onLongPress={handleLongPress}
           delayLongPress={350}
-          activeOpacity={0.85}
+          lifted={false}
+          pressedScale={0.92}
         >
           <View style={styles.fab}>
             <Icon name="add" size={30} color={COLORS.black} />
           </View>
-        </TouchableOpacity>
+        </PressableLift>
       </View>
 
       <Modal
@@ -342,3 +344,4 @@ const styles = StyleSheet.create({
 });
 
 export default CreatePostButton;
+
