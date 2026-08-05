@@ -70,6 +70,22 @@ npx eas-cli credentials -p ios
 
 Prefer letting EAS manage the distribution cert + provisioning profile for `preview-ios` / production.
 
+**Known blocker (2026-08-05):** non-interactive `eas build -p ios --profile preview-ios` reaches credential setup then fails with:
+
+`Credentials are not set up. Run this command again in interactive mode.`
+
+Alex must run once (interactive Apple login / EAS credential wizard):
+
+```powershell
+cd C:\Users\Alex\Blyp26-ios-ship
+npx eas-cli credentials -p ios
+# pick preview-ios / All: Set up all the required credentials to build your project
+# then:
+npx eas-cli build --platform ios --profile preview-ios
+```
+
+After that, `BUILD_IOS_PREVIEW.ps1` can stay non-interactive.
+
 Update `eas.json` → `submit.preview-ios.ios` and `submit.production.ios`:
 - `ascAppId`: numeric ASC App ID  
 - `appleTeamId`: 10-character Team ID  
