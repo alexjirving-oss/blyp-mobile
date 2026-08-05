@@ -103,7 +103,8 @@ export async function uploadMediaToStorage({ localUri, storagePath, contentType,
 
     const uploadPromise = useTask
       ? new Promise((resolve, reject) => {
-          let lastPct = -1;
+          let lastLogPct = -1;
+          let lastUiPct = -1;
           const task = FileSystem.createUploadTask(
             uploadUrl,
             fileUri,
@@ -117,9 +118,18 @@ export async function uploadMediaToStorage({ localUri, storagePath, contentType,
               const sent = Number(data?.totalBytesSent || 0);
               if (!(total > 0)) return;
               const pct = Math.min(100, Math.round((sent / total) * 100));
-              if (pct >= lastPct + 10 || pct === 100) {
-                lastPct = pct;
+              if (pct >= lastLogPct + 10 || pct === 100) {
+                lastLogPct = pct;
                 console.log('[STORAGE_UPLOAD] progress', { storagePath, pct, sent, total });
+              }
+              // Throttle UI callbacks (~every 2%) so composers stay responsive.
+              if (typeof onProgress === 'function' && (pct >= lastUiPct + 2 || pct === 100)) {
+                lastUiPct = pct;
+                try {
+                  onProgress(pct, { sent, total });
+                } catch {
+                  /* ignore */
+                }
               }
             },
           );
