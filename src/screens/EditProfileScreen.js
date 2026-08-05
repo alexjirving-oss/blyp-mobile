@@ -19,6 +19,7 @@ import {
   normalizeProfileClubs,
   toggleIdInList,
 } from '../services/profileIdentityCatalog';
+import { syncClubMembershipIndex } from '../services/clubDiscoveryService';
 
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
@@ -38,6 +39,9 @@ const EditProfileScreen = ({ navigation, route }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [savedProfileClubs, setSavedProfileClubs] = useState(() =>
+    normalizeProfileClubs(profileFromRoute?.profileClubs, getProfileIdentityCaps(false).maxClubs)
+  );
 
   const resolvedEmail = useMemo(() => {
     if (profileFromRoute?.email) return profileFromRoute.email;
@@ -94,7 +98,9 @@ const EditProfileScreen = ({ navigation, route }) => {
           if (userData.username || userData.handle) setUsername((prev) => prev || (userData.username || userData.handle));
           if (userData.bio) setBio(userData.bio);
           if (userData.photoURL) setProfileImage((prev) => prev || userData.photoURL);
-          setProfileClubs(normalizeProfileClubs(userData.profileClubs, identityCaps.maxClubs));
+          const loadedClubs = normalizeProfileClubs(userData.profileClubs, identityCaps.maxClubs);
+          setProfileClubs(loadedClubs);
+          setSavedProfileClubs(loadedClubs);
           setProfileBadges(normalizeProfileBadges(userData.profileBadges, identityCaps.maxBadges));
         }
       } catch (error) {
@@ -302,6 +308,13 @@ const EditProfileScreen = ({ navigation, route }) => {
         profileBadges: badgesToSave,
         updatedAt: new Date(),
       }, { merge: true });
+
+      try {
+        await syncClubMembershipIndex(uid, clubsToSave, savedProfileClubs);
+        setSavedProfileClubs(clubsToSave);
+      } catch (syncErr) {
+        console.warn('[EditProfile] club membership sync skipped', syncErr?.message || String(syncErr));
+      }
 
       // Backfill author meta on existing posts so Home/MediaViewer show updated name/photo.
       await backfillAuthorMetaOnPosts({ ownerUserId: uid, newDisplayName: normalizedUsername, newUsername: normalizedUsername, newPhotoURL: photoURL });

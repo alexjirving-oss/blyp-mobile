@@ -251,6 +251,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Club membership denorm (Phase 2). Primary discovery still queries
+    // users.profileClubs array-contains; this index supports counts/pages later.
+    match /clubMemberships/{clubId}/members/{memberId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.auth.uid == memberId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.clubId == clubId;
+      allow delete: if isSignedIn() && request.auth.uid == memberId;
+      allow update: if false;
+    }
+
     // Deny-by-default for everything else (closes universal auth write).
     match /{document=**} {
       allow read, write: if false;

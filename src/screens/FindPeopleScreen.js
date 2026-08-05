@@ -10,6 +10,12 @@ import { useAuth } from '../hooks/useCommon';
 import { conversationsMessagingService } from '../services/messaging';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { theme as blypTheme } from '../styles/blypTheme';
+import {
+  getMembersByClubId,
+  resolveClubIdFromQuery,
+  userMatchesClubQuery,
+} from '../services/clubDiscoveryService';
+import { getClubById } from '../services/profileIdentityCatalog';
 
 const withAlpha = (hex, alpha) => {
   const s = String(hex || '').replace('#', '');
@@ -136,23 +142,27 @@ const FindPeopleScreen = ({ navigation }) => {
   };
 
   const filterUsers = () => {
-    console.log('ðŸ” FIND PEOPLE: Filtering users for search text:', searchText);
-    console.log('ðŸ” FIND PEOPLE: Available users to filter:', allUsers.length);
+    const q = searchText.trim();
+    const resolvedFromQuery = q ? resolveClubIdFromQuery(q) : null;
+    const activeClubId = clubFilterId || resolvedFromQuery;
 
-    if (!searchText.trim()) {
-      console.log('ðŸ” FIND PEOPLE: No search text, clearing filtered users');
+    if (!q && !clubFilterId) {
       setFilteredUsers([]);
       return;
     }
 
-    const filtered = allUsers.filter(user =>
-      user.username?.toLowerCase().includes(searchText.toLowerCase()) ||
-      user.displayName?.toLowerCase().includes(searchText.toLowerCase()) ||
-      user.email?.toLowerCase().includes(searchText.toLowerCase())
-    );
-
-    console.log('ðŸ” FIND PEOPLE: Filtered results:', filtered.length, 'users');
-    console.log('ðŸ” FIND PEOPLE: Filtered users:', filtered.map(u => ({ id: u.id, username: u.username })));
+    const needle = q.toLowerCase();
+    const filtered = allUsers.filter((user) => {
+      const clubs = Array.isArray(user.profileClubs) ? user.profileClubs : [];
+      if (activeClubId && !clubs.includes(activeClubId)) return false;
+      if (!q) return true;
+      return (
+        user.username?.toLowerCase().includes(needle) ||
+        user.displayName?.toLowerCase().includes(needle) ||
+        user.email?.toLowerCase().includes(needle) ||
+        userMatchesClubQuery(user, q)
+      );
+    });
 
     setFilteredUsers(filtered);
   };
@@ -288,7 +298,9 @@ const FindPeopleScreen = ({ navigation }) => {
             >
               <Icon name="arrow-back" size={24} color={T.textSecondary} />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Find People</Text>
+            <Text style={styles.headerTitle}>
+              {clubFilterId ? (clubFilterLabel || 'Club') : 'Find People'}
+            </Text>
             <View style={styles.headerSpacer} />
           </View>
 
@@ -298,7 +310,11 @@ const FindPeopleScreen = ({ navigation }) => {
               <Icon name="search" size={20} color={T.textMuted} style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search by username, name, or email..."
+                placeholder={
+                  clubFilterId
+                    ? `Search within ${clubFilterLabel || 'club'}...`
+                    : 'Search name or club (e.g. Arsenal)...'
+                }
                 placeholderTextColor={T.textMuted}
                 value={searchText}
                 onChangeText={setSearchText}
@@ -405,6 +421,24 @@ const styles = StyleSheet.create({
   searchContainer: {
     paddingHorizontal: 20,
     paddingBottom: 20,
+  },
+  clubFilterChip: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: withAlpha(T.primary, 0.12),
+    borderWidth: 1,
+    borderColor: withAlpha(T.primary, 0.35),
+  },
+  clubFilterChipText: {
+    color: T.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
   },
   searchInputContainer: {
     flexDirection: 'row',

@@ -312,8 +312,46 @@ const SearchScreen = ({ navigation, route }) => {
     </TouchableOpacity>
   );
 
+  const openClubMembers = (club) => {
+    navigation.navigate('FindPeople', {
+      clubId: club.id,
+      clubLabel: club.shortLabel || club.label,
+    });
+  };
+
+  const renderClubItem = ({ item }) => (
+    <TouchableOpacity
+      style={styles.hashtagItem}
+      onPress={() => openClubMembers(item)}
+    >
+      <View style={styles.hashtagIcon}>
+        <Icon name={item.icon || 'football'} size={24} color="#00D2BE" />
+      </View>
+      <View style={styles.hashtagInfo}>
+        <Text style={styles.hashtagText}>{item.label}</Text>
+        <Text style={styles.hashtagCount}>
+          {item.kind === 'game' ? 'Game club' : 'Football club'} · find members
+        </Text>
+      </View>
+      <Icon name="chevron-forward" size={18} color="#666" />
+    </TouchableOpacity>
+  );
+
   const renderSuggestions = () => (
     <ScrollView style={styles.suggestionsContainer}>
+      {/* Clubs */}
+      {suggestions?.clubs && suggestions.clubs.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Clubs</Text>
+          <FlatList
+            data={suggestions.clubs}
+            renderItem={renderClubItem}
+            keyExtractor={(item) => item.id}
+            scrollEnabled={false}
+          />
+        </View>
+      )}
+
       {/* Recent Searches */}
       {suggestions?.recent && suggestions.recent.length > 0 && (
         <View style={styles.section}>
@@ -403,7 +441,8 @@ const SearchScreen = ({ navigation, route }) => {
             users: searchResults.users || [],
             posts: searchResults.posts || [],
             hashtags: searchResults.hashtags || [],
-            locations: searchResults.locations || []
+            locations: searchResults.locations || [],
+            clubs: searchResults.clubs || [],
           };
       }
     };
@@ -413,6 +452,18 @@ const SearchScreen = ({ navigation, route }) => {
     if (selectedTab === 'all') {
       return (
         <ScrollView style={styles.resultsContainer}>
+          {results.clubs?.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Clubs</Text>
+              <FlatList
+                data={results.clubs.slice(0, 4)}
+                renderItem={renderClubItem}
+                keyExtractor={(item) => item.id}
+                scrollEnabled={false}
+              />
+            </View>
+          )}
+
           {results.users.length > 0 && (
             <View style={styles.section}>
               <View style={styles.sectionHeaderRow}>

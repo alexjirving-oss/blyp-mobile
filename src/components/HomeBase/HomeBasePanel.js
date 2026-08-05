@@ -64,6 +64,11 @@ import {
   creatorAvatar,
   streamThumbnail,
 } from '../../services/discoveryService';
+import {
+  getMyProfileClubs,
+  getPeopleInSharedClubs,
+} from '../../services/clubDiscoveryService';
+import { CLUB_CATALOG, getClubById, resolveClubs } from '../../services/profileIdentityCatalog';
 import { postThumbnail } from '../../services/blypAiService';
 import { followUser, unfollowUser, subscribeToFollowingList } from '../../utils/followUtils';
 import { getActivity, countUnread } from '../../services/activityService';
@@ -131,6 +136,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const [live, setLive] = useState([]);
   const [trending, setTrending] = useState([]);
   const [creators, setCreators] = useState([]);
+  const [myClubs, setMyClubs] = useState([]);
+  const [clubPeople, setClubPeople] = useState([]);
   const [loading, setLoading] = useState(true);
   const [followingSet, setFollowingSet] = useState(new Set());
   const [unread, setUnread] = useState(0);
@@ -1042,6 +1049,92 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                     <Text style={styles.creatorName} numberOfLines={1}>
                       @{c.username || c.displayName || 'user'}
                     </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.followBtn, isF && styles.followingBtn]}
+                    activeOpacity={0.85}
+                    onPress={() => toggleFollow(c)}
+                  >
+                    <Text style={[styles.followText, isF && styles.followingText]}>{isF ? 'Following' : 'Follow'}</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </>
+      )}
+
+      
+      {/* Clubs — browse + people who share your clubs */}
+      <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>
+          {myClubDefs.length > 0 ? 'Your clubs' : 'Explore clubs'}
+        </Text>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('EditProfile')}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.editLink}>{myClubDefs.length > 0 ? 'Edit' : 'Join'}</Text>
+        </TouchableOpacity>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+        {exploreClubs.map((club) => (
+          <TouchableOpacity
+            key={club.id}
+            style={styles.clubChip}
+            activeOpacity={0.85}
+            onPress={() => openClubPeople(club)}
+          >
+            <Icon name={club.icon || 'football'} size={15} color={COLORS.textPrimary} />
+            <Text style={styles.clubChipText}>{club.shortLabel || club.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {clubPeople.length > 0 && (
+        <>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>People in your clubs</Text>
+            <TouchableOpacity
+              onPress={() => {
+                const first = myClubDefs[0];
+                if (first) openClubPeople(first);
+                else navigation.navigate('FindPeople');
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.editLink}>See all</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+            {clubPeople.map((c) => {
+              const avatar = creatorAvatar(c);
+              const targetId = c.id || c.uid || c.userId;
+              const isF = followingSet.has(targetId);
+              const initial = (c.displayName || c.username || '?').slice(0, 1).toUpperCase();
+              const shared = (c.sharedClubIds || [])
+                .map((id) => getClubById(id)?.shortLabel || getClubById(id)?.label)
+                .filter(Boolean)
+                .slice(0, 2)
+                .join(' · ');
+              return (
+                <View key={targetId} style={styles.creatorCard}>
+                  <TouchableOpacity activeOpacity={0.85} onPress={() => openCreator(c)}>
+                    {avatar ? (
+                      <Image source={{ uri: avatar }} style={styles.creatorAvatar} />
+                    ) : (
+                      <View style={[styles.creatorAvatar, styles.creatorAvatarFallback]}>
+                        <Text style={styles.creatorInitial}>{initial}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.creatorName} numberOfLines={1}>
+                      @{c.username || c.displayName || 'user'}
+                    </Text>
+                    {!!shared && (
+                      <Text style={styles.clubSharedHint} numberOfLines={1}>
+                        {shared}
+                      </Text>
+                    )}
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.followBtn, isF && styles.followingBtn]}
