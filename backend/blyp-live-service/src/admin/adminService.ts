@@ -5,10 +5,14 @@ import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
 import {
     syncUserRoleToFirestore,
+    syncAvatarFrameToFirestore,
+    getFirestoreUserPublicFields,
     setPostFeedPriorityFs,
     setPostModerationHiddenFs,
     type FeedPriority,
 } from './firestoreAdmin';
+import { invalidateBanCache } from './banGuard';
+import { invalidateLiveRestrictionCache } from './liveRestrictionGuard';
 
 import { isCanonicalCognitoSub as isCanonicalSubUserId } from '../auth/cognitoSub';
 
@@ -66,6 +70,8 @@ type AdminUserDetail = {
     bannedUntil: string | null;
     verification: AdminVerification;
     restrictions: AdminRestrictions;
+    avatarFrame: string | null;
+    photoURL: string | null;
     createdAt: string | null;
     updatedAt: string | null;
     recentActions: Array<{
@@ -603,6 +609,8 @@ export async function banUserByAdmin(input: {
         bannedUntil: input.bannedUntil,
     });
 
+    invalidateBanCache(input.targetUserId);
+
     await writeAdminAudit({
         actorUserId: input.actorUserId,
         action: 'user_ban',
@@ -626,6 +634,8 @@ export async function unbanUserByAdmin(input: {
         banReason: null,
         bannedUntil: null,
     });
+
+    invalidateBanCache(input.targetUserId);
 
     await writeAdminAudit({
         actorUserId: input.actorUserId,
@@ -653,6 +663,100 @@ export async function writeAdminAudit(input: {
     `,
         [input.actorUserId, input.action, input.targetType, input.targetId, JSON.stringify(input.metadata || {})]
     );
+}
+
+export async function listAdminAudit(input: {
+    q?: string;
+    action?: string;
+    limit: number;
+    offset: number;
+}): Promise<{
+    items: Array<{
+        id: number;
+        actorUserId: string;
+        action: string;
+        targetType: string;
+        targetId: string;
+        metadata: Record<string, unknown>;
+        createdAt: string | null;
+    }>;
+    total: number;
+    limit: number;
+    offset: number;
+    degraded?: boolean;
+    detail?: string;
+}> {
+    const limit = Math.max(1, Math.min(100, Number(input.limit) || 50));
+    const offset = Math.max(0, Number(input.offset) || 0);
+    const q = asString(input.q || '').trim();
+    const action = asString(input.action || '').trim();
+
+    try {
+        const db = adminDb();
+        if (!(await hasTable(db, 'admin_audit_log'))) {
+            return {
+                items: [],
+                total: 0,
+                limit,
+                offset,
+                degraded: true,
+                detail: 'admin_audit_log table missing',
+            };
+        }
+
+        const where: string[] = [];
+        const params: unknown[] = [];
+        if (action) {
+            where.push('action = ?');
+            params.push(action);
+        }
+        if (q) {
+            where.push('(actor_user_id ILIKE ? OR target_id ILIKE ? OR action ILIKE ?)');
+            const like = `%${q}%`;
+            params.push(like, like, like);
+        }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+        const countRs = await db.raw(
+            `SELECT COUNT(*)::bigint AS n FROM admin_audit_log ${whereSql}`,
+            params
+        );
+        const total = Number((countRs as any)?.rows?.[0]?.n || 0);
+
+        const listParams = [...params, limit, offset];
+        const listRs = await db.raw(
+            `
+            SELECT id, actor_user_id, action, target_type, target_id, metadata, created_at
+            FROM admin_audit_log
+            ${whereSql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?
+            `,
+            listParams
+        );
+
+        const items = (((listRs as any)?.rows || []) as Array<any>).map((r) => ({
+            id: Number(r.id),
+            actorUserId: asString(r.actor_user_id),
+            action: asString(r.action),
+            targetType: asString(r.target_type),
+            targetId: asString(r.target_id),
+            metadata: parseJson(r.metadata),
+            createdAt: toIso(r.created_at),
+        }));
+
+        return { items, total, limit, offset };
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] listAdminAudit failed');
+        return {
+            items: [],
+            total: 0,
+            limit,
+            offset,
+            degraded: true,
+            detail: e?.message || String(e),
+        };
+    }
 }
 
 async function hasTable(db: Knex, tableName: string): Promise<boolean> {
@@ -1108,7 +1212,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     const metadata = parseJson(state?.metadata);
     const directoryUser = await findDirectoryUser(userId);
 
-    const [actionsRs, messagesRs] = await Promise.all([
+    const [actionsRs, messagesRs, publicFields] = await Promise.all([
         db.raw(
             `
             SELECT action, target_type, target_id, metadata, created_at
@@ -1129,6 +1233,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
             `,
             [userId]
         ),
+        getFirestoreUserPublicFields(userId).catch(() => ({ avatarFrame: null, photoURL: null })),
     ]);
 
     const recentActions = (((actionsRs as any)?.rows || []) as Array<any>).map((r) => ({
@@ -1168,6 +1273,8 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         bannedUntil: toIso(state?.banned_until),
         verification: buildVerification(metadata),
         restrictions: buildRestrictions(metadata),
+        avatarFrame: publicFields.avatarFrame || null,
+        photoURL: publicFields.photoURL || null,
         createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
         updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
         recentActions,
@@ -1187,6 +1294,7 @@ export async function setAdminUserCapabilities(input: {
     accountRestricted: boolean;
     reason?: string | null;
     expiresAt?: string | null;
+    avatarFrame?: string | null;
 }): Promise<AdminUserDetail> {
     const now = new Date().toISOString();
     const state = await getAdminStateRow(input.targetUserId);
@@ -1227,11 +1335,15 @@ export async function setAdminUserCapabilities(input: {
 
     await writeUserMetadata(input.targetUserId, nextMetadata);
 
+    // Restrictions changed — drop liveRestrictionGuard TTL so go-live enforces immediately.
+    invalidateLiveRestrictionCache(input.targetUserId);
+
+    const directoryUser = await findDirectoryUser(input.targetUserId).catch(() => null);
+
     // Keep mobile in-app admin (useIsAdmin → users/{sub}.roles / isAdmin) in sync
     // whenever the dashboard role is set. Cognito sub == Firestore users doc id.
     let firestoreRoleSync: { ok: boolean; matchedDocs: number; detail?: string } | null = null;
     if (typeof input.role === 'string' && input.role.trim()) {
-        const directoryUser = await findDirectoryUser(input.targetUserId).catch(() => null);
         firestoreRoleSync = await syncUserRoleToFirestore(input.targetUserId, nextRole, {
             email: directoryUser?.email || null,
         });
@@ -1248,6 +1360,24 @@ export async function setAdminUserCapabilities(input: {
         }
     }
 
+    let firestoreAvatarFrameSync: { ok: boolean; matchedDocs: number; detail?: string } | null = null;
+    if (input.avatarFrame !== undefined) {
+        const frame = input.avatarFrame === 'gold_crown' ? 'gold_crown' : null;
+        firestoreAvatarFrameSync = await syncAvatarFrameToFirestore(input.targetUserId, frame, {
+            email: directoryUser?.email || null,
+        });
+        if (!firestoreAvatarFrameSync.ok || firestoreAvatarFrameSync.matchedDocs === 0) {
+            logger.warn(
+                {
+                    targetUserId: input.targetUserId,
+                    frame,
+                    sync: firestoreAvatarFrameSync,
+                },
+                '[admin] Firestore avatarFrame sync incomplete'
+            );
+        }
+    }
+
     await writeAdminAudit({
         actorUserId: input.actorUserId,
         action: 'user_capabilities_set',
@@ -1258,7 +1388,9 @@ export async function setAdminUserCapabilities(input: {
             restrictions: nextMetadata.restrictions,
             role: nextRole,
             previousRole: prevRole,
+            avatarFrame: input.avatarFrame === undefined ? undefined : (input.avatarFrame === 'gold_crown' ? 'gold_crown' : null),
             firestoreRoleSync,
+            firestoreAvatarFrameSync,
         },
     });
 

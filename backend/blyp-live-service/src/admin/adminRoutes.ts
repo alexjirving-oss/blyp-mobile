@@ -12,6 +12,7 @@ import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
 import {
     adminListUserPostsSchema,
     adminListUsersSchema,
+    adminListAuditSchema,
         adminQueueUserMessageSchema,
     adminSetAppVersionPolicySchema,
     adminSetCapabilitiesSchema,
@@ -30,6 +31,7 @@ import {
     getAdminMetricsOverview,
     getAdminUserSourceStats,
     getEffectiveUserControls,
+    listAdminAudit,
     listAdminUserPosts,
     listAdminUsers,
     queueAdminUserMessage,
@@ -349,6 +351,7 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, async (req: Authe
             accountRestricted: parsed.data.accountRestricted,
             reason: parsed.data.reason || null,
             expiresAt: parsed.data.expiresAt || null,
+            avatarFrame: parsed.data.avatarFrame === undefined ? undefined : (parsed.data.avatarFrame || null),
         });
 
         return res.json({ ok: true, userId: targetUserId, detail: out });
@@ -438,6 +441,21 @@ router.post('/admin/users/:userId/credit-coins', requireAdmin, async (req: Authe
             logger.error({ detail: err.detail }, '[admin] /admin/users/:userId/credit-coins failed');
         }
         return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    }
+});
+
+router.get('/admin/audit', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListAuditSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await listAdminAudit(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/audit failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });
 
