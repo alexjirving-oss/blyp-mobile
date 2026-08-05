@@ -63,3 +63,20 @@ export const adminSetAppVersionPolicySchema = z.object({
         });
     }
 });
+
+/** Dashboard coin credit — targetUserId comes from the route param. */
+export const adminCreditCoinsBodySchema = z.object({
+    coins: z.coerce.number().int().min(1).max(1_000_000),
+    idempotencyKey: z.string().trim().min(8).max(128).optional(),
+    reason: z.string().trim().min(1).max(200).optional(),
+});
+
+export const adminListReportsSchema = z.object({
+    status: z.enum(['open', 'resolved', 'dismissed', 'all']).default('open'),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export const adminResolveReportSchema = z.object({
+    status: z.enum(['resolved', 'dismissed']),
+    note: z.string().trim().max(500).optional(),
+});

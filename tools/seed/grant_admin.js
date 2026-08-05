@@ -5,9 +5,10 @@
  * Firebase auth uid (custom token mints uid == sub), so this is exactly what the
  * app checks at runtime.
  *
- * This is the direct way to make Melody a sign-inable in-app admin without going
- * through the admin console. (Admin *web console* login is separate and is
- * granted via the ADMIN_LOGIN_ACCOUNTS env on the live-service — see README/ops.)
+ * This is the direct way to make a user an in-app admin without going through
+ * the admin console Role picker. (Admin *web console* access is separate: Cognito
+ * sign-in at https://admin.blyp.world gated by ADMIN_ALLOWLIST_SUBS on Cloud Run.
+ * ADMIN_LOGIN_ACCOUNTS / shared-password login is retired.)
  *
  * Prerequisites:
  *   • Admin credentials, either:

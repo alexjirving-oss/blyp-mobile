@@ -3,6 +3,7 @@ import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { logger } from '../config/logger';
 import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
+import { syncUserRoleToFirestore } from './firestoreAdmin';
 
 // Updated to accept UUID versions 1-7 (was previously 1-5 only, which rejected UUIDv7 from Cognito)
 const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1149,15 +1150,39 @@ export async function setAdminUserCapabilities(input: {
         },
     };
 
+    const nextRole = input.role || asString(state?.role) || 'user';
+    const prevRole = asString(state?.role) || 'user';
+
     await upsertAdminState({
         userId: input.targetUserId,
-        role: input.role || asString(state?.role) || 'user',
+        role: nextRole,
         isBanned: asBool(state?.is_banned),
         banReason: asString(state?.ban_reason) || null,
         bannedUntil: toIso(state?.banned_until),
     });
 
     await writeUserMetadata(input.targetUserId, nextMetadata);
+
+    // Keep mobile in-app admin (useIsAdmin → users/{sub}.roles / isAdmin) in sync
+    // whenever the dashboard role is set. Cognito sub == Firestore users doc id.
+    let firestoreRoleSync: { ok: boolean; matchedDocs: number; detail?: string } | null = null;
+    if (typeof input.role === 'string' && input.role.trim()) {
+        const directoryUser = await findDirectoryUser(input.targetUserId).catch(() => null);
+        firestoreRoleSync = await syncUserRoleToFirestore(input.targetUserId, nextRole, {
+            email: directoryUser?.email || null,
+        });
+        if (!firestoreRoleSync.ok || firestoreRoleSync.matchedDocs === 0) {
+            logger.warn(
+                {
+                    targetUserId: input.targetUserId,
+                    nextRole,
+                    prevRole,
+                    sync: firestoreRoleSync,
+                },
+                '[admin] Firestore role sync incomplete; Postgres role was still updated'
+            );
+        }
+    }
 
     await writeAdminAudit({
         actorUserId: input.actorUserId,
@@ -1167,6 +1192,9 @@ export async function setAdminUserCapabilities(input: {
         metadata: {
             verification: nextMetadata.verification,
             restrictions: nextMetadata.restrictions,
+            role: nextRole,
+            previousRole: prevRole,
+            firestoreRoleSync,
         },
     });
 

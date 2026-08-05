@@ -1,9 +1,12 @@
 import { Router, Response, NextFunction } from 'express';
+import { randomUUID } from 'crypto';
 import { AuthedRequest, cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
 import { verifyCognitoJwt } from '../auth/verifyCognitoJwt';
 import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
+import { creditCoinsAdmin } from '../economy/economyService';
+import { EconomyError, toEconomyError } from '../economy/economyErrors';
 import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
 import {
     adminListUserPostsSchema,
@@ -11,6 +14,9 @@ import {
         adminQueueUserMessageSchema,
     adminSetAppVersionPolicySchema,
     adminSetCapabilitiesSchema,
+    adminCreditCoinsBodySchema,
+    adminListReportsSchema,
+    adminResolveReportSchema,
     banUserSchema,
 
     moderatePostSchema,
@@ -29,7 +35,9 @@ import {
     restorePostByAdmin,
     setAdminUserCapabilities,
     unbanUserByAdmin,
+    writeAdminAudit,
 } from './adminService';
+import { listFirestoreReports, resolveFirestoreReport } from './firestoreAdmin';
 import { getAppVersionPolicy, publicAppVersionPolicy, setAppVersionPolicy } from '../appVersion/appVersionPolicy';
 
 const router = Router();
@@ -348,6 +356,157 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, async (req: Authe
         return res.json({ ok: true, userId: targetUserId, detail: out });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/capabilities failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+/**
+ * Credit coins from the admin dashboard.
+ * Auth: ADMIN_ALLOWLIST_SUBS only (same as other /admin/* routes).
+ * Reuses economy creditCoinsAdmin ledger path. The separate
+ * /economy/admin/credit-coins endpoint still requires ECONOMY_ADMIN_CREDIT_ENABLED
+ * + ECONOMY_ADMIN_ALLOWLIST_SUBS for non-dashboard callers.
+ */
+router.post('/admin/users/:userId/credit-coins', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!isCanonicalSub(targetUserId)) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminCreditCoinsBodySchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const coins = parsed.data.coins;
+        const idempotencyKey = parsed.data.idempotencyKey || `admin-dash:${actorUserId}:${targetUserId}:${randomUUID()}`;
+        const reason = parsed.data.reason;
+
+        // Same Redis rate limits as /economy/admin/credit-coins (fail closed).
+        const { redis } = getEconomyInfra();
+        const day = new Date().toISOString().slice(0, 10);
+        const perMinuteKey = `economy:admin_credit:${actorUserId}:m1`;
+        const perDayKey = `economy:admin_credit:${actorUserId}:d:${day}`;
+
+        try {
+            const perMin = await redis.incr(perMinuteKey);
+            if (perMin === 1) await redis.expire(perMinuteKey, 60);
+            if (perMin > 3) {
+                throw new EconomyError('RATE_LIMIT', 429, 'Rate limited');
+            }
+
+            const perDay = await redis.incrby(perDayKey, coins);
+            if (perDay === coins) await redis.expire(perDayKey, 60 * 60 * 48);
+            if (perDay > 1_000_000) {
+                try { await redis.decrby(perDayKey, coins); } catch { /* ignore */ }
+                throw new EconomyError('RATE_LIMIT', 429, 'Daily cap exceeded');
+            }
+        } catch (e: any) {
+            if (e instanceof EconomyError) throw e;
+            throw new EconomyError('RATE_LIMIT', 503, 'Rate limiter unavailable', e?.message ?? e);
+        }
+
+        const out = await creditCoinsAdmin(actorUserId, {
+            targetUserId,
+            coins,
+            idempotencyKey,
+            reason,
+        });
+
+        await writeAdminAudit({
+            actorUserId,
+            action: 'user_credit_coins',
+            targetType: 'user',
+            targetId: targetUserId,
+            metadata: {
+                coins,
+                coinsCredited: out.coinsCredited,
+                newBalance: out.newBalance,
+                ledgerId: out.ledgerId,
+                idempotencyKey,
+                reason: reason || null,
+                replay: out.replay === true,
+            },
+        }).catch((err) => {
+            logger.warn({ err: err?.message || String(err) }, '[admin] credit-coins audit write failed');
+        });
+
+        return res.json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
+        if (err.code === 'INTERNAL') {
+            logger.error({ detail: err.detail }, '[admin] /admin/users/:userId/credit-coins failed');
+        }
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    }
+});
+
+router.get('/admin/reports', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListReportsSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await listFirestoreReports({
+            status: parsed.data.status,
+            limit: parsed.data.limit,
+        });
+
+        return res.json({
+            ok: true,
+            available: out.available,
+            reports: out.reports,
+            detail: out.detail || null,
+        });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/reports failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/reports/:reportId/resolve', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const reportId = String(req.params?.reportId || '').trim();
+        if (!reportId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminResolveReportSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await resolveFirestoreReport({
+            reportId,
+            actorUserId,
+            status: parsed.data.status,
+            note: parsed.data.note || null,
+        });
+
+        if (!out.ok) {
+            const status = out.detail === 'not_found' ? 404 : out.detail === 'firestore_unavailable' ? 503 : 500;
+            return res.status(status).json({ error: out.detail || 'FAILED', code: out.detail || 'FAILED' });
+        }
+
+        await writeAdminAudit({
+            actorUserId,
+            action: 'report_resolve',
+            targetType: 'report',
+            targetId: reportId,
+            metadata: {
+                status: parsed.data.status,
+                note: parsed.data.note || null,
+                report: out.report || null,
+            },
+        }).catch(() => undefined);
+
+        return res.json({ ok: true, report: out.report });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/reports/:reportId/resolve failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });

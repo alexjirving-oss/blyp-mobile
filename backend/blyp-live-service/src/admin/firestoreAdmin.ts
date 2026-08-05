@@ -245,6 +245,110 @@ export async function syncUserRoleToFirestore(
   }
 }
 
+export type FsReport = {
+  reportId: string;
+  targetType: string;
+  targetId: string;
+  reporterId: string;
+  reasonCode: string;
+  details: string;
+  status: string;
+  createdAt: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolveNote: string | null;
+};
+
+function mapReport(id: string, data: Record<string, any>): FsReport {
+  return {
+    reportId: id,
+    targetType: str(data.targetType),
+    targetId: str(data.targetId),
+    reporterId: str(data.reporterId),
+    reasonCode: str(data.reasonCode),
+    details: str(data.details),
+    status: str(data.status) || 'open',
+    createdAt: tsToIso(data.createdAt) || (typeof data.createdAt === 'number' ? new Date(data.createdAt).toISOString() : null),
+    resolvedAt: tsToIso(data.resolvedAt),
+    resolvedBy: str(data.resolvedBy) || null,
+    resolveNote: str(data.resolveNote) || null,
+  };
+}
+
+/**
+ * List user-submitted reports from the Firestore `reports` collection
+ * (written by mobile ReportingService). Admin SDK bypasses client rules.
+ */
+export async function listFirestoreReports(opts?: {
+  status?: 'open' | 'resolved' | 'dismissed' | 'all';
+  limit?: number;
+}): Promise<{ available: boolean; reports: FsReport[]; detail?: string }> {
+  const fs = getFirestore();
+  if (!fs) return { available: false, reports: [], detail: 'firestore_unavailable' };
+
+  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 100);
+  const status = opts?.status || 'open';
+
+  try {
+    let query: Query = fs.collection('reports');
+    if (status !== 'all') {
+      query = query.where('status', '==', status);
+    }
+    // Prefer newest-first when createdAt is numeric (ReportingService uses Date.now()).
+    // OrderBy may require a composite index for filtered status; fall back to unsorted.
+    let snap;
+    try {
+      snap = await query.orderBy('createdAt', 'desc').limit(limit).get();
+    } catch {
+      snap = await query.limit(limit).get();
+    }
+
+    const reports = snap.docs.map((d) => mapReport(d.id, d.data() || {}));
+    reports.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    return { available: true, reports: reports.slice(0, limit) };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[firestore-admin] listFirestoreReports failed');
+    return { available: false, reports: [], detail: e?.message || String(e) };
+  }
+}
+
+export async function resolveFirestoreReport(input: {
+  reportId: string;
+  actorUserId: string;
+  status: 'resolved' | 'dismissed';
+  note?: string | null;
+}): Promise<{ ok: boolean; report?: FsReport; detail?: string }> {
+  const fs = getFirestore();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+
+  const reportId = String(input.reportId || '').trim();
+  if (!reportId) return { ok: false, detail: 'missing_report_id' };
+
+  try {
+    const ref = fs.collection('reports').doc(reportId);
+    const snap = await ref.get();
+    if (!snap.exists) return { ok: false, detail: 'not_found' };
+
+    const patch = {
+      status: input.status,
+      resolvedAt: FieldValue.serverTimestamp(),
+      resolvedBy: input.actorUserId,
+      resolveNote: asStringSafe(input.note),
+    };
+    await ref.set(patch, { merge: true });
+    const after = await ref.get();
+    return { ok: true, report: mapReport(after.id, after.data() || {}) };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e), reportId }, '[firestore-admin] resolveFirestoreReport failed');
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
+function asStringSafe(value: unknown): string {
+  if (value == null) return '';
+  return String(value).trim().slice(0, 500);
+}
+
 /** Extract profile photo URL from a Firestore users/{uid} document. */
 function photoFromUserData(data: Record<string, unknown>): string | null {
   return (

@@ -289,7 +289,6 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   const [coins, setCoins] = useState("");
   const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -299,15 +298,19 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   const validAmount = Number.isFinite(amount) && amount >= 1 && amount <= 1_000_000;
 
   async function submit() {
-    if (!validAmount || !password) return;
+    if (!validAmount) return;
     setBusy(true); setErr(null); setMsg(null);
     try {
+      const idempotencyKey =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `admin-dash-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const res = await api.post<{ coinsCredited: number; newBalance: number }>(
         `/admin/users/${encodeURIComponent(u.userId)}/credit-coins`,
-        { coins: amount, reason: reason || undefined, password }
+        { coins: amount, reason: reason || undefined, idempotencyKey }
       );
       setMsg(`Credited ${res.coinsCredited.toLocaleString()} coins. New balance: ${res.newBalance.toLocaleString()}.`);
-      setCoins(""); setReason(""); setPassword(""); setConfirming(false);
+      setCoins(""); setReason(""); setConfirming(false);
       reload();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -343,22 +346,14 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
       ) : (
         <div className="stack" style={{ gap: 8 }}>
           <div className="muted" style={{ fontSize: 13 }}>
-            Confirm crediting <strong>{amount.toLocaleString()}</strong> coins to {u.displayName || u.username || u.userId}. Re-enter your admin password to authorise.
-          </div>
-          <div>
-            <label>Admin password</label>
-            <input
-              type="password" value={password} autoFocus
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-              placeholder="Your admin login password"
-            />
+            Confirm crediting <strong>{amount.toLocaleString()}</strong> coins to {u.displayName || u.username || u.userId}.
+            This posts an audited ledger entry via your Cognito admin session.
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <button className="btn" disabled={busy || !password} onClick={submit}>
+            <button className="btn" disabled={busy} onClick={submit}>
               {busy ? "Crediting…" : "Confirm & add coins"}
             </button>
-            <button className="btn ghost" disabled={busy} onClick={() => { setConfirming(false); setPassword(""); }}>
+            <button className="btn ghost" disabled={busy} onClick={() => setConfirming(false)}>
               Cancel
             </button>
           </div>
