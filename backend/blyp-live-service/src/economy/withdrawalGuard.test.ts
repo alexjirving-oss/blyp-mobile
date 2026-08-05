@@ -45,3 +45,19 @@ test('denies below minimum payout', () => {
   assert.equal(a.decision, 'deny');
   assert.ok(a.reasons.includes('BELOW_MIN_PAYOUT'));
 });
+
+test('routes large amounts to manual review', () => {
+  const a = assessWithdrawal({ ...base, amountCoins: 100_000, withdrawableCoins: 200_000 });
+  assert.equal(a.decision, 'review');
+  assert.equal(a.requiresManualReview, true);
+  assert.ok(a.reasons.includes('LARGE_AMOUNT'));
+});
+
+test('routes new payout accounts to manual review', () => {
+  const a = assessWithdrawal({
+    ...base,
+    payoutAccountAgeMs: 2 * 24 * 60 * 60 * 1000,
+  });
+  assert.equal(a.decision, 'review');
+  assert.ok(a.reasons.includes('NEW_PAYOUT_ACCOUNT'));
+});

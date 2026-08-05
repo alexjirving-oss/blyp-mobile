@@ -109,3 +109,15 @@ export const adminResolveReportSchema = z.object({
     status: z.enum(['resolved', 'dismissed']),
     note: z.string().trim().max(500).optional(),
 });
+
+export const adminListWithdrawalsSchema = z.object({
+    status: z
+        .enum(['pending_review', 'pending', 'processing', 'paid', 'failed', 'rejected', 'all'])
+        .default('pending_review'),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const adminRejectWithdrawalSchema = z.object({
+    reason: z.string().trim().min(1).max(500).optional(),
+});

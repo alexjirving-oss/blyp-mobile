@@ -70,8 +70,9 @@ export function isClientEconomyMutationAllowed(): boolean {
 }
 
 // Withdrawals: OFF by default — prod live-service kill-switch is off until
-// Stripe Connect is explicitly enabled. Set EXPO_PUBLIC_ENABLE_WITHDRAWALS=1
-// to show the client CTA (backend must also allow withdrawals).
+// Stripe Connect is explicitly enabled (sk_live_ + ENABLE_WITHDRAWALS=1).
+// Set EXPO_PUBLIC_ENABLE_WITHDRAWALS=1 only when the backend flag is also on.
+// See docs/WITHDRAWALS_OPS.md.
 export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', false);
 
 // Helper: determine unsafe simulation mode (client credits without server receipt)

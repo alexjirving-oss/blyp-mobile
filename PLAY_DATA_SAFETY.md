@@ -44,7 +44,7 @@ This document maps app features to data types collected/processed and third-part
 
 - Financial
   - Coin purchase receipts (Play Billing); gem/coin balances on live-service
-  - Withdrawals: not offered in production client until `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1` **and** backend kill-switch
+  - Withdrawals: not offered in production client until `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1` **and** backend `ENABLE_WITHDRAWALS=1` with Stripe secrets. Ops: `docs/WITHDRAWALS_OPS.md`.
 
 ## Security Practices
 - Data is encrypted in transit (HTTPS/TLS).

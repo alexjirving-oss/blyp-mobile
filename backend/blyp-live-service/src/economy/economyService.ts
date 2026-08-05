@@ -1675,6 +1675,11 @@ async function applyTeamGiftBonus(input: {
   });
 }
 
+/**
+ * Admin goodwill / support credits land in BONUS_COIN (spendable, never
+ * cashable). Purchased COIN and creator GEM remain separate; admin credits
+ * must never be indistinguishable from IAP-funded balances or withdrawable gems.
+ */
 export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCoinsInput) {
   const { db } = getEconomyInfra();
   const createdAt = nowIso();
@@ -1688,16 +1693,25 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
         ledgerId: 'ledger_id',
         amount: 'amount',
         createdAt: 'created_at',
+        currency: 'currency',
       })
       .where({ user_id: targetUserId, entry_type: 'ADMIN_CREDIT', idempotency_key: idempotencyKey })
       .first();
 
     if (existing) {
       const wallet = await ensureWalletRow(trx, targetUserId);
+      const creditedCurrency = String(existing.currency || 'BONUS_COIN');
       return {
         targetUserId,
         coinsCredited: Number(existing.amount),
-        newBalance: Number(wallet.coin_balance),
+        currency: creditedCurrency,
+        nonWithdrawable: true,
+        newBalance:
+          creditedCurrency === 'COIN'
+            ? Number(wallet.coin_balance)
+            : Number(wallet.bonus_coin_balance),
+        coinBalance: Number(wallet.coin_balance),
+        bonusCoinBalance: Number(wallet.bonus_coin_balance),
         ledgerId: String(existing.ledgerId),
         createdAt: new Date(existing.createdAt).toISOString(),
         replay: true,
@@ -1710,8 +1724,8 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
     if (!wallet) throw new EconomyError('INTERNAL', 500, 'Target wallet missing');
 
     const delta = BigInt(coins);
-    const before = BigInt(wallet.coin_balance);
-    const after = before + delta;
+    const beforeBonus = BigInt(wallet.bonus_coin_balance || 0);
+    const afterBonus = beforeBonus + delta;
     const ledgerId = randomUUID();
 
     const metadata = {
@@ -1719,13 +1733,15 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
       targetUserId,
       reason: typeof reason === 'string' ? reason : null,
       timestamp: createdAt,
+      nonWithdrawable: true,
+      source: 'admin_credit',
     };
 
     await trx('ledger_entries').insert({
       ledger_id: ledgerId,
       user_id: targetUserId,
       entry_type: 'ADMIN_CREDIT',
-      currency: 'COIN',
+      currency: 'BONUS_COIN',
       amount: delta.toString(),
       status: 'POSTED',
       reference_type: 'ADMIN_CREDIT',
@@ -1737,14 +1753,18 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
     await trx('wallets')
       .where({ user_id: targetUserId })
       .update({
-        coin_balance: after.toString(),
+        bonus_coin_balance: afterBonus.toString(),
         updated_at: trx.fn.now(),
       });
 
     return {
       targetUserId,
       coinsCredited: Number(coins),
-      newBalance: Number(after),
+      currency: 'BONUS_COIN',
+      nonWithdrawable: true,
+      newBalance: Number(afterBonus),
+      coinBalance: Number(wallet.coin_balance),
+      bonusCoinBalance: Number(afterBonus),
       ledgerId,
       createdAt,
       replay: false,
