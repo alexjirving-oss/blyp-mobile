@@ -173,7 +173,7 @@ export function buildTourSteps({ hasDating = true, hasGames = false } = {}) {
     steps.push({
       id: 'games',
       title: 'Games',
-      body: 'Chat/Games → Games covers Marble Race (multi-guest live) and Battle game (Artillery). Classic lobby stay paused.',
+      body: 'Chat/Games → Games covers Marble Race (start from your live) and Battle game (Artillery). Classic lobby stay paused.',
       icon: 'game-controller',
       navigate: { type: 'chatTab', select: 'games' },
       targetId: 'headerTab:games',

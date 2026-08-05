@@ -49,13 +49,20 @@ function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
 }
 
 export default function GamesContent({ navigation, onSelectChatTab }) {
-  const openLive = () => {
+  const startFromLive = () => {
     try {
-      navigation?.navigate?.('Chat');
+      navigation?.navigate?.('LiveStreamScreen', {
+        mode: 'host',
+        source: 'GamesMarbleRace',
+      });
     } catch {
-      /* ignore */
+      try {
+        navigation?.navigate?.('Chat');
+      } catch {
+        /* ignore */
+      }
+      onSelectChatTab?.('notifications');
     }
-    onSelectChatTab?.('notifications');
   };
 
   const openBattles = () => {
@@ -71,23 +78,23 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
       <GameCard
         icon="flash"
         title="Marble Race"
-        badge={MARBLE_ENABLED ? 'Live in multi-guest' : 'Coming soon'}
+        badge={MARBLE_ENABLED ? 'From your live' : 'Coming soon'}
         body={
           MARBLE_ENABLED
-            ? 'Guest Grand Prix — translucent race overlay on multi-guest lives. Hosts start the heat; guests pick a marble.'
-            : 'Guest Grand Prix will open from multi-guest lives once the race flag is on in this build.'
+            ? 'Guest Grand Prix — translucent race overlay on your live. Hosts tap Marble Race; solo practice works, and guests join when they are on stage.'
+            : 'Guest Grand Prix will open from your live once the race flag is on in this build.'
         }
         steps={
           MARBLE_ENABLED
             ? [
-                'Go Live (or join a live) with at least one guest on stage.',
-                'Host taps the Race CTA on the live overlay.',
-                'Guests pick a marble; cheer boosts can nudge the heat.',
+                'Go Live from your account (Start from Live below).',
+                'On your live overlay, tap the orange Race / Marble Race button.',
+                'Solo practice starts immediately; invite guests from chat for a full grid.',
               ]
-            : ['Open Live when Marble Race ships in your build.', 'Host a multi-guest stream to unlock Race.']
+            : ['Open Live when Marble Race ships in your build.', 'Host a stream and tap Race on the overlay.']
         }
-        ctaLabel={MARBLE_ENABLED ? 'Open Live' : null}
-        onCta={MARBLE_ENABLED ? openLive : null}
+        ctaLabel={MARBLE_ENABLED ? 'Start from Live' : null}
+        onCta={MARBLE_ENABLED ? startFromLive : null}
         muted={!MARBLE_ENABLED}
       />
 

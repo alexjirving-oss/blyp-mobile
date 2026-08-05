@@ -5,10 +5,12 @@
 
 export type MarblePhase = 'lobby' | 'lock' | 'heat' | 'podium' | 'ended';
 
-export const MARBLE_COLORS = ['#FF5A5F', '#00D2BE', '#FFB020', '#7B61FF'] as const;
-export const PLACE_POINTS = [10, 7, 5, 3] as const;
+export const MARBLE_COLORS = ['#FF5A5F', '#00D2BE', '#FFB020', '#7B61FF', '#4DA3FF', '#E86BA8'] as const;
+export const PLACE_POINTS = [10, 7, 5, 3, 2, 1] as const;
 export const HEATS_TOTAL = 3;
-export const MAX_RACERS = 4;
+/** Host + up to 5 guests (2–6 marbles including host). */
+export const MAX_RACERS = 6;
+export const MIN_RACERS = 2;
 export const TICK_MS = 200;
 export const LOBBY_TICKS = 75;
 export const LOCK_TICKS = 25;

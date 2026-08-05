@@ -258,12 +258,18 @@ const LiveStreamScreen = (props) => {
     );
   };
 
-  // Marble Race translucent overlay on multi-guest (non-battle) lives.
+  // Marble Race translucent overlay on non-battle lives (host CTA when flag on).
+  // Host can start solo practice; LIVE guests join the grid when present (2–6).
   const renderMarbleLayer = () => {
     if (!MARBLE_ENABLED || routeBattleId) return null;
     const gameSessionId = routeStreamId || streamId;
     if (!gameSessionId) return null;
-    const guestCount = (liveGuests || []).filter((g) => g && g.userId && g.userId !== uid).length;
+    // Host path: prefer live only (session exists after Go Live).
+    if (isHost && !isStreaming) return null;
+    const rosterCount = (liveGuests || []).filter((g) => g && g.userId && g.userId !== uid).length;
+    const guestCount = isHost
+      ? Math.max(rosterCount, typeof hostGuestCount === 'number' ? hostGuestCount : 0)
+      : rosterCount;
     return (
       <MarbleRaceOverlay
         sessionId={gameSessionId}
@@ -271,6 +277,17 @@ const LiveStreamScreen = (props) => {
         currentUid={uid}
         hostName={resolvedHostName || 'Host'}
         liveGuestCount={guestCount}
+        onInviteGuest={
+          isHost
+            ? () => {
+                Alert.alert(
+                  'Invite a guest to Race',
+                  'Tap a viewer in live chat and choose Invite to join. They appear on stage, then tap Race again — or start now for solo practice.',
+                  [{ text: 'Got it' }]
+                );
+              }
+            : undefined
+        }
       />
     );
   };

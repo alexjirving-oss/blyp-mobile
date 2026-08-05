@@ -33,6 +33,7 @@ export default function MarbleRaceOverlay({
   currentUid,
   hostName,
   liveGuestCount = 0,
+  onInviteGuest,
   onClose,
 }) {
   const [event, setEvent] = useState(null);
@@ -82,7 +83,12 @@ export default function MarbleRaceOverlay({
       const res = await marbleStart(sessionId, { hostName });
       applyEvent(res);
     } catch (e) {
-      setErr(e?.message || e?.code || 'Start failed');
+      const code = String(e?.code || e?.message || '');
+      if (/NEED_GUESTS|NEED_RACERS/i.test(code)) {
+        setErr('Invite a guest to Race, or try again in a moment.');
+      } else {
+        setErr(e?.message || e?.code || 'Start failed');
+      }
     } finally {
       setBusy(false);
     }
@@ -128,7 +134,10 @@ export default function MarbleRaceOverlay({
   const state = event?.state;
   const marbles = state?.marbles || [];
   const phase = state?.phase;
-  const canStart = isHost && !active && liveGuestCount >= 1;
+  // Host Race CTA is always available when the client flag is on (solo practice
+  // pads on the server when no guests are LIVE).
+  const canStart = isHost && !active && !!sessionId;
+  const soloPractice = isHost && !active && liveGuestCount < 1;
 
   return (
     <View style={styles.root} pointerEvents="box-none">
@@ -222,20 +231,42 @@ export default function MarbleRaceOverlay({
       ) : null}
 
       {isHost && !active ? (
-        <TouchableOpacity
-          style={[styles.startFab, !canStart && styles.startFabDisabled]}
-          onPress={start}
-          disabled={busy || !canStart}
-          activeOpacity={0.85}
-        >
-          {busy ? (
-            <ActivityIndicator color="#0A0A0C" />
-          ) : (
-            <Text style={styles.startFabText} allowFontScaling={false}>
-              {canStart ? 'Race' : 'Need guest'}
-            </Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.hostRaceCluster} pointerEvents="box-none">
+          {soloPractice ? (
+            <View style={styles.hintCard} pointerEvents="box-none">
+              <Text style={styles.hintText} allowFontScaling={false}>
+                Solo practice ready — or invite a guest to Race
+              </Text>
+              {typeof onInviteGuest === 'function' ? (
+                <TouchableOpacity
+                  style={styles.inviteBtn}
+                  onPress={onInviteGuest}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.inviteBtnText} allowFontScaling={false}>
+                    Invite a guest
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
+          <TouchableOpacity
+            style={styles.startFab}
+            onPress={start}
+            disabled={busy || !canStart}
+            activeOpacity={0.85}
+            accessibilityLabel="Start Marble Race"
+            accessibilityRole="button"
+          >
+            {busy ? (
+              <ActivityIndicator color="#0A0A0C" />
+            ) : (
+              <Text style={styles.startFabText} allowFontScaling={false}>
+                {soloPractice ? 'Race' : 'Marble Race'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
       ) : null}
 
       {err ? (
@@ -318,19 +349,52 @@ const styles = StyleSheet.create({
   pickChipText: { color: '#F4F7FA', fontSize: 11, fontWeight: '700' },
   podium: { marginTop: 8, gap: 2 },
   podiumLine: { color: '#F4F7FA', fontWeight: '800', fontSize: 12 },
-  startFab: {
+  hostRaceCluster: {
     position: 'absolute',
     right: 14,
-    bottom: 210,
+    bottom: 200,
+    alignItems: 'flex-end',
+    zIndex: 55,
+    gap: 8,
+    maxWidth: 220,
+  },
+  hintCard: {
+    backgroundColor: 'rgba(10, 14, 18, 0.82)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,176,32,0.55)',
+    gap: 8,
+    alignItems: 'stretch',
+  },
+  hintText: {
+    color: '#F4F7FA',
+    fontWeight: '700',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  inviteBtn: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  inviteBtnText: { color: '#FFB020', fontWeight: '800', fontSize: 12 },
+  startFab: {
     backgroundColor: '#FFB020',
     paddingHorizontal: 16,
     paddingVertical: 11,
     borderRadius: 22,
-    zIndex: 55,
-    minWidth: 72,
+    minWidth: 96,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
   },
-  startFabDisabled: { opacity: 0.45 },
   startFabText: { color: '#0A0A0C', fontWeight: '900', fontSize: 13 },
   errBanner: {
     position: 'absolute',

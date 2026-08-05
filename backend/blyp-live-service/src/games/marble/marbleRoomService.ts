@@ -18,8 +18,12 @@ import {
   seedFromString,
   TICK_MS,
   MAX_RACERS,
+  MIN_RACERS,
   type MarbleRaceState,
 } from './engine';
+
+/** Synthetic lanes so a host can solo-practice without a live guest. */
+const PRACTICE_NAMES = ['Practice A', 'Practice B', 'Practice C'] as const;
 
 const TTL_SECONDS = 60 * 60 * 2;
 const stateKey = (sessionId: string) => `marble:race:${sessionId}`;
@@ -205,15 +209,20 @@ async function tickOnce(sessionId: string) {
 export async function resolveRacers(sessionId: string, hostUserId: string, hostName?: string) {
   const guests = await listGuests(sessionId);
   const live = guests.filter((g) => g.state === 'LIVE').slice(0, MAX_RACERS - 1);
-  if (live.length < 1) {
-    const err: any = new Error('NEED_GUESTS');
-    err.code = 'NEED_GUESTS';
-    throw err;
-  }
-  return [
+  const racers: Array<{ userId: string; displayName: string }> = [
     { userId: hostUserId, displayName: hostName || 'Host' },
     ...live.map((g, i) => ({ userId: g.userId, displayName: `Guest ${i + 1}` })),
-  ].slice(0, MAX_RACERS);
+  ];
+  // Solo practice: pad with practice marbles so the heat can start (min 2).
+  // Prefer a 3-lane practice field when the host is alone.
+  const soloTarget = live.length === 0 ? Math.min(3, MAX_RACERS) : MIN_RACERS;
+  let pad = 0;
+  while (racers.length < soloTarget) {
+    const name = PRACTICE_NAMES[pad] || `Practice ${pad + 1}`;
+    pad += 1;
+    racers.push({ userId: `__practice_${sessionId}_${pad}`, displayName: name });
+  }
+  return racers.slice(0, MAX_RACERS);
 }
 
 export async function startRace(args: {
@@ -231,13 +240,13 @@ export async function startRace(args: {
     }
 
     const racers =
-      args.racers && args.racers.length >= 2
+      args.racers && args.racers.length >= MIN_RACERS
         ? args.racers.slice(0, MAX_RACERS)
         : await resolveRacers(sessionId, hostUserId, args.hostName);
 
-    if (racers.length < 2) {
-      const err: any = new Error('NEED_GUESTS');
-      err.code = 'NEED_GUESTS';
+    if (racers.length < MIN_RACERS) {
+      const err: any = new Error('NEED_RACERS');
+      err.code = 'NEED_RACERS';
       throw err;
     }
 
