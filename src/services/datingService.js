@@ -3,6 +3,7 @@
 // Blyp Dating client — prefs, discovery, like/pass, matches.
 // Gated in UI by useHasAI; likes go through blypDatingLike (server match write).
 // Prefs persist AsyncStorage + Firestore datingPrefs/{uid}.
+// Phase 4: bio / prompts / photo refs + Discover filters (age / gender / distance).
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, auth, firebaseEnabled } from '../config/firebase';
@@ -16,15 +17,54 @@ const FUNCTIONS_BASE = (
 
 const LIKE_ENDPOINT = FUNCTIONS_BASE + '/blypDatingLike';
 
+/** Fixed prompt stems — users fill answers (1–3). */
+export const DATING_PROMPT_OPTIONS = [
+  { id: 'weekend', question: 'A perfect weekend looks like…' },
+  { id: 'looking', question: "I'm looking for someone who…" },
+  { id: 'laugh', question: 'You should know I laugh at…' },
+  { id: 'green_flag', question: 'My green flag is…' },
+  { id: 'sunday', question: 'Sunday mornings are for…' },
+  { id: 'blyp', question: 'On Blyp you will find me…' },
+];
+
+/** Soft gender labels for dating only — not legal/medical categories. */
+export const DATING_GENDER_OPTIONS = [
+  { id: 'woman', label: 'Woman' },
+  { id: 'man', label: 'Man' },
+  { id: 'nonbinary', label: 'Non-binary' },
+  { id: 'prefer_not', label: 'Prefer not to say' },
+];
+
+export const DISTANCE_OPTIONS_KM = [null, 25, 50, 100, 250];
+
+const BIO_MAX = 280;
+const PROMPT_ANSWER_MAX = 120;
+const PROMPT_MAX = 3;
+const PHOTO_REF_MAX = 3;
+const AGE_MIN_FLOOR = 18;
+const AGE_MAX_CEIL = 99;
+
 const DEFAULT_PREFS = {
   optedIn: false,
   adultConfirmed: false,
   adultConfirmedAt: 0,
   bio: '',
+  prompts: [],
+  photoRefs: [],
+  useProfilePhoto: true,
+  birthYear: null,
+  gender: '',
+  lookingFor: [],
+  ageMin: 18,
+  ageMax: 99,
+  maxDistanceKm: null,
+  geoLat: null,
+  geoLon: null,
+  geoUpdatedAt: 0,
   updatedAt: 0,
 };
 
-const DISCOVERY_LIMIT = 40;
+const DISCOVERY_LIMIT = 80;
 
 const cache = new Map();
 
@@ -32,14 +72,104 @@ function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
 
+function clampInt(n, lo, hi, fallback) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(lo, Math.min(hi, Math.round(v)));
+}
+
+function normalizePrompts(raw) {
+  if (!Array.isArray(raw)) return [];
+  const known = new Set(DATING_PROMPT_OPTIONS.map((p) => p.id));
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const id = typeof item.id === 'string' ? item.id : '';
+    const answer = typeof item.answer === 'string' ? item.answer.trim().slice(0, PROMPT_ANSWER_MAX) : '';
+    if (!id || !known.has(id) || !answer || seen.has(id)) continue;
+    const q =
+      DATING_PROMPT_OPTIONS.find((p) => p.id === id)?.question ||
+      (typeof item.question === 'string' ? item.question : '');
+    seen.add(id);
+    out.push({ id, question: q, answer });
+    if (out.length >= PROMPT_MAX) break;
+  }
+  return out;
+}
+
+function normalizePhotoRefs(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const u of raw) {
+    if (typeof u !== 'string') continue;
+    const url = u.trim();
+    if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) continue;
+    if (out.includes(url)) continue;
+    out.push(url);
+    if (out.length >= PHOTO_REF_MAX) break;
+  }
+  return out;
+}
+
+function normalizeLookingFor(raw) {
+  if (!Array.isArray(raw)) return [];
+  const known = new Set(DATING_GENDER_OPTIONS.map((g) => g.id));
+  const out = [];
+  for (const id of raw) {
+    if (typeof id !== 'string' || !known.has(id) || out.includes(id)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
+function normalizeGender(raw) {
+  const id = typeof raw === 'string' ? raw : '';
+  return DATING_GENDER_OPTIONS.some((g) => g.id === id) ? id : '';
+}
+
 function normalize(raw) {
   const base = clone(DEFAULT_PREFS);
   if (!raw || typeof raw !== 'object') return base;
+  let ageMin = clampInt(raw.ageMin, AGE_MIN_FLOOR, AGE_MAX_CEIL, 18);
+  let ageMax = clampInt(raw.ageMax, AGE_MIN_FLOOR, AGE_MAX_CEIL, 99);
+  if (ageMin > ageMax) {
+    const t = ageMin;
+    ageMin = ageMax;
+    ageMax = t;
+  }
+  const birthYearRaw = raw.birthYear;
+  let birthYear = null;
+  if (birthYearRaw !== null && birthYearRaw !== undefined && birthYearRaw !== '') {
+    const y = clampInt(birthYearRaw, 1920, new Date().getFullYear() - AGE_MIN_FLOOR, null);
+    birthYear = y;
+  }
+  let maxDistanceKm = null;
+  if (raw.maxDistanceKm !== null && raw.maxDistanceKm !== undefined && raw.maxDistanceKm !== '') {
+    const d = Number(raw.maxDistanceKm);
+    if (Number.isFinite(d) && d > 0) maxDistanceKm = Math.min(500, Math.round(d));
+  }
+  const geoLat = Number(raw.geoLat);
+  const geoLon = Number(raw.geoLon);
+  const hasGeo = Number.isFinite(geoLat) && Number.isFinite(geoLon);
+
   return {
     optedIn: !!raw.optedIn,
     adultConfirmed: !!raw.adultConfirmed,
     adultConfirmedAt: Number(raw.adultConfirmedAt || 0) || 0,
-    bio: typeof raw.bio === 'string' ? raw.bio.slice(0, 280) : '',
+    bio: typeof raw.bio === 'string' ? raw.bio.slice(0, BIO_MAX) : '',
+    prompts: normalizePrompts(raw.prompts),
+    photoRefs: normalizePhotoRefs(raw.photoRefs),
+    useProfilePhoto: raw.useProfilePhoto !== false,
+    birthYear,
+    gender: normalizeGender(raw.gender),
+    lookingFor: normalizeLookingFor(raw.lookingFor),
+    ageMin,
+    ageMax,
+    maxDistanceKm,
+    geoLat: hasGeo ? geoLat : null,
+    geoLon: hasGeo ? geoLon : null,
+    geoUpdatedAt: Number(raw.geoUpdatedAt || 0) || 0,
     updatedAt: Number(raw.updatedAt || 0) || 0,
   };
 }
@@ -58,6 +188,60 @@ function snapData(snap) {
   if (!snap) return null;
   if (typeof snap.data === 'function') return snap.data() || null;
   return snap.data || null;
+}
+
+function ageFromBirthYear(birthYear) {
+  if (!birthYear || !Number.isFinite(Number(birthYear))) return null;
+  const y = Number(birthYear);
+  const now = new Date().getFullYear();
+  const age = now - y;
+  if (age < AGE_MIN_FLOOR || age > 120) return null;
+  return age;
+}
+
+/** Haversine distance in km. */
+export function haversineKm(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function passesFilters(viewerPrefs, candidatePrefs) {
+  if (!viewerPrefs) return true;
+  const cAge = ageFromBirthYear(candidatePrefs?.birthYear);
+  if (cAge != null) {
+    if (cAge < (viewerPrefs.ageMin || AGE_MIN_FLOOR)) return false;
+    if (cAge > (viewerPrefs.ageMax || AGE_MAX_CEIL)) return false;
+  }
+
+  const want = Array.isArray(viewerPrefs.lookingFor) ? viewerPrefs.lookingFor : [];
+  if (want.length > 0) {
+    const g = candidatePrefs?.gender || '';
+    if (g && !want.includes(g)) return false;
+  }
+
+  const maxKm = viewerPrefs.maxDistanceKm;
+  if (maxKm != null && maxKm > 0) {
+    const vLat = viewerPrefs.geoLat;
+    const vLon = viewerPrefs.geoLon;
+    const cLat = candidatePrefs?.geoLat;
+    const cLon = candidatePrefs?.geoLon;
+    if (
+      Number.isFinite(vLat) &&
+      Number.isFinite(vLon) &&
+      Number.isFinite(cLat) &&
+      Number.isFinite(cLon)
+    ) {
+      if (haversineKm(vLat, vLon, cLat, cLon) > maxKm) return false;
+    }
+  }
+
+  return true;
 }
 
 async function firebaseIdToken() {
@@ -189,32 +373,53 @@ async function enrichCard(uid, prefsDoc) {
       displayName = 'Unavailable';
     }
   } catch {
-    /* profile enrich is best-effort */
     unavailable = true;
     displayName = 'Unavailable';
   }
+
   const bio = typeof prefsDoc?.bio === 'string' ? prefsDoc.bio.trim() : '';
+  const prompts = normalizePrompts(prefsDoc?.prompts);
+  const refs = normalizePhotoRefs(prefsDoc?.photoRefs);
+  const useProfile = prefsDoc?.useProfilePhoto !== false;
+  const photos = [];
+  if (useProfile && photoURL) photos.push(photoURL);
+  for (const r of refs) {
+    if (!photos.includes(r)) photos.push(r);
+    if (photos.length >= PHOTO_REF_MAX) break;
+  }
+  if (!photos.length && photoURL) photos.push(photoURL);
+
+  const age = ageFromBirthYear(prefsDoc?.birthYear);
+  const gender = normalizeGender(prefsDoc?.gender);
+
   return {
     id: uid,
     displayName,
     username,
-    photoURL,
+    photoURL: photos[0] || photoURL,
+    photos,
+    bio,
+    prompts,
+    age,
+    gender,
     tagline: unavailable
       ? 'No longer on Blyp'
-      : bio || (username ? '@' + username : 'On Blyp Dating'),
+      : bio || (prompts[0]?.answer ? prompts[0].answer : username ? '@' + username : 'On Blyp Dating'),
     unavailable,
     stub: false,
   };
 }
 
 /**
- * Discovery cards: opted-in adults minus self, blocks, already liked/passed.
+ * Discovery cards: opted-in adults minus self, blocks, already liked/passed,
+ * then client filters (age / lookingFor / distance when data exists).
  */
 export async function fetchDiscoveryCards(uid) {
   if (!uid || !firebaseEnabled || !db) return [];
   await loadBlockedUsers().catch(() => {});
   const blocked = getBlockedSet();
   const seen = await loadSeenTargetIds(uid);
+  const viewerPrefs = await getDatingPrefs(uid);
 
   let docs = [];
   try {
@@ -236,7 +441,9 @@ export async function fetchDiscoveryCards(uid) {
     if (blocked.has(id) || seen.has(id)) continue;
     const data = typeof d.data === 'function' ? d.data() : d.data;
     if (!data?.adultConfirmed) continue;
-    candidates.push({ id, data });
+    const cand = normalize(data);
+    if (!passesFilters(viewerPrefs, cand)) continue;
+    candidates.push({ id, data: cand });
   }
 
   const cards = [];
@@ -341,7 +548,14 @@ export async function fetchMatches(uid) {
     const members = Array.isArray(data?.members) ? data.members : [];
     const otherId = members.find((m) => m !== uid);
     if (!otherId || blocked.has(otherId)) continue;
-    const card = await enrichCard(otherId, null);
+    let prefsDoc = null;
+    try {
+      const pSnap = await db.collection('datingPrefs').doc(otherId).get();
+      if (snapExists(pSnap)) prefsDoc = normalize(snapData(pSnap));
+    } catch {
+      /* ignore */
+    }
+    const card = await enrichCard(otherId, prefsDoc);
     out.push({
       matchId: d.id,
       otherUserId: otherId,
@@ -360,4 +574,4 @@ export function getStubDiscoveryCards() {
   return [];
 }
 
-export { DEFAULT_PREFS };
+export { DEFAULT_PREFS, BIO_MAX, PROMPT_MAX, AGE_MIN_FLOOR, AGE_MAX_CEIL };
