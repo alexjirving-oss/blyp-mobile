@@ -108,12 +108,32 @@ module.exports = () => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.blyp.mobile',
+      buildNumber: process.env.EXPO_IOS_BUILD_NUMBER || '1',
+      // Push: expo-notifications plugin + EAS credentials supply the aps entitlement.
       infoPlist: {
-        NSCameraUsageDescription: 'This app needs access to camera to take photos and videos',
-        NSMicrophoneUsageDescription: 'This app needs access to microphone for phone calls and recording audio',
-        NSPhotoLibraryUsageDescription: 'This app needs access to photo library to save and select media',
+        NSCameraUsageDescription:
+          'Blyp needs camera access to take photos, record videos, and go live.',
+        NSMicrophoneUsageDescription:
+          'Blyp needs microphone access for voice calls, voice memos, and live audio.',
+        NSPhotoLibraryUsageDescription:
+          'Blyp needs photo library access to save and select media.',
+        NSPhotoLibraryAddUsageDescription:
+          'Blyp needs permission to save photos and videos to your library.',
         NSLocationWhenInUseUsageDescription:
           'Blyp uses your location to find shops, restaurants, and takeaways near you.',
+        NSBluetoothAlwaysUsageDescription:
+          'Blyp uses Bluetooth to connect to nearby audio devices during calls and live streams.',
+        NSBluetoothPeripheralUsageDescription:
+          'Blyp uses Bluetooth to connect to nearby audio devices during calls and live streams.',
+        UIBackgroundModes: ['audio', 'voip', 'remote-notification'],
+        // Standard HTTPS / OS crypto only — speeds App Store Connect export compliance.
+        ITSAppUsesNonExemptEncryption: false,
+      },
+      entitlements: {
+        'aps-environment':
+          buildProfile === 'production' || buildProfile === 'preview-ios'
+            ? 'production'
+            : 'development',
       },
     },
     android: {

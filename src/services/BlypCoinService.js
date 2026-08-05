@@ -640,13 +640,18 @@ class BlypCoinService {
 
   // Coin packages for purchase
   static getCoinPackages() {
-    // `sku` MUST match the in-app product ID created in the Google Play Console
-    // exactly, and the backend `iap_products` table must grant the matching total
-    // coins (coins + bonus). The small pack reuses the existing proof product.
+    // SKUs MUST match store product IDs and backend IOS_IAP_CATALOG / ANDROID_IAP_CATALOG
+    // (backend/blyp-live-service/src/economy/iapCatalog.ts). Android: Play Console.
+    // iOS: App Store Connect — create matching IAPs before enabling StoreKit checkout.
+    const isIos = Platform.OS === 'ios';
+    const proofSku = isIos
+      ? 'blyp.ios.proof.coinpack.100'
+      : 'blyp.android.proof.coinpack.100';
+    const pack = (n) => (isIos ? `blyp.ios.coinpack.${n}` : `blyp.android.coinpack.${n}`);
     return [
       {
         id: 'small',
-        sku: 'blyp.android.proof.coinpack.100',
+        sku: proofSku,
         coins: 100,
         price: 0.99,
         bonus: 0,
@@ -655,7 +660,7 @@ class BlypCoinService {
       },
       {
         id: 'medium',
-        sku: 'blyp.android.coinpack.550',
+        sku: pack(550),
         coins: 500,
         price: 4.99,
         bonus: 50,
@@ -664,7 +669,7 @@ class BlypCoinService {
       },
       {
         id: 'large',
-        sku: 'blyp.android.coinpack.1150',
+        sku: pack(1150),
         coins: 1000,
         price: 9.99,
         bonus: 150,
@@ -673,7 +678,7 @@ class BlypCoinService {
       },
       {
         id: 'mega',
-        sku: 'blyp.android.coinpack.3000',
+        sku: pack(3000),
         coins: 2500,
         price: 19.99,
         bonus: 500,
@@ -682,7 +687,7 @@ class BlypCoinService {
       },
       {
         id: 'ultimate',
-        sku: 'blyp.android.coinpack.6500',
+        sku: pack(6500),
         coins: 5000,
         price: 39.99,
         bonus: 1500,

@@ -11,6 +11,10 @@
         "buildType": "apk",
         "gradleCommand": ":app:assembleDebug -Pandroid.useAndroidX=true"
       },
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
+      },
       "env": {
         "EXPO_PUBLIC_ENABLE_STREAMING": "1",
         "EXPO_PUBLIC_AWS_REGION": "eu-west-2",
@@ -30,6 +34,10 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease -Pandroid.useAndroidX=true"
+      },
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium"
       },
       "env": {
         "EXPO_PUBLIC_ENABLE_STREAMING": "1",
@@ -51,13 +59,27 @@
         "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
         "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
         "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
+        "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3",
         "FORCE_GENERATE_AWS_EXPORTS": "1"
+      }
+    },
+    "preview-ios": {
+      "extends": "preview",
+      "distribution": "store",
+      "ios": {
+        "simulator": false,
+        "resourceClass": "m-medium",
+        "autoIncrement": "buildNumber"
       }
     },
     "production": {
       "android": {
         "buildType": "app-bundle",
         "gradleCommand": ":app:bundleRelease -Pandroid.useAndroidX=true"
+      },
+      "ios": {
+        "resourceClass": "m-medium",
+        "autoIncrement": "buildNumber"
       },
       "env": {
         "EXPO_PUBLIC_ENABLE_STREAMING": "1",
@@ -93,9 +115,14 @@
         "releaseStatus": "draft"
       },
       "ios": {
-        "appleId": "your-apple-id@email.com",
-        "ascAppId": "1234567890",
-        "appleTeamId": "ABCD123456"
+        "ascAppId": "SET_AFTER_ASC_APP_CREATED",
+        "appleTeamId": "SET_APPLE_TEAM_ID"
+      }
+    },
+    "preview-ios": {
+      "ios": {
+        "ascAppId": "SET_AFTER_ASC_APP_CREATED",
+        "appleTeamId": "SET_APPLE_TEAM_ID"
       }
     },
     "internal": {

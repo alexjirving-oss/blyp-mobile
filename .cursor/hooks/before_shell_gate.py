@@ -12,7 +12,7 @@ ALLOW = {"permission": "allow"}
 
 DENY = [
     (r"BUILD_RELEASE_CANDIDATE", "Release build blocked. User must explicitly say to build."),
-    (r"\beas\s+build\b", "EAS build blocked."),
+    (r"\beas\s+build\b", "EAS build blocked. Use tools/release/BUILD_IOS_PREVIEW.ps1 after user greenlights iOS."),
     (r"\bgradle\b.*\bbundle\b", "Gradle bundle blocked."),
     (r"git\s+push\b[^\n]*(--force|\s-f\b)", "Force push blocked."),
     (r"git\s+reset\s+--hard", "Hard reset blocked."),
@@ -21,6 +21,9 @@ DENY = [
     (r"firebase\s+deploy\b", "firebase deploy blocked without user approval."),
     (r"Stop-Process\b.*node", "Killing all node processes blocked (use targeted stop)."),
 ]
+
+# Explicit allow: approved iOS preview script may invoke eas build internally.
+ALLOW_EAS_VIA = re.compile(r"BUILD_IOS_PREVIEW\.ps1", re.I)
 
 ASK = [
     (r"run_full_api_audit\.py", "API audit burns quota. Need: Pro-first, N<=12, 18s delay, user OK."),
@@ -87,6 +90,8 @@ def main() -> int:
 
     for pat, msg in DENY:
         if re.search(pat, command, re.I):
+            if ALLOW_EAS_VIA.search(command) and re.search(r"\beas\s+build\b", pat, re.I):
+                continue
             deny(msg)
 
     for pat, msg in ASK:

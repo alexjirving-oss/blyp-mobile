@@ -724,7 +724,7 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
             <View style={styles.packagesGrid}>
               {Platform.OS !== 'android' ? (
                 <Text style={[styles.infoText, { paddingHorizontal: 8 }]}>
-                  In-app coin purchases are available on Android. iOS StoreKit is coming next.
+                  In-app coin purchases are available on Android. iOS product IDs are aligned (`blyp.ios.*`); StoreKit checkout ships next.
                 </Text>
               ) : selectedTab === 'coins' ? (
                 purchasableCoinPackages.map(renderPackage)
