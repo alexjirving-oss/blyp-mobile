@@ -18,7 +18,9 @@ const CreatePostButton = () => {
   const [hasDraft, setHasDraft] = useState(false);
   const { uid, isAuthenticated, authReady } = useAuth();
   const streamingEnabled = isLiveStreamingEnabled();
-  const canShowGoLive = streamingEnabled;
+  // Always offer Go Live in the Create sheet for signed-in hosts. Streaming kill-switch
+  // is enforced on press (handleGoLive), not by hiding the entry.
+  const canShowGoLive = true;
 
   const refreshDraftFlag = useCallback(async () => {
     try {
@@ -56,18 +58,14 @@ const CreatePostButton = () => {
     return true;
   };
 
-  const handlePress = () => {
-    if (requireAccount(navigation, 'post or go live')) return;
-    // Dominant path: single tap opens Library (TikTok-class). Long-press opens Create sheet.
-    if (!ensureCanCreate('create a post')) return;
-    console.log('[POST][ENTRY] Plus tap â†’ Library');
-    navigation.navigate('Review', { entryPoint: 'plus_fab', mode: 'library', source: 'gallery' });
-  };
-
-  const handleLongPress = () => {
+  const openCreateSheet = () => {
     if (requireAccount(navigation, 'post or go live')) return;
     setShowMenu(true);
   };
+
+  // Tap and long-press both open Create (Photo / Video / Library / Go Live).
+  const handlePress = openCreateSheet;
+  const handleLongPress = openCreateSheet;
 
   const goReview = (params) => {
     setShowMenu(false);
@@ -129,6 +127,8 @@ const CreatePostButton = () => {
           delayLongPress={350}
           lifted={false}
           pressedScale={0.92}
+          accessibilityRole="button"
+          accessibilityLabel="Create"
         >
           <View style={styles.fab}>
             <Icon name="add" size={30} color={COLORS.black} />
@@ -163,6 +163,20 @@ const CreatePostButton = () => {
             ) : null}
 
             <View style={styles.postOptionsGrid}>
+              {canShowGoLive ? (
+                <TouchableOpacity
+                  style={styles.postOptionButton}
+                  onPress={() => handleMenuOption('live')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go Live"
+                >
+                  <View style={[styles.postOptionIconContainer, styles.liveIconContainer]}>
+                    <Icon name="radio-outline" size={28} color="#F87171" />
+                  </View>
+                  <Text style={styles.postOptionText}>Go Live</Text>
+                </TouchableOpacity>
+              ) : null}
+
               <TouchableOpacity
                 style={styles.postOptionButton}
                 onPress={() => goReview({ mode: 'photo', source: 'camera' })}
@@ -192,18 +206,6 @@ const CreatePostButton = () => {
                 </View>
                 <Text style={styles.postOptionText}>Library</Text>
               </TouchableOpacity>
-
-              {canShowGoLive ? (
-                <TouchableOpacity
-                  style={styles.postOptionButton}
-                  onPress={() => handleMenuOption('live')}
-                >
-                  <View style={[styles.postOptionIconContainer, styles.liveIconContainer]}>
-                    <Icon name="radio-outline" size={28} color="#F87171" />
-                  </View>
-                  <Text style={styles.postOptionText}>Go Live</Text>
-                </TouchableOpacity>
-              ) : null}
             </View>
 
           </View>
