@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { AuthedRequest, cognitoJwtMiddleware } from '../auth/cognitoJwtMiddleware';
 import { verifyCognitoJwt } from '../auth/verifyCognitoJwt';
+import { isCanonicalCognitoSub as isCanonicalSub } from '../auth/cognitoSub';
 import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
@@ -43,11 +44,6 @@ import { listFirestoreReports, resolveFirestoreReport } from './firestoreAdmin';
 import { getAppVersionPolicy, publicAppVersionPolicy, setAppVersionPolicy } from '../appVersion/appVersionPolicy';
 
 const router = Router();
-const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isCanonicalSub(value: unknown): boolean {
-    return COGNITO_SUB_REGEX.test(String(value || '').trim());
-}
 
 function extractBearerToken(req: AuthedRequest): string {
     // Fail closed: never accept tokens from query strings.

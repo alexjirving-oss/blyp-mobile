@@ -1,11 +1,10 @@
 import { Router, Response } from 'express';
 import { AuthedRequest, cognitoJwtMiddleware } from './cognitoJwtMiddleware';
+import { isCanonicalCognitoSub } from './cognitoSub';
 import { getAdminAuth } from '../config/firebaseAdmin';
 import { logger } from '../config/logger';
 
 const router = Router();
-const COGNITO_SUB_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Wave 1 federation: mint a Firebase custom token whose uid is the Cognito sub.
@@ -17,7 +16,7 @@ router.post(
   async (req: AuthedRequest, res: Response) => {
     try {
       const sub = String(req.user?.sub || '').trim();
-      if (!COGNITO_SUB_REGEX.test(sub)) {
+      if (!isCanonicalCognitoSub(sub)) {
         return res.status(401).json({
           error: 'UNAUTH',
           code: 'INVALID_SUB',

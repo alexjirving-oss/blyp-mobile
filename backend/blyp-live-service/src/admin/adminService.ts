@@ -10,8 +10,7 @@ import {
     type FeedPriority,
 } from './firestoreAdmin';
 
-// Updated to accept UUID versions 1-7 (was previously 1-5 only, which rejected UUIDv7 from Cognito)
-const COGNITO_SUB_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-7][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { isCanonicalCognitoSub as isCanonicalSubUserId } from '../auth/cognitoSub';
 
 export type AdminUserRow = {
     userId: string;
@@ -142,11 +141,6 @@ function asBool(value: unknown): boolean {
 function asString(value: unknown): string {
     if (typeof value !== 'string') return '';
     return value.trim();
-}
-
-function isCanonicalSubUserId(value: unknown): boolean {
-    const s = asString(value);
-    return COGNITO_SUB_REGEX.test(s);
 }
 
 function buildVerification(metadata: Record<string, any>): AdminVerification {

@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { COGNITO_SUB_REGEX } from '../auth/cognitoSub';
 
 const cognitoSubSchema = z
     .string()
     .trim()
-    .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, 'must be a Cognito sub');
+    .regex(COGNITO_SUB_REGEX, 'must be a Cognito sub');
 
 export const adminListUsersSchema = z.object({
     q: z.string().trim().max(120).optional(),
