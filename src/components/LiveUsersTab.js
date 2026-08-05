@@ -5,7 +5,9 @@ import { useNavigation, CommonActions, StackActions } from "@react-navigation/na
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from './Icon';
-import { COLORS } from '../styles/theme';
+import AvatarRingPulse from './motion/AvatarRingPulse';
+import PressableLift from './motion/PressableLift';
+import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import { useAuth } from '../hooks/useCommon';
 import { isFollowing, followUser, unfollowUser, getFollowersCount } from '../utils/followUtils';
 
@@ -61,8 +63,10 @@ export default function LiveUsersTab() {
     setRelBusy(true);
     setRel((p) => ({ ...p, iFollow: next, followers: Math.max(0, (p.followers || 0) + (next ? 1 : -1)) }));
     try {
-      if (next) await followUser(uid, previewHostUid);
-      else await unfollowUser(uid, previewHostUid);
+      const res = next
+        ? await followUser(uid, previewHostUid)
+        : await unfollowUser(uid, previewHostUid);
+      if (!res?.success) throw res?.error || new Error('follow write failed');
     } catch {
       setRel((p) => ({ ...p, iFollow: !next, followers: Math.max(0, (p.followers || 0) + (next ? -1 : 1)) }));
     } finally {
@@ -202,10 +206,12 @@ export default function LiveUsersTab() {
               activeOpacity={0.7}
             >
               <View style={styles.avatarContainer}>
-                <Image
-                  source={{ uri: item.photoURL || "https://ui-avatars.com/api/?name=" + encodeURIComponent(displayName || "Live") }}
-                  style={styles.avatar}
-                />
+                <AvatarRingPulse active tone="live" size={60} ringWidth={2}>
+                  <Image
+                    source={{ uri: item.photoURL || "https://ui-avatars.com/api/?name=" + encodeURIComponent(displayName || "Live") }}
+                    style={styles.avatar}
+                  />
+                </AvatarRingPulse>
                 <View style={styles.liveBadge}>
                   <Text style={styles.liveText}>LIVE</Text>
                 </View>
@@ -358,12 +364,18 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: `${COLORS.gradientEnd}4D`,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderTopColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 4,
   },
   avatarContainer: {
     position: 'relative',
@@ -373,8 +385,6 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    borderWidth: 2,
-    borderColor: COLORS.gradientEnd,
   },
   liveBadge: {
     position: 'absolute',
@@ -443,14 +453,15 @@ const styles = StyleSheet.create({
     padding: 22,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: SURFACE_DEPTH.highlightBorderStrong,
+    ...SHADOWS.medium,
   },
   previewAvatar: {
     width: 88,
     height: 88,
     borderRadius: 44,
     borderWidth: 2,
-    borderColor: COLORS.gradientEnd,
+    borderColor: COLORS.primary,
   },
   previewName: {
     color: '#fff',

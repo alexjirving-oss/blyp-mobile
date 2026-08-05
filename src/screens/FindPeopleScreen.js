@@ -4,7 +4,7 @@ import Icon from '../components/Icon';
 import { Alert, FlatList, Image, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { firestore as db } from '../config/firebase';
-import { subscribeToFollowingList, followUser } from '../utils/followUtils';
+import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
 import { conversationsMessagingService } from '../services/messaging';
@@ -201,19 +201,34 @@ const FindPeopleScreen = ({ navigation }) => {
         Alert.alert('Sign in required', 'Please sign in to follow users.');
         return;
       }
-      const res = await followUser(uid, userId);
+      const isFollowing = followingUserIds.has(userId);
+      // Optimistic toggle
+      setFollowingUserIds((prev) => {
+        const next = new Set(prev);
+        if (isFollowing) next.delete(userId);
+        else next.add(userId);
+        return next;
+      });
+      const res = isFollowing
+        ? await unfollowUser(uid, userId)
+        : await followUser(uid, userId);
       if (!res?.success) {
+        setFollowingUserIds((prev) => {
+          const next = new Set(prev);
+          if (isFollowing) next.add(userId);
+          else next.delete(userId);
+          return next;
+        });
         const raw = String(res?.error?.message || '');
         const friendly = raw.includes('404') || raw.includes('NOT_FOUND') || /ECONOMY_API/i.test(raw)
           ? 'Follow is temporarily unavailable. Please try again in a moment.'
           : raw.replace(/^\[ECONOMY_API\]\s*/i, '') || 'Please try again.';
-        Alert.alert('Couldn’t follow', friendly);
+        Alert.alert(isFollowing ? 'Couldn’t unfollow' : 'Couldn’t follow', friendly);
         return;
       }
-      Alert.alert('Success', 'User followed successfully!');
     } catch (error) {
       console.error('Error following user:', error);
-      Alert.alert('Error', 'Failed to follow user');
+      Alert.alert('Error', 'Failed to update follow');
     }
   };
 
@@ -239,15 +254,15 @@ const FindPeopleScreen = ({ navigation }) => {
             <Text style={styles.actionButtonText}>Message</Text>
           </TouchableOpacity>
 
-          {!isFollowing && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.followButton]}
-              onPress={() => handleFollow(item.id)}
-            >
-              <Icon name="person-add" size={16} color={T.primary} />
-              <Text style={[styles.actionButtonText, { color: T.primary }]}>Follow</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.actionButton, styles.followButton, isFollowing && styles.followingButton]}
+            onPress={() => handleFollow(item.id)}
+          >
+            <Icon name={isFollowing ? 'checkmark' : 'person-add'} size={16} color={isFollowing ? T.textSecondary : T.primary} />
+            <Text style={[styles.actionButtonText, { color: isFollowing ? T.textSecondary : T.primary }]}>
+              {isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -474,6 +489,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: T.primary,
+  },
+  followingButton: {
+    borderColor: T.textMuted || '#666',
+    opacity: 0.9,
   },
   actionButtonText: {
     fontSize: 12,

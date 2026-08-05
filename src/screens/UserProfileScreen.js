@@ -611,14 +611,22 @@ const UserProfileScreen = ({ route, navigation }) => {
                   <Text style={styles.statNumber}>{postCount != null ? formatNumber(postCount) : userPosts.length}</Text>
                   <Text style={styles.statLabel}>Posts</Text>
                 </View>
-                <View style={styles.statItem}>
+                <TouchableOpacity
+                  style={styles.statItem}
+                  onPress={() => navigation.navigate('Followers', { userId, type: 'followers' })}
+                  activeOpacity={0.7}
+                >
                   <Text style={styles.statNumber}>{formatNumber(followerCount)}</Text>
                   <Text style={styles.statLabel}>Followers</Text>
-                </View>
-                <View style={styles.statItem}>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.statItem}
+                  onPress={() => navigation.navigate('Followers', { userId, type: 'following' })}
+                  activeOpacity={0.7}
+                >
                   <Text style={styles.statNumber}>{formatNumber(followingCount)}</Text>
                   <Text style={styles.statLabel}>Following</Text>
-                </View>
+                </TouchableOpacity>
               </View>
 
               {/* Action Buttons */}

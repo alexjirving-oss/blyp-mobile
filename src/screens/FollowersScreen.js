@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import { ActivityIndicator, FlatList, Image, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -29,15 +29,21 @@ const FollowersScreen = () => {
   const [hasMoreData, setHasMoreData] = useState(true);
   const [lastDoc, setLastDoc] = useState(null);
   const [followingList, setFollowingList] = useState(new Set());
+  const [togglingIds, setTogglingIds] = useState(new Set());
   const currentUser = auth.currentUser;
+  const orderFieldRef = useRef('followedAt'); // server writes followedAt; legacy may use timestamp/createdAt
 
   const ITEMS_PER_PAGE = 20;
 
   useEffect(() => {
     loadInitialUsers();
+    let unsubFollowing;
     if (currentUser) {
-      loadCurrentUserFollowing();
+      unsubFollowing = loadCurrentUserFollowing();
     }
+    return () => {
+      try { unsubFollowing && unsubFollowing(); } catch {}
+    };
   }, [userId, type]);
 
   const loadInitialUsers = async () => {
@@ -46,6 +52,7 @@ const FollowersScreen = () => {
       setUsers([]);
       setLastDoc(null);
       setHasMoreData(true);
+      orderFieldRef.current = 'followedAt';
       await loadUsers(true);
     } catch (error) {
       console.error('Error loading initial users:', error);
@@ -59,6 +66,7 @@ const FollowersScreen = () => {
       setUsers([]);
       setLastDoc(null);
       setHasMoreData(true);
+      orderFieldRef.current = 'followedAt';
       await loadUsers(true);
     } catch (error) {
       console.error('Error refreshing users:', error);
@@ -67,8 +75,49 @@ const FollowersScreen = () => {
     }
   };
 
+  const fetchPage = async (usersRef, isInitial, cursor) => {
+    const fields = ['followedAt', 'createdAt', 'timestamp'];
+    // Prefer known server field; fall back through legacy field names; last resort unordered.
+    const tryFields = orderFieldRef.current
+      ? [orderFieldRef.current, ...fields.filter((f) => f !== orderFieldRef.current)]
+      : fields;
+
+    for (const field of tryFields) {
+      try {
+        let q = query(usersRef, orderBy(field, 'desc'), limit(ITEMS_PER_PAGE));
+        if (!isInitial && cursor) {
+          q = query(usersRef, orderBy(field, 'desc'), startAfter(cursor), limit(ITEMS_PER_PAGE));
+        }
+        const snapshot = await getDocs(q);
+        orderFieldRef.current = field;
+        return snapshot;
+      } catch (e) {
+        // Missing index / missing field → try next.
+        console.warn('[FollowersScreen] orderBy failed for', field, e?.message || e);
+      }
+    }
+
+    // Unordered fallback (still correct membership; order is arbitrary).
+    try {
+      let q = query(usersRef, limit(ITEMS_PER_PAGE));
+      if (!isInitial && cursor) {
+        q = query(usersRef, startAfter(cursor), limit(ITEMS_PER_PAGE));
+      }
+      orderFieldRef.current = null;
+      return await getDocs(q);
+    } catch (e) {
+      console.error('[FollowersScreen] unordered fallback failed', e);
+      throw e;
+    }
+  };
+
   const loadUsers = async (isInitial = false) => {
     if (!hasMoreData && !isInitial) return;
+    if (!userId) {
+      setLoading(false);
+      setUsers([]);
+      return;
+    }
 
     try {
       if (isInitial) {
@@ -79,59 +128,51 @@ const FollowersScreen = () => {
 
       const collectionName = type === 'followers' ? 'followers' : 'following';
       const usersRef = collection(db, 'users', userId, collectionName);
-
-      let q = query(
-        usersRef,
-        orderBy('timestamp', 'desc'),
-        limit(ITEMS_PER_PAGE)
-      );
-
-      if (!isInitial && lastDoc) {
-        q = query(
-          usersRef,
-          orderBy('timestamp', 'desc'),
-          startAfter(lastDoc),
-          limit(ITEMS_PER_PAGE)
-        );
-      }
-
-      const snapshot = await getDocs(q);
+      const snapshot = await fetchPage(usersRef, isInitial, lastDoc);
 
       if (snapshot.empty) {
         setHasMoreData(false);
+        if (isInitial) setUsers([]);
         return;
       }
 
-      // Batch fetch user data for better performance
       const userPromises = snapshot.docs.map(async (docSnap) => {
         const userDocRef = doc(db, 'users', docSnap.id);
         const userDoc = await getDoc(userDocRef);
         if (userDoc.exists()) {
           return {
             id: docSnap.id,
-            ...userDoc.data()
+            ...userDoc.data(),
           };
         }
-        return null;
+        // Graph edge without a profile doc — still show the id so lists aren't empty.
+        return {
+          id: docSnap.id,
+          displayName: 'User',
+          username: docSnap.id.slice(0, 8),
+        };
       });
 
       const userResults = await Promise.all(userPromises);
-      const usersList = userResults.filter(user => user !== null);
+      const usersList = userResults.filter((user) => user !== null);
 
       setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
 
       if (isInitial) {
         setUsers(usersList);
       } else {
-        setUsers(prevUsers => [...prevUsers, ...usersList]);
+        setUsers((prevUsers) => {
+          const have = new Set(prevUsers.map((u) => u.id));
+          return [...prevUsers, ...usersList.filter((u) => !have.has(u.id))];
+        });
       }
 
       if (snapshot.docs.length < ITEMS_PER_PAGE) {
         setHasMoreData(false);
       }
-
     } catch (error) {
       console.error('Error loading users:', error);
+      if (isInitial) setUsers([]);
     } finally {
       if (isInitial) {
         setLoading(false);
@@ -142,34 +183,61 @@ const FollowersScreen = () => {
   };
 
   const loadCurrentUserFollowing = () => {
-    if (!currentUser) return;
+    if (!currentUser) return () => {};
 
     const followingRef = collection(db, 'users', currentUser.uid, 'following');
     return onSnapshot(followingRef, (snapshot) => {
-      const following = new Set(snapshot.docs.map(doc => doc.id));
+      const following = new Set(snapshot.docs.map((d) => d.id));
       setFollowingList(following);
     });
   };
 
   const handleFollowToggle = async (targetUserId) => {
-    if (!currentUser) return;
+    if (!currentUser || !targetUserId || togglingIds.has(targetUserId)) return;
+
+    const isFollowing = followingList.has(targetUserId);
+    setTogglingIds((prev) => new Set(prev).add(targetUserId));
+    setFollowingList((prev) => {
+      const next = new Set(prev);
+      if (isFollowing) next.delete(targetUserId);
+      else next.add(targetUserId);
+      return next;
+    });
 
     try {
-      const isFollowing = followingList.has(targetUserId);
       const res = isFollowing
         ? await unfollowUser(currentUser.uid, targetUserId)
         : await followUser(currentUser.uid, targetUserId);
       if (!res?.success) {
+        setFollowingList((prev) => {
+          const next = new Set(prev);
+          if (isFollowing) next.add(targetUserId);
+          else next.delete(targetUserId);
+          return next;
+        });
         console.error('Error toggling follow:', res?.error?.message || res?.error);
       }
     } catch (error) {
+      setFollowingList((prev) => {
+        const next = new Set(prev);
+        if (isFollowing) next.add(targetUserId);
+        else next.delete(targetUserId);
+        return next;
+      });
       console.error('Error toggling follow:', error);
+    } finally {
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetUserId);
+        return next;
+      });
     }
   };
 
   const renderUserItem = ({ item }) => {
     const isCurrentUser = item.id === currentUser?.uid;
     const isFollowing = followingList.has(item.id);
+    const busy = togglingIds.has(item.id);
 
     return (
       <View style={styles.userItem}>
@@ -177,17 +245,16 @@ const FollowersScreen = () => {
           style={styles.userInfo}
           onPress={() => {
             if (!isCurrentUser) {
-              console.log('ðŸŽ¯ FollowersScreen: Navigating to user profile:', { userId: item.id, username: item.displayName || item.username });
               navigation.navigate('UserProfile', {
                 userId: item.id,
-                username: item.displayName || item.username || '@user'
+                username: item.displayName || item.username || '@user',
               });
             }
           }}
         >
           <Image
             source={{
-              uri: item.photoURL || item.avatar || 'https://via.placeholder.com/50'
+              uri: item.photoURL || item.avatar || 'https://via.placeholder.com/50',
             }}
             style={styles.avatar}
           />
@@ -199,8 +266,9 @@ const FollowersScreen = () => {
 
         {!isCurrentUser && (
           <TouchableOpacity
-            style={[styles.followButton, isFollowing && styles.followingButton]}
+            style={[styles.followButton, isFollowing && styles.followingButton, busy && { opacity: 0.6 }]}
             onPress={() => handleFollowToggle(item.id)}
+            disabled={busy}
           >
             <Text style={[styles.followButtonText, isFollowing && styles.followingButtonText]}>
               {isFollowing ? 'Following' : 'Follow'}
@@ -214,7 +282,6 @@ const FollowersScreen = () => {
   return (
     <ScreenContainer>
       <View style={styles.container}>
-          {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity
               style={styles.backButton}
@@ -228,7 +295,6 @@ const FollowersScreen = () => {
             <View style={styles.placeholder} />
           </View>
 
-          {/* Users List */}
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#e74c3c" />
@@ -422,5 +488,3 @@ const styles = StyleSheet.create({
 });
 
 export default FollowersScreen;
-
-

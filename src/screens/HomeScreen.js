@@ -23,6 +23,7 @@ import AudioTile from '../components/AudioTile';
 import { getPlayableVideoUri } from '../utils/videoCache';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import { COLORS } from '../styles/theme';
+import AvatarRing from '../components/motion/AvatarRing';
 import HeaderMenuTabs from '../components/HeaderMenuTabs';
 import HeaderWalletBalances from '../components/HeaderWalletBalances';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
@@ -35,7 +36,7 @@ import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
 import FollowingFeedPanel from '../components/HomeBase/FollowingFeedPanel';
 import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, INTEREST_CATALOG } from '../services/userPreferencesService';
-import { subscribeToFollowingList } from '../utils/followUtils';
+import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
 import { requireAccount } from '../services/guestSessionService';
 import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
@@ -247,7 +248,8 @@ const HomeScreen = ({ navigation, route }) => {
   // Which feed video is manually paused (tap-to-pause).
   const [pausedFeedId, setPausedFeedId] = useState(null);
   const [commentCounts, setCommentCounts] = useState({});
-  const [following, setFollowing] = useState({});
+  const [following, setFollowing] = useState({}); // keyed by creator userId
+  const followingBusyRef = useRef(new Set());
   const [selectedTab, setSelectedTab] = useState('A');
   const selectedTabRef = useRef('A');
   const uidRef = useRef(null);
@@ -323,6 +325,10 @@ const HomeScreen = ({ navigation, route }) => {
     if (!uid) return undefined;
     const unsub = subscribeToFollowingList(uid, (set) => {
       followingRef.current = set || new Set();
+      // Keep the For You follow-pill map in sync with the live graph.
+      const next = {};
+      (set || new Set()).forEach((id) => { next[id] = true; });
+      setFollowing(next);
     });
     return unsub;
   }, [uid]);
@@ -1082,17 +1088,35 @@ const HomeScreen = ({ navigation, route }) => {
     }, 300);
   }, [handleLike]);
 
-  const handleFollow = async (username) => {
+  const handleFollow = async (creatorId) => {
     if (requireAccount(navigation, 'follow creators')) return;
-    const userId = username;
-    const wasFollowing = following[username];
+    const targetId = String(creatorId || '').trim();
+    if (!uid || !targetId || targetId === uid) return;
+    if (followingBusyRef.current.has(targetId)) return;
+
+    const wasFollowing = !!following[targetId] || followingRef.current?.has?.(targetId);
     const newFollowStatus = !wasFollowing;
-    setFollowing((prev) => ({ ...prev, [username]: newFollowStatus }));
+    followingBusyRef.current.add(targetId);
+    setFollowing((prev) => ({ ...prev, [targetId]: newFollowStatus }));
+    // Keep ranking ref in sync for the current session.
+    if (followingRef.current) {
+      if (newFollowStatus) followingRef.current.add(targetId);
+      else followingRef.current.delete(targetId);
+    }
     try {
-      console.log(newFollowStatus ? `Following ${username}!` : `Unfollowed ${username}`);
+      const res = wasFollowing
+        ? await unfollowUser(uid, targetId)
+        : await followUser(uid, targetId);
+      if (!res?.success) throw res?.error || new Error('follow write failed');
     } catch (error) {
       console.error('Error updating follow status:', error);
-      setFollowing((prev) => ({ ...prev, [username]: wasFollowing }));
+      setFollowing((prev) => ({ ...prev, [targetId]: wasFollowing }));
+      if (followingRef.current) {
+        if (wasFollowing) followingRef.current.add(targetId);
+        else followingRef.current.delete(targetId);
+      }
+    } finally {
+      followingBusyRef.current.delete(targetId);
     }
   };
 
@@ -1365,27 +1389,51 @@ const HomeScreen = ({ navigation, route }) => {
                 : undefined
             }
           >
+            <View style={styles.creatorPillRow} pointerEvents="box-none">
             <TouchableOpacity
-              style={styles.creatorPill}
+              style={[styles.creatorPill, isActive && styles.creatorPillActive]}
               activeOpacity={0.88}
               onPress={() => handleUserProfilePress(item.user, item)}
             >
-              <Image
-                source={{
-                  uri:
-                    item.userPhotoURL ||
-                    item.user?.avatar ||
-                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-                }}
-                style={styles.creatorAvatar}
-                resizeMethod="resize"
-              />
+              <AvatarRing variant="brand" animated={isActive} size={34} ringWidth={1.5}>
+                <Image
+                  source={{
+                    uri:
+                      item.userPhotoURL ||
+                      item.user?.avatar ||
+                      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+                  }}
+                  style={styles.creatorAvatar}
+                  resizeMethod="resize"
+                />
+              </AvatarRing>
               <View style={styles.creatorMeta}>
                 <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
                   @{item.userDisplayName || item.user?.displayName || item.user?.username || item.username || 'user'}
                 </Text>
               </View>
             </TouchableOpacity>
+              {(() => {
+                const creatorId = String(item.userId || item.uid || item.user?.id || item.user?.uid || '').trim();
+                const isOwn = !!uid && creatorId && creatorId === uid;
+                const isF = !!creatorId && (!!following[creatorId] || followingRef.current?.has?.(creatorId));
+                if (!creatorId || isOwn || isF) return null;
+                return (
+                  <TouchableOpacity
+                    style={styles.followBadge}
+                    onPress={() => handleFollow(creatorId)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel="Follow creator"
+                  >
+                    <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
+                      <Icon name="add" size={12} color="#0A0A0C" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                );
+              })()}
+            </View>
           </View>
 
           <View style={styles.topStatCluster} pointerEvents="none">
@@ -2069,21 +2117,52 @@ const styles = StyleSheet.create({
   creatorPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     maxWidth: '100%',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(10,10,12,0.62)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(0,210,190,0.28)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  creatorPillActive: {
+    borderColor: 'rgba(0,210,190,0.55)',
+    borderTopColor: 'rgba(255,255,255,0.2)',
+    shadowOpacity: 0.28,
+    elevation: 4,
+  },
+  creatorPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: '100%',
+  },
+  followBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: 'hidden',
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.28,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  followBadgeInner: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   creatorAvatar: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
   },
   creatorMeta: { flexShrink: 1, maxWidth: 180 },
   creatorHandle: { color: COLORS.white, fontWeight: '800', fontSize: 14 },

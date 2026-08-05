@@ -10,22 +10,35 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import searchService from '../services/searchService';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
+import { useAuth } from '../hooks/useCommon';
+import { followUser, unfollowUser, subscribeToFollowingList } from '../utils/followUtils';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 const SearchResultsScreen = ({ route, navigation }) => {
   const { query, type = 'all' } = route.params;
+  const { uid } = useAuth();
   const [results, setResults] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [followingIds, setFollowingIds] = useState(new Set());
 
   useEffect(() => {
     performSearch();
   }, [query, type]);
+
+  useEffect(() => {
+    if (!uid) {
+      setFollowingIds(new Set());
+      return undefined;
+    }
+    return subscribeToFollowingList(uid, (set) => setFollowingIds(set || new Set()));
+  }, [uid]);
 
   const performSearch = async () => {
     try {
@@ -42,32 +55,74 @@ const SearchResultsScreen = ({ route, navigation }) => {
     }
   };
 
-  const renderUserItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.userItem}
-      onPress={() => navigation.navigate('UserProfile', { userId: item.id, username: item.username })}
-    >
-      <Image source={{ uri: item.avatar }} style={styles.userAvatar} />
-      <View style={styles.userInfo}>
-        <View style={styles.userNameRow}>
-          <Text style={styles.username}>@{item.username}</Text>
-          {item.verified && (
-            <Icon  name="checkmark-circle" size={16} color="#1da1f2"  />
-          )}
+  const handleFollowToggle = async (targetUserId, e) => {
+    try { e?.stopPropagation?.(); } catch {}
+    if (!uid) {
+      Alert.alert('Sign in required', 'Please sign in to follow users.');
+      return;
+    }
+    const targetId = String(targetUserId || '').trim();
+    if (!targetId || targetId === uid) return;
+    const isF = followingIds.has(targetId);
+    setFollowingIds((prev) => {
+      const next = new Set(prev);
+      if (isF) next.delete(targetId);
+      else next.add(targetId);
+      return next;
+    });
+    try {
+      const res = isF
+        ? await unfollowUser(uid, targetId)
+        : await followUser(uid, targetId);
+      if (!res?.success) throw res?.error || new Error('follow failed');
+    } catch (err) {
+      console.error('[SearchResults] follow toggle failed', err);
+      setFollowingIds((prev) => {
+        const next = new Set(prev);
+        if (isF) next.add(targetId);
+        else next.delete(targetId);
+        return next;
+      });
+      Alert.alert('Couldn’t update follow', 'Please try again.');
+    }
+  };
+
+  const renderUserItem = ({ item }) => {
+    const targetId = item.id || item.uid || item.userId;
+    const isF = targetId && followingIds.has(targetId);
+    return (
+      <TouchableOpacity
+        style={styles.userItem}
+        onPress={() => navigation.navigate('UserProfile', { userId: targetId, username: item.username })}
+      >
+        <Image source={{ uri: item.avatar || item.photoURL }} style={styles.userAvatar} />
+        <View style={styles.userInfo}>
+          <View style={styles.userNameRow}>
+            <Text style={styles.username}>@{item.username}</Text>
+            {item.verified && (
+              <Icon name="checkmark-circle" size={16} color="#1da1f2" />
+            )}
+          </View>
+          <Text style={styles.displayName}>{item.displayName}</Text>
+          <Text style={styles.followers}>{item.followers} followers</Text>
         </View>
-        <Text style={styles.displayName}>{item.displayName}</Text>
-        <Text style={styles.followers}>{item.followers} followers</Text>
-      </View>
-      <TouchableOpacity style={styles.followButton}>
-        <LinearGradient
-          colors={['#00D2BE', '#00A89E']}
-          style={styles.followGradient}
-        >
-          <Text style={styles.followButtonText}>Follow</Text>
-        </LinearGradient>
+        {!!targetId && targetId !== uid && (
+          <TouchableOpacity
+            style={[styles.followButton, isF && styles.followingButton]}
+            onPress={(e) => handleFollowToggle(targetId, e)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <LinearGradient
+              colors={isF ? ['#27272E', '#3F3F46'] : ['#00D2BE', '#00A89E']}
+              style={styles.followGradient}
+            >
+              <Text style={styles.followButtonText}>{isF ? 'Following' : 'Follow'}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
       </TouchableOpacity>
-    </TouchableOpacity>
-  );
+    );
+  };
 
   const renderPostItem = ({ item, index }) => (
     <TouchableOpacity 
@@ -367,6 +422,9 @@ const styles = StyleSheet.create({
   },
   followButton: {
     borderRadius: 15,
+  },
+  followingButton: {
+    opacity: 0.95,
   },
   followGradient: {
     paddingHorizontal: 16,

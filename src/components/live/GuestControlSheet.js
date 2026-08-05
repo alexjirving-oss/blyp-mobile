@@ -146,8 +146,10 @@ export default function GuestControlSheet({
     setRelBusy(true);
     setRel((p) => ({ ...p, iFollow: next, followers: (p.followers || 0) + (next ? 1 : -1) }));
     try {
-      if (next) await followUser(currentUserId, selectedId);
-      else await unfollowUser(currentUserId, selectedId);
+      const res = next
+        ? await followUser(currentUserId, selectedId)
+        : await unfollowUser(currentUserId, selectedId);
+      if (!res?.success) throw res?.error || new Error('follow write failed');
     } catch {
       setRel((p) => ({ ...p, iFollow: !next, followers: (p.followers || 0) + (next ? -1 : 1) }));
     } finally {

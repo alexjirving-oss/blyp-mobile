@@ -98,10 +98,24 @@ const OnboardingScreen = ({ uid, onDone }) => {
       return next;
     });
     try {
-      if (isF) await unfollowUser(uid, targetId);
-      else await followUser(uid, targetId);
+      const res = isF
+        ? await unfollowUser(uid, targetId)
+        : await followUser(uid, targetId);
+      if (!res?.success) {
+        setFollowing((prev) => {
+          const next = new Set(prev);
+          if (isF) next.add(targetId);
+          else next.delete(targetId);
+          return next;
+        });
+      }
     } catch {
-      /* ignore — optimistic */
+      setFollowing((prev) => {
+        const next = new Set(prev);
+        if (isF) next.add(targetId);
+        else next.delete(targetId);
+        return next;
+      });
     }
   };
 

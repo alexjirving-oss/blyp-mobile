@@ -272,10 +272,24 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       return n;
     });
     try {
-      if (isF) await unfollowUser(uid, targetId);
-      else await followUser(uid, targetId);
+      const res = isF
+        ? await unfollowUser(uid, targetId)
+        : await followUser(uid, targetId);
+      if (!res?.success) {
+        setFollowingSet((prev) => {
+          const n = new Set(prev);
+          if (isF) n.add(targetId);
+          else n.delete(targetId);
+          return n;
+        });
+      }
     } catch {
-      /* subscription corrects */
+      setFollowingSet((prev) => {
+        const n = new Set(prev);
+        if (isF) n.add(targetId);
+        else n.delete(targetId);
+        return n;
+      });
     }
   };
 

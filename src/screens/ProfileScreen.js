@@ -9,7 +9,7 @@ import HeaderMenuTabs from '../components/HeaderMenuTabs';
 import { auth, db, storage, firebaseEnabled } from '../config/firebase';
 import { snapData } from '../utils/firestoreSnap';
 import { signOut } from 'firebase/auth';
-import { subscribeToFollowersCount, getFollowersCount } from '../utils/followUtils';
+import { subscribeToFollowersCount, subscribeToFollowingCount, getFollowersCount, getFollowingCount } from '../utils/followUtils';
 import { COLORS } from '../styles/theme';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 
@@ -83,15 +83,14 @@ const ProfileScreen = () => {
     return () => { if (unsub) unsub(); };
   }, [user]);
 
-  // Following count
+  // Following count — same graph path as followUtils (users/{uid}/following)
   useEffect(() => {
-    if (!user || !firebaseEnabled) return;
-    const unsub = db.collection('followers').where('followerId', '==', user.uid).onSnapshot(
-      snap => setFollowingCount(snap.size),
-      err => console.log('[PROFILE][ERROR] following count', err.message)
-    );
-    return () => unsub();
-  }, [user, firebaseEnabled]);
+    if (!user) return;
+    let unsub;
+    try { unsub = subscribeToFollowingCount(user.uid, c => setFollowingCount(c)); }
+    catch { getFollowingCount(user.uid).then(c => setFollowingCount(c)).catch(() => setFollowingCount(0)); }
+    return () => { if (unsub) unsub(); };
+  }, [user]);
 
   // User posts subscription — live first page; older pages paginated below.
   useEffect(() => {
@@ -271,11 +270,11 @@ const ProfileScreen = () => {
         </TouchableOpacity>
 
         <View style={styles.stats}>
-          <View style={styles.statBox}>
+          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers', { userId: user.uid, type: 'following' })}>
             <Text style={styles.statValue}>{followingCount}</Text>
             <Text style={styles.statLabel}>Following</Text>
-          </View>
-          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers', { userId: user.uid })}>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers', { userId: user.uid, type: 'followers' })}>
             <Text style={styles.statValue}>{followersCount}</Text>
             <Text style={styles.statLabel}>Followers</Text>
           </TouchableOpacity>

@@ -16,6 +16,41 @@ async function assertTargetExists(targetUserId: string): Promise<void> {
 }
 
 /**
+ * Recompute denormalized follow counters from the graph subcollections.
+ * Keeps discovery / profile fields honest and backfills stale zeros for
+ * users involved in a follow write.
+ */
+async function syncFollowCounts(userIds: string[]): Promise<void> {
+  const db = getFirestore();
+  if (!db) return;
+  const unique = Array.from(new Set(userIds.map(normalizeUserId).filter(Boolean)));
+  await Promise.all(
+    unique.map(async (userId) => {
+      try {
+        const [followersAgg, followingAgg] = await Promise.all([
+          db.collection('users').doc(userId).collection('followers').count().get(),
+          db.collection('users').doc(userId).collection('following').count().get(),
+        ]);
+        const followersCount = followersAgg.data().count;
+        const followingCount = followingAgg.data().count;
+        await db.collection('users').doc(userId).set(
+          {
+            followersCount,
+            followingCount,
+            // Legacy aliases some discovery code still reads.
+            followers: followersCount,
+            following: followingCount,
+          },
+          { merge: true },
+        );
+      } catch (e) {
+        console.warn('[socialFollow] syncFollowCounts failed', userId, (e as any)?.message || e);
+      }
+    }),
+  );
+}
+
+/**
  * Server-authoritative follow write.
  * Mirrors client Firestore graph: users/{actor}/following/{target}
  * and users/{target}/followers/{actor}.
@@ -40,6 +75,13 @@ export async function followUser(actorUserId: string, targetUserIdRaw: string): 
 
   const followingRef = db.collection('users').doc(actor).collection('following').doc(targetUserId);
   const followerRef = db.collection('users').doc(targetUserId).collection('followers').doc(actor);
+  const existing = await followingRef.get();
+  if (existing.exists) {
+    // Idempotent: still refresh denormalized counts in case they drifted.
+    void syncFollowCounts([actor, targetUserId]);
+    return { ok: true, following: true, targetUserId };
+  }
+
   const now = FieldValue.serverTimestamp();
 
   const batch = db.batch();
@@ -49,6 +91,7 @@ export async function followUser(actorUserId: string, targetUserIdRaw: string): 
       userId: targetUserId,
       followedAt: now,
       createdAt: now,
+      timestamp: now,
     },
     { merge: true },
   );
@@ -58,10 +101,12 @@ export async function followUser(actorUserId: string, targetUserIdRaw: string): 
       userId: actor,
       followedAt: now,
       createdAt: now,
+      timestamp: now,
     },
     { merge: true },
   );
   await batch.commit();
+  await syncFollowCounts([actor, targetUserId]);
 
   return { ok: true, following: true, targetUserId };
 }
@@ -89,6 +134,7 @@ export async function unfollowUser(actorUserId: string, targetUserIdRaw: string)
   batch.delete(followingRef);
   batch.delete(followerRef);
   await batch.commit();
+  await syncFollowCounts([actor, targetUserId]);
 
   return { ok: true, following: false, targetUserId };
 }

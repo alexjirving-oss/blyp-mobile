@@ -17,6 +17,7 @@ import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import BlypLogo, { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
 import Icon from '../components/Icon';
 import StandingBadge from '../components/StandingBadge';
+import PressableLift from '../components/motion/PressableLift';
 import HeaderMenuTabs from '../components/HeaderMenuTabs';
 import PlanStatusBanner from '../components/PlanStatusBanner';
 import { useEntitlement } from '../hooks/useEntitlement';
@@ -58,6 +59,7 @@ import {
   hydrateOwnProfile,
   clearOwnProfileCache,
 } from '../services/ownProfileCache';
+import { getFollowersCount, getFollowingCount } from '../utils/followUtils';
 
 type ProfileCategory = { id: string; label: string; order: number };
 type ProfileCategoryChip = { id: string; label: string; count: number };
@@ -434,20 +436,21 @@ const ProfileScreenV3: React.FC = () => {
       setProfile(basics);
       profileHydratedRef.current = true;
 
-      // Followers count (each query failure isolated per A2)
+      // Follow graph lives at users/{uid}/followers|following — NOT a top-level
+      // `followers` collection (legacy path always returned 0 / permission errors).
       let followers: StatValue = 0;
       let following: StatValue = 0;
       let likes: StatValue = 0;
       let posts: StatValue = 0;
       let lives: StatValue = 0;
       try {
-        followers = safeNumber(await countQuery(db.collection('followers').where('userId', '==', uid)));
+        followers = safeNumber(await getFollowersCount(uid));
       } catch (e: any) {
         try { console.warn('[PROFILE][WARN] followers load failed', e?.message); } catch { }
         followers = null;
       }
       try {
-        following = safeNumber(await countQuery(db.collection('followers').where('followerId', '==', uid)));
+        following = safeNumber(await getFollowingCount(uid));
       } catch (e: any) {
         try { console.warn('[PROFILE][WARN] following load failed', e?.message); } catch { }
         following = null;
@@ -1413,7 +1416,18 @@ const ProfileScreenV3: React.FC = () => {
                     style={styles.identityFlair}
                   />
 
-                  <ProfileStats stats={stats} styles={styles} />
+                  <ProfileStats
+                    stats={stats}
+                    styles={styles}
+                    onPressFollowers={() => {
+                      if (!uid) return;
+                      (nav as any).navigate?.('Followers', { userId: uid, type: 'followers' });
+                    }}
+                    onPressFollowing={() => {
+                      if (!uid) return;
+                      (nav as any).navigate?.('Followers', { userId: uid, type: 'following' });
+                    }}
+                  />
 
                   <ProfileActions
                     onEditProfile={onEditProfile}
@@ -1944,8 +1958,14 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,210,190,0.35)',
+    borderTopColor: 'rgba(255,255,255,0.22)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 5,
   },
   avatarPlaceholder: {
     width: 88,
@@ -1954,8 +1974,14 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
     backgroundColor: theme.colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,210,190,0.28)',
+    borderTopColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 4,
   },
   avatarInitial: {
     color: theme.colors.textPrimary,
@@ -2061,6 +2087,14 @@ const createStyles = (theme: BlypTheme) => StyleSheet.create({
     borderRadius: 14,
     minHeight: 50,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: 'rgba(255,255,255,0.16)',
   },
   primaryActionBtnGradient: {
     width: '100%',
@@ -2482,7 +2516,12 @@ const ProfileBioLinks: React.FC<{ bio?: string; onEditProfile: () => void; style
   );
 };
 
-const ProfileStats: React.FC<{ stats: { followers: StatValue; following: StatValue; likes: StatValue; posts: StatValue; lives: StatValue }; styles: any }> = ({ stats, styles }) => {
+const ProfileStats: React.FC<{
+  stats: { followers: StatValue; following: StatValue; likes: StatValue; posts: StatValue; lives: StatValue };
+  styles: any;
+  onPressFollowers?: () => void;
+  onPressFollowing?: () => void;
+}> = ({ stats, styles, onPressFollowers, onPressFollowing }) => {
   return (
     <View style={styles.statsContainer}>
       <View style={styles.statItem}>
@@ -2490,15 +2529,29 @@ const ProfileStats: React.FC<{ stats: { followers: StatValue; following: StatVal
         <Text style={styles.statLabel}>Posts</Text>
       </View>
       <View style={styles.statDivider} />
-      <View style={styles.statItem}>
+      <TouchableOpacity
+        style={styles.statItem}
+        onPress={onPressFollowers}
+        disabled={!onPressFollowers}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="View followers"
+      >
         <Text style={styles.statValue}>{renderStat(stats.followers)}</Text>
         <Text style={styles.statLabel}>Followers</Text>
-      </View>
+      </TouchableOpacity>
       <View style={styles.statDivider} />
-      <View style={styles.statItem}>
+      <TouchableOpacity
+        style={styles.statItem}
+        onPress={onPressFollowing}
+        disabled={!onPressFollowing}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel="View following"
+      >
         <Text style={styles.statValue}>{renderStat(stats.following)}</Text>
         <Text style={styles.statLabel}>Following</Text>
-      </View>
+      </TouchableOpacity>
       <View style={styles.statDivider} />
       <View style={styles.statItem}>
         <Text style={styles.statValue}>{renderStat(stats.likes)}</Text>
@@ -2531,16 +2584,16 @@ const ProfileActions: React.FC<{
   if (isCompact) {
     return (
       <View style={[styles.actionsContainer, { flexDirection: 'column', gap: theme.spacing.sm }]}>
-        <TouchableOpacity
+        <PressableLift
           style={[styles.primaryActionBtn, { flex: undefined, width: '100%' }]}
           onPress={onEditProfile}
-          activeOpacity={0.85}
+          lifted={false}
         >
           <View style={styles.primaryActionBtnGradient}>
             <Icon name={"create" as any} {...iconProps} color={theme.colors.textPrimary} />
             <Text style={styles.actionBtnText} {...labelProps}>Edit profile</Text>
           </View>
-        </TouchableOpacity>
+        </PressableLift>
 
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
           <TouchableOpacity
@@ -2566,12 +2619,12 @@ const ProfileActions: React.FC<{
 
   return (
     <View style={styles.actionsContainer}>
-      <TouchableOpacity style={[styles.primaryActionBtn, { flex: 1.4 }]} onPress={onEditProfile} activeOpacity={0.85}>
+      <PressableLift style={[styles.primaryActionBtn, { flex: 1.4 }]} onPress={onEditProfile} lifted={false}>
         <View style={styles.primaryActionBtnGradient}>
           <Icon name={"create" as any} {...iconProps} color={theme.colors.textPrimary} />
           <Text style={styles.actionBtnText} {...labelProps}>Edit profile</Text>
         </View>
-      </TouchableOpacity>
+      </PressableLift>
       <TouchableOpacity style={[styles.secondaryActionBtn, { flex: 1 }]} onPress={onWallet} activeOpacity={0.8}>
         <Icon name={"wallet" as any} {...iconProps} color={theme.colors.textSecondary} />
         <Text style={styles.secondaryActionText} {...labelProps}>Wallet</Text>

@@ -35,6 +35,7 @@ import { blockUser } from '../services/BlockService';
 import { fixStorageUrl } from '../utils/urlUtils';
 import { sharePost as sharePostLink } from '../services/shareService';
 import { COLORS } from '../styles/theme';
+import AvatarRing from '../components/motion/AvatarRing';
 import { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
 import { followUser, unfollowUser, subscribeToFollowingList } from '../utils/followUtils';
 import { useAuth } from '../hooks/useCommon';
@@ -921,32 +922,40 @@ const MediaViewerItem = ({
         </TouchableOpacity>
 
         <View style={styles.userPillWrap} pointerEvents="box-none">
+          <View style={styles.creatorPillRow} pointerEvents="box-none">
           <TouchableOpacity style={styles.creatorPill} onPress={openCreatorProfile} activeOpacity={0.85}>
-            {actualPost.user?.avatar || actualPost.userPhotoURL ? (
-              <Image
-                source={{ uri: actualPost.user?.avatar || actualPost.userPhotoURL }}
-                style={styles.creatorAvatar}
-              />
-            ) : (
-              <LinearGradient colors={[COLORS.primary, COLORS.electric]} style={styles.creatorAvatarFallback}>
-                <Icon name="person" size={16} color="#0A0A0C" />
-              </LinearGradient>
-            )}
+            <AvatarRing variant="brand" animated size={30} ringWidth={1.5}>
+              {actualPost.user?.avatar || actualPost.userPhotoURL ? (
+                <Image
+                  source={{ uri: actualPost.user?.avatar || actualPost.userPhotoURL }}
+                  style={styles.creatorAvatar}
+                />
+              ) : (
+                <LinearGradient colors={[COLORS.primary, COLORS.electric]} style={styles.creatorAvatarFallback}>
+                  <Icon name="person" size={16} color="#0A0A0C" />
+                </LinearGradient>
+              )}
+            </AvatarRing>
             <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
               @{displayName}
             </Text>
+            </TouchableOpacity>
+            {/* Sibling (not nested) so Android reliably receives the press */}
             {!isFollowing && !isOwnPost && (
               <TouchableOpacity
                 style={styles.followBadge}
-                onPress={(e) => { e?.stopPropagation?.(); handleFollow(); }}
+                onPress={handleFollow}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Follow creator"
               >
                 <LinearGradient colors={['#00D2BE', '#00A89E']} style={styles.followBadgeInner}>
                   <Icon name="add" size={12} color="#0A0A0C" />
                 </LinearGradient>
               </TouchableOpacity>
             )}
-          </TouchableOpacity>
+          </View>
           <View style={styles.topStatCluster} pointerEvents="none">
             <View style={styles.topStatPill}>
               <Icon name="eye-outline" size={14} color={COLORS.white} />
@@ -1550,6 +1559,14 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     minWidth: 0,
   },
+  creatorPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '72%',
+  },
   topStatCluster: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1579,19 +1596,23 @@ const styles = StyleSheet.create({
     gap: 8,
     flexShrink: 1,
     maxWidth: '58%',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     borderRadius: 999,
     backgroundColor: 'rgba(10,10,12,0.62)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(0,210,190,0.4)',
+    borderTopColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 3,
   },
   creatorAvatar: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
   },
   creatorAvatarFallback: {
     width: 30,
