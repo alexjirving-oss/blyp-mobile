@@ -19,7 +19,8 @@ export type EconomyErrorCode =
   | 'BLOCKED'
   | 'WITHDRAWALS_DISABLED'
   | 'WITHDRAWAL_DENIED'
-  | 'STRIPE_NOT_CONFIGURED';
+  | 'STRIPE_NOT_CONFIGURED'
+  | 'INVALID_STATE';
 
 export class EconomyError extends Error {
   code: EconomyErrorCode;

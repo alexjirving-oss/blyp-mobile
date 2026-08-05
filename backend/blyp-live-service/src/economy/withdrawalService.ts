@@ -14,12 +14,24 @@ import { getWallet } from './economyService';
 import { assessWithdrawal, type KycStatus, type WithdrawalContext } from './withdrawalGuard';
 import { WITHDRAWAL_POLICY as P } from './withdrawalPolicy';
 
-function withdrawalsEnabled(): boolean {
+function stripeSecretConfigured(): boolean {
+  return Boolean(String(getEconomyEnv().STRIPE_SECRET_KEY || '').trim());
+}
+
+/**
+ * Kill-switch + Stripe gate. ENABLE_WITHDRAWALS=1 alone is not enough —
+ * a missing/empty STRIPE_SECRET_KEY keeps cash-out closed so we never
+ * accept requests we cannot settle.
+ */
+export function withdrawalsEnabled(): boolean {
   const env = getEconomyEnv();
-  return Number(env.ENABLE_WITHDRAWALS || 0) === 1;
+  return Number(env.ENABLE_WITHDRAWALS || 0) === 1 && stripeSecretConfigured();
 }
 
 function assertWithdrawalsEnabled() {
+  if (Number(getEconomyEnv().ENABLE_WITHDRAWALS || 0) === 1 && !stripeSecretConfigured()) {
+    throw new EconomyError('STRIPE_NOT_CONFIGURED', 503, 'Stripe is not configured');
+  }
   if (!withdrawalsEnabled()) {
     throw new EconomyError('WITHDRAWALS_DISABLED', 403, 'Withdrawals are disabled');
   }
@@ -436,46 +448,14 @@ export async function requestWithdrawal(
 
   // Auto path: Stripe transfer to connected account.
   try {
-    const stripe = getStripe();
-    const transfer = await stripe.transfers.create(
-      {
-        amount: splits.netMinor,
-        currency: platformCurrency(),
-        destination: payout.stripe_account_id,
-        transfer_group: withdrawalId,
-        metadata: {
-          blyp_user_id: userId,
-          withdrawal_id: withdrawalId,
-          amount_gems: String(amountGems),
-        },
-      },
-      { idempotencyKey: `blyp-withdraw-${idempotencyKey}` },
-    );
-
-    await db('withdrawal_requests')
-      .where({ withdrawal_id: withdrawalId })
-      .update({
-        status: 'paid',
-        stripe_transfer_id: transfer.id,
-        settled_at: db.fn.now(),
-        updated_at: db.fn.now(),
-      });
-
-    await db('ledger_entries').insert({
-      ledger_id: randomUUID(),
-      user_id: userId,
-      entry_type: 'WITHDRAWAL_SETTLEMENT',
-      currency: 'GEM',
-      amount: '0',
-      status: 'POSTED',
-      reference_type: 'WITHDRAWAL',
-      reference_id: withdrawalId,
-      idempotency_key: `withdraw-settle:${userId}:${idempotencyKey}`,
-      metadata: db.raw('?::jsonb', [
-        JSON.stringify({ stripeTransferId: transfer.id, netMinor: splits.netMinor }),
-      ]),
+    const settled = await settleStripeTransfer({
+      withdrawalId,
+      userId,
+      amountGems,
+      netMinor: splits.netMinor,
+      stripeAccountId: payout.stripe_account_id,
+      idempotencyKey,
     });
-
     return {
       kind: 'ok' as const,
       response: {
@@ -486,41 +466,283 @@ export async function requestWithdrawal(
         netGems: splits.netGems,
         netMinor: splits.netMinor,
         currency: platformCurrency(),
-        stripeTransferId: transfer.id,
+        stripeTransferId: settled.stripeTransferId,
         reasons: assessment.reasons,
       },
     };
   } catch (e: any) {
     logger.error({ err: e?.message || String(e), withdrawalId }, '[withdraw] stripe transfer failed');
-    // Reverse reserve
-    await db.transaction(async (trx) => {
-      const wallet = await ensureWalletRow(trx, userId);
-      await trx('wallets')
-        .where({ user_id: userId })
-        .update({
-          gem_available: (BigInt(wallet.gem_available || 0) + BigInt(amountGems)).toString(),
-          updated_at: trx.fn.now(),
-        });
-      await trx('withdrawal_requests')
-        .where({ withdrawal_id: withdrawalId })
-        .update({ status: 'failed', updated_at: trx.fn.now() });
-      await trx('ledger_entries').insert({
-        ledger_id: randomUUID(),
-        user_id: userId,
-        entry_type: 'WITHDRAWAL_REVERSE',
-        currency: 'GEM',
-        amount: amountGems.toString(),
-        status: 'POSTED',
-        reference_type: 'WITHDRAWAL',
-        reference_id: withdrawalId,
-        idempotency_key: `withdraw-reverse:${userId}:${idempotencyKey}`,
-        metadata: trx.raw('?::jsonb', [JSON.stringify({ error: e?.message || String(e) })]),
-      });
+    await reverseWithdrawalReserve({
+      withdrawalId,
+      userId,
+      amountGems,
+      idempotencyKey,
+      error: e?.message || String(e),
+      nextStatus: 'failed',
     });
     throw new EconomyError('PROVIDER_ERROR', 502, 'Payout provider failed', {
       detail: e?.message || String(e),
     });
   }
+}
+
+async function settleStripeTransfer(input: {
+  withdrawalId: string;
+  userId: string;
+  amountGems: number;
+  netMinor: number;
+  stripeAccountId: string;
+  idempotencyKey: string;
+}) {
+  const { db } = getEconomyInfra();
+  const stripe = getStripe();
+  const transfer = await stripe.transfers.create(
+    {
+      amount: input.netMinor,
+      currency: platformCurrency(),
+      destination: input.stripeAccountId,
+      transfer_group: input.withdrawalId,
+      metadata: {
+        blyp_user_id: input.userId,
+        withdrawal_id: input.withdrawalId,
+        amount_gems: String(input.amountGems),
+      },
+    },
+    { idempotencyKey: `blyp-withdraw-${input.idempotencyKey}` },
+  );
+
+  await db('withdrawal_requests')
+    .where({ withdrawal_id: input.withdrawalId })
+    .update({
+      status: 'paid',
+      stripe_transfer_id: transfer.id,
+      settled_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+  await db('ledger_entries').insert({
+    ledger_id: randomUUID(),
+    user_id: input.userId,
+    entry_type: 'WITHDRAWAL_SETTLEMENT',
+    currency: 'GEM',
+    amount: '0',
+    status: 'POSTED',
+    reference_type: 'WITHDRAWAL',
+    reference_id: input.withdrawalId,
+    idempotency_key: `withdraw-settle:${input.userId}:${input.idempotencyKey}`,
+    metadata: db.raw('?::jsonb', [
+      JSON.stringify({ stripeTransferId: transfer.id, netMinor: input.netMinor }),
+    ]),
+  });
+
+  return { stripeTransferId: transfer.id };
+}
+
+async function reverseWithdrawalReserve(input: {
+  withdrawalId: string;
+  userId: string;
+  amountGems: number;
+  idempotencyKey: string;
+  error?: string;
+  nextStatus: 'failed' | 'rejected';
+  actorUserId?: string;
+  reason?: string;
+}) {
+  const { db } = getEconomyInfra();
+  await db.transaction(async (trx) => {
+    const wallet = await ensureWalletRow(trx, input.userId);
+    await trx('wallets')
+      .where({ user_id: input.userId })
+      .update({
+        gem_available: (BigInt(wallet.gem_available || 0) + BigInt(input.amountGems)).toString(),
+        updated_at: trx.fn.now(),
+      });
+    await trx('withdrawal_requests')
+      .where({ withdrawal_id: input.withdrawalId })
+      .update({
+        status: input.nextStatus,
+        updated_at: trx.fn.now(),
+        metadata: trx.raw(
+          `COALESCE(metadata, '{}'::jsonb) || ?::jsonb`,
+          [
+            JSON.stringify({
+              ...(input.actorUserId ? { reviewedBy: input.actorUserId } : {}),
+              ...(input.reason ? { rejectReason: input.reason } : {}),
+              ...(input.error ? { error: input.error } : {}),
+              reviewedAt: new Date().toISOString(),
+            }),
+          ],
+        ),
+      });
+    await trx('ledger_entries').insert({
+      ledger_id: randomUUID(),
+      user_id: input.userId,
+      entry_type: input.nextStatus === 'rejected' ? 'WITHDRAWAL_REJECT' : 'WITHDRAWAL_REVERSE',
+      currency: 'GEM',
+      amount: input.amountGems.toString(),
+      status: 'POSTED',
+      reference_type: 'WITHDRAWAL',
+      reference_id: input.withdrawalId,
+      idempotency_key: `withdraw-${input.nextStatus}:${input.userId}:${input.idempotencyKey}`,
+      metadata: trx.raw('?::jsonb', [
+        JSON.stringify({
+          error: input.error || null,
+          actorUserId: input.actorUserId || null,
+          reason: input.reason || null,
+        }),
+      ]),
+    });
+  });
+}
+
+function mapWithdrawalRow(row: any) {
+  return {
+    withdrawalId: String(row.withdrawal_id),
+    userId: String(row.user_id),
+    amountGems: Number(row.amount_gems),
+    feeGems: Number(row.fee_gems),
+    netGems: Number(row.net_gems),
+    netMinor: Number(row.net_minor),
+    currency: String(row.currency || platformCurrency()),
+    status: String(row.status),
+    reasons: row.reasons,
+    stripeAccountId: row.stripe_account_id || null,
+    stripeTransferId: row.stripe_transfer_id || null,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    settledAt: row.settled_at ? new Date(row.settled_at).toISOString() : null,
+    metadata: row.metadata || {},
+  };
+}
+
+/** Ops: list withdrawal requests (default: pending_review queue). */
+export async function listWithdrawals(opts: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}) {
+  const { db } = getEconomyInfra();
+  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 50));
+  const offset = Math.max(0, Number(opts.offset) || 0);
+  const status = String(opts.status || 'pending_review').trim();
+
+  let q = db('withdrawal_requests').select('*').orderBy('created_at', 'desc').limit(limit).offset(offset);
+  if (status && status !== 'all') {
+    q = q.where({ status });
+  }
+  const rows = await q;
+  return { items: rows.map(mapWithdrawalRow), limit, offset, status };
+}
+
+/**
+ * Ops: approve a pending_review withdrawal and execute the Stripe transfer.
+ * Gems were already reserved at request time.
+ */
+export async function approveWithdrawal(withdrawalId: string, actorUserId: string) {
+  const { db } = getEconomyInfra();
+  const id = String(withdrawalId || '').trim();
+  if (!id) throw new EconomyError('INVALID_INPUT', 400, 'withdrawalId required');
+
+  const row = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+  if (!row) throw new EconomyError('NOT_FOUND', 404, 'Withdrawal not found');
+  if (String(row.status) === 'paid') {
+    return mapWithdrawalRow(row);
+  }
+  if (String(row.status) !== 'pending_review') {
+    throw new EconomyError('INVALID_STATE', 409, `Cannot approve status=${row.status}`);
+  }
+  if (!row.stripe_account_id) {
+    throw new EconomyError('WITHDRAWAL_DENIED', 403, 'No payout account on request');
+  }
+  if (!stripeSecretConfigured()) {
+    throw new EconomyError('STRIPE_NOT_CONFIGURED', 503, 'Stripe is not configured');
+  }
+
+  await db('withdrawal_requests')
+    .where({ withdrawal_id: id })
+    .update({
+      status: 'processing',
+      updated_at: db.fn.now(),
+      metadata: db.raw(`COALESCE(metadata, '{}'::jsonb) || ?::jsonb`, [
+        JSON.stringify({
+          approvedBy: actorUserId,
+          approvedAt: new Date().toISOString(),
+        }),
+      ]),
+    });
+
+  const amountGems = Number(row.amount_gems);
+  const netMinor = Number(row.net_minor);
+  const idempotencyKey = String(row.idempotency_key);
+
+  try {
+    const settled = await settleStripeTransfer({
+      withdrawalId: id,
+      userId: row.user_id,
+      amountGems,
+      netMinor,
+      stripeAccountId: row.stripe_account_id,
+      idempotencyKey: `approve:${idempotencyKey}`,
+    });
+    const updated = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+    return {
+      ...mapWithdrawalRow(updated || row),
+      status: 'paid',
+      stripeTransferId: settled.stripeTransferId,
+    };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e), withdrawalId: id }, '[withdraw] admin approve transfer failed');
+    // Return to pending_review so ops can retry after fixing Stripe; do NOT reverse gems yet.
+    await db('withdrawal_requests')
+      .where({ withdrawal_id: id })
+      .update({
+        status: 'pending_review',
+        updated_at: db.fn.now(),
+        metadata: db.raw(`COALESCE(metadata, '{}'::jsonb) || ?::jsonb`, [
+          JSON.stringify({
+            lastApproveError: e?.message || String(e),
+            lastApproveAttemptAt: new Date().toISOString(),
+            lastApproveBy: actorUserId,
+          }),
+        ]),
+      });
+    throw new EconomyError('PROVIDER_ERROR', 502, 'Payout provider failed', {
+      detail: e?.message || String(e),
+    });
+  }
+}
+
+/** Ops: reject pending_review and restore reserved gems. */
+export async function rejectWithdrawal(
+  withdrawalId: string,
+  actorUserId: string,
+  reason?: string,
+) {
+  const { db } = getEconomyInfra();
+  const id = String(withdrawalId || '').trim();
+  if (!id) throw new EconomyError('INVALID_INPUT', 400, 'withdrawalId required');
+
+  const row = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+  if (!row) throw new EconomyError('NOT_FOUND', 404, 'Withdrawal not found');
+  if (String(row.status) === 'rejected') {
+    return mapWithdrawalRow(row);
+  }
+  if (String(row.status) !== 'pending_review') {
+    throw new EconomyError('INVALID_STATE', 409, `Cannot reject status=${row.status}`);
+  }
+
+  await reverseWithdrawalReserve({
+    withdrawalId: id,
+    userId: row.user_id,
+    amountGems: Number(row.amount_gems),
+    idempotencyKey: String(row.idempotency_key),
+    nextStatus: 'rejected',
+    actorUserId,
+    reason: reason ? String(reason).slice(0, 500) : undefined,
+  });
+
+  const updated = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+  return mapWithdrawalRow(updated || { ...row, status: 'rejected' });
 }
 
 export async function handleStripeWebhook(rawBody: Buffer, signature: string | undefined) {

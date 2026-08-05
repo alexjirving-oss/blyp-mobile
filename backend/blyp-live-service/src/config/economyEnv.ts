@@ -9,7 +9,7 @@ const economyEnvSchema = z.object({
   CREATOR_SHARE_BPS: z.coerce.number().int().min(0).max(10000),
   GEMS_PER_COIN_NUM: z.coerce.number().int().min(0),
   GEMS_PER_COIN_DEN: z.coerce.number().int().min(1),
-  PENDING_GEMS_HOLD_SECONDS: z.coerce.number().int().min(0),
+  PENDING_GEMS_HOLD_SECONDS: z.coerce.number().int().min(0), // prod target 604800 (7d); authoritative gem clearance
   IDEMPOTENCY_TTL_SECONDS: z.coerce.number().int().min(1),
 
   // Promote (optional; used to price creator-first boosts)
@@ -37,6 +37,7 @@ const economyEnvSchema = z.object({
   WITHDRAW_GEM_MINOR_UNITS: z.coerce.number().int().min(1).optional(),
   /** Alias accepted for plan naming; same as WITHDRAW_GEM_MINOR_UNITS. */
   WITHDRAW_COIN_MINOR_UNITS: z.coerce.number().int().min(1).optional(),
+  /** Kill-switch. Also requires non-empty STRIPE_SECRET_KEY at runtime. Keep 0 until sk_live_. */
   ENABLE_WITHDRAWALS: z.coerce.number().int().min(0).max(1).optional(),
   STRIPE_CONNECT_RETURN_URL: z.string().optional(),
   STRIPE_CONNECT_REFRESH_URL: z.string().optional(),
