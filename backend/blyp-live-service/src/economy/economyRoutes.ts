@@ -542,11 +542,21 @@ router.get('/economy/matchday/leaderboard', async (req: AuthedRequest, res) => {
   }
 });
 
-// Global rankings hub (Phase 0–4): economy + social/live + competitive/game + club-scoped boards.
+// Global rankings hub (Phase 0–5): economy + social/live + competitive/game + club + Plus gates.
 router.get('/economy/rankings/boards', async (req: AuthedRequest, res) => {
   try {
     if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
-    res.json({ boards: listRankingBoardsMeta() });
+    res.json({
+      boards: listRankingBoardsMeta(),
+      entitlement: {
+        freeLimit: 3,
+        plusLimit: 50,
+        freeWindows: ['alltime'],
+        plusWindows: ['day', 'week', 'month', 'year', 'alltime'],
+        datingRequires: ['plus', 'dating_opt_in'],
+        optOutFields: ['leaderboardOptOut', 'privacyHideFromRankings'],
+      },
+    });
   } catch (e: any) {
     const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
@@ -555,12 +565,13 @@ router.get('/economy/rankings/boards', async (req: AuthedRequest, res) => {
 
 router.get('/economy/rankings', async (req: AuthedRequest, res) => {
   try {
-    if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const board = typeof req.query?.board === 'string' ? req.query.board.trim() : '';
     const window = typeof req.query?.window === 'string' ? req.query.window.trim() : 'alltime';
     const clubId = typeof req.query?.clubId === 'string' ? req.query.clubId.trim() : '';
     const limit = req.query?.limit;
-    const out = await getRankingBoard(board, limit, window, clubId || undefined);
+    const out = await getRankingBoard(board, limit, window, clubId || undefined, userId);
     res.json(out);
   } catch (e: any) {
     const err = toEconomyError(e);

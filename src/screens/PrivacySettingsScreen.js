@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import Icon from '../components/Icon';
 import SettingsScreenShell from '../components/SettingsScreenShell';
 import {
@@ -16,9 +17,13 @@ import {
 } from '../services/PrivacyConsent';
 import { submitPrivacyRequest } from '../services/PrivacyRequests';
 import { initSentryIfPossible, setSentryEnabled } from '../monitoring/sentry';
+import { firestore as db } from '../config/firebase';
+import { useAuth } from '../hooks/useCommon';
 
 const PrivacySettingsScreen = ({ navigation }) => {
+  const { uid } = useAuth();
   const [consent, setConsent] = useState(false);
+  const [leaderboardOptOut, setLeaderboardOptOut] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -26,15 +31,27 @@ const PrivacySettingsScreen = ({ navigation }) => {
     let mounted = true;
     (async () => {
       const value = await getAnalyticsConsent();
+      let optOut = false;
+      if (uid && db) {
+        try {
+          const snap = await getDoc(doc(db, 'users', uid));
+          const data = snap.exists() ? snap.data() : null;
+          optOut =
+            data?.leaderboardOptOut === true || data?.privacyHideFromRankings === true;
+        } catch {
+          optOut = false;
+        }
+      }
       if (mounted) {
         setConsent(value);
+        setLeaderboardOptOut(optOut);
         setLoading(false);
       }
     })();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [uid]);
 
   const onToggleConsent = async (next) => {
     setBusy(true);
@@ -47,6 +64,32 @@ const PrivacySettingsScreen = ({ navigation }) => {
       }
     } catch (error) {
       Alert.alert('Error', error?.message || 'Could not update consent');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToggleLeaderboardOptOut = async (next) => {
+    if (!uid) {
+      Alert.alert('Sign in required', 'Please sign in to change ranking privacy.');
+      return;
+    }
+    setBusy(true);
+    const prev = leaderboardOptOut;
+    setLeaderboardOptOut(next);
+    try {
+      await setDoc(
+        doc(db, 'users', uid),
+        {
+          leaderboardOptOut: !!next,
+          privacyHideFromRankings: !!next,
+          updatedAt: new Date(),
+        },
+        { merge: true },
+      );
+    } catch (error) {
+      setLeaderboardOptOut(prev);
+      Alert.alert('Error', error?.message || 'Could not update ranking privacy');
     } finally {
       setBusy(false);
     }
@@ -109,6 +152,24 @@ const PrivacySettingsScreen = ({ navigation }) => {
           value={consent}
           onValueChange={onToggleConsent}
           disabled={busy}
+          trackColor={{ false: '#141418', true: '#00A89E' }}
+          thumbColor="#F5F5F7"
+        />
+      </View>
+
+      <Text style={[styles.sectionTitle, { marginTop: 28 }]}>Rankings</Text>
+      <View style={styles.row}>
+        <View style={styles.rowText}>
+          <Text style={styles.rowTitle}>Hide me from public rankings</Text>
+          <Text style={styles.rowSubtitle}>
+            When on, your profile is excluded from Rankings leaderboards (coin spend, gifts,
+            followers, clubs, and similar boards). Battle glory may still show if you compete.
+          </Text>
+        </View>
+        <Switch
+          value={leaderboardOptOut}
+          onValueChange={onToggleLeaderboardOptOut}
+          disabled={busy || !uid}
           trackColor={{ false: '#141418', true: '#00A89E' }}
           thumbColor="#F5F5F7"
         />

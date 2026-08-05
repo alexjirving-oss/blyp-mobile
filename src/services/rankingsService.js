@@ -1,15 +1,26 @@
 // rankingsService.js
 //
-// Client for the Rankings hub (Phase 0–4). Live boards hit the economy backend
-// with optional day/week/month/year windows. Club boards require clubId
-// (profileClubs membership ∩ gift_events / followers). Battle glory deep-links
-// BattleLeaderboard. Remaining catalog tiles are Coming soon (with notes).
+// Client for the Rankings hub (Phase 0–5). Live boards hit the economy backend
+// with optional day/week/month/year windows (Plus). Free viewers get top-3 +
+// all-time. Club boards require clubId. Battle glory deep-links BattleLeaderboard
+// (full, free). Dating boards stay Coming soon (Plus + dating opt-in only).
 
 import { callEconomyBackend } from '../api/economyLiveApi';
 import { CLUB_CATALOG, getClubById } from './profileIdentityCatalog';
 
 /** @typedef {'coin_spend'|'gem_earn'|'followers_total'|'gifts_sent'|'gifts_recv'|'stream_earnings'|'peak_viewers'|'battle_glory'|'battle_wins'|'battle_streak'|'marble_wins'|'live_game_wins'|'club_coin_spend'|'club_followers'} LiveBoardId */
 /** @typedef {'day'|'week'|'month'|'year'|'alltime'} RankingWindow */
+
+/** Free plan: podium peek only. */
+export const FREE_RANKINGS_LIMIT = 3;
+/** Plus / trial: full board depth (server max 50). */
+export const PLUS_RANKINGS_LIMIT = 50;
+
+export const BOARD_ACCESS = {
+  freePeek: 'Top 3 · all-time on Free; full board + windows on Plus',
+  battleGlory: 'Full battle glory board is free for everyone',
+  dating: 'Plus + dating opt-in only (not live yet)',
+};
 
 export const RANKING_WINDOWS = [
   { id: 'day', label: 'Day' },
@@ -236,11 +247,39 @@ export const COMING_SOON_BOARDS = [
     windows: 'Month',
     note: 'team_earnings table is cumulative (no monthly window yet); scoped agency board deferred.',
   },
-  { id: 'dating_matches', title: 'Most dating matches', category: 'Dating', windows: 'Week · Month' },
-  { id: 'dating_likes_recv', title: 'Most dating likes received', category: 'Dating', windows: 'Week · Month' },
-  { id: 'promote_spend', title: 'Promotion spenders', category: 'Economy', windows: 'Month' },
+  {
+    id: 'dating_matches',
+    title: 'Most dating matches',
+    category: 'Dating',
+    windows: 'Week · Month',
+    access: 'plus_dating',
+    note: 'Plus + dating opt-in only. Never shown to Free or users who have not opted into Dating.',
+  },
+  {
+    id: 'dating_likes_recv',
+    title: 'Most dating likes received',
+    category: 'Dating',
+    windows: 'Week · Month',
+    access: 'plus_dating',
+    note: 'Plus + dating opt-in only. Never shown to Free or users who have not opted into Dating.',
+  },
+  {
+    id: 'promote_spend',
+    title: 'Promotion spenders',
+    category: 'Economy',
+    windows: 'Month',
+    access: 'plus',
+    note: 'Plus transparency board — deferred until promote spend rollups ship.',
+  },
   { id: 'daily_streak', title: 'Daily reward streaks', category: 'Economy', windows: 'All time' },
-  { id: 'friends_coin', title: 'Friends: coin spend', category: 'Social', windows: 'Week' },
+  {
+    id: 'friends_coin',
+    title: 'Friends: coin spend',
+    category: 'Social',
+    windows: 'Week',
+    access: 'plus',
+    note: 'Plus friends-scope board — deferred until follow-graph ∩ wallet rollup ships.',
+  },
   { id: 'global_score', title: 'Blyp Score (composite)', category: 'Later', windows: 'Week' },
 ];
 
@@ -248,11 +287,12 @@ export { CLUB_CATALOG, getClubById };
 
 /**
  * @param {string} board
- * @param {{ limit?: number, window?: RankingWindow, clubId?: string }} [opts]
+ * @param {{ limit?: number, window?: RankingWindow, clubId?: string, hasPlus?: boolean }} [opts]
  */
 export async function fetchRankingBoard(board, opts = {}) {
-  const limit = opts.limit || 25;
-  const window = opts.window || 'alltime';
+  const hasPlus = opts.hasPlus !== false;
+  const limit = opts.limit || (hasPlus ? PLUS_RANKINGS_LIMIT : FREE_RANKINGS_LIMIT);
+  const window = hasPlus ? opts.window || 'alltime' : 'alltime';
   const params = { board, limit, window };
   if (opts.clubId) params.clubId = opts.clubId;
   return callEconomyBackend('/economy/rankings', 'GET', params);

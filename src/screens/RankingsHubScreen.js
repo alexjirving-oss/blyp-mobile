@@ -1,8 +1,8 @@
 // RankingsHubScreen.js
 //
-// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Phase 1–4),
-// club-scoped boards with club picker (profileClubs), Coming soon tiles (with
-// data notes) for the rest. Battle glory deep-links BattleLeaderboard.
+// Rankings hub: live boards with Day/Week/Month/Year/All window chips (Plus),
+// free top-3 peek, club-scoped boards, Coming soon (dating = Plus + opt-in).
+// Battle glory deep-links BattleLeaderboard (full, free).
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -20,11 +20,14 @@ import Icon from '../components/Icon';
 import { COLORS } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
+import { useHasAI } from '../hooks/useEntitlement';
 import {
   CLUB_CATALOG,
   CLUB_SPEND_WINDOWS,
   COMING_SOON_BOARDS,
+  FREE_RANKINGS_LIMIT,
   LIVE_BOARDS,
+  PLUS_RANKINGS_LIMIT,
   RANKING_WINDOWS,
   fetchRankingBoard,
   formatScore,
@@ -53,6 +56,7 @@ function rankBadge(rank) {
 
 const RankingsHubScreen = ({ navigation, route }) => {
   const { uid } = useAuth();
+  const hasPlus = useHasAI();
   const initialBoard = route?.params?.board || null;
   const [selected, setSelected] = useState(initialBoard);
   const [windowId, setWindowId] = useState('alltime');
@@ -69,9 +73,14 @@ const RankingsHubScreen = ({ navigation, route }) => {
   );
 
   const isClubBoard = !!liveBoard?.requiresClubId;
-  const supportsWindows = !!liveBoard?.windows;
+  const supportsWindows = !!liveBoard?.windows && hasPlus;
   const windowOptions =
     liveBoard?.windows === 'club' ? CLUB_SPEND_WINDOWS : RANKING_WINDOWS;
+
+  // Free users stay on all-time when entitlement drops.
+  useEffect(() => {
+    if (!hasPlus && windowId !== 'alltime') setWindowId('alltime');
+  }, [hasPlus, windowId]);
 
   const clubChips = useMemo(() => {
     const mine = (myClubIds || [])
@@ -109,7 +118,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
     }
   }, [isClubBoard, clubId, myClubIds]);
 
-  const loadBoard = useCallback(async (boardId, win, scopeClubId) => {
+  const loadBoard = useCallback(async (boardId, win, scopeClubId, plus) => {
     const def = LIVE_BOARDS.find((b) => b.id === boardId);
     if (!def || def.source !== 'economy') return;
     if (def.requiresClubId && !scopeClubId) {
@@ -122,11 +131,12 @@ const RankingsHubScreen = ({ navigation, route }) => {
     setLoading(true);
     setError('');
     try {
-      const effectiveWindow = def.windows ? win || 'alltime' : 'alltime';
+      const effectiveWindow = plus && def.windows ? win || 'alltime' : 'alltime';
       const res = await fetchRankingBoard(boardId, {
-        limit: 25,
+        limit: plus ? PLUS_RANKINGS_LIMIT : FREE_RANKINGS_LIMIT,
         window: effectiveWindow,
         clubId: def.requiresClubId ? scopeClubId : undefined,
+        hasPlus: plus,
       });
       setEntries(Array.isArray(res?.entries) ? res.entries : []);
       setMeta(res || null);
@@ -142,9 +152,9 @@ const RankingsHubScreen = ({ navigation, route }) => {
   useEffect(() => {
     if (selected && liveBoard?.source === 'economy') {
       if (liveBoard.requiresClubId && !clubId) return;
-      loadBoard(selected, windowId, clubId);
+      loadBoard(selected, windowId, clubId, hasPlus);
     }
-  }, [selected, windowId, clubId, liveBoard, loadBoard]);
+  }, [selected, windowId, clubId, liveBoard, loadBoard, hasPlus]);
 
   const openBoard = useCallback(
     (board) => {
@@ -152,7 +162,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
         navigation.navigate(board.route);
         return;
       }
-      if (board.windows === 'club') setWindowId('week');
+      if (hasPlus && board.windows === 'club') setWindowId('week');
       else setWindowId('alltime');
       setSelected(board.id);
       if (board.requiresClubId && !clubId) {
@@ -160,7 +170,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
         else if (CLUB_CATALOG[0]?.id) setClubId(CLUB_CATALOG[0].id);
       }
     },
-    [navigation, clubId, myClubIds],
+    [navigation, clubId, myClubIds, hasPlus],
   );
 
   const renderRow = useCallback(
@@ -278,11 +288,30 @@ const RankingsHubScreen = ({ navigation, route }) => {
           </ScrollView>
         ) : (
           <Text style={styles.windowHint}>
-            {isClubBoard
-              ? 'All time · members via profileClubs'
-              : 'All time · refreshed on open'}
+            {!hasPlus && liveBoard?.windows
+              ? 'Free plan: all-time top 3 · Plus unlocks Day–Year and the full board'
+              : isClubBoard
+                ? 'All time · members via profileClubs'
+                : 'All time · refreshed on open'}
           </Text>
         )}
+
+        {!hasPlus ? (
+          <TouchableOpacity
+            style={styles.upsellBanner}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('Plans')}
+            accessibilityRole="button"
+            accessibilityLabel="See Blyp Plus plans for full rankings"
+          >
+            <Icon name="star" size={responsiveFont(16)} color={COLORS.primary} />
+            <Text style={styles.upsellBannerText}>
+              {meta?.upsell ||
+                'Showing top 3. Blyp Plus unlocks the full board and time windows.'}
+            </Text>
+            <Text style={styles.upsellCta}>Plans</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {loading ? (
           <View style={styles.centered}>
@@ -293,7 +322,7 @@ const RankingsHubScreen = ({ navigation, route }) => {
             <Text style={styles.errorText}>{error}</Text>
             <TouchableOpacity
               style={styles.retryBtn}
-              onPress={() => loadBoard(selected, windowId, clubId)}
+              onPress={() => loadBoard(selected, windowId, clubId, hasPlus)}
             >
               <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
@@ -310,6 +339,19 @@ const RankingsHubScreen = ({ navigation, route }) => {
                   ? 'No club rankings yet — join this club on your profile or send gifts.'
                   : 'No rankings yet — be the first.'}
               </Text>
+            }
+            ListFooterComponent={
+              !hasPlus && entries.length > 0 ? (
+                <TouchableOpacity
+                  style={styles.upsellFooter}
+                  activeOpacity={0.85}
+                  onPress={() => navigation.navigate('Plans')}
+                >
+                  <Text style={styles.upsellFooterText}>
+                    Unlock ranks 4+ and Day / Week / Month / Year with Blyp Plus
+                  </Text>
+                </TouchableOpacity>
+              ) : null
             }
           />
         )}
@@ -342,9 +384,24 @@ const RankingsHubScreen = ({ navigation, route }) => {
 
       <ScrollView contentContainerStyle={styles.hubContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.hubLead}>
-          See who&apos;s leading across Blyp — economy, social, live, games and clubs. Switch Day /
-          Week / Month / Year on windowed boards; pick a club for scoped boards.
+          See who&apos;s leading across Blyp — economy, social, live, games and clubs.
+          {hasPlus
+            ? ' Switch Day / Week / Month / Year on windowed boards; pick a club for scoped boards.'
+            : ' Free plan shows the top 3 (all-time). Blyp Plus unlocks the full board and time windows.'}
         </Text>
+
+        {!hasPlus ? (
+          <TouchableOpacity
+            style={styles.hubUpsell}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('Plans')}
+          >
+            <Text style={styles.hubUpsellText}>
+              Upgrade to Blyp Plus for full rankings and Day–Year windows
+            </Text>
+            <Text style={styles.upsellCta}>Plans</Text>
+          </TouchableOpacity>
+        ) : null}
 
         <Text style={styles.sectionTitle}>Live now</Text>
         {LIVE_BOARDS.map((board) => (
@@ -361,16 +418,26 @@ const RankingsHubScreen = ({ navigation, route }) => {
               <Text style={styles.liveTitle}>{board.title}</Text>
               <Text style={styles.liveBlurb} numberOfLines={2}>
                 {board.blurb}
-                {board.windows === true
-                  ? ' · Day–Year windows'
-                  : board.windows === 'club'
-                    ? ' · Week · Month'
-                    : board.requiresClubId
-                      ? ' · Pick a club'
-                      : ''}
+                {board.source === 'navigate'
+                  ? ' · Free full board'
+                  : hasPlus
+                    ? board.windows === true
+                      ? ' · Day–Year windows'
+                      : board.windows === 'club'
+                        ? ' · Week · Month'
+                        : board.requiresClubId
+                          ? ' · Pick a club'
+                          : ''
+                    : ' · Free top 3'}
               </Text>
             </View>
-            <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
+            {!hasPlus && board.source !== 'navigate' ? (
+              <View style={styles.plusPill}>
+                <Text style={styles.plusPillText}>Plus</Text>
+              </View>
+            ) : (
+              <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
+            )}
           </TouchableOpacity>
         ))}
 
@@ -385,8 +452,20 @@ const RankingsHubScreen = ({ navigation, route }) => {
                   <Text style={styles.soonWindows}>{b.windows}</Text>
                   {!!b.note && <Text style={styles.soonNote}>{b.note}</Text>}
                 </View>
-                <View style={styles.soonPill}>
-                  <Text style={styles.soonPillText}>Soon</Text>
+                <View
+                  style={[
+                    styles.soonPill,
+                    (b.access === 'plus' || b.access === 'plus_dating') && styles.plusPill,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.soonPillText,
+                      (b.access === 'plus' || b.access === 'plus_dating') && styles.plusPillText,
+                    ]}
+                  >
+                    {b.access === 'plus_dating' ? 'Plus+opt-in' : b.access === 'plus' ? 'Plus' : 'Soon'}
+                  </Text>
                 </View>
               </View>
             ))}
@@ -426,7 +505,70 @@ const styles = StyleSheet.create({
     fontSize: responsiveFont(14),
     lineHeight: responsiveFont(20),
     color: COLORS.textSecondary,
-    marginBottom: responsiveSize(16),
+    marginBottom: responsiveSize(12),
+  },
+  hubUpsell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: responsiveSize(10),
+    paddingHorizontal: responsiveSize(12),
+    borderRadius: 12,
+    backgroundColor: COLORS.surface || '#F4F5F7',
+    marginBottom: responsiveSize(14),
+  },
+  hubUpsellText: {
+    flex: 1,
+    fontSize: responsiveFont(13),
+    color: COLORS.textPrimary,
+    fontWeight: '500',
+  },
+  upsellBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: responsiveSize(16),
+    marginBottom: responsiveSize(8),
+    paddingVertical: responsiveSize(10),
+    paddingHorizontal: responsiveSize(12),
+    borderRadius: 12,
+    backgroundColor: COLORS.surface || '#F4F5F7',
+  },
+  upsellBannerText: {
+    flex: 1,
+    fontSize: responsiveFont(12),
+    lineHeight: responsiveFont(16),
+    color: COLORS.textSecondary,
+  },
+  upsellCta: {
+    fontSize: responsiveFont(12),
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  upsellFooter: {
+    marginTop: responsiveSize(12),
+    marginBottom: responsiveSize(8),
+    paddingVertical: responsiveSize(12),
+    paddingHorizontal: responsiveSize(12),
+    borderRadius: 12,
+    backgroundColor: COLORS.surface || '#F4F5F7',
+  },
+  upsellFooterText: {
+    textAlign: 'center',
+    fontSize: responsiveFont(13),
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  plusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,210,190,0.15)',
+  },
+  plusPillText: {
+    fontSize: responsiveFont(11),
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   sectionTitle: {
     fontSize: responsiveFont(15),

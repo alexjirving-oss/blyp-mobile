@@ -1,5 +1,5 @@
 /**
- * Global rankings (Phase 0 + Phase 1 + P1.5 + P2 + P3 + P4).
+ * Global rankings (Phase 0 + Phase 1 + P1.5 + P2 + P3 + P4 + P5).
  *
  * All-time boards read denormalized wallet / Firestore / gift / stream tables.
  * Windowed day/week/month/year boards prefer durable rankings_snapshots
@@ -17,6 +17,10 @@
  * P4: club_coin_spend / club_followers via Firestore users.profileClubs
  * (array-contains) ∩ gift_events / followersCount. League + team agency boards
  * stay deferred (no durable sport-page / monthly team rollups yet).
+ *
+ * P5: Free viewers get top-3 + all-time only; Plus/trial get full depth + windows.
+ * leaderboardOptOut / privacyHideFromRankings exclude identities. Dating boards
+ * (when added) require Plus + dating opt-in — not live yet.
  */
 
 import { getEconomyInfra } from './infra';
@@ -50,6 +54,8 @@ export type RankingEntry = {
   score: number;
 };
 
+export type RankingViewerTier = 'free' | 'plus';
+
 export type RankingBoardResponse = {
   board: RankingBoardId;
   window: RankingWindow;
@@ -76,7 +82,26 @@ export type RankingBoardResponse = {
   note?: string;
   /** Club-scoped boards only. */
   clubId?: string;
+  /** P5: viewer entitlement applied to this response. */
+  viewerTier?: RankingViewerTier;
+  /** True when free tier truncated depth or coerced window. */
+  capped?: boolean;
+  /** Max rows this viewer may request. */
+  maxLimit?: number;
+  /** True when free viewers cannot use day/week/month/year. */
+  windowsLocked?: boolean;
+  upsell?: string;
 };
+
+/** Free plan depth (podium peek). */
+export const FREE_RANKINGS_LIMIT = 3;
+/** Plus / trial max (matches clampLimit upper bound). */
+export const PLUS_RANKINGS_LIMIT = 50;
+
+/** Board ids reserved for dating — never served without Plus + dating opt-in. */
+const DATING_BOARD_IDS = new Set(['dating_matches', 'dating_likes_recv']);
+
+const STATUS_BLOCKS_PAID = new Set(['revoked', 'expired', 'on_hold', 'paused', 'inactive']);
 
 export type RankingMaterializeResult = {
   board: RankingBoardId;
@@ -257,9 +282,53 @@ function cacheKey(
   window: RankingWindow,
   limit: number,
   clubId?: string,
+  viewerTier: RankingViewerTier = 'plus',
 ): string {
   const scope = clubId ? `:club:${clubId}` : '';
-  return `rankings:v2:${board}:${window}:${limit}${scope}`;
+  return `rankings:v3:${board}:${window}:${limit}:${viewerTier}${scope}`;
+}
+
+/**
+ * Resolve Plus/trial for rankings depth. Infra read failure → fail-open (Plus)
+ * so we do not wrongly lock entitled users. Missing entitlement doc → free.
+ */
+export async function viewerHasPlusRankings(userId: string): Promise<boolean> {
+  const fsDb = getFirestore();
+  if (!fsDb || !userId) return true;
+  try {
+    const snap = await fsDb.collection('entitlements').doc(userId).get();
+    if (!snap.exists) return false;
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    const now = Date.now();
+    const tier = String(data.tier || 'trial');
+    const trialEndsAt = Number(data.trialEndsAt || 0);
+    const currentPeriodEnd = Number(data.currentPeriodEnd || 0);
+    const status = String(data.status || '');
+    if (tier === 'plus' || tier === 'plus_coins') {
+      return currentPeriodEnd > now && !STATUS_BLOCKS_PAID.has(status);
+    }
+    if (trialEndsAt && now < trialEndsAt) return true;
+    return false;
+  } catch (e: any) {
+    logger.warn(
+      { err: e?.message || String(e), userId },
+      '[rankings] entitlement read failed — fail-open Plus',
+    );
+    return true;
+  }
+}
+
+async function viewerDatingOptedIn(userId: string): Promise<boolean> {
+  const fsDb = getFirestore();
+  if (!fsDb || !userId) return false;
+  try {
+    const snap = await fsDb.collection('datingPrefs').doc(userId).get();
+    if (!snap.exists) return false;
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    return data.optedIn === true;
+  } catch {
+    return false;
+  }
 }
 
 async function cacheGet(key: string): Promise<RankingBoardResponse | null> {
@@ -1260,16 +1329,48 @@ export async function getRankingBoard(
   limitRaw?: unknown,
   windowRaw?: unknown,
   clubIdRaw?: unknown,
+  viewerUserId?: string,
 ): Promise<RankingBoardResponse> {
-  const board = String(boardRaw || '').trim() as RankingBoardId;
+  const boardIdRaw = String(boardRaw || '').trim();
+  if (DATING_BOARD_IDS.has(boardIdRaw)) {
+    const uid = String(viewerUserId || '').trim();
+    const datingPlus = uid ? await viewerHasPlusRankings(uid) : false;
+    const optedIn = uid && datingPlus ? await viewerDatingOptedIn(uid) : false;
+    if (!datingPlus || !optedIn) {
+      throw new EconomyError(
+        'RESTRICTED',
+        403,
+        'Dating rankings require Blyp Plus and an active dating opt-in',
+        { board: boardIdRaw, requires: ['plus', 'dating_opt_in'] },
+      );
+    }
+    throw new EconomyError('INVALID_INPUT', 400, 'Dating rankings are not live yet', {
+      board: boardIdRaw,
+    });
+  }
+
+  const board = boardIdRaw as RankingBoardId;
   if (!BOARD_META[board]) {
     throw new EconomyError('INVALID_INPUT', 400, 'Unknown rankings board', {
       board: boardRaw,
       allowed: Object.keys(BOARD_META),
     });
   }
-  const limit = clampLimit(limitRaw);
+
+  const hasPlus = viewerUserId ? await viewerHasPlusRankings(viewerUserId) : true;
+  const viewerTier: RankingViewerTier = hasPlus ? 'plus' : 'free';
+  const maxLimit = hasPlus ? PLUS_RANKINGS_LIMIT : FREE_RANKINGS_LIMIT;
+  const requested = clampLimit(limitRaw);
+  const limit = Math.min(requested, maxLimit);
+
   let window = parseWindow(windowRaw);
+  let windowsLocked = false;
+  const capped = !hasPlus;
+  if (!hasPlus && window !== 'alltime') {
+    window = 'alltime';
+    windowsLocked = true;
+  }
+
   const clubId = isClubBoard(board) ? parseClubId(clubIdRaw) : undefined;
 
   // Boards without windowed history coerce to all-time.
@@ -1277,9 +1378,20 @@ export async function getRankingBoard(
     window = 'alltime';
   }
 
-  const key = cacheKey(board, window, limit, clubId);
+  const key = cacheKey(board, window, limit, clubId, viewerTier);
   const cached = await cacheGet(key);
-  if (cached) return cached;
+  if (cached) {
+    return {
+      ...cached,
+      viewerTier,
+      capped,
+      maxLimit,
+      windowsLocked: windowsLocked || undefined,
+      upsell: hasPlus
+        ? undefined
+        : 'Blyp Plus unlocks the full board and Day / Week / Month / Year windows.',
+    };
+  }
 
   let result: RankingBoardResponse;
   if (board === 'club_coin_spend') {
@@ -1309,13 +1421,21 @@ export async function getRankingBoard(
       result = fromSnap || (await giftOrEarningsBoard(board, window, limit));
     }
   } else if (window === 'alltime') {
-    result = await walletBoard(board, limit);
+    result = await walletBoard(board as 'coin_spend' | 'gem_earn', limit);
   } else {
     const fromSnap = await readSnapshotBoard(board, window, limit);
-    result = fromSnap || (await ledgerWindowBoard(board, window, limit));
+    result = fromSnap || (await ledgerWindowBoard(board as 'coin_spend' | 'gem_earn', window, limit));
   }
 
   result.cacheTtlSec = CACHE_TTL_SEC[window];
+  result.viewerTier = viewerTier;
+  result.capped = capped || undefined;
+  result.maxLimit = maxLimit;
+  result.windowsLocked = windowsLocked || undefined;
+  if (!hasPlus) {
+    result.upsell =
+      'Blyp Plus unlocks the full board and Day / Week / Month / Year windows.';
+  }
   await cacheSet(key, result, CACHE_TTL_SEC[window]);
   return result;
 }
