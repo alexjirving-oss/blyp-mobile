@@ -920,3 +920,74 @@ export async function setPostModerationHiddenFs(
     return { ok: false, detail };
   }
 }
+
+/**
+ * Queue a durable FCM/in-app notification for a host-initiated guest invite.
+ * Matches the Cloud Functions outbox shape so notificationDispatch can send it.
+ */
+export async function enqueueGuestInviteNotification(input: {
+  guestUserId: string;
+  hostUserId: string;
+  sessionId: string;
+  hostDisplayName?: string;
+}): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const guestUserId = String(input.guestUserId || '').trim();
+  const hostUserId = String(input.hostUserId || '').trim();
+  const sessionId = String(input.sessionId || '').trim();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!guestUserId || !hostUserId || !sessionId) return { ok: false, detail: 'missing_fields' };
+
+  let hostName = String(input.hostDisplayName || '').trim();
+  if (!hostName) {
+    try {
+      const snap = await fs.collection('users').doc(hostUserId).get();
+      const d = (snap.data() || {}) as Record<string, unknown>;
+      hostName = String(d.displayName || d.username || d.name || '').trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!hostName) hostName = 'A host';
+
+  const crypto = await import('crypto');
+  const dedupeKey = `guestinvite:${sessionId}:${guestUserId}`;
+  const id = 'n_' + crypto.createHash('sha1').update(dedupeKey).digest('hex').slice(0, 32);
+  const now = Date.now();
+  const doc = {
+    userId: guestUserId,
+    type: 'live',
+    title: 'Join the live',
+    body: `${hostName} invited you on stage`,
+    data: {
+      type: 'guest_invite',
+      streamId: sessionId,
+      hostId: hostUserId,
+      screen: 'LiveStream',
+    },
+    dedupeKey,
+    collapseKey: `guestinvite:${sessionId}`,
+    status: 'queued',
+    sendAfter: now,
+    attempts: 0,
+    maxAttempts: 5,
+    nextAttemptAt: 0,
+    createdAt: now,
+  };
+
+  try {
+    await fs.collection('notifications').doc(id).create(doc);
+    return { ok: true };
+  } catch (e: any) {
+    const code = e?.code || e?.status;
+    if (code === 6 || code === 'already-exists' || /already exists/i.test(String(e?.message || ''))) {
+      return { ok: true, detail: 'already_queued' };
+    }
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, guestUserId, sessionId },
+      '[firestore-admin] enqueueGuestInviteNotification failed',
+    );
+    return { ok: false, detail };
+  }
+}

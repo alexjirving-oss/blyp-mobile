@@ -50,6 +50,7 @@ import BattleOverlay from '../components/Battles/BattleOverlay';
 import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
 import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
 import GuestControlSheet from '../components/live/GuestControlSheet';
+import LiveInviteGuestsModal from '../components/live/LiveInviteGuestsModal';
 import { markJoined as markBattleJoined, getBattle as getBattleDoc, addGiftScore as addBattleGiftScore } from '../services/battleService';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
@@ -213,6 +214,8 @@ const LiveStreamScreen = (props) => {
   );
   // Games bottom-tab panel (Marble Race / battle game). Host starts Race from here.
   const [gamesOpen, setGamesOpen] = useState(false);
+  const [inviteGuestsOpen, setInviteGuestsOpen] = useState(false);
+  const [invitingGuestUid, setInvitingGuestUid] = useState(null);
 
   // Floating toggle + full overlay for the artillery battle-stage game. Rendered
   // in both viewer and host battle branches. Opaque so the game reads over video.
@@ -276,13 +279,7 @@ const LiveStreamScreen = (props) => {
         onClose={() => setGamesOpen(false)}
         onInviteGuest={
           isHost
-            ? () => {
-                Alert.alert(
-                  'Invite a guest to Race',
-                  'Tap a viewer in live chat and choose Invite to join. They appear on stage, then tap Start Race — or start now for solo practice.',
-                  [{ text: 'Got it' }]
-                );
-              }
+            ? () => setInviteGuestsOpen(true)
             : undefined
         }
       />
@@ -2649,6 +2646,35 @@ const LiveStreamScreen = (props) => {
     openGift({ userId: String(targetId), name: item.username || 'Viewer' });
   };
 
+  const inviteGuestFromFollowGraph = useCallback(async (user) => {
+    const targetId = user?.id || user?.userId;
+    const sid = ivsHostSession?.sessionId || ivsHostSession?.streamId || streamId;
+    if (!targetId || !sid) {
+      Alert.alert('Invite failed', 'Go live first, then invite someone to join.');
+      throw new Error('missing_session');
+    }
+    setInvitingGuestUid(String(targetId));
+    try {
+      await hostInviteGuest(String(sid), String(targetId));
+      Toast.show?.({
+        type: 'success',
+        text1: 'Invite sent',
+        text2: `${user?.displayName || user?.username || 'Guest'} got a Blyp ping`,
+      });
+    } catch (e) {
+      const msg = String(e?.message || e?.code || '');
+      Alert.alert(
+        msg.includes('PANEL_FULL') ? 'Panel full' : 'Invite failed',
+        msg.includes('PANEL_FULL')
+          ? `You can have up to ${MAX_GUEST_SLOTS} guests on stage at once.`
+          : 'Could not invite this person right now.'
+      );
+      throw e;
+    } finally {
+      setInvitingGuestUid(null);
+    }
+  }, [ivsHostSession?.sessionId, ivsHostSession?.streamId, streamId]);
+
   // Host tapping a commenter: choose to gift them OR invite them up as a guest.
   // (Viewers only get the gift action.) The invite is host-initiated — the viewer
   // gets an accept prompt and only then goes on stage.
@@ -3778,10 +3804,8 @@ const LiveStreamScreen = (props) => {
                                       <TouchableOpacity
                                         style={styles.ivsInviteTile}
                                         activeOpacity={0.85}
-                                        onPress={() => Alert.alert(
-                                          'Open guest spot',
-                                          'Viewers can tap “Request to join” on your stream. When they do, you’ll get a prompt here to add them to this spot.',
-                                        )}
+                                        onPress={() => setInviteGuestsOpen(true)}
+                                        accessibilityLabel="Invite guests from followers"
                                       >
                                         <View style={styles.ivsInvitePlusCircle}>
                                           <Text style={styles.ivsInvitePlusText}>+</Text>
@@ -4115,6 +4139,14 @@ const LiveStreamScreen = (props) => {
                   onOpenProfile={handleGuestProfile}
                   giftTotalsByUser={giftTotalsByUser}
                   joinedAtByUser={guestJoinedAt}
+                />
+
+                <LiveInviteGuestsModal
+                  visible={inviteGuestsOpen}
+                  hostUid={uid}
+                  onClose={() => setInviteGuestsOpen(false)}
+                  onInvite={inviteGuestFromFollowGraph}
+                  invitingUid={invitingGuestUid}
                 />
 
                 <ReportModal

@@ -34,7 +34,7 @@ import {
 import { buildSafeStageName } from '../services/ivsStageName';
 import { markBattleAttendance, assertBattleParticipant, assertBattleCreator } from '../economy/battleEscrowService';
 import { emitRoomEvent } from '../realtime/realtimeBus';
-import { getStreamPlaybackForViewer } from '../admin/firestoreAdmin';
+import { getStreamPlaybackForViewer, enqueueGuestInviteNotification } from '../admin/firestoreAdmin';
 import {
   MAX_GUEST_SLOTS,
   collectUsedGuestSlots,
@@ -435,6 +435,12 @@ export async function hostInviteGuest(
   const slotIndex = pickSlotIndex(used);
   await hostInviteGuestStore(sessionId, guestUserId, slotIndex, nowIso());
   emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex });
+  // Durable push/inbox ping so off-stream followers still get the invite.
+  void enqueueGuestInviteNotification({
+    guestUserId,
+    hostUserId: session.hostUserId,
+    sessionId,
+  }).catch(() => {});
   return { slotIndex, stageArn: session.stageArn };
 }
 
