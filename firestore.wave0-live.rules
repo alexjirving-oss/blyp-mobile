@@ -413,11 +413,10 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Dating (subscription-package surface). Prefs + passes are client-writable
-    // for the owner; likes may be written by owner OR Admin SDK (blypDatingLike);
-    // matches are server-only.
-    // Phase 4 optional fields (not in hasAll): prompts[], photoRefs[], useProfilePhoto,
-    // birthYear, gender, lookingFor[], ageMin, ageMax, maxDistanceKm, geoLat, geoLon, geoUpdatedAt.
+    // Dating (subscription-package surface). Phase 5: likes/passes via CF only;
+    // optedIn requires self-reported birthYear. Matches remain server-only.
+    // Phase 4 fields (not in hasAll): prompts[], photoRefs[], useProfilePhoto,
+    // gender, lookingFor[], ageMin, ageMax, maxDistanceKm, geoLat, geoLon, geoUpdatedAt.
     match /datingPrefs/{uid} {
       allow read: if isSignedIn();
       allow create, update: if isOwner(uid)
@@ -427,18 +426,25 @@ service cloud.firestore {
         && request.resource.data.optedIn is bool
         && request.resource.data.adultConfirmed is bool
         && request.resource.data.bio is string
-        && request.resource.data.bio.size() <= 280;
+        && request.resource.data.bio.size() <= 280
+        && (
+          !request.resource.data.optedIn
+          || (
+            request.resource.data.keys().hasAny(['birthYear'])
+            && request.resource.data.birthYear is int
+            && request.resource.data.birthYear >= 1920
+            && request.resource.data.birthYear <= 2100
+          )
+        );
       allow delete: if isOwner(uid);
     }
 
     match /datingPasses/{passId} {
       allow read: if isSignedIn()
         && resource.data.fromUid == request.auth.uid;
-      allow create: if isSignedIn()
-        && request.resource.data.fromUid == request.auth.uid
-        && request.resource.data.keys().hasAll(['fromUid', 'toUid', 'createdAt'])
-        && request.resource.data.fromUid != request.resource.data.toUid;
-      allow update, delete: if isSignedIn()
+      allow create: if false;
+      allow update: if false;
+      allow delete: if isSignedIn()
         && resource.data.fromUid == request.auth.uid;
     }
 
@@ -446,12 +452,7 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
-      // Client may write own outgoing likes; mutual-match CF uses Admin SDK.
-      allow create: if isSignedIn()
-        && request.resource.data.fromUid == request.auth.uid
-        && request.resource.data.keys().hasAll(['fromUid', 'toUid', 'createdAt'])
-        && request.resource.data.fromUid != request.resource.data.toUid;
-      allow update, delete: if false;
+      allow create, update, delete: if false;
     }
 
     match /datingMatches/{matchId} {

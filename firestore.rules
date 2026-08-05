@@ -224,9 +224,10 @@ service cloud.firestore {
     }
 
     // Dating (keep in sync with firestore.wave0-live.rules — deploy source of truth).
-    // Phase 4 may also store: prompts, photoRefs, useProfilePhoto, birthYear,
-    // gender, lookingFor, ageMin, ageMax, maxDistanceKm, geoLat, geoLon, geoUpdatedAt.
-    // hasAll (not hasOnly) so extended profile/filter fields are allowed.
+    // Phase 5: soft age gate — optedIn requires self-reported birthYear (int).
+    // Likes/passes are written only via Cloud Functions (Admin SDK); clients read.
+    // Phase 4 fields still allowed: prompts, photoRefs, useProfilePhoto, gender,
+    // lookingFor, ageMin, ageMax, maxDistanceKm, geoLat, geoLon, geoUpdatedAt.
     match /datingPrefs/{uid} {
       allow read: if isSignedIn();
       allow create, update: if isOwner(uid)
@@ -236,18 +237,26 @@ service cloud.firestore {
         && request.resource.data.optedIn is bool
         && request.resource.data.adultConfirmed is bool
         && request.resource.data.bio is string
-        && request.resource.data.bio.size() <= 280;
+        && request.resource.data.bio.size() <= 280
+        && (
+          !request.resource.data.optedIn
+          || (
+            request.resource.data.keys().hasAny(['birthYear'])
+            && request.resource.data.birthYear is int
+            && request.resource.data.birthYear >= 1920
+            && request.resource.data.birthYear <= 2100
+          )
+        );
       allow delete: if isOwner(uid);
     }
 
     match /datingPasses/{passId} {
       allow read: if isSignedIn()
         && resource.data.fromUid == request.auth.uid;
-      allow create: if isSignedIn()
-        && request.resource.data.fromUid == request.auth.uid
-        && request.resource.data.keys().hasAll(['fromUid', 'toUid', 'createdAt'])
-        && request.resource.data.fromUid != request.resource.data.toUid;
-      allow update, delete: if isSignedIn()
+      // Phase 5: create via blypDatingPass (Admin SDK). Owner may delete own pass.
+      allow create: if false;
+      allow update: if false;
+      allow delete: if isSignedIn()
         && resource.data.fromUid == request.auth.uid;
     }
 
@@ -255,11 +264,8 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
-      allow create: if isSignedIn()
-        && request.resource.data.fromUid == request.auth.uid
-        && request.resource.data.keys().hasAll(['fromUid', 'toUid', 'createdAt'])
-        && request.resource.data.fromUid != request.resource.data.toUid;
-      allow update, delete: if false;
+      // Phase 5: create via blypDatingLike only (Admin SDK) — no client forge.
+      allow create, update, delete: if false;
     }
 
     match /datingMatches/{matchId} {

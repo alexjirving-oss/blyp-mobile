@@ -253,6 +253,7 @@ export type FsReport = {
   reasonCode: string;
   details: string;
   status: string;
+  surface: string | null;
   createdAt: string | null;
   resolvedAt: string | null;
   resolvedBy: string | null;
@@ -268,6 +269,7 @@ function mapReport(id: string, data: Record<string, any>): FsReport {
     reasonCode: str(data.reasonCode),
     details: str(data.details),
     status: str(data.status) || 'open',
+    surface: str(data.surface) || null,
     createdAt: tsToIso(data.createdAt) || (typeof data.createdAt === 'number' ? new Date(data.createdAt).toISOString() : null),
     resolvedAt: tsToIso(data.resolvedAt),
     resolvedBy: str(data.resolvedBy) || null,

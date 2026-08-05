@@ -20,6 +20,11 @@ export interface RateLimitOptions {
   windowMs: number;
   /** Maximum requests allowed within the window before denial. */
   max: number;
+  /**
+   * When true (default), limiter infra errors ALLOW the request (search).
+   * Dating / abuse-sensitive paths should pass false to fail closed.
+   */
+  failOpen?: boolean;
 }
 
 export interface RateLimitResult {
@@ -83,8 +88,14 @@ export async function checkRateLimit(
 
     return result;
   } catch (e) {
-    // Fail OPEN: a limiter failure must never block legitimate search.
-    console.error('[rateLimit] error (allowing request)', (e as Error)?.message);
-    return { allowed: true, retryAfterSec: 0, remaining: opts.max };
+    const failOpen = opts.failOpen !== false;
+    console.error(
+      '[rateLimit] error (' + (failOpen ? 'allowing' : 'denying') + ' request)',
+      (e as Error)?.message,
+    );
+    if (failOpen) {
+      return { allowed: true, retryAfterSec: 0, remaining: opts.max };
+    }
+    return { allowed: false, retryAfterSec: 30, remaining: 0 };
   }
 }

@@ -61,9 +61,12 @@ async function checkRateLimit(key, opts = exports.SEARCH_RATE_LIMIT) {
         return result;
     }
     catch (e) {
-        // Fail OPEN: a limiter failure must never block legitimate search.
-        console.error('[rateLimit] error (allowing request)', e === null || e === void 0 ? void 0 : e.message);
-        return { allowed: true, retryAfterSec: 0, remaining: opts.max };
+        const failOpen = opts.failOpen !== false;
+        console.error('[rateLimit] error (' + (failOpen ? 'allowing' : 'denying') + ' request)', e === null || e === void 0 ? void 0 : e.message);
+        if (failOpen) {
+            return { allowed: true, retryAfterSec: 0, remaining: opts.max };
+        }
+        return { allowed: false, retryAfterSec: 30, remaining: 0 };
     }
 }
 //# sourceMappingURL=rateLimit.js.map

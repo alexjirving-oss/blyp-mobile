@@ -1,9 +1,10 @@
 // datingService.js
 //
 // Blyp Dating client — prefs, discovery, like/pass, matches.
-// Gated in UI by useHasAI; likes go through blypDatingLike (server match write).
+// Gated in UI by useHasAI; likes/passes go through Cloud Functions (rate-limited).
 // Prefs persist AsyncStorage + Firestore datingPrefs/{uid}.
 // Phase 4: bio / prompts / photo refs + Discover filters (age / gender / distance).
+// Phase 5: soft birthYear gate for Discover; server rejects unentitled / incomplete prefs.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, auth, firebaseEnabled } from '../config/firebase';
@@ -16,6 +17,7 @@ const FUNCTIONS_BASE = (
 ).replace(/\/+$/, '');
 
 const LIKE_ENDPOINT = FUNCTIONS_BASE + '/blypDatingLike';
+const PASS_ENDPOINT = FUNCTIONS_BASE + '/blypDatingPass';
 
 /** Fixed prompt stems — users fill answers (1–3). */
 export const DATING_PROMPT_OPTIONS = [
@@ -174,10 +176,6 @@ function normalize(raw) {
   };
 }
 
-function pairId(fromUid, toUid) {
-  return fromUid + '_' + toUid;
-}
-
 function snapExists(snap) {
   if (!snap) return false;
   if (typeof snap.exists === 'function') return !!snap.exists();
@@ -197,6 +195,12 @@ function ageFromBirthYear(birthYear) {
   const age = now - y;
   if (age < AGE_MIN_FLOOR || age > 120) return null;
   return age;
+}
+
+/** Soft Discover eligibility: adult + opted-in + self-reported birth year (age ≥ 18). */
+export function canParticipateInDiscover(prefs) {
+  if (!prefs) return false;
+  return !!prefs.adultConfirmed && !!prefs.optedIn && ageFromBirthYear(prefs.birthYear) != null;
 }
 
 /** Haversine distance in km. */
@@ -319,11 +323,14 @@ export async function confirmAdult(uid) {
   });
 }
 
-/** Toggle discovery opt-in. Refuses if adult not confirmed. */
+/** Toggle discovery opt-in. Refuses if adult not confirmed or birth year missing. */
 export async function setDatingOptIn(uid, optedIn) {
   const current = await getDatingPrefs(uid);
   if (optedIn && !current.adultConfirmed) {
     throw new Error('Confirm you are 18+ before joining Dating.');
+  }
+  if (optedIn && ageFromBirthYear(current.birthYear) == null) {
+    throw new Error('Add your birth year in Prefs before joining Discover.');
   }
   return setDatingPrefs(uid, { optedIn: !!optedIn });
 }
@@ -411,8 +418,9 @@ async function enrichCard(uid, prefsDoc) {
 }
 
 /**
- * Discovery cards: opted-in adults minus self, blocks, already liked/passed,
- * then client filters (age / lookingFor / distance when data exists).
+ * Discovery cards: opted-in adults with birthYear, minus self, blocks, already
+ * liked/passed, then client filters (age / lookingFor / distance when data exists).
+ * Viewer must also clear the soft age gate.
  */
 export async function fetchDiscoveryCards(uid) {
   if (!uid || !firebaseEnabled || !db) return [];
@@ -420,6 +428,7 @@ export async function fetchDiscoveryCards(uid) {
   const blocked = getBlockedSet();
   const seen = await loadSeenTargetIds(uid);
   const viewerPrefs = await getDatingPrefs(uid);
+  if (!canParticipateInDiscover(viewerPrefs)) return [];
 
   let docs = [];
   try {
@@ -442,6 +451,7 @@ export async function fetchDiscoveryCards(uid) {
     const data = typeof d.data === 'function' ? d.data() : d.data;
     if (!data?.adultConfirmed) continue;
     const cand = normalize(data);
+    if (ageFromBirthYear(cand.birthYear) == null) continue;
     if (!passesFilters(viewerPrefs, cand)) continue;
     candidates.push({ id, data: cand });
   }
@@ -457,19 +467,50 @@ export async function fetchDiscoveryCards(uid) {
   return cards;
 }
 
-/** Persist a pass (client-owned doc). */
+/**
+ * Pass via Cloud Function (rate-limited; entitlement + Discover gate enforced server-side).
+ * @returns {{ ok:boolean, alreadyPassed?:boolean, code?:string }}
+ */
 export async function recordPass(uid, toUid) {
-  if (!uid || !toUid || uid === toUid) return;
-  if (!firebaseEnabled || !db) return;
+  if (!uid || !toUid || uid === toUid) {
+    return { ok: false, code: 'invalid_target' };
+  }
+
+  const token = await firebaseIdToken();
+  if (!token) return { ok: false, code: 'unauthenticated' };
+
   try {
-    await db.collection('datingPasses').doc(pairId(uid, toUid)).set({
-      fromUid: uid,
-      toUid,
-      createdAt: Date.now(),
+    const resp = await fetch(PASS_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify({ toUid }),
     });
+    const data = await resp.json().catch(() => ({}));
+
+    if (resp.ok && data?.ok) {
+      return {
+        ok: true,
+        alreadyPassed: !!data.alreadyPassed,
+      };
+    }
+
+    const codeByStatus = {
+      400: 'invalid_target',
+      401: 'unauthenticated',
+      402: 'subscription_required',
+      403: data?.reason || 'forbidden',
+      429: 'rate_limited',
+    };
+    return {
+      ok: false,
+      code: data?.reason || codeByStatus[resp.status] || 'error',
+      retryAfterSec: Number(data?.retryAfterSec) || undefined,
+    };
   } catch (e) {
-    console.warn('[dating] pass write failed', e?.message || String(e));
-    throw e;
+    return { ok: false, code: 'error', detail: String(e?.message || 'pass-failed') };
   }
 }
 
@@ -511,10 +552,12 @@ export async function recordLike(uid, toUid) {
       402: 'subscription_required',
       403: data?.reason || 'forbidden',
       404: 'target_unavailable',
+      429: 'rate_limited',
     };
     return {
       ok: false,
       code: data?.reason || codeByStatus[resp.status] || 'error',
+      retryAfterSec: Number(data?.retryAfterSec) || undefined,
     };
   } catch (e) {
     return { ok: false, code: 'error', detail: String(e?.message || 'like-failed') };

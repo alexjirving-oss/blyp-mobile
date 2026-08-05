@@ -22,6 +22,7 @@ type AdminReport = {
   reasonCode: string;
   details: string;
   status: string;
+  surface?: string | null;
   createdAt: string | null;
   resolvedAt: string | null;
   resolvedBy: string | null;

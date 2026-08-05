@@ -34,8 +34,9 @@ export const REPORT_REASONS = [
  * @param {string} props.targetId
  * @param {string} [props.targetLabel] e.g. "@alex" or "this post"
  * @param {string} [props.reportedUserId] user to optionally block (for posts/comments/streams)
+ * @param {string} [props.surface] optional product surface for triage (e.g. "dating")
  */
-export default function ReportModal({ visible, onClose, targetType, targetId, targetLabel, reportedUserId }) {
+export default function ReportModal({ visible, onClose, targetType, targetId, targetLabel, reportedUserId, surface }) {
   const [reason, setReason] = useState(null);
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -63,6 +64,7 @@ export default function ReportModal({ visible, onClose, targetType, targetId, ta
         targetId,
         reasonCode: reason,
         details,
+        surface,
       });
       if (alsoBlock && reportedUserId) {
         try { await blockUser(reportedUserId); } catch { /* non-fatal */ }
@@ -78,7 +80,7 @@ export default function ReportModal({ visible, onClose, targetType, targetId, ta
       setSubmitting(false);
       Alert.alert('Couldn’t send report', e?.message || 'Please try again.');
     }
-  }, [reason, details, targetType, targetId, reportedUserId, close]);
+  }, [reason, details, targetType, targetId, reportedUserId, surface, close]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>

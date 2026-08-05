@@ -1,6 +1,6 @@
 // DatingScreen.js
 //
-// Blyp Dating — Phase 4: profile prefs (bio, prompts, filters) + enriched Discover cards.
+// Blyp Dating — Phase 4 prefs + Phase 5 soft age gate / report path.
 // Matches deep-link into Messenger (createOrGetDirectThread) — unchanged from Phase 3.
 // Gated by the same subscription package as AI (useHasAI) — no second paywall.
 
@@ -36,6 +36,7 @@ import {
   DATING_PROMPT_OPTIONS,
   DISTANCE_OPTIONS_KM,
   PROMPT_MAX,
+  canParticipateInDiscover,
   confirmAdult,
   fetchDiscoveryCards,
   fetchMatches,
@@ -55,6 +56,25 @@ const TABS = [
 ];
 
 const distanceLabel = (km) => (km == null ? 'Off' : km + ' km');
+
+const datingActionError = (code) => {
+  switch (code) {
+    case 'subscription_required':
+      return 'Dating likes need an active Plus or trial.';
+    case 'dating_not_enabled':
+      return 'Turn on discovery in Prefs first.';
+    case 'birth_year_required':
+      return 'Add your birth year in Prefs before liking or passing.';
+    case 'blocked':
+      return "You can't interact with this person.";
+    case 'rate_limited':
+      return 'Slow down — try again in a minute.';
+    case 'target_unavailable':
+      return 'This person is no longer available.';
+    default:
+      return 'Please try again.';
+  }
+};
 
 const DatingScreen = ({ navigation }) => {
   const { uid, user: authUser, getDisplayName } = useAuth();
@@ -126,7 +146,7 @@ const DatingScreen = ({ navigation }) => {
       await loadBlockedUsers().catch(() => {});
       const p = await getDatingPrefs(uid);
       setPrefs(p);
-      if (p?.optedIn) {
+      if (canParticipateInDiscover(p)) {
         await refreshDiscovery();
       } else {
         setCards([]);
@@ -155,7 +175,7 @@ const DatingScreen = ({ navigation }) => {
       try {
         const next = await setDatingPrefs(uid, patch);
         setPrefs(next);
-        if (refreshCards && next.optedIn) {
+        if (refreshCards && canParticipateInDiscover(next)) {
           await refreshDiscovery();
         }
         return next;
@@ -189,11 +209,15 @@ const DatingScreen = ({ navigation }) => {
         Alert.alert('18+ required', 'Confirm you are 18 or older before joining Dating.');
         return;
       }
+      if (value && !(prefs?.birthYear != null && Number(prefs.birthYear) > 0)) {
+        Alert.alert('Birth year required', 'Add your birth year below before joining Discover.');
+        return;
+      }
       setBusy(true);
       try {
         const next = await setDatingOptIn(uid, value);
         setPrefs(next);
-        if (value) {
+        if (canParticipateInDiscover(next)) {
           await refreshDiscovery();
         } else {
           setCards([]);
@@ -205,7 +229,7 @@ const DatingScreen = ({ navigation }) => {
         setBusy(false);
       }
     },
-    [uid, busy, prefs?.adultConfirmed, refreshDiscovery],
+    [uid, busy, prefs?.adultConfirmed, prefs?.birthYear, refreshDiscovery],
   );
 
   const onSaveBio = useCallback(async () => {
@@ -214,9 +238,21 @@ const DatingScreen = ({ navigation }) => {
 
   const onSaveBirthYear = useCallback(async () => {
     const trimmed = birthYearDraft.trim();
-    const patch = { birthYear: trimmed ? Number(trimmed) : null };
-    await savePrefsPatch(patch);
-  }, [savePrefsPatch, birthYearDraft]);
+    if (!trimmed) {
+      if (prefs?.optedIn) {
+        Alert.alert('Birth year required', 'Turn off Show me in Dating before clearing your birth year.');
+        return;
+      }
+      await savePrefsPatch({ birthYear: null });
+      return;
+    }
+    const year = Number(trimmed);
+    if (!Number.isFinite(year) || String(Math.round(year)).length !== 4) {
+      Alert.alert('Check birth year', 'Enter a four-digit year (self-report, no ID check).');
+      return;
+    }
+    await savePrefsPatch({ birthYear: year }, { refreshCards: true });
+  }, [savePrefsPatch, birthYearDraft, prefs?.optedIn]);
 
   const togglePromptSelection = useCallback((id) => {
     setSelectedPromptIds((prev) => {
@@ -338,7 +374,11 @@ const DatingScreen = ({ navigation }) => {
     if (!uid || !current || actionBusy) return;
     setActionBusy(true);
     try {
-      await recordPass(uid, current.id);
+      const result = await recordPass(uid, current.id);
+      if (!result.ok) {
+        Alert.alert("Couldn't pass", datingActionError(result.code));
+        return;
+      }
       advanceCard();
     } catch (e) {
       Alert.alert("Couldn't pass", e?.message || 'Please try again.');
@@ -353,15 +393,7 @@ const DatingScreen = ({ navigation }) => {
     try {
       const result = await recordLike(uid, current.id);
       if (!result.ok) {
-        const msg =
-          result.code === 'subscription_required'
-            ? 'Dating likes need an active Plus or trial.'
-            : result.code === 'dating_not_enabled'
-              ? 'Turn on discovery in Prefs first.'
-              : result.code === 'blocked'
-                ? "You can't like this person."
-                : 'Please try again.';
-        Alert.alert("Couldn't like", msg);
+        Alert.alert("Couldn't like", datingActionError(result.code));
         return;
       }
       if (result.matched) {
@@ -573,8 +605,9 @@ const DatingScreen = ({ navigation }) => {
     );
   }
 
-  const showCardStack = prefs.optedIn && current;
+  const showCardStack = canParticipateInDiscover(prefs) && current;
   const lookingFor = Array.isArray(prefs.lookingFor) ? prefs.lookingFor : [];
+  const needsBirthYear = !!prefs.optedIn && !(prefs.birthYear != null && Number(prefs.birthYear) > 0);
 
   const renderMatch = ({ item }) => {
     const rowKey = item.matchId || item.id;
@@ -659,6 +692,17 @@ const DatingScreen = ({ navigation }) => {
                 </Text>
                 <TouchableOpacity style={styles.primaryBtn} onPress={() => setTab('prefs')}>
                   <Text style={styles.primaryBtnText}>Open prefs</Text>
+                </TouchableOpacity>
+              </View>
+            ) : needsBirthYear ? (
+              <View style={styles.emptyBlock}>
+                <Icon name="calendar-outline" size={32} color={COLORS.textMuted} />
+                <Text style={styles.emptyTitle}>Birth year needed</Text>
+                <Text style={styles.emptyBody}>
+                  Discover needs a self-reported birth year (18+). No government ID — just your year so age filters work.
+                </Text>
+                <TouchableOpacity style={styles.primaryBtn} onPress={() => setTab('prefs')}>
+                  <Text style={styles.primaryBtnText}>Add birth year</Text>
                 </TouchableOpacity>
               </View>
             ) : showCardStack ? (
@@ -814,8 +858,10 @@ const DatingScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.prefSection}>
-              <Text style={styles.sectionTitle}>Birth year (optional)</Text>
-              <Text style={styles.prefBody}>Used to show your age on your card.</Text>
+              <Text style={styles.sectionTitle}>Birth year (required for Discover)</Text>
+              <Text style={styles.prefBody}>
+                Self-report only — used for age on your card and filters. No ID verification.
+              </Text>
               <TextInput
                 style={styles.textInputSingle}
                 value={birthYearDraft}
@@ -1026,6 +1072,7 @@ const DatingScreen = ({ navigation }) => {
         targetId={reportTarget?.id}
         targetLabel={reportTarget?.label}
         reportedUserId={reportTarget?.id}
+        surface="dating"
       />
     </ScreenContainer>
   );

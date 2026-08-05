@@ -6,7 +6,7 @@ import { db, auth } from '../config/firebase';
 import EnterpriseAnalyticsService from './EnterpriseAnalyticsService';
 
 class ReportingService {
-  async reportContent({ targetType, targetId, reasonCode, details }) {
+  async reportContent({ targetType, targetId, reasonCode, details, surface }) {
     const user = auth.currentUser;
     if (!user) throw new Error('Must be authenticated to file report');
     if (!targetType || !targetId || !reasonCode) throw new Error('Missing required report fields');
@@ -19,6 +19,9 @@ class ReportingService {
       createdAt: Date.now(), // client timestamp (serverTimestamp used in index function later)
       status: 'open'
     };
+    if (typeof surface === 'string' && surface.trim()) {
+      doc.surface = surface.trim().slice(0, 40);
+    }
     const ref = await db.collection('reports').add(doc);
     try {
       EnterpriseAnalyticsService.trackError('report_stream', { // reuse trackError for visibility until specific event added
@@ -26,7 +29,7 @@ class ReportingService {
         message: 'User filed report',
         code: 'REPORT_FILED',
         severity: 'low',
-        context: { targetType, targetId, reasonCode }
+        context: { targetType, targetId, reasonCode, surface: doc.surface || null }
       });
     } catch {}
     return { id: ref.id, ...doc };
