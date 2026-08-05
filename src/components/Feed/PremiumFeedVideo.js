@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import EnhancedVideo from '../EnhancedVideo';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
+import { FEED_VIDEO_VERTICAL_NUDGE_Y } from './feedVideoLayout';
 
 const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
 
@@ -13,6 +14,9 @@ const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
  * Portrait / square clips use `cover` (edge-to-edge). Wide landscape clips use
  * `contain` top-anchored so letterboxing sits under the action rail, not above
  * the frame. Includes a progress strip, pause glyph, and brand vignettes.
+ *
+ * Cover / custom-fit frames apply FEED_VIDEO_VERTICAL_NUDGE_Y so the subject
+ * sits optically between header chrome and the absolute tab bar / viewer footer.
  */
 export default function PremiumFeedVideo({
   uri,
@@ -101,9 +105,21 @@ export default function PremiumFeedVideo({
     return [{ translateX: tx }, { translateY: ty }, { scale: userScale }];
   }, [mediaDisplay, offsetX, offsetY, userScale]);
 
+  // Top-anchored wide contain already pins under the header; only nudge cover /
+  // custom-fit fills whose geometric center sits low under absolute footers.
+  const isTopAnchoredWide = isWide && aspect > 0 && !hasCustomFit;
+  const hostTransform = useMemo(() => {
+    const parts = [];
+    if (!isTopAnchoredWide && FEED_VIDEO_VERTICAL_NUDGE_Y) {
+      parts.push({ translateY: FEED_VIDEO_VERTICAL_NUDGE_Y });
+    }
+    if (framingTransform) parts.push(...framingTransform);
+    return parts.length ? parts : null;
+  }, [isTopAnchoredWide, framingTransform]);
+
   return (
     <View style={[styles.root, style]}>
-      <View style={[isWide && aspect > 0 && !hasCustomFit ? fillStyle : styles.videoHost, framingTransform ? { transform: framingTransform } : null]}>
+      <View style={[isTopAnchoredWide ? fillStyle : styles.videoHost, hostTransform ? { transform: hostTransform } : null]}>
         <EnhancedVideo
           uri={uri}
           poster={poster}
