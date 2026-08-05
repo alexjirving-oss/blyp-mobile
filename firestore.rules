@@ -17,7 +17,9 @@ service cloud.firestore {
         && !('feedPriorityAccount' in request.resource.data)
         && !('feedPriorityAccountUpdatedAt' in request.resource.data)
         && !('feedPriorityAccountUpdatedBy' in request.resource.data)
-        && !('creatorFeedWeight' in request.resource.data);
+        && !('creatorFeedWeight' in request.resource.data)
+        && !('earnedBadgeIds' in request.resource.data)
+        && !('earnedBadgeIdsUpdatedAt' in request.resource.data);
     }
 
     function userPrivFieldsFrozenOnUpdate() {
@@ -32,7 +34,11 @@ service cloud.firestore {
         && request.resource.data.get('feedPriorityAccountUpdatedBy', null)
           == resource.data.get('feedPriorityAccountUpdatedBy', null)
         && request.resource.data.get('creatorFeedWeight', null)
-          == resource.data.get('creatorFeedWeight', null);
+          == resource.data.get('creatorFeedWeight', null)
+        && request.resource.data.get('earnedBadgeIds', [])
+          == resource.data.get('earnedBadgeIds', [])
+        && request.resource.data.get('earnedBadgeIdsUpdatedAt', null)
+          == resource.data.get('earnedBadgeIdsUpdatedAt', null);
     }
 
     // Admin hide / priority on posts — clients cannot set or clear.
@@ -272,6 +278,12 @@ service cloud.firestore {
         && request.resource.data.clubId == clubId;
       allow delete: if isSignedIn() && request.auth.uid == memberId;
       allow update: if false;
+    }
+
+    // Earnable badges (Phase 3). Server Admin SDK mints only; clients equip subset.
+    match /badgeAwards/{userId}/items/{badgeId} {
+      allow read: if isSignedIn();
+      allow write: if false;
     }
 
     // Deny-by-default for everything else (closes universal auth write).

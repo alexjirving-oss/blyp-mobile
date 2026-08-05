@@ -1,6 +1,7 @@
 // DatingScreen.js
 //
-// Blyp Dating — Phase 3: matches deep-link into Messenger (createOrGetDirectThread).
+// Blyp Dating — Phase 4: profile prefs (bio, prompts, filters) + enriched Discover cards.
+// Matches deep-link into Messenger (createOrGetDirectThread) — unchanged from Phase 3.
 // Gated by the same subscription package as AI (useHasAI) — no second paywall.
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -27,6 +29,13 @@ import { db } from '../config/firebase';
 import { conversationsMessagingService } from '../services/messaging';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import {
+  AGE_MAX_CEIL,
+  AGE_MIN_FLOOR,
+  BIO_MAX,
+  DATING_GENDER_OPTIONS,
+  DATING_PROMPT_OPTIONS,
+  DISTANCE_OPTIONS_KM,
+  PROMPT_MAX,
   confirmAdult,
   fetchDiscoveryCards,
   fetchMatches,
@@ -34,7 +43,9 @@ import {
   recordLike,
   recordPass,
   setDatingOptIn,
+  setDatingPrefs,
 } from '../services/datingService';
+import { getCurrentGeo } from '../services/locationService';
 import { blockUser, loadBlockedUsers } from '../services/BlockService';
 
 const TABS = [
@@ -42,6 +53,8 @@ const TABS = [
   { id: 'matches', label: 'Matches' },
   { id: 'prefs', label: 'Prefs' },
 ];
+
+const distanceLabel = (km) => (km == null ? 'Off' : km + ' km');
 
 const DatingScreen = ({ navigation }) => {
   const { uid, user: authUser, getDisplayName } = useAuth();
@@ -57,6 +70,24 @@ const DatingScreen = ({ navigation }) => {
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [chatBusyId, setChatBusyId] = useState(null);
+
+  const [bioDraft, setBioDraft] = useState('');
+  const [birthYearDraft, setBirthYearDraft] = useState('');
+  const [selectedPromptIds, setSelectedPromptIds] = useState([]);
+  const [promptAnswers, setPromptAnswers] = useState({});
+
+  useEffect(() => {
+    if (!prefs) return;
+    setBioDraft(prefs.bio || '');
+    setBirthYearDraft(prefs.birthYear != null ? String(prefs.birthYear) : '');
+    const ids = (prefs.prompts || []).map((p) => p.id);
+    setSelectedPromptIds(ids);
+    const answers = {};
+    (prefs.prompts || []).forEach((p) => {
+      if (p?.id) answers[p.id] = p.answer || '';
+    });
+    setPromptAnswers(answers);
+  }, [prefs]);
 
   const refreshDiscovery = useCallback(async () => {
     if (!uid) {
@@ -117,6 +148,27 @@ const DatingScreen = ({ navigation }) => {
     }
   }, [tab, uid, prefs?.adultConfirmed, refreshMatches]);
 
+  const savePrefsPatch = useCallback(
+    async (patch, { refreshCards = false } = {}) => {
+      if (!uid || busy) return null;
+      setBusy(true);
+      try {
+        const next = await setDatingPrefs(uid, patch);
+        setPrefs(next);
+        if (refreshCards && next.optedIn) {
+          await refreshDiscovery();
+        }
+        return next;
+      } catch (e) {
+        Alert.alert("Couldn't save", e?.message || 'Please try again.');
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [uid, busy, refreshDiscovery],
+  );
+
   const onConfirmAdult = useCallback(async () => {
     if (!uid || busy) return;
     setBusy(true);
@@ -154,6 +206,126 @@ const DatingScreen = ({ navigation }) => {
       }
     },
     [uid, busy, prefs?.adultConfirmed, refreshDiscovery],
+  );
+
+  const onSaveBio = useCallback(async () => {
+    await savePrefsPatch({ bio: bioDraft });
+  }, [savePrefsPatch, bioDraft]);
+
+  const onSaveBirthYear = useCallback(async () => {
+    const trimmed = birthYearDraft.trim();
+    const patch = { birthYear: trimmed ? Number(trimmed) : null };
+    await savePrefsPatch(patch);
+  }, [savePrefsPatch, birthYearDraft]);
+
+  const togglePromptSelection = useCallback((id) => {
+    setSelectedPromptIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= PROMPT_MAX) {
+        Alert.alert('Limit reached', 'Pick up to ' + PROMPT_MAX + ' prompts.');
+        return prev;
+      }
+      return [...prev, id];
+    });
+  }, []);
+
+  const onSavePrompts = useCallback(async () => {
+    const prompts = selectedPromptIds
+      .map((id) => {
+        const opt = DATING_PROMPT_OPTIONS.find((p) => p.id === id);
+        const answer = (promptAnswers[id] || '').trim();
+        if (!opt || !answer) return null;
+        return { id, question: opt.question, answer };
+      })
+      .filter(Boolean);
+    await savePrefsPatch({ prompts });
+  }, [savePrefsPatch, selectedPromptIds, promptAnswers]);
+
+  const onToggleUseProfilePhoto = useCallback(
+    async (value) => {
+      await savePrefsPatch({ useProfilePhoto: value });
+    },
+    [savePrefsPatch],
+  );
+
+  const onSelectGender = useCallback(
+    async (id) => {
+      await savePrefsPatch({ gender: id });
+    },
+    [savePrefsPatch],
+  );
+
+  const onAdjustAge = useCallback(
+    async (field, delta) => {
+      const curMin = prefs?.ageMin ?? AGE_MIN_FLOOR;
+      const curMax = prefs?.ageMax ?? AGE_MAX_CEIL;
+      let ageMin = curMin;
+      let ageMax = curMax;
+      if (field === 'min') ageMin = Math.max(AGE_MIN_FLOOR, Math.min(AGE_MAX_CEIL, curMin + delta));
+      else ageMax = Math.max(AGE_MIN_FLOOR, Math.min(AGE_MAX_CEIL, curMax + delta));
+      if (ageMin > ageMax) {
+        if (field === 'min') ageMax = ageMin;
+        else ageMin = ageMax;
+      }
+      await savePrefsPatch({ ageMin, ageMax }, { refreshCards: true });
+    },
+    [prefs?.ageMin, prefs?.ageMax, savePrefsPatch],
+  );
+
+  const onToggleLookingFor = useCallback(
+    async (id) => {
+      const current = Array.isArray(prefs?.lookingFor) ? prefs.lookingFor : [];
+      const next = current.includes(id) ? current.filter((x) => x !== id) : [...current, id];
+      await savePrefsPatch({ lookingFor: next }, { refreshCards: true });
+    },
+    [prefs?.lookingFor, savePrefsPatch],
+  );
+
+  const captureGeo = useCallback(async () => {
+    const res = await getCurrentGeo();
+    if (!res.ok) {
+      const msg =
+        res.reason === 'denied'
+          ? 'Allow location access to filter by distance.'
+          : 'Location is unavailable right now.';
+      Alert.alert('Location needed', msg);
+      return null;
+    }
+    return res.geo;
+  }, []);
+
+  const onUpdateLocation = useCallback(async () => {
+    const geo = await captureGeo();
+    if (!geo) return;
+    await savePrefsPatch(
+      {
+        geoLat: geo.lat,
+        geoLon: geo.lon,
+        geoUpdatedAt: Date.now(),
+      },
+      { refreshCards: true },
+    );
+  }, [captureGeo, savePrefsPatch]);
+
+  const onSelectDistance = useCallback(
+    async (km) => {
+      if (km == null) {
+        await savePrefsPatch({ maxDistanceKm: null }, { refreshCards: true });
+        return;
+      }
+      const geo = await captureGeo();
+      if (!geo) return;
+      await savePrefsPatch(
+        {
+          maxDistanceKm: km,
+          geoLat: geo.lat,
+          geoLon: geo.lon,
+          geoUpdatedAt: Date.now(),
+        },
+        { refreshCards: true },
+      );
+    },
+    [captureGeo, savePrefsPatch],
   );
 
   const current = cards[cardIndex] || null;
@@ -402,6 +574,7 @@ const DatingScreen = ({ navigation }) => {
   }
 
   const showCardStack = prefs.optedIn && current;
+  const lookingFor = Array.isArray(prefs.lookingFor) ? prefs.lookingFor : [];
 
   const renderMatch = ({ item }) => {
     const rowKey = item.matchId || item.id;
@@ -489,7 +662,7 @@ const DatingScreen = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
             ) : showCardStack ? (
-              <View style={styles.cardStack}>
+              <ScrollView contentContainerStyle={styles.cardScroll} showsVerticalScrollIndicator={false}>
                 <View style={styles.personCard}>
                   {current.photoURL ? (
                     <Image source={{ uri: current.photoURL }} style={styles.avatarImage} />
@@ -500,8 +673,25 @@ const DatingScreen = ({ navigation }) => {
                       </Text>
                     </View>
                   )}
-                  <Text style={styles.personName}>{current.displayName}</Text>
-                  <Text style={styles.personTagline}>{current.tagline}</Text>
+                  <Text style={styles.personName}>
+                    {current.displayName}
+                    {current.age != null ? ', ' + current.age : ''}
+                  </Text>
+                  {current.bio ? (
+                    <Text style={styles.personBio}>{current.bio}</Text>
+                  ) : (
+                    <Text style={styles.personTagline}>{current.tagline}</Text>
+                  )}
+                  {(current.prompts || []).length > 0 && (
+                    <View style={styles.promptBubbleWrap}>
+                      {current.prompts.map((p) => (
+                        <View key={p.id} style={styles.promptBubble}>
+                          <Text style={styles.promptQuestion}>{p.question}</Text>
+                          <Text style={styles.promptAnswer}>{p.answer}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
 
                 <View style={styles.actionRow}>
@@ -541,7 +731,7 @@ const DatingScreen = ({ navigation }) => {
                     )}
                   </TouchableOpacity>
                 </View>
-              </View>
+              </ScrollView>
             ) : (
               <View style={styles.emptyBlock}>
                 <Icon name="checkmark-circle" size={32} color={COLORS.primary} />
@@ -583,7 +773,7 @@ const DatingScreen = ({ navigation }) => {
         )}
 
         {tab === 'prefs' && (
-          <ScrollView style={styles.panel} contentContainerStyle={styles.prefsPad}>
+          <ScrollView style={styles.panel} contentContainerStyle={styles.prefsPad} keyboardShouldPersistTaps="handled">
             <View style={styles.prefRow}>
               <View style={styles.prefCopy}>
                 <Text style={styles.prefTitle}>Show me in Dating</Text>
@@ -598,6 +788,225 @@ const DatingScreen = ({ navigation }) => {
                 trackColor={{ false: COLORS.backgroundLight, true: COLORS.primaryDark }}
                 thumbColor={prefs.optedIn ? COLORS.primary : COLORS.textMuted}
               />
+            </View>
+
+            <View style={styles.prefSection}>
+              <Text style={styles.sectionTitle}>Short bio</Text>
+              <TextInput
+                style={styles.textInput}
+                value={bioDraft}
+                onChangeText={setBioDraft}
+                placeholder="Say a little about yourself…"
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+                maxLength={BIO_MAX}
+              />
+              <Text style={styles.charCount}>
+                {bioDraft.length}/{BIO_MAX}
+              </Text>
+              <TouchableOpacity
+                style={[styles.saveBtn, busy && styles.btnDisabled]}
+                onPress={onSaveBio}
+                disabled={busy}
+              >
+                <Text style={styles.saveBtnText}>Save bio</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.prefSection}>
+              <Text style={styles.sectionTitle}>Birth year (optional)</Text>
+              <Text style={styles.prefBody}>Used to show your age on your card.</Text>
+              <TextInput
+                style={styles.textInputSingle}
+                value={birthYearDraft}
+                onChangeText={setBirthYearDraft}
+                placeholder="e.g. 1995"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="number-pad"
+                maxLength={4}
+              />
+              <TouchableOpacity
+                style={[styles.saveBtn, busy && styles.btnDisabled]}
+                onPress={onSaveBirthYear}
+                disabled={busy}
+              >
+                <Text style={styles.saveBtnText}>Save birth year</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.prefSection}>
+              <Text style={styles.sectionTitle}>Prompts (up to {PROMPT_MAX})</Text>
+              <View style={styles.chipRow}>
+                {DATING_PROMPT_OPTIONS.map((p) => {
+                  const selected = selectedPromptIds.includes(p.id);
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[styles.optionChip, selected && styles.optionChipActive]}
+                      onPress={() => togglePromptSelection(p.id)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.optionChipText, selected && styles.optionChipTextActive]} numberOfLines={2}>
+                        {p.question}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {selectedPromptIds.map((id) => {
+                const opt = DATING_PROMPT_OPTIONS.find((p) => p.id === id);
+                if (!opt) return null;
+                return (
+                  <View key={id} style={styles.promptEditBlock}>
+                    <Text style={styles.promptEditLabel}>{opt.question}</Text>
+                    <TextInput
+                      style={styles.textInputSingle}
+                      value={promptAnswers[id] || ''}
+                      onChangeText={(t) => setPromptAnswers((prev) => ({ ...prev, [id]: t }))}
+                      placeholder="Your answer…"
+                      placeholderTextColor={COLORS.textMuted}
+                      maxLength={120}
+                    />
+                  </View>
+                );
+              })}
+              <TouchableOpacity
+                style={[styles.saveBtn, busy && styles.btnDisabled]}
+                onPress={onSavePrompts}
+                disabled={busy}
+              >
+                <Text style={styles.saveBtnText}>Save prompts</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.prefRow}>
+              <View style={styles.prefCopy}>
+                <Text style={styles.prefTitle}>Use profile photo</Text>
+                <Text style={styles.prefBody}>Show your main Blyp avatar on your Dating card.</Text>
+              </View>
+              <Switch
+                value={prefs.useProfilePhoto !== false}
+                onValueChange={onToggleUseProfilePhoto}
+                disabled={busy}
+                trackColor={{ false: COLORS.backgroundLight, true: COLORS.primaryDark }}
+                thumbColor={prefs.useProfilePhoto !== false ? COLORS.primary : COLORS.textMuted}
+              />
+            </View>
+
+            <View style={styles.prefSection}>
+              <Text style={styles.sectionTitle}>I am</Text>
+              <View style={styles.chipRow}>
+                {DATING_GENDER_OPTIONS.map((g) => {
+                  const active = prefs.gender === g.id;
+                  return (
+                    <TouchableOpacity
+                      key={g.id}
+                      style={[styles.optionChip, active && styles.optionChipActive]}
+                      onPress={() => onSelectGender(g.id)}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.prefSection}>
+              <Text style={styles.sectionTitle}>Discover filters</Text>
+
+              <Text style={styles.filterLabel}>Age range</Text>
+              <View style={styles.stepperRow}>
+                <View style={styles.stepperBlock}>
+                  <Text style={styles.stepperLabel}>Min</Text>
+                  <View style={styles.stepperControls}>
+                    <TouchableOpacity
+                      style={styles.stepperBtn}
+                      onPress={() => onAdjustAge('min', -1)}
+                      disabled={busy}
+                    >
+                      <Icon name="remove" size={18} color={COLORS.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.stepperValue}>{prefs.ageMin ?? AGE_MIN_FLOOR}</Text>
+                    <TouchableOpacity
+                      style={styles.stepperBtn}
+                      onPress={() => onAdjustAge('min', 1)}
+                      disabled={busy}
+                    >
+                      <Icon name="add" size={18} color={COLORS.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <View style={styles.stepperBlock}>
+                  <Text style={styles.stepperLabel}>Max</Text>
+                  <View style={styles.stepperControls}>
+                    <TouchableOpacity
+                      style={styles.stepperBtn}
+                      onPress={() => onAdjustAge('max', -1)}
+                      disabled={busy}
+                    >
+                      <Icon name="remove" size={18} color={COLORS.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.stepperValue}>{prefs.ageMax ?? AGE_MAX_CEIL}</Text>
+                    <TouchableOpacity
+                      style={styles.stepperBtn}
+                      onPress={() => onAdjustAge('max', 1)}
+                      disabled={busy}
+                    >
+                      <Icon name="add" size={18} color={COLORS.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+
+              <Text style={styles.filterLabel}>Looking for</Text>
+              <View style={styles.chipRow}>
+                {DATING_GENDER_OPTIONS.map((g) => {
+                  const active = lookingFor.includes(g.id);
+                  return (
+                    <TouchableOpacity
+                      key={'lf-' + g.id}
+                      style={[styles.optionChip, active && styles.optionChipActive]}
+                      onPress={() => onToggleLookingFor(g.id)}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.filterLabel}>Max distance</Text>
+              <View style={styles.chipRow}>
+                {DISTANCE_OPTIONS_KM.map((km) => {
+                  const active =
+                    (prefs.maxDistanceKm == null && km == null) || prefs.maxDistanceKm === km;
+                  return (
+                    <TouchableOpacity
+                      key={'dist-' + String(km)}
+                      style={[styles.optionChip, active && styles.optionChipActive]}
+                      onPress={() => onSelectDistance(km)}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                        {distanceLabel(km)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {prefs.maxDistanceKm != null && prefs.maxDistanceKm > 0 && (
+                <TouchableOpacity
+                  style={[styles.secondaryBtn, busy && styles.btnDisabled]}
+                  onPress={onUpdateLocation}
+                  disabled={busy}
+                >
+                  <Text style={styles.secondaryBtnText}>Update location</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <View style={styles.prefNote}>
@@ -657,7 +1066,7 @@ const styles = StyleSheet.create({
   tabChipTextActive: { color: COLORS.textPrimary },
 
   panel: { flex: 1, paddingHorizontal: 16 },
-  prefsPad: { paddingBottom: 40 },
+  prefsPad: { paddingBottom: 40, gap: 12 },
   matchesPad: { paddingBottom: 40, gap: 10 },
 
   gateCard: {
@@ -709,7 +1118,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 
-  cardStack: { flex: 1, justifyContent: 'center', gap: 20, paddingBottom: 24 },
+  cardScroll: { paddingBottom: 24, gap: 20 },
   personCard: {
     borderRadius: 20,
     backgroundColor: COLORS.backgroundCard,
@@ -718,8 +1127,7 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: 'center',
     gap: 10,
-    minHeight: responsiveSize(320),
-    justifyContent: 'center',
+    minHeight: responsiveSize(280),
   },
   avatarFallback: {
     width: 96,
@@ -728,24 +1136,43 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primaryDark,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   avatarImage: {
     width: 96,
     height: 96,
     borderRadius: 48,
-    marginBottom: 8,
+    marginBottom: 4,
     backgroundColor: COLORS.primaryDark,
   },
   avatarLetter: { color: COLORS.textPrimary, fontSize: responsiveFont(36), fontWeight: '800' },
   personName: { color: COLORS.textPrimary, fontSize: responsiveFont(22), fontWeight: '800' },
+  personBio: {
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(14),
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   personTagline: { color: COLORS.textSecondary, fontSize: responsiveFont(14), textAlign: 'center', lineHeight: 20 },
+  promptBubbleWrap: { width: '100%', gap: 8, marginTop: 4 },
+  promptBubble: {
+    width: '100%',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,210,190,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.2)',
+    gap: 4,
+  },
+  promptQuestion: { color: COLORS.primary, fontSize: responsiveFont(12), fontWeight: '700' },
+  promptAnswer: { color: COLORS.textPrimary, fontSize: responsiveFont(14), lineHeight: 18 },
 
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 14,
+    paddingBottom: 8,
   },
   roundBtn: {
     width: 52,
@@ -802,10 +1229,91 @@ const styles = StyleSheet.create({
   prefCopy: { flex: 1, gap: 4 },
   prefTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '700' },
   prefBody: { color: COLORS.textSecondary, fontSize: responsiveFont(13), lineHeight: 18 },
+  prefSection: {
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 10,
+  },
+  sectionTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '700' },
+  filterLabel: { color: COLORS.textSecondary, fontSize: responsiveFont(13), fontWeight: '600', marginTop: 4 },
+  textInput: {
+    minHeight: 88,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: COLORS.backgroundLight || 'rgba(0,0,0,0.2)',
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(14),
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  textInputSingle: {
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: COLORS.backgroundLight || 'rgba(0,0,0,0.2)',
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(14),
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  charCount: { color: COLORS.textMuted, fontSize: responsiveFont(11), textAlign: 'right' },
+  saveBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.primaryDark,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  saveBtnText: { color: COLORS.textPrimary, fontSize: responsiveFont(13), fontWeight: '700' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: COLORS.backgroundLight || 'rgba(0,0,0,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    maxWidth: '100%',
+  },
+  optionChipActive: {
+    backgroundColor: COLORS.primaryDark,
+    borderColor: COLORS.primary,
+  },
+  optionChipText: { color: COLORS.textSecondary, fontSize: responsiveFont(12), fontWeight: '600' },
+  optionChipTextActive: { color: COLORS.textPrimary },
+  promptEditBlock: { gap: 6 },
+  promptEditLabel: { color: COLORS.textSecondary, fontSize: responsiveFont(12), fontWeight: '600' },
+  stepperRow: { flexDirection: 'row', gap: 16 },
+  stepperBlock: { flex: 1, gap: 6 },
+  stepperLabel: { color: COLORS.textMuted, fontSize: responsiveFont(12), fontWeight: '600' },
+  stepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.backgroundLight || 'rgba(0,0,0,0.15)',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  stepperBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValue: { color: COLORS.textPrimary, fontSize: responsiveFont(16), fontWeight: '800' },
   prefNote: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 16,
+    marginTop: 4,
     padding: 14,
     borderRadius: 12,
     backgroundColor: 'rgba(0,210,190,0.08)',
