@@ -35,6 +35,14 @@ import speechToTextService from '../services/speechToTextService';
 import geminiSpeechService from '../services/geminiSpeechService';
 import mediaDescriptionService from '../services/mediaDescriptionService';
 import { enqueuePostUpload } from '../services/postUploadQueue';
+import {
+  subscribeFollowedTeams,
+  getFollowedTeamsOnce,
+} from '../services/teamPreferencesService';
+import {
+  SPORT_TAG_OPTIONS,
+  resolvePublishSportTags,
+} from '../services/sportPostTags';
 
 /**
  * Android photo-picker / camera URIs are often short-lived content:// handles.
@@ -226,6 +234,9 @@ const ReviewScreen = () => {
   const [generatedHashtagsState, setGeneratedHashtagsState] = useState([]);
   const [profileCategories, setProfileCategories] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [followedTeams, setFollowedTeams] = useState([]);
+  const [selectedSportTags, setSelectedSportTags] = useState([]);
+  const [selectedTeamIds, setSelectedTeamIds] = useState([]);
   const [editedAfterAI, setEditedAfterAI] = useState(false);
   // AI caption variants the user can choose between (2-3 options)
   const [descriptionVariants, setDescriptionVariants] = useState([]);
@@ -280,6 +291,29 @@ const ReviewScreen = () => {
     return () => {
       cancelled = true;
     };
+  }, [uid]);
+
+  // Followed clubs/constructors → default sportTags / teamIds on publish.
+  useEffect(() => {
+    const unsub = subscribeFollowedTeams(uid, (list) => {
+      const teams = Array.isArray(list) ? list : [];
+      setFollowedTeams(teams);
+      setSelectedSportTags((prev) => {
+        if (prev.length > 0) return prev;
+        const tags = [];
+        for (const t of teams) {
+          const sport = String(t?.sport || '').toLowerCase();
+          if ((sport === 'f1' || sport === 'formula 1') && !tags.includes('f1')) tags.push('f1');
+          if ((sport === 'soccer' || sport === 'football') && !tags.includes('football')) tags.push('football');
+        }
+        return tags;
+      });
+      setSelectedTeamIds((prev) => {
+        if (prev.length > 0) return prev;
+        return teams.map((t) => String(t.id)).filter(Boolean);
+      });
+    });
+    return unsub;
   }, [uid]);
 
   // Initialize original caption when transcript changes
@@ -2415,12 +2449,24 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         userId: appUserId,
       });
 
+      const teamsForTags =
+        followedTeams.length > 0
+          ? followedTeams
+          : (await getFollowedTeamsOnce(uid).catch(() => [])) || [];
+      const { sportTags, teamIds } = resolvePublishSportTags({
+        followedTeams: teamsForTags,
+        selectedSportTags,
+        selectedTeamIds,
+      });
+
       enqueuePostUpload({
         mediaItems: jobMedia,
         caption: baseCaption,
         title: (generatedTitleState && generatedTitleState.trim()) || baseCaption.substring(0, 80) || 'New Post',
         hashtags: generatedHashtagsState || [],
         categoryId: selectedCategoryId || null,
+        sportTags,
+        teamIds,
         sharedTo: Object.keys(selectedPlatforms).filter((k) => selectedPlatforms[k]),
         userId: appUserId,
         username: displayName,
@@ -3179,6 +3225,57 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                 </View>
               </View>
             ) : null}
+
+            {/* Sport / team tags — fill Football & F1 video rails */}
+            <View style={styles.hashtagContainer}>
+              <Text style={styles.hashtagLabel}>Sport tag</Text>
+              <View style={styles.hashtagList}>
+                {SPORT_TAG_OPTIONS.map((opt) => {
+                  const active = selectedSportTags.includes(opt.id);
+                  return (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={[styles.hashtagChip, active && styles.categoryChipActive]}
+                      onPress={() => {
+                        setSelectedSportTags((prev) =>
+                          prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id]
+                        );
+                      }}
+                    >
+                      <Text style={[styles.hashtagText, active && styles.categoryChipTextActive]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {followedTeams.length > 0 ? (
+                <>
+                  <Text style={[styles.hashtagLabel, { marginTop: 10 }]}>Tag your teams</Text>
+                  <View style={styles.hashtagList}>
+                    {followedTeams.map((t) => {
+                      const id = String(t.id);
+                      const active = selectedTeamIds.includes(id);
+                      return (
+                        <TouchableOpacity
+                          key={id}
+                          style={[styles.hashtagChip, active && styles.categoryChipActive]}
+                          onPress={() => {
+                            setSelectedTeamIds((prev) =>
+                              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+                            );
+                          }}
+                        >
+                          <Text style={[styles.hashtagText, active && styles.categoryChipTextActive]} numberOfLines={1}>
+                            {t.shortName || t.name || id}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              ) : null}
+            </View>
 
             {/* Generated Hashtags */}
             {Array.isArray(generatedHashtags) && generatedHashtags.length > 0 && (

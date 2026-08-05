@@ -44,7 +44,7 @@ function emit(store) {
 // Keep only the fields we need so the cache/doc stays small.
 function compactTeam(team) {
   if (!team || !team.id) return null;
-  return {
+  const out = {
     id: String(team.id),
     name: team.name || '',
     shortName: team.shortName || '',
@@ -53,6 +53,10 @@ function compactTeam(team) {
     stadium: team.stadium || '',
     sport: team.sport || 'Soccer',
   };
+  if (team.leagueId) out.leagueId = String(team.leagueId);
+  if (team.country) out.country = String(team.country);
+  if (team.clubCatalogId) out.clubCatalogId = String(team.clubCatalogId);
+  return out;
 }
 
 async function readCache(uid) {

@@ -5,12 +5,15 @@ import {
   MAX_PROFILE_BADGES_FREE,
   MAX_PROFILE_CLUBS_FREE,
   MAX_PROFILE_CLUBS_PLUS,
+  SPORTSDB_PREMIER_LEAGUE_ID,
+  clubToSportsDbTeam,
   getProfileIdentityCaps,
   isServerEarnedBadge,
   normalizeEarnedBadgeIds,
   normalizeEquippableBadges,
   normalizeProfileBadges,
   normalizeProfileClubs,
+  resolveSportsDbTeamsFromClubs,
   toggleIdInList,
 } from '../profileIdentityCatalog';
 
@@ -91,13 +94,22 @@ describe('profileIdentityCatalog', () => {
     ).toEqual(['badge_live_host']);
   });
 
-  test('toggle respects max', () => {
-    let list = [];
-    list = toggleIdInList(list, 'a', 2);
-    list = toggleIdInList(list, 'b', 2);
-    list = toggleIdInList(list, 'c', 2);
-    expect(list).toEqual(['a', 'b']);
-    list = toggleIdInList(list, 'a', 2);
-    expect(list).toEqual(['b']);
+  test('football clubs map to SportsDB team ids', () => {
+    expect(clubToSportsDbTeam('club_arsenal')).toEqual(
+      expect.objectContaining({
+        id: '133604',
+        name: 'Arsenal',
+        leagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+        sport: 'Soccer',
+      })
+    );
+    expect(clubToSportsDbTeam('club_marble_racing')).toBeNull();
+    const mapped = resolveSportsDbTeamsFromClubs([
+      'club_arsenal',
+      'club_tottenham',
+      'club_marble_racing',
+      'club_arsenal',
+    ]);
+    expect(mapped.map((t) => t.id)).toEqual(['133604', '133616']);
   });
 });

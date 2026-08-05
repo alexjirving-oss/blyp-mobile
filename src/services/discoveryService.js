@@ -71,15 +71,39 @@ export async function getTrendingPosts(limit = 10, interestTerms = []) {
   }
 }
 
-/** Posts matching a topic's terms, ranked by relevance then engagement. */
-export async function getTopicPosts(terms = [], limit = 30) {
+/**
+ * Posts matching a topic's terms, ranked by relevance then engagement.
+ * Optional sportTags / teamIds boost (and best-effort array-contains merge)
+ * so upload-time tagging fills Football / F1 rails reliably.
+ *
+ * @param {string[]} terms
+ * @param {number} [limit]
+ * @param {{ sportTags?: string[], teamIds?: string[] }} [opts]
+ */
+export async function getTopicPosts(terms = [], limit = 30, opts = {}) {
   if (!firebaseEnabled || !db?.collection) return [];
   const t = (terms || []).map((x) => String(x).toLowerCase()).filter(Boolean);
-  if (t.length === 0) return [];
+  const sportTags = (opts.sportTags || []).map((x) => String(x).toLowerCase()).filter(Boolean);
+  const teamIds = new Set((opts.teamIds || []).map((x) => String(x)).filter(Boolean));
+  if (t.length === 0 && sportTags.length === 0 && teamIds.size === 0) return [];
   try {
+    const byId = new Map();
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(120).get();
-    const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
-    const ranked = all
+    for (const d of snap?.docs || []) byId.set(d.id, { id: d.id, ...d.data() });
+
+    // Best-effort indexed pull for tagged posts (no composite index needed).
+    for (const tag of sportTags.slice(0, 2)) {
+      try {
+        const tagged = await db.collection('posts').where('sportTags', 'array-contains', tag).limit(40).get();
+        for (const d of tagged?.docs || []) {
+          if (!byId.has(d.id)) byId.set(d.id, { id: d.id, ...d.data() });
+        }
+      } catch (e) {
+        console.warn('[DISCOVERY] sportTags query skipped', e?.message || String(e));
+      }
+    }
+
+    const ranked = Array.from(byId.values())
       .map((p) => {
         const hay = [p.title, p.caption, p.description, p.category, (p.hashtags || []).join(' '), p.username, p.userDisplayName]
           .filter(Boolean)
@@ -87,6 +111,10 @@ export async function getTopicPosts(terms = [], limit = 30) {
           .toLowerCase();
         let score = 0;
         for (const term of t) if (hay.includes(term)) score += 1;
+        const postTags = (Array.isArray(p.sportTags) ? p.sportTags : []).map((x) => String(x).toLowerCase());
+        for (const tag of sportTags) if (postTags.includes(tag)) score += 8;
+        const postTeams = (Array.isArray(p.teamIds) ? p.teamIds : []).map((x) => String(x));
+        for (const tid of postTeams) if (teamIds.has(tid)) score += 12;
         return { p, score };
       })
       .filter((x) => x.score > 0)

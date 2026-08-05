@@ -25,19 +25,105 @@ export function getProfileIdentityCaps(hasPlus) {
   };
 }
 
-/** @typedef {{ id: string, label: string, kind: 'football'|'game'|'community', icon: string, shortLabel?: string }} ClubDef */
+/**
+ * @typedef {{
+ *   id: string,
+ *   label: string,
+ *   kind: 'football'|'game'|'community',
+ *   icon: string,
+ *   shortLabel?: string,
+ *   sportsDbTeamId?: string,
+ *   sportsDbLeagueId?: string,
+ *   leagueLabel?: string,
+ * }} ClubDef
+ */
 /** @typedef {{ id: string, label: string, icon: string, rarity: 'common'|'rare'|'seasonal', earn: 'pick'|'server' }} BadgeDef */
+
+/** English Premier League on TheSportsDB (shared by catalog PL clubs). */
+export const SPORTSDB_PREMIER_LEAGUE_ID = '4328';
 
 /** @type {readonly ClubDef[]} */
 export const CLUB_CATALOG = Object.freeze([
-  { id: 'club_arsenal', label: 'Arsenal', kind: 'football', icon: 'football', shortLabel: 'Arsenal' },
-  { id: 'club_chelsea', label: 'Chelsea', kind: 'football', icon: 'football', shortLabel: 'Chelsea' },
-  { id: 'club_liverpool', label: 'Liverpool', kind: 'football', icon: 'football', shortLabel: 'Liverpool' },
-  { id: 'club_man_city', label: 'Manchester City', kind: 'football', icon: 'football', shortLabel: 'Man City' },
-  { id: 'club_man_united', label: 'Manchester United', kind: 'football', icon: 'football', shortLabel: 'Man Utd' },
-  { id: 'club_tottenham', label: 'Tottenham', kind: 'football', icon: 'football', shortLabel: 'Spurs' },
-  { id: 'club_newcastle', label: 'Newcastle United', kind: 'football', icon: 'football', shortLabel: 'Newcastle' },
-  { id: 'club_aston_villa', label: 'Aston Villa', kind: 'football', icon: 'football', shortLabel: 'Villa' },
+  {
+    id: 'club_arsenal',
+    label: 'Arsenal',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Arsenal',
+    sportsDbTeamId: '133604',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_chelsea',
+    label: 'Chelsea',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Chelsea',
+    sportsDbTeamId: '133610',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_liverpool',
+    label: 'Liverpool',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Liverpool',
+    sportsDbTeamId: '133602',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_man_city',
+    label: 'Manchester City',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Man City',
+    sportsDbTeamId: '133613',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_man_united',
+    label: 'Manchester United',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Man Utd',
+    sportsDbTeamId: '133612',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_tottenham',
+    label: 'Tottenham',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Spurs',
+    sportsDbTeamId: '133616',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_newcastle',
+    label: 'Newcastle United',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Newcastle',
+    sportsDbTeamId: '134777',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
+  {
+    id: 'club_aston_villa',
+    label: 'Aston Villa',
+    kind: 'football',
+    icon: 'football',
+    shortLabel: 'Villa',
+    sportsDbTeamId: '133601',
+    sportsDbLeagueId: SPORTSDB_PREMIER_LEAGUE_ID,
+    leagueLabel: 'English Premier League',
+  },
   { id: 'club_marble_racing', label: 'Marble Racing', kind: 'game', icon: 'speedometer', shortLabel: 'Marbles' },
 ]);
 
@@ -157,6 +243,44 @@ export function normalizeEquippableBadges(raw, earnedRaw, max = MAX_PROFILE_BADG
 /** Resolve club ids to catalog rows (drops unknowns). */
 export function resolveClubs(ids) {
   return normalizeProfileClubs(ids).map((id) => clubById.get(id)).filter(Boolean);
+}
+
+/**
+ * Map a profile club catalog id to a followable SportsDB team shape.
+ * Returns null for non-football / unmapped clubs (e.g. Marble Racing).
+ * @param {string} clubId
+ * @returns {{ id: string, name: string, shortName: string, badge: null, league: string, leagueId: string, sport: string, clubCatalogId: string } | null}
+ */
+export function clubToSportsDbTeam(clubId) {
+  const club = getClubById(clubId);
+  if (!club || club.kind !== 'football' || !club.sportsDbTeamId) return null;
+  return {
+    id: String(club.sportsDbTeamId),
+    name: club.label,
+    shortName: club.shortLabel || club.label,
+    badge: null,
+    league: club.leagueLabel || 'Football',
+    leagueId: club.sportsDbLeagueId ? String(club.sportsDbLeagueId) : null,
+    sport: 'Soccer',
+    clubCatalogId: club.id,
+  };
+}
+
+/**
+ * Resolve profile club ids → SportsDB followable teams (deduped by team id).
+ * @param {unknown} clubIds
+ * @returns {Array<object>}
+ */
+export function resolveSportsDbTeamsFromClubs(clubIds) {
+  const out = [];
+  const seen = new Set();
+  for (const id of normalizeProfileClubs(clubIds)) {
+    const team = clubToSportsDbTeam(id);
+    if (!team || seen.has(team.id)) continue;
+    seen.add(team.id);
+    out.push(team);
+  }
+  return out;
 }
 
 /** Resolve badge ids to catalog rows (drops unknowns). */

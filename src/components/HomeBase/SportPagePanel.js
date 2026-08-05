@@ -31,8 +31,8 @@ import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import { getTopicPosts, getSuggestedCreators, creatorAvatar } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
 import { followUser, unfollowUser, subscribeToFollowingList } from '../../utils/followUtils';
-import { searchFootballTeams, getNextMatches, getLastMatches } from '../../services/footballDataService';
-import { getF1Teams, getNextRace, getLastRaceResult } from '../../services/formula1DataService';
+import { searchFootballTeams, getNextMatches, getLastMatches, getLeagueTable } from '../../services/footballDataService';
+import { getF1Teams, getNextRace, getLastRaceResult, getSeasonRaces } from '../../services/formula1DataService';
 import {
   subscribeFollowedTeams,
   addFollowedTeam,
@@ -40,6 +40,11 @@ import {
 } from '../../services/teamPreferencesService';
 import { isMatchdayLiveEnabled } from '../../services/matchdayService';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
+import {
+  SPORTSDB_PREMIER_LEAGUE_ID,
+  resolveSportsDbTeamsFromClubs,
+} from '../../services/profileIdentityCatalog';
+import { getMyProfileClubs } from '../../services/clubDiscoveryService';
 
 const SPORTS = {
   football: {
@@ -136,8 +141,11 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
 
   // Team following
   const [teams, setTeams] = useState([]);
-  const [matches, setMatches] = useState({}); // football: { [teamId]: { next, last } }
-  const [f1, setF1] = useState({ next: null, lastRace: null, podium: [], loaded: false });
+  const [matches, setMatches] = useState({}); // football: { [teamId]: { next, last, upcoming } }
+  const [standings, setStandings] = useState([]); // league table rows
+  const [standingsLeague, setStandingsLeague] = useState('');
+  const [f1, setF1] = useState({ next: null, lastRace: null, podium: [], calendar: [], loaded: false });
+  const [profileSeedTried, setProfileSeedTried] = useState(false);
 
   // Picker
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -178,7 +186,7 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
 
   const termsKey = contentTerms.join(',');
 
-  // Football: fetch next/last per followed team.
+  // Football: fetch next/last + upcoming list per followed team.
   useEffect(() => {
     if (cfg.kind !== 'football') return;
     myTeams.forEach((t) => {
@@ -186,32 +194,106 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       (async () => {
         try {
           const [next, last] = await Promise.all([getNextMatches(t.id), getLastMatches(t.id)]);
-          setMatches((prev) => ({ ...prev, [t.id]: { next: next?.[0] || null, last: last?.[0] || null } }));
+          setMatches((prev) => ({
+            ...prev,
+            [t.id]: {
+              next: next?.[0] || null,
+              last: last?.[0] || null,
+              upcoming: Array.isArray(next) ? next.slice(0, 5) : [],
+            },
+          }));
         } catch {
-          setMatches((prev) => ({ ...prev, [t.id]: { next: null, last: null } }));
+          setMatches((prev) => ({ ...prev, [t.id]: { next: null, last: null, upcoming: [] } }));
         }
       })();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTeams, cfg.kind]);
 
-  // F1: championship-wide next race + last podium (once a constructor is followed).
+  // Football standings strip — prefer followed team's league, else Premier League.
   useEffect(() => {
-    if (cfg.kind !== 'f1' || f1.loaded || myTeams.length === 0) return;
+    if (cfg.kind !== 'football') return;
+    const leagueId =
+      myTeams.find((t) => t.leagueId)?.leagueId || SPORTSDB_PREMIER_LEAGUE_ID;
+    const leagueLabel = myTeams.find((t) => t.leagueId && t.league)?.league || 'Premier League';
+    let cancelled = false;
     (async () => {
       try {
-        const [next, lastRes] = await Promise.all([getNextRace(), getLastRaceResult()]);
-        setF1({ next, lastRace: lastRes?.race || null, podium: lastRes?.podium || [], loaded: true });
+        const rows = await getLeagueTable(String(leagueId));
+        if (cancelled) return;
+        setStandings(Array.isArray(rows) ? rows : []);
+        setStandingsLeague(leagueLabel);
       } catch {
-        setF1({ next: null, lastRace: null, podium: [], loaded: true });
+        if (!cancelled) {
+          setStandings([]);
+          setStandingsLeague('');
+        }
       }
     })();
-  }, [cfg.kind, myTeams.length, f1.loaded]);
+    return () => {
+      cancelled = true;
+    };
+  }, [cfg.kind, myTeams]);
+
+  // Seed followed clubs from profile CLUB_CATALOG → SportsDB ids (once).
+  useEffect(() => {
+    if (cfg.kind !== 'football' || !uid || profileSeedTried || myTeams.length > 0) return;
+    setProfileSeedTried(true);
+    (async () => {
+      try {
+        const clubs = await getMyProfileClubs(uid);
+        const mapped = resolveSportsDbTeamsFromClubs(clubs);
+        for (const team of mapped.slice(0, 3)) {
+          await addFollowedTeam(uid, team);
+        }
+      } catch {
+        /* non-blocking */
+      }
+    })();
+  }, [cfg.kind, uid, profileSeedTried, myTeams.length]);
+
+  // F1: championship-wide next race + last podium + calendar strip.
+  useEffect(() => {
+    if (cfg.kind !== 'f1' || f1.loaded) return;
+    (async () => {
+      try {
+        const [next, lastRes, calendar] = await Promise.all([
+          getNextRace(),
+          getLastRaceResult(),
+          getSeasonRaces(),
+        ]);
+        const now = Date.now();
+        const upcoming = (calendar || [])
+          .filter((r) => {
+            if (!r?.timestamp && !r?.date) return true;
+            try {
+              const d = new Date(r.timestamp || `${r.date}T00:00:00Z`);
+              return !isNaN(d.getTime()) ? d.getTime() >= now - 6 * 3600e3 : true;
+            } catch {
+              return true;
+            }
+          })
+          .slice(0, 6);
+        setF1({
+          next,
+          lastRace: lastRes?.race || null,
+          podium: lastRes?.podium || [],
+          calendar: upcoming,
+          loaded: true,
+        });
+      } catch {
+        setF1({ next: null, lastRace: null, podium: [], calendar: [], loaded: true });
+      }
+    })();
+  }, [cfg.kind, f1.loaded]);
 
   const load = useMemo(
     () => async () => {
       const [p, c] = await Promise.all([
-        getTopicPosts(contentTerms, 40),
+        getTopicPosts(contentTerms, 40, {
+          sportTags: cfg.kind === 'generic' ? [] : [sportId].filter(Boolean),
+          teamIds: myTeams.map((t) => t.id),
+        }),
         getSuggestedCreators(12, contentTerms, uid),
       ]);
       setPosts(p);
@@ -220,7 +302,7 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       setRefreshing(false);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [termsKey, uid]
+    [termsKey, uid, sportId, cfg.kind, myTeams.map((t) => t.id).join(',')]
   );
 
   useEffect(() => {
@@ -344,6 +426,7 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
     const m = matches[team.id];
     const fixture = m?.next ? describeFixture(m.next, team.name) : null;
     const result = m?.last ? describeResult(m.last, team.name) : null;
+    const upcoming = Array.isArray(m?.upcoming) ? m.upcoming : [];
     return (
       <View style={[styles.teamCard, { borderLeftColor: cfg.accent }]}>
         <View style={styles.teamHeader}>
@@ -377,6 +460,27 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
             <Text style={styles.teamRowMuted}>{m ? 'No recent result' : 'Loading…'}</Text>
           )}
         </View>
+        {upcoming.length > 1 && (
+          <View style={styles.fixtureList}>
+            <Text style={styles.teamRowLabel}>FIXTURES</Text>
+            {upcoming.map((ev) => {
+              const d = describeFixture(ev, team.name);
+              return (
+                <TouchableOpacity
+                  key={ev.id || `${ev.date}-${ev.homeTeam}`}
+                  style={styles.fixtureRow}
+                  activeOpacity={0.85}
+                  onPress={() => openMatchday(ev, team)}
+                >
+                  <Text style={styles.fixtureWhen} numberOfLines={1}>{formatKickoff(ev)}</Text>
+                  <Text style={styles.fixtureWho} numberOfLines={1}>
+                    {d ? `${d.homeAway === 'H' ? 'vs' : '@'} ${d.opponent}` : ev.name || 'Fixture'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
         {!!m?.next?.id && (
           <TouchableOpacity
             style={[styles.teamAsk, { marginBottom: 6 }]}
@@ -396,6 +500,20 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       </View>
     );
   };
+
+  const followedTeamIdSet = useMemo(() => new Set(myTeams.map((t) => String(t.id))), [myTeams]);
+
+  const standingsStripRows = useMemo(() => {
+    if (!standings.length) return [];
+    // Prefer window around followed clubs; else top of table.
+    const followedIdx = standings
+      .map((r, i) => (followedTeamIdSet.has(String(r.teamId)) ? i : -1))
+      .filter((i) => i >= 0);
+    if (followedIdx.length === 0) return standings.slice(0, 8);
+    const center = followedIdx[0];
+    const start = Math.max(0, center - 2);
+    return standings.slice(start, start + 8);
+  }, [standings, followedTeamIdSet]);
 
   // ---- F1 followed-constructor + race card ----
   const F1YourTeam = () => (
@@ -427,6 +545,23 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
           <Text style={styles.teamRowMuted}>{f1.loaded ? 'Schedule unavailable' : 'Loading…'}</Text>
         )}
       </View>
+      {/* Calendar strip */}
+      {f1.calendar?.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.standingsStrip}>
+          {f1.calendar.map((r) => (
+            <TouchableOpacity
+              key={r.id || r.round}
+              style={[styles.calCard, r.id === f1.next?.id && { borderColor: cfg.accent }]}
+              activeOpacity={0.85}
+              onPress={() => askBlyp(`${r.name} F1`)}
+            >
+              <Text style={[styles.calRound, { color: cfg.accent }]}>R{r.round || '?'}</Text>
+              <Text style={styles.calName} numberOfLines={2}>{r.name}</Text>
+              <Text style={styles.calWhen} numberOfLines={1}>{formatKickoff(r)}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
       {/* Last podium */}
       {f1.podium?.length > 0 && (
         <View style={[styles.teamCard, { borderLeftColor: cfg.accent }]}>
@@ -509,6 +644,53 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
             <F1YourTeam />
           ) : (
             myTeams.map((t) => <FootballTeamCard key={t.id} team={t} />)
+          )}
+
+          {/* F1 calendar even before following a constructor */}
+          {cfg.kind === 'f1' && myTeams.length === 0 && f1.calendar?.length > 0 && (
+            <>
+              <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 10 }]}>Race calendar</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.standingsStrip}>
+                {f1.calendar.map((r) => (
+                  <TouchableOpacity
+                    key={r.id || r.round}
+                    style={styles.calCard}
+                    activeOpacity={0.85}
+                    onPress={() => askBlyp(`${r.name} F1`)}
+                  >
+                    <Text style={[styles.calRound, { color: cfg.accent }]}>R{r.round || '?'}</Text>
+                    <Text style={styles.calName} numberOfLines={2}>{r.name}</Text>
+                    <Text style={styles.calWhen} numberOfLines={1}>{formatKickoff(r)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
+
+          {/* Football standings strip */}
+          {cfg.kind === 'football' && standingsStripRows.length > 0 && (
+            <View style={{ marginTop: 8 }}>
+              <Text style={[styles.sectionTitle, { marginBottom: 10 }]}>
+                {standingsLeague ? `${standingsLeague} table` : 'Standings'}
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.standingsStrip}>
+                {standingsStripRows.map((row) => {
+                  const mine = followedTeamIdSet.has(String(row.teamId));
+                  return (
+                    <View
+                      key={`${row.rank}-${row.teamId}`}
+                      style={[styles.standingCard, mine && { borderColor: cfg.accent, borderWidth: 1.5 }]}
+                    >
+                      <Text style={[styles.standingRank, mine && { color: cfg.accent }]}>#{row.rank}</Text>
+                      <TeamBadge uri={row.badge} size={28} accent={cfg.accent} />
+                      <Text style={styles.standingTeam} numberOfLines={1}>{row.team}</Text>
+                      <Text style={styles.standingPts}>{row.points} pts</Text>
+                      <Text style={styles.standingForm}>{row.played} played</Text>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
           )}
         </View>
       )}
@@ -746,6 +928,32 @@ const styles = StyleSheet.create({
   teamRowMuted: { color: COLORS.textMuted, fontSize: responsiveFont(13), flex: 1 },
   teamAsk: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   teamAskText: { fontSize: responsiveFont(12), fontWeight: '700' },
+
+  fixtureList: { gap: 6, marginTop: 4 },
+  fixtureRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border,
+  },
+  fixtureWhen: { color: COLORS.textMuted, fontSize: responsiveFont(11), width: 108 },
+  fixtureWho: { color: COLORS.textSecondary, fontSize: responsiveFont(12), flex: 1, fontWeight: '600' },
+
+  standingsStrip: { gap: 10, paddingBottom: 4 },
+  standingCard: {
+    width: 108, alignItems: 'center', gap: 4, paddingVertical: 10, paddingHorizontal: 8,
+    borderRadius: 12, backgroundColor: COLORS.backgroundCard, borderWidth: 1, borderColor: COLORS.border,
+  },
+  standingRank: { color: COLORS.textMuted, fontSize: responsiveFont(11), fontWeight: '800' },
+  standingTeam: { color: COLORS.textPrimary, fontSize: responsiveFont(11), fontWeight: '700', textAlign: 'center' },
+  standingPts: { color: COLORS.textSecondary, fontSize: responsiveFont(12), fontWeight: '800' },
+  standingForm: { color: COLORS.textMuted, fontSize: responsiveFont(10) },
+
+  calCard: {
+    width: 132, gap: 4, paddingVertical: 12, paddingHorizontal: 10, marginBottom: 12,
+    borderRadius: 12, backgroundColor: COLORS.backgroundCard, borderWidth: 1, borderColor: COLORS.border,
+  },
+  calRound: { fontSize: responsiveFont(11), fontWeight: '900' },
+  calName: { color: COLORS.textPrimary, fontSize: responsiveFont(12), fontWeight: '700', minHeight: 32 },
+  calWhen: { color: COLORS.textMuted, fontSize: responsiveFont(10) },
 
   f1Chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   f1Chip: {

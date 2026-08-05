@@ -212,6 +212,8 @@ function buildOptimisticPost(job) {
     tags: job.tags || [],
     hashtags: job.hashtags || [],
     categoryId: job.categoryId || null,
+    sportTags: Array.isArray(job.sportTags) ? job.sportTags : [],
+    teamIds: Array.isArray(job.teamIds) ? job.teamIds : [],
     emoji: media.length > 0 ? '📸' : '💭',
     media: media.map((m) => ({
       url: m.uri,
@@ -347,6 +349,8 @@ async function runJob(jobId) {
       tags: job.tags || extractHashtags(job.caption || ''),
       hashtags: job.hashtags || [],
       categoryId: job.categoryId || null,
+      sportTags: Array.isArray(job.sportTags) ? job.sportTags : [],
+      teamIds: Array.isArray(job.teamIds) ? job.teamIds : [],
       emoji: uploadedMedia.length > 0 ? '📸' : '💭',
       media: uploadedMedia,
       type: postType,
@@ -436,6 +440,8 @@ async function pump() {
  * @param {string} [input.title]
  * @param {string[]} [input.hashtags]
  * @param {string|null} [input.categoryId]
+ * @param {string[]} [input.sportTags]
+ * @param {string[]} [input.teamIds]
  * @param {string[]} [input.sharedTo]
  * @param {string} input.userId
  * @param {string} input.username
@@ -475,6 +481,12 @@ export function enqueuePostUpload(input) {
     hashtags: Array.isArray(input.hashtags) ? input.hashtags : [],
     tags: extractHashtags(caption),
     categoryId: input.categoryId || null,
+    sportTags: Array.isArray(input.sportTags)
+      ? input.sportTags.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
+      : [],
+    teamIds: Array.isArray(input.teamIds)
+      ? Array.from(new Set(input.teamIds.map((t) => String(t).trim()).filter(Boolean)))
+      : [],
     sharedTo: Array.isArray(input.sharedTo) ? input.sharedTo : [],
     userId: String(input.userId),
     username: input.username || 'Anonymous',
