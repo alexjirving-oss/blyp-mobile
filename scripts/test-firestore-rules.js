@@ -25,7 +25,7 @@ const {
 } = require('firebase/firestore');
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-rules';
-const RULES_PATH = path.join(__dirname, '..', 'firestore.rules');
+const RULES_PATH = path.join(__dirname, '..', 'firestore.wave0-live.rules');
 
 (async () => {
   let failures = 0;
@@ -162,12 +162,52 @@ const RULES_PATH = path.join(__dirname, '..', 'firestore.rules');
     'cannot write another user doc'
   );
 
+  // P0: owners cannot self-grant admin / roles (create or update).
+  await expectDeny(
+    setDoc(doc(otherDb, 'users', 'user_self_admin'), {
+      displayName: 'Nope',
+      isAdmin: true,
+    }),
+    'cannot create user doc with isAdmin true'
+  );
+  // otherId creating as self with isAdmin
+  await expectDeny(
+    setDoc(doc(otherDb, 'users', otherId), {
+      displayName: 'Other',
+      isAdmin: true,
+    }),
+    'cannot create own user doc with isAdmin true'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', ownerId), { roles: ['admin'] }, { merge: true }),
+    'cannot set roles admin on own user doc'
+  );
+  await expectAllow(
+    setDoc(doc(ownerDb, 'users', ownerId), { bio: 'hello' }, { merge: true }),
+    'owner can update bio without touching admin fields'
+  );
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'users', ownerId), {
+      displayName: 'Owner',
+      isAdmin: true,
+      roles: ['admin'],
+    });
+  });
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', ownerId), { isAdmin: false, roles: [] }, { merge: true }),
+    'owner cannot clear server-granted admin fields'
+  );
+  await expectAllow(
+    setDoc(doc(ownerDb, 'users', ownerId), { bio: 'still me' }, { merge: true }),
+    'owner can edit bio while admin fields stay frozen'
+  );
+
   // Catch-all denies unknown collections (closes AUD-C002 regression).
   await expectDeny(
     setDoc(doc(ownerDb, 'secretVault', 'x'), { secret: true }),
     'unknown collection write denied'
   );
-  await expectDeny(getDoc(doc(ownerDb, 'liveStreams', 's1')), 'liveStreams read denied by default');
+  await expectDeny(getDoc(doc(anonDb, 'liveStreams', 's1')), 'anon liveStreams read denied');
 
   // Posts: create own only.
   await expectAllow(
@@ -177,6 +217,40 @@ const RULES_PATH = path.join(__dirname, '..', 'firestore.rules');
   await expectDeny(
     setDoc(doc(ownerDb, 'posts', 'p2'), { userId: otherId, text: 'nope' }),
     'cannot create post as another user'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'posts', 'p_hidden'), {
+      userId: ownerId,
+      text: 'x',
+      moderation: { hidden: true },
+    }),
+    'cannot create post already admin-hidden'
+  );
+
+  // P0: owner cannot clear admin moderation hide / feedPriority.
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'posts', 'p_mod'), {
+      userId: ownerId,
+      text: 'visible',
+      moderation: { hidden: true, source: 'admin' },
+      feedPriority: 'less',
+    });
+  });
+  await expectDeny(
+    setDoc(
+      doc(ownerDb, 'posts', 'p_mod'),
+      { moderation: { hidden: false } },
+      { merge: true }
+    ),
+    'owner cannot clear moderation.hidden'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'posts', 'p_mod'), { feedPriority: 'high' }, { merge: true }),
+    'owner cannot change feedPriority'
+  );
+  await expectAllow(
+    setDoc(doc(ownerDb, 'posts', 'p_mod'), { text: 'edited caption' }, { merge: true }),
+    'owner can edit caption while moderation stays frozen'
   );
 
   await env.cleanup();

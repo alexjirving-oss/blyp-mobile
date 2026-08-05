@@ -9,6 +9,39 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Privileged user fields — Admin SDK / trusted backend only.
+    function userPrivFieldsFrozenOnCreate() {
+      return request.resource.data.get('isAdmin', false) == false
+        && request.resource.data.get('roles', []) == []
+        && !('adminRoleUpdatedAt' in request.resource.data);
+    }
+
+    function userPrivFieldsFrozenOnUpdate() {
+      return request.resource.data.get('isAdmin', false) == resource.data.get('isAdmin', false)
+        && request.resource.data.get('roles', []) == resource.data.get('roles', [])
+        && request.resource.data.get('adminRoleUpdatedAt', null)
+          == resource.data.get('adminRoleUpdatedAt', null);
+    }
+
+    // Admin hide / priority on posts — clients cannot set or clear.
+    function postModerationFrozenOnCreate() {
+      return request.resource.data.get('moderation', {}).get('hidden', false) == false
+        && !('feedPriority' in request.resource.data)
+        && !('adminPriority' in request.resource.data)
+        && !('feedPriorityUpdatedAt' in request.resource.data)
+        && !('feedPriorityUpdatedBy' in request.resource.data);
+    }
+
+    function postModerationFrozenOnUpdate() {
+      return request.resource.data.get('moderation', {}) == resource.data.get('moderation', {})
+        && request.resource.data.get('feedPriority', null) == resource.data.get('feedPriority', null)
+        && request.resource.data.get('adminPriority', null) == resource.data.get('adminPriority', null)
+        && request.resource.data.get('feedPriorityUpdatedAt', null)
+          == resource.data.get('feedPriorityUpdatedAt', null)
+        && request.resource.data.get('feedPriorityUpdatedBy', null)
+          == resource.data.get('feedPriorityUpdatedBy', null);
+    }
+
     // Wave 0: economy is server-only (blocks client mint/spend).
     match /wallets/{userId} {
       allow read: if isOwner(userId);
@@ -54,7 +87,8 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId);
+      allow create: if isOwner(userId) && userPrivFieldsFrozenOnCreate();
+      allow update: if isOwner(userId) && userPrivFieldsFrozenOnUpdate();
       allow delete: if false;
 
       match /followers/{followerId} {
@@ -92,8 +126,13 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && postModerationFrozenOnCreate();
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && postModerationFrozenOnUpdate();
+      allow delete: if isSignedIn()
         && resource.data.userId == request.auth.uid;
 
       // Feed comments (CommentsModal). Missing this → deny-by-default.
