@@ -16,6 +16,7 @@ import { applyCors } from '../http/cors';
 import { initFirebaseAdmin } from '../firebaseAdmin';
 import { creditSubscriptionCoinsViaLiveService } from './coinGrant';
 import { SKU_TO_TIER, monthlyCoinsFor, verifyPlaySubscription, tokenDocId } from './entitlement';
+import { ensureTrialDocIfMissing } from '../assistant/entitlement';
 
 initFirebaseAdmin();
 const db = admin.firestore();
@@ -24,6 +25,46 @@ function periodKey(expiryMs: number): string {
   const d = new Date(expiryMs);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+
+/**
+ * Once-per-account 30-day trial bootstrap. Creates entitlements/{uid} only when
+ * missing — never renews trial clocks or overwrites paid subscribers.
+ */
+export const blypEnsureTrial = functions.https.onRequest(async (req, res) => {
+  applyCors(req, res, { methods: 'POST, OPTIONS' });
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.status(405).json({ ok: false, reason: 'method' });
+    return;
+  }
+
+  const authHeader = String(req.headers.authorization || '');
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
+  let uid = '';
+  try {
+    if (!idToken) throw new Error('missing-token');
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    uid = decoded.uid;
+  } catch {
+    res.status(401).json({ ok: false, reason: 'unauthenticated' });
+    return;
+  }
+
+  try {
+    const result = await ensureTrialDocIfMissing(uid, 'blypEnsureTrial');
+    res.status(200).json({
+      ok: true,
+      created: result.created,
+      entitlement: result.entitlement,
+    });
+  } catch (e) {
+    console.error('[blypEnsureTrial] error', (e as Error)?.message);
+    res.status(500).json({ ok: false, reason: 'error' });
+  }
+});
 
 export const blypSubscriptionActivate = functions.https.onRequest(async (req, res) => {
   applyCors(req, res, { methods: 'POST, OPTIONS' });

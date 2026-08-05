@@ -44,19 +44,60 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.blypSubscriptionActivate = void 0;
+exports.blypSubscriptionActivate = exports.blypEnsureTrial = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const cors_1 = require("../http/cors");
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const coinGrant_1 = require("./coinGrant");
 const entitlement_1 = require("./entitlement");
+const entitlement_2 = require("../assistant/entitlement");
 (0, firebaseAdmin_1.initFirebaseAdmin)();
 const db = admin.firestore();
 function periodKey(expiryMs) {
     const d = new Date(expiryMs);
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+/**
+ * Once-per-account 30-day trial bootstrap. Creates entitlements/{uid} only when
+ * missing — never renews trial clocks or overwrites paid subscribers.
+ */
+exports.blypEnsureTrial = functions.https.onRequest(async (req, res) => {
+    (0, cors_1.applyCors)(req, res, { methods: 'POST, OPTIONS' });
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+    }
+    if (req.method !== 'POST') {
+        res.status(405).json({ ok: false, reason: 'method' });
+        return;
+    }
+    const authHeader = String(req.headers.authorization || '');
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
+    let uid = '';
+    try {
+        if (!idToken)
+            throw new Error('missing-token');
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        uid = decoded.uid;
+    }
+    catch (_a) {
+        res.status(401).json({ ok: false, reason: 'unauthenticated' });
+        return;
+    }
+    try {
+        const result = await (0, entitlement_2.ensureTrialDocIfMissing)(uid, 'blypEnsureTrial');
+        res.status(200).json({
+            ok: true,
+            created: result.created,
+            entitlement: result.entitlement,
+        });
+    }
+    catch (e) {
+        console.error('[blypEnsureTrial] error', e === null || e === void 0 ? void 0 : e.message);
+        res.status(500).json({ ok: false, reason: 'error' });
+    }
+});
 exports.blypSubscriptionActivate = functions.https.onRequest(async (req, res) => {
     var _a;
     (0, cors_1.applyCors)(req, res, { methods: 'POST, OPTIONS' });

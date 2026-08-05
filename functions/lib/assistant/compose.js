@@ -106,8 +106,12 @@ exports.blypAssistantCompose = functions
         res.status(401).json({ ok: false, reason: 'unauthenticated' });
         return;
     }
-    // 2) Premium gate (server-authoritative, fails closed)
-    const sub = await (0, entitlement_1.getSubscriptionState)(uid);
+    // Premium gate (server-authoritative). Missing entitlement docs get a
+    // once-per-account trial bootstrap — never renewed on reinstall/login.
+    let sub = await (0, entitlement_1.getSubscriptionState)(uid);
+    if (!sub.active) {
+        sub = await (0, entitlement_1.ensureTrialIfMissing)(uid, 'compose_bootstrap');
+    }
     if (!sub.active) {
         res.status(402).json({ ok: false, reason: 'subscription_required' });
         return;

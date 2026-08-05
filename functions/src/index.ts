@@ -29,7 +29,7 @@ export { buildBlypIndex, blypRetentionSweep } from './search/scheduled';
 export { blypPostEvent } from './distribution/handlers';
 export { blypReachSweep } from './distribution/scheduled';
 // Export subscription activation (verified Play purchase -> paid entitlement + coin grant)
-export { blypSubscriptionActivate } from './subscriptions/handlers';
+export { blypSubscriptionActivate, blypEnsureTrial } from './subscriptions/handlers';
 // Real-time Developer Notifications: keep entitlement in sync with the subscription
 // lifecycle (renewal/cancel/grace/hold/expiry/refund) so failed payments downgrade.
 export { blypPlayRtdn } from './subscriptions/rtdn';
