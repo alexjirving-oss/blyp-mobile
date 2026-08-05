@@ -469,7 +469,7 @@ const CommentsModal = ({
         if (isPermission) {
           Alert.alert(
             'Comment failed',
-            'Firestore denied the write (permission denied).\n\nMost common causes:\n- Firebase Auth bridge not established (start Functions emulator on 5001 and ensure adb reverse is set)\n- Firestore rules do not allow /posts/{postId}/comments writes (deploy updated firestore.rules)'
+            'Could not save your comment (permission denied).\n\nIf this keeps happening, sign out and back in, then try again.'
           );
           return;
         }
