@@ -6,7 +6,8 @@
  * decides whether the accumulated signal warrants an automatic action and/or an
  * admin alert, then applies it:
  *
- *  - Critical reasons (child_safety) act on the FIRST report — zero tolerance.
+ *  - Critical reasons (child_safety) always alert for admin review, but only
+ *    auto-hide once CRITICAL_HIDE_REPORTERS distinct reporters have reported.
  *  - Serious reasons (nudity_sexual, violence, hate, self_harm) act once two or
  *    more reports land, and always raise an alert.
  *  - Any target crossing AUTO_HIDE_THRESHOLD distinct reports is auto-hidden.
@@ -19,15 +20,31 @@
  * Never throws.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.__test = void 0;
 exports.evaluateAutoAction = evaluateAutoAction;
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const AUTO_HIDE_THRESHOLD = 3;
+/** Distinct reporters required before a child_safety report auto-hides a post. */
+const CRITICAL_HIDE_REPORTERS = 2;
 const CRITICAL_REASONS = new Set(['child_safety']);
 const SERIOUS_REASONS = new Set(['nudity_sexual', 'violence', 'hate', 'self_harm', 'illegal']);
+function reporterSignal(input) {
+    const n = Number(input.distinctReporters);
+    if (Number.isFinite(n) && n > 0)
+        return n;
+    return input.totalReports;
+}
 function decide(input) {
     const { reasonCode, totalReports } = input;
+    const reporters = reporterSignal(input);
     if (CRITICAL_REASONS.has(reasonCode)) {
-        return { hide: true, alert: true, severity: 'critical', reason: `critical_reason:${reasonCode}` };
+        // Always escalate for human review; never hide on a single reporter.
+        return {
+            hide: reporters >= CRITICAL_HIDE_REPORTERS,
+            alert: true,
+            severity: 'critical',
+            reason: `critical_reason:${reasonCode}:reporters=${reporters}`,
+        };
     }
     if (SERIOUS_REASONS.has(reasonCode)) {
         return {
@@ -95,6 +112,7 @@ async function evaluateAutoAction(db, input) {
             severity: verdict.severity,
             decisionReason: verdict.reason,
             totalReports: input.totalReports,
+            distinctReporters: reporterSignal(input),
             createdAt: firebaseAdmin_1.admin.firestore.FieldValue.serverTimestamp(),
         });
     }
@@ -123,15 +141,18 @@ async function evaluateAutoAction(db, input) {
                 targetId: input.targetId,
                 reasonCode: input.reasonCode,
                 totalReports: input.totalReports,
+                distinctReporters: reporterSignal(input),
                 hidden,
                 status: 'open',
                 createdAt: firebaseAdmin_1.admin.firestore.FieldValue.serverTimestamp(),
             });
-            console.error(`[ALERT][report_auto_action] sev=${verdict.severity} ${input.targetType}/${input.targetId} reason=${input.reasonCode} reports=${input.totalReports} hidden=${hidden}`);
+            console.error(`[ALERT][report_auto_action] sev=${verdict.severity} ${input.targetType}/${input.targetId} reason=${input.reasonCode} reports=${input.totalReports} reporters=${reporterSignal(input)} hidden=${hidden}`);
         }
         catch (e) {
             console.warn('[reportAutoAction] alert failed', (e === null || e === void 0 ? void 0 : e.message) || String(e));
         }
     }
 }
+/** Exported for unit tests. */
+exports.__test = { decide, CRITICAL_HIDE_REPORTERS, AUTO_HIDE_THRESHOLD };
 //# sourceMappingURL=reportAutoAction.js.map

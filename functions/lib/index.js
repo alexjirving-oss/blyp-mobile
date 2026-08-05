@@ -978,6 +978,7 @@ exports.aggregateReport = functions.firestore
     }
     const queueDocId = `${targetType}_${targetId}`;
     const ref = db.collection('moderationQueue').doc(queueDocId);
+    const reporterId = typeof data.reporterId === 'string' && data.reporterId ? data.reporterId : null;
     let aggregated = null;
     try {
         aggregated = await db.runTransaction(async (tx) => {
@@ -985,18 +986,22 @@ exports.aggregateReport = functions.firestore
             const now = admin.firestore.FieldValue.serverTimestamp();
             if (!existing.exists) {
                 const reasons = { [reasonCode]: 1 };
+                const reporterIds = reporterId ? [reporterId] : [];
+                const distinctReporters = reporterIds.length;
                 tx.set(ref, {
                     targetType,
                     targetId,
                     totalReports: 1,
                     reasons,
+                    reporterIds,
+                    distinctReporters,
                     firstReportedAt: now,
                     lastReportedAt: now,
                     openReportIds: [snap.id],
                     status: 'pending_review',
                     priorityScore: 1 // simple initial heuristic
                 });
-                return { totalReports: 1, reasons };
+                return { totalReports: 1, reasons, distinctReporters };
             }
             else {
                 const cur = existing.data() || {};
@@ -1004,17 +1009,28 @@ exports.aggregateReport = functions.firestore
                 reasons[reasonCode] = (reasons[reasonCode] || 0) + 1;
                 const openReportIds = Array.isArray(cur.openReportIds) ? [snap.id, ...cur.openReportIds].slice(0, 25) : [snap.id];
                 const totalReports = (cur.totalReports || 0) + 1;
+                let reporterIds = Array.isArray(cur.reporterIds)
+                    ? cur.reporterIds.filter((id) => typeof id === 'string')
+                    : [];
+                if (reporterId && !reporterIds.includes(reporterId)) {
+                    reporterIds = [reporterId, ...reporterIds].slice(0, 100);
+                }
+                const distinctReporters = reporterIds.length > 0
+                    ? reporterIds.length
+                    : (Number(cur.distinctReporters) || totalReports);
                 // Simple priority heuristic: totalReports + distinctReasons * 0.5
                 const distinctReasons = Object.keys(reasons).length;
                 const priorityScore = totalReports + distinctReasons * 0.5;
                 tx.update(ref, {
                     reasons,
                     totalReports,
+                    reporterIds,
+                    distinctReporters,
                     lastReportedAt: now,
                     openReportIds,
                     priorityScore
                 });
-                return { totalReports, reasons };
+                return { totalReports, reasons, distinctReporters };
             }
         });
         console.log(`🛡️ Aggregated report into moderationQueue/${queueDocId}`);
@@ -1030,6 +1046,7 @@ exports.aggregateReport = functions.firestore
                 targetId,
                 reasonCode,
                 totalReports: aggregated.totalReports,
+                distinctReporters: aggregated.distinctReporters,
                 reasons: aggregated.reasons,
                 reportId: snap.id,
             });
