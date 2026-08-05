@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { creditSubscriptionCoins, purgeUserData } from '../economy/economyService';
 import { toEconomyError } from '../economy/economyErrors';
+import { materializeRankingsSnapshots } from '../economy/rankingsService';
 import { deleteCognitoUserBySub } from '../admin/adminCognitoDirectory';
 import { logger } from '../config/logger';
 
@@ -18,6 +19,20 @@ import { logger } from '../config/logger';
  * Auth model: a single shared secret carried in `x-internal-secret`, compared
  * in constant time. Fails CLOSED — if `INTERNAL_SHARED_SECRET` is not set the
  * route returns 503 and never processes the request.
+ *
+ * Rankings P1.5 cron (Cloud Scheduler HTTP):
+ *   POST /internal/cron/rankings-materialize
+ *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
+ *
+ * Example gcloud (replace SECRET; prefer Secret Manager / headers-file):
+ *   gcloud scheduler jobs create http rankings-materialize \
+ *     --project=blyp-master --location=us-central1 \
+ *     --schedule="every 10 minutes" --time-zone=UTC \
+ *     --uri="https://blyp-live-service-innn3d7yqq-uc.a.run.app/internal/cron/rankings-materialize" \
+ *     --http-method=POST \
+ *     --headers="Content-Type=application/json,x-internal-secret=SECRET" \
+ *     --message-body="{}" \
+ *     --attempt-deadline=180s
  */
 
 const router = Router();
@@ -74,6 +89,38 @@ router.post('/internal/subscription/credit-coins', requireInternalSecret, async 
 });
 
 const purgeSchema = z.object({ userId: z.string().min(1) }).strict();
+
+const rankingsMaterializeSchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+  })
+  .strict()
+  .optional();
+
+/**
+ * Precompute rankings_snapshots for coin_spend + gem_earn × day/week/month/year.
+ * Invoked by Cloud Scheduler (or manually) with x-internal-secret.
+ */
+router.post('/internal/cron/rankings-materialize', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = rankingsMaterializeSchema.safeParse(req.body && Object.keys(req.body).length ? req.body : undefined);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await materializeRankingsSnapshots({ limit: parsed.data?.limit });
+    logger.info(
+      { ok: out.ok, durationMs: out.durationMs, boards: out.results.length },
+      '[internal] rankings materialize complete',
+    );
+    return res.status(out.ok ? 200 : 207).json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/rankings-materialize');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
 
 // Account-deletion purge of the user's personal economy data (wallet,
 // subscriptions, entitlements, per-user activity). Called by the Firebase

@@ -276,7 +276,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         // Rankings P1: windowed board aggregates filter by type + time.
         `CREATE INDEX IF NOT EXISTS idx_ledger_type_created ON ledger_entries (entry_type, created_at DESC)`,
 
-        // Durable rankings rollups (P1 query-time writes; P1.5 scheduled cron).
+        // Durable rankings rollups (P1 query-time writes; P1.5 cron materialize).
         `CREATE TABLE IF NOT EXISTS rankings_snapshots (
           board text NOT NULL,
           window text NOT NULL,

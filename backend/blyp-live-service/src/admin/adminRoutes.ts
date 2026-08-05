@@ -7,6 +7,7 @@ import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { creditCoinsAdmin } from '../economy/economyService';
+import { materializeRankingsSnapshots } from '../economy/rankingsService';
 import { EconomyError, toEconomyError } from '../economy/economyErrors';
 import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
 import {
@@ -756,6 +757,46 @@ router.get('/admin/metrics/overview', requireAdmin, async (_req: AuthedRequest, 
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/metrics/overview failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+/**
+ * Manually materialize rankings_snapshots (coin_spend + gem_earn windows).
+ * Same work as Cloud Scheduler → POST /internal/cron/rankings-materialize.
+ */
+router.post('/admin/rankings/materialize', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const limitRaw = (req.body as any)?.limit;
+        const limit =
+            limitRaw === undefined || limitRaw === null || limitRaw === ''
+                ? undefined
+                : Number(limitRaw);
+        if (limit !== undefined && (!Number.isFinite(limit) || limit < 1 || limit > 50)) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const out = await materializeRankingsSnapshots({ limit });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'rankings_materialize',
+            targetType: 'system',
+            targetId: 'rankings_snapshots',
+            metadata: {
+                ok: out.ok,
+                limit: out.limit,
+                durationMs: out.durationMs,
+                results: out.results,
+            },
+        }).catch((err) => {
+            logger.warn({ err: err?.message || String(err) }, '[admin] rankings materialize audit write failed');
+        });
+
+        return res.status(out.ok ? 200 : 207).json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
+        logger.error({ err: err.message, detail: err.detail }, '[admin] /admin/rankings/materialize failed');
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
     }
 });
 

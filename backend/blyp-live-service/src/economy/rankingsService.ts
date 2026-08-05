@@ -1,10 +1,10 @@
 /**
- * Global rankings (Phase 0 + Phase 1).
+ * Global rankings (Phase 0 + Phase 1 + P1.5).
  *
  * All-time boards read denormalized wallet / Firestore counters.
- * Windowed day/week/month/year boards aggregate ledger_entries at query time
- * with Redis TTL cache, and best-effort write rankings_snapshots for durability.
- * Full cron materialization is planned for P1.5.
+ * Windowed day/week/month/year boards prefer durable rankings_snapshots
+ * (cron-materialized), falling back to query-time ledger aggregates with
+ * Redis TTL cache and best-effort snapshot writes.
  */
 
 import { getEconomyInfra } from './infra';
@@ -19,10 +19,10 @@ export type RankingWindow = 'day' | 'week' | 'month' | 'year' | 'alltime';
 export type RankingEntry = {
   rank: number;
   userId: string;
-  score: number;
   displayName: string;
   photoURL: string;
   handle: string;
+  score: number;
 };
 
 export type RankingBoardResponse = {
@@ -37,7 +37,23 @@ export type RankingBoardResponse = {
   cacheTtlSec?: number;
 };
 
+export type RankingMaterializeResult = {
+  board: RankingBoardId;
+  window: Exclude<RankingWindow, 'alltime'>;
+  entryCount: number;
+  computedAt: string;
+  ok: boolean;
+  error?: string;
+};
+
 const WINDOWS: RankingWindow[] = ['day', 'week', 'month', 'year', 'alltime'];
+
+const WINDOWED: Array<Exclude<RankingWindow, 'alltime'>> = ['day', 'week', 'month', 'year'];
+
+const ECONOMY_BOARDS: Array<'coin_spend' | 'gem_earn'> = ['coin_spend', 'gem_earn'];
+
+/** Snapshot rollup depth (cron + durable reads). */
+export const RANKINGS_SNAPSHOT_LIMIT = 50;
 
 const BOARD_META: Record<
   RankingBoardId,
@@ -87,6 +103,14 @@ const CACHE_TTL_SEC: Record<RankingWindow, number> = {
   alltime: 60,
 };
 
+/** Prefer snapshot reads when cron has refreshed within this age. */
+const SNAPSHOT_MAX_AGE_MS: Record<Exclude<RankingWindow, 'alltime'>, number> = {
+  day: 5 * 60 * 1000,
+  week: 15 * 60 * 1000,
+  month: 30 * 60 * 1000,
+  year: 60 * 60 * 1000,
+};
+
 function clampLimit(raw: unknown): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return 25;
@@ -132,7 +156,23 @@ async function cacheSet(key: string, value: RankingBoardResponse, ttlSec: number
   }
 }
 
-async function persistSnapshot(board: RankingBoardId, window: RankingWindow, entries: RankingEntry[]): Promise<void> {
+async function cacheInvalidateBoard(board: RankingBoardId, window: RankingWindow): Promise<void> {
+  try {
+    const { redis } = getEconomyInfra();
+    // Common client limits; keys are small so fan-out is fine.
+    const keys = [10, 25, 50].map((n) => cacheKey(board, window, n));
+    if (keys.length) await redis.del(...keys);
+  } catch {
+    // Cache is best-effort.
+  }
+}
+
+async function persistSnapshot(
+  board: RankingBoardId,
+  window: RankingWindow,
+  entries: RankingEntry[],
+  opts?: { throwOnError?: boolean },
+): Promise<void> {
   try {
     const { db } = getEconomyInfra();
     const computedAt = new Date();
@@ -156,8 +196,9 @@ async function persistSnapshot(board: RankingBoardId, window: RankingWindow, ent
   } catch (e: any) {
     logger.warn(
       { err: e?.message || String(e), board, window },
-      '[rankings] snapshot persist failed (non-fatal)',
+      '[rankings] snapshot persist failed',
     );
+    if (opts?.throwOnError) throw e;
   }
 }
 
@@ -252,12 +293,11 @@ async function walletBoard(
   };
 }
 
-async function ledgerWindowBoard(
+async function aggregateLedgerWindow(
   board: 'coin_spend' | 'gem_earn',
   window: Exclude<RankingWindow, 'alltime'>,
   limit: number,
-): Promise<RankingBoardResponse> {
-  const meta = BOARD_META[board];
+): Promise<RankingEntry[]> {
   const { db } = getEconomyInfra();
   const interval = WINDOW_INTERVAL[window];
   const types = board === 'coin_spend' ? [...COIN_SPEND_TYPES] : [...GEM_EARN_TYPES];
@@ -281,11 +321,20 @@ async function ledgerWindowBoard(
 
   const ids = rows.map((r: any) => String(r.user_id || '')).filter(Boolean);
   const profiles = await enrichProfiles(ids);
-  const entries = toEntries(
+  return toEntries(
     rows.map((r: any) => ({ user_id: String(r.user_id || ''), score: Number(r.score || 0) })),
     profiles,
     limit,
   );
+}
+
+async function ledgerWindowBoard(
+  board: 'coin_spend' | 'gem_earn',
+  window: Exclude<RankingWindow, 'alltime'>,
+  limit: number,
+): Promise<RankingBoardResponse> {
+  const meta = BOARD_META[board];
+  const entries = await aggregateLedgerWindow(board, window, limit);
 
   const out: RankingBoardResponse = {
     board,
@@ -298,10 +347,68 @@ async function ledgerWindowBoard(
     cacheTtlSec: CACHE_TTL_SEC[window],
   };
 
-  // Durable rollup for ops / future cron consumers (best-effort).
+  // Durable rollup for ops / cron consumers (best-effort on query path).
   void persistSnapshot(board, window, entries);
 
   return out;
+}
+
+async function readSnapshotBoard(
+  board: 'coin_spend' | 'gem_earn',
+  window: Exclude<RankingWindow, 'alltime'>,
+  limit: number,
+): Promise<RankingBoardResponse | null> {
+  try {
+    const { db } = getEconomyInfra();
+    const rows = await db('rankings_snapshots')
+      .select(
+        'user_id',
+        'rank',
+        'score',
+        'display_name',
+        'photo_url',
+        'handle',
+        'computed_at',
+      )
+      .where({ board, window })
+      .orderBy('rank', 'asc')
+      .limit(limit);
+
+    if (!rows.length) return null;
+
+    const computedAtRaw = (rows[0] as any).computed_at;
+    const computedAt = computedAtRaw ? new Date(computedAtRaw) : null;
+    if (!computedAt || Number.isNaN(computedAt.getTime())) return null;
+    const ageMs = Date.now() - computedAt.getTime();
+    if (ageMs > SNAPSHOT_MAX_AGE_MS[window]) return null;
+
+    const meta = BOARD_META[board];
+    const entries: RankingEntry[] = rows.map((r: any, i: number) => ({
+      rank: Number(r.rank) || i + 1,
+      userId: String(r.user_id || ''),
+      score: Number(r.score || 0),
+      displayName: str(r.display_name) || 'Blyp user',
+      photoURL: str(r.photo_url),
+      handle: str(r.handle),
+    }));
+
+    return {
+      board,
+      window,
+      metric: `${board}_${window}`,
+      unit: meta.unit,
+      entries,
+      computedAt: computedAt.toISOString(),
+      source: 'snapshot',
+      cacheTtlSec: CACHE_TTL_SEC[window],
+    };
+  } catch (e: any) {
+    logger.warn(
+      { err: e?.message || String(e), board, window },
+      '[rankings] snapshot read failed',
+    );
+    return null;
+  }
 }
 
 async function followersBoard(limit: number): Promise<RankingBoardResponse> {
@@ -359,6 +466,81 @@ async function followersBoard(limit: number): Promise<RankingBoardResponse> {
   };
 }
 
+/**
+ * Cron / admin materialization: recompute coin_spend + gem_earn for
+ * day/week/month/year into rankings_snapshots and warm Redis.
+ */
+export async function materializeRankingsSnapshots(opts?: {
+  limit?: number;
+  boards?: Array<'coin_spend' | 'gem_earn'>;
+  windows?: Array<Exclude<RankingWindow, 'alltime'>>;
+}): Promise<{
+  ok: boolean;
+  limit: number;
+  results: RankingMaterializeResult[];
+  durationMs: number;
+}> {
+  const started = Date.now();
+  const limit = Math.max(1, Math.min(RANKINGS_SNAPSHOT_LIMIT, Math.floor(opts?.limit || RANKINGS_SNAPSHOT_LIMIT)));
+  const boards = opts?.boards?.length ? opts.boards : ECONOMY_BOARDS;
+  const windows = opts?.windows?.length ? opts.windows : WINDOWED;
+  const results: RankingMaterializeResult[] = [];
+
+  for (const board of boards) {
+    for (const window of windows) {
+      const computedAt = new Date().toISOString();
+      try {
+        const entries = await aggregateLedgerWindow(board, window, limit);
+        await persistSnapshot(board, window, entries, { throwOnError: true });
+        await cacheInvalidateBoard(board, window);
+
+        const meta = BOARD_META[board];
+        const response: RankingBoardResponse = {
+          board,
+          window,
+          metric: `${board}_${window}`,
+          unit: meta.unit,
+          entries: entries.slice(0, Math.min(25, limit)),
+          computedAt,
+          source: 'snapshot',
+          cacheTtlSec: CACHE_TTL_SEC[window],
+        };
+        // Warm common client limits from the same rollup.
+        for (const warmLimit of [10, 25, 50]) {
+          if (warmLimit > limit) continue;
+          await cacheSet(
+            cacheKey(board, window, warmLimit),
+            { ...response, entries: entries.slice(0, warmLimit) },
+            CACHE_TTL_SEC[window],
+          );
+        }
+
+        results.push({
+          board,
+          window,
+          entryCount: entries.length,
+          computedAt,
+          ok: true,
+        });
+      } catch (e: any) {
+        const msg = e?.message || String(e);
+        logger.error({ err: msg, board, window }, '[rankings] materialize failed');
+        results.push({
+          board,
+          window,
+          entryCount: 0,
+          computedAt,
+          ok: false,
+          error: msg,
+        });
+      }
+    }
+  }
+
+  const ok = results.every((r) => r.ok);
+  return { ok, limit, results, durationMs: Date.now() - started };
+}
+
 export async function getRankingBoard(
   boardRaw: string,
   limitRaw?: unknown,
@@ -389,7 +571,8 @@ export async function getRankingBoard(
   } else if (window === 'alltime') {
     result = await walletBoard(board, limit);
   } else {
-    result = await ledgerWindowBoard(board, window, limit);
+    const fromSnap = await readSnapshotBoard(board, window, limit);
+    result = fromSnap || (await ledgerWindowBoard(board, window, limit));
   }
 
   result.cacheTtlSec = CACHE_TTL_SEC[window];
@@ -407,7 +590,7 @@ export function listRankingBoardsMeta() {
     note:
       id === 'followers_total'
         ? 'Windowed followers_delta needs follow-event history (P2+).'
-        : 'Windowed boards use query-time ledger aggregates + Redis cache; cron materialization in P1.5.',
+        : 'Windowed boards prefer cron rankings_snapshots; fall back to ledger aggregates + Redis.',
   }));
 }
 
