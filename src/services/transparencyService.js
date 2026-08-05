@@ -72,14 +72,14 @@ export const PLANS = [
     name: 'Free',
     price: '£0',
     blurb:
-      'After the trial: posts, follows, messages, gifting and your feed all keep working. The premium AI extras (AI captions, Blyp answers + voice, AI sport pages) pause.',
+      'After the trial: posts, follows, messages, gifting and your feed all keep working. Premium extras (AI captions, Blyp answers + voice, AI sport pages, Dating) pause.',
     highlight: false,
   },
   {
     id: 'plus',
     name: 'Blyp Plus',
     price: '$4.99/mo',
-    blurb: 'Everything on — all the AI features, all the time.',
+    blurb: 'Everything on — AI features and Dating, all the time.',
     highlight: true,
   },
   {
@@ -87,7 +87,7 @@ export const PLANS = [
     name: 'Blyp Plus + Coins',
     price: '$9.99/mo',
     blurb:
-      'Everything in Plus, plus 999 coins every month — roughly your money back as spendable currency. Coins gift to creators or convert to gems; they are never cashable.',
+      'Everything in Plus (AI + Dating), plus 999 coins every month — roughly your money back as spendable currency. Coins gift to creators or convert to gems; they are never cashable.',
     highlight: false,
   },
 ];
