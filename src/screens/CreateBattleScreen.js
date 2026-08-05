@@ -1,8 +1,8 @@
-// CreateBattleScreen — schedule a head-to-head battle and invite an opponent.
+// CreateBattleScreen — prearrange a head-to-head battle vs a competitor.
 //
-// Pick an opponent (user search), give it a title, choose when it starts,
-// optionally add an equal coin deposit (attendance bond), and choose whether to
-// notify your supporters. Submitting writes the invite; the opponent gets a push.
+// Pick an opponent, set the datetime, optionally put down an equal forfeit stake
+// (attendance bond), confirm, and both sides are notified. Submitting writes the
+// invite; the opponent gets a push. Creator also gets a 10-min reminder.
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
@@ -66,7 +66,9 @@ const CreateBattleScreen = ({ navigation, route }) => {
     const t = Number(prefill.startAt);
     return Number.isFinite(t) && t > Date.now() ? t : atHour(0, 20);
   });
-  const [stakeCoins, setStakeCoins] = useState(0);
+  const [stakeCoins, setStakeCoins] = useState(
+    Number.isFinite(Number(prefill.stakeCoins)) ? Math.max(0, Math.round(Number(prefill.stakeCoins))) : 0
+  );
   const [notifySupporters, setNotifySupporters] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const debounceRef = useRef(null);
@@ -87,6 +89,22 @@ const CreateBattleScreen = ({ navigation, route }) => {
   }, [uid]);
 
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const nudgeDay = useCallback((delta) => {
+    setStartAt((v) => {
+      const d = new Date(v);
+      d.setDate(d.getDate() + delta);
+      const next = d.getTime();
+      return next > Date.now() + 60000 ? next : Date.now() + 15 * 60 * 1000;
+    });
+  }, []);
+
+  const nudgeHour = useCallback((delta) => {
+    setStartAt((v) => {
+      const next = v + delta * 60 * 60 * 1000;
+      return next > Date.now() + 60000 ? next : Date.now() + 15 * 60 * 1000;
+    });
+  }, []);
 
   const submit = useCallback(async () => {
     if (!opponent) {
@@ -109,8 +127,10 @@ const CreateBattleScreen = ({ navigation, route }) => {
       });
       if (!res.ok) {
         const msg = res.reason === 'insufficient_funds'
-          ? 'You do not have enough coins for that deposit.'
-          : 'Could not create the battle. Please try again.';
+          ? 'You do not have enough coins for that forfeit stake.'
+          : res.reason === 'self'
+            ? 'You cannot challenge yourself.'
+            : 'Could not create the battle. Please try again.';
         Alert.alert('Battle not created', msg);
         setSubmitting(false);
         return;
@@ -128,12 +148,16 @@ const CreateBattleScreen = ({ navigation, route }) => {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Icon name="chevron-back" size={24} color={COLORS.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Create battle</Text>
+        <Text style={styles.title}>Prearrange battle</Text>
         <View style={styles.backBtn} />
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>Opponent</Text>
+        <Text style={styles.heroSub}>
+          Challenge someone at a set time. Optional forfeit stake — both put coins down; show up to get them back.
+        </Text>
+
+        <Text style={styles.label}>1. Opponent</Text>
         {opponent ? (
           <View style={styles.selectedOpponent}>
             <Avatar uri={opponent.photoURL} name={opponent.displayName} />
@@ -171,7 +195,7 @@ const CreateBattleScreen = ({ navigation, route }) => {
           </>
         )}
 
-        <Text style={styles.label}>Title (optional)</Text>
+        <Text style={styles.label}>2. Title (optional)</Text>
         <TextInput
           style={styles.textInput}
           placeholder="e.g. Sing-off, FIFA showdown…"
@@ -181,7 +205,7 @@ const CreateBattleScreen = ({ navigation, route }) => {
           maxLength={60}
         />
 
-        <Text style={styles.label}>When</Text>
+        <Text style={styles.label}>3. When</Text>
         <View style={styles.chipRow}>
           {SCHEDULE_PRESETS.map((p) => {
             const v = p.ms();
@@ -193,20 +217,33 @@ const CreateBattleScreen = ({ navigation, route }) => {
             );
           })}
         </View>
-        <View style={styles.stepperRow}>
-          <TouchableOpacity style={styles.stepBtn} onPress={() => setStartAt((v) => Math.max(Date.now() + 60000, v - 15 * 60 * 1000))}>
-            <Text style={styles.stepBtnText}>−15m</Text>
-          </TouchableOpacity>
+        <View style={styles.whenCard}>
           <Text style={styles.whenLabel}>{whenLabel(startAt)}</Text>
-          <TouchableOpacity style={styles.stepBtn} onPress={() => setStartAt((v) => v + 15 * 60 * 1000)}>
-            <Text style={styles.stepBtnText}>+15m</Text>
-          </TouchableOpacity>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepBtn} onPress={() => nudgeDay(-1)}>
+              <Text style={styles.stepBtnText}>−1d</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stepBtn} onPress={() => nudgeHour(-1)}>
+              <Text style={styles.stepBtnText}>−1h</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stepBtn} onPress={() => setStartAt((v) => Math.max(Date.now() + 60000, v - 15 * 60 * 1000))}>
+              <Text style={styles.stepBtnText}>−15m</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stepBtn} onPress={() => setStartAt((v) => v + 15 * 60 * 1000)}>
+              <Text style={styles.stepBtnText}>+15m</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stepBtn} onPress={() => nudgeHour(1)}>
+              <Text style={styles.stepBtnText}>+1h</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stepBtn} onPress={() => nudgeDay(1)}>
+              <Text style={styles.stepBtnText}>+1d</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        <Text style={styles.label}>Deposit (attendance bond)</Text>
+        <Text style={styles.label}>4. Forfeit stake</Text>
         <Text style={styles.helpText}>
-          Both of you put down the same coins. Turn up and you get your coins back. If only one turns up, they take the
-          whole pot. If nobody shows, the app keeps it. Paid back in coins, never gems.
+          Both put down the same coins. Turn up and you get them back. If only one shows, they take the pot. If nobody shows, the app keeps it. Paid in coins, never gems.
         </Text>
         <View style={styles.chipRow}>
           {STAKE_PRESETS.map((s) => {
@@ -221,8 +258,8 @@ const CreateBattleScreen = ({ navigation, route }) => {
 
         <View style={styles.toggleRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Notify my supporters</Text>
-            <Text style={styles.helpText}>Send your followers a heads-up about this battle.</Text>
+            <Text style={styles.toggleLabel}>Notify my supporters</Text>
+            <Text style={styles.helpText}>After they accept, followers get a heads-up.</Text>
           </View>
           <Switch
             value={notifySupporters}
@@ -241,20 +278,25 @@ const CreateBattleScreen = ({ navigation, route }) => {
           {submitting ? (
             <ActivityIndicator color="#0A0A0C" />
           ) : (
-            <Text style={styles.submitText}>{stakeCoins > 0 ? `Send challenge · ${stakeCoins} coins` : 'Send challenge'}</Text>
+            <Text style={styles.submitText}>
+              {stakeCoins > 0 ? `Send challenge · ${stakeCoins} coins` : 'Send challenge'}
+            </Text>
           )}
         </TouchableOpacity>
+        <Text style={styles.footerHint}>Opponent is notified instantly. You’ll get a reminder 10 minutes before start.</Text>
       </ScrollView>
     </ScreenContainer>
   );
 };
 
 const styles = StyleSheet.create({
-  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, marginBottom: 8, paddingTop: responsiveSize(8) },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, marginBottom: 4, paddingTop: responsiveSize(8) },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: COLORS.textPrimary, fontSize: responsiveFont(18), fontWeight: '800' },
   content: { padding: responsiveSize(16), paddingBottom: responsiveSize(60) },
+  heroSub: { color: COLORS.textSecondary, fontSize: responsiveFont(13), lineHeight: responsiveFont(18), marginBottom: responsiveSize(4) },
   label: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(14), marginTop: responsiveSize(18), marginBottom: responsiveSize(8) },
+  toggleLabel: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(14), marginBottom: responsiveSize(4) },
   helpText: { color: COLORS.textSecondary, fontSize: responsiveFont(12), lineHeight: responsiveFont(17), marginBottom: responsiveSize(10) },
   searchBox: {
     flexDirection: 'row', alignItems: 'center', gap: responsiveSize(8),
@@ -266,6 +308,7 @@ const styles = StyleSheet.create({
   selectedOpponent: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.backgroundCard, borderRadius: responsiveSize(12), padding: responsiveSize(12),
+    borderWidth: 1, borderColor: 'rgba(0,210,190,0.35)',
   },
   selName: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(14) },
   selUsername: { color: COLORS.textSecondary, fontSize: responsiveFont(12) },
@@ -286,17 +329,24 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: COLORS.primary, backgroundColor: 'rgba(0,210,190,0.12)' },
   chipText: { color: COLORS.textSecondary, fontSize: responsiveFont(13), fontWeight: '600' },
   chipTextActive: { color: COLORS.primary },
-  stepperRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: responsiveSize(12) },
-  stepBtn: { backgroundColor: COLORS.backgroundCard, borderRadius: responsiveSize(10), paddingVertical: responsiveSize(8), paddingHorizontal: responsiveSize(14) },
-  stepBtnText: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(13) },
-  whenLabel: { color: COLORS.textPrimary, fontSize: responsiveFont(14), fontWeight: '700', flex: 1, textAlign: 'center' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', marginTop: responsiveSize(8) },
+  whenCard: {
+    marginTop: responsiveSize(12),
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: responsiveSize(12),
+    padding: responsiveSize(12),
+  },
+  stepperRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: responsiveSize(6), marginTop: responsiveSize(10) },
+  stepBtn: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: responsiveSize(10), paddingVertical: responsiveSize(8), paddingHorizontal: responsiveSize(10) },
+  stepBtnText: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(12) },
+  whenLabel: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '800', textAlign: 'center' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', marginTop: responsiveSize(16) },
   submitBtn: {
     backgroundColor: COLORS.primary, borderRadius: responsiveSize(14),
     paddingVertical: responsiveSize(15), alignItems: 'center', marginTop: responsiveSize(28),
   },
   submitBtnDisabled: { opacity: 0.5 },
   submitText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
+  footerHint: { color: COLORS.textSecondary, fontSize: responsiveFont(11), textAlign: 'center', marginTop: responsiveSize(10), opacity: 0.8 },
 });
 
 export default CreateBattleScreen;

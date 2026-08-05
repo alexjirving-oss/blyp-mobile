@@ -230,6 +230,12 @@ export async function acceptBattle(battle, uid) {
       acceptedAt: Date.now(),
       updatedAt: Date.now(),
     });
+    // Opponent reminder once the fight is locked in as scheduled.
+    await setBattleReminder(
+      { ...battle, status: BATTLE_STATUS.SCHEDULED },
+      uid,
+      10
+    ).catch(() => {});
     return { ok: true };
   } catch {
     return { ok: false, reason: 'write_failed' };

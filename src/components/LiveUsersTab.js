@@ -156,7 +156,7 @@ export default function LiveUsersTab() {
   }
 
   if (!liveUsers.length) {
-    console.log('Ã¢Å¡Â Ã¯Â¸Â LiveUsersTab: No live users, showing empty state');
+    console.log('LiveUsersTab: No live users, showing empty state');
     return (
       <ScrollView
         contentContainerStyle={[styles.centerContainer, { flexGrow: 1, backgroundColor: 'transparent' }]}
@@ -167,11 +167,20 @@ export default function LiveUsersTab() {
         <Icon name="radio-outline" size={56} color={COLORS.primary} style={styles.emptyIcon} />
         <Text style={styles.emptyTitle}>Nobody is live right now</Text>
         <Text style={styles.emptySubtitle}>Be the first to go live!</Text>
+        <TouchableOpacity
+          style={styles.prearrangeBtn}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('CreateBattle')}
+        >
+          <Icon name="flash" size={18} color="#0A0A0C" />
+          <Text style={styles.prearrangeBtnText}>Prearrange a battle</Text>
+        </TouchableOpacity>
+        <Text style={styles.prearrangeHint}>Schedule vs a competitor with an optional forfeit stake</Text>
       </ScrollView>
     );
   }
 
-  console.log('Ã¢Å“â€¦ LiveUsersTab: Rendering FlatList with', liveUsers.length, 'users');
+  console.log('LiveUsersTab: Rendering FlatList with', liveUsers.length, 'users');
 
   const formatHandle = (handle) => {
     if (!handle) return null;
@@ -186,6 +195,20 @@ export default function LiveUsersTab() {
         data={liveUsers}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContainer, { paddingTop: 0 }]}
+        ListHeaderComponent={
+          <TouchableOpacity
+            style={styles.prearrangeBanner}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('CreateBattle')}
+          >
+            <Icon name="flash" size={18} color={COLORS.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.prearrangeBannerTitle}>Prearrange a battle</Text>
+              <Text style={styles.prearrangeBannerSub}>Pick opponent, time & forfeit stake</Text>
+            </View>
+            <Icon name="chevron-forward" size={18} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.gradientEnd} />
         }
@@ -359,6 +382,50 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#888',
     textAlign: 'center',
+  },
+  prearrangeBtn: {
+    marginTop: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  prearrangeBtnText: {
+    color: '#0A0A0C',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  prearrangeHint: {
+    marginTop: 10,
+    color: '#888',
+    fontSize: 12,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
+  prearrangeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.backgroundCard || '#121216',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.28)',
+  },
+  prearrangeBannerTitle: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  prearrangeBannerSub: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    marginTop: 2,
   },
   card: {
     flexDirection: 'row',

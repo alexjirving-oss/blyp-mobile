@@ -12,6 +12,7 @@ import { useAuth } from '../../hooks/useCommon';
 import {
   subscribeUpcomingBattles,
   subscribePendingInvites,
+  subscribeMyBattles,
   isStaked,
   BATTLE_STATUS,
 } from '../../services/battleService';
@@ -90,6 +91,7 @@ export default function BattlesContent({ navigation }) {
   const { uid } = useAuth();
   const [battles, setBattles] = useState([]);
   const [invites, setInvites] = useState([]);
+  const [outgoing, setOutgoing] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -105,6 +107,21 @@ export default function BattlesContent({ navigation }) {
   useEffect(() => {
     if (!uid) return undefined;
     const unsub = subscribePendingInvites(uid, setInvites);
+    return () => { try { unsub && unsub(); } catch {} };
+  }, [uid, reloadKey]);
+
+  useEffect(() => {
+    if (!uid) {
+      setOutgoing([]);
+      return undefined;
+    }
+    const unsub = subscribeMyBattles(uid, (rows) => {
+      setOutgoing(
+        (rows || []).filter(
+          (b) => b.status === BATTLE_STATUS.PENDING && b.creatorUid === uid
+        )
+      );
+    });
     return () => { try { unsub && unsub(); } catch {} };
   }, [uid, reloadKey]);
 
@@ -135,8 +152,9 @@ export default function BattlesContent({ navigation }) {
     >
       <TouchableOpacity style={styles.createButton} activeOpacity={0.9} onPress={openCreate}>
         <Icon name="flash" size={responsiveFont(18)} color="#0A0A0C" />
-        <Text style={styles.createButtonText}>Create a battle</Text>
+        <Text style={styles.createButtonText}>Prearrange a battle</Text>
       </TouchableOpacity>
+      <Text style={styles.createHint}>Pick an opponent, time, and optional forfeit stake</Text>
 
       <TouchableOpacity style={styles.roomsButton} activeOpacity={0.9} onPress={openRooms}>
         <Icon name="people" size={responsiveFont(18)} color={COLORS.primary} />
@@ -183,6 +201,24 @@ export default function BattlesContent({ navigation }) {
         </View>
       )}
 
+      {outgoing.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Waiting on reply</Text>
+          {outgoing.map((b) => (
+            <TouchableOpacity key={b.id} style={styles.inviteRow} activeOpacity={0.85} onPress={() => openDetail(b.id)}>
+              <Avatar uri={b.opponentPhoto} name={b.opponentName} />
+              <View style={styles.inviteBody}>
+                <Text style={styles.inviteName} numberOfLines={1}>Challenge to {b.opponentName}</Text>
+                <Text style={styles.inviteMeta} numberOfLines={1}>
+                  {startLabel(b.scheduledStartAt)}{isStaked(b) ? ` · ${b.stakeCoins} coins` : ''} · pending
+                </Text>
+              </View>
+              <Icon name="chevron-forward" size={responsiveFont(18)} color={COLORS.textSecondary} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Upcoming & live</Text>
         {loading ? (
@@ -215,6 +251,13 @@ const styles = StyleSheet.create({
     marginBottom: responsiveSize(20),
   },
   createButtonText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
+  createHint: {
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(12),
+    textAlign: 'center',
+    marginTop: -responsiveSize(12),
+    marginBottom: responsiveSize(16),
+  },
   roomsButton: {
     flexDirection: 'row',
     alignItems: 'center',

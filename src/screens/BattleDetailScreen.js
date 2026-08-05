@@ -143,10 +143,14 @@ const BattleDetailScreen = ({ navigation, route }) => {
 
   const live = battle.status === BATTLE_STATUS.LIVE;
   const completed = battle.status === BATTLE_STATUS.COMPLETED;
+  const pending = battle.status === BATTLE_STATUS.PENDING;
+  const scheduled = battle.status === BATTLE_STATUS.SCHEDULED;
   const startSoon = battle.scheduledStartAt - Date.now() < 5 * 60 * 1000;
   const withinJoinWindow = Date.now() < battle.scheduledStartAt + JOIN_GRACE_MS;
   const creatorWon = completed && battle.winnerUid === battle.creatorUid;
   const opponentWon = completed && battle.winnerUid === battle.opponentUid;
+  const canCancel = isParticipant && (pending || scheduled);
+  const canRemind = (scheduled || pending) && !!uid;
 
   return (
     <ScreenContainer>
@@ -182,6 +186,14 @@ const BattleDetailScreen = ({ navigation, route }) => {
         <Text style={styles.battleTitle}>{battle.title}</Text>
 
         <View style={styles.infoCard}>
+          {pending && (
+            <View style={styles.infoRow}>
+              <Icon name="hourglass-outline" size={responsiveFont(16)} color={COLORS.textSecondary} />
+              <Text style={styles.infoText}>
+                {isInvitee ? 'Waiting for your response' : `Waiting for ${battle.opponentName} to accept`}
+              </Text>
+            </View>
+          )}
           <View style={styles.infoRow}>
             <Icon name="time-outline" size={responsiveFont(16)} color={COLORS.textSecondary} />
             <Text style={styles.infoText}>{fullWhen(battle.scheduledStartAt)}</Text>
@@ -189,7 +201,9 @@ const BattleDetailScreen = ({ navigation, route }) => {
           {isStaked(battle) && (
             <View style={styles.infoRow}>
               <Icon name="server-outline" size={responsiveFont(16)} color={COLORS.primary} />
-              <Text style={[styles.infoText, { color: COLORS.primary }]}>{battle.stakeCoins} coin deposit each (attendance bond)</Text>
+              <Text style={[styles.infoText, { color: COLORS.primary }]}>
+                {battle.stakeCoins} coin forfeit stake each — show up to get it back
+              </Text>
             </View>
           )}
           {completed && (
@@ -214,7 +228,7 @@ const BattleDetailScreen = ({ navigation, route }) => {
           </View>
         )}
 
-        {!isInvitee && isParticipant && battle.status === BATTLE_STATUS.SCHEDULED && (
+        {!isInvitee && isParticipant && scheduled && (
           <>
             {(startSoon && withinJoinWindow) ? (
               <TouchableOpacity style={styles.primaryBtn} onPress={goLive}>
@@ -224,9 +238,6 @@ const BattleDetailScreen = ({ navigation, route }) => {
             ) : (
               <View style={styles.waitCard}><Text style={styles.muted}>You can go live when it's almost time. We'll remind you.</Text></View>
             )}
-            <TouchableOpacity style={styles.linkBtn} onPress={onCancel} disabled={busy}>
-              <Text style={styles.linkText}>Cancel battle</Text>
-            </TouchableOpacity>
           </>
         )}
 
@@ -237,18 +248,28 @@ const BattleDetailScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         )}
 
-        {/* Viewer actions */}
-        {!isParticipant && live && (
+        {/* Viewer / participant reminder */}
+        {!isInvitee && live && !isParticipant && (
           <TouchableOpacity style={styles.primaryBtn} onPress={watchLive}>
             <Icon name="eye" size={responsiveFont(18)} color="#0A0A0C" />
             <Text style={styles.primaryText}>Watch battle</Text>
           </TouchableOpacity>
         )}
 
-        {!isParticipant && battle.status === BATTLE_STATUS.SCHEDULED && (
-          <TouchableOpacity style={[styles.primaryBtn, reminderSet && styles.primaryBtnDone]} onPress={onRemind} disabled={reminderSet}>
+        {canRemind && !live && !completed && (
+          <TouchableOpacity
+            style={[styles.primaryBtn, reminderSet && styles.primaryBtnDone]}
+            onPress={onRemind}
+            disabled={reminderSet}
+          >
             <Icon name={reminderSet ? 'checkmark' : 'notifications-outline'} size={responsiveFont(18)} color="#0A0A0C" />
-            <Text style={styles.primaryText}>{reminderSet ? 'Reminder set' : 'Remind me'}</Text>
+            <Text style={styles.primaryText}>{reminderSet ? 'Reminder set' : 'Remind me 10 min before'}</Text>
+          </TouchableOpacity>
+        )}
+
+        {canCancel && (
+          <TouchableOpacity style={styles.linkBtn} onPress={onCancel} disabled={busy}>
+            <Text style={styles.linkText}>{pending ? 'Withdraw challenge' : 'Cancel battle'}</Text>
           </TouchableOpacity>
         )}
 

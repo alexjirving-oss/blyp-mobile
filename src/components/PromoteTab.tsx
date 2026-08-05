@@ -1,11 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../styles/useTheme';
 import type { BlypTheme } from '../styles/blypTheme';
 import { useAuth } from '../hooks/useCommon';
 import BuyCoinsOverlay from './BuyCoinsOverlay';
-import { getPromotePricing, getSpotlightAvailability, promoteBattle, promoteBookSpotlight, promoteBookTimeSlot } from '../api/economyLiveApi';
+import {
+  getPromotePricing,
+  getSpotlightAvailability,
+  promoteBattle,
+  promoteBookSpotlight,
+  promoteBookTimeSlot,
+} from '../api/economyLiveApi';
+import { emitWalletUpdated } from '../utils/walletEvents';
+import { subscribeMyBattles, BATTLE_STATUS } from '../services/battleService';
 import { BLYP_LOGO_GRADIENT_COLORS } from './BlypLogo';
 
 type DurationKey = '1h' | '24h' | '7d';
@@ -14,6 +32,15 @@ type PromotePricing = {
   battle: { coins: number; durationHours: number };
   timeSlot: { per30MinCoins: number };
   spotlight: { coins1h: number; coins24h: number; coins7d: number };
+};
+
+type BattlePick = {
+  id: string;
+  title?: string;
+  opponentName?: string;
+  creatorName?: string;
+  status?: string;
+  scheduledStartAt?: number;
 };
 
 type Props = {
@@ -32,8 +59,36 @@ function formatShort(dtIso: string) {
   }
 }
 
+function formatBattleWhen(ms?: number) {
+  if (!ms) return '';
+  try {
+    return new Date(ms).toLocaleString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
 function makeIdempotencyKey(prefix: string) {
   return `${prefix}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+}
+
+function applyNewBalances(
+  out: any,
+  onCoinsChanged?: (n: number) => void
+) {
+  const coinBalance = Number(out?.newBalances?.coinBalance || 0);
+  const bonusCoinBalance = Number(out?.newBalances?.bonusCoinBalance || 0);
+  const next = coinBalance + bonusCoinBalance;
+  if (Number.isFinite(next)) {
+    onCoinsChanged?.(next);
+    emitWalletUpdated({ coinBalance, bonusCoinBalance });
+  }
 }
 
 export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }: Props) {
@@ -47,6 +102,10 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
 
   const [buyCoinsVisible, setBuyCoinsVisible] = useState(false);
   const [buyCoinsRequired, setBuyCoinsRequired] = useState(0);
+
+  const [myBattles, setMyBattles] = useState<BattlePick[]>([]);
+  const [battleModalOpen, setBattleModalOpen] = useState(false);
+  const [selectedBattleId, setSelectedBattleId] = useState<string | null>(null);
 
   const [slotModalOpen, setSlotModalOpen] = useState(false);
   const [slotNote, setSlotNote] = useState('');
@@ -71,6 +130,19 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
     [currentCoins]
   );
 
+  const handleApiError = useCallback(
+    (e: any, fallback: string, requiredCoins?: number) => {
+      const code = String(e?.code || '');
+      if (code === 'INSUFFICIENT_FUNDS' && requiredCoins != null) {
+        setBuyCoinsRequired(requiredCoins);
+        setBuyCoinsVisible(true);
+        return;
+      }
+      Alert.alert('Error', String(e?.message || fallback));
+    },
+    []
+  );
+
   const refreshPricing = useCallback(async () => {
     if (!uid || !authReady) return;
     try {
@@ -87,39 +159,67 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
     refreshPricing();
   }, [refreshPricing]);
 
+  useEffect(() => {
+    if (!uid) {
+      setMyBattles([]);
+      return undefined;
+    }
+    const unsub = subscribeMyBattles(uid, (rows: any[]) => {
+      const eligible = (rows || []).filter((b) =>
+        [BATTLE_STATUS.PENDING, BATTLE_STATUS.SCHEDULED, BATTLE_STATUS.LIVE].includes(b.status)
+      );
+      setMyBattles(eligible);
+      setSelectedBattleId((prev) => {
+        if (prev && eligible.some((b) => b.id === prev)) return prev;
+        return eligible[0]?.id || null;
+      });
+    });
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [uid]);
+
   const battleCoins = pricing?.battle?.coins ?? 100;
+  const battleHours = pricing?.battle?.durationHours ?? 24;
 
   const onBuyCoinsClose = () => {
     setBuyCoinsVisible(false);
   };
 
-  const handleBattle = async () => {
+  const openBattlePromote = () => {
+    if (!uid) {
+      Alert.alert('Login Required', 'Please log in to promote.');
+      return;
+    }
+    setBattleModalOpen(true);
+  };
+
+  const submitBattlePromote = async () => {
     if (!uid) {
       Alert.alert('Login Required', 'Please log in to promote.');
       return;
     }
     if (!requireCoinsOrOpenOverlay(battleCoins)) return;
 
-    Alert.alert('Got a Battle?', `Promote for ${battleCoins} coins?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Promote',
-        onPress: async () => {
-          setBusy(true);
-          try {
-            const out: any = await promoteBattle({ idempotencyKey: makeIdempotencyKey('promote:battle') });
-            const next = Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
-            if (Number.isFinite(next)) onCoinsChanged?.(next);
-            Alert.alert('Promoted', 'Your battle boost is active.');
-          } catch (e: any) {
-            const msg = String(e?.message || 'Failed to promote');
-            Alert.alert('Error', msg);
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
+    setBusy(true);
+    try {
+      const out: any = await promoteBattle({
+        idempotencyKey: makeIdempotencyKey('promote:battle'),
+        battleRef: selectedBattleId || undefined,
+      });
+      applyNewBalances(out, onCoinsChanged);
+      setBattleModalOpen(false);
+      const ends = out?.endsAt ? formatShort(out.endsAt) : `${battleHours}h`;
+      Alert.alert('Promoted', `Battle boost is active until ${ends}.`);
+    } catch (e: any) {
+      handleApiError(e, 'Failed to promote', battleCoins);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const buildTimeSlotChoices = useMemo(() => {
@@ -133,7 +233,6 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
     for (let i = 0; i < 40; i++) {
       const d = new Date(start);
       d.setMinutes(d.getMinutes() + i * 30);
-      // Keep times in a reasonable window (next ~20 hours).
       out.push(d.toISOString());
     }
     return out;
@@ -172,13 +271,11 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
         durationMinutes: slotDurationMinutes,
         note: slotNote ? slotNote.trim().slice(0, 200) : undefined,
       });
-      const next = Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
-      if (Number.isFinite(next)) onCoinsChanged?.(next);
+      applyNewBalances(out, onCoinsChanged);
       setSlotModalOpen(false);
-      Alert.alert('Booked', 'Your time slot is booked.');
+      Alert.alert('Booked', `Time slot booked for ${formatShort(slotStartIso)}.`);
     } catch (e: any) {
-      const msg = String(e?.message || 'Failed to book');
-      Alert.alert('Error', msg);
+      handleApiError(e, 'Failed to book', timeSlotCost);
     } finally {
       setBusy(false);
     }
@@ -196,7 +293,7 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
       const arr = Array.isArray(out?.availableStartsAt) ? out.availableStartsAt : [];
       setSpotAvail(arr);
       setSpotSelected((prev) => (prev && arr.includes(prev) ? prev : arr[0] || null));
-    } catch (e: any) {
+    } catch {
       setSpotAvail([]);
       setSpotSelected(null);
     }
@@ -237,13 +334,11 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
         startsAt: spotSelected,
         durationKey: spotDuration,
       });
-      const next = Number(out?.newBalances?.coinBalance || 0) + Number(out?.newBalances?.bonusCoinBalance || 0);
-      if (Number.isFinite(next)) onCoinsChanged?.(next);
+      applyNewBalances(out, onCoinsChanged);
       setSpotModalOpen(false);
-      Alert.alert('Booked', 'Your spotlight is booked.');
+      Alert.alert('Booked', `Spotlight booked from ${formatShort(spotSelected)}.`);
     } catch (e: any) {
-      const msg = String(e?.message || 'Failed to book');
-      Alert.alert('Error', msg);
+      handleApiError(e, 'Failed to book', spotlightCost);
     } finally {
       setBusy(false);
     }
@@ -252,41 +347,63 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
   return (
     <View style={styles.container}>
       <Text style={styles.headerTitle}>Promote</Text>
-      <Text style={styles.headerSub}>Boost your content with coins.</Text>
+      <Text style={styles.headerSub}>Spend coins to boost battles, book slots, or take the spotlight.</Text>
 
       <View style={styles.balanceRow}>
         <Text style={styles.balanceLabel}>Your coins</Text>
         <Text style={styles.balanceValue}>{Number(currentCoins || 0).toLocaleString()}</Text>
       </View>
 
-      {pricingErr ? <Text style={styles.errorText}>{pricingErr}</Text> : null}
+      {pricingErr ? (
+        <TouchableOpacity onPress={refreshPricing}>
+          <Text style={styles.errorText}>{pricingErr} — tap to retry</Text>
+        </TouchableOpacity>
+      ) : null}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity style={styles.card} onPress={handleBattle} disabled={busy} activeOpacity={0.9}>
+        <TouchableOpacity style={styles.card} onPress={openBattlePromote} disabled={busy} activeOpacity={0.9}>
           <LinearGradient colors={['#141418', '#1C1C22']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cardGradient}>
-            <Text style={styles.cardTitle}>Got a Battle?</Text>
-            <Text style={styles.cardDesc}>Boost your battle for {battleCoins} coins.</Text>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.cardTitle}>Boost a Battle</Text>
+              <Text style={styles.pricePill}>{battleCoins.toLocaleString()} coins</Text>
+            </View>
+            <Text style={styles.cardDesc}>
+              Feature your upcoming fight for {battleHours}h. Pick which battle to boost.
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.card} onPress={openTimeSlot} disabled={busy} activeOpacity={0.9}>
           <View style={styles.cardPlain}>
-            <Text style={styles.cardTitle}>Book a Time Slot</Text>
-            <Text style={styles.cardDescMuted}>Pick a time for a promoted slot.</Text>
-            <Text style={styles.cardMeta}>From {Number(pricing?.timeSlot?.per30MinCoins ?? 250).toLocaleString()} coins / 30 min</Text>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.cardTitle}>Book a Time Slot</Text>
+              <Text style={styles.pricePillMuted}>
+                From {Number(pricing?.timeSlot?.per30MinCoins ?? 250).toLocaleString()}
+              </Text>
+            </View>
+            <Text style={styles.cardDescMuted}>Reserve a promoted window for your content or live.</Text>
+            <Text style={styles.cardMeta}>Priced per 30 minutes</Text>
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.card} onPress={openSpotlight} disabled={busy} activeOpacity={0.9}>
           <View style={styles.cardPlain}>
-            <Text style={styles.cardTitle}>Ultimate Spotlight</Text>
-            <Text style={styles.cardDescMuted}>Limited spotlight slots in real time.</Text>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.cardTitle}>Ultimate Spotlight</Text>
+              <Text style={styles.pricePillMuted}>Limited</Text>
+            </View>
+            <Text style={styles.cardDescMuted}>Exclusive spotlight windows — only one at a time.</Text>
             <Text style={styles.cardMeta}>
-              1h {Number(pricing?.spotlight?.coins1h ?? 500).toLocaleString()} • 24h {Number(pricing?.spotlight?.coins24h ?? 5000).toLocaleString()} • 7d {Number(pricing?.spotlight?.coins7d ?? 25000).toLocaleString()}
+              1h {Number(pricing?.spotlight?.coins1h ?? 500).toLocaleString()} · 24h{' '}
+              {Number(pricing?.spotlight?.coins24h ?? 5000).toLocaleString()} · 7d{' '}
+              {Number(pricing?.spotlight?.coins7d ?? 25000).toLocaleString()}
             </Text>
           </View>
         </TouchableOpacity>
 
+        <Text style={styles.footnote}>
+          Coins are debited from your live-service wallet instantly. Failed bookings are not charged.
+        </Text>
         <View style={{ height: 24 }} />
       </ScrollView>
 
@@ -297,6 +414,82 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
         currentCoins={Number(currentCoins || 0)}
         navigation={navigation}
       />
+
+      <Modal visible={battleModalOpen} transparent animationType="slide" onRequestClose={() => setBattleModalOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <Text style={styles.modalTitle}>Boost a Battle</Text>
+            <Text style={styles.modalSub}>
+              {battleCoins.toLocaleString()} coins · active for {battleHours} hours
+            </Text>
+
+            <Text style={styles.sectionLabel}>Your battles (optional)</Text>
+            {myBattles.length === 0 ? (
+              <View style={styles.emptyAvail}>
+                <Text style={styles.emptyAvailText}>No upcoming battles — you can still buy a general boost.</Text>
+                <TouchableOpacity
+                  style={styles.linkBtn}
+                  onPress={() => {
+                    setBattleModalOpen(false);
+                    navigation?.navigate?.('CreateBattle');
+                  }}
+                >
+                  <Text style={styles.linkBtnText}>Or prearrange a battle</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
+                <TouchableOpacity
+                  onPress={() => setSelectedBattleId(null)}
+                  style={[styles.battleRow, !selectedBattleId && styles.battleRowActive]}
+                >
+                  <Text style={[styles.battleRowTitle, !selectedBattleId && styles.choiceTextActive]}>
+                    General battle boost
+                  </Text>
+                  <Text style={styles.battleRowMeta}>Not tied to a specific fight</Text>
+                </TouchableOpacity>
+                {myBattles.map((b) => {
+                  const active = selectedBattleId === b.id;
+                  const vs =
+                    b.creatorName && b.opponentName
+                      ? `${b.creatorName} vs ${b.opponentName}`
+                      : b.title || 'Battle';
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      onPress={() => setSelectedBattleId(b.id)}
+                      style={[styles.battleRow, active && styles.battleRowActive]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.battleRowTitle, active && styles.choiceTextActive]} numberOfLines={1}>
+                          {b.title || vs}
+                        </Text>
+                        <Text style={styles.battleRowMeta} numberOfLines={1}>
+                          {formatBattleWhen(b.scheduledStartAt)}
+                          {b.status ? ` · ${b.status}` : ''}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            <Text style={styles.costText}>Cost: {battleCoins.toLocaleString()} coins</Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setBattleModalOpen(false)} style={styles.secondaryBtn} disabled={busy}>
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={submitBattlePromote} style={styles.primaryBtn} disabled={busy}>
+                <LinearGradient colors={BLYP_LOGO_GRADIENT_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primaryBtnGrad}>
+                  {busy ? <ActivityIndicator color={theme.colors.onBrand} /> : <Text style={styles.primaryBtnText}>Promote</Text>}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={slotModalOpen} transparent animationType="slide" onRequestClose={() => setSlotModalOpen(false)}>
         <View style={styles.modalOverlay}>
@@ -345,7 +538,7 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
               </TouchableOpacity>
               <TouchableOpacity onPress={submitTimeSlot} style={styles.primaryBtn} disabled={busy}>
                 <LinearGradient colors={BLYP_LOGO_GRADIENT_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primaryBtnGrad}>
-                  <Text style={styles.primaryBtnText}>Book</Text>
+                  {busy ? <ActivityIndicator color={theme.colors.onBrand} /> : <Text style={styles.primaryBtnText}>Book</Text>}
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -361,11 +554,13 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
 
             <Text style={styles.sectionLabel}>Duration</Text>
             <View style={styles.choiceRowWrap}>
-              {([
-                { key: '1h', label: '1 hour' },
-                { key: '24h', label: '24 hours' },
-                { key: '7d', label: '7 days' },
-              ] as { key: DurationKey; label: string }[]).map((d) => {
+              {(
+                [
+                  { key: '1h', label: '1 hour' },
+                  { key: '24h', label: '24 hours' },
+                  { key: '7d', label: '7 days' },
+                ] as { key: DurationKey; label: string }[]
+              ).map((d) => {
                 const active = spotDuration === d.key;
                 return (
                   <TouchableOpacity
@@ -403,9 +598,9 @@ export default function PromoteTab({ currentCoins, onCoinsChanged, navigation }:
               <TouchableOpacity onPress={() => setSpotModalOpen(false)} style={styles.secondaryBtn} disabled={busy}>
                 <Text style={styles.secondaryBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={submitSpotlight} style={styles.primaryBtn} disabled={busy}>
+              <TouchableOpacity onPress={submitSpotlight} style={styles.primaryBtn} disabled={busy || !spotSelected}>
                 <LinearGradient colors={BLYP_LOGO_GRADIENT_COLORS} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.primaryBtnGrad}>
-                  <Text style={styles.primaryBtnText}>Book</Text>
+                  {busy ? <ActivityIndicator color={theme.colors.onBrand} /> : <Text style={styles.primaryBtnText}>Book</Text>}
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -420,6 +615,7 @@ function createStyles(theme: BlypTheme) {
   return StyleSheet.create({
     container: {
       paddingTop: 8,
+      flex: 1,
     },
     headerTitle: {
       color: theme.colors.textPrimary,
@@ -434,6 +630,8 @@ function createStyles(theme: BlypTheme) {
       textAlign: 'center',
       marginTop: 6,
       marginBottom: 12,
+      paddingHorizontal: 20,
+      lineHeight: 18,
     },
     balanceRow: {
       flexDirection: 'row',
@@ -476,29 +674,61 @@ function createStyles(theme: BlypTheme) {
       padding: 16,
       backgroundColor: theme.colors.surface,
     },
+    cardTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
     cardTitle: {
       color: theme.colors.textPrimary,
       fontSize: 16,
       fontWeight: '900',
+      flex: 1,
+    },
+    pricePill: {
+      color: theme.colors.onBrand,
+      backgroundColor: theme.colors.accent,
+      overflow: 'hidden',
+      fontSize: 11,
+      fontWeight: '900',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 999,
+    },
+    pricePillMuted: {
+      color: theme.colors.textSecondary,
+      fontSize: 11,
+      fontWeight: '800',
     },
     cardDesc: {
       color: theme.colors.textPrimary,
       opacity: 0.9,
-      marginTop: 6,
+      marginTop: 8,
       fontSize: 13,
-      fontWeight: '700',
+      fontWeight: '600',
+      lineHeight: 18,
     },
     cardDescMuted: {
       color: theme.colors.textSecondary,
-      marginTop: 6,
+      marginTop: 8,
       fontSize: 13,
       fontWeight: '600',
+      lineHeight: 18,
     },
     cardMeta: {
       color: theme.colors.textSecondary,
       marginTop: 10,
       fontSize: 12,
       fontWeight: '700',
+    },
+    footnote: {
+      color: theme.colors.textSecondary,
+      fontSize: 11,
+      textAlign: 'center',
+      marginTop: 8,
+      opacity: 0.85,
+      lineHeight: 16,
     },
     modalOverlay: {
       flex: 1,
@@ -510,6 +740,7 @@ function createStyles(theme: BlypTheme) {
       padding: 16,
       borderTopLeftRadius: 18,
       borderTopRightRadius: 18,
+      paddingBottom: 20,
     },
     modalTitle: {
       color: theme.colors.textPrimary,
@@ -552,7 +783,7 @@ function createStyles(theme: BlypTheme) {
       backgroundColor: theme.colors.surface,
     },
     choicePillActive: {
-      borderColor: 'transparent',
+      borderColor: theme.colors.accent,
       backgroundColor: theme.colors.surfaceAlt,
     },
     choiceText: {
@@ -562,6 +793,29 @@ function createStyles(theme: BlypTheme) {
     },
     choiceTextActive: {
       color: theme.colors.textPrimary,
+    },
+    battleRow: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 8,
+      backgroundColor: theme.colors.surface,
+    },
+    battleRowActive: {
+      borderColor: theme.colors.accent,
+      backgroundColor: theme.colors.surfaceAlt,
+    },
+    battleRowTitle: {
+      color: theme.colors.textPrimary,
+      fontWeight: '800',
+      fontSize: 14,
+    },
+    battleRowMeta: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      marginTop: 4,
+      fontWeight: '600',
     },
     input: {
       borderWidth: 1,
@@ -609,22 +863,33 @@ function createStyles(theme: BlypTheme) {
       paddingVertical: 12,
       alignItems: 'center',
       justifyContent: 'center',
+      minHeight: 44,
     },
     primaryBtnText: {
       color: theme.colors.onBrand,
       fontWeight: '900',
     },
     emptyAvail: {
-      paddingVertical: 12,
+      paddingVertical: 14,
       paddingHorizontal: 12,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: theme.colors.border,
       backgroundColor: theme.colors.surface,
+      alignItems: 'center',
     },
     emptyAvailText: {
       color: theme.colors.textSecondary,
       fontWeight: '700',
+    },
+    linkBtn: {
+      marginTop: 10,
+      paddingVertical: 8,
+    },
+    linkBtnText: {
+      color: theme.colors.accent,
+      fontWeight: '800',
+      fontSize: 13,
     },
   });
 }
