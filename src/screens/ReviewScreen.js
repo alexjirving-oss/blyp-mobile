@@ -38,6 +38,39 @@ import speechToTextService from '../services/speechToTextService';
 import geminiSpeechService from '../services/geminiSpeechService';
 import mediaDescriptionService from '../services/mediaDescriptionService';
 import { initialReachState } from '../services/blypReachClient';
+
+/**
+ * Android photo-picker / camera URIs are often short-lived content:// handles.
+ * Copy into app cache immediately so AI polish + later Storage upload still work.
+ */
+async function persistLocalMediaAsset(asset) {
+  if (!asset?.uri || typeof asset.uri !== 'string') return asset;
+  const uri = asset.uri;
+
+  // Durable file:// already — keep it.
+  if (uri.startsWith('file://')) {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (info?.exists && Number(info.size || 0) > 0) return asset;
+    } catch { /* copy below */ }
+  }
+
+  const isVideo = asset.type === 'video' || String(asset.mimeType || '').startsWith('video/');
+  const isAudio = asset.type === 'audio' || String(asset.mimeType || '').startsWith('audio/');
+  const ext = isVideo ? 'mp4' : isAudio ? 'm4a' : 'jpg';
+  const dest = `${FileSystem.cacheDirectory}blyp-media-${Date.now()}-${Math.floor(Math.random() * 1e6)}.${ext}`;
+  try {
+    await FileSystem.copyAsync({ from: uri, to: dest });
+    const info = await FileSystem.getInfoAsync(dest);
+    if (!info?.exists || Number(info.size || 0) <= 0) {
+      throw new Error('persist copy empty');
+    }
+    return { ...asset, uri: dest, localUri: dest };
+  } catch (e) {
+    console.warn('[MEDIA] persistLocalMediaAsset failed; keeping original URI', e?.message || e);
+    return asset;
+  }
+}
 import { COMPOSE_DRAFT_KEY } from '../components/CreatePostButton';
 // Caption orchestrator (smart-merge Option B)
 import { getPreviewCaption, freezeCaption } from '../../caption/orchestrator';
@@ -1357,6 +1390,12 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
   const addMediaFromLibrary = async () => {
     try {
       console.log('🎯 GALLERY FUNCTION CALLED - addMediaFromLibrary starting...');
+
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm?.granted && perm?.accessPrivileges !== 'limited') {
+        Alert.alert('Permission needed', 'Allow Photos/Videos access so Blyp can attach and upload media.');
+        return;
+      }
       
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
@@ -1369,11 +1408,15 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
         setSourceType('gallery');
         console.log('📸 Source set to gallery for', result.assets.length, 'items');
         
-        // Add new media to existing mediaItems
-        const newMediaItems = result.assets.map(asset => ({
+        // Add new media to existing mediaItems (persist URIs first)
+        const mapped = result.assets.map(asset => ({
           ...asset,
           type: asset.type === 'video' ? 'video' : 'photo'
         }));
+        const newMediaItems = [];
+        for (const item of mapped) {
+          newMediaItems.push(await persistLocalMediaAsset(item));
+        }
         
         console.log('📸 Adding media from library:', newMediaItems.length, 'items');
         console.log('📸 New media types:', newMediaItems.map(item => item.type));
@@ -2157,16 +2200,21 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
   // Take Photo — land straight on the composer (no multi-photo gate).
   const handleTakePhoto = async () => {
     try {
+      const cam = await ImagePicker.requestCameraPermissionsAsync();
+      if (!cam?.granted) {
+        Alert.alert('Permission needed', 'Allow Camera access to take a photo.');
+        return;
+      }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
-        const newMediaItem = {
+        const newMediaItem = await persistLocalMediaAsset({
           ...result.assets[0],
           type: 'photo'
-        };
+        });
         console.log('📷 Taking photo - new media item:', { type: newMediaItem.type, uri: newMediaItem.uri?.substring(0, 50) + '...' });
         setSourceType((prev) => prev || 'camera');
         setShowMultiPhotoModal(false);
@@ -2187,16 +2235,21 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
   // Take Video handler  
   const handleTakeVideo = async () => {
     try {
+      const cam = await ImagePicker.requestCameraPermissionsAsync();
+      if (!cam?.granted) {
+        Alert.alert('Permission needed', 'Allow Camera access to record a video.');
+        return;
+      }
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
         quality: 0.8,
       });
 
       if (!result.canceled && result.assets[0]) {
-        const newMediaItem = {
+        const newMediaItem = await persistLocalMediaAsset({
           ...result.assets[0],
           type: 'video'
-        };
+        });
         setSourceType((prev) => prev || 'camera');
         setShowMultiPhotoModal(false);
         setOverlayAlreadyShown(true);
