@@ -236,20 +236,14 @@ function resolveLucide(key) {
   return null;
 }
 
-export default function Icon({ name, size = 24, color, focused = false, style, strokeWidth, fill }) {
+export default function Icon({ name, size = 24, color, focused = false, style, strokeWidth }) {
   const key = (name || '').toString().toLowerCase();
   const lucideName = resolveLucide(key);
   if (lucideName) {
     const Comp = L[lucideName] || L.Circle;
-    const solid = fill != null && fill !== false;
     return (
       <View style={style}>
-        <Comp
-          size={size}
-          color={color}
-          fill={solid ? (fill === true ? color : fill) : 'none'}
-          strokeWidth={strokeWidth ?? (focused ? 2.5 : solid ? 1.5 : 2)}
-        />
+        <Comp size={size} color={color} strokeWidth={strokeWidth ?? (focused ? 2.5 : 2)} />
       </View>
     );
   }
