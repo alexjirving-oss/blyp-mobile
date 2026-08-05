@@ -100,6 +100,7 @@ class ChatRoomService {
         isActive: true,
         tags: roomData.tags || [],
         rules: roomData.rules || [],
+        ambassadors: [],
         hostInfo: {
           uid: this.currentUser.uid,
           displayName: this.currentUser.displayName || 'Anonymous',
@@ -145,8 +146,15 @@ class ChatRoomService {
         }
       });
 
-      // Sort by last activity (most recent first)
-      rooms.sort((a, b) => b.lastActivity - a.lastActivity);
+      // Sort occupancy-first (people before empty), then recent activity.
+      rooms.sort((a, b) => {
+        const ac = Number(a.participantCount) || 0;
+        const bc = Number(b.participantCount) || 0;
+        if (ac > 0 && bc === 0) return -1;
+        if (ac === 0 && bc > 0) return 1;
+        if (bc !== ac) return bc - ac;
+        return b.lastActivity - a.lastActivity;
+      });
       callback(rooms);
     }, (error) => {
       console.error('Error subscribing to rooms:', error);
@@ -286,6 +294,52 @@ class ChatRoomService {
       console.error('Error leaving room:', error);
       throw error;
     }
+  }
+
+  /** Opt-in page ambassador — helps grow empty/low rooms (share + welcome). */
+  async claimAmbassador(roomId) {
+    if (!this.currentUser) throw new Error('User not authenticated');
+
+    const roomRef = doc(db, 'chatRooms', roomId);
+    const roomDoc = await getDoc(roomRef);
+    if (!roomDoc.exists()) throw new Error('Room not found');
+
+    const data = roomDoc.data() || {};
+    const list = Array.isArray(data.ambassadors) ? data.ambassadors : [];
+    if (list.some((a) => a?.uid === this.currentUser.uid || a === this.currentUser.uid)) {
+      return { alreadyAmbassador: true, ambassadors: list };
+    }
+    if (list.length >= 5) {
+      throw new Error('Ambassador slots full');
+    }
+
+    // Ensure membership so firestore rules allow the update.
+    if (!Array.isArray(data.participants) || !data.participants.includes(this.currentUser.uid)) {
+      await updateDoc(roomRef, {
+        participants: arrayUnion(this.currentUser.uid),
+        participantCount: increment(1),
+        lastActivity: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    const entry = {
+      uid: this.currentUser.uid,
+      displayName: this.currentUser.displayName || 'Anonymous',
+      claimedAt: Date.now(),
+    };
+    await updateDoc(roomRef, {
+      ambassadors: arrayUnion(entry),
+      updatedAt: serverTimestamp(),
+      lastActivity: serverTimestamp(),
+    });
+
+    await this.sendMessage(roomId, {
+      text: `${this.currentUser.displayName || 'Someone'} became a page ambassador`,
+      type: 'system',
+    }).catch(() => {});
+
+    return { alreadyAmbassador: false, ambassadors: [...list, entry] };
   }
 
   // Send a message to a chat room

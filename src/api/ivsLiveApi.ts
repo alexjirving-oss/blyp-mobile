@@ -1209,6 +1209,19 @@ export async function joinBattleStageLive(
 // can fall back to watch-only.
 // ============================================================================
 
+export interface RoomAmbassador {
+  uid: string;
+  displayName?: string;
+  claimedAt: number;
+}
+
+export interface RoomIntroPinned {
+  text: string;
+  byUid: string;
+  byName?: string;
+  pinnedAt: number;
+}
+
 export interface RoomSummary {
   roomId: string;
   topicId: string;
@@ -1219,6 +1232,9 @@ export interface RoomSummary {
   isFull: boolean;
   isActive: boolean;
   hasStage: boolean;
+  ambassadors?: RoomAmbassador[];
+  ambassadorCount?: number;
+  introPinned?: RoomIntroPinned | null;
 }
 
 export interface JoinRoomPublisherResponse {
@@ -1241,7 +1257,15 @@ export interface JoinRoomViewerResponse {
 /** Attach a `.code` to live-service errors by scanning the formatted message. */
 function decorateRoomError(err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
-  const known = ['ROOM_FULL', 'ROOM_NOT_FOUND', 'FIRESTORE_UNAVAILABLE', 'ROOM_STAGE_TIMEOUT'];
+  const known = [
+    'ROOM_FULL',
+    'ROOM_NOT_FOUND',
+    'FIRESTORE_UNAVAILABLE',
+    'ROOM_STAGE_TIMEOUT',
+    'AMBASSADOR_FULL',
+    'NOT_AMBASSADOR',
+    'INVALID_INTRO',
+  ];
   const e = err instanceof Error ? err : new Error(msg);
   const hit = known.find((c) => msg.includes(c));
   if (hit) (e as any).code = hit;
@@ -1289,6 +1313,38 @@ export async function leaveRoom(roomId: string): Promise<void> {
 /** Presence heartbeat — keeps the caller's seat from being swept as stale. */
 export async function roomHeartbeat(roomId: string): Promise<void> {
   await callLiveBackend<{ ok: boolean }>('/api/rooms/heartbeat', 'POST', { roomId });
+}
+
+/** Opt-in as a page ambassador for a topic room. */
+export async function claimRoomAmbassador(
+  roomId: string,
+  displayName?: string,
+): Promise<{ ambassadors: RoomAmbassador[]; alreadyAmbassador: boolean; room: RoomSummary }> {
+  try {
+    return await callLiveBackend('/api/rooms/ambassador/claim', 'POST', {
+      roomId,
+      ...(displayName ? { displayName } : {}),
+    });
+  } catch (err) {
+    return decorateRoomError(err);
+  }
+}
+
+/** Pin a short welcome/intro (ambassadors only). */
+export async function pinRoomAmbassadorIntro(
+  roomId: string,
+  text: string,
+  displayName?: string,
+): Promise<{ introPinned: RoomIntroPinned }> {
+  try {
+    return await callLiveBackend('/api/rooms/ambassador/intro', 'POST', {
+      roomId,
+      text,
+      ...(displayName ? { displayName } : {}),
+    });
+  } catch (err) {
+    return decorateRoomError(err);
+  }
 }
 
 // ============================================================================

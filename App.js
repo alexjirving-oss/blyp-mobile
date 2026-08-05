@@ -1211,6 +1211,20 @@ function AppInner() {
             navWhenReady('Blyp', q ? { initialQuery: q } : undefined);
             return;
           }
+          case 'room': {
+            const roomId = parsed.path || parsed.query?.id || parsed.query?.roomId;
+            if (!roomId) return;
+            const title = parsed.query?.t || parsed.query?.title || 'Room';
+            const topicLabel = parsed.query?.topic || '';
+            navWhenReady('Room', { roomId, title, topicLabel });
+            return;
+          }
+          case 'chatroom': {
+            const roomId = parsed.path || parsed.query?.id || parsed.query?.roomId;
+            if (!roomId) return;
+            navWhenReady('ChatRoom', { roomId });
+            return;
+          }
           case 'saved':
             navWhenReady('Saved');
             return;

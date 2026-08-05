@@ -116,4 +116,48 @@ export async function shareUrl(url, title) {
   return safeShare({ title: 'Share link', message: `${lead}${u}`, url: u });
 }
 
-export default { postUrl, postWebUrl, userUrl, blypUrl, sharePost, sharePosts, shareProfile, shareBlyp, shareUrl };
+export const roomUrl = (roomId) => `${SCHEME}room/${encodeURIComponent(String(roomId || ''))}`;
+
+export const roomWebUrl = (room) => {
+  const id = room?.roomId || room?.id;
+  if (!id) return WEB_BASE;
+  const title = pickStr(room?.title, room?.name) || 'a room on Blyp';
+  const topic = pickStr(room?.topicLabel, room?.category);
+  const parts = [`t=${encodeURIComponent(title.slice(0, 140))}`];
+  if (topic) parts.push(`topic=${encodeURIComponent(topic.slice(0, 80))}`);
+  return `${WEB_BASE}/room/${encodeURIComponent(String(id))}?${parts.join('&')}`;
+};
+
+/** Share a topic / chat room invite (HTTPS + deep link fallback in message). */
+export async function shareRoom(room) {
+  const id = room?.roomId || room?.id;
+  if (!id) return false;
+  const title = pickStr(room?.title, room?.name) || 'a room on Blyp';
+  const topic = pickStr(room?.topicLabel, room?.category);
+  const isChat = !!room?.id && !room?.roomId && !room?.topicId;
+  const link = roomWebUrl({ ...room, roomId: id, title });
+  const deep = isChat
+    ? `${SCHEME}chatroom/${encodeURIComponent(String(id))}`
+    : roomUrl(id);
+  const topicBit = topic ? ` (${topic})` : '';
+  return safeShare({
+    title: 'Invite to room',
+    message: `Join “${title}”${topicBit} on Blyp\n${link}\n${deep}`,
+    url: link,
+  });
+}
+
+export default {
+  postUrl,
+  postWebUrl,
+  userUrl,
+  blypUrl,
+  roomUrl,
+  roomWebUrl,
+  sharePost,
+  sharePosts,
+  shareProfile,
+  shareBlyp,
+  shareUrl,
+  shareRoom,
+};

@@ -17,6 +17,8 @@
 //     stageProvisioningAt,                 // short-lived lock while creating stage
 //     publisherCount,                      // derived count of active publishers
 //     occupiedSlots: { "<slotIndex>": uid } // authoritative compact seat map
+//     ambassadors: [{ uid, displayName, claimedAt }]  // page ambassadors (grow/share)
+//     introPinned: { text, byUid, byName, pinnedAt } | null
 //   rooms/{roomId}/participants/{uid}
 //     uid, role: 'participant' | 'viewer', publishing, slotIndex,
 //     displayName, joinedAt, lastSeenAt
@@ -28,6 +30,20 @@ import { logger } from '../config/logger';
 export const DEFAULT_ROOM_CAPACITY = Number(process.env.ROOM_CAPACITY) || 8;
 export const ROOM_STAGE_PROVISION_LOCK_MS = 15_000;
 export const ROOM_PRESENCE_TTL_MS = Number(process.env.ROOM_PRESENCE_TTL_MS) || 45_000;
+export const MAX_ROOM_AMBASSADORS = Number(process.env.ROOM_MAX_AMBASSADORS) || 5;
+
+export interface RoomAmbassador {
+  uid: string;
+  displayName?: string;
+  claimedAt: number;
+}
+
+export interface RoomIntroPinned {
+  text: string;
+  byUid: string;
+  byName?: string;
+  pinnedAt: number;
+}
 
 export interface RoomDoc {
   roomId: string;
@@ -41,6 +57,8 @@ export interface RoomDoc {
   stageProvisioningAt?: number | null;
   publisherCount?: number;
   occupiedSlots?: Record<string, string>;
+  ambassadors?: RoomAmbassador[];
+  introPinned?: RoomIntroPinned | null;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -131,6 +149,8 @@ export async function ensureSeedRooms(): Promise<void> {
       stageProvisioningAt: null,
       publisherCount: 0,
       occupiedSlots: {},
+      ambassadors: [],
+      introPinned: null,
       createdAt: now(),
       updatedAt: now(),
     } satisfies RoomDoc);
@@ -339,6 +359,85 @@ export async function heartbeat(roomId: string, uid: string): Promise<void> {
 // graceful leave (crash, force-quit, lost network). Recomputes occupiedSlots
 // from surviving publisher rows so the authoritative seat map self-heals.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Page ambassadors — light-touch role for empty/low rooms: welcome, share link,
+// optional pinned intro. Not a CMS; capped list on the room doc.
+// ---------------------------------------------------------------------------
+
+export async function claimAmbassador(
+  roomId: string,
+  uid: string,
+  displayName?: string,
+): Promise<{ ambassadors: RoomAmbassador[]; alreadyAmbassador: boolean }> {
+  const fs = db();
+  return fs.runTransaction(async (tx) => {
+    const ref = roomRef(roomId);
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      const err: any = new Error('Room not found');
+      err.code = 'ROOM_NOT_FOUND';
+      throw err;
+    }
+    const room = snap.data() as RoomDoc;
+    const list: RoomAmbassador[] = Array.isArray(room.ambassadors) ? [...room.ambassadors] : [];
+    const existing = list.find((a) => a.uid === uid);
+    if (existing) {
+      return { ambassadors: list, alreadyAmbassador: true };
+    }
+    if (list.length >= MAX_ROOM_AMBASSADORS) {
+      const err: any = new Error('Ambassador slots full');
+      err.code = 'AMBASSADOR_FULL';
+      throw err;
+    }
+    list.push({
+      uid,
+      displayName: displayName || uid,
+      claimedAt: now(),
+    });
+    tx.update(ref, { ambassadors: list, updatedAt: now() });
+    return { ambassadors: list, alreadyAmbassador: false };
+  });
+}
+
+export async function pinRoomIntro(
+  roomId: string,
+  uid: string,
+  text: string,
+  displayName?: string,
+): Promise<RoomIntroPinned> {
+  const fs = db();
+  return fs.runTransaction(async (tx) => {
+    const ref = roomRef(roomId);
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      const err: any = new Error('Room not found');
+      err.code = 'ROOM_NOT_FOUND';
+      throw err;
+    }
+    const room = snap.data() as RoomDoc;
+    const list = Array.isArray(room.ambassadors) ? room.ambassadors : [];
+    if (!list.some((a) => a.uid === uid)) {
+      const err: any = new Error('Only page ambassadors can pin an intro');
+      err.code = 'NOT_AMBASSADOR';
+      throw err;
+    }
+    const trimmed = String(text || '').trim().slice(0, 280);
+    if (!trimmed) {
+      const err: any = new Error('Intro text required');
+      err.code = 'INVALID_INTRO';
+      throw err;
+    }
+    const intro: RoomIntroPinned = {
+      text: trimmed,
+      byUid: uid,
+      byName: displayName || uid,
+      pinnedAt: now(),
+    };
+    tx.update(ref, { introPinned: intro, updatedAt: now() });
+    return intro;
+  });
+}
 
 export async function sweepStaleParticipants(roomId: string, ttlMs = ROOM_PRESENCE_TTL_MS): Promise<number> {
   const fs = db();

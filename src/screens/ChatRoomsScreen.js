@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
 import { COLORS } from '../styles/theme';
+import { shareRoom } from '../services/shareService';
 
 const ROOM_CATEGORIES = [
   { id: 'general', name: 'General', icon: 'chatbubbles-outline', color: '#3b82f6' },
@@ -54,8 +55,8 @@ const ChatRoomsScreen = ({ navigation }) => {
       if (searchQuery.trim()) {
         filteredRooms = filteredRooms.filter(room =>
           room.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          room.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          room.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+          (room.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (room.tags || []).some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
         );
       }
 
@@ -159,6 +160,35 @@ const ChatRoomsScreen = ({ navigation }) => {
     }
   };
 
+  const handleAmbassador = (room) => {
+    const isAmb = (room.ambassadors || []).some(
+      (a) => a?.uid === currentUser?.uid || a === currentUser?.uid
+    );
+    if (isAmb) {
+      shareRoom({ id: room.id, name: room.name, category: room.category });
+      return;
+    }
+    Alert.alert(
+      'Become a page ambassador?',
+      `Help grow “${room.name}” — welcome people and share the invite link.`,
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Yes, I’m in',
+          onPress: async () => {
+            try {
+              await ChatRoomService.claimAmbassador(room.id);
+              await shareRoom({ id: room.id, name: room.name, category: room.category });
+              Alert.alert('You’re a page ambassador', 'Share the room anytime to bring people in.');
+            } catch (error) {
+              Alert.alert('Couldn’t claim', error.message);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const resetForm = () => {
     setRoomName('');
     setRoomDescription('');
@@ -187,8 +217,13 @@ const ChatRoomsScreen = ({ navigation }) => {
 
   const renderRoomItem = ({ item: room }) => {
     const category = ROOM_CATEGORIES.find(cat => cat.id === room.category) || ROOM_CATEGORIES[0];
-    const isUserRoom = room.participants.includes(currentUser?.uid);
+    const isUserRoom = (room.participants || []).includes(currentUser?.uid);
     const canJoin = !isUserRoom && room.participantCount < room.maxParticipants;
+    const empty = (room.participantCount || 0) <= 1;
+    const hasAmbassador = (room.ambassadors || []).length > 0;
+    const isAmb = (room.ambassadors || []).some(
+      (a) => a?.uid === currentUser?.uid || a === currentUser?.uid
+    );
 
     return (
       <TouchableOpacity
@@ -216,6 +251,7 @@ const ChatRoomsScreen = ({ navigation }) => {
                 <View style={styles.roomTitleRow}>
                   <Text style={styles.roomName} numberOfLines={1}>{room.name}</Text>
                   {room.isPrivate && <Icon name="lock-closed" size={16} color="#f59e0b" />}
+                  {hasAmbassador && <Icon name="ribbon-outline" size={16} color="#fbbf24" />}
                 </View>
                 <Text style={styles.roomDescription} numberOfLines={2}>
                   {room.description || 'No description'}
@@ -226,6 +262,21 @@ const ChatRoomsScreen = ({ navigation }) => {
                     {room.participantCount}/{room.maxParticipants} members
                   </Text>
                 </View>
+                {empty ? (
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e?.stopPropagation?.();
+                      handleAmbassador(room);
+                    }}
+                    style={{ marginTop: 8 }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>
+                      {isAmb
+                        ? 'You’re a page ambassador · tap to share'
+                        : 'Would you like to become a page ambassador?'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </View>
 
@@ -259,7 +310,7 @@ const ChatRoomsScreen = ({ navigation }) => {
             </View>
           )}
 
-          {room.tags.length > 0 && (
+          {(room.tags || []).length > 0 && (
             <View style={styles.tagsContainer}>
               {room.tags.slice(0, 3).map((tag, index) => (
                 <View key={index} style={styles.tag}>

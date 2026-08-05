@@ -18,6 +18,8 @@ import {
   joinRoomAsViewer as apiJoinViewer,
   leaveRoom as apiLeaveRoom,
   roomHeartbeat as apiRoomHeartbeat,
+  claimRoomAmbassador as apiClaimAmbassador,
+  pinRoomAmbassadorIntro as apiPinIntro,
 } from '../api/ivsLiveApi';
 
 const ROOMS = 'rooms';
@@ -39,9 +41,14 @@ function publisherCountOf(data) {
   return Object.keys(occupied).length;
 }
 
+function mapAmbassadors(data) {
+  return Array.isArray(data?.ambassadors) ? data.ambassadors : [];
+}
+
 function mapRoom(id, data) {
   const capacity = Number(data?.capacity) || 0;
   const publisherCount = publisherCountOf(data);
+  const ambassadors = mapAmbassadors(data);
   return {
     roomId: data?.roomId || id,
     topicId: data?.topicId || 'other',
@@ -52,12 +59,47 @@ function mapRoom(id, data) {
     isFull: capacity > 0 && publisherCount >= capacity,
     isActive: data?.isActive !== false,
     hasStage: !!data?.stageArn,
+    ambassadors,
+    ambassadorCount: typeof data?.ambassadorCount === 'number' ? data.ambassadorCount : ambassadors.length,
+    introPinned: data?.introPinned || null,
   };
+}
+
+/** Occupancy-first sort: rooms with people before empty, then by count desc. */
+export function sortRoomsByOccupancy(rooms) {
+  return [...(rooms || [])].sort((a, b) => {
+    const ac = Number(a?.publisherCount) || 0;
+    const bc = Number(b?.publisherCount) || 0;
+    if (ac > 0 && bc === 0) return -1;
+    if (ac === 0 && bc > 0) return 1;
+    if (bc !== ac) return bc - ac;
+    return String(a?.title || '').localeCompare(String(b?.title || ''));
+  });
+}
+
+/** Local filter on title / topic / roomId. */
+export function filterRoomsByQuery(rooms, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return rooms || [];
+  return (rooms || []).filter((room) => {
+    const hay = [
+      room?.title,
+      room?.topicLabel,
+      room?.topicId,
+      room?.roomId,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return hay.includes(q);
+  });
 }
 
 /**
  * Group a flat room list into topic sections, ordered by the interest catalogue
  * so the browse screen feels consistent with the rest of the app.
+ * Within each topic, rooms are sorted occupancy-first.
+ * Topics that have occupied rooms float above fully-empty topics.
  */
 export function groupRoomsByTopic(rooms) {
   const byTopic = new Map();
@@ -70,14 +112,30 @@ export function groupRoomsByTopic(rooms) {
   for (const topic of INTEREST_CATALOG) {
     const items = byTopic.get(topic.id);
     if (items && items.length) {
-      sections.push({ topicId: topic.id, topicLabel: topic.label, icon: topic.icon, rooms: items });
+      sections.push({
+        topicId: topic.id,
+        topicLabel: topic.label,
+        icon: topic.icon,
+        rooms: sortRoomsByOccupancy(items),
+      });
       byTopic.delete(topic.id);
     }
   }
   // Any topics not in the catalogue, appended.
   for (const [topicId, items] of byTopic.entries()) {
-    sections.push({ topicId, topicLabel: items[0]?.topicLabel || topicId, icon: 'pricetag', rooms: items });
+    sections.push({
+      topicId,
+      topicLabel: items[0]?.topicLabel || topicId,
+      icon: 'pricetag',
+      rooms: sortRoomsByOccupancy(items),
+    });
   }
+  // Occupied topics first (any room with publishers), then empty topics.
+  sections.sort((a, b) => {
+    const aLive = (a.rooms || []).some((r) => (r.publisherCount || 0) > 0) ? 1 : 0;
+    const bLive = (b.rooms || []).some((r) => (r.publisherCount || 0) > 0) ? 1 : 0;
+    return bLive - aLive;
+  });
   return sections;
 }
 
@@ -162,22 +220,34 @@ export function subscribeRoomParticipants(roomId, cb) {
   }
 }
 
+export function isRoomAmbassador(room, uid) {
+  if (!uid || !room) return false;
+  return (room.ambassadors || []).some((a) => a?.uid === uid);
+}
+
 // Authoritative actions (live-service).
 export const joinRoomAsPublisher = apiJoinPublisher;
 export const joinRoomAsViewer = apiJoinViewer;
 export const leaveRoom = apiLeaveRoom;
 export const roomHeartbeat = apiRoomHeartbeat;
+export const claimRoomAmbassador = apiClaimAmbassador;
+export const pinRoomAmbassadorIntro = apiPinIntro;
 
 export default {
   getTopics,
   topicIconFor,
   groupRoomsByTopic,
+  sortRoomsByOccupancy,
+  filterRoomsByQuery,
   fetchRooms,
   subscribeRooms,
   subscribeRoom,
   subscribeRoomParticipants,
+  isRoomAmbassador,
   joinRoomAsPublisher,
   joinRoomAsViewer,
   leaveRoom,
   roomHeartbeat,
+  claimRoomAmbassador,
+  pinRoomAmbassadorIntro,
 };

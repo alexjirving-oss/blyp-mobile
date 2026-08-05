@@ -175,7 +175,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn()
         && request.resource.data.createdBy == request.auth.uid;
-      allow update, delete: if isSignedIn()
+      // Creator full control; members may join/leave and claim page ambassador.
+      allow update: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid
+        || request.auth.uid in request.resource.data.participants
+        || request.auth.uid in resource.data.participants
+      );
+      allow delete: if isSignedIn()
         && resource.data.createdBy == request.auth.uid;
     }
 
@@ -212,6 +218,9 @@ service cloud.firestore {
     }
 
     // Dating (keep in sync with firestore.wave0-live.rules — deploy source of truth).
+    // Phase 4 may also store: prompts, photoRefs, useProfilePhoto, birthYear,
+    // gender, lookingFor, ageMin, ageMax, maxDistanceKm, geoLat, geoLon, geoUpdatedAt.
+    // hasAll (not hasOnly) so extended profile/filter fields are allowed.
     match /datingPrefs/{uid} {
       allow read: if isSignedIn();
       allow create, update: if isOwner(uid)
@@ -219,7 +228,9 @@ service cloud.firestore {
           'optedIn', 'adultConfirmed', 'adultConfirmedAt', 'bio', 'updatedAt'
         ])
         && request.resource.data.optedIn is bool
-        && request.resource.data.adultConfirmed is bool;
+        && request.resource.data.adultConfirmed is bool
+        && request.resource.data.bio is string
+        && request.resource.data.bio.size() <= 280;
       allow delete: if isOwner(uid);
     }
 

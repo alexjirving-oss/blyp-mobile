@@ -20,6 +20,8 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Alert,
+  TextInput,
+  Modal,
 } from 'react-native';
 import Icon from '../components/Icon';
 import { COLORS } from '../styles/theme';
@@ -27,7 +29,14 @@ import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
 import { useIVSRoomSession } from '../live/ivs/hooks/useIVSRoomSession';
 import { getNativeIVSBroadcastView, getNativeIVSRealTimeView } from '../live/ivs/native/views';
-import { subscribeRoom, subscribeRoomParticipants } from '../services/roomsService';
+import {
+  subscribeRoom,
+  subscribeRoomParticipants,
+  claimRoomAmbassador,
+  pinRoomAmbassadorIntro,
+  isRoomAmbassador,
+} from '../services/roomsService';
+import { shareRoom } from '../services/shareService';
 
 function initialOf(name) {
   return String(name || '?').trim().charAt(0).toUpperCase() || '?';
@@ -49,7 +58,7 @@ function AvatarFallback({ name, label }) {
 }
 
 export default function RoomScreen({ navigation, route }) {
-  const { uid } = useAuth();
+  const { uid, user } = useAuth();
   const roomId = route?.params?.roomId;
   const title = route?.params?.title || 'Room';
   const topicLabel = route?.params?.topicLabel || '';
@@ -59,6 +68,10 @@ export default function RoomScreen({ navigation, route }) {
 
   const [roomDoc, setRoomDoc] = useState(null);
   const [presence, setPresence] = useState([]); // [{ uid, slotIndex, publishing, displayName }]
+  const [claimingAmbassador, setClaimingAmbassador] = useState(false);
+  const [introModal, setIntroModal] = useState(false);
+  const [introDraft, setIntroDraft] = useState('');
+  const [pinning, setPinning] = useState(false);
 
   const session = useIVSRoomSession({ roomId, enabled: !!roomId, displayName: undefined });
   const {
@@ -130,6 +143,64 @@ export default function RoomScreen({ navigation, route }) {
   }, [navigation]);
 
   const publisherCount = seatByIndex.size;
+  const emptyRoom = publisherCount === 0;
+  const amAmbassador = isRoomAmbassador(roomDoc, uid);
+  const displayName = user?.displayName || user?.username || undefined;
+
+  const onShare = useCallback(() => {
+    shareRoom({
+      roomId,
+      title: roomDoc?.title || title,
+      topicLabel: roomDoc?.topicLabel || topicLabel,
+    });
+  }, [roomId, roomDoc, title, topicLabel]);
+
+  const onClaimAmbassador = useCallback(() => {
+    if (!uid) {
+      Alert.alert('Sign in required', 'Sign in to become a page ambassador.');
+      return;
+    }
+    Alert.alert(
+      'Become a page ambassador?',
+      'Welcome people, share the invite link, and optionally pin a short intro. Keep it light — no CMS.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Yes, I’m in',
+          onPress: async () => {
+            setClaimingAmbassador(true);
+            try {
+              await claimRoomAmbassador(roomId, displayName);
+              await shareRoom({
+                roomId,
+                title: roomDoc?.title || title,
+                topicLabel: roomDoc?.topicLabel || topicLabel,
+              });
+            } catch (e) {
+              Alert.alert('Couldn’t claim', e?.message || 'Try again later.');
+            } finally {
+              setClaimingAmbassador(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [uid, roomId, displayName, roomDoc, title, topicLabel]);
+
+  const onPinIntro = useCallback(async () => {
+    const text = introDraft.trim();
+    if (!text) return;
+    setPinning(true);
+    try {
+      await pinRoomAmbassadorIntro(roomId, text, displayName);
+      setIntroModal(false);
+      setIntroDraft('');
+    } catch (e) {
+      Alert.alert('Couldn’t pin intro', e?.message || 'Try again.');
+    } finally {
+      setPinning(false);
+    }
+  }, [introDraft, roomId, displayName]);
 
   const renderTile = (slotId) => {
     const seat = seatByIndex.get(slotId);
@@ -202,11 +273,69 @@ export default function RoomScreen({ navigation, route }) {
           <Icon name="chevron-back" size={responsiveFont(24)} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-          {!!topicLabel && <Text style={styles.headerSub} numberOfLines={1}>{topicLabel} · {publisherCount}/{capacity}</Text>}
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{roomDoc?.title || title}</Text>
+            {amAmbassador ? (
+              <View style={styles.headerAmbassadorBadge}>
+                <Icon name="ribbon-outline" size={responsiveFont(12)} color="#f59e0b" />
+              </View>
+            ) : null}
+          </View>
+          {!!(roomDoc?.topicLabel || topicLabel) && (
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {roomDoc?.topicLabel || topicLabel} · {publisherCount}/{capacity}
+            </Text>
+          )}
         </View>
-        <View style={{ width: responsiveSize(24) }} />
+        <TouchableOpacity onPress={onShare} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Icon name="share-outline" size={responsiveFont(22)} color={COLORS.textPrimary} />
+        </TouchableOpacity>
       </View>
+
+      {roomDoc?.introPinned?.text ? (
+        <View style={styles.introBanner}>
+          <Icon name="pin" size={responsiveFont(14)} color={COLORS.primary} />
+          <Text style={styles.introBannerText} numberOfLines={3}>
+            {roomDoc.introPinned.text}
+            {roomDoc.introPinned.byName ? ` — ${roomDoc.introPinned.byName}` : ''}
+          </Text>
+        </View>
+      ) : null}
+
+      {emptyRoom && !amAmbassador ? (
+        <TouchableOpacity
+          style={styles.emptyAmbassadorBanner}
+          onPress={onClaimAmbassador}
+          disabled={claimingAmbassador}
+        >
+          {claimingAmbassador ? (
+            <ActivityIndicator color={COLORS.primary} />
+          ) : (
+            <>
+              <Icon name="ribbon-outline" size={responsiveFont(18)} color={COLORS.primary} />
+              <Text style={styles.emptyAmbassadorText}>
+                Nobody here yet. Would you like to become a page ambassador?
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      ) : null}
+
+      {amAmbassador ? (
+        <View style={styles.ambassadorDuties}>
+          <Text style={styles.ambassadorDutiesLabel}>Page ambassador</Text>
+          <View style={styles.ambassadorActions}>
+            <TouchableOpacity style={styles.dutyBtn} onPress={onShare}>
+              <Icon name="share-social-outline" size={responsiveFont(14)} color={COLORS.primary} />
+              <Text style={styles.dutyBtnText}>Share invite</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dutyBtn} onPress={() => setIntroModal(true)}>
+              <Icon name="pin-outline" size={responsiveFont(14)} color={COLORS.primary} />
+              <Text style={styles.dutyBtnText}>Pin intro</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       {connectionState === 'connecting' && publisherCount === 0 ? (
         <View style={styles.loading}>
@@ -249,6 +378,36 @@ export default function RoomScreen({ navigation, route }) {
           </TouchableOpacity>
         )}
       </View>
+
+      <Modal visible={introModal} transparent animationType="fade" onRequestClose={() => setIntroModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Pin a welcome intro</Text>
+            <Text style={styles.modalSub}>One short line newcomers see when they open this room.</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={introDraft}
+              onChangeText={setIntroDraft}
+              placeholder="e.g. Welcome — introduce yourself and share your team!"
+              placeholderTextColor={COLORS.textSecondary}
+              multiline
+              maxLength={280}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity onPress={() => setIntroModal(false)}>
+                <Text style={styles.modalCancel}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSave}
+                onPress={onPinIntro}
+                disabled={pinning || !introDraft.trim()}
+              >
+                {pinning ? <ActivityIndicator color="#0A0A0C" /> : <Text style={styles.modalSaveText}>Pin</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -264,9 +423,100 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  headerCenter: { flex: 1, alignItems: 'center' },
-  headerTitle: { color: COLORS.textPrimary, fontWeight: '800', fontSize: responsiveFont(17) },
+  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: responsiveSize(8) },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: responsiveSize(6) },
+  headerTitle: { color: COLORS.textPrimary, fontWeight: '800', fontSize: responsiveFont(17), maxWidth: '90%' },
+  headerAmbassadorBadge: {
+    padding: responsiveSize(2),
+    borderRadius: responsiveSize(8),
+    backgroundColor: 'rgba(245,158,11,0.15)',
+  },
   headerSub: { color: COLORS.textSecondary, fontSize: responsiveFont(12), marginTop: 2 },
+  introBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: responsiveSize(8),
+    marginHorizontal: responsiveSize(16),
+    marginTop: responsiveSize(10),
+    padding: responsiveSize(12),
+    borderRadius: responsiveSize(12),
+    backgroundColor: 'rgba(0,210,190,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.2)',
+  },
+  introBannerText: { flex: 1, color: COLORS.textPrimary, fontSize: responsiveFont(13), lineHeight: responsiveFont(18) },
+  emptyAmbassadorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(10),
+    marginHorizontal: responsiveSize(16),
+    marginTop: responsiveSize(10),
+    padding: responsiveSize(12),
+    borderRadius: responsiveSize(12),
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  emptyAmbassadorText: { flex: 1, color: COLORS.primary, fontWeight: '600', fontSize: responsiveFont(13), lineHeight: responsiveFont(18) },
+  ambassadorDuties: {
+    marginHorizontal: responsiveSize(16),
+    marginTop: responsiveSize(10),
+    gap: responsiveSize(8),
+  },
+  ambassadorDutiesLabel: { color: '#f59e0b', fontWeight: '700', fontSize: responsiveFont(12) },
+  ambassadorActions: { flexDirection: 'row', gap: responsiveSize(8) },
+  dutyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(6),
+    paddingVertical: responsiveSize(8),
+    paddingHorizontal: responsiveSize(12),
+    borderRadius: responsiveSize(20),
+    backgroundColor: 'rgba(0,210,190,0.10)',
+  },
+  dutyBtnText: { color: COLORS.primary, fontWeight: '700', fontSize: responsiveFont(12) },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    padding: responsiveSize(24),
+  },
+  modalCard: {
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: responsiveSize(16),
+    padding: responsiveSize(18),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  modalTitle: { color: COLORS.textPrimary, fontWeight: '800', fontSize: responsiveFont(16) },
+  modalSub: { color: COLORS.textSecondary, fontSize: responsiveFont(12), marginTop: responsiveSize(6), marginBottom: responsiveSize(12) },
+  modalInput: {
+    minHeight: responsiveSize(80),
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: responsiveSize(12),
+    padding: responsiveSize(12),
+    color: COLORS.textPrimary,
+    textAlignVertical: 'top',
+    fontSize: responsiveFont(14),
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: responsiveSize(16),
+    marginTop: responsiveSize(14),
+  },
+  modalCancel: { color: COLORS.textSecondary, fontWeight: '600', fontSize: responsiveFont(14) },
+  modalSave: {
+    backgroundColor: COLORS.primary,
+    borderRadius: responsiveSize(20),
+    paddingVertical: responsiveSize(10),
+    paddingHorizontal: responsiveSize(18),
+    minWidth: responsiveSize(64),
+    alignItems: 'center',
+  },
+  modalSaveText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(14) },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: responsiveSize(10) },
   loadingText: { color: COLORS.textSecondary, fontSize: responsiveFont(13) },
   grid: {

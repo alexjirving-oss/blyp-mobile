@@ -15,6 +15,8 @@ import {
   leaveRoom,
   heartbeatRoom,
   sweepRoom,
+  claimRoomAmbassador,
+  pinAmbassadorIntro,
 } from '../live/roomsService';
 
 const router = Router();
@@ -110,6 +112,46 @@ router.post('/rooms/sweep', async (req: AuthedRequest, res) => {
     res.json({ ok: true, removed });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to sweep room', detail: err?.message });
+  }
+});
+
+// Opt-in page ambassador for empty/low rooms (share, welcome, pin intro).
+router.post('/rooms/ambassador/claim', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub || req.user?.username;
+    if (!userId) return res.status(401).json({ error: 'User not found in token' });
+    const { roomId, displayName } = req.body || {};
+    if (!roomId) return res.status(400).json({ error: 'roomId required' });
+
+    const result = await claimRoomAmbassador(String(roomId), userId, displayName);
+    res.json(result);
+  } catch (err: any) {
+    const code = err?.code || 'UNKNOWN_ERROR';
+    const status =
+      code === 'ROOM_NOT_FOUND' ? 404 : code === 'AMBASSADOR_FULL' ? 409 : 500;
+    res.status(status).json({ error: 'Failed to claim ambassador', code, detail: err?.message });
+  }
+});
+
+// Pin a short intro message (ambassadors only).
+router.post('/rooms/ambassador/intro', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub || req.user?.username;
+    if (!userId) return res.status(401).json({ error: 'User not found in token' });
+    const { roomId, text, displayName } = req.body || {};
+    if (!roomId) return res.status(400).json({ error: 'roomId required' });
+    if (!text) return res.status(400).json({ error: 'text required' });
+
+    const result = await pinAmbassadorIntro(String(roomId), userId, String(text), displayName);
+    res.json(result);
+  } catch (err: any) {
+    const code = err?.code || 'UNKNOWN_ERROR';
+    const status =
+      code === 'ROOM_NOT_FOUND' ? 404
+        : code === 'NOT_AMBASSADOR' ? 403
+          : code === 'INVALID_INTRO' ? 400
+            : 500;
+    res.status(status).json({ error: 'Failed to pin intro', code, detail: err?.message });
   }
 });
 

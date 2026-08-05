@@ -23,7 +23,11 @@ import {
   releaseSlot,
   heartbeat as heartbeatStore,
   sweepStaleParticipants,
+  claimAmbassador as claimAmbassadorStore,
+  pinRoomIntro as pinRoomIntroStore,
   type RoomDoc,
+  type RoomAmbassador,
+  type RoomIntroPinned,
 } from './roomsStore';
 import { logger } from '../config/logger';
 
@@ -33,6 +37,7 @@ function publicRoom(room: RoomDoc) {
   const occupied = room.occupiedSlots || {};
   const publisherCount = typeof room.publisherCount === 'number' ? room.publisherCount : Object.keys(occupied).length;
   const capacity = room.capacity || 0;
+  const ambassadors = Array.isArray(room.ambassadors) ? room.ambassadors : [];
   return {
     roomId: room.roomId,
     topicId: room.topicId,
@@ -43,6 +48,9 @@ function publicRoom(room: RoomDoc) {
     isFull: capacity > 0 && publisherCount >= capacity,
     isActive: !!room.isActive,
     hasStage: !!room.stageArn,
+    ambassadors,
+    ambassadorCount: ambassadors.length,
+    introPinned: room.introPinned || null,
   };
 }
 
@@ -209,4 +217,33 @@ export async function heartbeatRoom(roomId: string, userId: string): Promise<voi
 
 export async function sweepRoom(roomId: string): Promise<number> {
   return sweepStaleParticipants(roomId);
+}
+
+export async function claimRoomAmbassador(
+  roomId: string,
+  userId: string,
+  displayName?: string,
+): Promise<{ ambassadors: RoomAmbassador[]; alreadyAmbassador: boolean; room: ReturnType<typeof publicRoom> }> {
+  const room = await getRoom(roomId);
+  if (!room || !room.isActive) {
+    const err: any = new Error('Room not found or inactive');
+    err.code = 'ROOM_NOT_FOUND';
+    throw err;
+  }
+  const result = await claimAmbassadorStore(roomId, userId, displayName);
+  const fresh = await getRoom(roomId);
+  return {
+    ...result,
+    room: publicRoom(fresh || room),
+  };
+}
+
+export async function pinAmbassadorIntro(
+  roomId: string,
+  userId: string,
+  text: string,
+  displayName?: string,
+): Promise<{ introPinned: RoomIntroPinned }> {
+  const introPinned = await pinRoomIntroStore(roomId, userId, text, displayName);
+  return { introPinned };
 }
