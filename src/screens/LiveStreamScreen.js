@@ -48,6 +48,7 @@ import GiftSystem from '../components/GiftSystem';
 import LiveGiftOverlay from '../components/live/LiveGiftOverlay';
 import BattleOverlay from '../components/Battles/BattleOverlay';
 import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
+import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
 import GuestControlSheet from '../components/live/GuestControlSheet';
 import { markJoined as markBattleJoined, getBattle as getBattleDoc, addGiftScore as addBattleGiftScore } from '../services/battleService';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
@@ -198,6 +199,11 @@ const LiveStreamScreen = (props) => {
   );
   const [showArtillery, setShowArtillery] = useState(false);
 
+  // Marble Race (Guest Grand Prix). Dual-flag dark ship.
+  const MARBLE_ENABLED = /^(1|true|yes|on)$/i.test(
+    String(process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED || '').trim()
+  );
+
   // Floating toggle + full overlay for the artillery battle-stage game. Rendered
   // in both viewer and host battle branches. Opaque so the game reads over video.
   const renderArtilleryLayer = () => {
@@ -241,6 +247,23 @@ const LiveStreamScreen = (props) => {
           Battle game
         </Text>
       </TouchableOpacity>
+    );
+  };
+
+  // Marble Race translucent overlay on multi-guest (non-battle) lives.
+  const renderMarbleLayer = () => {
+    if (!MARBLE_ENABLED || routeBattleId) return null;
+    const gameSessionId = routeStreamId || streamId;
+    if (!gameSessionId) return null;
+    const guestCount = (liveGuests || []).filter((g) => g && g.userId && g.userId !== uid).length;
+    return (
+      <MarbleRaceOverlay
+        sessionId={gameSessionId}
+        isHost={isHost}
+        currentUid={uid}
+        hostName={resolvedHostName || 'Host'}
+        liveGuestCount={guestCount}
+      />
     );
   };
 
@@ -3174,6 +3197,7 @@ const LiveStreamScreen = (props) => {
           <BattleOverlay battleId={routeBattleId} currentUid={uid} onEnded={() => goToSummary()} />
         ) : null}
         {renderArtilleryLayer()}
+        {renderMarbleLayer()}
       </View>
     );
   }
@@ -3805,6 +3829,7 @@ const LiveStreamScreen = (props) => {
                   <BattleOverlay battleId={routeBattleId} currentUid={uid} onEnded={() => goToSummary()} />
                 ) : null}
                 {renderArtilleryLayer()}
+                {renderMarbleLayer()}
 
                 <GuestControlSheet
                   visible={guestControlVisible}

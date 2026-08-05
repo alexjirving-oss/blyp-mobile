@@ -1336,3 +1336,43 @@ export async function artilleryFire(
 export async function artilleryGetState(sessionId: string): Promise<ArtilleryStateEvent> {
   return callLiveBackend<ArtilleryStateEvent>('/api/live-game/artillery/state', 'GET', { sessionId });
 }
+
+// ============================================================================
+// BLYP MARBLE RACE — Guest Grand Prix (server-authoritative live overlay)
+// ============================================================================
+
+export interface MarbleGameEvent {
+  game: 'marble';
+  sessionId: string;
+  type: 'PHASE' | 'SNAPSHOT' | 'BOOST' | 'FINISH' | 'PODIUM' | 'ENDED';
+  version: number;
+  hostUserId: string;
+  state: any;
+}
+
+export async function marbleStart(
+  sessionId: string,
+  opts?: { hostName?: string; racers?: Array<{ userId: string; displayName: string }> }
+): Promise<MarbleGameEvent> {
+  return callLiveBackend<MarbleGameEvent>('/api/live-game/marble/start', 'POST', {
+    sessionId,
+    ...(opts?.hostName ? { hostName: opts.hostName } : {}),
+    ...(opts?.racers ? { racers: opts.racers } : {}),
+  });
+}
+
+export async function marbleNextHeat(sessionId: string): Promise<MarbleGameEvent> {
+  return callLiveBackend<MarbleGameEvent>('/api/live-game/marble/next-heat', 'POST', { sessionId });
+}
+
+export async function marbleEnd(sessionId: string): Promise<MarbleGameEvent> {
+  return callLiveBackend<MarbleGameEvent>('/api/live-game/marble/end', 'POST', { sessionId });
+}
+
+export async function marblePick(sessionId: string, racerUserId: string): Promise<MarbleGameEvent> {
+  return callLiveBackend<MarbleGameEvent>('/api/live-game/marble/pick', 'POST', { sessionId, racerUserId });
+}
+
+export async function marbleGetState(sessionId: string): Promise<MarbleGameEvent> {
+  return callLiveBackend<MarbleGameEvent>('/api/live-game/marble/state', 'GET', { sessionId });
+}

@@ -41,6 +41,12 @@ export function emitGameEvent(streamId: string, payload: any) {
   ioRef.to(`stream:${streamId}`).emit('game_event', payload);
 }
 
+// Blyp Marble Race — dedicated channel so payloads never collide with artillery STATE/SHOT.
+export function emitMarbleGameEvent(streamId: string, payload: any) {
+  if (!ioRef) return;
+  ioRef.to(`stream:${streamId}`).emit('marble_game_event', payload);
+}
+
 // Matchday Live rooms reuse the stream room naming so clients join with
 // streamId = `matchday:{eventId}`.
 export function emitMatchdayEvent(eventId: string, payload: any) {

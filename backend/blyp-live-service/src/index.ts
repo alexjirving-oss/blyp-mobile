@@ -6,6 +6,7 @@ import http from 'http';
 import liveRoutes from './routes/liveRoutes';
 import roomsRoutes from './routes/roomsRoutes';
 import gameRoutes from './routes/gameRoutes';
+import marbleRoutes from './routes/marbleRoutes';
 import economyRoutes from './economy/economyRoutes';
 import internalRoutes from './internal/internalRoutes';
 import adminRoutes from './admin/adminRoutes';
@@ -159,6 +160,9 @@ app.use('/api', roomsRoutes);
 // Blyp Artillery — server-authoritative battle-stage game (gated by
 // LIVE_ARTILLERY_ENABLED inside the router).
 app.use('/api', gameRoutes);
+
+// Blyp Marble Race — Guest Grand Prix overlay (gated by LIVE_MARBLE_RACE_ENABLED).
+app.use('/api', marbleRoutes);
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   // Central error handler to avoid unhandled rejections leaking details

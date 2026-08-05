@@ -8,6 +8,7 @@ import { decodeCursor, encodeCursor } from './cursor';
 import { findIapCatalogEntry } from './iapCatalog';
 import { emitGiftEvent, emitLiveGameEvent, emitGameEvent } from '../realtime/realtimeBus';
 import { applyReviveForReceiver, getRoom } from '../games/artillery/gameRoomService';
+import { applyCheerForReceiver } from '../games/marble/marbleRoomService';
 import { getUserTeamForEarnings, mirrorTeamEarnings, incrementPostGiftTotals } from '../admin/firestoreAdmin';
 import { getSessionById } from '../live/liveSessionStore';
 import { listGuests } from '../live/guestSlotStore';
@@ -1445,6 +1446,24 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       }
     } catch (e: any) {
       logger.warn({ err: e?.message || String(e) }, '[artillery] revive-gift hook failed (non-fatal)');
+    }
+  }
+
+  // Cheer Burst → marble race capped boost (per marble / heat). Best-effort.
+  // applyCheerForReceiver emits marble_game_event BOOST itself.
+  if (
+    result.kind === 'success' &&
+    giftId === 'cheer_burst' &&
+    /^(1|true|yes|on)$/i.test(String(process.env.LIVE_MARBLE_RACE_ENABLED || '').trim())
+  ) {
+    try {
+      await applyCheerForReceiver({
+        sessionId: streamId,
+        receiverUserId,
+        senderUserId,
+      });
+    } catch (e: any) {
+      logger.warn({ err: e?.message || String(e) }, '[marble] cheer_burst hook failed (non-fatal)');
     }
   }
 

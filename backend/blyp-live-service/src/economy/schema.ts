@@ -332,6 +332,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
             { gift_id: 'crown', name: 'Crown', coin_cost: 50, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👑' } },
             { gift_id: 'rocket', name: 'Rocket', coin_cost: 100, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🚀' } },
             { gift_id: 'revive', name: 'Revive', coin_cost: 30, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🛟', action: 'revive' } },
+            { gift_id: 'cheer_burst', name: 'Cheer Burst', coin_cost: 25, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💨', action: 'cheer_burst' } },
           ])
           .onConflict('gift_id')
           .merge(['name', 'coin_cost', 'enabled', 'rarity', 'asset_json']);

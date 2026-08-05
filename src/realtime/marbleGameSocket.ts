@@ -1,0 +1,48 @@
+import { io, type Socket } from 'socket.io-client';
+import { getCognitoJwtForApi } from '../api/getCognitoJwtForApi';
+import { resolveEconomySocketUrl } from '../api/economyLiveApi';
+import type { MarbleGameEvent } from '../api/ivsLiveApi';
+
+export interface MarbleSocketSubscription {
+  close: () => void;
+}
+
+/** Subscribe to server-authoritative Marble Race `marble_game_event`s. */
+export async function subscribeToMarbleGameEvents(
+  sessionId: string,
+  onEvent: (payload: MarbleGameEvent) => void
+): Promise<MarbleSocketSubscription> {
+  const token = await getCognitoJwtForApi({ tokenType: 'id' });
+  const url = resolveEconomySocketUrl();
+
+  const socket: Socket = io(url, {
+    autoConnect: false,
+    transports: ['websocket'],
+    auth: { token },
+  });
+
+  const join = () => {
+    try {
+      socket.emit('join', { streamId: sessionId });
+    } catch {
+      // ignore
+    }
+  };
+
+  socket.on('connect', join);
+  socket.on('marble_game_event', onEvent as any);
+  socket.connect();
+
+  return {
+    close: () => {
+      try {
+        socket.off('marble_game_event', onEvent as any);
+        socket.off('connect', join);
+        socket.emit('leave', { streamId: sessionId });
+        socket.disconnect();
+      } catch {
+        // ignore
+      }
+    },
+  };
+}
