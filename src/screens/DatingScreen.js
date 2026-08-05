@@ -1,6 +1,6 @@
 // DatingScreen.js
 //
-// Blyp Dating — Phase 2: real discovery + like/pass + mutual matches.
+// Blyp Dating — Phase 3: matches deep-link into Messenger (createOrGetDirectThread).
 // Gated by the same subscription package as AI (useHasAI) — no second paywall.
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -23,6 +23,9 @@ import { COLORS } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useHasAI } from '../hooks/useEntitlement';
 import { useAuth } from '../hooks/useCommon';
+import { db } from '../config/firebase';
+import { conversationsMessagingService } from '../services/messaging';
+import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import {
   confirmAdult,
   fetchDiscoveryCards,
@@ -41,7 +44,7 @@ const TABS = [
 ];
 
 const DatingScreen = ({ navigation }) => {
-  const { uid } = useAuth();
+  const { uid, user: authUser, getDisplayName } = useAuth();
   const entitled = useHasAI();
   const [tab, setTab] = useState('discover');
   const [loading, setLoading] = useState(true);
@@ -53,6 +56,7 @@ const DatingScreen = ({ navigation }) => {
   const [reportTarget, setReportTarget] = useState(null);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [chatBusyId, setChatBusyId] = useState(null);
 
   const refreshDiscovery = useCallback(async () => {
     if (!uid) {
@@ -236,6 +240,87 @@ const DatingScreen = ({ navigation }) => {
     );
   }, [current, uid, advanceCard, refreshMatches]);
 
+  const openMatchChat = useCallback(
+    async (item) => {
+      if (!item || chatBusyId) return;
+
+      const otherUserId = item.otherUserId || item.id;
+      if (!otherUserId || item.unavailable) {
+        Alert.alert(
+          'Unavailable',
+          'This person is no longer on Blyp, so chat cannot be opened.',
+        );
+        return;
+      }
+
+      if (!uid) {
+        Alert.alert('Sign in required', 'Please sign in to start a chat.');
+        return;
+      }
+
+      try {
+        setChatBusyId(item.matchId || otherUserId);
+
+        if (!__DEV__) {
+          try {
+            await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
+          } catch (e) {
+            const code = e?.code || e?.name || 'FIREBASE_AUTH_ERROR';
+            const msg = e?.message || String(e);
+            const status = typeof e?.status === 'number' ? ` (HTTP ${e.status})` : '';
+            console.error('[CHAT][AUTH] Firebase auth bridge not ready', {
+              code,
+              msg,
+              status,
+              detail: e?.detail,
+              url: e?.url,
+            });
+            Alert.alert(
+              'Auth Error',
+              `Cannot start chat until Firebase auth is ready.\n\n${code}${status}\n${msg}`,
+            );
+            return;
+          }
+        }
+
+        const meName =
+          (typeof getDisplayName === 'function' ? getDisplayName() : null) ||
+          authUser?.displayName ||
+          authUser?.username ||
+          authUser?.email ||
+          'Unknown';
+        const otherName = item.displayName || item.username || 'Unknown';
+        const otherUser = {
+          id: otherUserId,
+          username: item.username || null,
+          displayName: otherName,
+          photoURL: item.photoURL || null,
+          avatar: item.photoURL || null,
+        };
+
+        const conversationId = await conversationsMessagingService.createOrGetDirectThread(
+          db,
+          uid,
+          otherUserId,
+          meName,
+          otherName,
+        );
+
+        navigation.navigate('ChatConversation', {
+          conversationId,
+          chatId: conversationId,
+          otherUser,
+        });
+      } catch (error) {
+        console.error('Error starting chat from dating match:', error);
+        Alert.alert('Error', 'Failed to start chat. Please try again.');
+      } finally {
+        setChatBusyId(null);
+      }
+    },
+    [uid, chatBusyId, getDisplayName, authUser, navigation],
+  );
+
   if (!entitled) {
     return (
       <ScreenContainer>
@@ -318,28 +403,50 @@ const DatingScreen = ({ navigation }) => {
 
   const showCardStack = prefs.optedIn && current;
 
-  const renderMatch = ({ item }) => (
-    <View style={styles.matchRow}>
-      {item.photoURL ? (
-        <Image source={{ uri: item.photoURL }} style={styles.matchAvatar} />
-      ) : (
-        <View style={[styles.matchAvatar, styles.matchAvatarFallback]}>
-          <Text style={styles.matchAvatarLetter}>
-            {(item.displayName || '?').charAt(0).toUpperCase()}
+  const renderMatch = ({ item }) => {
+    const rowKey = item.matchId || item.id;
+    const opening = chatBusyId === rowKey;
+    const unavailable = !!item.unavailable || !(item.otherUserId || item.id);
+    return (
+      <TouchableOpacity
+        style={[styles.matchRow, unavailable && styles.matchRowMuted]}
+        onPress={() => openMatchChat(item)}
+        activeOpacity={0.85}
+        disabled={!!chatBusyId}
+        accessibilityRole="button"
+        accessibilityLabel={
+          unavailable
+            ? 'Match unavailable'
+            : 'Message ' + (item.displayName || 'match')
+        }
+      >
+        {item.photoURL && !unavailable ? (
+          <Image source={{ uri: item.photoURL }} style={styles.matchAvatar} />
+        ) : (
+          <View style={[styles.matchAvatar, styles.matchAvatarFallback]}>
+            <Text style={styles.matchAvatarLetter}>
+              {(item.displayName || '?').charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
+        <View style={styles.matchCopy}>
+          <Text style={styles.matchName} numberOfLines={1}>
+            {item.displayName}
+          </Text>
+          <Text style={styles.matchMeta} numberOfLines={1}>
+            {item.tagline || 'Matched on Blyp'}
           </Text>
         </View>
-      )}
-      <View style={styles.matchCopy}>
-        <Text style={styles.matchName} numberOfLines={1}>
-          {item.displayName}
-        </Text>
-        <Text style={styles.matchMeta} numberOfLines={1}>
-          {item.tagline || 'Matched on Blyp'}
-        </Text>
-      </View>
-      <Text style={styles.matchSoon}>Chat soon</Text>
-    </View>
-  );
+        {opening ? (
+          <ActivityIndicator color={COLORS.primary} />
+        ) : unavailable ? (
+          <Text style={styles.matchUnavailable}>Unavailable</Text>
+        ) : (
+          <Icon name="chatbubble-outline" size={20} color={COLORS.primary} />
+        )}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <ScreenContainer>
@@ -461,7 +568,7 @@ const DatingScreen = ({ navigation }) => {
                 <Icon name="chatbubbles-outline" size={32} color={COLORS.textMuted} />
                 <Text style={styles.emptyTitle}>No matches yet</Text>
                 <Text style={styles.emptyBody}>
-                  When someone you like likes you back, they will show up here. Messaging from a match lands in Phase 3.
+                  When someone you like likes you back, they will show up here. Tap a match to open Messenger.
                 </Text>
               </View>
             ) : (
@@ -665,6 +772,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
+  matchRowMuted: { opacity: 0.72 },
   matchAvatar: {
     width: 48,
     height: 48,
@@ -679,7 +787,7 @@ const styles = StyleSheet.create({
   matchCopy: { flex: 1, gap: 2 },
   matchName: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '700' },
   matchMeta: { color: COLORS.textSecondary, fontSize: responsiveFont(12) },
-  matchSoon: { color: COLORS.textMuted, fontSize: responsiveFont(12), fontWeight: '600' },
+  matchUnavailable: { color: COLORS.textMuted, fontSize: responsiveFont(12), fontWeight: '600' },
 
   prefRow: {
     flexDirection: 'row',

@@ -170,6 +170,7 @@ async function enrichCard(uid, prefsDoc) {
   let displayName = 'Member';
   let photoURL = null;
   let username = '';
+  let unavailable = false;
   try {
     const userSnap = await db.collection('users').doc(uid).get();
     if (snapExists(userSnap)) {
@@ -183,9 +184,14 @@ async function enrichCard(uid, prefsDoc) {
         (typeof u.photoURL === 'string' && u.photoURL) ||
         (typeof u.avatar === 'string' && u.avatar) ||
         null;
+    } else {
+      unavailable = true;
+      displayName = 'Unavailable';
     }
   } catch {
     /* profile enrich is best-effort */
+    unavailable = true;
+    displayName = 'Unavailable';
   }
   const bio = typeof prefsDoc?.bio === 'string' ? prefsDoc.bio.trim() : '';
   return {
@@ -193,7 +199,10 @@ async function enrichCard(uid, prefsDoc) {
     displayName,
     username,
     photoURL,
-    tagline: bio || (username ? '@' + username : 'On Blyp Dating'),
+    tagline: unavailable
+      ? 'No longer on Blyp'
+      : bio || (username ? '@' + username : 'On Blyp Dating'),
+    unavailable,
     stub: false,
   };
 }
