@@ -167,6 +167,28 @@ async function cacheInvalidateBoard(board: RankingBoardId, window: RankingWindow
   }
 }
 
+async function ensureRankingsSnapshotsTable(): Promise<void> {
+  const { db } = getEconomyInfra();
+  // Idempotent; quotes reserved "window" column.
+  await db.raw(`
+    CREATE TABLE IF NOT EXISTS rankings_snapshots (
+      board text NOT NULL,
+      "window" text NOT NULL,
+      user_id text NOT NULL,
+      rank integer NOT NULL,
+      score bigint NOT NULL DEFAULT 0,
+      display_name text NOT NULL DEFAULT '',
+      photo_url text NOT NULL DEFAULT '',
+      handle text NOT NULL DEFAULT '',
+      computed_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (board, "window", user_id)
+    )
+  `);
+  await db.raw(
+    `CREATE INDEX IF NOT EXISTS idx_rankings_snapshots_board_window_rank ON rankings_snapshots (board, "window", rank)`,
+  );
+}
+
 async function persistSnapshot(
   board: RankingBoardId,
   window: RankingWindow,
@@ -485,6 +507,8 @@ export async function materializeRankingsSnapshots(opts?: {
   const boards = opts?.boards?.length ? opts.boards : ECONOMY_BOARDS;
   const windows = opts?.windows?.length ? opts.windows : WINDOWED;
   const results: RankingMaterializeResult[] = [];
+
+  await ensureRankingsSnapshotsTable();
 
   for (const board of boards) {
     for (const window of windows) {

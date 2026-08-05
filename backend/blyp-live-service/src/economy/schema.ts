@@ -277,9 +277,10 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_ledger_type_created ON ledger_entries (entry_type, created_at DESC)`,
 
         // Durable rankings rollups (P1 query-time writes; P1.5 cron materialize).
+        // "window" is a Postgres reserved word — must be quoted in DDL.
         `CREATE TABLE IF NOT EXISTS rankings_snapshots (
           board text NOT NULL,
-          window text NOT NULL,
+          "window" text NOT NULL,
           user_id text NOT NULL,
           rank integer NOT NULL,
           score bigint NOT NULL DEFAULT 0,
@@ -287,9 +288,9 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           photo_url text NOT NULL DEFAULT '',
           handle text NOT NULL DEFAULT '',
           computed_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (board, window, user_id)
+          PRIMARY KEY (board, "window", user_id)
         )`,
-        `CREATE INDEX IF NOT EXISTS idx_rankings_snapshots_board_window_rank ON rankings_snapshots (board, window, rank)`,
+        `CREATE INDEX IF NOT EXISTS idx_rankings_snapshots_board_window_rank ON rankings_snapshots (board, "window", rank)`,
         // Hard guarantee that a single store purchase token can only ever be
         // redeemed once across the whole system (race-proof double-grant guard).
         // NOTE: use jsonb_exists(metadata, 'purchaseToken') rather than the jsonb
