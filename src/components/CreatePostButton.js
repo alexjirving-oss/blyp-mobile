@@ -57,6 +57,14 @@ const CreatePostButton = () => {
 
   const handlePress = () => {
     if (requireAccount(navigation, 'post or go live')) return;
+    // Dominant path: single tap opens Library (TikTok-class). Long-press opens Create sheet.
+    if (!ensureCanCreate('create a post')) return;
+    console.log('[POST][ENTRY] Plus tap → Library');
+    navigation.navigate('Review', { entryPoint: 'plus_fab', mode: 'library', source: 'gallery' });
+  };
+
+  const handleLongPress = () => {
+    if (requireAccount(navigation, 'post or go live')) return;
     setShowMenu(true);
   };
 
@@ -113,7 +121,13 @@ const CreatePostButton = () => {
   return (
     <>
       <View style={styles.container}>
-        <TouchableOpacity style={styles.button} onPress={handlePress} activeOpacity={0.85}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={handlePress}
+          onLongPress={handleLongPress}
+          delayLongPress={350}
+          activeOpacity={0.85}
+        >
           <View style={styles.fab}>
             <Icon name="add" size={30} color={COLORS.black} />
           </View>

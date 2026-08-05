@@ -40,6 +40,10 @@ import { useTabReset } from '../utils/tabResetBus';
 import { requireAccount } from '../services/guestSessionService';
 import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
 import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
+import {
+  getPendingOptimisticPosts,
+  subscribePostUploads,
+} from '../services/postUploadQueue';
 import { setPostLiked } from '../services/LikeService';
 import { recordPostView, getPostViewCount } from '../services/PostViewService';
 import {
@@ -428,6 +432,47 @@ const HomeScreen = ({ navigation, route }) => {
       } catch { /* no-op */ }
     }
   }, [route?.params?.focusFeed]);
+
+  // Prepend in-flight background publishes (local video URI) until Firestore lands.
+  useEffect(() => {
+    const mergePending = () => {
+      const pending = getPendingOptimisticPosts().filter(isValidFeedPost);
+      if (!pending.length) return;
+      setRandomPosts((prev) => {
+        const have = new Set((prev || []).map((p) => p.id));
+        const cycle = forYouCycleRef.current;
+        const fresh = pending
+          .filter((p) => !have.has(p.id))
+          .map((p) => ({ ...p, feedKey: `${p.id}__${cycle}` }));
+        if (!fresh.length) return prev;
+        const next = [...fresh, ...(prev || [])];
+        randomPostsRef.current = next;
+        setIsEmptyFeed(false);
+        return next;
+      });
+      setVideos((prev) => {
+        const have = new Set((prev || []).map((p) => p.id));
+        const vids = pending.filter(isPlayableVideoPost).filter((p) => !have.has(p.id));
+        return vids.length ? [...vids, ...(prev || [])] : prev;
+      });
+    };
+    mergePending();
+    return subscribePostUploads(() => {
+      mergePending();
+      setRandomPosts((prev) => {
+        const still = new Set(getPendingOptimisticPosts().map((p) => p.id));
+        const next = (prev || []).filter((p) => !p._pendingUpload || still.has(p.id));
+        if (next.length === (prev || []).length) return prev;
+        randomPostsRef.current = next;
+        return next;
+      });
+      setVideos((prev) => {
+        const still = new Set(getPendingOptimisticPosts().map((p) => p.id));
+        const next = (prev || []).filter((p) => !p._pendingUpload || still.has(p.id));
+        return next.length === (prev || []).length ? prev : next;
+      });
+    });
+  }, []);
 
   useEffect(() => {
     uidRef.current = uid || null;

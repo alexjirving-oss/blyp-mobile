@@ -127,6 +127,7 @@ import { isOnboarded, subscribePreferences } from './src/services/userPreference
 import LiveErrorBoundary from './src/components/LiveErrorBoundary';
 import ScreenErrorBoundary from './src/components/ScreenErrorBoundary';
 import GlobalImportProgress from './src/components/GlobalImportProgress';
+import GlobalPostUploadProgress from './src/components/GlobalPostUploadProgress';
 // Lazy screens (defer heavy modules until navigated)
 const ArtilleryGameScreen = React.lazy(() => import('./src/games/artillery/ArtilleryGameScreen'));
 const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
@@ -1350,6 +1351,7 @@ function AppInner() {
             </View>
           )}
           {showApp && <GlobalImportProgress navigationRef={navigationRef} />}
+          {showApp && <GlobalPostUploadProgress />}
           <Toast />
         </NavigationContainer>
       </PerformanceProvider>

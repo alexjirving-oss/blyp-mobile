@@ -21,24 +21,20 @@ import UnifiedVideo from '../components/UnifiedVideo';
 import { Audio } from 'expo-av';
 import { COLORS } from '../styles/theme';
 import * as ImagePicker from 'expo-image-picker';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system/legacy';
-import { db as firestore, auth, storage } from '../config/firebase';
+import { db as firestore, auth } from '../config/firebase';
 import { serverTimestamp } from 'firebase/firestore';
-import { firebaseNative } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
 import { normalizeProfileCategories } from '../utils/profileCategories';
 import { useHasAI, useEntitlement } from '../hooks/useEntitlement';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
-import { uploadMediaToStorage } from '../utils/uploadMediaToStorage';
-import { prepareMediaForUpload } from '../utils/prepareMediaForUpload';
 import Toast from 'react-native-toast-message';
 import BlypLogo from '../components/BlypLogo';
 import aiService from '../services/aiService';
 import speechToTextService from '../services/speechToTextService';
 import geminiSpeechService from '../services/geminiSpeechService';
 import mediaDescriptionService from '../services/mediaDescriptionService';
-import { initialReachState } from '../services/blypReachClient';
+import { enqueuePostUpload } from '../services/postUploadQueue';
 
 /**
  * Android photo-picker / camera URIs are often short-lived content:// handles.
@@ -2335,110 +2331,8 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     });
   };
 
-  const uploadMedia = async (mediaUri, mediaType, fbUser, statusCtx = {}) => {
-    if (!fbUser || !fbUser.uid) {
-      throw new Error('User not authenticated (no Firebase UID)');
-    }
-    const kind = String(mediaType || 'photo').toLowerCase();
-    const itemLabel = statusCtx.itemLabel || 'media';
-    console.log('📤 Starting media upload...');
-    console.log('📤 Media URI:', mediaUri);
-    console.log('📤 Media type:', kind);
-    console.log('📤 Using Firebase UID:', fbUser.uid);
-
-    const fileExtension =
-      kind === 'video' ? 'mp4' : kind === 'audio' ? 'm4a' : 'jpg';
-    const fileName = `${kind}-${Date.now()}.${fileExtension}`;
-    const filePath = `users/${fbUser.uid}/media/${fileName}`;
-    const contentType =
-      kind === 'video' ? 'video/mp4' : kind === 'audio' ? 'audio/m4a' : 'image/jpeg';
-
-    // Compress large videos before Storage (TikTok-style client prep). Soft-fails.
-    let uploadUri = mediaUri;
-    if (kind === 'video') {
-      try {
-        setUploadStatusText(`Compressing ${itemLabel}…`);
-        const prepared = await prepareMediaForUpload(mediaUri, 'video', {
-          onProgress: (p) => {
-            const raw = Number(p) || 0;
-            // Compressor may report 0–1 or 0–100 depending on native build.
-            const pct = Math.min(100, Math.round(raw <= 1 ? raw * 100 : raw));
-            setUploadStatusText(`Compressing ${itemLabel}… ${pct}%`);
-          },
-        });
-        if (prepared?.uri) uploadUri = prepared.uri;
-        console.log('📤 Media prep', {
-          compressed: !!prepared?.compressed,
-          originalBytes: prepared?.originalBytes,
-          compressedBytes: prepared?.compressedBytes,
-          reason: prepared?.reason,
-        });
-      } catch (prepErr) {
-        console.warn('📤 Media prep skipped', prepErr?.message || prepErr);
-      }
-    }
-
-    setUploadStatusText(`Uploading ${itemLabel}…`);
-    const uploadedPromise = uploadMediaToStorage({
-      localUri: uploadUri,
-      storagePath: filePath,
-      contentType,
-      timeoutMs: kind === 'video' ? 180000 : 90000,
-      onProgress: (pct) => {
-        setUploadStatusText(`Uploading ${itemLabel}… ${pct}%`);
-      },
-    });
-
-    let thumbnailUrl = null;
-
-    // TikTok-style: don't serialize thumb after the full video upload — generate
-    // + upload thumb in parallel with the main media so publish isn't 2x wait.
-    let thumbWork = Promise.resolve(null);
-    if (kind === 'video') {
-      thumbWork = (async () => {
-        try {
-          console.log('🎬 Generating video thumbnail (parallel with upload)...');
-          const thumbnailPromise = VideoThumbnails.getThumbnailAsync(mediaUri, {
-            time: 0,
-            quality: 0.55,
-          });
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Thumbnail generation timeout')), 5000)
-          );
-          const { uri: thumbnailUri } = await Promise.race([thumbnailPromise, timeoutPromise]);
-          const thumbnailFileName = `thumbnail-${Date.now()}.jpg`;
-          const thumbPath = `users/${fbUser.uid}/thumbnails/${thumbnailFileName}`;
-          const thumbUploaded = await uploadMediaToStorage({
-            localUri: thumbnailUri,
-            storagePath: thumbPath,
-            contentType: 'image/jpeg',
-            timeoutMs: 30000,
-          });
-          return thumbUploaded.downloadURL;
-        } catch (error) {
-          console.error('⚠️ Failed to generate thumbnail:', error);
-          return null;
-        }
-      })();
-    }
-
-    const [uploaded, thumbResult] = await Promise.all([uploadedPromise, thumbWork]);
-    const downloadURL = uploaded.downloadURL;
-    thumbnailUrl = thumbResult;
-    console.log('📤 Upload complete, download URL:', downloadURL);
-    if (thumbnailUrl) console.log('✅ Thumbnail uploaded:', thumbnailUrl);
-
-    let normalizedType = 'image';
-    if (kind === 'video') normalizedType = 'video';
-    else if (kind === 'audio') normalizedType = 'audio';
-
-    return {
-      url: downloadURL,
-      type: normalizedType,
-      thumbnail: thumbnailUrl || null,
-    };
-  };
-
+  // Background publish: validate + enqueue, then leave Review immediately.
+  // Compress / Storage / posts.add run in postUploadQueue (global banner).
   const handlePost = async () => {
     const hasMedia = Array.isArray(mediaItems) && mediaItems.length > 0;
     if (!caption.trim() && !hasMedia && (!media || !media.uri)) {
@@ -2446,8 +2340,6 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       return;
     }
 
-    // Release builds must have Firebase Auth established before Storage/Firestore.
-    // In DEV we sometimes run with open rules, so we allow skipping.
     if (__DEV__) {
       console.log('[POST][AUTH] DEV: skipping strict Firebase auth gate.');
     } else {
@@ -2466,129 +2358,41 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         return;
       }
     }
-    
-    // Use Firebase user if available, otherwise create mock user with Cognito UID
+
     let fbUser = auth.currentUser;
     if (!fbUser && cognitoUser && __DEV__) {
-      // Create mock Firebase user with Cognito UID for DEV-OPEN rules
-      fbUser = { 
+      fbUser = {
         uid: cognitoUser.getUsername?.() || uid,
         displayName: null,
         email: null,
         photoURL: null,
-        providerId: 'cognito'
+        providerId: 'cognito',
       };
     } else if (!fbUser) {
-      // No Firebase user and no Cognito user
       console.error('❌ No user available for posting');
       Alert.alert('Auth Error', 'You must be logged in to post.');
       return;
     }
-    const appUser = fbUser; // Use Firebase user if available, or Cognito-based mock user
-    
-    console.log('🚀 Starting post creation...');
-    console.log('🚀 Current user (fb||cognito):', appUser);
-    console.log('🚀 User ID:', fbUser?.uid || cognitoUser?.getUsername?.());
-    console.log('🚀 Caption:', caption);
-    console.log('🚀 Media:', media);
-    
+
     if (firebaseSuspended) {
       Alert.alert('Posting Disabled', 'Firebase key suspended. Rotate key before posting.');
       return;
     }
-    if (!appUser) {
+    if (!fbUser?.uid) {
       Alert.alert('Error', 'No Firebase user; cannot post');
       return;
     }
 
-    setIsUploading(true);
-    setUploadStatusText('Preparing your content…');
-    
     try {
-      let uploadedMedia = [];
-      
-      if (mediaItems && mediaItems.length > 0) {
-        console.log(`📤 Starting upload process for ${mediaItems.length} media items...`);
-        
-        for (let i = 0; i < mediaItems.length; i++) {
-          const mediaItem = mediaItems[i];
-          if (mediaItem.uri) {
-            try {
-              const itemLabel =
-                mediaItems.length > 1
-                  ? `${i + 1}/${mediaItems.length}`
-                  : mediaItem.type === 'video'
-                    ? 'video'
-                    : 'photo';
-              console.log(`📤 Uploading media ${i + 1}/${mediaItems.length}... Type: ${mediaItem.type}`);
-              let mediaData;
-              try {
-                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser, { itemLabel });
-              } catch (firstErr) {
-                console.warn(`📤 Media ${i + 1} first attempt failed, retrying once…`, firstErr?.message);
-                setUploadStatusText(`Retrying ${itemLabel}…`);
-                mediaData = await uploadMedia(mediaItem.uri, mediaItem.type, fbUser, { itemLabel });
-              }
-              uploadedMedia.push(mediaData);
-            } catch (uploadError) {
-              // Expanded diagnostics for storage/unknown issues
-              const errObj = uploadError || {};
-              const customData = errObj.customData || errObj._customData || null;
-              const reason = String(errObj.message || errObj.code || 'unknown error').slice(0, 180);
-              const diag = {
-                index: i + 1,
-                code: errObj.code,
-                name: errObj.name,
-                message: errObj.message,
-                customData,
-                customDataJson: customData ? JSON.stringify(customData).slice(0, 500) : null,
-                serverResponse: errObj.serverResponse || errObj.response || (errObj.error && errObj.error.serverResponse),
-                authUid: auth?.currentUser?.uid || null,
-                cognitoUid: uid || null,
-                stack: errObj.stack ? errObj.stack.split('\n').slice(0, 3) : null
-              };
-              console.error(`📤 Media upload ${i + 1} failed`, diag);
-              console.log('📤 Retry/skip decision prompt will appear');
-              
-              // Ask user if they want to continue without this media
-              const continueWithoutMedia = await new Promise((resolve) => {
-                Alert.alert(
-                  'Upload Failed',
-                  `Media upload ${i + 1} failed:\n${reason}\n\nContinue without this file?`,
-                  [
-                    { text: 'Cancel All', onPress: () => resolve(false) },
-                    { text: 'Skip This Media', onPress: () => resolve(true) }
-                  ]
-                );
-              });
-              
-              if (!continueWithoutMedia) {
-                throw new Error('Upload cancelled by user');
-              }
-              
-              console.log(`📤 Skipping failed media ${i + 1}...`);
-            }
-          }
-        }
-        
-        console.log(`📤 Media upload completed: ${uploadedMedia.length}/${mediaItems.length} successful`);
-      }
-
-      // Determine post type based on media
-  const hasVideo = uploadedMedia.some(m => m.type === 'video');
-  const hasImage = uploadedMedia.some(m => m.type === 'image');
-  const hasAudio = uploadedMedia.some(m => m.type === 'audio');
-  const postType = hasVideo ? 'video' : hasImage ? 'image' : hasAudio ? 'audio' : 'text';
-      
-      // Get primary media URLs for compatibility
-      const primaryMedia = uploadedMedia[0];
-  const videoUrl = hasVideo ? primaryMedia?.url : null;
-  const imageUrl = hasImage ? primaryMedia?.url : null;
-  const audioUrl = hasAudio ? primaryMedia?.url : null;
-
-      // Extract thumbnail URL from the primary media
-      const thumbnailUrl = uploadedMedia[0]?.thumbnail;
-      
+      const frozen = freezeCaption(captionState);
+      setCaptionState(frozen);
+      const metadata = preparePostMetadata({
+        captionState: frozen,
+        photos: (mediaItems || [])
+          .filter((m) => m?.type === 'image' || m?.type === 'photo')
+          .map((m, idx) => ({ id: String(idx) })),
+      });
+      const baseCaption = metadata.caption || '';
       const appUserId = String(uid || fbUser?.uid || '').trim() || 'anonymous';
       const displayName =
         fbUser?.displayName ||
@@ -2597,111 +2401,55 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         cognitoUser?.getUsername?.() ||
         'Anonymous';
       const photoURL = fbUser?.photoURL || cognitoUser?.attributes?.picture || null;
-      // Freeze caption before preparing metadata
-      const frozen = freezeCaption(captionState);
-      setCaptionState(frozen);
 
-      // Prepare upload metadata with frozen caption
-      const metadata = preparePostMetadata({
-        captionState: frozen,
-        photos: (uploadedMedia || []).filter(m => m.type === 'image').map((m, idx) => ({ id: String(idx) }))
+      const jobMedia = (mediaItems || [])
+        .filter((m) => m?.uri)
+        .map((m) => ({
+          uri: m.uri,
+          type: m.type === 'video' ? 'video' : m.type === 'audio' ? 'audio' : 'photo',
+        }));
+
+      console.log('[POST] Enqueue background publish', {
+        mediaCount: jobMedia.length,
+        fbUid: fbUser.uid,
+        userId: appUserId,
       });
 
-      // Single source of truth for caption
-      const baseCaption = metadata.caption || '';
-      
-      const postData = {
+      enqueuePostUpload({
+        mediaItems: jobMedia,
+        caption: baseCaption,
+        title: (generatedTitleState && generatedTitleState.trim()) || baseCaption.substring(0, 80) || 'New Post',
+        hashtags: generatedHashtagsState || [],
+        categoryId: selectedCategoryId || null,
+        sharedTo: Object.keys(selectedPlatforms).filter((k) => selectedPlatforms[k]),
         userId: appUserId,
         username: displayName,
         userPhotoURL: photoURL,
-        title: (generatedTitleState && generatedTitleState.trim()) || baseCaption.substring(0, 80) || 'New Post',
-        transcript: baseCaption,
-        description: baseCaption,
-        caption: baseCaption,
-        tags: extractHashtags(baseCaption),
-        hashtags: generatedHashtagsState || [],
-        categoryId: selectedCategoryId || null,
-        emoji: uploadedMedia.length > 0 ? '📸' : '💭',
-        media: uploadedMedia,
-        type: postType, // Add post type
-  videoUrl: videoUrl, // Add direct video URL
-  imageUrl: imageUrl, // Add direct image URL
-  audioUrl: audioUrl, // Add direct audio URL
-        thumbnail: thumbnailUrl || null, // Guard against undefined (Firestore rejects undefined)
-        user: {
-          username: displayName,
-          avatar: photoURL
-        },
-        likes: 0, // Add likes field
-        comments: 0, // Add comments field  
-        shares: 0, // Add shares field
-        sharedTo: Object.keys(selectedPlatforms).filter(k => selectedPlatforms[k]),
-        date: serverTimestamp(),
-        likeCount: 0,
-        commentCount: 0,
-        viewCount: 0,
-        views: 0,
-        giftCoins: 0,
-        giftCount: 0,
-        coinsReceived: 0,
-        // Earn-your-reach: every new post enters audition with a fair, equal start.
-        reach: initialReachState(),
-      };
-
-      console.log('=== SAVING POST TO FIREBASE ===');
-      console.log('Post data:', postData);
-
-      setUploadStatusText('Publishing…');
-      const docRef = await firestore.collection('posts').add(postData);
-      
-      console.log('✅ Post saved successfully with ID:', docRef.id);
-      
-      // Stop upload overlay and navigate immediately
-      setIsUploading(false);
+        fbUid: fbUser.uid,
+      });
 
       try {
         await AsyncStorage.removeItem(COMPOSE_DRAFT_KEY);
       } catch {
         // non-blocking
       }
-      
+
       Toast.show({
-        type: 'success',
-        text1: 'Post created!',
-        text2: 'Your post is now live',
+        type: 'info',
+        text1: 'Publishing…',
+        text2: 'You can keep browsing — upload continues in the background',
         position: 'bottom',
+        visibilityTime: 2200,
       });
-      
-      // Navigate immediately - user doesn't need to wait. Land on the For You
-      // feed (not the HomeBase hub) so the user can actually see posted content (P7.7).
+
+      // Leave Review immediately; GlobalPostUploadProgress shows stage/%.
       navigation.navigate('MainTabs', { screen: 'Home', params: { focusFeed: true } });
-      
-      // Generate AI comments in background (non-blocking, fire-and-forget)
-      console.log('🤖 Starting background AI comment generation for post:', docRef.id);
-      generateAIComments(postData)
-        .then(aiComments => {
-          if (aiComments && aiComments.length > 0) {
-            console.log(`✅ Generated ${aiComments.length} AI comments in background`);
-            setGeneratedComments(aiComments);
-            // Optionally: Update Firestore post with AI comment IDs for future retrieval
-          }
-        })
-        .catch(err => {
-          console.warn('[POST][AI] Background AI comment generation failed', { 
-            postId: docRef.id, 
-            error: err?.message 
-          });
-          // Fail silently - post is already created successfully
-        });
-      
     } catch (error) {
       const code = error?.code || error?.name || 'POST_FAILED';
       const msg = error?.message || String(error);
       const status = typeof error?.status === 'number' ? ` (HTTP ${error.status})` : '';
       console.error('Error posting:', { code, msg, status, error });
       Alert.alert('Error', `Failed to post.\n\n${code}${status}\n${msg}`);
-      setIsUploading(false);
-      setIsGeneratingComments(false);
     }
   };
 
