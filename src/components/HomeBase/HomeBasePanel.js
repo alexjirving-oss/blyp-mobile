@@ -106,6 +106,7 @@ const INTEREST_PROMPTS = {
 const QUICK_ACTIONS = [
   { id: 'blyp', label: 'blyp it', icon: 'sparkles', route: 'Blyp' },
   { id: 'live', label: 'Go live', icon: 'radio', route: 'LiveStreamScreen', params: { mode: 'host', source: 'home_base' } },
+  { id: 'rankings', label: 'Rankings', icon: 'trophy', route: 'Rankings' },
   { id: 'dating', label: 'Dating', icon: 'heart', route: 'Dating' },
   { id: 'games', label: 'Games', icon: 'game-controller', route: 'Games' },
   { id: 'saved', label: 'Saved', icon: 'bookmark', route: 'Saved' },

@@ -59,6 +59,7 @@ import {
   reactMatchday,
   settleMatchdayPredictions,
 } from './matchdayService';
+import { getRankingBoard, listRankingBoardsMeta } from './rankingsService';
 import { EconomyError, toEconomyError } from './economyErrors';
 import { getEconomyInfra } from './infra';
 import { logger } from '../config/logger';
@@ -521,6 +522,30 @@ router.get('/economy/matchday/leaderboard', async (req: AuthedRequest, res) => {
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const eventId = typeof req.query?.eventId === 'string' ? req.query.eventId.trim() : '';
     const out = await getMatchdayLeaderboard(eventId || undefined);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+// Global rankings hub (Phase 0): denormalized wallet / follower counters.
+router.get('/economy/rankings/boards', async (req: AuthedRequest, res) => {
+  try {
+    if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    res.json({ boards: listRankingBoardsMeta() });
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/economy/rankings', async (req: AuthedRequest, res) => {
+  try {
+    if (!req.user?.sub) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const board = typeof req.query?.board === 'string' ? req.query.board.trim() : '';
+    const limit = req.query?.limit;
+    const out = await getRankingBoard(board, limit);
     res.json(out);
   } catch (e: any) {
     const err = toEconomyError(e);

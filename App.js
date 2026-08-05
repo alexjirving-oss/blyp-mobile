@@ -151,6 +151,7 @@ const SavedScreen = React.lazy(() => import('./src/screens/SavedScreen'));
 const ActivityScreen = React.lazy(() => import('./src/screens/ActivityScreen'));
 const YourBlypScreen = React.lazy(() => import('./src/screens/YourBlypScreen'));
 const DatingScreen = React.lazy(() => import('./src/screens/DatingScreen'));
+const RankingsHubScreen = React.lazy(() => import('./src/screens/RankingsHubScreen'));
 const CreateBattleScreen = React.lazy(() => import('./src/screens/CreateBattleScreen'));
 const BattleDetailScreen = React.lazy(() => import('./src/screens/BattleDetailScreen'));
 const BattleLeaderboardScreen = React.lazy(() => import('./src/screens/BattleLeaderboardScreen'));
@@ -486,6 +487,11 @@ function AppStack() {
       <Stack.Screen name="Dating" children={(navProps) => (
         <Suspense fallback={null}>
           <DatingScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Rankings" children={(navProps) => (
+        <Suspense fallback={null}>
+          <RankingsHubScreen {...navProps} />
         </Suspense>
       )} />
       <Stack.Screen name="CreateBattle" children={(navProps) => (
