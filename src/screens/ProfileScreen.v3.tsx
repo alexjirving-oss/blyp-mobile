@@ -194,7 +194,7 @@ const ProfileScreenV3: React.FC = () => {
 
   // Guided tour: focus Promote / My Profile without fighting local tab state.
   useEffect(() => {
-    return subscribeTourSelect((payload) => {
+    return subscribeTourSelect((payload: { screen?: string; tab?: string }) => {
       if (payload?.screen !== 'Profile' || !payload?.tab) return;
       setActiveTab(String(payload.tab));
     });

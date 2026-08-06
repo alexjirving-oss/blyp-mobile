@@ -351,7 +351,7 @@ export default function PromoteTab({
 
   return (
     <View style={styles.root}>
-      <TourTarget id="promote.studio">
+      <TourTarget id="promote.studio" style={{}}>
         <LinearGradient colors={[...BLYP_LOGO_GRADIENT_COLORS]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
           <Text style={styles.heroEyebrow}>Creator growth</Text>
           <Text style={styles.heroTitle}>Promote Studio</Text>

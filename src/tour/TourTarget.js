@@ -7,6 +7,9 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { View } from 'react-native';
 import { clearTourTarget, setTourTarget } from './tourTargets';
 
+/**
+ * @param {{ id?: string, children?: any, style?: any }} [props]
+ */
 export default function TourTarget({ id, children, style, ...rest }) {
   const ref = useRef(null);
 
