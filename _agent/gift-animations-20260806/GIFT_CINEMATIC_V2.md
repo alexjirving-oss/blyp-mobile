@@ -1,8 +1,12 @@
 # Blyp Gift Cinematic V2 — Motion Bible
 
+> **SUPERSEDED as hero presentation (2026-08-06):** Skia geometric V2 was rejected as “moving emojis.”  
+> Heroes now use authored **film clips** — see **`GIFT_FILM_CLIPS.md`**.  
+> Skia scenes remain as cheap fallback only.
+
 **Date:** 2026-08-06  
 **Worktree:** `C:\Users\Alex\Blyp26-eas-modern`  
-**Status:** V2 player + 5 hero Skia cinemas shipped  
+**Status:** Skia V2 kept as fallback; film clips are primary  
 **Supersedes craft bar of:** P0 `1fe0dcd` (teal particle / emoji overlays — **rejected**)
 
 Companion canvas: `gift-animations-system.canvas.tsx`
@@ -15,8 +19,8 @@ Companion canvas: `gift-animations-system.canvas.tsx`
 |-------|--------|
 | “Rival Disney / Pixar” **in-app** | Theatrical **gift cinema**: authored timelines, stage lighting, impact frames, hold-for-glory, diegetic chrome, 60fps Skia choreography |
 | True Pixar film renders | **Impossible** as RN particles. Needs EXR/USD, LookDev, film comp, proprietary render farms |
-| What we ship now | Procedural Skia vector heroes + Reanimated phase clock — **not** emoji shocks |
-| What still needs a motion designer | Alpha WebM/MP4 per Ultimate SKU, Rive state machines, authored SFX beds, HDR grade LUTs, hand-keyed secondary animation |
+| What we ship now (heroes) | **Film clips** via `GiftFilmPlayer` — see `GIFT_FILM_CLIPS.md`. Skia = fallback only |
+| What still needs a motion designer | Higher-craft plates, Rive state machines, authored SFX beds, HDR grade LUTs, hand-keyed secondary animation |
 
 **In-app Pixar-rival = gasp from craft of timing, light, and silhouette — not claiming we shipped Toy Story frames.**
 

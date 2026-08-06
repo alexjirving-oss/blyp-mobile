@@ -141,6 +141,7 @@ export const GIFT_MOTION = {
     motif: 'flame_column',
     cinemaId: 'fire',
     cinematicV2: true,
+    filmClip: true,
     palette: ['#7C2D12', ENERGY_RED, ENERGY_ORANGE],
     particles: ['🔥', '✨', '💥'],
     audioKey: 'gift_fire',
@@ -169,6 +170,7 @@ export const GIFT_MOTION = {
     motif: 'crystal_prism',
     cinemaId: 'diamond',
     cinematicV2: true,
+    filmClip: true,
     palette: ['#0E7490', CRYSTAL, TEAL_LIGHT],
     particles: ['💎', '✨', '💠'],
     audioKey: 'gift_diamond',
@@ -184,6 +186,7 @@ export const GIFT_MOTION = {
     motif: 'stadium_wave',
     cinemaId: 'cheer_burst',
     cinematicV2: true,
+    filmClip: true,
     palette: [TEAL_DARK, TEAL, ENERGY_ORANGE],
     particles: ['💨', '👏', '✨'],
     audioKey: 'gift_cheer',
@@ -212,6 +215,7 @@ export const GIFT_MOTION = {
     motif: 'regal_drop',
     cinemaId: 'crown',
     cinematicV2: true,
+    filmClip: true,
     palette: ['#92400E', GOLD, TEAL],
     particles: ['👑', '✨', '⭐'],
     audioKey: 'gift_crown',
@@ -227,6 +231,7 @@ export const GIFT_MOTION = {
     motif: 'orbital_launch',
     cinemaId: 'rocket',
     cinematicV2: true,
+    filmClip: true,
     palette: [INK, TEAL, ENERGY_ORANGE],
     particles: ['🚀', '✨', '🔥', '💫'],
     audioKey: 'gift_rocket',
@@ -234,8 +239,9 @@ export const GIFT_MOTION = {
   },
 };
 
-/** Hero gifts that use GiftCinematicPlayer (Skia cinema), not emoji overlays. */
+/** Hero gifts that use GiftCinematicPlayer (film clips, Skia fallback). */
 export const CINEMATIC_V2_IDS = Object.keys(GIFT_MOTION).filter((k) => GIFT_MOTION[k].cinematicV2);
+export const FILM_CLIP_IDS = Object.keys(GIFT_MOTION).filter((k) => GIFT_MOTION[k].filmClip);
 
 export function resolveMotion(giftId, fallback = {}) {
   const key = String(giftId || '').toLowerCase();
@@ -384,9 +390,23 @@ export function getFxBudget() {
 }
 
 /**
- * Full duration for cinematic V2 heroes (longer glory hold than P0 emoji path).
+ * Full duration for cinematic V2 heroes.
+ * Film-clip path: authored MP4 length + glory freeze + chrome.
+ * Skia fallback: longer procedural hold than P0 emoji path.
  */
 export function cinemaHoldMs(motion) {
+  // Lazy require avoids circular import at module init
+  try {
+    // eslint-disable-next-line global-require
+    const { FILM_CLIP_META } = require('./filmClipRegistry');
+    const id = motion?.cinemaId || motion?.giftId;
+    const meta = id ? FILM_CLIP_META[id] : null;
+    if (meta && motion?.filmClip !== false) {
+      return meta.durationMs + meta.gloryMs + 400;
+    }
+  } catch {
+    // fall through to Skia timing
+  }
   const tier = getTierConfig(motion?.motionTier);
   const base = {
     mid: 2200,

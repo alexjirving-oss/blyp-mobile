@@ -1,5 +1,6 @@
 /**
  * Registry for cinematic V2 Skia hero scenes.
+ * Used only as fallback when a film clip is missing (see filmClipRegistry.js).
  */
 
 import RocketCinema from './RocketCinema';
