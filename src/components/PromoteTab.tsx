@@ -345,7 +345,7 @@ export default function PromoteTab({
 
   const liveBattles = battles.filter((b) => {
     const s = String(b.status || '').toUpperCase();
-    return s !== 'ENDED' && s !== 'CANCELLED' && s !== String(BATTLE_STATUS?.ENDED || 'ENDED');
+    return s !== 'ENDED' && s !== 'CANCELLED' && s !== String(BATTLE_STATUS?.COMPLETED || 'COMPLETED').toUpperCase() && s !== 'COMPLETED';
   });
 
   return (
@@ -555,7 +555,7 @@ export default function PromoteTab({
         </View>
       </Modal>
 
-      <BuyCoinsOverlay visible={buyOpen} onClose={() => setBuyOpen(false)} />
+      <BuyCoinsOverlay visible={buyOpen} onClose={() => setBuyOpen(false)} requiredCoins={Number(selectedPkg?.coins) || 0} currentCoins={Number(currentCoins) || 0} navigation={_navigation} />
     </View>
   );
 }
@@ -570,17 +570,17 @@ function createStyles(theme: BlypTheme) {
     heroSub: { color: 'rgba(0,0,0,0.65)', fontSize: 13, marginTop: 4 },
     heroCoins: { marginTop: 10, color: '#0b0b0b', fontWeight: '800', fontSize: 14 },
     tabRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-    tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: c.backgroundCard, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
+    tabBtn: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: c.surface, borderWidth: 1, borderColor: c.border, alignItems: 'center' },
     tabBtnOn: { borderColor: c.primary, backgroundColor: c.primary + '22' },
     tabText: { color: c.textSecondary, fontWeight: '700', fontSize: 13 },
     tabTextOn: { color: c.textPrimary },
     catRow: { gap: 8, paddingBottom: 10 },
-    catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: c.border, backgroundColor: c.backgroundCard, marginRight: 8 },
+    catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, marginRight: 8 },
     catChipOn: { borderColor: c.primary, backgroundColor: c.primary + '22' },
     catText: { color: c.textSecondary, fontWeight: '700', fontSize: 12 },
     catTextOn: { color: c.textPrimary },
     listPad: { paddingBottom: 40, gap: 10 },
-    card: { backgroundColor: c.backgroundCard, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, marginBottom: 10 },
+    card: { backgroundColor: c.surface, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: c.border, marginBottom: 10 },
     cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
     cardTitle: { color: c.textPrimary, fontSize: 16, fontWeight: '800', flex: 1 },
     cardPrice: { color: c.primary, fontWeight: '800', fontSize: 13 },
@@ -594,12 +594,12 @@ function createStyles(theme: BlypTheme) {
     modalClose: { color: c.primary, fontWeight: '700' },
     sectionLabel: { color: c.textMuted, fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginTop: 14, marginBottom: 8, textTransform: 'uppercase' },
     rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    pkgChip: { borderWidth: 1, borderColor: c.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: c.backgroundCard, marginBottom: 4 },
+    pkgChip: { borderWidth: 1, borderColor: c.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: c.surface, marginBottom: 4 },
     pkgChipOn: { borderColor: c.primary, backgroundColor: c.primary + '22' },
     pkgLabel: { color: c.textPrimary, fontWeight: '700', fontSize: 13 },
     pkgCoins: { color: c.textSecondary, fontSize: 11, marginTop: 2 },
     reach: { color: c.primary, fontWeight: '700', marginTop: 10, fontSize: 13 },
-    pickRow: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.backgroundCard, marginBottom: 8 },
+    pickRow: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, marginBottom: 8 },
     pickRowOn: { borderColor: c.primary, backgroundColor: c.primary + '18' },
     pickTitle: { color: c.textPrimary, fontWeight: '700', fontSize: 14 },
     pickSub: { color: c.textSecondary, fontSize: 12, marginTop: 2 },
@@ -607,7 +607,7 @@ function createStyles(theme: BlypTheme) {
     tinyChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: c.border, marginRight: 6, marginBottom: 6 },
     tinyChipOn: { borderColor: c.primary, backgroundColor: c.primary + '22' },
     tinyText: { color: c.textPrimary, fontSize: 12, fontWeight: '600' },
-    noteInput: { borderWidth: 1, borderColor: c.border, borderRadius: 12, padding: 12, color: c.textPrimary, minHeight: 72, textAlignVertical: 'top', backgroundColor: c.backgroundCard },
+    noteInput: { borderWidth: 1, borderColor: c.border, borderRadius: 12, padding: 12, color: c.textPrimary, minHeight: 72, textAlignVertical: 'top', backgroundColor: c.surface },
     cta: { marginTop: 18, backgroundColor: c.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
     ctaText: { color: '#0b0b0b', fontWeight: '900', fontSize: 15 },
   });

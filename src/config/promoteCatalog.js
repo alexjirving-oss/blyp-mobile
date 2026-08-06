@@ -262,10 +262,10 @@ export function formatReachPreview(estimate) {
   if (!estimate) return 'Reach preview unavailable';
   const fmt = (n) => {
     const v = Number(n) || 0;
-    if (v >= 1000) return ${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k;
+    if (v >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k`;
     return String(Math.round(v));
   };
-  return Est. – ;
+  return `Est. ${fmt(estimate.low)} - ${fmt(estimate.high)}`;
 }
 
 export default {
