@@ -1,0 +1,6 @@
+﻿_frames/
+_frames_studio/
+_encode_work/
+_qc/
+*.log
+hdri/*.hdr

@@ -1,5 +1,6 @@
 /**
  * Authored cinematic film clips for hero gifts.
+ * Prefer AlphaPlayer-style RGB|Alpha split MP4 when present;
  * Skia scenes remain as fallback when a clip module is missing.
  */
 
@@ -11,7 +12,7 @@ export const FILM_CLIP_META = {
     gloryMs: 1000,
     impactAt: 0.28,
     loopOnce: true,
-    composite: 'darkKeyScreen',
+    composite: 'alphaSplitRgbLeft',
     storyBeat: 'Metallic rocket ignition → ascent streak → apex star detonation.',
   },
   crown: {
@@ -21,7 +22,7 @@ export const FILM_CLIP_META = {
     gloryMs: 1100,
     impactAt: 0.42,
     loopOnce: true,
-    composite: 'darkKeyScreen',
+    composite: 'alphaSplitRgbLeft',
     storyBeat: 'Jeweled gold crown descends on light shaft → contact glitter storm.',
   },
   diamond: {
@@ -31,7 +32,7 @@ export const FILM_CLIP_META = {
     gloryMs: 1100,
     impactAt: 0.34,
     loopOnce: true,
-    composite: 'darkKeyScreen',
+    composite: 'alphaSplitRgbLeft',
     storyBeat: 'Crystal rotates with caustic flashes → prism beams → shatter bloom.',
   },
   cheer_burst: {
@@ -41,7 +42,7 @@ export const FILM_CLIP_META = {
     gloryMs: 1100,
     impactAt: 0.3,
     loopOnce: true,
-    composite: 'darkKeyScreen',
+    composite: 'alphaSplitRgbLeft',
     storyBeat: 'Confetti cannon → stadium light streaks → teal/gold celebration wash.',
   },
   fire: {
@@ -51,12 +52,25 @@ export const FILM_CLIP_META = {
     gloryMs: 1100,
     impactAt: 0.3,
     loopOnce: true,
-    composite: 'darkKeyScreen',
+    composite: 'alphaSplitRgbLeft',
     storyBeat: 'Ember floor → luminous flame column → heat bloom + ember rain.',
   },
 };
 
-/** Metro-bundled MP4 modules (H.264 / yuv420p). */
+/**
+ * Drop-in contract:
+ *   assets/gifts/cinema/alpha/{id}.mp4
+ *   layout: side-by-side RGB | Alpha (YYEVA), 720×1280 subject → 1440×1280 file
+ */
+export const ALPHA_CLIPS = {
+  rocket: require('../../../../assets/gifts/cinema/alpha/rocket.mp4'),
+  crown: require('../../../../assets/gifts/cinema/alpha/crown.mp4'),
+  diamond: require('../../../../assets/gifts/cinema/alpha/diamond.mp4'),
+  cheer_burst: require('../../../../assets/gifts/cinema/alpha/cheer_burst.mp4'),
+  fire: require('../../../../assets/gifts/cinema/alpha/fire.mp4'),
+};
+
+/** Dark-key / RGB-on-black Metro-bundled MP4 modules (H.264 / yuv420p). */
 export const FILM_CLIPS = {
   rocket: require('../../../../assets/gifts/cinema/clips/rocket.mp4'),
   crown: require('../../../../assets/gifts/cinema/clips/crown.mp4'),
@@ -64,6 +78,25 @@ export const FILM_CLIPS = {
   cheer_burst: require('../../../../assets/gifts/cinema/clips/cheer_burst.mp4'),
   fire: require('../../../../assets/gifts/cinema/clips/fire.mp4'),
 };
+
+export function resolveAlphaClip(motion) {
+  const id = motion?.cinemaId || motion?.giftId;
+  if (!id || !ALPHA_CLIPS[id]) return null;
+  return {
+    id,
+    module: ALPHA_CLIPS[id],
+    meta: {
+      ...(FILM_CLIP_META[id] || {
+        cinemaId: id,
+        durationMs: 3000,
+        gloryMs: 900,
+        impactAt: 0.25,
+      }),
+      composite: 'alphaSplitRgbLeft',
+      layout: 'splitHorizontalRgbLeftAlphaRight',
+    },
+  };
+}
 
 export function resolveFilmClip(motion) {
   const id = motion?.cinemaId || motion?.giftId;
@@ -81,5 +114,9 @@ export function resolveFilmClip(motion) {
 }
 
 export function hasFilmClip(motion) {
-  return !!resolveFilmClip(motion);
+  return !!resolveFilmClip(motion) || !!resolveAlphaClip(motion);
+}
+
+export function hasAlphaClip(motion) {
+  return !!resolveAlphaClip(motion);
 }

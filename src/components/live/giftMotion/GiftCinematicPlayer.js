@@ -37,8 +37,9 @@ import {
 } from './giftMotionSystem';
 import { resolveCinemaScene } from './scenes/cinemaRegistry';
 import { impactPulse } from './scenes/cinemaHelpers';
-import { resolveFilmClip } from './filmClipRegistry';
+import { resolveAlphaClip, resolveFilmClip } from './filmClipRegistry';
 import GiftFilmPlayer from './GiftFilmPlayer';
+import GiftAlphaFilmPlayer from './GiftAlphaFilmPlayer';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
@@ -83,9 +84,17 @@ function fireAftershock() {
  */
 export default function GiftCinematicPlayer({ entry, onSkip, onDone }) {
   const motion = entry?.motion;
+  const alpha = useMemo(() => resolveAlphaClip(motion), [motion]);
   const film = useMemo(() => resolveFilmClip(motion), [motion]);
 
-  // Primary path: authored cinematic MP4 clips
+  // Preferred: true soft-edge alpha (YYEVA RGB|A split → WebGL composite)
+  if (alpha?.module) {
+    return (
+      <GiftAlphaFilmPlayer entry={entry} film={alpha} onSkip={onSkip} onDone={onDone} />
+    );
+  }
+
+  // Interim: dark-key H.264 over live (screen-style composite)
   if (film?.source) {
     return (
       <GiftFilmPlayer entry={entry} film={film} onSkip={onSkip} onDone={onDone} />

@@ -1,26 +1,18 @@
-# Motion designer commission brief — Blyp TikTok-class gifts
+# Motion designer commission brief — Blyp TikTok-class gifts (optional polish)
 
-**Goal:** Replace procedural dark-key FX with **true TikTok LIVE gift overlays** for rocket, crown, diamond, cheer_burst, fire.
+**Primary path:** Self-authored studio alpha masters in-repo (`assets/gifts/cinema/alpha/`).  
+This brief is **optional later polish** only — not a blocker for shipping.
 
-## Delivery format (required)
+## Delivery format (if commissioning polish later)
 
-Prefer **one** of:
+1. **Alpha-channel MP4** (AlphaPlayer / YYEVA): RGB | Alpha side-by-side, H.264, 720×1280 or 1080×1920 portrait, 30fps, 2.8–4.0s.
+2. Or ProRes 4444 / WebM VP9 with alpha + baked split MP4.
 
-1. **Alpha-channel MP4** (ByteDance AlphaPlayer / YYEVA / VAP layout): RGB | Alpha side-by-side or dual-track, H.264/H.265, 720×1280 or 1080×1920 portrait, 30fps, 2.8–4.0s, loop-once.
-2. **ProRes 4444 / WebM VP9 with alpha** for mastering, plus baked AlphaPlayer MP4 for Android.
-3. Optional parallel: **PAG** or high-end **Lottie** only if soft edges + particles fully supported.
+Wire via `_agent/gift-animations-20260806/alpha-pipeline/DROP_IN_CONTRACT.md`.
 
-Do **not** deliver opaque letterboxed cinema with hard black plate as the only master.
+## Visual bar
 
-## Visual bar (must match)
-
-See `_agent/gift-animations-20260806/TIKTOK_GIFT_BAR.md`.
-
-- Full-bleed or large center-stage (subject ≈55–90% of shorter edge)
-- Glossy 3D or high-end 2D materials (PBR gold/crystal/chrome/flame)
-- Dense glitter/smoke/sparks; soft luminous edges
-- Clear impact beat with bloom overshoot
-- Soft composite over live (true alpha), not a movie theater wipe
+See `TIKTOK_GIFT_BAR.md`. Soft luminous edges, PBR materials, dense particles, clear impact bloom over live.
 
 ## Per gift
 
@@ -32,16 +24,8 @@ See `_agent/gift-animations-20260806/TIKTOK_GIFT_BAR.md`.
 | cheer_burst | 3.0–3.4s | 30% | Confetti/ribbon cannon → stadium wash |
 | fire | 3.1–3.5s | 30% | Ember floor → flame column → heat bloom |
 
-Brand accents: Mercedes teal `#00D2BE` + gold `#FBBF24` (legendary). Avoid purple sludge.
+Brand: teal `#00D2BE` + gold `#FBBF24`.
 
-## Handoff package
+## Optional polish (not required to unblock)
 
-- Master alpha video per gift
-- Mobile-encoded AlphaPlayer MP4
-- Impact timestamp (ms) + optional audio bed
-- 4 QC stills (entrance / impact / aftermath / glory)
-- License: exclusive or perpetual app license for Blyp
-
-## Current interim (do not copy as art direction)
-
-Procedural Canvas + Pixabay sparkle screen-composite in `assets/gifts/cinema/clips/*.mp4` — honest leap past cartoon rigs, **not** the final bar.
+If we later want a specialist pass on top of self-authored masters, a short AE/3D polish per gift is enough. Prefer iterating in Blender/AE ourselves first.

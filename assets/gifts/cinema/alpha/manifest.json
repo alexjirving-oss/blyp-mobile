@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "layout": "rgb|alpha side-by-side",
+  "gifts": {
+    "rocket": {
+      "id": "rocket",
+      "layout": "splitHorizontalRgbLeftAlphaRight",
+      "fps": 30,
+      "frameCount": 102,
+      "alphaMp4": "assets/gifts/cinema/alpha/rocket.mp4",
+      "darkKeyMp4": "assets/gifts/cinema/clips/rocket.mp4",
+      "webm": "assets/gifts/cinema/alpha/rocket.webm",
+      "durationMs": 3400,
+      "impactAt": 0.28,
+      "gloryMs": 1000
+    },
+    "crown": {
+      "id": "crown",
+      "layout": "splitHorizontalRgbLeftAlphaRight",
+      "fps": 30,
+      "frameCount": 96,
+      "alphaMp4": "assets/gifts/cinema/alpha/crown.mp4",
+      "darkKeyMp4": "assets/gifts/cinema/clips/crown.mp4",
+      "webm": "assets/gifts/cinema/alpha/crown.webm",
+      "durationMs": 3200,
+      "impactAt": 0.42,
+      "gloryMs": 1100
+    },
+    "diamond": {
+      "id": "diamond",
+      "layout": "splitHorizontalRgbLeftAlphaRight",
+      "fps": 30,
+      "frameCount": 99,
+      "alphaMp4": "assets/gifts/cinema/alpha/diamond.mp4",
+      "darkKeyMp4": "assets/gifts/cinema/clips/diamond.mp4",
+      "webm": "assets/gifts/cinema/alpha/diamond.webm",
+      "durationMs": 3300,
+      "impactAt": 0.34,
+      "gloryMs": 1100
+    },
+    "cheer_burst": {
+      "id": "cheer_burst",
+      "layout": "splitHorizontalRgbLeftAlphaRight",
+      "fps": 30,
+      "frameCount": 96,
+      "alphaMp4": "assets/gifts/cinema/alpha/cheer_burst.mp4",
+      "darkKeyMp4": "assets/gifts/cinema/clips/cheer_burst.mp4",
+      "webm": "assets/gifts/cinema/alpha/cheer_burst.webm",
+      "durationMs": 3200,
+      "impactAt": 0.3,
+      "gloryMs": 1100
+    },
+    "fire": {
+      "id": "fire",
+      "layout": "splitHorizontalRgbLeftAlphaRight",
+      "fps": 30,
+      "frameCount": 99,
+      "alphaMp4": "assets/gifts/cinema/alpha/fire.mp4",
+      "darkKeyMp4": "assets/gifts/cinema/clips/fire.mp4",
+      "webm": "assets/gifts/cinema/alpha/fire.webm",
+      "durationMs": 3300,
+      "impactAt": 0.3,
+      "gloryMs": 1100
+    }
+  }
+}

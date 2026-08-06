@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Blyp Gift FX — TikTok-bar overlays</title>
+  <title>Blyp Gift FX — studio alpha (PENDING review)</title>
   <style>
     :root {
       --bg: #070b12;
       --ink: #e8eef7;
       --muted: #8b9bb0;
       --teal: #00d2be;
+      --warn: #fbbf24;
       --card: #0e1624;
     }
     * { box-sizing: border-box; }
@@ -17,7 +18,7 @@
       margin: 0;
       font-family: "Segoe UI", system-ui, sans-serif;
       background:
-        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,210,190,0.18), transparent),
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,210,190,0.16), transparent),
         var(--bg);
       color: var(--ink);
       min-height: 100vh;
@@ -35,12 +36,24 @@
     }
     .tag {
       display: inline-block;
-      color: var(--teal);
-      font-weight: 700;
+      color: var(--warn);
+      font-weight: 800;
       font-size: 0.75rem;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       margin-bottom: 0.75rem;
+    }
+    .banner {
+      max-width: 42rem;
+      margin: 0 auto 1.25rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid rgba(251,191,36,0.45);
+      border-radius: 12px;
+      background: rgba(251,191,36,0.08);
+      color: #fde68a;
+      font-size: 0.92rem;
+      line-height: 1.45;
+      text-align: left;
     }
     .lede {
       color: var(--muted);
@@ -71,7 +84,7 @@
       border: 1px solid rgba(255,255,255,0.2);
     }
     .reel {
-      max-width: 720px;
+      max-width: 420px;
       margin: 0 auto;
       padding: 0 1rem 3rem;
       display: grid;
@@ -82,20 +95,40 @@
       border-radius: 16px;
       overflow: hidden;
       border: 1px solid rgba(255,255,255,0.06);
-      box-shadow: 0 20px 50px rgba(0,0,0,0.45);
     }
-    .clip video {
-      display: block;
-      width: 100%;
+    .stage {
+      position: relative;
       aspect-ratio: 9 / 16;
-      background: #000;
-      object-fit: contain;
+      max-height: 70vh;
+      background:
+        linear-gradient(160deg, #1a2740 0%, #0b1220 55%, #142033 100%);
+      overflow: hidden;
     }
-    .meta { padding: 1rem 1.15rem 1.2rem; }
-    .meta h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
-    .meta p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
+    .stage::before {
+      content: "live feed stand-in";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,0.18);
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      z-index: 0;
+    }
+    .stage video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: transparent;
+      z-index: 1;
+    }
+    .meta { padding: 0.9rem 1.1rem 1.1rem; }
+    .meta h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+    .meta p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.4; }
     footer {
-      text-align: center;
       color: var(--muted);
       font-size: 0.8rem;
       padding: 0 1rem 2.5rem;
@@ -107,12 +140,14 @@
 </head>
 <body>
   <header>
-    <div class="tag">TikTok-bar · dark-key gift overlays</div>
-    <h1>Blyp Gift FX Trailer Reel</h1>
+    <div class="tag">Play gate · PENDING_USER_REVIEW</div>
+    <h1>Blyp Gift FX — Studio Alpha</h1>
+    <div class="banner">
+      Self-authored EEVEE PBR heroes + true alpha WebM over a live stand-in.
+      No Play upload until you reply <strong>PLAY GATE: PASS</strong>.
+    </div>
     <p class="lede">
-      Large center-stage luxury FX on black (screen-composited glitter plate) —
-      metallic rocket, jeweled crown, crystal diamond, confetti cannon, flame column.
-      Not cartoon character cinema. Not Ken Burns. Still short of TikTok’s best paid 3D AlphaPlayer packs.
+      RGB|A split MP4s power the in-app WebGL player. This reel uses VP9 alpha WebM so you can judge soft edges over a fake live plate.
     </p>
     <div class="controls">
       <button type="button" id="playAll">Play full reel</button>
@@ -121,15 +156,31 @@
   </header>
 
   <main class="reel">
-    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/rocket.mp4"></video><div class="meta"><h2>Rocket — Ultimate</h2><p>Metallic rocket ignition → ascent streak → apex star detonation + sparkle plate.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/crown.mp4"></video><div class="meta"><h2>Crown — Legendary</h2><p>Jeweled gold crown descends on light shaft → contact glitter storm → regal halo.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/diamond.mp4"></video><div class="meta"><h2>Diamond — Epic</h2><p>Crystal rotates with caustic flashes → prism beams → shatter spark bloom.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/cheer_burst.mp4"></video><div class="meta"><h2>Cheer Burst — Epic</h2><p>Confetti cannon → stadium light streaks → teal/gold celebration wash.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/fire.mp4"></video><div class="meta"><h2>Fire — Mid / Spotlight</h2><p>Ember floor → luminous flame column → heat bloom + ember rain.</p></div></article>
+    <article class="clip">
+      <div class="stage"><video controls playsinline preload="metadata" src="../alpha/rocket.webm"></video></div>
+      <div class="meta"><h2>Rocket — Ultimate</h2><p>Chrome + gold nose, teal accents, exhaust plume, spark burst.</p></div>
+    </article>
+    <article class="clip">
+      <div class="stage"><video controls playsinline preload="metadata" src="../alpha/crown.webm"></video></div>
+      <div class="meta"><h2>Crown — Legendary</h2><p>Gold band, jeweled spikes, light shaft, glitter storm.</p></div>
+    </article>
+    <article class="clip">
+      <div class="stage"><video controls playsinline preload="metadata" src="../alpha/diamond.webm"></video></div>
+      <div class="meta"><h2>Diamond — Epic</h2><p>Brilliant-cut crystal, prism beams, shatter sparks.</p></div>
+    </article>
+    <article class="clip">
+      <div class="stage"><video controls playsinline preload="metadata" src="../alpha/cheer_burst.webm"></video></div>
+      <div class="meta"><h2>Cheer Burst — Epic</h2><p>Confetti / spark cannon + stadium streaks.</p></div>
+    </article>
+    <article class="clip">
+      <div class="stage"><video controls playsinline preload="metadata" src="../alpha/fire.webm"></video></div>
+      <div class="meta"><h2>Fire — Mid / Spotlight</h2><p>Flame column + ember floor + rising sparks.</p></div>
+    </article>
   </main>
 
   <footer>
-    Dark-keyed H.264 @ 720×1280 / 30fps. In-app: GiftFilmPlayer uses transparent root, glow plate, impact flash, screen blend.
+    Gate: <code>_agent/GIFT_PLAY_GATE.md</code> · Alpha masters: <code>assets/gifts/cinema/alpha/</code> ·
+    Still short of TikTok’s top Unreal character gifts — iterate in-house if needed. Do not upload until PASS.
   </footer>
 
   <script>
