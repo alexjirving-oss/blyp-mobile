@@ -22,6 +22,11 @@ export interface WithdrawalContext {
   paidOutLast7dCoins: number;
   paidOutLast30dCoins: number;
   selfFundedCoins: number;
+  /**
+   * Owner / ADMIN_ALLOWLIST / WITHDRAW_TEST_SUBS launch-test path.
+   * Softens ACCOUNT_TOO_NEW + NEW_PAYOUT_ACCOUNT only — fraud rails stay on.
+   */
+  launchTestBypass?: boolean;
 }
 
 export type WithdrawalDecision = 'allow' | 'review' | 'deny';
@@ -57,7 +62,10 @@ export function assessWithdrawal(ctx: WithdrawalContext): WithdrawalAssessment {
   if (ctx.underFraudReview) denies.push('UNDER_FRAUD_REVIEW');
   if (P.BLOCK_IF_OPEN_CHARGEBACK && ctx.openChargebackCount > 0) denies.push('OPEN_CHARGEBACK');
 
-  if (ctx.accountAgeMs < P.MIN_ACCOUNT_AGE_MS) denies.push('ACCOUNT_TOO_NEW');
+  // Launch-test bypass: account-age hold only (normal users still blocked).
+  if (!ctx.launchTestBypass && ctx.accountAgeMs < P.MIN_ACCOUNT_AGE_MS) {
+    denies.push('ACCOUNT_TOO_NEW');
+  }
   if (P.REQUIRE_VERIFIED_EMAIL && !ctx.emailVerified) denies.push('EMAIL_NOT_VERIFIED');
   if (P.REQUIRE_KYC && ctx.kycStatus !== 'verified') denies.push('KYC_NOT_VERIFIED');
   if (P.REQUIRE_PAYOUT_ACCOUNT && !ctx.hasPayoutAccount) denies.push('NO_PAYOUT_ACCOUNT');
@@ -73,7 +81,12 @@ export function assessWithdrawal(ctx: WithdrawalContext): WithdrawalAssessment {
   if (ctx.paidOutLast7dCoins + ctx.amountCoins > P.WEEKLY_PAYOUT_CAP_COINS) reviews.push('OVER_WEEKLY_CAP');
   if (ctx.paidOutLast30dCoins + ctx.amountCoins > P.MONTHLY_PAYOUT_CAP_COINS) reviews.push('OVER_MONTHLY_CAP');
 
-  if (ctx.hasPayoutAccount && ctx.payoutAccountAgeMs < P.NEW_PAYOUT_ACCOUNT_HOLD_MS) {
+  // Launch-test bypass: new Connect account hold → review (still auto-path for small Owner tests).
+  if (
+    !ctx.launchTestBypass &&
+    ctx.hasPayoutAccount &&
+    ctx.payoutAccountAgeMs < P.NEW_PAYOUT_ACCOUNT_HOLD_MS
+  ) {
     reviews.push('NEW_PAYOUT_ACCOUNT');
   }
   if (ctx.amountCoins >= P.MANUAL_REVIEW_ABOVE_COINS) reviews.push('LARGE_AMOUNT');

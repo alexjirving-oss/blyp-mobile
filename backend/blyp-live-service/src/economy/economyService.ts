@@ -14,6 +14,10 @@ import { getSessionById } from '../live/liveSessionStore';
 import { listGuests } from '../live/guestSlotStore';
 import { logger } from '../config/logger';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteMethodBookInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
+import {
+  isWithdrawLaunchTestUser,
+  LAUNCH_TEST_GEM_CREDIT_CAP,
+} from './withdrawLaunchTest';
 
 // Team gift bonus rates, expressed in micro-gems per base gem so all accrual is
 // done in integers (1 gem = 1_000_000 micro). Member earns +10% of base gems,
@@ -2230,6 +2234,125 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
       ledgerId,
       createdAt,
       replay: false,
+    };
+  });
+
+  return out;
+}
+
+/**
+ * Owner / launch-test gem credit → gem_available (audited ledger).
+ * Bypasses the normal 7d pending hold so Owner can prove cash-out today.
+ * Never use this for normal user gift settlement.
+ */
+export async function creditGemsAdminLaunchTest(
+  actorUserId: string,
+  input: {
+    targetUserId: string;
+    gems: number;
+    idempotencyKey: string;
+    reason?: string | null;
+  },
+) {
+  const { db } = getEconomyInfra();
+  const createdAt = nowIso();
+  const { targetUserId, gems, idempotencyKey, reason } = input;
+  const gemsInt = Math.floor(Number(gems));
+  if (!Number.isFinite(gemsInt) || gemsInt < 1) {
+    throw new EconomyError('INVALID_INPUT', 400, 'gems invalid');
+  }
+  if (gemsInt > LAUNCH_TEST_GEM_CREDIT_CAP) {
+    throw new EconomyError('INVALID_INPUT', 400, `gems exceed launch-test cap ${LAUNCH_TEST_GEM_CREDIT_CAP}`);
+  }
+  if (!isWithdrawLaunchTestUser(targetUserId)) {
+    throw new EconomyError(
+      'WITHDRAWAL_DENIED',
+      403,
+      'Target is not a launch-test / Owner allowlisted user',
+    );
+  }
+
+  const out = await db.transaction(async (trx) => {
+    const existing = await trx('ledger_entries')
+      .select({
+        ledgerId: 'ledger_id',
+        amount: 'amount',
+        createdAt: 'created_at',
+      })
+      .where({
+        user_id: targetUserId,
+        entry_type: 'ADMIN_GEM_CREDIT',
+        idempotency_key: idempotencyKey,
+      })
+      .first();
+
+    if (existing) {
+      const wallet = await ensureWalletRow(trx, targetUserId);
+      return {
+        targetUserId,
+        gemsCredited: Number(existing.amount),
+        currency: 'GEM' as const,
+        withdrawable: true,
+        gemAvailable: Number(wallet.gem_available),
+        gemPending: Number(wallet.gem_pending),
+        ledgerId: String(existing.ledgerId),
+        createdAt: new Date(existing.createdAt).toISOString(),
+        replay: true,
+        launchTest: true,
+      };
+    }
+
+    await trx('wallets').insert({ user_id: targetUserId }).onConflict('user_id').ignore();
+    const wallet = await trx('wallets').where({ user_id: targetUserId }).forUpdate().first();
+    if (!wallet) throw new EconomyError('INTERNAL', 500, 'Target wallet missing');
+
+    const delta = BigInt(gemsInt);
+    const before = BigInt(wallet.gem_available || 0);
+    const after = before + delta;
+    const ledgerId = randomUUID();
+
+    const metadata = {
+      actorUserId,
+      targetUserId,
+      reason: typeof reason === 'string' ? reason : null,
+      timestamp: createdAt,
+      source: 'admin_gem_credit_launch_test',
+      bypassPendingHold: true,
+      launchTest: true,
+    };
+
+    await trx('ledger_entries').insert({
+      ledger_id: ledgerId,
+      user_id: targetUserId,
+      entry_type: 'ADMIN_GEM_CREDIT',
+      currency: 'GEM',
+      amount: delta.toString(),
+      status: 'POSTED',
+      reference_type: 'ADMIN_GEM_CREDIT',
+      reference_id: ledgerId,
+      idempotency_key: idempotencyKey,
+      metadata,
+    });
+
+    await trx('wallets')
+      .where({ user_id: targetUserId })
+      .update({
+        gem_available: after.toString(),
+        lifetime_earned_gems: trx.raw('lifetime_earned_gems + ?', [delta.toString()]),
+        updated_at: trx.fn.now(),
+      });
+
+    return {
+      targetUserId,
+      gemsCredited: gemsInt,
+      currency: 'GEM' as const,
+      withdrawable: true,
+      gemAvailable: Number(after),
+      gemPending: Number(wallet.gem_pending || 0),
+      ledgerId,
+      createdAt,
+      replay: false,
+      launchTest: true,
     };
   });
 

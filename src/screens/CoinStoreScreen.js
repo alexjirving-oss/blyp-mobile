@@ -206,7 +206,7 @@ const CoinStoreScreen = ({
       if (!eligibility?.connect?.linked || !eligibility?.connect?.payoutsEnabled) {
         Alert.alert(
           'Connect payout account',
-          'Creator earnings (gems) can be withdrawn after Stripe onboarding. Purchased coins are never cashable.',
+          'Gems from gifts can be cashed out after Stripe onboarding. Purchased coins are never cashable. Min 1000 gems, 30% platform fee. Normal accounts have a clearance hold before gems are available.',
           [
             { text: 'Cancel', style: 'cancel' },
             {
@@ -783,7 +783,7 @@ const CoinStoreScreen = ({
                 {selectedTab === 'coins'
                   ? 'Buy coins to send gifts and unlock features. Purchased coins are spendable only — they cannot be withdrawn as cash.'
                   : ENABLE_WITHDRAWALS
-                    ? 'Gems are creator earnings from gifts. After clearance they can be withdrawn to your bank via Stripe (platform fee applies).'
+                    ? 'Gems are creator earnings from gifts (not purchased coins). After the normal clearance hold they can be withdrawn via Stripe. Minimum 1000 gems. Platform fee 30%.'
                     : 'Gems are creator earnings from gifts. Cash-out is not available yet — balances are tracked for when withdrawals open.'
                 }
               </Text>
@@ -891,7 +891,7 @@ const CoinStoreScreen = ({
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
                     ? 'How many gems do you want to convert? (1 gem = 1 coin)'
-                    : 'Cash out cleared gem earnings (minimum 1000). Purchased coins are not cashable. 30% platform fee applies.'}
+                    : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. 30% platform fee. Normal users: gems clear after a hold period before withdraw.'}
                 </Text>
 
                 <TextInput

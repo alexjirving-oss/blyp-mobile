@@ -100,6 +100,13 @@ export const adminCreditCoinsBodySchema = z.object({
     reason: z.string().trim().min(1).max(200).optional(),
 });
 
+/** Owner launch-test gem credit (gem_available) — target from route param. */
+export const adminCreditGemsBodySchema = z.object({
+    gems: z.coerce.number().int().min(1).max(5_000),
+    idempotencyKey: z.string().trim().min(8).max(128).optional(),
+    reason: z.string().trim().min(1).max(200).optional(),
+});
+
 export const adminListReportsSchema = z.object({
     status: z.enum(['open', 'resolved', 'dismissed', 'all']).default('open'),
     limit: z.coerce.number().int().min(1).max(100).default(50),

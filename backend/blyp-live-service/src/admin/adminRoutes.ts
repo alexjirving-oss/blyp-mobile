@@ -6,12 +6,13 @@ import { isCanonicalCognitoSub as isCanonicalSub } from '../auth/cognitoSub';
 import { getAdminEnv } from '../config/adminEnv';
 import { logger } from '../config/logger';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
-import { creditCoinsAdmin } from '../economy/economyService';
+import { creditCoinsAdmin, creditGemsAdminLaunchTest } from '../economy/economyService';
 import {
     approveWithdrawal,
     listWithdrawals,
     rejectWithdrawal,
 } from '../economy/withdrawalService';
+import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
 import { materializeRankingsSnapshots } from '../economy/rankingsService';
 import { EconomyError, toEconomyError } from '../economy/economyErrors';
 import { sanitizeBearerAuthorization } from '../utils/headerSanitize';
@@ -23,6 +24,7 @@ import {
     adminSetAppVersionPolicySchema,
     adminSetCapabilitiesSchema,
     adminCreditCoinsBodySchema,
+    adminCreditGemsBodySchema,
     adminListReportsSchema,
     adminResolveReportSchema,
     adminListWithdrawalsSchema,
@@ -646,6 +648,80 @@ router.post('/admin/users/:userId/credit-coins', requireAdmin, requirePermission
         const err = toEconomyError(e);
         if (err.code === 'INTERNAL') {
             logger.error({ detail: err.detail }, '[admin] /admin/users/:userId/credit-coins failed');
+        }
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    }
+});
+
+/**
+ * Owner-only launch-test gem credit → gem_available (audited).
+ * Target must be WITHDRAW_TEST_SUBS / ADMIN_ALLOWLIST / Owner bootstrap.
+ */
+router.post('/admin/users/:userId/credit-gems', requireAdmin, requirePermission('economy.credit'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const actorRole = String(req.user?.adminRole || '') as AdminRole;
+        if (actorRole !== 'owner') {
+            return res.status(403).json({
+                error: 'FORBIDDEN',
+                code: 'OWNER_ONLY',
+                detail: 'Launch-test gem credit is Owner-only',
+            });
+        }
+
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!isCanonicalSub(targetUserId)) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminCreditGemsBodySchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const gems = parsed.data.gems;
+        if (gems > LAUNCH_TEST_GEM_CREDIT_CAP) {
+            return res.status(400).json({
+                error: 'INVALID_INPUT',
+                code: 'GEM_CREDIT_CAP',
+                detail: `Max ${LAUNCH_TEST_GEM_CREDIT_CAP} gems per launch-test credit`,
+            });
+        }
+
+        const idempotencyKey =
+            parsed.data.idempotencyKey || `admin-gem:${actorUserId}:${targetUserId}:${randomUUID()}`;
+        const reason = parsed.data.reason || 'owner_launch_test_withdraw';
+
+        const out = await creditGemsAdminLaunchTest(actorUserId, {
+            targetUserId,
+            gems,
+            idempotencyKey,
+            reason,
+        });
+
+        await writeAdminAudit({
+            actorUserId,
+            action: 'user_credit_gems_launch_test',
+            targetType: 'user',
+            targetId: targetUserId,
+            metadata: {
+                gems,
+                gemsCredited: out.gemsCredited,
+                gemAvailable: out.gemAvailable,
+                ledgerId: out.ledgerId,
+                idempotencyKey,
+                reason,
+                replay: out.replay === true,
+            },
+        }).catch((err) => {
+            logger.warn({ err: err?.message || String(err) }, '[admin] credit-gems audit write failed');
+        });
+
+        return res.json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
+        if (err.code === 'INTERNAL') {
+            logger.error({ detail: err.detail }, '[admin] /admin/users/:userId/credit-gems failed');
         }
         return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
     }

@@ -61,3 +61,35 @@ test('routes new payout accounts to manual review', () => {
   assert.equal(a.decision, 'review');
   assert.ok(a.reasons.includes('NEW_PAYOUT_ACCOUNT'));
 });
+
+test('launch-test bypass softens account age + new payout hold', () => {
+  const a = assessWithdrawal({
+    ...base,
+    accountAgeMs: 2 * 24 * 60 * 60 * 1000,
+    payoutAccountAgeMs: 1 * 60 * 60 * 1000,
+    launchTestBypass: true,
+  });
+  assert.equal(a.decision, 'allow');
+  assert.ok(!a.reasons.includes('ACCOUNT_TOO_NEW'));
+  assert.ok(!a.reasons.includes('NEW_PAYOUT_ACCOUNT'));
+});
+
+test('launch-test bypass still denies fraud freeze', () => {
+  const a = assessWithdrawal({
+    ...base,
+    accountFrozen: true,
+    launchTestBypass: true,
+  });
+  assert.equal(a.decision, 'deny');
+  assert.ok(a.reasons.includes('ACCOUNT_FROZEN'));
+});
+
+test('launch-test bypass still denies account too new when flag off', () => {
+  const a = assessWithdrawal({
+    ...base,
+    accountAgeMs: 2 * 24 * 60 * 60 * 1000,
+    launchTestBypass: false,
+  });
+  assert.equal(a.decision, 'deny');
+  assert.ok(a.reasons.includes('ACCOUNT_TOO_NEW'));
+});

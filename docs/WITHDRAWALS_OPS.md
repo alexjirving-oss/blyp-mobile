@@ -15,11 +15,26 @@ admin BONUS_COIN are never cashable.
 | `PENDING_GEMS_HOLD_SECONDS` | `604800` (7 days) | keep `604800` |
 | Client `EXPO_PUBLIC_ENABLE_WITHDRAWALS` | unset / false (CTA hidden) | `1` in EAS prod profile **after** backend flag |
 | `ADMIN_ALLOWLIST_SUBS` | set — **preserve** | unchanged |
+| `WITHDRAW_TEST_SUBS` | unset | Owner launch-test sub(s) — softens account-age + new-payout holds only |
 | `LIVE_MARBLE_RACE_ENABLED` | `1` — **preserve** | unchanged |
 
 Code refuses to treat withdrawals as enabled unless **both**
 `ENABLE_WITHDRAWALS=1` **and** a non-empty `STRIPE_SECRET_KEY` are present.
 Admin control plane reports `stripeKeyMode` (`test` / `live` / `absent`) without exposing secrets.
+
+### Launch-test / Owner bypass (keep fraud rails)
+
+For users in `WITHDRAW_TEST_SUBS`, `ADMIN_ALLOWLIST_SUBS`, or Owner bootstrap:
+
+- Softened: `ACCOUNT_TOO_NEW` deny, `NEW_PAYOUT_ACCOUNT` review
+- Still enforced: min 1000 gems, 30% fee, KYC/Connect, chargebacks, fraud freeze, velocity caps, large-amount review
+
+Owner gem credit (audited `ADMIN_GEM_CREDIT` → `gem_available`):
+
+```http
+POST /admin/users/:userId/credit-gems          # Owner + economy.credit
+POST /internal/economy/credit-launch-test-gems # x-internal-secret; helper tools/stripe/CREDIT_LAUNCH_TEST_GEMS.ps1
+```
 
 ## Env vars (Cloud Run `blyp-live-service`, us-central1)
 

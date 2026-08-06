@@ -13,6 +13,7 @@ import { getEconomyInfra } from './infra';
 import { getWallet } from './economyService';
 import { assessWithdrawal, type KycStatus, type WithdrawalContext } from './withdrawalGuard';
 import { WITHDRAWAL_POLICY as P } from './withdrawalPolicy';
+import { isWithdrawLaunchTestUser } from './withdrawLaunchTest';
 
 function stripeSecretConfigured(): boolean {
   return Boolean(String(getEconomyEnv().STRIPE_SECRET_KEY || '').trim());
@@ -232,6 +233,7 @@ async function buildContext(
     paidOutLast7dCoins,
     paidOutLast30dCoins,
     selfFundedCoins: bal.selfFundedCoins,
+    launchTestBypass: isWithdrawLaunchTestUser(userId),
   };
 }
 
@@ -263,6 +265,9 @@ export async function getWithdrawEligibility(
     platformFeePercent: P.PLATFORM_FEE_PERCENT,
     gemMinorUnits: gemMinorUnits(),
     fiatCurrency: platformCurrency(),
+    holdDaysNormalUsers: Math.round(P.HOLD_DURATION_MS / (24 * 60 * 60 * 1000)),
+    accountAgeDaysNormalUsers: Math.round(P.MIN_ACCOUNT_AGE_MS / (24 * 60 * 60 * 1000)),
+    launchTestBypass: !!ctx.launchTestBypass,
     feePreviewMinPayout: {
       amountGems: P.MIN_PAYOUT_COINS,
       feeGems: fee.feeGems,
@@ -282,6 +287,13 @@ export async function getWithdrawEligibility(
       bal.withdrawableGems >= P.MIN_PAYOUT_COINS &&
       assessment.decision !== 'deny' &&
       !!payout?.payouts_enabled,
+    policyCopy: {
+      coinsNotCashable: true,
+      gemsFromGiftsCashable: true,
+      minPayoutGems: P.MIN_PAYOUT_COINS,
+      platformFeePercent: P.PLATFORM_FEE_PERCENT,
+      pendingHoldDays: Math.round(P.HOLD_DURATION_MS / (24 * 60 * 60 * 1000)),
+    },
   };
 }
 

@@ -2,7 +2,7 @@
 
 This repo is already configured for EAS auto-submit:
 - `eas.json` → `submit.production.android.serviceAccountKeyPath = "./android-service-account.json"`
-- `eas.json` → `submit.production.android.track = "internal"`
+- `eas.json` → `submit.production.android.track = "production" (draft); use submit profile "internal" for internal testing`
 
 Your next job is to enable Google Play Developer API access and generate the service account JSON key.
 

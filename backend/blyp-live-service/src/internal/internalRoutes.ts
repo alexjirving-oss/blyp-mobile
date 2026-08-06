@@ -1,13 +1,15 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { creditSubscriptionCoins, purgeUserData } from '../economy/economyService';
+import { creditSubscriptionCoins, purgeUserData, creditGemsAdminLaunchTest } from '../economy/economyService';
 import { toEconomyError } from '../economy/economyErrors';
 import { materializeRankingsSnapshots } from '../economy/rankingsService';
 import { applyBattleGiftPledges, refundBattleGiftPledges } from '../economy/battleGiftPledgeService';
 import { battleGiftPledgesApplySchema, battleGiftPledgesRefundSchema } from '../economy/economySchemas';
 import { deleteCognitoUserBySub } from '../admin/adminCognitoDirectory';
 import { logger } from '../config/logger';
+import { createConnectOnboardLink } from '../economy/withdrawalService';
+import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
 
 /**
  * Internal service-to-service routes.
@@ -85,6 +87,75 @@ router.post('/internal/subscription/credit-coins', requireInternalSecret, async 
     const err = toEconomyError(e);
     if (err.code === 'INTERNAL') {
       logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/subscription/credit-coins');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+const launchTestGemCreditSchema = z
+  .object({
+    userId: z.string().min(1),
+    gems: z.coerce.number().int().min(1).max(LAUNCH_TEST_GEM_CREDIT_CAP),
+    idempotencyKey: z.string().min(8).max(128),
+    reason: z.string().min(1).max(200).optional(),
+    /** When true, also mint a Stripe Connect Account Link for the user. */
+    includeConnectLink: z.coerce.boolean().optional(),
+    email: z.string().email().optional(),
+  })
+  .strict();
+
+/**
+ * Owner launch-test: credit gem_available (audited) for WITHDRAW_TEST_SUBS /
+ * ADMIN_ALLOWLIST / Owner bootstrap targets. Optional Connect onboard URL.
+ * Does NOT execute a Stripe transfer.
+ */
+router.post('/internal/economy/credit-launch-test-gems', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = launchTestGemCreditSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const { userId, gems, idempotencyKey, reason, includeConnectLink, email } = parsed.data;
+    const out = await creditGemsAdminLaunchTest('internal:launch-test', {
+      targetUserId: userId,
+      gems,
+      idempotencyKey,
+      reason: reason || 'owner_launch_test_withdraw',
+    });
+    let connect: { url?: string; stripeAccountId?: string; expiresAt?: number } | null = null;
+    if (includeConnectLink) {
+      try {
+        connect = await createConnectOnboardLink(userId, {
+          email: email || undefined,
+          returnUrl: 'blyp://withdraw/connect-return',
+          refreshUrl: 'blyp://withdraw/connect-refresh',
+        });
+      } catch (e: any) {
+        logger.warn(
+          { err: e?.message || String(e), userId },
+          '[internal] connect link after gem credit failed',
+        );
+        connect = {
+          url: undefined,
+          error: String(e?.message || e || 'connect_failed').slice(0, 300),
+        };
+      }
+    }
+    logger.info(
+      {
+        userId,
+        gemsCredited: out.gemsCredited,
+        gemAvailable: out.gemAvailable,
+        replay: out.replay,
+        connectLinked: Boolean(connect?.stripeAccountId),
+      },
+      '[internal] launch-test gem credit',
+    );
+    return res.json({ ok: true, ...out, connect });
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/economy/credit-launch-test-gems');
     }
     return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
