@@ -122,38 +122,78 @@ function EnhancedVideo(props) {
 
     let cancelled = false;
     const timers = [];
+    const wantMuted = props.isMuted ?? true;
 
+    // Imperative mute/play must be idempotent. Neighbor preload cells (±2) finish
+    // loading and used to spam setIsMutedAsync(true)+pauseAsync, which steals
+    // Android audio focus from the active For You player → audible mute flicker.
     const apply = async () => {
-      if (cancelled) return;
+      if (cancelled) return false;
       try {
+        const status = (await v.getStatusAsync?.()) || null;
+        if (cancelled) return false;
+
         if (isFocused) {
+          if (status?.isLoaded) {
+            if (status.isMuted !== wantMuted) {
+              try {
+                await v.setIsMutedAsync?.(wantMuted);
+              } catch {
+                /* best-effort */
+              }
+            }
+            if (status.didJustFinish) {
+              await v.replayAsync?.();
+              return true;
+            }
+            if (!status.isPlaying) {
+              await v.playAsync?.();
+              return false; // may still be buffering — retry
+            }
+            return true; // already playing at intended mute
+          }
           try {
-            await v.setIsMutedAsync?.(props.isMuted ?? true);
+            await v.setIsMutedAsync?.(wantMuted);
           } catch {
             /* best-effort */
           }
-          const status = (await v.getStatusAsync?.()) || null;
-          if (status?.isLoaded && status.didJustFinish) {
-            await v.replayAsync?.();
-          } else if (!status?.isLoaded || !status.isPlaying) {
-            await v.playAsync?.();
-          }
-        } else {
+          await v.playAsync?.();
+          return false;
+        }
+
+        // Inactive / blurred: only touch native audio if something is still
+        // audible or playing. Silent no-ops avoid focus thrash with the active cell.
+        if (status?.isLoaded && (status.isPlaying || status.isMuted === false)) {
           try {
             await v.setIsMutedAsync?.(true);
           } catch {
             /* best-effort */
           }
-          await v.pauseAsync?.();
+          if (status.isPlaying) {
+            await v.pauseAsync?.();
+          }
+          return false; // one safety retry for navigation bleed
         }
+        return true;
       } catch {
-        /* best-effort */
+        return false;
       }
     };
 
-    apply();
-    timers.push(setTimeout(apply, 200));
-    timers.push(setTimeout(apply, 500));
+    (async () => {
+      const settled = await apply();
+      if (cancelled || settled) return;
+      // Focused: retry until playing. Unfocused audible: one bleed-safety retry.
+      // Never schedule the old fixed 200/500 spam on every preload load.
+      timers.push(
+        setTimeout(() => {
+          apply().then((done) => {
+            if (cancelled || done || !isFocused) return;
+            timers.push(setTimeout(() => apply(), 400));
+          });
+        }, 220),
+      );
+    })();
 
     return () => {
       cancelled = true;

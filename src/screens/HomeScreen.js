@@ -1198,8 +1198,10 @@ const HomeScreen = ({ navigation, route }) => {
     [commentCounts]
   );
 
-  // onViewableItemsChanged used for the main feed lists
-  // Viewability handler for #4ME feed only (ensures single active item)
+  // Viewability is for impressions/views ONLY. Active playback index comes from
+  // scroll snap (handleDiscoverScrollEnd). Updating currentDiscoverIndex from
+  // viewableItems[0] fought scroll-end and oscillated between adjacent cells
+  // during paging / 60%-visible overlap → shouldPlay/mute flicker on For You.
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (selectedTabRef.current !== 'A') return;
     if (!viewableItems || viewableItems.length === 0) return;
@@ -1215,12 +1217,6 @@ const HomeScreen = ({ navigation, route }) => {
       if (authorId && authorId === uidRef.current) return;
       recordPostView(p.id, uidRef.current).catch(() => {});
     });
-    const first = viewableItems[0];
-    if (typeof first.index === 'number') {
-      setDescriptionVisibleIndex(null);
-      setCurrentDiscoverIndex(first.index);
-      console.log('ðŸŽ¯ #4ME active index updated', first.index);
-    }
   }).current;
 
   const handleDiscoverScrollEnd = useCallback(
@@ -1432,17 +1428,20 @@ const HomeScreen = ({ navigation, route }) => {
             const cachedUri = prefetchedUris[videoUri];
             const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 2;
 
+            const cellActive = isDiscoverItemActive(index);
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
                 <PremiumFeedVideo
                   uri={cachedUri || videoUri}
                   poster={item.thumbnail || item.imageUrl || item.user?.avatar}
                   style={StyleSheet.absoluteFill}
-                  shouldPlay={isDiscoverItemActive(index)}
+                  shouldPlay={cellActive}
                   shouldLoad={shouldLoad}
                   paused={pausedFeedId === item.id}
                   isLooping
-                  isMuted={false}
+                  // Explicit mute on inactive/preload cells — never rely only on
+                  // shouldPlay→isFocused inside EnhancedVideo (preload thrash).
+                  isMuted={!cellActive}
                   mediaDisplay={item.mediaDisplay || null}
                   onNaturalSize={(ns) => {
                     const a = ns.width / ns.height;
@@ -1645,7 +1644,7 @@ const HomeScreen = ({ navigation, route }) => {
             shouldPlay={isScreenFocused && selectedTab === 'B' && index === currentIndex}
             shouldLoad={Math.abs(currentIndex - index) <= 2}
             isLooping={true}
-            isMuted={false}
+            isMuted={!(isScreenFocused && selectedTab === 'B' && index === currentIndex)}
             resizeMode="cover"
           />
         </TouchableOpacity>
