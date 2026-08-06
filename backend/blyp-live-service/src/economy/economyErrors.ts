@@ -20,7 +20,10 @@ export type EconomyErrorCode =
   | 'WITHDRAWALS_DISABLED'
   | 'WITHDRAWAL_DENIED'
   | 'STRIPE_NOT_CONFIGURED'
-  | 'INVALID_STATE';
+  | 'INVALID_STATE'
+  | 'PROMOTE_CAP'
+  | 'PROMOTE_TYPE_ACTIVE'
+  | 'SEARCH_CAP';
 
 export class EconomyError extends Error {
   code: EconomyErrorCode;
