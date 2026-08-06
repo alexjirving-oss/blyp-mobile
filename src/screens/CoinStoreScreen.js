@@ -99,6 +99,16 @@ const getGemPackages = () => [
   }
 ];
 
+/**
+ * @param {object} props
+ * @param {any} [props.navigation]
+ * @param {any} [props.route]
+ * @param {boolean} [props.embedded]
+ * @param {string} [props.initialTab]
+ * @param {boolean} [props.scrollToPackagesOnMount]
+ * @param {number|null|undefined} [props.initialCoins]
+ * @param {number|null|undefined} [props.initialGems]
+ */
 const CoinStoreScreen = ({
   navigation,
   route = null,
