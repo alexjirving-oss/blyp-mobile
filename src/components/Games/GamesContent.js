@@ -7,13 +7,10 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
+import { isArtilleryEnabled, isMarbleRaceEnabled } from '../../config/LiveGamesFlags';
 
-const MARBLE_ENABLED = /^(1|true|yes|on)$/i.test(
-  String(process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED || '').trim()
-);
-const ARTILLERY_ENABLED = /^(1|true|yes|on)$/i.test(
-  String(process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED || '').trim()
-);
+const MARBLE_ENABLED = isMarbleRaceEnabled();
+const ARTILLERY_ENABLED = isArtilleryEnabled();
 
 function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
   return (

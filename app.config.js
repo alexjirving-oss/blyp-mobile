@@ -85,6 +85,26 @@ module.exports = () => {
         ? '1'
         : '0',
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
+    // Live overlay games — bake into extra so production Hermes can read them
+    // (process.env.EXPO_PUBLIC_* is often empty at runtime; see LiveGamesFlags.js).
+    // Marble Race: ON unless explicitly disabled (backend LIVE_MARBLE_RACE_ENABLED=1).
+    EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED: (() => {
+      const raw = String(process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED || '')
+        .trim()
+        .toLowerCase();
+      if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return '0';
+      if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
+      return isProductionProfile ? '1' : '0';
+    })(),
+    // Artillery: ON only when explicitly set (Cloud Run may still gate separately).
+    EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED: (() => {
+      const raw = String(process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED || '')
+        .trim()
+        .toLowerCase();
+      if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return '0';
+      if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
+      return '0';
+    })(),
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
     },

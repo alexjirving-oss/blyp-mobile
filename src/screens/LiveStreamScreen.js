@@ -42,6 +42,7 @@ import { useAuth, useFirestoreDoc, clearCognitoSessions, refreshAuthNow, userPoo
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
+import { isArtilleryEnabled, isMarbleRaceEnabled } from '../config/LiveGamesFlags';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import CommentsModal from '../components/CommentsModal';
 import GiftSystem from '../components/GiftSystem';
@@ -217,15 +218,11 @@ const LiveStreamScreen = (props) => {
   // Blyp Artillery battle-stage game (server-authoritative). Client toggle is
   // gated by EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED; the backend is independently
   // gated by LIVE_ARTILLERY_ENABLED so it ships dark until both are on.
-  const ARTILLERY_ENABLED = /^(1|true|yes|on)$/i.test(
-    String(process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED || '').trim()
-  );
+  const ARTILLERY_ENABLED = isArtilleryEnabled();
   const [showArtillery, setShowArtillery] = useState(false);
 
-  // Marble Race (Guest Grand Prix). Dual-flag dark ship.
-  const MARBLE_ENABLED = /^(1|true|yes|on)$/i.test(
-    String(process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED || '').trim()
-  );
+  // Marble Race (Guest Grand Prix). Reads expo.extra + env (not bare process.env).
+  const MARBLE_ENABLED = isMarbleRaceEnabled();
   // Games bottom-tab panel (Marble Race / battle game). Host starts Race from here.
   const [gamesOpen, setGamesOpen] = useState(false);
   const [inviteGuestsOpen, setInviteGuestsOpen] = useState(false);
