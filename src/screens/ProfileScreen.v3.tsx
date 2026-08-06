@@ -27,7 +27,7 @@ import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { useAuth, refreshAuthNow, hardLogout } from '../hooks/useCommon';
-import { requestReplayTour } from '../tour/tourBus';
+import { requestReplayTour, subscribeTourSelect } from '../tour/tourBus';
 import { useTabReset } from '../utils/tabResetBus';
 import { exitGuestMode, useGuestMode } from '../services/guestSessionService';
 import { useTheme } from '../styles/useTheme';
@@ -191,6 +191,14 @@ const ProfileScreenV3: React.FC = () => {
       /* ignore */
     }
   }, [route?.params?.openPromote, nav]);
+
+  // Guided tour: focus Promote / My Profile without fighting local tab state.
+  useEffect(() => {
+    return subscribeTourSelect((payload) => {
+      if (payload?.screen !== 'Profile' || !payload?.tab) return;
+      setActiveTab(String(payload.tab));
+    });
+  }, []);
   const [headerHeight, setHeaderHeight] = useState(0);
   // Seed from early-hydrate cache so the header never flashes "User" / zeros.
   const cachedBootstrap = uid ? getCachedOwnProfile(uid) : null;

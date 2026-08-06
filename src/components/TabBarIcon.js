@@ -2,6 +2,7 @@
 import { View, Text, StyleSheet } from 'react-native';
 import * as Icons from 'lucide-react-native';
 import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
+import TourTarget from '../tour/TourTarget';
 
 const iconMap = {
   home: Icons.Home,
@@ -12,9 +13,9 @@ const iconMap = {
   call: Icons.Phone,
 };
 
-const TabBarIcon = ({ name, color, size = 24, badge, focused = false }) => {
+const TabBarIcon = ({ name, color, size = 24, badge, focused = false, tourTargetId }) => {
   const IconComp = iconMap[name] || Icons.Circle;
-  return (
+  const body = (
     <View style={styles.container}>
       <View style={[styles.iconShell, focused ? styles.iconShellActive : styles.iconShellInactive]}>
         {focused ? <View pointerEvents="none" style={styles.shellSheen} /> : null}
@@ -27,6 +28,8 @@ const TabBarIcon = ({ name, color, size = 24, badge, focused = false }) => {
       ) : null}
     </View>
   );
+  if (!tourTargetId) return body;
+  return <TourTarget id={tourTargetId}>{body}</TourTarget>;
 };
 
 const styles = StyleSheet.create({

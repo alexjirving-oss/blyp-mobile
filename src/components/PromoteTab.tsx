@@ -34,6 +34,7 @@ import {
   formatReachPreview,
   methodTitleForType,
 } from '../config/promoteCatalog';
+import TourTarget from '../tour/TourTarget';
 
 type DurationKey = '1h' | '24h' | '7d';
 
@@ -350,12 +351,14 @@ export default function PromoteTab({
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={[...BLYP_LOGO_GRADIENT_COLORS]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-        <Text style={styles.heroEyebrow}>Creator growth</Text>
-        <Text style={styles.heroTitle}>Promote Studio</Text>
-        <Text style={styles.heroSub}>Catalog-driven methods · fair caps · labelled search</Text>
-        <Text style={styles.heroCoins}>{Number(currentCoins || 0).toLocaleString()} coins</Text>
-      </LinearGradient>
+      <TourTarget id="promote.studio">
+        <LinearGradient colors={[...BLYP_LOGO_GRADIENT_COLORS]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+          <Text style={styles.heroEyebrow}>Creator growth</Text>
+          <Text style={styles.heroTitle}>Promote Studio</Text>
+          <Text style={styles.heroSub}>Catalog-driven methods · fair caps · labelled search</Text>
+          <Text style={styles.heroCoins}>{Number(currentCoins || 0).toLocaleString()} coins</Text>
+        </LinearGradient>
+      </TourTarget>
 
       <View style={styles.tabRow}>
         {([

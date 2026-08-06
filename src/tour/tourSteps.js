@@ -1,15 +1,17 @@
 /**
- * Guided tour step catalogue.
+ * Guided product tour — cinematic first-run / replayable beats.
  *
- * Each step can optionally navigate so the real surface is visible behind the
- * coach card. Dating is soft-mentioned for free users (no hard paywall push).
+ * Design rules:
+ *  - Short titles + one-line bodies (no walls of text)
+ *  - One primary CTA label per step
+ *  - Prefer live TourTarget measures; zones are layout-flexible fallbacks
+ *  - Optional beat visuals (gifts wow, Stage Desk peek) render in the overlay
  *
- * targetId  — live measure from TourTarget (preferred)
- * targetZone — heuristic spotlight when measure is missing
- * preferredPlacement — hint for callout placement (above|below|left|right)
+ * Covers: For You → engage → Gifts → Home customize → Live + Stage Desk →
+ * Promote → Messages → Profile.
  */
 
-export const TOUR_VERSION = 2;
+export const TOUR_VERSION = 3;
 
 /**
  * @param {{ hasDating?: boolean, hasGames?: boolean }} opts
@@ -17,190 +19,123 @@ export const TOUR_VERSION = 2;
  *   id: string,
  *   title: string,
  *   body: string,
+ *   cta: string,
  *   icon: string,
  *   accent?: string,
  *   navigate?: { type: string, name?: string, params?: object, select?: string },
  *   targetId?: string,
+ *   targetIds?: string[],
  *   targetZone?: string,
  *   preferredPlacement?: 'above' | 'below' | 'left' | 'right',
+ *   beat?: 'intro' | 'gifts' | 'stageDesk' | 'done',
  *   soft?: boolean,
  * }>}
  */
 export function buildTourSteps({ hasDating = true, hasGames = false } = {}) {
-  const steps = [
-    {
-      id: 'welcome',
-      title: 'Welcome to Blyp',
-      body: 'A quick tour of the places you’ll use every day. Skip anytime — replay from Settings or Notifications.',
-      icon: 'sparkles',
-      navigate: { type: 'tab', name: 'Home', select: 'A' },
-      targetZone: 'center.soft',
-      preferredPlacement: 'below',
-    },
+  // Dating / games remain discoverable in-app; the tour stays lean and product-critical.
+  void hasDating;
+  void hasGames;
+
+  return [
     {
       id: 'forYou',
       title: 'For You',
-      body: 'Your personalized feed opens first. Swipe through clips and discover people who match your vibe.',
+      body: 'Your feed opens first — swipe clips, find people who match your vibe.',
+      cta: 'Show me',
       icon: 'flame',
       navigate: { type: 'homeForYou' },
       targetId: 'headerTab:A',
+      targetIds: ['headerTab:A', 'home.forYou'],
       targetZone: 'header.forYou',
       preferredPlacement: 'below',
+      beat: 'intro',
     },
     {
-      id: 'forYouActions',
-      title: 'For You actions',
-      body: 'Use the side actions to like, comment, share, and save. That’s how you engage without leaving the feed.',
+      id: 'engage',
+      title: 'React in place',
+      body: 'Like, comment, share — right on the clip. No leaving the feed.',
+      cta: 'Next',
       icon: 'heart',
       navigate: { type: 'homeForYou' },
+      targetId: 'feedActions',
+      targetIds: ['feedActions', 'feed.engage'],
       targetZone: 'foryou.actions',
-      preferredPlacement: 'left',
+      preferredPlacement: 'above',
     },
     {
-      id: 'homeHub',
-      title: 'Home hub',
-      body: 'Tap the Home chip beside For You for your hub — Jump in, live rails, Dating, and quick shortcuts.',
-      icon: 'home',
+      id: 'gifts',
+      title: 'Gifts that land',
+      body: 'Send a gift and the room feels it — cinematic, not a tip jar.',
+      cta: 'Wow',
+      icon: 'gift',
+      navigate: { type: 'homeForYou' },
+      targetId: 'feedGift',
+      targetIds: ['feedGift', 'feed.gift'],
+      targetZone: 'feed.gift',
+      preferredPlacement: 'above',
+      beat: 'gifts',
+    },
+    {
+      id: 'homeCustomize',
+      title: 'Make Home yours',
+      body: 'Jump to Home, then customize rails — live, interests, shortcuts.',
+      cta: 'Customize',
+      icon: 'grid',
       navigate: { type: 'homeHub' },
-      targetId: 'headerTab:home',
-      targetZone: 'header.home',
+      targetId: 'homeCustomize',
+      targetIds: ['homeCustomize', 'headerTab:home'],
+      targetZone: 'home.customize',
       preferredPlacement: 'below',
     },
     {
-      id: 'create',
-      title: 'Create (+)',
-      body: 'Tap the teal + to open Create — photo, video, library, or resume a draft. This is how you post on Blyp.',
-      icon: 'add-circle',
-      navigate: { type: 'tab', name: 'Home' },
-      targetId: 'create',
-      targetZone: 'tab.create',
-      preferredPlacement: 'above',
-    },
-    {
-      id: 'goLive',
-      title: 'Go Live',
-      body: 'Inside Create, tap Go Live to start a stream. Hosts go live from the same + button.',
-      icon: 'radio',
-      navigate: { type: 'tab', name: 'Home' },
-      targetId: 'create',
-      targetZone: 'tab.create',
-      preferredPlacement: 'above',
-    },
-    {
-      id: 'blypSearch',
-      title: 'Ask Blyp',
-      body: 'Blyp is your AI search — ask about games, places, people, or what’s on. Open it from Home or Search.',
-      icon: 'search',
-      navigate: { type: 'stack', name: 'Blyp' },
-      targetZone: 'center.soft',
-      preferredPlacement: 'below',
-    },
-    {
-      id: 'live',
-      title: 'Live',
-      body: 'Chat/Games → Live shows who’s streaming now. Tap in to watch or chat with the room.',
+      id: 'liveStageDesk',
+      title: 'Live + Stage Desk',
+      body: 'Watch who’s live. Hosts get Stage Desk — your on-stream control surface.',
+      cta: 'Peek',
       icon: 'videocam',
       navigate: { type: 'chatTab', select: 'notifications' },
       targetId: 'headerTab:notifications',
-      targetZone: 'header.tabs',
+      targetIds: ['headerTab:notifications', 'create'],
+      targetZone: 'header.live',
+      preferredPlacement: 'below',
+      beat: 'stageDesk',
+    },
+    {
+      id: 'promote',
+      title: 'Promote',
+      body: 'Boost a battle, feed post, or spotlight — coin-powered reach when you’re ready.',
+      cta: 'Next',
+      icon: 'megaphone',
+      navigate: { type: 'profileTab', select: 'Promote' },
+      targetId: 'headerTab:Promote',
+      targetIds: ['headerTab:Promote', 'promote.studio'],
+      targetZone: 'header.promote',
       preferredPlacement: 'below',
     },
     {
-      id: 'battlesPromote',
-      title: 'Battles & Promote',
-      body: 'Battles are head-to-head live matchups. Promote (coins) can boost battles or spotlight — use it lightly when you’re ready.',
-      icon: 'trophy',
-      navigate: { type: 'chatTab', select: 'battles' },
-      targetId: 'headerTab:battles',
-      targetZone: 'header.tabs',
-      preferredPlacement: 'below',
-    },
-    {
-      id: 'messenger',
+      id: 'messages',
       title: 'Messages',
-      body: 'Messages holds DMs, calls, and notifications. Stay close with people you meet on Blyp.',
+      body: 'DMs, calls, and pings — stay close to people you meet on Blyp.',
+      cta: 'Next',
       icon: 'chatbubble',
       navigate: { type: 'tab', name: 'Messenger', select: 'chats' },
+      targetId: 'tab.messenger',
+      targetIds: ['tab.messenger'],
       targetZone: 'tab.messenger',
       preferredPlacement: 'above',
     },
     {
-      id: 'rooms',
-      title: 'Rooms',
-      body: 'Rooms are live voice hangouts. Jump in to talk with people who share your vibe — ambassadors help keep energy high.',
-      icon: 'mic',
-      navigate: { type: 'stack', name: 'Rooms' },
-      targetZone: 'center.soft',
-      preferredPlacement: 'below',
-    },
-    {
       id: 'profile',
       title: 'Your profile',
-      body: 'Edit your look, wallet, subscription, and settings from Profile. This is your home base on Blyp.',
+      body: 'Look, wallet, settings — and Replay tour anytime from Menu or Settings.',
+      cta: 'Finish',
       icon: 'person',
-      navigate: { type: 'tab', name: 'Profile' },
+      navigate: { type: 'profileTab', select: 'My Profile' },
+      targetId: 'headerTab:My Profile',
+      targetIds: ['headerTab:My Profile', 'tab.profile'],
       targetZone: 'tab.profile',
       preferredPlacement: 'above',
+      beat: 'done',
     },
   ];
-
-  if (hasDating) {
-    steps.push({
-      id: 'dating',
-      title: 'Dating',
-      body: 'Meet people who share your world. Open Dating from Chat → Dating, Home → Jump in, or Profile → Menu. Included with Plus / trial.',
-      icon: 'heart',
-      navigate: { type: 'chatTab', select: 'dating' },
-      targetId: 'headerTab:dating',
-      targetZone: 'header.tabs',
-      preferredPlacement: 'below',
-    });
-  } else {
-    steps.push({
-      id: 'dating',
-      title: 'Dating (Plus)',
-      body: 'Dating lives on Chat → Dating, Home → Jump in, or Profile → Menu. Free users see plans; Plus / trial unlocks Discover.',
-      icon: 'heart',
-      soft: true,
-      navigate: { type: 'chatTab', select: 'dating' },
-      targetId: 'headerTab:dating',
-      targetZone: 'header.tabs',
-      preferredPlacement: 'below',
-    });
-  }
-
-  if (hasGames) {
-    steps.push({
-      id: 'games',
-      title: 'Games',
-      body: 'Chat/Games → Games covers Marble Race (start from your live) and Battle game (Artillery). Classic lobby stay paused.',
-      icon: 'game-controller',
-      navigate: { type: 'chatTab', select: 'games' },
-      targetId: 'headerTab:games',
-      targetZone: 'header.tabs',
-      preferredPlacement: 'below',
-    });
-  }
-
-  steps.push({
-    id: 'rankings',
-    title: 'Rankings',
-    body: 'See who’s climbing — gifts, streams, and glory boards. Rankings are open to everyone.',
-    icon: 'trophy',
-    navigate: { type: 'stack', name: 'Rankings' },
-    targetZone: 'center.soft',
-    preferredPlacement: 'below',
-  });
-
-  steps.push({
-    id: 'done',
-    title: 'You’re set',
-    body: 'That’s the tour. Explore at your own pace — reopen anytime from Notifications or Settings. Skip was always available too.',
-    icon: 'checkmark-circle',
-    navigate: { type: 'tab', name: 'Home', select: 'A' },
-    targetZone: 'center.soft',
-    preferredPlacement: 'below',
-  });
-
-  return steps;
 }

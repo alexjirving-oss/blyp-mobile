@@ -1,5 +1,6 @@
 /**
  * TourTarget — measures a view into the tour target registry.
+ * Remeasures on layout + staggered ticks so anchors survive tab/animation churn.
  */
 
 import React, { useCallback, useEffect, useRef } from 'react';
@@ -22,11 +23,10 @@ export default function TourTarget({ id, children, style, ...rest }) {
 
   useEffect(() => {
     if (!id) return undefined;
-    const t1 = setTimeout(measure, 60);
-    const t2 = setTimeout(measure, 320);
+    const delays = [40, 180, 420, 900];
+    const timers = delays.map((ms) => setTimeout(measure, ms));
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      timers.forEach(clearTimeout);
       clearTourTarget(id);
     };
   }, [id, measure]);

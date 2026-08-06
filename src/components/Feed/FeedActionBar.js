@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
+import TourTarget from '../../tour/TourTarget';
 
 /**
  * Horizontal engagement chrome for For You / MediaViewer.
@@ -24,12 +25,9 @@ export default function FeedActionBar({
   pointerEvents = 'box-none',
 }) {
   return (
-    <View
-      style={[styles.bar, { bottom: bottomOffset }, style]}
-      pointerEvents={pointerEvents}
-    >
+    <TourTarget id="feedActions" style={[styles.bar, { bottom: bottomOffset }, style]} pointerEvents={pointerEvents}>
       <View style={styles.inner}>{children}</View>
-    </View>
+    </TourTarget>
   );
 }
 

@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import Icon from '../Icon';
+import TourTarget from '../../tour/TourTarget';
 import {
   resolveReminder,
   createReminder,
@@ -1326,17 +1327,21 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       <View style={styles.greetRow}>
         <Text style={styles.greetText}>{greeting()}</Text>
         <View style={styles.greetActions}>
-          <TouchableOpacity
-            style={[styles.savedBtn, editMode && styles.editHomeBtnActive]}
-            onPress={() => setEditMode((v) => !v)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Icon
-              name={editMode ? 'checkmark' : 'grid-outline'}
-              size={18}
-              color={editMode ? COLORS.black : COLORS.textPrimary}
-            />
-          </TouchableOpacity>
+          <TourTarget id="homeCustomize">
+            <TouchableOpacity
+              style={[styles.savedBtn, editMode && styles.editHomeBtnActive]}
+              onPress={() => setEditMode((v) => !v)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Customize Home"
+            >
+              <Icon
+                name={editMode ? 'checkmark' : 'grid-outline'}
+                size={18}
+                color={editMode ? COLORS.black : COLORS.textPrimary}
+              />
+            </TouchableOpacity>
+          </TourTarget>
           <TouchableOpacity
             style={styles.savedBtn}
             onPress={() => {

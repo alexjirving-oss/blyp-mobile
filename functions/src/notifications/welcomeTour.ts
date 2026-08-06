@@ -34,7 +34,7 @@ export const onUserOnboardedWelcomeTour = functions.firestore
         userId: uid,
         type: 'system',
         title: 'Welcome to Blyp',
-        body: 'Take a quick tour of Home, Create, Live, Messages, and more.',
+        body: 'Take a quick tour of For You, Home, Live, Gifts, Promote, and Messages.',
         dedupeKey: `welcome_tour:${uid}`,
         collapseKey: `welcome_tour:${uid}`,
         data: {

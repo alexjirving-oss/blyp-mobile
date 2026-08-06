@@ -400,7 +400,7 @@ export const SettingsStub = ({ navigation }: any) => {
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Replay tour</Text>
-              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>Walk through Home, Create, Live, Messages again</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>For You, Home, Live, Gifts, Promote, Messages</Text>
             </View>
           </TouchableOpacity>
 

@@ -27,7 +27,7 @@ export async function getLocalWelcomeTourItem(uid) {
       userId: uid,
       type: 'system',
       title: parsed.title || 'Welcome to Blyp',
-      body: parsed.body || 'Take a quick tour of Home, Create, Live, Messages, and more.',
+      body: parsed.body || 'Take a quick tour of For You, Home, Live, Gifts, Promote, and Messages.',
       data: { type: 'tour', action: 'start' },
       status: 'sent',
       createdAt: Number(parsed.createdAt) || Date.now(),
@@ -52,7 +52,7 @@ export async function ensureLocalWelcomeTourItem(uid, { force = false } = {}) {
     }
     const item = {
       title: 'Welcome to Blyp',
-      body: 'Take a quick tour of Home, Create, Live, Messages, and more.',
+      body: 'Take a quick tour of For You, Home, Live, Gifts, Promote, and Messages.',
       createdAt: Date.now(),
       consumed: false,
     };
@@ -74,7 +74,7 @@ export async function consumeLocalWelcomeTourItem(uid) {
       JSON.stringify({
         ...prev,
         title: prev?.title || 'Welcome to Blyp',
-        body: prev?.body || 'Take a quick tour of Home, Create, Live, Messages, and more.',
+        body: prev?.body || 'Take a quick tour of For You, Home, Live, Gifts, Promote, and Messages.',
         createdAt: Number(prev?.createdAt) || Date.now(),
         consumed: true,
         consumedAt: Date.now(),

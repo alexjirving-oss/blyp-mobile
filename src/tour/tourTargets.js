@@ -2,7 +2,8 @@
  * Tour target registry + callout placement.
  *
  * Targets can be registered by real views (TourTarget) or resolved from
- * named zones (tab slots, header strip, For You action rail).
+ * named zones (tab slots, header strip, For You action bar, etc.).
+ * Zones are intentionally flexible so the tour survives layout moves.
  */
 
 const targets = new Map();
@@ -130,40 +131,75 @@ export function resolveZoneRect(zone, metrics) {
     };
   }
 
-  if (zone === 'header.tabs') {
+  if (zone === 'header.tabs' || zone === 'header.live' || zone === 'header.promote') {
     return {
       x: 10,
-      y: (insets.top || 0) + 6,
+      y: (insets.top || 0) + 52,
       width: width - 20,
-      height: 46,
+      height: 44,
     };
   }
 
   if (zone === 'header.forYou' || zone === 'header.home') {
     const idx = zone === 'header.forYou' ? 0 : 1;
     return {
-      x: 10 + idx * 88,
-      y: (insets.top || 0) + 8,
-      width: 84,
-      height: 42,
+      x: 12 + idx * 86,
+      y: (insets.top || 0) + 54,
+      width: 80,
+      height: 40,
     };
   }
 
+  // Horizontal For You engagement strip (above tab bar) — was a right-rail zone.
   if (zone === 'foryou.actions') {
+    const barH = 72;
+    const y = tabY - barH - 6;
     return {
-      x: width - 72,
-      y: height * 0.32,
-      width: 58,
-      height: Math.min(260, height * 0.38),
+      x: 8,
+      y: Math.max((insets.top || 0) + 120, y),
+      width: width - 16,
+      height: barH,
+    };
+  }
+
+  // Gift control sits toward the right of the horizontal action bar.
+  if (zone === 'feed.gift') {
+    const barH = 72;
+    const y = tabY - barH - 6;
+    const slot = Math.min(72, width * 0.18);
+    return {
+      x: width - slot - 56,
+      y: Math.max((insets.top || 0) + 120, y),
+      width: slot,
+      height: barH,
+    };
+  }
+
+  // Home hub customize (grid) control — top-right of the hub greeting row.
+  if (zone === 'home.customize') {
+    return {
+      x: width - 120,
+      y: (insets.top || 0) + 118,
+      width: 44,
+      height: 44,
+    };
+  }
+
+  if (zone === 'stage.desk') {
+    return {
+      x: width * 0.1,
+      y: height * 0.22,
+      width: width * 0.8,
+      height: height * 0.34,
     };
   }
 
   if (zone === 'center.soft') {
     return {
-      x: width * 0.2,
-      y: height * 0.28,
-      width: width * 0.6,
-      height: height * 0.22,
+      x: width * 0.18,
+      y: height * 0.26,
+      width: width * 0.64,
+      height: height * 0.2,
     };
   }
 
@@ -193,7 +229,6 @@ export function placeCallout({
   const centerX = () => clamp((screenW - cardW) / 2, minX, maxX);
 
   if (!target) {
-    // No spotlight — float mid-upper so the bottom tab bar stays visible.
     return {
       x: centerX(),
       y: clamp(screenH * 0.22, minY, Math.max(minY, maxY)),
@@ -201,7 +236,7 @@ export function placeCallout({
     };
   }
 
-  const hole = inflate(target, 8);
+  const hole = inflate(target, 10);
   const alignXToTarget = () =>
     clamp(target.x + target.width / 2 - cardW / 2, minX, maxX);
 
@@ -250,7 +285,6 @@ export function placeCallout({
     });
   }
 
-  // Prefer non-overlapping; drop any that still collide (side placements with tall cards).
   const safe = candidates.filter((c) => {
     const cardRect = { x: c.x, y: c.y, width: cardW, height: cardH };
     return !intersects(cardRect, hole);
@@ -262,7 +296,6 @@ export function placeCallout({
     return { x: pool[0].x, y: pool[0].y, placement: pool[0].placement };
   }
 
-  // Last resort: opposite half of the screen from the target.
   const targetMidY = target.y + target.height / 2;
   const y =
     targetMidY > screenH / 2
@@ -272,12 +305,19 @@ export function placeCallout({
 }
 
 /**
- * Resolve the best rect for a step: live target → zone heuristic.
+ * Resolve the best rect for a step: live targets (flexible ids) → zone heuristic.
  */
 export function resolveStepTarget(step, metrics) {
   if (!step) return null;
-  if (step.targetId) {
-    const live = getTourTarget(step.targetId);
+  const ids = [];
+  if (step.targetId) ids.push(step.targetId);
+  if (Array.isArray(step.targetIds)) {
+    for (const id of step.targetIds) {
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+  }
+  for (const id of ids) {
+    const live = getTourTarget(id);
     if (live) return live;
   }
   if (step.targetZone) {

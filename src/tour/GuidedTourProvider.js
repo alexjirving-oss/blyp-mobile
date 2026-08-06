@@ -91,6 +91,14 @@ function safeNavigate(navigationRef, action) {
     if (action?.type === 'chatTab') {
       navigationRef.navigate('MainTabs', { screen: 'Chat' });
       selectAfterNavigate('Chat', action.select || 'notifications');
+      return;
+    }
+    if (action?.type === 'profileTab') {
+      navigationRef.navigate('MainTabs', {
+        screen: 'Profile',
+        params: action.select === 'Promote' ? { openPromote: true } : undefined,
+      });
+      selectAfterNavigate('Profile', action.select || 'My Profile');
     }
   } catch (e) {
     console.warn('[tour] navigate failed', e?.message || e);

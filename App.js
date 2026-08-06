@@ -380,7 +380,14 @@ function MainTabs() {
         listeners={makeDoubleTapResetListener('Messenger')}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <TabBarIcon name="chatbubbles" color={color} size={size} focused={focused} badge={unreadCount > 0 ? unreadCount : null} />
+            <TabBarIcon
+              name="chatbubbles"
+              color={color}
+              size={size}
+              focused={focused}
+              badge={unreadCount > 0 ? unreadCount : null}
+              tourTargetId="tab.messenger"
+            />
           ),
           tabBarLabel: 'Messages',
         }}
@@ -391,7 +398,7 @@ function MainTabs() {
         listeners={makeDoubleTapResetListener('Profile')}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <TabBarIcon name="person" color={color} size={size} focused={focused} />
+            <TabBarIcon name="person" color={color} size={size} focused={focused} tourTargetId="tab.profile" />
           ),
         }}
       />

@@ -26,6 +26,7 @@ import {
   makeIdempotencyKey,
 } from '../api/economyLiveApi';
 import { subscribeWalletUpdated } from '../utils/walletEvents';
+import TourTarget from '../tour/TourTarget';
 
 const { width } = Dimensions.get('window');
 
@@ -987,29 +988,31 @@ const GiftSystem = ({
     <>
       {!hideTrigger ? (
         triggerVariant === 'feed' ? (
-          <TouchableOpacity
-            style={styles.feedTriggerOuter}
-            onPress={() => setShowGiftModal(true)}
-            activeOpacity={0.85}
-            delayPressIn={0}
-          >
-            <View style={styles.feedTriggerStack}>
-              <LinearGradient
-                colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.feedTriggerRing}
-              >
-                <View style={styles.feedTriggerInner}>
-                  <View style={styles.feedTriggerGloss} pointerEvents="none" />
-                  <Icon name="gift" size={22} color={COLORS.white} />
-                </View>
-              </LinearGradient>
-              <Text style={styles.feedTriggerLabel} allowFontScaling={false}>
-                {Number(giftCoins) > 0 ? formatGiftCoins(giftCoins) : 'Gift'}
-              </Text>
-            </View>
-          </TouchableOpacity>
+          <TourTarget id="feedGift">
+            <TouchableOpacity
+              style={styles.feedTriggerOuter}
+              onPress={() => setShowGiftModal(true)}
+              activeOpacity={0.85}
+              delayPressIn={0}
+            >
+              <View style={styles.feedTriggerStack}>
+                <LinearGradient
+                  colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.feedTriggerRing}
+                >
+                  <View style={styles.feedTriggerInner}>
+                    <View style={styles.feedTriggerGloss} pointerEvents="none" />
+                    <Icon name="gift" size={22} color={COLORS.white} />
+                  </View>
+                </LinearGradient>
+                <Text style={styles.feedTriggerLabel} allowFontScaling={false}>
+                  {Number(giftCoins) > 0 ? formatGiftCoins(giftCoins) : 'Gift'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </TourTarget>
         ) : (
           <TouchableOpacity
             style={styles.giftButton}
