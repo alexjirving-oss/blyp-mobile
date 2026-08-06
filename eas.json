@@ -81,6 +81,7 @@
         "EXPO_PUBLIC_LIVE_SERVICE_URL": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
         "EXPO_PUBLIC_USE_LIVE_SERVICE_WALLET": "true",
         "EXPO_PUBLIC_DISABLE_PURCHASES": "false",
+        "EXPO_PUBLIC_ENABLE_WITHDRAWALS": "1",
         "EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED": "1",
         "EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED": "1",
         "FORCE_GENERATE_AWS_EXPORTS": "1"

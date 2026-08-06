@@ -18,12 +18,33 @@ export const TRANSACTIONS_COLLECTION = 'transactions';
 export const GIFTS_COLLECTION = 'gifts';
 export const GEMS_COLLECTION = 'gems';
 
-// Environment helper
-const env: Record<string, string | undefined> = (typeof process !== 'undefined' && process?.env) ? process.env : {};
+// Environment helper — prefer expo.extra for production Hermes (process.env often empty).
+function readExtraFlag(name: string): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+    const Constants = require('expo-constants')?.default || require('expo-constants');
+    const extra =
+      Constants?.expoConfig?.extra?.[name] ??
+      Constants?.manifest?.extra?.[name] ??
+      Constants?.manifest2?.extra?.expoClient?.extra?.[name] ??
+      Constants?.manifest2?.extra?.[name];
+    return String(extra ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
 function envFlag(name: string, defaultValue: boolean): boolean {
-  const raw = env[name];
-  if (raw === undefined) return defaultValue;
-  return raw === '1' || raw === 'true';
+  // Dynamic process.env key — avoid babel freezing a missing literal at bundle time.
+  const fromEnv =
+    typeof process !== 'undefined' && process?.env
+      ? String(process.env[name] ?? '').trim()
+      : '';
+  const raw = (fromEnv || readExtraFlag(name)).toLowerCase();
+  if (!raw) return defaultValue;
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return false;
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return true;
+  return defaultValue;
 }
 
 // ============================================================================
@@ -69,9 +90,8 @@ export function isClientEconomyMutationAllowed(): boolean {
   return CLIENT_ECONOMY_MUTATIONS_ENABLED;
 }
 
-// Withdrawals: OFF by default — prod live-service kill-switch is off until
-// Stripe Connect is explicitly enabled (sk_live_ + ENABLE_WITHDRAWALS=1).
-// Set EXPO_PUBLIC_ENABLE_WITHDRAWALS=1 only when the backend flag is also on.
+// Withdrawals: production AAB defaults ON via app.config extra when Cloud Run
+// ENABLE_WITHDRAWALS=1 + live Stripe are set. Override with EXPO_PUBLIC_ENABLE_WITHDRAWALS=0.
 // See docs/WITHDRAWALS_OPS.md.
 export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', false);
 

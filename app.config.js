@@ -78,12 +78,16 @@ module.exports = () => {
     EXPO_PUBLIC_LIVE_SERVICE_URL:
       process.env.EXPO_PUBLIC_LIVE_SERVICE_URL ||
       'https://blyp-live-service-innn3d7yqq-uc.a.run.app',
-    // Default OFF — matches live-service withdrawal kill-switch. Opt in with =1.
-    EXPO_PUBLIC_ENABLE_WITHDRAWALS:
-      process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS === '1' ||
-      String(process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS || '').toLowerCase() === 'true'
-        ? '1'
-        : '0',
+    // Withdrawals CTA: Cloud Run ENABLE_WITHDRAWALS=1 + live Stripe. Default ON
+    // for production/canonical AAB so Hermes reads it from expo.extra; set =0 to hide.
+    EXPO_PUBLIC_ENABLE_WITHDRAWALS: (() => {
+      const raw = String(process.env.EXPO_PUBLIC_ENABLE_WITHDRAWALS || '')
+        .trim()
+        .toLowerCase();
+      if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return '0';
+      if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
+      return isProductionProfile ? '1' : '0';
+    })(),
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
     // Live overlay games — bake into extra so production Hermes can read them
     // (process.env.EXPO_PUBLIC_* is often empty at runtime; see LiveGamesFlags.js).
