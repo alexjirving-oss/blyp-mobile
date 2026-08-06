@@ -84,8 +84,17 @@ function KillSwitchBoard() {
                     </Badge>
                   </td>
                   <td className="dim" style={{ fontSize: 12 }}>
-                    env={w?.enableWithdrawalsEnv ? "1" : "0"} · stripe={w?.stripeConfigured ? "yes" : "no"}
+                    env={w?.enableWithdrawalsEnv ? "1" : "0"} · stripe=
+                    {w?.stripeConfigured
+                      ? w?.stripeKeyMode === "live"
+                        ? "live"
+                        : w?.stripeKeyMode === "test"
+                          ? "test"
+                          : "yes"
+                      : "no"}
+                    {w?.stripeWebhookConfigured != null ? ` · whsec=${w.stripeWebhookConfigured ? "yes" : "no"}` : ""}
                     <div>{w?.note}</div>
+                    {w?.stripeNote ? <div>{w.stripeNote}</div> : null}
                   </td>
                   <td className="dim" style={{ fontSize: 11 }}>Cloud Run only</td>
                 </tr>

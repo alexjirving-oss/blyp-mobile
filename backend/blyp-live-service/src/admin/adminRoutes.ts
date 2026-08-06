@@ -2178,25 +2178,36 @@ router.post('/admin/games/disputes/:disputeId/status', requireAdmin, requirePerm
     }
 });
 
-/** Chargeback desk: manual flags wire WithdrawalGuard; Stripe/Play ingest still stubbed. */
+/** Chargeback desk: Stripe dispute webhooks + manual flags wire WithdrawalGuard; Play ingest still manual. */
 router.get('/admin/fraud/chargebacks', requireAdmin, async (_req: AuthedRequest, res: Response) => {
     try {
         const iap = await adminListIapPurchases({ limit: 40 });
         const anomalies = (iap.items || []).filter((x: any) => Array.isArray(x.anomalyHints) && x.anomalyHints.length > 0);
         const flagged = await listOpenChargebackUsers(50);
+        let stripeWebhookConfigured = false;
+        try {
+            const { getStripeReadiness } = await import('../economy/withdrawalService');
+            stripeWebhookConfigured = getStripeReadiness().webhookConfigured;
+        } catch {
+            // economy env may be unavailable in degraded admin-only boots
+        }
         return res.json({
             openChargebackCount: flagged.length,
             flaggedUsers: flagged,
             chargebackIngest: {
-                wired: false,
-                detail: 'Stripe/Play chargeback webhooks not connected. Ops may set openChargebackCount on a user — WithdrawalGuard reads user_admin_state.metadata.fraud.',
+                wired: true,
+                stripeDisputes: true,
+                playBilling: false,
+                webhookConfigured: stripeWebhookConfigured,
+                detail:
+                    'Stripe charge.dispute.* + radar.early_fraud_warning.created on POST /webhooks/stripe set openChargebackCount when the Connect account maps to a Blyp user. Play Billing chargebacks remain manual (admin fraud flags).',
             },
             withdrawBlockWired: true,
             iapAnomalies: anomalies.slice(0, 25),
             iapSource: iap.source,
             iapNote: iap.note,
             degraded: iap.degraded,
-            note: 'Manual chargeback flag blocks withdraw when BLOCK_IF_OPEN_CHARGEBACK is on. ENABLE_WITHDRAWALS remains OFF in prod.',
+            note: 'Open chargeback flags block withdraw when BLOCK_IF_OPEN_CHARGEBACK is on. ENABLE_WITHDRAWALS is independent (Cloud Run env).',
         });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] chargebacks desk failed');

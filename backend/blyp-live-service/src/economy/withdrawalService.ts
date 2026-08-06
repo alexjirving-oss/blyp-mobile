@@ -18,6 +18,47 @@ function stripeSecretConfigured(): boolean {
   return Boolean(String(getEconomyEnv().STRIPE_SECRET_KEY || '').trim());
 }
 
+/** Safe readiness for admin/ops — never returns key material. */
+export type StripeKeyMode = 'absent' | 'test' | 'live' | 'unknown';
+
+export function getStripeReadiness(): {
+  secretConfigured: boolean;
+  webhookConfigured: boolean;
+  keyMode: StripeKeyMode;
+  liveKeyPresent: boolean;
+  connectRequired: true;
+  note: string;
+} {
+  const env = getEconomyEnv();
+  const secret = String(env.STRIPE_SECRET_KEY || '').trim();
+  const webhook = String(env.STRIPE_WEBHOOK_SECRET || '').trim();
+  let keyMode: StripeKeyMode = 'absent';
+  if (secret) {
+    if (secret.startsWith('sk_live_')) keyMode = 'live';
+    else if (secret.startsWith('sk_test_')) keyMode = 'test';
+    else keyMode = 'unknown';
+  }
+  const liveKeyPresent = keyMode === 'live';
+  let note = 'Stripe secret not configured';
+  if (keyMode === 'live' && webhook) {
+    note = 'Live Stripe secret + webhook signing secret present (Connect Express payouts)';
+  } else if (keyMode === 'live' && !webhook) {
+    note = 'Live Stripe secret present but STRIPE_WEBHOOK_SECRET missing';
+  } else if (keyMode === 'test') {
+    note = 'Test Stripe secret (sk_test_) — replace with sk_live_ before enabling withdrawals';
+  } else if (keyMode === 'unknown') {
+    note = 'STRIPE_SECRET_KEY set but not a recognizable sk_live_/sk_test_ prefix';
+  }
+  return {
+    secretConfigured: Boolean(secret),
+    webhookConfigured: Boolean(webhook),
+    keyMode,
+    liveKeyPresent,
+    connectRequired: true,
+    note,
+  };
+}
+
 /**
  * Kill-switch + Stripe gate. ENABLE_WITHDRAWALS=1 alone is not enough —
  * a missing/empty STRIPE_SECRET_KEY keeps cash-out closed so we never
@@ -151,7 +192,7 @@ async function buildContext(
     payout && payout.payouts_enabled && payout.details_submitted ? 'verified' : payout ? 'pending' : 'unverified';
 
   // Fraud / chargeback flags from admin console (user_admin_state.metadata.fraud).
-  // Stripe/Play ingest remains unwired — ops set openChargebackCount manually.
+  // Stripe dispute webhooks increment openChargebackCount; Play IAP chargebacks stay manual.
   let accountFrozen = false;
   let underFraudReview = false;
   let openChargebackCount = 0;
@@ -766,6 +807,68 @@ export async function rejectWithdrawal(
   return mapWithdrawalRow(updated || { ...row, status: 'rejected' });
 }
 
+async function resolveUserIdForStripeEvent(input: {
+  connectAccountId?: string | null;
+  metadataUserId?: string | null;
+  stripe?: Stripe;
+}): Promise<string | null> {
+  const { db } = getEconomyInfra();
+  const metaUid = String(input.metadataUserId || '').trim();
+  if (metaUid) return metaUid;
+  const accountId = String(input.connectAccountId || '').trim();
+  if (!accountId) return null;
+  const row = await db('payout_accounts').where({ stripe_account_id: accountId }).first();
+  if (row?.user_id) return String(row.user_id);
+  if (input.stripe) {
+    try {
+      const account = await input.stripe.accounts.retrieve(accountId);
+      const fromMeta = String(account.metadata?.blyp_user_id || '').trim();
+      if (fromMeta) return fromMeta;
+    } catch (e: any) {
+      logger.warn(
+        { err: e?.message || String(e), accountId },
+        '[stripe-webhook] account retrieve for user map failed',
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * Apply Stripe dispute / early-fraud signals onto user_admin_state.metadata.fraud
+ * so WithdrawalGuard BLOCK_IF_OPEN_CHARGEBACK can deny cash-out.
+ */
+async function applyStripeChargebackSignal(input: {
+  userId: string;
+  disputeId: string;
+  eventType: string;
+  status?: string | null;
+  closing: boolean;
+}) {
+  const { setUserFraudFlags, getUserFraudFlags } = await import('../admin/adminDeferredOps');
+  const current = await getUserFraudFlags(input.userId);
+  let nextCount = current.openChargebackCount;
+  if (input.closing) {
+    nextCount = Math.max(0, current.openChargebackCount - 1);
+  } else {
+    nextCount = Math.min(99, current.openChargebackCount + 1);
+  }
+  const note = input.closing
+    ? `Stripe ${input.eventType} closed ${input.disputeId}${input.status ? ` (${input.status})` : ''}`
+    : `Stripe ${input.eventType} ${input.disputeId}${input.status ? ` (${input.status})` : ''}`;
+  await setUserFraudFlags({
+    actorUserId: 'stripe_webhook',
+    userId: input.userId,
+    openChargebackCount: nextCount,
+    underFraudReview: nextCount > 0 ? true : current.underFraudReview,
+    note: note.slice(0, 500),
+  });
+  logger.info(
+    { userId: input.userId, disputeId: input.disputeId, eventType: input.eventType, openChargebackCount: nextCount },
+    '[stripe-webhook] chargeback signal applied',
+  );
+}
+
 export async function handleStripeWebhook(rawBody: Buffer, signature: string | undefined) {
   const env = getEconomyEnv();
   const secret = String(env.STRIPE_WEBHOOK_SECRET || '').trim();
@@ -784,6 +887,10 @@ export async function handleStripeWebhook(rawBody: Buffer, signature: string | u
   }
 
   const { db } = getEconomyInfra();
+  const connectAccountId =
+    typeof (event as { account?: string }).account === 'string'
+      ? String((event as { account?: string }).account)
+      : null;
 
   if (event.type === 'account.updated') {
     const account = event.data.object as Stripe.Account;
@@ -833,6 +940,81 @@ export async function handleStripeWebhook(rawBody: Buffer, signature: string | u
             .where({ withdrawal_id: withdrawalId })
             .update({ status: 'failed', updated_at: trx.fn.now() });
         });
+      }
+    }
+  }
+
+  // Chargeback / dispute ingest (Stripe). Play Billing chargebacks remain manual via admin.
+  const disputeTypes = new Set([
+    'charge.dispute.created',
+    'charge.dispute.updated',
+    'charge.dispute.closed',
+    'charge.dispute.funds_withdrawn',
+    'charge.dispute.funds_reinstated',
+  ]);
+  if (disputeTypes.has(String(event.type))) {
+    const dispute = event.data.object as Stripe.Dispute;
+    const metaUid =
+      (dispute.metadata && (dispute.metadata.blyp_user_id || dispute.metadata.user_id)) || null;
+    const userId = await resolveUserIdForStripeEvent({
+      connectAccountId,
+      metadataUserId: metaUid,
+      stripe,
+    });
+    if (!userId) {
+      logger.warn(
+        { type: event.type, disputeId: dispute.id, connectAccountId },
+        '[stripe-webhook] dispute with no mapped Blyp user — skipped fraud flag',
+      );
+    } else {
+      const typeStr = String(event.type);
+      const closing =
+        typeStr === 'charge.dispute.closed' ||
+        typeStr === 'charge.dispute.funds_reinstated' ||
+        String(dispute.status) === 'won';
+      // Only bump on create / funds_withdrawn; ignore noisy .updated to avoid double-count.
+      const shouldMutate =
+        closing ||
+        typeStr === 'charge.dispute.created' ||
+        typeStr === 'charge.dispute.funds_withdrawn';
+      if (shouldMutate) {
+        try {
+          await applyStripeChargebackSignal({
+            userId,
+            disputeId: dispute.id,
+            eventType: typeStr,
+            status: dispute.status ? String(dispute.status) : null,
+            closing,
+          });
+        } catch (e: any) {
+          logger.error(
+            { err: e?.message || String(e), userId, disputeId: dispute.id },
+            '[stripe-webhook] dispute flag failed',
+          );
+        }
+      }
+    }
+  }
+
+  if (String(event.type) === 'radar.early_fraud_warning.created') {
+    const efw = event.data.object as { id?: string; charge?: string; metadata?: Record<string, string> };
+    const metaUid = efw.metadata?.blyp_user_id || efw.metadata?.user_id || null;
+    const userId = await resolveUserIdForStripeEvent({
+      connectAccountId,
+      metadataUserId: metaUid,
+      stripe,
+    });
+    if (userId) {
+      try {
+        await applyStripeChargebackSignal({
+          userId,
+          disputeId: String(efw.id || efw.charge || 'efw'),
+          eventType: 'radar.early_fraud_warning.created',
+          status: 'warning',
+          closing: false,
+        });
+      } catch (e: any) {
+        logger.error({ err: e?.message || String(e), userId }, '[stripe-webhook] efw flag failed');
       }
     }
   }

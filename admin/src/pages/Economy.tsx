@@ -155,8 +155,20 @@ export default function Economy() {
               <div style={{ fontWeight: 700 }}>{w.enableWithdrawalsEnv ? "1" : "0"}</div>
             </div>
             <div>
-              <div className="dim" style={{ fontSize: 11 }}>Stripe secret configured</div>
-              <div style={{ fontWeight: 700 }}>{w.stripeConfigured ? "yes" : "no"}</div>
+              <div className="dim" style={{ fontSize: 11 }}>Stripe secret</div>
+              <div style={{ fontWeight: 700 }}>
+                {w.stripeConfigured
+                  ? w.stripeKeyMode === "live"
+                    ? "live"
+                    : w.stripeKeyMode === "test"
+                      ? "test"
+                      : w.stripeKeyMode || "yes"
+                  : "no"}
+              </div>
+            </div>
+            <div>
+              <div className="dim" style={{ fontSize: 11 }}>Webhook secret</div>
+              <div style={{ fontWeight: 700 }}>{w.stripeWebhookConfigured ? "yes" : "no"}</div>
             </div>
             <div>
               <div className="dim" style={{ fontSize: 11 }}>Effective</div>
@@ -165,11 +177,18 @@ export default function Economy() {
           </div>
           {!payoutsLive ? (
             <WarnNote>
-              {w.note}. Queue may still show historical <code>pending_review</code> rows, but cash-out is not live.
-              Do not tell creators payouts work. Env is Cloud Run–only (not toggled here).
+              {w.note}.{" "}
+              {w.stripeKeyMode === "test"
+                ? "Cloud Run still has sk_test_ — paste live keys before flipping ENABLE_WITHDRAWALS."
+                : w.stripeLiveKeyPresent
+                  ? "Live key detected; kill-switch still OFF (Cloud Run env only)."
+                  : "Stripe not live-ready yet."}{" "}
+              Queue may still show historical <code>pending_review</code> rows. Do not tell creators payouts work.
             </WarnNote>
           ) : (
-            <InfoNote>{w.note}. Approve executes Stripe transfer; reject restores reserved gems.</InfoNote>
+            <InfoNote>
+              {w.note}. {w.stripeNote || "Approve executes Stripe Connect transfer; reject restores reserved gems."}
+            </InfoNote>
           )}
           {dual && (
             <div style={{ marginTop: 10 }}>

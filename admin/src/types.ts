@@ -245,6 +245,11 @@ export interface OpsControlPlane {
   withdrawals: {
     enableWithdrawalsEnv: boolean;
     stripeConfigured: boolean;
+    stripeWebhookConfigured?: boolean;
+    stripeKeyMode?: "absent" | "test" | "live" | "unknown";
+    stripeLiveKeyPresent?: boolean;
+    stripeConnectRequired?: boolean;
+    stripeNote?: string;
     effectivelyEnabled: boolean;
     note: string;
   };

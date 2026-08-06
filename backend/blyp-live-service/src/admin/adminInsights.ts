@@ -427,20 +427,38 @@ export async function listAdminGlobalPosts(input: {
 export async function getOpsControlPlane(): Promise<Record<string, unknown>> {
   let enableWithdrawalsEnv = false;
   let stripeConfigured = false;
+  let stripeWebhookConfigured = false;
+  let stripeKeyMode: 'absent' | 'test' | 'live' | 'unknown' = 'absent';
+  let stripeLiveKeyPresent = false;
   let effectivelyEnabled = false;
   let withdrawalNote = 'Withdrawals disabled (ENABLE_WITHDRAWALS is not 1)';
+  let stripeNote = 'Stripe secret not configured';
 
   try {
     const { getEconomyEnv } = await import('../config/economyEnv');
-    const { withdrawalsEnabled } = await import('../economy/withdrawalService');
+    const { withdrawalsEnabled, getStripeReadiness } = await import('../economy/withdrawalService');
     const env = getEconomyEnv();
     enableWithdrawalsEnv = Number(env.ENABLE_WITHDRAWALS || 0) === 1;
-    stripeConfigured = Boolean(String(env.STRIPE_SECRET_KEY || '').trim());
+    const stripe = getStripeReadiness();
+    stripeConfigured = stripe.secretConfigured;
+    stripeWebhookConfigured = stripe.webhookConfigured;
+    stripeKeyMode = stripe.keyMode;
+    stripeLiveKeyPresent = stripe.liveKeyPresent;
+    stripeNote = stripe.note;
     effectivelyEnabled = withdrawalsEnabled();
     if (effectivelyEnabled) {
-      withdrawalNote = 'Withdrawals enabled (ENABLE_WITHDRAWALS=1 and Stripe configured)';
+      withdrawalNote =
+        stripeKeyMode === 'live'
+          ? 'Withdrawals enabled (ENABLE_WITHDRAWALS=1 and live Stripe configured)'
+          : 'Withdrawals enabled with non-live Stripe key — replace with sk_live_ for production payouts';
     } else if (enableWithdrawalsEnv && !stripeConfigured) {
       withdrawalNote = 'ENABLE_WITHDRAWALS=1 but STRIPE_SECRET_KEY is not configured';
+    } else if (!enableWithdrawalsEnv && stripeLiveKeyPresent) {
+      withdrawalNote =
+        'Live Stripe key present; ENABLE_WITHDRAWALS still 0 — flip flag after webhook smoke';
+    } else if (!enableWithdrawalsEnv && stripeKeyMode === 'test') {
+      withdrawalNote =
+        'Withdrawals disabled; Stripe is test-mode (sk_test_). Paste sk_live_ + whsec before enabling.';
     }
   } catch (e: any) {
     withdrawalNote = `Economy env unavailable: ${e?.message || String(e)}`;
@@ -464,6 +482,11 @@ export async function getOpsControlPlane(): Promise<Record<string, unknown>> {
     withdrawals: {
       enableWithdrawalsEnv,
       stripeConfigured,
+      stripeWebhookConfigured,
+      stripeKeyMode,
+      stripeLiveKeyPresent,
+      stripeConnectRequired: true,
+      stripeNote,
       effectivelyEnabled,
       note: withdrawalNote,
     },
