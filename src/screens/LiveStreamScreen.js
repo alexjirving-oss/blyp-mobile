@@ -43,6 +43,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
 import { isArtilleryEnabled, isMarbleRaceEnabled } from '../config/LiveGamesFlags';
+import { useLockPortraitWhileFocused } from '../utils/lockPortraitWhileFocused';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import CommentsModal from '../components/CommentsModal';
 import GiftSystem from '../components/GiftSystem';
@@ -179,6 +180,8 @@ BLYP_nativeLog('ðŸ“¸ LiveStreamScreen: CameraView imported? ' + String(type
 const LiveStreamScreen = (props) => {
   const NativeIVSBroadcastView = getNativeIVSBroadcastView();
   const NativeIVSRealTimeView = getNativeIVSRealTimeView();
+  // Keep live video feed portrait-stable; MainActivity itself is fullSensor for Fold.
+  useLockPortraitWhileFocused();
   BLYP_nativeLog('[LIVE][RENDER] LiveStreamScreen render', 1);
   BLYP_nativeLog(
     '[LIVE][PROPS_AT_MOUNT] ' +

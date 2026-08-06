@@ -33,8 +33,10 @@ const ScreenContainer = ({
       <View style={[styles.container, { paddingTop: topPad }, style]}>
         <StatusBar
           barStyle={barStyle || (isDark ? 'light-content' : 'dark-content')}
-          backgroundColor={statusBarColor || colors.bgGradient[0]}
-          translucent={Platform.OS === 'android'}
+          // Android 15 edge-to-edge: backgroundColor/translucent hit deprecated APIs.
+          {...(Platform.OS === 'android'
+            ? {}
+            : { backgroundColor: statusBarColor || colors.bgGradient[0] })}
         />
         {children}
       </View>

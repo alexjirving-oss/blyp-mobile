@@ -7,11 +7,35 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
-# react-native-reanimated
+# ---- React Native / Hermes / New Architecture ----
+-keep class com.facebook.react.** { *; }
+-keep class com.facebook.hermes.** { *; }
+-keep class com.facebook.jni.** { *; }
+-keep class com.facebook.react.turbomodule.** { *; }
+-keep class com.facebook.react.bridge.** { *; }
+-keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactProp <methods>; }
+-keepclassmembers class * { @com.facebook.react.uimanager.annotations.ReactPropGroup <methods>; }
+
+# ---- Reanimated / Worklets ----
 -keep class com.swmansion.reanimated.** { *; }
+-keep class com.swmansion.common.** { *; }
+-keep class com.swmansion.rnscreens.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
-# Amazon IVS Broadcast SDK
+# ---- Skia ----
+-keep class com.shopify.reactnative.skia.** { *; }
+-keep class com.shopify.** { *; }
+
+# ---- Expo modules ----
+-keep class expo.modules.** { *; }
+-keep class org.unimodules.** { *; }
+-dontwarn expo.modules.**
+
+# ---- Safe area / gesture / screens ----
+-keep class com.th3rdwave.safeareacontext.** { *; }
+-keep class com.swmansion.gesturehandler.** { *; }
+
+# ---- Amazon IVS Broadcast SDK ----
 -keep class com.amazonaws.ivs.broadcast.** { *; }
 -keep class com.amazonaws.ivs.broadcast.BroadcastSession { *; }
 -keep class com.amazonaws.ivs.broadcast.BroadcastSession$* { *; }
@@ -20,10 +44,29 @@
 -keep class com.amazonaws.ivs.broadcast.DeviceInfo { *; }
 -keep class com.amazonaws.ivs.broadcast.DeviceInfo$* { *; }
 
-# Amazon IVS Player SDK
+# ---- Amazon IVS Player SDK ----
 -keep class com.amazonaws.ivs.player.** { *; }
 -keep class com.amazonaws.ivs.player.Player { *; }
 -keep class com.amazonaws.ivs.player.Player$* { *; }
 -keep class com.amazonaws.ivs.player.PlayerException { *; }
+
+# ---- LiveKit / WebRTC ----
+-keep class io.livekit.** { *; }
+-keep class livekit.org.** { *; }
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
+
+# ---- ML Kit / CameraX (expo-camera barcode) ----
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_** { *; }
+-dontwarn com.google.mlkit.**
+
+# ---- Blyp native modules ----
+-keep class com.blyp.mobile.** { *; }
+
+# ---- OkHttp / Gson commonly touched by RN networking ----
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn javax.annotation.**
 
 # Add any project specific keep options here:

@@ -15,6 +15,7 @@ import * as MediaLibrary from 'expo-media-library';
 import * as Device from 'expo-device';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../styles/theme';
+import { useLockPortraitWhileFocused } from '../utils/lockPortraitWhileFocused';
 
 const CameraScreen = () => {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -29,6 +30,7 @@ const CameraScreen = () => {
   const singlePhotoTimeoutRef = useRef(null);
   const cameraRef = useRef(null);
   const navigation = useNavigation();
+  useLockPortraitWhileFocused();
 
   useEffect(() => {
     if (!cameraPermission) {

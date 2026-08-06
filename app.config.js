@@ -120,7 +120,9 @@ module.exports = () => {
     slug: 'blyp-mobile',
     scheme: 'blyp',
     version: '1.0.18',
-    orientation: 'portrait',
+    // default = unspecified MainActivity orientation so Fold unfold works;
+    // camera/live screens lock portrait in JS (lockPortraitWhileFocused).
+    orientation: 'default',
     icon: './assets/icon.png',
     userInterfaceStyle: 'dark',
     splash: {
@@ -141,6 +143,8 @@ module.exports = () => {
       },
     },
     android: {
+      // Edge-to-edge: transparent system bars; avoid deprecated StatusBar color APIs.
+      edgeToEdgeEnabled: true,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0A0A0C',
@@ -224,18 +228,17 @@ module.exports = () => {
       './plugins/withIVSiOS',
       // Strip BOOT_COMPLETED from expo-notifications (Android 15 mediaPlayback FGS).
       './plugins/withAndroid15BootFgsCompliance',
+      // Foldables / Play large-screen: fullSensor MainActivity + ML Kit override.
+      './plugins/withPlayConsoleAndroidFixes',
+      'expo-screen-orientation',
       // In-app audio calls (LiveKit + WebRTC). Requires a native rebuild / new AAB.
       '@livekit/react-native-expo-plugin',
       '@config-plugins/react-native-webrtc',
     ],
     extra,
-    androidNavigationBar: {
-      visible: 'immersive',
-    },
+    // Style only — backgroundColor/translucent map to deprecated window APIs on Android 15+.
     androidStatusBar: {
-      backgroundColor: '#0A0A0C',
       barStyle: 'light-content',
-      translucent: true,
     },
     owner: 'alexjirving',
   };

@@ -72,10 +72,10 @@ const BLYP_CHROME_BLACK = '#0A0A0C';
 function useAndroidChromeBlack() {
   useEffect(() => {
     if (Platform.OS !== 'android') return;
+    // Android 15+: do not call StatusBar.setBackgroundColor / setTranslucent
+    // (deprecated window.statusBarColor APIs under edge-to-edge). Style only.
     try {
       RNStatusBar.setBarStyle('light-content');
-      RNStatusBar.setBackgroundColor(BLYP_CHROME_BLACK);
-      RNStatusBar.setTranslucent(true);
     } catch { }
     NavigationBar.setButtonStyleAsync('light').catch(() => {});
   }, []);
@@ -1374,7 +1374,7 @@ function AppInner() {
     <View testID="ROOT_APP" accessible={true} accessibilityLabel="ROOT_APP" style={{ flex: 1 }}>
       <PerformanceProvider>
         <NavigationContainer ref={navigationRef} theme={navTheme}>
-          <StatusBar style="light" backgroundColor={BLYP_CHROME_BLACK} translucent />
+          <StatusBar style="light" />
           {showApp ? (
             onboarded === null && !!effectiveUser && !isGuest ? (
               // Real user whose onboarding status is still resolving: hold a
