@@ -77,6 +77,11 @@ const DEFAULT_PREFS = {
    * homeLayoutService so new catalog types heal in without forcing a migrate.
    */
   homeLayout: null,
+  /**
+   * Stage Desk (host Live Dashboard) layout — widgets, theme, pin order.
+   * Normalized via liveDashboardService.
+   */
+  liveDashboard: null,
   updatedAt: 0,
 };
 
@@ -193,6 +198,9 @@ function normalize(raw) {
     // Pass through raw layout; homeLayoutService.normalizeHomeLayout heals shape.
     homeLayout:
       raw.homeLayout && typeof raw.homeLayout === 'object' ? raw.homeLayout : null,
+    // Pass through; liveDashboardService.normalizeLiveDashboard heals shape.
+    liveDashboard:
+      raw.liveDashboard && typeof raw.liveDashboard === 'object' ? raw.liveDashboard : null,
     updatedAt: Number(raw.updatedAt) || 0,
   };
 }
@@ -442,6 +450,12 @@ export async function setHomeLayout(uid, homeLayout) {
   return persist(uid, { ...prev, homeLayout: homeLayout || null });
 }
 
+/** Persist Stage Desk (Live Dashboard) host chrome layout. */
+export async function setLiveDashboard(uid, liveDashboard) {
+  const prev = await getPreferences(uid);
+  return persist(uid, { ...prev, liveDashboard: liveDashboard || null });
+}
+
 export async function isOnboarded(uid) {
   const prefs = await getPreferences(uid);
   if (prefs.onboarded) return true;
@@ -508,6 +522,7 @@ export default {
   setTourCompleted,
   resetTour,
   setHomeLayout,
+  setLiveDashboard,
   isOnboarded,
   getEnabledPages,
   interestLabels,

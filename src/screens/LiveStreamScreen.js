@@ -52,6 +52,15 @@ import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
 import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
 import GuestControlSheet from '../components/live/GuestControlSheet';
 import LiveInviteGuestsModal from '../components/live/LiveInviteGuestsModal';
+import LiveDashboardSheet from '../components/live/dashboard/LiveDashboardSheet';
+import StageDeskChrome from '../components/live/dashboard/StageDeskChrome';
+import {
+  STAGE_DESK_NAME,
+  getLiveDashboard,
+  subscribeLiveDashboard,
+  resolveStageDeskPro,
+} from '../services/liveDashboardService';
+import { useHasAI } from '../hooks/useEntitlement';
 import {
   markJoined as markBattleJoined,
   getBattle as getBattleDoc,
@@ -227,6 +236,10 @@ const LiveStreamScreen = (props) => {
   const [gamesOpen, setGamesOpen] = useState(false);
   const [inviteGuestsOpen, setInviteGuestsOpen] = useState(false);
   const [invitingGuestUid, setInvitingGuestUid] = useState(null);
+  const [stageDeskOpen, setStageDeskOpen] = useState(false);
+  const [stageDeskLayout, setStageDeskLayout] = useState(null);
+  const plusEntitled = useHasAI();
+  const stageDeskPro = resolveStageDeskPro({ entitled: !!plusEntitled });
 
   // Floating toggle + full overlay for the artillery battle-stage game. Rendered
   // in both viewer and host battle branches. Opaque so the game reads over video.
@@ -305,6 +318,26 @@ const LiveStreamScreen = (props) => {
   const mode = isViewerRoute ? 'viewer' : 'host';
   const isViewer = isViewerRoute;
   const isHost = !isViewer;
+
+  // Stage Desk prefs — host-only chrome layout (AsyncStorage + Firestore prefs).
+  useEffect(() => {
+    if (!isHost || !uid) return undefined;
+    let alive = true;
+    getLiveDashboard(uid).then((d) => {
+      if (alive) setStageDeskLayout(d);
+    });
+    const unsub = subscribeLiveDashboard(uid, (d) => {
+      if (alive) setStageDeskLayout(d);
+    });
+    return () => {
+      alive = false;
+      try {
+        unsub?.();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [isHost, uid]);
 
   // CRITICAL DEBUG: Log decision
   console.log('[LIVE][DECISION_MADE]', {
@@ -3986,6 +4019,21 @@ const LiveStreamScreen = (props) => {
                   />
 
                   <TouchableOpacity
+                    style={styles.preLiveDeskBtn}
+                    onPress={() => setStageDeskOpen(true)}
+                    activeOpacity={0.85}
+                    accessibilityLabel={`Open ${STAGE_DESK_NAME}`}
+                  >
+                    <Icon name="options" size={18} color="#00D2BE" />
+                    <Text style={styles.preLiveDeskBtnText} allowFontScaling={false}>
+                      {STAGE_DESK_NAME}
+                    </Text>
+                    <Text style={styles.preLiveDeskHint} allowFontScaling={false}>
+                      Customize alerts, goals, layout
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
                     style={styles.goLiveButton}
                     onPress={() => {
                       if (goLiveStartedRef.current) {
@@ -4056,6 +4104,17 @@ const LiveStreamScreen = (props) => {
                     </View>
                   </View>
                 </View>
+
+                {isStreaming ? (
+                  <StageDeskChrome
+                    layout={stageDeskLayout}
+                    isPro={stageDeskPro}
+                    viewCount={viewCount}
+                    heartCount={heartCount}
+                    giftTotalsByUser={giftTotalsByUser}
+                    topInset={LIVE_TOP_INSET + 52}
+                  />
+                ) : null}
 
                 <LiveReactionsHearts
                   burst={reactionBurst}
@@ -4158,18 +4217,17 @@ const LiveStreamScreen = (props) => {
                       </TouchableOpacity>
                     ) : null}
 
-                    {!activeBattleId ? (
-                      <TouchableOpacity
-                        style={styles.hostControl}
-                        onPress={() => setShowLayoutSwitcher((v) => !v)}
-                        activeOpacity={0.85}
-                      >
-                        <View style={[styles.hostControlCircle, showLayoutSwitcher && styles.hostControlCircleActive]}>
-                          <Icon name="grid" size={20} color={showLayoutSwitcher ? '#00D2BE' : '#fff'} />
-                        </View>
-                        <Text style={styles.hostControlLabel} allowFontScaling={false}>Layout</Text>
-                      </TouchableOpacity>
-                    ) : null}
+                    <TouchableOpacity
+                      style={styles.hostControl}
+                      onPress={() => setStageDeskOpen(true)}
+                      activeOpacity={0.85}
+                      accessibilityLabel={`Open ${STAGE_DESK_NAME}`}
+                    >
+                      <View style={[styles.hostControlCircle, stageDeskOpen && styles.hostControlCircleActive]}>
+                        <Icon name="options" size={20} color={stageDeskOpen ? '#00D2BE' : '#00D2BE'} />
+                      </View>
+                      <Text style={styles.hostControlLabel} allowFontScaling={false}>Desk</Text>
+                    </TouchableOpacity>
 
                     <TouchableOpacity style={styles.hostControl} onPress={confirmExitLive} activeOpacity={0.85}>
                       <View style={[styles.hostControlCircle, styles.hostControlCircleDanger]}>
@@ -4254,6 +4312,64 @@ const LiveStreamScreen = (props) => {
             )}
           </View>
         )}
+        {/* Stage Desk — host Live Dashboard (pre-live + live) */}
+        {isHost ? (
+          <LiveDashboardSheet
+            visible={stageDeskOpen}
+            onClose={() => setStageDeskOpen(false)}
+            uid={uid}
+            isStreaming={isStreaming}
+            viewCount={viewCount}
+            heartCount={heartCount}
+            giftTotalsByUser={giftTotalsByUser}
+            guestLayoutMode={guestLayoutMode}
+            micOn={ivsHostSession?.isMicEnabled ?? true}
+            cameraOn={ivsHostSession?.isCameraEnabled ?? true}
+            marbleEnabled={MARBLE_ENABLED}
+            battleActive={!!activeBattleId}
+            onSetLayout={(modeId) => {
+              setGuestLayoutMode(modeId);
+              if (modeId === LIVE_LAYOUT_MODES.HOST_FOCUS) {
+                setHostGuestTrayMode('collapsed');
+              } else if (modeId === LIVE_LAYOUT_MODES.BOTTOM_GRID) {
+                setHostGuestTrayMode((prev) => (prev === 'hidden' ? 'collapsed' : prev));
+              } else {
+                setHostGuestTrayMode('hidden');
+              }
+              setShowLayoutSwitcher(false);
+            }}
+            onToggleMic={toggleMic}
+            onFlipCamera={flipCamera}
+            onToggleCamera={toggleHostCamera}
+            onOpenChat={() => {
+              setStageDeskOpen(false);
+              setCommentsModalVisible(true);
+            }}
+            onInviteGuests={() => {
+              setStageDeskOpen(false);
+              setInviteGuestsOpen(true);
+            }}
+            onOpenGuestSheet={() => {
+              setStageDeskOpen(false);
+              setGuestControlVisible(true);
+            }}
+            onShare={shareLive}
+            onOpenGames={() => {
+              setStageDeskOpen(false);
+              openLiveGames();
+            }}
+            onSendComment={(text) => sendComment(text)}
+            onNavigatePlans={() => {
+              setStageDeskOpen(false);
+              try {
+                navigation.navigate('Plans');
+              } catch {
+                /* route may be absent in some stacks */
+              }
+            }}
+          />
+        ) : null}
+
         {/* Themed exit confirmation dialog */}
         <Modal
           visible={showExitConfirm}
@@ -4747,6 +4863,30 @@ const styles = StyleSheet.create({
   },
   preLiveBottom: {
     gap: 14,
+  },
+  preLiveDeskBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,210,190,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.35)',
+  },
+  preLiveDeskBtnText: {
+    color: '#00D2BE',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  preLiveDeskHint: {
+    flex: 1,
+    textAlign: 'right',
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
+    fontWeight: '600',
   },
   hostControlRow: {
     flexDirection: 'row',
