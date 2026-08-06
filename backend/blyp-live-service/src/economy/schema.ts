@@ -369,16 +369,16 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         // Idempotent: inserts what's missing and re-enables/refreshes existing rows.
         await db('gift_catalog')
           .insert([
-            { gift_id: 'heart', name: 'Heart', coin_cost: 1, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '❤️' } },
-            { gift_id: 'thumbsup', name: 'Thumbs Up', coin_cost: 2, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👍' } },
-            { gift_id: 'clap', name: 'Clap', coin_cost: 5, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👏' } },
-            { gift_id: 'fire', name: 'Fire', coin_cost: 10, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🔥' } },
-            { gift_id: 'star', name: 'Star', coin_cost: 15, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '⭐' } },
-            { gift_id: 'diamond', name: 'Diamond', coin_cost: 25, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💎' } },
-            { gift_id: 'crown', name: 'Crown', coin_cost: 50, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👑' } },
-            { gift_id: 'rocket', name: 'Rocket', coin_cost: 100, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🚀' } },
-            { gift_id: 'revive', name: 'Revive', coin_cost: 30, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🛟', action: 'revive' } },
-            { gift_id: 'cheer_burst', name: 'Cheer Burst', coin_cost: 25, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💨', action: 'cheer_burst' } },
+            { gift_id: 'heart', name: 'Heart', coin_cost: 1, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '❤️', motionTier: 'small', motif: 'pulse_bloom' } },
+            { gift_id: 'thumbsup', name: 'Thumbs Up', coin_cost: 2, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👍', motionTier: 'small', motif: 'pop_ack' } },
+            { gift_id: 'clap', name: 'Clap', coin_cost: 5, enabled: true, rarity: 'common', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👏', motionTier: 'small', motif: 'shock_clap' } },
+            { gift_id: 'fire', name: 'Fire', coin_cost: 10, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🔥', motionTier: 'mid', motif: 'flame_column' } },
+            { gift_id: 'star', name: 'Star', coin_cost: 15, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '⭐', motionTier: 'mid', motif: 'constellation' } },
+            { gift_id: 'diamond', name: 'Diamond', coin_cost: 25, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💎', motionTier: 'epic', motif: 'crystal_prism' } },
+            { gift_id: 'crown', name: 'Crown', coin_cost: 50, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👑', motionTier: 'legendary', motif: 'regal_drop' } },
+            { gift_id: 'rocket', name: 'Rocket', coin_cost: 100, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🚀', motionTier: 'ultimate', motif: 'orbital_launch' } },
+            { gift_id: 'revive', name: 'Revive', coin_cost: 30, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🛟', action: 'revive', motionTier: 'epic', motif: 'life_ring' } },
+            { gift_id: 'cheer_burst', name: 'Cheer Burst', coin_cost: 25, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💨', action: 'cheer_burst', motionTier: 'epic', motif: 'stadium_wave' } },
           ])
           .onConflict('gift_id')
           .merge(['name', 'coin_cost', 'enabled', 'rarity', 'asset_json']);

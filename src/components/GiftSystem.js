@@ -629,23 +629,34 @@ const GiftSystem = ({
   };
 
   const triggerGiftAnimation = (gift) => {
-    if (gift.name === 'Heart' || gift.emoji === '❤️') {
+    if (gift.name === 'Heart' || gift.emoji === '❤️' || gift.id === 'heart') {
       triggerDisneyHeartAnimation();
-    } else {
-      // Regular gift animation for other gifts
-      Animated.sequence([
-        Animated.timing(giftAnimation, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(giftAnimation, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        })
-      ]).start();
+      return;
     }
+    // Anticipation → overshoot climax → linger fade for mid/epic sender confirm.
+    // Live room viewers get the full GiftHeroFx via LiveGiftOverlay socket path.
+    giftAnimation.setValue(0);
+    Animated.sequence([
+      Animated.timing(giftAnimation, {
+        toValue: 0.35,
+        duration: 90,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.spring(giftAnimation, {
+        toValue: 1,
+        friction: 4,
+        tension: 120,
+        useNativeDriver: true,
+      }),
+      Animated.delay(gift.cost >= 25 ? 480 : 220),
+      Animated.timing(giftAnimation, {
+        toValue: 0,
+        duration: gift.cost >= 50 ? 700 : 520,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   // Disney Pixar-quality heart animation - prepare to be amazed! 🎬✨
@@ -827,12 +838,12 @@ const GiftSystem = ({
   };
 
   const getRarityColor = (rarity) => {
+    // Blyp Gift Motion palette — teal/sport energy; gold only on legendary.
     const colors = {
-      // 3-stop gradients read more "illustrated" than flat 2-stop.
-      common: ['#3F3F46', '#71717A', '#A1A1AA'],
-      rare: ['#1d4ed8', '#3b82f6', '#60a5fa'],
-      epic: ['#6d28d9', '#8b5cf6', '#c084fc'],
-      legendary: ['#b45309', '#f59e0b', '#fde68a']
+      common: ['#3F3F46', '#00A89E', '#00D2BE'],
+      rare: ['#0E7490', '#00D2BE', '#F59E0B'],
+      epic: ['#0E7490', '#A5F3FC', '#7FEDE2'],
+      legendary: ['#92400E', '#FBBF24', '#00D2BE'],
     };
     return colors[rarity] || colors.common;
   };

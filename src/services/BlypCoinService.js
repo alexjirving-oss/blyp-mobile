@@ -701,8 +701,10 @@ class BlypCoinService {
       { id: 'fire', name: 'Fire', cost: 10, emoji: '🔥', rarity: 'rare' },
       { id: 'star', name: 'Star', cost: 15, emoji: '⭐', rarity: 'rare' },
       { id: 'diamond', name: 'Diamond', cost: 25, emoji: '💎', rarity: 'epic' },
+      { id: 'cheer_burst', name: 'Cheer Burst', cost: 25, emoji: '💨', rarity: 'rare' },
+      { id: 'revive', name: 'Revive', cost: 30, emoji: '🛟', rarity: 'epic' },
       { id: 'crown', name: 'Crown', cost: 50, emoji: '👑', rarity: 'legendary' },
-      { id: 'rocket', name: 'Rocket', cost: 100, emoji: '🚀', rarity: 'legendary' }
+      { id: 'rocket', name: 'Rocket', cost: 100, emoji: '🚀', rarity: 'legendary' },
     ];
   }
 }
