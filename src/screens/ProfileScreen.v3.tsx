@@ -26,6 +26,12 @@ import { getEconomyWallet } from '../api/economyLiveApi';
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
+import {
+  getCachedWalletBalance,
+  loadWalletBalanceFromStorage,
+  setWalletBalanceCache,
+} from '../services/walletBalanceCache';
+import { emitWalletUpdated } from '../utils/walletEvents';
 import { useAuth, refreshAuthNow, hardLogout } from '../hooks/useCommon';
 import { requestReplayTour, subscribeTourSelect } from '../tour/tourBus';
 import { useTabReset } from '../utils/tabResetBus';
@@ -251,32 +257,45 @@ const ProfileScreenV3: React.FC = () => {
 
   const loadBalances = useCallback(async () => {
     if (!uid || !authReady) {
-      setCoinBalance(0);
-      setGemBalance(0);
       return;
     }
     try {
+      // Paint last-known balances immediately (Wallet tab must not wait on network).
+      const cached = getCachedWalletBalance(uid) || (await loadWalletBalanceFromStorage(uid));
+      if (cached) {
+        setCoinBalance(cached.coins);
+        setGemBalance(cached.gems);
+      }
+
       if (shouldUseLiveServiceWallet()) {
         try {
           const wallet = await getEconomyWallet();
           const coins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
           const gems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
-          setCoinBalance(Number.isFinite(coins) ? coins : 0);
-          setGemBalance(Number.isFinite(gems) ? gems : 0);
+          const nextCoins = Number.isFinite(coins) ? coins : 0;
+          const nextGems = Number.isFinite(gems) ? gems : 0;
+          setCoinBalance(nextCoins);
+          setGemBalance(nextGems);
+          void setWalletBalanceCache(uid, { coins: nextCoins, gems: nextGems });
+          try { emitWalletUpdated(wallet); } catch { /* ignore */ }
           return;
         } catch (e: any) {
           console.warn('[PROFILE_V3][BALANCES] live-service wallet fetch failed; falling back', e?.message || String(e));
         }
       }
 
-      const coins = await BlypCoinService.getUserBalance(uid);
-      const gems = await GemService.getUserGems(uid);
-      setCoinBalance(Number.isFinite(coins) ? coins : 0);
-      setGemBalance(Number.isFinite(gems) ? gems : 0);
+      const [coins, gems] = await Promise.all([
+        BlypCoinService.getUserBalance(uid),
+        GemService.getUserGems(uid),
+      ]);
+      const nextCoins = Number.isFinite(coins) ? coins : 0;
+      const nextGems = Number.isFinite(gems) ? gems : 0;
+      setCoinBalance(nextCoins);
+      setGemBalance(nextGems);
+      void setWalletBalanceCache(uid, { coins: nextCoins, gems: nextGems });
     } catch (e: any) {
       console.warn('[PROFILE_V3][BALANCES] failed', e?.message || String(e));
-      setCoinBalance(0);
-      setGemBalance(0);
+      // Keep last-known balances; do not force zeros on transient failures.
     }
   }, [uid, authReady]);
 
@@ -1220,9 +1239,7 @@ const ProfileScreenV3: React.FC = () => {
     return <View style={styles.postCellWrap}>{renderPostItem({ item })}</View>;
   }, [renderPostItem, styles]);
 
-  // Loading gate: don't block the main Profile tab while fetching profile data.
-  // Keep Wallet/Promote tabs gated if they depend on loaded balances.
-  const isLoading = !authReady || authLoading || (profileTab !== 'myProfile' && busy);
+  // Auth gate only — Promote/Wallet mount immediately once signed in.
   const authPending = !authReady || authLoading;
   const hasUser = !!uid;
   const showLoggedOut = !authPending && !hasUser;
@@ -1368,37 +1385,28 @@ const ProfileScreenV3: React.FC = () => {
           </View>
         ) : profileTab === 'tab2' ? (
           <View style={{ flex: 1, paddingBottom: tabBarHeight }}>
-            {isLoading ? (
-              <View style={styles.centerArea}>
-                <ActivityIndicator color={theme.colors.accent} size="large" />
-                <Text style={styles.stateSub}>Loading your wallet…</Text>
-              </View>
-            ) : (
-              <CoinStoreScreen navigation={nav as any} embedded />
-            )}
+            <CoinStoreScreen
+              navigation={nav as any}
+              embedded
+              initialCoins={coinBalance}
+              initialGems={gemBalance}
+            />
           </View>
         ) : profileTab === 'tab1' ? (
           <View style={{ flex: 1, paddingBottom: tabBarHeight }}>
-            {isLoading ? (
-              <View style={styles.centerArea}>
-                <ActivityIndicator color={theme.colors.accent} size="large" />
-                <Text style={styles.stateSub}>Loading…</Text>
-              </View>
-            ) : (
-              <PromoteTab
-                currentCoins={coinBalance}
-                onCoinsChanged={(next: number) => setCoinBalance(Number.isFinite(Number(next)) ? Number(next) : 0)}
-                navigation={nav as any}
-                posts={(userPosts || []).map((p: any) => ({
-                  id: String(p?.id || ''),
-                  caption: String(p?.caption || p?.description || p?.title || ''),
-                  thumbnail: p?.thumbnail || p?.imageUrl || undefined,
-                })).filter((p: any) => p.id)}
-                initialMethodId={
-                  typeof route?.params?.promoteMethodId === 'string' ? route.params.promoteMethodId : null
-                }
-              />
-            )}
+            <PromoteTab
+              currentCoins={coinBalance}
+              onCoinsChanged={(next: number) => setCoinBalance(Number.isFinite(Number(next)) ? Number(next) : 0)}
+              navigation={nav as any}
+              posts={(userPosts || []).map((p: any) => ({
+                id: String(p?.id || ''),
+                caption: String(p?.caption || p?.description || p?.title || ''),
+                thumbnail: p?.thumbnail || p?.imageUrl || undefined,
+              })).filter((p: any) => p.id)}
+              initialMethodId={
+                typeof route?.params?.promoteMethodId === 'string' ? route.params.promoteMethodId : null
+              }
+            />
           </View>
         ) : profileTab === 'myProfile' ? (
           // Virtualized profile feed: the posts grid IS the scroller (numColumns

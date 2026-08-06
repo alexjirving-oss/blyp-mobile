@@ -12,7 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { doc, getDoc, getDocs } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { auth, firestore as db } from '../config/firebase';
 import BlypCoinService from '../services/BlypCoinService';
 import { getEconomyWallet } from '../api/economyLiveApi';
@@ -20,6 +20,11 @@ import { useAuth } from '../hooks/useCommon';
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 import { peekDailyReward, claimDailyReward } from '../services/streakService';
 import { subscribeWalletUpdated } from '../utils/walletEvents';
+import {
+  getCachedWalletBalance,
+  loadWalletBalanceFromStorage,
+  setWalletBalanceCache,
+} from '../services/walletBalanceCache';
 
 const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => {
   const [balance, setBalance] = useState(0);
@@ -38,10 +43,33 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
       const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
       if (Number.isFinite(nextBalance)) setBalance(nextBalance);
       if (Number.isFinite(nextGems)) setGemBalance(nextGems);
+      if (effectiveUid && Number.isFinite(nextBalance) && Number.isFinite(nextGems)) {
+        void setWalletBalanceCache(effectiveUid, { coins: nextBalance, gems: nextGems });
+      }
     } catch (e) {
       console.warn('[WALLET] live-service wallet fetch failed', e?.message || String(e));
     }
   };
+
+  useEffect(() => {
+    if (!effectiveUid) return undefined;
+    let cancelled = false;
+    const mem = getCachedWalletBalance(effectiveUid);
+    if (mem) {
+      setBalance(mem.coins);
+      setGemBalance(mem.gems);
+    } else {
+      loadWalletBalanceFromStorage(effectiveUid).then((disk) => {
+        if (!cancelled && disk) {
+          setBalance(disk.coins);
+          setGemBalance(disk.gems);
+        }
+      }).catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveUid]);
 
   useEffect(() => {
     if (effectiveUid) {
@@ -115,11 +143,17 @@ const BlypCoinWallet = ({ navigation, showBalance = true, compact = false }) => 
 
   const loadTransactions = async () => {
     if (!effectiveUid) return;
-    
+
     setLoading(true);
     try {
-      const history = await BlypCoinService.getTransactionHistory(effectiveUid);
-      setTransactions(history);
+      // Parallelize balance refresh + ledger so the modal doesn't waterfall.
+      const [history] = await Promise.all([
+        BlypCoinService.getTransactionHistory(effectiveUid),
+        shouldUseLiveServiceWallet() && authReady && isAuthenticated
+          ? refreshLiveWalletBalance()
+          : Promise.resolve(),
+      ]);
+      setTransactions(Array.isArray(history) ? history : []);
     } catch (error) {
       console.error('Error loading transactions:', error);
     } finally {

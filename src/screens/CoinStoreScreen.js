@@ -27,6 +27,12 @@ import {
   shouldUseServerValidation
 } from '../config/economyModel';
 import { emitWalletUpdated, subscribeWalletUpdated } from '../utils/walletEvents';
+import {
+  getCachedWalletBalance,
+  loadWalletBalanceFromStorage,
+  setWalletBalanceCache,
+} from '../services/walletBalanceCache';
+import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 
 const { width } = Dimensions.get('window');
 
@@ -93,14 +99,25 @@ const getGemPackages = () => [
   }
 ];
 
-const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTab = 'coins', scrollToPackagesOnMount = false }) => {
+const CoinStoreScreen = ({
+  navigation,
+  route = null,
+  embedded = false,
+  initialTab = 'coins',
+  scrollToPackagesOnMount = false,
+  initialCoins = null,
+  initialGems = null,
+}) => {
   const insets = useSafeAreaInsets?.() || { top: 0, bottom: 0, left: 0, right: 0 };
   const scrollRef = useRef(null);
   const packagesSectionYRef = useRef(0);
 
-  const [balance, setBalance] = useState(0);
-  const [gemBalance, setGemBalance] = useState(0);
+  const seedCoins = Number.isFinite(Number(initialCoins)) ? Number(initialCoins) : 0;
+  const seedGems = Number.isFinite(Number(initialGems)) ? Number(initialGems) : 0;
+  const [balance, setBalance] = useState(seedCoins);
+  const [gemBalance, setGemBalance] = useState(seedGems);
   const [loading, setLoading] = useState(false);
+  const [balancesRefreshing, setBalancesRefreshing] = useState(false);
   const [selectedTab, setSelectedTab] = useState(initialTab || 'coins'); // 'coins' or 'gems'
   const [packages] = useState(BlypCoinService.getCoinPackages());
   const [gemPackages] = useState(() => getGemPackages());
@@ -123,6 +140,28 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
     if (embedded) return 12;
     return Math.max(12, (insets?.top || 0) + 12);
   }, [embedded, insets]);
+
+  // Seed from parent / disk cache so Wallet never waits on Stripe or network.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!uid) return;
+      const mem = getCachedWalletBalance(uid);
+      if (mem && !cancelled) {
+        setBalance(mem.coins);
+        setGemBalance(mem.gems);
+        return;
+      }
+      const disk = await loadWalletBalanceFromStorage(uid);
+      if (!cancelled && disk) {
+        setBalance(disk.coins);
+        setGemBalance(disk.gems);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid]);
 
   const closeOverlay = () => {
     setOverlayType(null);
@@ -149,6 +188,8 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
       Alert.alert('Unavailable', 'Withdrawals are currently disabled.');
       return;
     }
+    // Stripe Connect eligibility is checked only when the user taps Withdraw —
+    // never on Wallet mount / balance refresh.
     try {
       const eligibility = await getWithdrawEligibility();
       if (!eligibility?.connect?.linked || !eligibility?.connect?.payoutsEnabled) {
@@ -198,11 +239,28 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
 
   const refreshLiveWallet = async () => {
     try {
-      const wallet = await getEconomyWallet();
-      const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
-      const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
-      if (Number.isFinite(nextCoins)) setBalance(nextCoins);
-      if (Number.isFinite(nextGems)) setGemBalance(nextGems);
+      if (shouldUseLiveServiceWallet()) {
+        const wallet = await getEconomyWallet();
+        const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
+        const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+        if (Number.isFinite(nextCoins)) setBalance(nextCoins);
+        if (Number.isFinite(nextGems)) setGemBalance(nextGems);
+        if (uid && Number.isFinite(nextCoins) && Number.isFinite(nextGems)) {
+          void setWalletBalanceCache(uid, { coins: nextCoins, gems: nextGems });
+        }
+        try { emitWalletUpdated(wallet); } catch { /* ignore */ }
+        return;
+      }
+      if (!uid) return;
+      const [coins, gems] = await Promise.all([
+        BlypCoinService.getUserBalance(uid),
+        GemService.getUserGems(uid),
+      ]);
+      const nextCoins = Number.isFinite(coins) ? coins : 0;
+      const nextGems = Number.isFinite(gems) ? gems : 0;
+      setBalance(nextCoins);
+      setGemBalance(nextGems);
+      void setWalletBalanceCache(uid, { coins: nextCoins, gems: nextGems });
     } catch (e) {
       console.warn('[COIN_STORE] live-service wallet fetch failed', e?.message || String(e));
     }
@@ -212,8 +270,14 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
     return subscribeWalletUpdated((snap) => {
       if (snap?.coins != null && Number.isFinite(snap.coins)) setBalance(snap.coins);
       if (snap?.gems != null && Number.isFinite(snap.gems)) setGemBalance(snap.gems);
+      if (uid && (snap?.coins != null || snap?.gems != null)) {
+        void setWalletBalanceCache(uid, {
+          coins: snap?.coins,
+          gems: snap?.gems,
+        });
+      }
     });
-  }, []);
+  }, [uid]);
 
   useEffect(() => {
     loadBalance();
@@ -230,6 +294,7 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
     return () => {
       if (liveInterval) clearInterval(liveInterval);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, authReady, isAuthenticated]);
 
   useEffect(() => {
@@ -291,16 +356,18 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
   }, [scrollToPackagesOnMount]);
 
   const loadBalance = async () => {
-    if (uid) {
-      try {
-        // Keep last-known balance while auth settles — never flash/force 0.
-        if (!authReady || !isAuthenticated) {
-          return;
-        }
-        await refreshLiveWallet();
-      } catch (error) {
-        console.warn('[COIN_STORE] Error loading balance:', error?.message || String(error));
+    if (!uid) return;
+    try {
+      // Keep last-known balance while auth settles — never flash/force 0.
+      if (!authReady || !isAuthenticated) {
+        return;
       }
+      setBalancesRefreshing(true);
+      await refreshLiveWallet();
+    } catch (error) {
+      console.warn('[COIN_STORE] Error loading balance:', error?.message || String(error));
+    } finally {
+      setBalancesRefreshing(false);
     }
   };
 
@@ -641,13 +708,19 @@ const CoinStoreScreen = ({ navigation, route = null, embedded = false, initialTa
 
         <Text style={styles.headerTitle}>My Blyp Wallet</Text>
 
-        {/* Large balances (centered) */}
+        {/* Large balances (centered) — show cached values immediately; soft refresh hint */}
         <View style={styles.heroBalances}>
-          <View style={styles.heroBalanceRow}>
+          {balancesRefreshing ? (
+            <View style={styles.balanceSkeletonRow}>
+              <View style={styles.balanceSkeletonPill} />
+              <View style={[styles.balanceSkeletonPill, { width: 88 }]} />
+            </View>
+          ) : null}
+          <View style={[styles.heroBalanceRow, balancesRefreshing && { opacity: 0.55 }]}>
             <Text style={styles.heroIcon}>{'\uD83E\uDE99'}</Text>
             <Text style={styles.heroValue}>{balance.toLocaleString()}</Text>
           </View>
-          <View style={styles.heroBalanceRow}>
+          <View style={[styles.heroBalanceRow, balancesRefreshing && { opacity: 0.55 }]}>
             <Text style={styles.heroIcon}>{'\uD83D\uDC8E'}</Text>
             <Text style={[styles.heroValue, styles.heroGemValue]}>{gemBalance.toLocaleString()}</Text>
           </View>
@@ -931,6 +1004,17 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
     alignItems: 'center',
+  },
+  balanceSkeletonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  balanceSkeletonPill: {
+    width: 72,
+    height: 10,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   heroBalanceRow: {
     flexDirection: 'row',

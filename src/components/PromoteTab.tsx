@@ -23,6 +23,7 @@ import {
 } from '../api/economyLiveApi';
 import { emitWalletUpdated } from '../utils/walletEvents';
 import { subscribeMyBattles, BATTLE_STATUS } from '../services/battleService';
+import { useAuth } from '../hooks/useCommon';
 import { BLYP_LOGO_GRADIENT_COLORS } from './BlypLogo';
 import {
   PROMOTE_CATEGORIES,
@@ -97,11 +98,13 @@ export default function PromoteTab({
 }: Props) {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const { uid, authReady } = useAuth();
 
   const [studioTab, setStudioTab] = useState<StudioTab>('catalog');
   const [category, setCategory] = useState('all');
   const [pricing, setPricing] = useState<PromotePricing | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Fallback catalog is available immediately; pricing refresh is non-blocking.
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [buyOpen, setBuyOpen] = useState(false);
   const [battles, setBattles] = useState<BattlePick[]>([]);
@@ -155,9 +158,10 @@ export default function PromoteTab({
     setLoading(true);
     try {
       const p = await getPromotePricing();
-      setPricing(p);
+      setPricing(p || null);
     } catch (e: any) {
       console.warn('[PromoteStudio] pricing', e?.message || e);
+      // Keep fallback catalog from mergePromoteCatalog(null).
     } finally {
       setLoading(false);
     }
@@ -187,19 +191,29 @@ export default function PromoteTab({
   }, [studioTab, reloadMine]);
 
   useEffect(() => {
-    const unsub = subscribeMyBattles?.((list: any[]) => {
-      const mapped = (list || [])
-        .filter((b) => b && b.id)
-        .map((b) => ({
-          id: String(b.id),
-          title: b.title || b.name,
-          opponentName: b.opponentName || b.opponent?.displayName,
-          creatorName: b.creatorName,
-          status: b.status || b.battleStatus,
-          scheduledStartAt: b.scheduledStartAt || b.startsAtMs,
-        }));
-      setBattles(mapped);
-    });
+    if (!uid || !authReady) {
+      setBattles([]);
+      return undefined;
+    }
+    let unsub: (() => void) | undefined;
+    try {
+      unsub = subscribeMyBattles(uid, (list: any[]) => {
+        const mapped = (Array.isArray(list) ? list : [])
+          .filter((b) => b && b.id)
+          .map((b) => ({
+            id: String(b.id),
+            title: b.title || b.name,
+            opponentName: b.opponentName || b.opponent?.displayName,
+            creatorName: b.creatorName,
+            status: b.status || b.battleStatus,
+            scheduledStartAt: b.scheduledStartAt || b.startsAtMs,
+          }));
+        setBattles(mapped);
+      });
+    } catch (e: any) {
+      console.warn('[PromoteStudio] battles subscribe', e?.message || e);
+      setBattles([]);
+    }
     return () => {
       try {
         unsub?.();
@@ -207,7 +221,7 @@ export default function PromoteTab({
         /* ignore */
       }
     };
-  }, []);
+  }, [uid, authReady]);
 
   const openCompose = useCallback(
     (methodId: string) => {
@@ -333,7 +347,10 @@ export default function PromoteTab({
         }
       }
       setComposeOpen(false);
-      Alert.alert('Promote booked', `${composeMethod.title} is live until ${formatShort(res.endsAt)}.`);
+      Alert.alert(
+        'Promote booked',
+        `${composeMethod.title} is live until ${formatShort(String(res?.endsAt || ''))}.`,
+      );
       setStudioTab('active');
       reloadMine();
     } catch (e: any) {
@@ -382,20 +399,24 @@ export default function PromoteTab({
             ))}
           </ScrollView>
 
-          {loading ? (
+          {loading && !filtered.length ? (
             <ActivityIndicator style={{ marginTop: 24 }} color={theme.colors.primary} />
+          ) : !filtered.length ? (
+            <Text style={styles.empty}>No promote methods available right now.</Text>
           ) : (
             <ScrollView contentContainerStyle={styles.listPad} showsVerticalScrollIndicator={false}>
               {filtered.map((m) => {
-                const minCoins = Math.min(...(m.packages || []).map((p) => Number(p.coins) || 0));
+                const pkgCoins = (m.packages || []).map((p) => Number(p.coins) || 0);
+                const minCoins = pkgCoins.length ? Math.min(...pkgCoins) : 0;
+                const typeLabel = String(m.type || m.methodId || 'PROMOTE').replace(/_/g, ' ');
                 return (
-                  <TouchableOpacity key={m.methodId} style={styles.card} activeOpacity={0.88} onPress={() => openCompose(m.methodId)}>
+                  <TouchableOpacity key={m.methodId || typeLabel} style={styles.card} activeOpacity={0.88} onPress={() => openCompose(m.methodId)}>
                     <View style={styles.cardTop}>
-                      <Text style={styles.cardTitle}>{m.title}</Text>
+                      <Text style={styles.cardTitle}>{m.title || 'Promote'}</Text>
                       <Text style={styles.cardPrice}>from {minCoins}</Text>
                     </View>
-                    <Text style={styles.cardSub}>{m.subtitle}</Text>
-                    <Text style={styles.cardMeta}>{m.type.replace(/_/g, ' ')} · {m.packages?.length || 0} packages</Text>
+                    <Text style={styles.cardSub}>{m.subtitle || ''}</Text>
+                    <Text style={styles.cardMeta}>{typeLabel} · {m.packages?.length || 0} packages</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -411,13 +432,13 @@ export default function PromoteTab({
           ) : (studioTab === 'active' ? mineActive : mineHistory).length === 0 ? (
             <Text style={styles.empty}>No {studioTab} promotions yet.</Text>
           ) : (
-            (studioTab === 'active' ? mineActive : mineHistory).map((p) => (
-              <View key={p.promotionId} style={styles.card}>
-                <Text style={styles.cardTitle}>{methodTitleForType(p.methodId || p.promotionType)}</Text>
+            (studioTab === 'active' ? mineActive : mineHistory).map((p, idx) => (
+              <View key={String(p?.promotionId || p?.id || `${studioTab}-${idx}`)} style={styles.card}>
+                <Text style={styles.cardTitle}>{methodTitleForType(p?.methodId || p?.promotionType)}</Text>
                 <Text style={styles.cardSub}>
-                  {p.promotionType} · {formatShort(p.startsAt)} → {formatShort(p.endsAt)}
+                  {String(p?.promotionType || 'PROMOTE')} · {formatShort(String(p?.startsAt || ''))} → {formatShort(String(p?.endsAt || ''))}
                 </Text>
-                {p.note ? <Text style={styles.cardMeta}>{p.note}</Text> : null}
+                {p?.note ? <Text style={styles.cardMeta}>{p.note}</Text> : null}
               </View>
             ))
           )}

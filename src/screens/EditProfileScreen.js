@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import { Alert, Image, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import Toast from 'react-native-toast-message';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, getDoc, setDoc, collection, query, where, getDocs, limit as fsLimit } from 'firebase/firestore';
 import { storage, firestore as db } from '../config/firebase';
@@ -22,6 +23,7 @@ import {
 } from '../services/profileIdentityCatalog';
 import { syncClubMembershipIndex } from '../services/clubDiscoveryService';
 import { fetchEarnedBadgeIds, syncBadgeAwards } from '../services/badgeAwardsService';
+import { setOwnProfileCache } from '../services/ownProfileCache';
 
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
@@ -50,6 +52,11 @@ const EditProfileScreen = ({ navigation, route }) => {
   const [loading, setLoading] = useState(true);
   const [savedProfileClubs, setSavedProfileClubs] = useState(() =>
     normalizeProfileClubs(profileFromRoute?.profileClubs, getProfileIdentityCaps(false).maxClubs)
+  );
+  const initialUsernameRef = useRef(
+    String(profileFromRoute?.username || profileFromRoute?.handle || '')
+      .trim()
+      .replace(/^@/, '')
   );
 
   const resolvedEmail = useMemo(() => {
@@ -104,7 +111,11 @@ const EditProfileScreen = ({ navigation, route }) => {
 
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          if (userData.username || userData.handle) setUsername((prev) => prev || (userData.username || userData.handle));
+          if (userData.username || userData.handle) {
+            const loaded = String(userData.username || userData.handle || '').trim().replace(/^@/, '');
+            if (loaded && !initialUsernameRef.current) initialUsernameRef.current = loaded;
+            setUsername((prev) => prev || (userData.username || userData.handle));
+          }
           if (userData.bio) setBio(userData.bio);
           if (userData.photoURL) setProfileImage((prev) => prev || userData.photoURL);
           const loadedClubs = normalizeProfileClubs(userData.profileClubs, identityCaps.maxClubs);
@@ -300,18 +311,24 @@ const EditProfileScreen = ({ navigation, route }) => {
     setIsSaving(true);
 
     try {
-      // Enforce uniqueness across users (exclude self).
-      const collisions = await Promise.all([
-        getDocs(query(collection(db, 'users'), where('username', '==', normalizedUsername), fsLimit(5))),
-        getDocs(query(collection(db, 'users'), where('handle', '==', normalizedUsername), fsLimit(5))),
-      ]);
-      const taken = collisions.some((snap) =>
-        snap.docs.some((d) => d.id !== uid)
-      );
-      if (taken) {
-        Alert.alert('Username taken', 'That username is already in use. Pick another.');
-        setIsSaving(false);
-        return;
+      const prevUsername = String(initialUsernameRef.current || '').trim();
+      const usernameChanged =
+        !prevUsername || prevUsername.toLowerCase() !== normalizedUsername.toLowerCase();
+
+      // Only hit uniqueness queries when the username actually changed.
+      if (usernameChanged) {
+        const collisions = await Promise.all([
+          getDocs(query(collection(db, 'users'), where('username', '==', normalizedUsername), fsLimit(5))),
+          getDocs(query(collection(db, 'users'), where('handle', '==', normalizedUsername), fsLimit(5))),
+        ]);
+        const taken = collisions.some((snap) =>
+          snap.docs.some((d) => d.id !== uid)
+        );
+        if (taken) {
+          Alert.alert('Username taken', 'That username is already in use. Pick another.');
+          setIsSaving(false);
+          return;
+        }
       }
 
       let photoURL = profileImage;
@@ -331,40 +348,88 @@ const EditProfileScreen = ({ navigation, route }) => {
         earnedBadgeIds,
         identityCaps.maxBadges
       );
+      const bioTrimmed = bio.trim();
       const userDocRef = doc(db, 'users', uid);
       await setDoc(userDocRef, {
         displayName: normalizedUsername,
         username: normalizedUsername,
         handle: normalizedUsername,
         photoURL: photoURL,
-        bio: bio.trim(),
+        bio: bioTrimmed,
         email: resolvedEmail,
         profileClubs: clubsToSave,
         profileBadges: badgesToSave,
         updatedAt: new Date(),
       }, { merge: true });
 
+      // Optimistic UI: paint profile + leave immediately. Club index + post
+      // author-meta backfill can take many sequential Firestore writes.
+      initialUsernameRef.current = normalizedUsername;
+      setSavedProfileClubs(clubsToSave);
       try {
-        await syncClubMembershipIndex(uid, clubsToSave, savedProfileClubs);
-        setSavedProfileClubs(clubsToSave);
-      } catch (syncErr) {
-        console.warn('[EditProfile] club membership sync skipped', syncErr?.message || String(syncErr));
+        await setOwnProfileCache(uid, {
+          basics: {
+            displayName: normalizedUsername,
+            username: normalizedUsername,
+            handle: normalizedUsername,
+            photoURL,
+            bio: bioTrimmed,
+            email: resolvedEmail,
+            profileClubs: clubsToSave,
+            profileBadges: badgesToSave,
+          },
+        });
+      } catch (cacheErr) {
+        console.warn('[EditProfile] own profile cache update skipped', cacheErr?.message || String(cacheErr));
       }
 
-      // Backfill author meta on existing posts so Home/MediaViewer show updated name/photo.
-      await backfillAuthorMetaOnPosts({ ownerUserId: uid, newDisplayName: normalizedUsername, newUsername: normalizedUsername, newPhotoURL: photoURL });
-      if (legacyUserId) {
-        await backfillAuthorMetaOnPosts({ ownerUserId: legacyUserId, newDisplayName: normalizedUsername, newUsername: normalizedUsername, newPhotoURL: photoURL });
+      setIsSaving(false);
+      setIsUploading(false);
+      try {
+        Toast.show({
+          type: 'success',
+          text1: 'Profile saved',
+          position: 'bottom',
+          visibilityTime: 1800,
+        });
+      } catch {
+        /* ignore */
+      }
+      try {
+        navigation.goBack();
+      } catch {
+        /* ignore */
       }
 
-      Alert.alert('Success', 'Profile updated successfully!', [
-        { text: 'OK', onPress: () => navigation.goBack() }
-      ]);
-
+      const clubsPrev = savedProfileClubs;
+      void (async () => {
+        try {
+          await syncClubMembershipIndex(uid, clubsToSave, clubsPrev);
+        } catch (syncErr) {
+          console.warn('[EditProfile] club membership sync skipped', syncErr?.message || String(syncErr));
+        }
+        try {
+          await backfillAuthorMetaOnPosts({
+            ownerUserId: uid,
+            newDisplayName: normalizedUsername,
+            newUsername: normalizedUsername,
+            newPhotoURL: photoURL,
+          });
+          if (legacyUserId) {
+            await backfillAuthorMetaOnPosts({
+              ownerUserId: legacyUserId,
+              newDisplayName: normalizedUsername,
+              newUsername: normalizedUsername,
+              newPhotoURL: photoURL,
+            });
+          }
+        } catch (backfillErr) {
+          console.warn('[EditProfile] background backfill failed', backfillErr?.message || String(backfillErr));
+        }
+      })();
     } catch (error) {
       console.error('Error updating profile:', error);
       Alert.alert('Error', 'Failed to update profile. Please try again.');
-    } finally {
       setIsSaving(false);
       setIsUploading(false);
     }

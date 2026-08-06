@@ -769,8 +769,9 @@ export function subscribePendingInvites(uid, cb) {
  * to avoid a composite index, matching the socialImportService pattern.
  */
 export function subscribeMyBattles(uid, cb) {
-  if (!firebaseEnabled || !db?.collection || !uid) {
-    cb([]);
+  const safeCb = typeof cb === 'function' ? cb : () => {};
+  if (!firebaseEnabled || !db?.collection || !uid || typeof uid !== 'string') {
+    safeCb([]);
     return () => {};
   }
   try {
@@ -783,12 +784,12 @@ export function subscribeMyBattles(uid, cb) {
           const rows = (snap?.docs || [])
             .map((d) => ({ id: d.id, ...d.data() }))
             .sort((a, b) => (b.scheduledStartAt || b.createdAt || 0) - (a.scheduledStartAt || a.createdAt || 0));
-          cb(rows);
+          safeCb(rows);
         },
-        () => cb([])
+        () => safeCb([])
       );
   } catch {
-    cb([]);
+    safeCb([]);
     return () => {};
   }
 }
