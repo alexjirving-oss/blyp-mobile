@@ -211,7 +211,9 @@ android {
             // Always attach the release signingConfig; we enforce presence later
             // (after project evaluation) so EAS can inject signing config.
             signingConfig signingConfigs.release
-            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'true'
+            // Resource shrink is optional; minify (R8) is the Play Console recommendation.
+            // Keep shrink off by default to avoid AGP linked-resources races on Windows.
+            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
