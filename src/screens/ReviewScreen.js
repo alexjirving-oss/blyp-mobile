@@ -266,13 +266,15 @@ const ReviewScreen = () => {
   const [shouldAutoTriggerStepByStep, setShouldAutoTriggerStepByStep] = useState(false);
   const scrollViewRef = useRef(null);
 
-  // MAGIC PATH state: show an instant optimistic caption, then upgrade it in
-  // place when the single multimodal AI call resolves.
+  // Staged AI compose: describe media on upload → user guide → Generate 3 options.
   const [isPolishingCaption, setIsPolishingCaption] = useState(false);
   const [magicError, setMagicError] = useState(null);
+  const [describeError, setDescribeError] = useState(null);
+  const [userGuideText, setUserGuideText] = useState('');
   const magicRunIdRef = useRef(0);          // invalidates stale in-flight runs
   const magicUserTookOverRef = useRef(false); // user edited/picked → don't clobber
-  const magicAutoStartedRef = useRef(false); // ambient AI once per compose session
+  const describeAutoStartedRef = useRef(false); // ambient vision describe once per compose
+  const magicAutoStartedRef = useRef(false); // legacy name kept for resume/draft guards
 
   // Load this creator's profile category shelves for the compose picker.
   useEffect(() => {
@@ -365,8 +367,8 @@ const ReviewScreen = () => {
     setCaptionState({ ...nextState, previewCaption: preview?.finalCaption ?? preview ?? '' });
   }, [mediaItems, manualDescription, voiceCaption, mediaDescriptions, aiGeneratedCaptionState, editedAfterAI]);
   
-  // Frictionless path: never auto-open the description gate. Ambient Magic Path
-  // runs once media lands (see generateMagicPost auto-start effect below).
+  // Frictionless path: never auto-open the description gate. Ambient vision
+  // describe runs once media lands (see autoDescribeMedia effect below).
   useEffect(() => {
     if (mediaItems.length > 0 && !overlayAlreadyShown) {
       setOverlayAlreadyShown(true);
@@ -374,6 +376,16 @@ const ReviewScreen = () => {
       setShouldAutoTriggerStepByStep(false);
     }
   }, [mediaItems.length, overlayAlreadyShown]);
+
+  // Reset staged AI when the composer is cleared.
+  useEffect(() => {
+    if (mediaItems.length === 0) {
+      describeAutoStartedRef.current = false;
+      magicAutoStartedRef.current = false;
+      setDescribeError(null);
+      setMediaDescriptions([]);
+    }
+  }, [mediaItems.length]);
   
   // Media Descriptions States
   const [mediaDescriptions, setMediaDescriptions] = useState([]);
@@ -541,10 +553,10 @@ const ReviewScreen = () => {
     if (next === 0) return;
     setOverlayAlreadyShown(true);
     setShowDescriptionMethodOverlay(false);
-    if (next > prev && prev > 0 && !magicUserTookOverRef.current) {
-      const note = (manualDescription || caption || '').trim();
-      void generateMagicPost(note).catch((e) => {
-        console.error('❌ re-polish after add-media failed', e);
+    if (next > prev && prev > 0) {
+      // New media added mid-compose — refresh literal vision descriptions.
+      void autoDescribeMedia({ gate: false, force: true }).catch((e) => {
+        console.error('❌ re-describe after add-media failed', e);
       });
     }
   }, [mediaItems.length]);
@@ -563,17 +575,18 @@ const ReviewScreen = () => {
   const generateMediaDescriptions = async (forceGeneration = false) => {
     if (mediaItems.length === 0) {
       setMediaDescriptions([]);
-      return;
+      return [];
     }
 
     // Only generate if user explicitly requested AI or force is true
     if (!userRequestedAI && !forceGeneration) {
       console.log('🚫 Skipping photo description generation - user has not requested AI');
-      return;
+      return mediaDescriptions || [];
     }
 
     try {
       setIsGeneratingDescriptions(true);
+      setDescribeError(null);
       setIsProcessingAllAI(true);
       console.log(`🎯 Generating descriptions for ${mediaItems.length} media items...`);
       console.log('📋 Media items to process:', mediaItems.map(item => ({ type: item.type, uri: item.uri?.substring(0, 50) + '...' })));
@@ -583,6 +596,15 @@ const ReviewScreen = () => {
       const descriptions = await mediaDescriptionService.generateMediaDescriptions(mediaItems);
       console.log('✅ Generated descriptions:', descriptions);
       setMediaDescriptions(descriptions);
+
+      if (descriptions?.aiError || descriptions?.usedFallback) {
+        setDescribeError(
+          descriptions.aiError ||
+            'Using a basic description — edit it or retry for a better read'
+        );
+      } else {
+        setDescribeError(null);
+      }
       
       // Update contextual data with photo descriptions
       setAllContextualData(prev => ({
@@ -591,32 +613,52 @@ const ReviewScreen = () => {
       }));
       
       console.log('✅ Media descriptions generated successfully');
+      return descriptions;
     } catch (error) {
       console.error('❌ Failed to generate media descriptions:', error.message);
       console.error('❌ Full error:', error);
       
       // Check if it's a quota error - disable AI features gracefully
-      if (error.message.includes('quota') || error.message.includes('429')) {
-        console.log('� API quota exceeded - disabling AI features temporarily');
-        setMediaDescriptions(['⚠️ AI temporarily unavailable due to quota limits']);
-        // Disable automatic AI content generation when quota exceeded
-        return;
-      } else {
-        // Create fallback descriptions for other errors
-        const fallbackDescriptions = mediaItems.map((item, index) => {
-          const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          return item.type === 'video' 
-            ? `Video ${index + 1} captured at ${timestamp}`
-            : `Photo ${index + 1} captured at ${timestamp}`;
-        });
-        
-        console.log('🔄 Using fallback descriptions:', fallbackDescriptions);
-        setMediaDescriptions(fallbackDescriptions);
+      if (error.message?.includes('quota') || error.message?.includes('429')) {
+        console.log('API quota exceeded - disabling AI features temporarily');
+        const quotaMsg = 'AI temporarily unavailable due to quota limits';
+        setMediaDescriptions([quotaMsg]);
+        setDescribeError(quotaMsg);
+        return [quotaMsg];
       }
+      // Create fallback descriptions for other errors
+      const fallbackDescriptions = mediaItems.map((item, index) => {
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return item.type === 'video' 
+          ? `Video ${index + 1} captured at ${timestamp}`
+          : `Photo ${index + 1} captured at ${timestamp}`;
+      });
+      
+      console.log('🔄 Using fallback descriptions:', fallbackDescriptions);
+      setMediaDescriptions(fallbackDescriptions);
+      setDescribeError(error?.message ? String(error.message).slice(0, 120) : 'Could not describe media — edit or retry');
+      return fallbackDescriptions;
     } finally {
       setIsGeneratingDescriptions(false);
       setIsProcessingAllAI(false);
     }
+  };
+
+  // Step 1 — ambient / explicit literal vision describe (does NOT invent captions).
+  // opts.gate=false skips Plus alert (ambient auto-start for entitled users).
+  const autoDescribeMedia = async (opts = {}) => {
+    const gate = opts?.gate !== false;
+    const force = opts?.force === true;
+    if (mediaItems.length === 0) return [];
+    if (gate && !requireAI()) return [];
+    if (!gate && !aiEntitled) return [];
+
+    setUserRequestedAI(true);
+    setOverlayAlreadyShown(true);
+    setShowDescriptionMethodOverlay(false);
+    setShowStepByStepOverlay(false);
+
+    return generateMediaDescriptions(true);
   };
 
   const removeMediaItem = (index) => {
@@ -769,22 +811,21 @@ const ReviewScreen = () => {
         
         // Auto-trigger step-by-step processing if recording was from description overlay
         if (isRecordingFromOverlay) {
-          console.log('🎤 Voice input recorded from overlay - generating post (magic path)');
+          console.log('🎤 Voice guide from overlay — staged optimize');
           console.log('🎤 Transcript to process:', transcript);
           setShowDescriptionMethodOverlay(false);
-          // MAGIC PATH: instant draft + single multimodal upgrade.
-          void generateMagicPost(transcript).catch((e) => {
-            console.error('❌ generateMagicPost failed', e);
+          setUserGuideText(transcript);
+          void generateOptimizedPosts({ guide: transcript }).catch((e) => {
+            console.error('❌ generateOptimizedPosts failed', e);
           });
           return;
         }
         
-        // Only auto-trigger AI generation if NOT coming from camera with multiple photos
-        // If coming from camera, trigger step-by-step processing now that voice is done
-        // MAGIC PATH for every voice route: instant draft + single multimodal upgrade.
+        // Voice becomes the user guide, then produce 3 optimized options.
         setShouldAutoTriggerStepByStep(false);
-        void generateMagicPost(transcript).catch((e) => {
-          console.error('❌ generateMagicPost failed', e);
+        setUserGuideText(transcript);
+        void generateOptimizedPosts({ guide: transcript }).catch((e) => {
+          console.error('❌ generateOptimizedPosts failed', e);
         });
       } else {
         console.log('🎤 Voice recording complete - using fallback placeholder');
@@ -795,7 +836,7 @@ const ReviewScreen = () => {
         Toast.show({
           type: 'info',
           text1: '🎤 Audio recorded',
-          text2: 'Type your description in the text box below',
+          text2: 'Type your guide below, then Generate',
           position: 'bottom',
         });
         
@@ -807,11 +848,9 @@ const ReviewScreen = () => {
           return;
         }
         
-        // MAGIC PATH without voice: still produce a draft straight from the photos.
+        // No transcript — leave guide empty; ambient describe already ran / will run.
         if (!shouldAutoTriggerStepByStep) {
-          void generateMagicPost('').catch((e) => {
-            console.error('❌ generateMagicPost failed', e);
-          });
+          // Do not invent captions without a guide; user can tap Generate.
         } else {
           console.log('🎤 No transcript - waiting for user action in camera flow');
         }
@@ -835,12 +874,9 @@ const ReviewScreen = () => {
         return;
       }
       
-      // MAGIC PATH: even if transcription failed, still produce a draft from photos.
+      // Transcription failed — keep composer usable; describe may already be ready.
       if (!shouldAutoTriggerStepByStep) {
-        console.log('🔄 Voice processing failed, generating post from photos anyway');
-        void generateMagicPost('').catch((e) => {
-          console.error('❌ generateMagicPost failed', e);
-        });
+        console.log('🔄 Voice processing failed — user can type a guide and Generate');
       } else {
         console.log('🔄 Voice processing failed in camera flow - waiting for user action');
       }
@@ -849,7 +885,7 @@ const ReviewScreen = () => {
       Toast.show({
         type: 'info',
         text1: '🎤 Voice processing skipped',
-        text2: 'Continuing with photo analysis...',
+        text2: 'Type a guide and tap Generate',
         position: 'bottom',
       });
     } finally {
@@ -1081,19 +1117,21 @@ const ReviewScreen = () => {
   const regenerateVariants = async () => {
     try {
       setIsRegeneratingVariants(true);
-      const result = await mediaDescriptionService.generatePostDescriptionVariants(
+      setMagicError(null);
+      const guide = (userGuideText || variantIntent || '').trim();
+      const result = await mediaDescriptionService.generateOptimizedPostVariants(
         mediaDescriptions || [],
-        variantIntent || '',
+        guide,
         { count: 3 }
       );
-      const ok = commitVariantResult(result, variantIntent);
+      const ok = commitVariantResult(result, guide);
       if (!ok) {
         const fallback = mediaDescriptionService.getVariantFallback(
           mediaDescriptions || [],
-          variantIntent || '',
+          guide,
           3
         );
-        commitVariantResult(fallback, variantIntent);
+        commitVariantResult(fallback, guide);
       }
       Toast.show({
         type: 'success',
@@ -1103,6 +1141,7 @@ const ReviewScreen = () => {
       });
     } catch (error) {
       console.error('❌ Failed to regenerate variants:', error);
+      setMagicError('Could not regenerate — try again');
       Toast.show({
         type: 'error',
         text1: 'Could not regenerate',
@@ -1111,6 +1150,85 @@ const ReviewScreen = () => {
       });
     } finally {
       setIsRegeneratingVariants(false);
+    }
+  };
+
+  // Step 2+3 — combine literal vision description + user guide → 3 selectable posts.
+  const generateOptimizedPosts = async (opts = {}) => {
+    const gate = opts?.gate !== false;
+    if (gate && !requireAI()) return;
+    if (mediaItems.length === 0) {
+      Alert.alert('Add media', 'Upload a photo or video first.');
+      return;
+    }
+
+    const guide = (opts?.guide ?? userGuideText ?? voiceCaption ?? '').trim();
+    const runId = (magicRunIdRef.current += 1);
+    magicUserTookOverRef.current = false;
+    setMagicError(null);
+    setUserRequestedAI(true);
+    setVariantIntent(guide);
+
+    setShowDescriptionMethodOverlay(false);
+    setShowStepByStepOverlay(false);
+    setShowReviewOverlay(false);
+    setIsPolishingCaption(true);
+
+    Toast.show({
+      type: 'info',
+      text1: 'Writing 3 post options…',
+      text2: guide ? 'Combining media + your guide' : 'Optimizing from media description',
+      position: 'bottom',
+    });
+
+    try {
+      let descriptions = Array.isArray(mediaDescriptions) ? mediaDescriptions : [];
+      const needsDescribe =
+        descriptions.length !== mediaItems.length ||
+        descriptions.every((d) => !d || String(d).trim() === '—' || String(d).includes('captured at'));
+
+      if (needsDescribe) {
+        descriptions = await autoDescribeMedia({ gate: false, force: true });
+        if (magicRunIdRef.current !== runId) return;
+      }
+
+      const result = await mediaDescriptionService.generateOptimizedPostVariants(
+        descriptions || [],
+        guide,
+        { count: 3 }
+      );
+
+      if (magicRunIdRef.current !== runId) return;
+
+      if (result?.variants?.length) {
+        if (magicUserTookOverRef.current) {
+          setDescriptionVariants(result.variants);
+        } else {
+          commitVariantResult(result, guide);
+          Toast.show({
+            type: 'success',
+            text1: '3 options ready',
+            text2: 'Pick one — it becomes your caption',
+            position: 'bottom',
+          });
+        }
+        setMagicError(null);
+      } else {
+        const fallback = mediaDescriptionService.getVariantFallback(descriptions || [], guide, 3);
+        commitVariantResult(fallback, guide);
+        setMagicError('AI polish unavailable — draft options shown; edit or retry');
+      }
+
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: 320, animated: true });
+      }, 50);
+    } catch (e) {
+      console.error('❌ generateOptimizedPosts failed', e);
+      if (magicRunIdRef.current === runId) {
+        setMagicError(e?.message ? String(e.message).slice(0, 90) : 'Couldn’t generate options — try again');
+      }
+    } finally {
+      if (magicRunIdRef.current === runId) setIsPolishingCaption(false);
     }
   };
 
@@ -1495,15 +1613,16 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
   };
 
   const handleContinueWithPost = () => {
-    console.log('📝 Continue with photos — composer + ambient Magic Path');
+    console.log('📝 Continue with photos — composer + ambient describe');
     setShowMultiPhotoModal(false);
     setIsCapturingMultiplePhotos(false);
     setShowDescriptionMethodOverlay(false);
     setOverlayAlreadyShown(true);
-    if (!magicAutoStartedRef.current && mediaItems.length > 0) {
+    if (!describeAutoStartedRef.current && mediaItems.length > 0) {
+      describeAutoStartedRef.current = true;
       magicAutoStartedRef.current = true;
-      void generateMagicPost('').catch((e) => {
-        console.error('❌ generateMagicPost failed', e);
+      void autoDescribeMedia({ gate: false }).catch((e) => {
+        console.error('❌ autoDescribeMedia failed', e);
       });
     }
   };
@@ -2115,8 +2234,9 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
         return;
       }
 
-      // MAGIC PATH: instant draft from the typed intent + photos, upgraded in place.
-      await generateMagicPost(descriptionText);
+      // Staged path: typed text is the user guide → 3 optimized options.
+      setUserGuideText(descriptionText);
+      await generateOptimizedPosts({ guide: descriptionText });
       
     } catch (error) {
       console.error('❌ Failed to generate post from text:', error);
@@ -2126,7 +2246,7 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
 
   // Handle continuing without description (for camera flow)
   const handleContinueWithoutDescription = async () => {
-    console.log('🚀 User chose to continue without description - starting step-by-step processing');
+    console.log('🚀 User chose to continue without description - starting describe step');
     
     // Set user requested AI flag
     setUserRequestedAI(true);
@@ -2134,14 +2254,13 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     // Close overlay
     setShowDescriptionMethodOverlay(false);
     
-    // Reset the auto-trigger flag and generate a draft straight from the photos.
+    // Reset the auto-trigger flag and describe media (user can add guide next).
     setShouldAutoTriggerStepByStep(false);
     
     try {
-      // MAGIC PATH: no description needed — build the post from the photos.
-      await generateMagicPost('');
+      await autoDescribeMedia({ gate: true, force: true });
     } catch (error) {
-      console.error('❌ Failed to generate post:', error);
+      console.error('❌ Failed to describe media:', error);
       Alert.alert('Error', 'Failed to start AI processing');
     }
   };
@@ -2190,17 +2309,16 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
               voiceInputs: [...prev.voiceInputs, transcript]
             }));
             
-            // Only pre-fill the caption with raw voice IF we haven't already
-            // generated an AI post caption.
+            // Voice becomes the user guide → 3 optimized post options.
             if (!aiGeneratedCaptionState) {
               setManualDescription(transcript);
             }
+            setUserGuideText(transcript);
             
-            // MAGIC PATH: instant draft + single multimodal upgrade after voice input.
-            console.log('🤖 Generating post (magic path) after voice description');
+            console.log('🤖 Generating optimized posts after voice guide');
             setUserRequestedAI(true);
-            void generateMagicPost(transcript).catch((e) => {
-              console.error('❌ generateMagicPost failed', e);
+            void generateOptimizedPosts({ guide: transcript }).catch((e) => {
+              console.error('❌ generateOptimizedPosts failed', e);
             });
             
           } else {
@@ -2318,15 +2436,16 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     }
   }, [mode, mediaItems.length]);
 
-  // Ambient Magic Path: once media is present, auto-caption for entitled users
-  // (photos + videos — videos use a thumbnail frame). Free users still see the
-  // explicit "Generate with AI" CTA below; we do not auto-paywall them.
+  // Ambient step 1: once media is present, auto-DESCRIBE for entitled users
+  // (photos + videos — videos use a thumbnail frame). Do NOT auto-invent
+  // captions — user adds a guide, then taps Generate for 3 options.
   useEffect(() => {
     if (mediaItems.length === 0) return;
-    if (magicAutoStartedRef.current) return;
+    if (describeAutoStartedRef.current) return;
     if (route?.params?.resumeDraft) {
       // Resumed drafts already have a caption; don't clobber unless empty.
       if ((caption || '').trim().length > 0) {
+        describeAutoStartedRef.current = true;
         magicAutoStartedRef.current = true;
         return;
       }
@@ -2335,18 +2454,20 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
     // or skip it for trial users still loading.
     if (!entitlement) return undefined;
     if (!entitlement.capabilities?.ai) {
+      describeAutoStartedRef.current = true;
       magicAutoStartedRef.current = true;
       setOverlayAlreadyShown(true);
       return undefined;
     }
 
+    describeAutoStartedRef.current = true;
     magicAutoStartedRef.current = true;
     setOverlayAlreadyShown(true);
     setShowDescriptionMethodOverlay(false);
     setShowMultiPhotoModal(false);
     const t = setTimeout(() => {
-      void generateMagicPost('', { gate: false }).catch((e) => {
-        console.error('❌ ambient generateMagicPost failed', e);
+      void autoDescribeMedia({ gate: false }).catch((e) => {
+        console.error('❌ ambient autoDescribeMedia failed', e);
       });
     }, 150);
     return () => clearTimeout(t);
@@ -2814,25 +2935,107 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
           </View>
         )}
 
-        {/* Primary AI entry — always visible once media is on the composer */}
+        {/* Staged AI: literal describe → user guide → 3 optimized posts */}
         {mediaItems.length > 0 && (
           <View style={styles.aiPrimarySection}>
+            <View style={styles.aiDescribeHeader}>
+              <Text style={styles.sectionLabel}>What AI sees</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  void autoDescribeMedia({ gate: true, force: true }).catch((e) => {
+                    console.error('❌ retry describe failed', e);
+                  });
+                }}
+                disabled={isGeneratingDescriptions}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.aiDescribeRetry}>
+                  {isGeneratingDescriptions ? 'Describing…' : 'Re-describe'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {isGeneratingDescriptions ? (
+              <View style={styles.aiDescribeStatus}>
+                <ActivityIndicator size="small" color="#00D2BE" style={{ marginRight: 8 }} />
+                <Text style={styles.aiDescribeStatusText}>Describing your media…</Text>
+              </View>
+            ) : null}
+
+            {!!describeError && !isGeneratingDescriptions ? (
+              <View style={styles.aiDescribeStatus}>
+                <Icon name="alert-circle-outline" size={16} color="#FBBF24" />
+                <Text style={[styles.aiDescribeStatusText, { color: '#FBBF24', marginLeft: 8, flex: 1 }]} numberOfLines={2}>
+                  {describeError}
+                </Text>
+              </View>
+            ) : null}
+
+            <TextInput
+              style={styles.aiDescribeInput}
+              placeholder={
+                isGeneratingDescriptions
+                  ? 'Looking at your media…'
+                  : 'Literal description (e.g. bicycle on patio with shrubbery)'
+              }
+              placeholderTextColor="#888"
+              value={Array.isArray(mediaDescriptions) ? mediaDescriptions.filter(Boolean).join('\n') : ''}
+              onChangeText={(text) => {
+                const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+                const next =
+                  lines.length > 0
+                    ? lines
+                    : mediaItems.map(() => '');
+                // Keep one entry per media item when possible.
+                while (next.length < mediaItems.length) next.push('');
+                setMediaDescriptions(next.slice(0, Math.max(mediaItems.length, lines.length || 1)));
+                setAllContextualData((prev) => ({
+                  ...prev,
+                  photoDescriptions: next,
+                }));
+                setDescribeError(null);
+              }}
+              multiline
+              numberOfLines={3}
+              editable={!isGeneratingDescriptions}
+              maxLength={600}
+            />
+
+            <Text style={[styles.sectionLabel, { marginTop: 14 }]}>Your guide</Text>
+            <TextInput
+              style={styles.aiGuideInput}
+              placeholder='e.g. chilling with my mate'
+              placeholderTextColor="#888"
+              value={userGuideText}
+              onChangeText={(text) => {
+                setUserGuideText(text);
+                setVariantIntent(text);
+              }}
+              multiline
+              numberOfLines={2}
+              maxLength={300}
+            />
+
             <TouchableOpacity
               style={[
                 styles.aiPrimaryButton,
-                (isPolishingCaption || mediaItems.length === 0) && styles.enhanceButtonDisabled,
+                (isPolishingCaption || isGeneratingDescriptions || mediaItems.length === 0) &&
+                  styles.enhanceButtonDisabled,
               ]}
               onPress={() => {
-                const note = (manualDescription || caption || voiceCaption || '').trim();
-                void generateMagicPost(note).catch((e) => {
-                  console.error('❌ Generate with AI failed', e);
+                void generateOptimizedPosts().catch((e) => {
+                  console.error('❌ Generate optimized posts failed', e);
                 });
               }}
-              disabled={isPolishingCaption || mediaItems.length === 0}
+              disabled={isPolishingCaption || isGeneratingDescriptions || mediaItems.length === 0}
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={isPolishingCaption ? ['#666', '#666'] : ['#00D2BE', '#00A89E']}
+                colors={
+                  isPolishingCaption || isGeneratingDescriptions
+                    ? ['#666', '#666']
+                    : ['#00D2BE', '#00A89E']
+                }
                 style={styles.aiPrimaryGradient}
               >
                 {isPolishingCaption ? (
@@ -2841,13 +3044,29 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
                   <Icon name="sparkles" size={22} color="#0A0A0C" />
                 )}
                 <Text style={styles.aiPrimaryButtonText}>
-                  {isPolishingCaption ? 'Writing with AI…' : 'Generate with AI'}
+                  {isPolishingCaption ? 'Writing 3 options…' : 'Generate 3 post options'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
             <Text style={styles.aiPrimaryHint}>
-              Captions, title and hashtags from your media — or hold the mic and describe it.
+              AI describes your media, you add a guide, then pick one of three optimized captions.
             </Text>
+            {!!magicError && !isPolishingCaption ? (
+              <View style={[styles.aiDescribeStatus, { marginTop: 8 }]}>
+                <Icon name="alert-circle-outline" size={16} color="#FBBF24" />
+                <Text style={[styles.aiDescribeStatusText, { color: '#FBBF24', marginLeft: 8, flex: 1 }]} numberOfLines={2}>
+                  {magicError}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    void generateOptimizedPosts().catch(() => {});
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={{ color: '#00D2BE', fontWeight: '700', fontSize: 13 }}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -2883,12 +3102,12 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
             <Text style={styles.voiceStatusTitle}>
               {isTranscribing ? 'Processing with AI...' :
                isRecording ? 'Listening...' : 
-               'Hold to Describe'}
+               'Hold to guide'}
             </Text>
             <Text style={styles.voiceStatusSubtitle}>
-              {isTranscribing ? 'Converting speech to text for editing' :
+              {isTranscribing ? 'Converting speech to text for your guide' :
                isRecording ? `Recording: ${Math.floor(recordingDuration / 1000)}s` : 
-               'Hold button and speak - text will appear below for editing'}
+               'Speak your guide (e.g. chilling with my mate), then Generate'}
             </Text>
 
           </View>
@@ -3325,16 +3544,16 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => {
-                const note = (manualDescription || caption || '').trim();
-                void generateMagicPost(note).catch((e) => {
-                  console.error('❌ polish generateMagicPost failed', e);
+                const note = (userGuideText || manualDescription || caption || '').trim();
+                void generateOptimizedPosts({ guide: note }).catch((e) => {
+                  console.error('❌ polish generateOptimizedPosts failed', e);
                 });
               }}
               disabled={isPolishingCaption || mediaItems.length === 0}
             >
               <Icon name="sparkles" size={20} color="#00D2BE" />
               <Text style={[styles.actionButtonText, { color: '#00D2BE' }]}>
-                {isPolishingCaption ? 'Polishing…' : 'Polish AI'}
+                {isPolishingCaption ? 'Writing…' : 'Generate AI'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -3347,23 +3566,28 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
 
       {/* Post Button — AI polish never blocks publish */}
       <View style={styles.footer}>
-        {isPolishingCaption || magicError ? (
+        {isGeneratingDescriptions || isPolishingCaption || magicError || describeError ? (
           <View style={styles.magicStatusChip}>
-            {isPolishingCaption ? (
+            {isGeneratingDescriptions || isPolishingCaption ? (
               <>
                 <ActivityIndicator size="small" color="#00D2BE" style={{ marginRight: 8 }} />
-                <Text style={styles.magicStatusText}>Writing caption…</Text>
+                <Text style={styles.magicStatusText}>
+                  {isGeneratingDescriptions ? 'Describing media…' : 'Writing 3 options…'}
+                </Text>
               </>
             ) : (
               <>
                 <Icon name="alert-circle-outline" size={16} color="#FBBF24" />
                 <Text style={[styles.magicStatusText, { marginLeft: 8, color: '#FBBF24' }]} numberOfLines={2}>
-                  {magicError}
+                  {magicError || describeError}
                 </Text>
                 <TouchableOpacity
                   onPress={() => {
-                    magicAutoStartedRef.current = true;
-                    void generateMagicPost(variantIntent || '').catch(() => {});
+                    if (describeError && !descriptionVariants.length) {
+                      void autoDescribeMedia({ gate: true, force: true }).catch(() => {});
+                    } else {
+                      void generateOptimizedPosts({ guide: userGuideText || variantIntent || '' }).catch(() => {});
+                    }
                   }}
                   style={{ marginLeft: 10 }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -4050,6 +4274,54 @@ const styles = StyleSheet.create({
   // AI Voice Section
   aiPrimarySection: {
     marginBottom: 16,
+  },
+  aiDescribeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  aiDescribeRetry: {
+    color: '#00D2BE',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  aiDescribeStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  aiDescribeStatusText: {
+    color: '#9ca3af',
+    fontSize: 13,
+  },
+  aiDescribeInput: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272E',
+    color: '#E5E7EB',
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  aiGuideInput: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272E',
+    color: '#ffffff',
+    fontSize: 15,
+    lineHeight: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 56,
+    marginBottom: 12,
+    textAlignVertical: 'top',
   },
   aiPrimaryButton: {
     borderRadius: 14,

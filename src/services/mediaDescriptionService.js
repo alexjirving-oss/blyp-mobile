@@ -271,10 +271,11 @@ class MediaDescriptionService {
       }
     }
 
-    const promptType = mediaItem.type === 'video' ? 'video (based on a frame)' : mediaItem.type;
+    const promptType = mediaItem.type === 'video' ? 'video frame' : 'photo';
+    // Literal vision copy — grounding for caption variants (not a social caption).
     const prompt = simplePrompt
-      ? `Describe this ${promptType} in one short casual sentence. No emojis.`
-      : `Describe this ${promptType} in a natural, casual way like someone would actually talk. One casual sentence, no emojis.`;
+      ? `Describe this ${promptType} literally in one short sentence: visible objects, people, setting, and actions. No opinions, hashtags, or emoji. Example: "bicycle on patio with shrubbery".`
+      : `Describe this ${promptType} literally and concretely in one short sentence. Name what is visibly present (objects, people, place, activity). Do NOT write a social caption, opinion, or vibe. No hashtags or emoji. Example style: "bicycle on patio with shrubbery".`;
 
     const payload = {
       contents: [{
@@ -842,7 +843,10 @@ Return ONLY valid JSON.`;
 
 ${intentBlock}
 
-Return JSON with "variants": ${count} DISTINCT caption options for this single post:
+Return JSON with:
+1) "perPhotoDescriptions": one LITERAL visual description per photo/frame (objects, people, setting, actions — NOT a caption; example: "bicycle on patio with shrubbery").
+2) "variants": ${count} DISTINCT optimized caption options for this single post:
+- Combine the literal photo context with the user's intent/guide.
 - Lead with the user's intent; photos are supporting detail only.
 - Make options different in tone (punchy / warm / playful).
 - Natural first-person. Light emoji OK.
@@ -853,11 +857,15 @@ Return ONLY valid JSON.`;
       contents: [{ parts: [{ text: promptText }, ...imageParts] }],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 900,
+        maxOutputTokens: 1100,
         responseMimeType: 'application/json',
         responseSchema: {
           type: 'OBJECT',
           properties: {
+            perPhotoDescriptions: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
             variants: {
               type: 'ARRAY',
               items: {
@@ -871,7 +879,7 @@ Return ONLY valid JSON.`;
               },
             },
           },
-          required: ['variants'],
+          required: ['variants', 'perPhotoDescriptions'],
         },
       },
     };
@@ -1262,9 +1270,9 @@ Make it fun and authentic based on what you see and the user's context: "${userP
   }
 
   /**
-   * Generate descriptions for multiple media items
+   * Generate literal vision descriptions for media items (compose step 1).
    * @param {Array} mediaItems - Array of media items
-   * @returns {Promise<Array>} - Array of descriptions
+   * @returns {Promise<{ descriptions: string[], usedFallback: boolean, aiError: string|null }>}
    */
   async generateMediaDescriptions(mediaItems) {
     this.log('🎯 Generating descriptions for %d media items...', mediaItems.length);
@@ -1274,11 +1282,19 @@ Make it fun and authentic based on what you see and the user's context: "${userP
     // Real generateMediaDescription calls already surface auth/quota errors.
 
     const rawResults = [];
+    let anySuccess = false;
+    let lastError = null;
 
-    // Cap sequential vision calls — one-shot generatePostFromMedia is preferred.
+    // Cap sequential vision calls — one-shot generatePostFromMedia is preferred for variants.
     const limit = Math.min(mediaItems.length, 3);
     for (let i = 0; i < limit; i += 1) {
-      rawResults[i] = await this.generateMediaDescription(mediaItems[i], i);
+      try {
+        rawResults[i] = await this.generateMediaDescription(mediaItems[i], i);
+        if (rawResults[i]) anySuccess = true;
+      } catch (e) {
+        lastError = e;
+        rawResults[i] = null;
+      }
     }
     for (let i = limit; i < mediaItems.length; i += 1) {
       rawResults[i] = null;
@@ -1292,7 +1308,32 @@ Make it fun and authentic based on what you see and the user's context: "${userP
     });
 
     this.log('✅ Generated descriptions:', finalResults);
-    return finalResults;
+
+    // Backward-compatible array return for older callers, plus metadata via properties.
+    const out = finalResults;
+    out.descriptions = finalResults;
+    out.usedFallback = !anySuccess;
+    out.aiError = !anySuccess
+      ? (lastError?.message
+        ? String(lastError.message).slice(0, 120)
+        : 'Could not describe media — edit the description or try again')
+      : null;
+    return out;
+  }
+
+  /**
+   * Optimize post copy from literal media descriptions + user guide.
+   * Thin alias used by the staged create-post UI (describe → guide → 3 options).
+   * @param {string[]} perPhotoDescriptions
+   * @param {string} userGuide
+   * @param {Object} [options]
+   * @returns {Promise<{ variants: Array, title: string }>}
+   */
+  async generateOptimizedPostVariants(perPhotoDescriptions = [], userGuide = '', options = {}) {
+    return this.generatePostDescriptionVariants(perPhotoDescriptions, userGuide, {
+      count: options.count || 3,
+      ...options,
+    });
   }
 
   /**
