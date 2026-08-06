@@ -1229,6 +1229,15 @@ function AppInner() {
             navWhenReady('ChatRoom', { roomId });
             return;
           }
+          case 'team': {
+            const teamId = parsed.path || parsed.query?.id || parsed.query?.teamId;
+            if (!teamId) {
+              navWhenReady('MyTeam');
+              return;
+            }
+            navWhenReady('TeamDetail', { teamId });
+            return;
+          }
           case 'saved':
             navWhenReady('Saved');
             return;

@@ -56,7 +56,10 @@ const CreateBattleScreen = ({ navigation, route }) => {
   const { uid } = useAuth();
   // The Blyp bar ("arrange a battle between me and X for Friday 8") can deep-link
   // here with the opponent and/or start time already resolved.
+  // Team dashboard may pass teamId / teamMembers for roster quick-picks.
   const prefill = route?.params || {};
+  const teamMembers = Array.isArray(prefill.teamMembers) ? prefill.teamMembers : [];
+  const teamName = prefill.teamName || null;
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -164,7 +167,9 @@ const CreateBattleScreen = ({ navigation, route }) => {
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.heroSub}>
-          Challenge someone at a set time. Optional forfeit stake — both put coins down; show up to get them back.
+          {teamName
+            ? `Challenge from ${teamName}. Optional forfeit stake — both put coins down; show up to get them back.`
+            : 'Challenge someone at a set time. Optional forfeit stake — both put coins down; show up to get them back.'}
         </Text>
 
         <Text style={styles.label}>1. Opponent</Text>
@@ -181,6 +186,31 @@ const CreateBattleScreen = ({ navigation, route }) => {
           </View>
         ) : (
           <>
+            {teamMembers.length > 0 && (
+              <View style={{ marginBottom: responsiveSize(12) }}>
+                <Text style={[styles.label, { marginTop: 0, marginBottom: responsiveSize(8) }]}>
+                  From your team
+                </Text>
+                {teamMembers.map((u) => (
+                  <TouchableOpacity
+                    key={u.id || u.uid}
+                    style={styles.resultRow}
+                    onPress={() => setOpponent({
+                      id: u.id || u.uid,
+                      displayName: u.displayName || 'Member',
+                      username: u.username || '',
+                      photoURL: u.photoURL || null,
+                    })}
+                  >
+                    <Avatar uri={u.photoURL} name={u.displayName} size={36} />
+                    <View style={{ flex: 1, marginLeft: responsiveSize(10) }}>
+                      <Text style={styles.selName}>{u.displayName || 'Member'}</Text>
+                      <Text style={styles.selUsername}>Teammate</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
             <View style={styles.searchBox}>
               <Icon name="search" size={responsiveFont(16)} color={COLORS.textSecondary} />
               <TextInput

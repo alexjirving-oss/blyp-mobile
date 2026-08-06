@@ -110,7 +110,7 @@ const GAME_TYPES = [
   }
 ];
 
-const ChatListScreen = ({ navigation }) => {
+const ChatListScreen = ({ navigation, route }) => {
   // The main tab bar (App.js MainTabs) is an absolute overlay, so this screen
   // must reserve its height or every sub-tab's bottom (Your Blyp stats, team
   // lists, etc.) renders hidden underneath the footer. Context (not the hook)
@@ -119,6 +119,18 @@ const ChatListScreen = ({ navigation }) => {
   const [selectedTab, setSelectedTab] = useState('notifications');
   // Double-tap the Chat/Games tab → reset to the first sub-page ("Live").
   useTabReset('Chat', () => setSelectedTab('notifications'));
+
+  useEffect(() => {
+    const tab = route?.params?.initialTab;
+    if (!tab) return;
+    const allowed = ['notifications', 'battles', 'games', 'dating', 'yourblyp', 'teams'];
+    if (allowed.includes(tab)) setSelectedTab(tab);
+    try {
+      navigation?.setParams?.({ initialTab: undefined });
+    } catch {
+      /* ignore */
+    }
+  }, [route?.params?.initialTab, navigation]);
 
   useEffect(() => {
     return subscribeTourSelect((payload) => {

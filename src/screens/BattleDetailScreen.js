@@ -12,7 +12,7 @@ import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
 import {
   subscribeBattle, acceptBattle, rejectBattle, cancelBattle, setBattleReminder,
-  isStaked, battleSideFor, BATTLE_STATUS, JOIN_GRACE_MS,
+  rematchBattle, isStaked, battleSideFor, BATTLE_STATUS, JOIN_GRACE_MS,
 } from '../services/battleService';
 import ScheduleBattleGiftModal from '../components/Battles/ScheduleBattleGiftModal';
 import { listBattleGiftPledges } from '../api/economyLiveApi';
@@ -144,6 +144,22 @@ const BattleDetailScreen = ({ navigation, route }) => {
     await setBattleReminder(battle, uid, 10);
     setReminderSet(true);
   }, [battle, uid]);
+
+  const onRematch = useCallback(async () => {
+    if (!battle || !uid) return;
+    setBusy(true);
+    const res = await rematchBattle(battle, uid);
+    setBusy(false);
+    if (!res.ok) {
+      Alert.alert('Could not rematch', 'Please try again from a live room if this battle has ended.');
+      return;
+    }
+    if (res.id) {
+      navigation.replace
+        ? navigation.replace('BattleDetail', { battleId: res.id })
+        : navigation.navigate('BattleDetail', { battleId: res.id });
+    }
+  }, [battle, uid, navigation]);
 
   if (loading) {
     return (
@@ -314,6 +330,43 @@ const BattleDetailScreen = ({ navigation, route }) => {
 
         {completed && (
           <View style={styles.waitCard}><Text style={styles.muted}>This battle has ended.</Text></View>
+        )}
+
+        {completed && isParticipant && (
+          <TouchableOpacity style={styles.primaryBtn} onPress={onRematch} disabled={busy}>
+            {busy ? (
+              <ActivityIndicator color="#0A0A0C" />
+            ) : (
+              <>
+                <Icon name="refresh" size={responsiveFont(18)} color="#0A0A0C" />
+                <Text style={styles.primaryText}>Rematch</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {completed && isParticipant && (
+          <TouchableOpacity
+            style={styles.giftBtn}
+            onPress={() => navigation?.navigate?.('CreateBattle', {
+              opponent: side === 'creator'
+                ? { id: battle.opponentUid, displayName: battle.opponentName, photoURL: battle.opponentPhoto, username: battle.opponentUsername }
+                : { id: battle.creatorUid, displayName: battle.creatorName, photoURL: battle.creatorPhoto, username: battle.creatorUsername },
+              prefillTitle: battle.title ? `Rematch: ${battle.title}` : undefined,
+            })}
+          >
+            <Icon name="calendar-outline" size={responsiveFont(18)} color="#0A0A0C" />
+            <Text style={styles.primaryText}>Schedule rematch</Text>
+          </TouchableOpacity>
+        )}
+
+        {(scheduled || pending) && isParticipant && (
+          <TouchableOpacity
+            style={styles.linkBtn}
+            onPress={() => navigation?.navigate?.('Profile', { openPromote: true })}
+          >
+            <Text style={[styles.linkText, { color: COLORS.primary }]}>Promote this battle</Text>
+          </TouchableOpacity>
         )}
       </ScrollView>
 

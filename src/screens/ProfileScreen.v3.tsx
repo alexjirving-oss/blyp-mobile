@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView, TouchableOpacity, Image, ActivityIndicator, RefreshControl, StatusBar, FlatList, Alert, Modal, Platform, useWindowDimensions, BackHandler } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import ScreenContainer from '../components/ScreenContainer';
@@ -172,12 +172,25 @@ const mapHeaderTabToProfileTab = (tabLabel: string): ProfileTabKey => {
 
 const ProfileScreenV3: React.FC = () => {
   const nav = useNavigation();
+  const route = useRoute<any>();
   const { user, uid, authReady, loading: authLoading } = useAuth();
   const [profileTab, setProfileTab] = useState<ProfileTabKey>('myProfile');
   const [activeTab, setActiveTab] = useState('My Profile');
   const isGuest = useGuestMode();
   // Double-tap the Profile tab → reset to the first sub-page ("My Profile").
   useTabReset('Profile', () => setActiveTab('My Profile'));
+
+  // Battle HQ / deep links can open Profile straight on Promote.
+  useEffect(() => {
+    if (!route?.params?.openPromote) return;
+    setActiveTab('Promote');
+    setProfileTab('tab1');
+    try {
+      (nav as any)?.setParams?.({ openPromote: undefined });
+    } catch {
+      /* ignore */
+    }
+  }, [route?.params?.openPromote, nav]);
   const [headerHeight, setHeaderHeight] = useState(0);
   // Seed from early-hydrate cache so the header never flashes "User" / zeros.
   const cachedBootstrap = uid ? getCachedOwnProfile(uid) : null;

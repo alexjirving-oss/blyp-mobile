@@ -118,6 +118,17 @@ export async function shareUrl(url, title) {
 
 export const roomUrl = (roomId) => `${SCHEME}room/${encodeURIComponent(String(roomId || ''))}`;
 
+export const teamUrl = (teamId) => `${SCHEME}team/${encodeURIComponent(String(teamId || ''))}`;
+
+export const teamWebUrl = (team) => {
+  const id = team?.id || team?.teamId;
+  if (!id) return WEB_BASE;
+  const title = pickStr(team?.name) || 'a team on Blyp';
+  const parts = [`t=${encodeURIComponent(title.slice(0, 140))}`];
+  if (team?.leaderName) parts.push(`leader=${encodeURIComponent(String(team.leaderName).slice(0, 80))}`);
+  return `${WEB_BASE}/team/${encodeURIComponent(String(id))}?${parts.join('&')}`;
+};
+
 export const roomWebUrl = (room) => {
   const id = room?.roomId || room?.id;
   if (!id) return WEB_BASE;
@@ -147,6 +158,20 @@ export async function shareRoom(room) {
   });
 }
 
+/** Share an invite to join a Blyp creator team. */
+export async function shareTeam(team) {
+  const id = team?.id || team?.teamId;
+  if (!id) return false;
+  const name = pickStr(team?.name) || 'our team';
+  const link = teamWebUrl(team);
+  const deep = teamUrl(id);
+  return safeShare({
+    title: 'Invite to team',
+    message: `Join ${name} on Blyp — creator battles, live support, and crew goals.\n${link}\n${deep}`,
+    url: link,
+  });
+}
+
 export default {
   postUrl,
   postWebUrl,
@@ -154,10 +179,13 @@ export default {
   blypUrl,
   roomUrl,
   roomWebUrl,
+  teamUrl,
+  teamWebUrl,
   sharePost,
   sharePosts,
   shareProfile,
   shareBlyp,
   shareUrl,
   shareRoom,
+  shareTeam,
 };

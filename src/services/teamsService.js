@@ -614,6 +614,103 @@ function toMs(ts) {
   }
 }
 
+const dash = (n) => {
+  if (n == null || !Number.isFinite(Number(n))) return '—';
+  const v = Number(n);
+  if (v <= 0) return '—';
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 10) / 10);
+};
+
+/**
+ * Honest team dashboard aggregates from real team/member/battle fields.
+ * Missing data surfaces as "—" — never invented production metrics.
+ */
+export function computeTeamDashboardStats({ team, members, battles } = {}) {
+  const memberList = Array.isArray(members) ? members : [];
+  const battleList = Array.isArray(battles) ? battles : [];
+  const memberCount = memberList.length || Number(team?.memberCount) || 0;
+
+  const gemsFromTeam = Number(team?.teamTotalGems);
+  const gemsFromMembers = memberList.reduce(
+    (sum, m) => sum + Number(m?.gemsEarned || 0) + Number(m?.teamBonusGems || 0),
+    0
+  );
+  const giftsTotal =
+    Number.isFinite(gemsFromTeam) && gemsFromTeam > 0
+      ? gemsFromTeam
+      : gemsFromMembers > 0
+        ? gemsFromMembers
+        : null;
+
+  const completed = battleList.filter((b) => {
+    const st = String(b?.status || '').toLowerCase();
+    return st === 'completed' || st === 'done' || st === 'finished';
+  });
+  let wins = 0;
+  let winsTracked = false;
+  completed.forEach((b) => {
+    if (b?.winnerUid || b?.winnerSide || b?.winnerId) {
+      winsTracked = true;
+      wins += 1;
+    }
+  });
+
+  const activeMembers = memberList.filter((m) => Number(m?.hoursLive || 0) > 0).length;
+  const weeklyRaw = team?.weeklyActivity ?? team?.weekLiveHours ?? team?.weeklyHours;
+  const weeklyNum = weeklyRaw == null ? null : Number(weeklyRaw);
+  const tier = team?.tier || team?.rank || team?.rankLabel || null;
+
+  return {
+    memberCount,
+    battlesCount: battleList.length,
+    battlesLabel: battleList.length > 0 ? String(battleList.length) : '—',
+    winsLabel: winsTracked ? String(wins) : '—',
+    giftsLabel: giftsTotal != null ? dash(giftsTotal) : '—',
+    giftsTotal: giftsTotal != null ? giftsTotal : 0,
+    activeMembers,
+    activeLabel: memberCount > 0 ? String(activeMembers) : '—',
+    weeklyLabel:
+      weeklyNum != null && Number.isFinite(weeklyNum) && weeklyNum > 0 ? dash(weeklyNum) : '—',
+    tier: tier ? String(tier) : null,
+  };
+}
+
+/**
+ * Best-effort online map for team members via users/{uid}.presence.state.
+ * Teams are small — one listener per member is fine.
+ */
+export function subscribeMembersPresence(uids, callback) {
+  const ids = [...new Set((Array.isArray(uids) ? uids : []).filter(Boolean).map(String))];
+  if (!ids.length) {
+    callback({});
+    return () => {};
+  }
+  const map = {};
+  const unsubs = ids.map((uid) =>
+    onSnapshot(
+      doc(db, 'users', uid),
+      (snap) => {
+        const data = snapExists(snap) ? snapData(snap) : null;
+        map[uid] = String(data?.presence?.state || '').toLowerCase() === 'online';
+        callback({ ...map });
+      },
+      () => {
+        map[uid] = false;
+        callback({ ...map });
+      }
+    )
+  );
+  return () => {
+    unsubs.forEach((u) => {
+      try {
+        u && u();
+      } catch {
+        /* ignore */
+      }
+    });
+  };
+}
+
 // arrayUnion without importing it at top-level repeatedly (kept local + lazy so
 // a missing export can't break module load).
 function arrayUnionSafe(value) {

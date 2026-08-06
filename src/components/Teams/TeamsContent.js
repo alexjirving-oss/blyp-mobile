@@ -16,8 +16,10 @@ import {
   Alert,
   RefreshControl,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../Icon';
 import BlypAvatar from '../BlypAvatar';
+import PressableLift from '../motion/PressableLift';
 import { COLORS } from '../../styles/theme';
 import { useAuth } from '../../hooks/useCommon';
 import { subscribeTeams, applyToRunTeam, getMyMembership } from '../../services/teamsService';
@@ -124,29 +126,34 @@ const TeamsContent = ({ navigation }) => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         ListHeaderComponent={
           <View>
-            <View style={styles.heroRow}>
-              <Icon name="people-circle-outline" size={22} color={COLORS.primary} />
+            <View style={styles.hero}>
+              <LinearGradient
+                colors={['rgba(0,210,190,0.28)', 'rgba(0,168,158,0.05)', 'transparent']}
+                style={StyleSheet.absoluteFill}
+              />
+              <Text style={styles.heroEyebrow}>Teams</Text>
+              <Text style={styles.heroTitle}>Your creator crew</Text>
               <Text style={styles.heroText}>
-                Teams are official creator agencies on Blyp. Join one for support, battles and group goals.
+                Official agencies on Blyp — battles, group goals, and a roster that has your back.
               </Text>
             </View>
             <View style={styles.actionsRow}>
-              <TouchableOpacity
+              <PressableLift
                 style={[styles.actionBtn, styles.actionPrimary]}
-                activeOpacity={0.9}
+                contentStyle={styles.actionBtnInner}
                 onPress={() => navigation?.navigate?.('MyTeam')}
               >
                 <Icon name="ribbon-outline" size={18} color="#001b18" />
-                <Text style={styles.actionPrimaryText}>{myTeamId ? 'My Team' : 'My Team'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+                <Text style={styles.actionPrimaryText}>{myTeamId ? 'My Team dashboard' : 'My Team'}</Text>
+              </PressableLift>
+              <PressableLift
                 style={[styles.actionBtn, styles.actionGhost]}
-                activeOpacity={0.9}
+                contentStyle={styles.actionBtnInner}
                 onPress={() => setApplyOpen(true)}
               >
                 <Icon name="add-circle-outline" size={18} color={COLORS.primary} />
                 <Text style={styles.actionGhostText}>Apply to run a team</Text>
-              </TouchableOpacity>
+              </PressableLift>
             </View>
             <Text style={styles.sectionLabel}>All teams</Text>
           </View>
@@ -197,14 +204,32 @@ const TeamsContent = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.pageBackground },
   listContent: { padding: 16, paddingBottom: 120 },
-  heroRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 16 },
-  heroText: { flex: 1, color: COLORS.textSecondary, fontSize: 13, lineHeight: 19 },
+  hero: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#0E1214',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.22)',
+    padding: 18,
+    marginBottom: 16,
+    minHeight: 120,
+  },
+  heroEyebrow: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  heroTitle: { color: COLORS.textPrimary, fontSize: 24, fontWeight: '900', marginTop: 6, letterSpacing: -0.3 },
+  heroText: { color: COLORS.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 8 },
   actionsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 12 },
+  actionBtn: { flex: 1, borderRadius: 12, overflow: 'hidden' },
+  actionBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 },
   actionPrimary: { backgroundColor: COLORS.primary },
-  actionPrimaryText: { color: '#001b18', fontWeight: '800', fontSize: 14 },
-  actionGhost: { borderWidth: 1, borderColor: COLORS.primary },
-  actionGhostText: { color: COLORS.primary, fontWeight: '700', fontSize: 13 },
+  actionPrimaryText: { color: '#001b18', fontWeight: '800', fontSize: 13 },
+  actionGhost: { borderWidth: 1, borderColor: COLORS.primary, backgroundColor: 'rgba(0,210,190,0.06)' },
+  actionGhostText: { color: COLORS.primary, fontWeight: '700', fontSize: 12 },
   sectionLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
   card: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: COLORS.backgroundCard, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: COLORS.border },
   cardBody: { flex: 1 },
