@@ -1,0 +1,5 @@
+node_modules/
+_frames/
+_qc/
+_qc2/
+*.log

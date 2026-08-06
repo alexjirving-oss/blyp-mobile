@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blyp Gift Film Clips — Trailer Reel</title>
+  <style>
+    :root {
+      --bg: #070b12;
+      --ink: #e8eef7;
+      --muted: #8b9bb0;
+      --teal: #00d2be;
+      --card: #0e1624;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,210,190,0.18), transparent),
+        var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    header {
+      padding: 2.5rem 1.5rem 1rem;
+      text-align: center;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      margin: 0 0 0.4rem;
+      letter-spacing: -0.02em;
+    }
+    .tag {
+      display: inline-block;
+      color: var(--teal);
+      font-weight: 700;
+      font-size: 0.75rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+    .lede {
+      color: var(--muted);
+      max-width: 40rem;
+      margin: 0 auto 1.25rem;
+      line-height: 1.5;
+    }
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 1.5rem;
+    }
+    button {
+      background: linear-gradient(135deg, var(--teal), #0ea5a0);
+      color: #061018;
+      border: 0;
+      border-radius: 999px;
+      padding: 0.7rem 1.4rem;
+      font-weight: 800;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .reel {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 1rem 3rem;
+      display: grid;
+      gap: 1.75rem;
+    }
+    .clip {
+      background: var(--card);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.45);
+    }
+    .clip video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+    }
+    .meta { padding: 1rem 1.15rem 1.2rem; }
+    .meta h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
+    .meta p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
+    .storyboards {
+      max-width: 960px;
+      margin: 0 auto 3rem;
+      padding: 0 1rem;
+    }
+    .storyboards h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+    .sb-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.5rem;
+    }
+    .sb-grid img {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      border-radius: 8px;
+      background: #111;
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+      padding: 0 1rem 2.5rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="tag">Gift cinema · true motion</div>
+    <h1>Blyp Gift Film Trailer Reel</h1>
+    <p class="lede">
+      Five hero gifts as continuous 30fps character motion — anticipation, arcs, particles —
+      not Ken Burns slideshows. Double-click this file or use Play full reel.
+    </p>
+    <div class="controls">
+      <button type="button" id="playAll">Play full reel</button>
+      <button type="button" class="secondary" id="pauseAll">Pause</button>
+    </div>
+  </header>
+
+  <main class="reel">
+    <article class="clip"><video controls playsinline preload="metadata" src="../clips/rocket.mp4"></video><div class="meta"><h2>Rocket — Ultimate</h2><p>Toy rocket with eyes: pad anticipation → ignition → ascent → star glory.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../clips/crown.mp4"></video><div class="meta"><h2>Crown — Legendary</h2><p>Jeweled crown character descends and crowns the stage.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../clips/diamond.mp4"></video><div class="meta"><h2>Diamond — Epic</h2><p>Diamond character facet-dances into a light burst.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../clips/cheer_burst.mp4"></video><div class="meta"><h2>Cheer Burst — Epic</h2><p>Stadium figures erupt in a celebration wave.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../clips/fire.mp4"></video><div class="meta"><h2>Fire — Mid / Spotlight</h2><p>Phoenix fire-spirit rises from embers to glory.</p></div></article>
+  </main>
+
+  <section class="storyboards">
+    <h2>Storyboard stills</h2>
+    <div class="sb-grid" id="sb"></div>
+  </section>
+
+  <footer>
+    True-motion procedural cinema (character rig every frame @ 30fps → H.264). Not a stills slideshow.
+  </footer>
+
+  <script>
+    const videos = [...document.querySelectorAll('video')];
+    let chainToken = 0;
+    document.getElementById('playAll').onclick = async () => {
+      const token = ++chainToken;
+      for (const v of videos) {
+        if (token !== chainToken) return;
+        v.currentTime = 0;
+        try { await v.play(); } catch (e) {}
+        await new Promise((resolve) => {
+          const done = () => { v.removeEventListener('ended', done); resolve(); };
+          v.addEventListener('ended', done);
+        });
+      }
+    };
+    document.getElementById('pauseAll').onclick = () => {
+      chainToken++;
+      videos.forEach((v) => v.pause());
+    };
+    const frames = [
+      'rocket-01-anticipation.png','rocket-02-ignition.png','rocket-03-ascent.png','rocket-04-glory.png',
+      'crown-01-descent.png','crown-02-crowning.png','crown-03-glory.png',
+      'diamond-01-reveal.png','diamond-02-dance.png','diamond-03-glory.png',
+      'cheer-01-stadium.png','cheer-02-wave.png','cheer-03-glory.png',
+      'fire-01-embers.png','fire-02-rise.png','fire-03-glory.png',
+    ];
+    const sb = document.getElementById('sb');
+    for (const f of frames) {
+      const img = document.createElement('img');
+      img.src = '../storyboards/' + f;
+      img.alt = f;
+      img.loading = 'lazy';
+      sb.appendChild(img);
+    }
+  </script>
+</body>
+</html>

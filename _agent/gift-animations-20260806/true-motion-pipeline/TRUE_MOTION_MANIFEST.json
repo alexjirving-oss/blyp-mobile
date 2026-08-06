@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-08-06T05:30:26.727Z",
+  "method": "procedural-canvas-character-rig@30fps → ffmpeg libx264",
+  "note": "Every frame redraws animated character/prop with continuous transforms + particles. Storyboards used only as soft atmospheric plates, not Ken Burns hero.",
+  "fps": 30,
+  "size": "1280x720",
+  "gifts": [
+    {
+      "id": "rocket",
+      "frames": 99,
+      "seconds": 3.3,
+      "out": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\rocket.mp4",
+      "bytes": 518229,
+      "impactAt": 0.26,
+      "gloryMs": 1000
+    },
+    {
+      "id": "crown",
+      "frames": 90,
+      "seconds": 3,
+      "out": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\crown.mp4",
+      "bytes": 423429,
+      "impactAt": 0.42,
+      "gloryMs": 1100
+    },
+    {
+      "id": "diamond",
+      "frames": 93,
+      "seconds": 3.1,
+      "out": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\diamond.mp4",
+      "bytes": 434697,
+      "impactAt": 0.32,
+      "gloryMs": 1100
+    },
+    {
+      "id": "cheer_burst",
+      "frames": 93,
+      "seconds": 3.1,
+      "out": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\cheer_burst.mp4",
+      "bytes": 760625,
+      "impactAt": 0.3,
+      "gloryMs": 1100
+    },
+    {
+      "id": "fire",
+      "frames": 93,
+      "seconds": 3.1,
+      "out": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\fire.mp4",
+      "bytes": 512900,
+      "impactAt": 0.28,
+      "gloryMs": 1100
+    }
+  ]
+}
