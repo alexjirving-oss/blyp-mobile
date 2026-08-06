@@ -1,4 +1,4 @@
-# Add project specific ProGuard rules here.
+﻿# Add project specific ProGuard rules here.
 # By default, the flags in this file are appended to flags specified
 # in /usr/local/Cellar/android-sdk/24.3.3/tools/proguard/proguard-android.txt
 # You can edit the include path and order by changing the proguardFiles
@@ -70,3 +70,15 @@
 -dontwarn javax.annotation.**
 
 # Add any project specific keep options here:
+
+# ---- Optional Chromium Cronet (IVS HTTP client; not on compile classpath) ----
+-dontwarn org.chromium.net.CronetEngine$Builder
+-dontwarn org.chromium.net.CronetEngine
+-dontwarn org.chromium.net.CronetException
+-dontwarn org.chromium.net.UploadDataProvider
+-dontwarn org.chromium.net.UploadDataProviders
+-dontwarn org.chromium.net.UrlRequest$Builder
+-dontwarn org.chromium.net.UrlRequest$Callback
+-dontwarn org.chromium.net.UrlRequest
+-dontwarn org.chromium.net.UrlResponseInfo
+
