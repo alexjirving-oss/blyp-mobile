@@ -38,3 +38,15 @@ writes. Safe in-SDK bump: keep `npx expo install --fix` within SDK 54.
 - Merged manifest: MainActivity `fullSensor`, ML Kit activity override present.
 - Release mapping / R8: `minifyEnabled true` on `release` build type.
 - Fold7: unfold does not force portrait chrome; Camera + Live still lock portrait while focused.
+
+## Bake / upload note (2026-08-06)
+
+Allocated `versionCode` **2026313370** for these fixes. Local canonical bake did **not** finish in this session (Windows Gradle/`createBundleReleaseJsAndAssets` Metro hangs / process kills under long release builds; one attempt reached `minifyReleaseWithR8` then failed on a dirty AGP graph). Fixes are committed; re-run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\RUN_PRE_RELEASE_REGRESSION_GATE.ps1 -ExpectedVersionCode 2026313370
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\release\BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode 2026313370
+npm run play:upload -- -Profile production
+```
+
+If `2026313370` is already in `tools/release/built_versioncodes.txt`, bump first with `tools/release/bump_version_code.ps1`.
