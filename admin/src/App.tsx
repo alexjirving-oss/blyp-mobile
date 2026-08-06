@@ -3,22 +3,25 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { useAuth } from "./auth/useAuth";
 import Layout from "./components/Layout";
+import { ToastProvider } from "./components/Toast";
 import { Spinner } from "./components/ui";
 import Login from "./pages/Login";
-import CommandCenter from "./pages/CommandCenter";
-import People from "./pages/People";
-import PersonDetail from "./pages/PersonDetail";
-import Economy from "./pages/Economy";
-import Ops from "./pages/Ops";
-import Content from "./pages/Content";
-import Live from "./pages/Live";
-import Safety from "./pages/Safety";
-import Access from "./pages/Access";
-import Growth from "./pages/Growth";
-import Comms from "./pages/Comms";
-import Config from "./pages/Config";
-import Teams from "./pages/Teams";
 
+// Lazy-load authenticated surfaces so login boot does not evaluate heavy
+// chart/lodash chunks (some of which currently break under Vite/Rolldown CJS interop).
+const CommandCenter = lazy(() => import("./pages/CommandCenter"));
+const People = lazy(() => import("./pages/People"));
+const PersonDetail = lazy(() => import("./pages/PersonDetail"));
+const Economy = lazy(() => import("./pages/Economy"));
+const Ops = lazy(() => import("./pages/Ops"));
+const Content = lazy(() => import("./pages/Content"));
+const Live = lazy(() => import("./pages/Live"));
+const Safety = lazy(() => import("./pages/Safety"));
+const Access = lazy(() => import("./pages/Access"));
+const Growth = lazy(() => import("./pages/Growth"));
+const Comms = lazy(() => import("./pages/Comms"));
+const Config = lazy(() => import("./pages/Config"));
+const Teams = lazy(() => import("./pages/Teams"));
 const Workbook = lazy(() => import("./pages/Workbook"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -27,9 +30,14 @@ function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function PageSuspense({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<Spinner label="Loading…" />}>{children}</Suspense>;
+}
+
 export default function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -40,19 +48,19 @@ export default function App() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<CommandCenter />} />
-            <Route path="/people" element={<People />} />
-            <Route path="/people/:userId" element={<PersonDetail />} />
-            <Route path="/content" element={<Content />} />
-            <Route path="/live" element={<Live />} />
-            <Route path="/teams" element={<Teams />} />
-            <Route path="/safety" element={<Safety />} />
-            <Route path="/economy" element={<Economy />} />
-            <Route path="/growth" element={<Growth />} />
-            <Route path="/comms" element={<Comms />} />
-            <Route path="/config" element={<Config />} />
-            <Route path="/ops" element={<Ops />} />
-            <Route path="/access" element={<Access />} />
+            <Route path="/" element={<PageSuspense><CommandCenter /></PageSuspense>} />
+            <Route path="/people" element={<PageSuspense><People /></PageSuspense>} />
+            <Route path="/people/:userId" element={<PageSuspense><PersonDetail /></PageSuspense>} />
+            <Route path="/content" element={<PageSuspense><Content /></PageSuspense>} />
+            <Route path="/live" element={<PageSuspense><Live /></PageSuspense>} />
+            <Route path="/teams" element={<PageSuspense><Teams /></PageSuspense>} />
+            <Route path="/safety" element={<PageSuspense><Safety /></PageSuspense>} />
+            <Route path="/economy" element={<PageSuspense><Economy /></PageSuspense>} />
+            <Route path="/growth" element={<PageSuspense><Growth /></PageSuspense>} />
+            <Route path="/comms" element={<PageSuspense><Comms /></PageSuspense>} />
+            <Route path="/config" element={<PageSuspense><Config /></PageSuspense>} />
+            <Route path="/ops" element={<PageSuspense><Ops /></PageSuspense>} />
+            <Route path="/access" element={<PageSuspense><Access /></PageSuspense>} />
             <Route
               path="/workbook"
               element={
@@ -65,6 +73,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </AuthProvider>
   );
 }

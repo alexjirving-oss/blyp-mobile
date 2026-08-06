@@ -150,6 +150,27 @@ async function buildContext(
   const kycStatus: KycStatus =
     payout && payout.payouts_enabled && payout.details_submitted ? 'verified' : payout ? 'pending' : 'unverified';
 
+  // Fraud / chargeback flags from admin console (user_admin_state.metadata.fraud).
+  // Stripe/Play ingest remains unwired — ops set openChargebackCount manually.
+  let accountFrozen = false;
+  let underFraudReview = false;
+  let openChargebackCount = 0;
+  try {
+    const adminRow = await db('user_admin_state').where({ user_id: userId }).first();
+    const meta =
+      typeof adminRow?.metadata === 'string'
+        ? JSON.parse(adminRow.metadata)
+        : adminRow?.metadata && typeof adminRow.metadata === 'object'
+          ? adminRow.metadata
+          : {};
+    const fraud = meta?.fraud && typeof meta.fraud === 'object' ? meta.fraud : {};
+    accountFrozen = fraud.accountFrozen === true;
+    underFraudReview = fraud.underFraudReview === true;
+    openChargebackCount = Math.max(0, Math.floor(Number(fraud.openChargebackCount) || 0));
+  } catch {
+    // Prefer fail-open on missing admin table so withdraw path still works.
+  }
+
   return {
     now,
     amountCoins: amountGems,
@@ -157,9 +178,9 @@ async function buildContext(
     accountAgeMs: Math.max(0, now - createdAt),
     emailVerified: !!claims.emailVerified,
     kycStatus,
-    accountFrozen: false,
-    underFraudReview: false,
-    openChargebackCount: 0,
+    accountFrozen,
+    underFraudReview,
+    openChargebackCount,
     hasPayoutAccount: !!payout?.stripe_account_id,
     payoutAccountAgeMs: payoutCreated ? Math.max(0, now - payoutCreated) : 0,
     openRequestCount: openRows.length,

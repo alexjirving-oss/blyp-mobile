@@ -11,6 +11,10 @@
  *    more reports land, and always raise an alert.
  *  - Any target crossing AUTO_HIDE_THRESHOLD distinct reports is auto-hidden.
  *
+ * Thresholds may be overridden at runtime via Firestore
+ * `appConfig/autoModPolicy` (written by Cloud Run admin console). Missing or
+ * invalid fields fall back to the compile-time defaults below.
+ *
  * "Auto-hide" is only applied to posts today (we can locate and flag them
  * deterministically). The client feed/viewer must honour posts.moderation.hidden.
  * For users/comments/streams we raise an alert and mark the queue item for
@@ -23,11 +27,56 @@ import { admin } from '../firebaseAdmin';
 
 type Db = admin.firestore.Firestore;
 
-const AUTO_HIDE_THRESHOLD = 3;
+const DEFAULT_AUTO_HIDE_THRESHOLD = 3;
 /** Distinct reporters required before a child_safety report auto-hides a post. */
-const CRITICAL_HIDE_REPORTERS = 2;
+const DEFAULT_CRITICAL_HIDE_REPORTERS = 2;
+const DEFAULT_SERIOUS_HIDE_REPORTS = 2;
 const CRITICAL_REASONS = new Set(['child_safety']);
 const SERIOUS_REASONS = new Set(['nudity_sexual', 'violence', 'hate', 'self_harm', 'illegal']);
+
+type RuntimePolicy = {
+  autoHideThreshold: number;
+  criticalHideReporters: number;
+  seriousHideReports: number;
+};
+
+let policyCache: { at: number; policy: RuntimePolicy } | null = null;
+const POLICY_TTL_MS = 60_000;
+
+function clamp(n: unknown, min: number, max: number, fallback: number): number {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(v)));
+}
+
+async function loadPolicy(db: Db): Promise<RuntimePolicy> {
+  const now = Date.now();
+  if (policyCache && now - policyCache.at < POLICY_TTL_MS) return policyCache.policy;
+  const fallback: RuntimePolicy = {
+    autoHideThreshold: DEFAULT_AUTO_HIDE_THRESHOLD,
+    criticalHideReporters: DEFAULT_CRITICAL_HIDE_REPORTERS,
+    seriousHideReports: DEFAULT_SERIOUS_HIDE_REPORTS,
+  };
+  try {
+    const snap = await db.collection('appConfig').doc('autoModPolicy').get();
+    if (!snap.exists) {
+      policyCache = { at: now, policy: fallback };
+      return fallback;
+    }
+    const data = snap.data() || {};
+    const policy: RuntimePolicy = {
+      autoHideThreshold: clamp(data.autoHideThreshold, 1, 50, fallback.autoHideThreshold),
+      criticalHideReporters: clamp(data.criticalHideReporters, 1, 20, fallback.criticalHideReporters),
+      seriousHideReports: clamp(data.seriousHideReports, 1, 20, fallback.seriousHideReports),
+    };
+    policyCache = { at: now, policy };
+    return policy;
+  } catch (e) {
+    console.warn('[reportAutoAction] loadPolicy failed', (e as any)?.message || String(e));
+    policyCache = { at: now, policy: fallback };
+    return fallback;
+  }
+}
 
 export interface AutoActionInput {
   targetType: string;
@@ -46,13 +95,16 @@ function reporterSignal(input: AutoActionInput): number {
   return input.totalReports;
 }
 
-function decide(input: AutoActionInput): { hide: boolean; alert: boolean; severity: 'critical' | 'high' | 'normal'; reason: string } {
+function decide(
+  input: AutoActionInput,
+  policy: RuntimePolicy,
+): { hide: boolean; alert: boolean; severity: 'critical' | 'high' | 'normal'; reason: string } {
   const { reasonCode, totalReports } = input;
   const reporters = reporterSignal(input);
   if (CRITICAL_REASONS.has(reasonCode)) {
     // Always escalate for human review; never hide on a single reporter.
     return {
-      hide: reporters >= CRITICAL_HIDE_REPORTERS,
+      hide: reporters >= policy.criticalHideReporters,
       alert: true,
       severity: 'critical',
       reason: `critical_reason:${reasonCode}:reporters=${reporters}`,
@@ -60,13 +112,13 @@ function decide(input: AutoActionInput): { hide: boolean; alert: boolean; severi
   }
   if (SERIOUS_REASONS.has(reasonCode)) {
     return {
-      hide: totalReports >= 2,
+      hide: totalReports >= policy.seriousHideReports,
       alert: true,
       severity: 'high',
       reason: `serious_reason:${reasonCode}:reports=${totalReports}`,
     };
   }
-  if (totalReports >= AUTO_HIDE_THRESHOLD) {
+  if (totalReports >= policy.autoHideThreshold) {
     return { hide: true, alert: true, severity: 'normal', reason: `threshold:reports=${totalReports}` };
   }
   return { hide: false, alert: false, severity: 'normal', reason: '' };
@@ -98,9 +150,10 @@ async function hidePost(db: Db, postId: string, reason: string): Promise<boolean
 }
 
 export async function evaluateAutoAction(db: Db, input: AutoActionInput): Promise<void> {
+  const policy = await loadPolicy(db);
   let verdict;
   try {
-    verdict = decide(input);
+    verdict = decide(input, policy);
   } catch (e) {
     console.warn('[reportAutoAction] decide failed', (e as any)?.message || String(e));
     return;
@@ -127,6 +180,7 @@ export async function evaluateAutoAction(db: Db, input: AutoActionInput): Promis
       decisionReason: verdict.reason,
       totalReports: input.totalReports,
       distinctReporters: reporterSignal(input),
+      policy,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   } catch (e) {
@@ -173,4 +227,9 @@ export async function evaluateAutoAction(db: Db, input: AutoActionInput): Promis
 }
 
 /** Exported for unit tests. */
-export const __test = { decide, CRITICAL_HIDE_REPORTERS, AUTO_HIDE_THRESHOLD };
+export const __test = {
+  decide,
+  CRITICAL_HIDE_REPORTERS: DEFAULT_CRITICAL_HIDE_REPORTERS,
+  AUTO_HIDE_THRESHOLD: DEFAULT_AUTO_HIDE_THRESHOLD,
+  loadPolicy,
+};

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAsync } from "../lib/useAsync";
 import { fmtRelative } from "../lib/format";
@@ -40,8 +40,14 @@ function statusBadge(user: AdminUserRow) {
 
 export default function People() {
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
+  const [params] = useSearchParams();
+  const [query, setQuery] = useState(() => params.get("q") || "");
   const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    const next = params.get("q") || "";
+    setQuery(next);
+  }, [params]);
   const q = useDebounced(query, 350);
   const [activeQuery, setActiveQuery] = useState(q);
   const effectiveOffset = activeQuery === q ? offset : 0;

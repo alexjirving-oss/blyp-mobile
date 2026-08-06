@@ -1,13 +1,20 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { useAuth } from "../auth/useAuth";
 import { useAsync } from "../lib/useAsync";
-import { fmtDate, fmtRelative } from "../lib/format";
+import { fmtDate, fmtNum, fmtRelative } from "../lib/format";
 import AdminUserAvatar from "../components/AdminUserAvatar";
-import { PageHeader, Spinner, ErrorNote, Badge, EmptyState } from "../components/ui";
-import type { AdminUserDetail, AdminPostsResponse } from "../types";
+import { PageHeader, Spinner, ErrorNote, Badge, EmptyState, InfoNote, WarnNote } from "../components/ui";
+import type {
+  AdminUserDetail,
+  AdminPostsResponse,
+  WalletResponse,
+  LedgerResponse,
+  StrikeSummary,
+} from "../types";
 
-type Tab = "overview" | "controls" | "posts" | "activity";
+type Tab = "overview" | "controls" | "360" | "posts" | "activity";
 
 export default function PersonDetail() {
   const { userId = "" } = useParams();
@@ -55,19 +62,20 @@ export default function PersonDetail() {
           </div>
 
           <div className="row" style={{ gap: 6, marginBottom: 16 }}>
-            {(["overview", "controls", "posts", "activity"] as Tab[]).map((t) => (
+            {(["overview", "360", "controls", "posts", "activity"] as Tab[]).map((t) => (
               <button
                 key={t}
                 className={tab === t ? "btn tiny" : "btn ghost tiny"}
                 onClick={() => setTab(t)}
                 style={{ textTransform: "capitalize" }}
               >
-                {t}
+                {t === "360" ? "User 360" : t}
               </button>
             ))}
           </div>
 
           {tab === "overview" && <Overview u={u} />}
+          {tab === "360" && <User360 userId={userId} u={u} />}
           {tab === "controls" && (
             <Controls
               key={`${u.userId}:${u.avatarFrame || ""}:${u.feedPriorityAccount || "standard"}`}
@@ -125,6 +133,138 @@ function Overview({ u }: { u: AdminUserDetail }) {
   );
 }
 
+function User360({ userId, u }: { userId: string; u: AdminUserDetail }) {
+  const wallet = useAsync<WalletResponse>(() => api.get<WalletResponse>(`/admin/users/${encodeURIComponent(userId)}/wallet`), [userId]);
+  const ledger = useAsync<LedgerResponse>(() => api.get<LedgerResponse>(`/admin/users/${encodeURIComponent(userId)}/ledger?limit=25`), [userId]);
+  const reports = useAsync<{ available: boolean; reports: Array<{ reportId: string; reasonCode: string; status: string; reporterId: string; targetId: string; createdAt: string | null }>; note?: string }>(
+    () => api.get(`/admin/users/${encodeURIComponent(userId)}/reports`),
+    [userId],
+  );
+  const devices = useAsync<{ available: boolean; items: unknown[]; note?: string; detail?: string }>(
+    () => api.get(`/admin/users/${encodeURIComponent(userId)}/devices`),
+    [userId],
+  );
+  const strikes = useAsync<StrikeSummary>(() => api.get<StrikeSummary>(`/admin/users/${encodeURIComponent(userId)}/strikes`), [userId]);
+  const [strikeReason, setStrikeReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function addStrike() {
+    if (!strikeReason.trim()) return;
+    setBusy(true);
+    try {
+      await api.post(`/admin/users/${encodeURIComponent(userId)}/strikes`, { reason: strikeReason.trim() });
+      setStrikeReason("");
+      strikes.reload();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="stack" style={{ gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+        <div className="card">
+          <div className="dim" style={{ fontSize: 11 }}>Coins</div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>{wallet.data?.available ? fmtNum(wallet.data.coinBalance || 0) : "—"}</div>
+        </div>
+        <div className="card">
+          <div className="dim" style={{ fontSize: 11 }}>Bonus coins</div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>{wallet.data?.available ? fmtNum(wallet.data.bonusCoinBalance || 0) : "—"}</div>
+        </div>
+        <div className="card">
+          <div className="dim" style={{ fontSize: 11 }}>Gems avail / pending</div>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>
+            {wallet.data?.available ? `${fmtNum(wallet.data.gemAvailable || 0)} / ${fmtNum(wallet.data.gemPending || 0)}` : "—"}
+          </div>
+        </div>
+        <div className="card">
+          <div className="dim" style={{ fontSize: 11 }}>Active strikes</div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>{strikes.data?.activeCount ?? "—"}</div>
+        </div>
+      </div>
+      {wallet.data && !wallet.data.available && <WarnNote>Wallet unavailable: {wallet.data.detail}</WarnNote>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }}>
+        <div className="card">
+          <div className="row spread" style={{ marginBottom: 8 }}>
+            <h3 className="panel-title" style={{ margin: 0 }}>Recent ledger</h3>
+            <Link className="btn ghost tiny" to="/economy">Open explorer</Link>
+          </div>
+          {ledger.loading && <Spinner />}
+          {ledger.data && ledger.data.items.length === 0 && <EmptyState>No ledger entries.</EmptyState>}
+          {ledger.data && ledger.data.items.length > 0 && (
+            <div className="table-wrap" style={{ maxHeight: 320 }}>
+              <table>
+                <thead><tr><th>When</th><th>Type</th><th>Amount</th></tr></thead>
+                <tbody>
+                  {ledger.data.items.map((e) => (
+                    <tr key={e.ledgerId}>
+                      <td className="muted" style={{ fontSize: 11 }}>{fmtRelative(e.createdAt)}</td>
+                      <td style={{ fontSize: 12 }}>{e.entryType}</td>
+                      <td>{fmtNum(e.amount)} <span className="dim">{e.currency}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="card stack">
+          <h3 className="panel-title">Reports (recent window)</h3>
+          {reports.data?.note && <InfoNote>{reports.data.note}</InfoNote>}
+          {reports.data && reports.data.reports.length === 0 && <EmptyState>No reports in recent window.</EmptyState>}
+          {reports.data?.reports.map((r) => (
+            <div key={r.reportId} className="row spread" style={{ borderBottom: "1px solid var(--divider)", paddingBottom: 6 }}>
+              <div>
+                <Badge kind={r.status === "open" ? "warn" : "neutral"}>{r.reasonCode || "report"}</Badge>
+                <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                  {r.targetId === userId ? "as target" : "as reporter"} · {fmtRelative(r.createdAt)}
+                </div>
+              </div>
+              <Link className="btn ghost tiny" to={`/safety?q=${encodeURIComponent(r.reportId)}`}>Safety</Link>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="card">
+          <h3 className="panel-title">Devices / sessions</h3>
+          {devices.data && !devices.data.available && (
+            <WarnNote>{devices.data.note || devices.data.detail || "Unavailable"}</WarnNote>
+          )}
+          <EmptyState>No device inventory in live-service (honest empty).</EmptyState>
+        </div>
+        <div className="card stack">
+          <h3 className="panel-title">Strikes</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="grow" value={strikeReason} onChange={(e) => setStrikeReason(e.target.value)} placeholder="Strike reason (audited)" />
+            <button className="btn tiny" disabled={busy || !strikeReason.trim()} onClick={addStrike}>
+              {busy ? "…" : "Add strike"}
+            </button>
+          </div>
+          {strikes.data?.strikes.length === 0 && <EmptyState>No strikes.</EmptyState>}
+          {strikes.data?.strikes.map((s) => (
+            <div key={s.strikeId} className="row spread" style={{ borderBottom: "1px solid var(--divider)", paddingBottom: 6 }}>
+              <div>
+                <span style={{ fontSize: 13 }}>{s.reason}</span>
+                <div className="dim" style={{ fontSize: 11 }}>{fmtRelative(s.createdAt)}</div>
+              </div>
+              <Badge kind={s.active ? "err" : "neutral"}>{s.active ? "active" : "inactive"}</Badge>
+            </div>
+          ))}
+          <div className="dim" style={{ fontSize: 11 }}>
+            Caps timeline: messaging {u.restrictions.messagingRestricted ? "restricted" : "ok"} · live{" "}
+            {u.restrictions.liveRestricted ? "restricted" : "ok"} · login{" "}
+            {u.restrictions.loginRestricted ? "restricted" : "ok"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <label className="row" style={{ gap: 8, cursor: "pointer", margin: 0 }}>
@@ -135,6 +275,12 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 }
 
 function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
+  const { can } = useAuth();
+  const canCaps = can("users.capabilities");
+  const canFeed = can("growth.feed_priority");
+  const canBan = can("users.ban");
+  const canUnban = can("users.unban");
+  const canMsg = can("users.message");
   const [verified, setVerified] = useState(u.verification.isVerified);
   const [verificationNote, setVerificationNote] = useState(u.verification.note || "");
   const [role, setRole] = useState(u.role || "user");
@@ -147,14 +293,12 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   const [loginRestricted, setLogin] = useState(u.restrictions.loginRestricted);
   const [accountRestricted, setAccount] = useState(u.restrictions.accountRestricted);
   const [reason, setReason] = useState(u.restrictions.reason || "");
-
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
   const [banReason, setBanReason] = useState("");
   const [msgSubject, setMsgSubject] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   async function run(key: string, fn: () => Promise<unknown>, okMsg: string) {
     setBusy(key); setErr(null); setMsg(null);
@@ -170,140 +314,163 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   }
 
   return (
-    <div className="stack">
+    <div className="stack" style={{ gap: 16 }}>
       {msg && <div style={{ color: "var(--success)", fontSize: 13 }}>{msg}</div>}
       {err && <ErrorNote>{err}</ErrorNote>}
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div className="card stack">
-          <h3 className="panel-title">Capabilities & restrictions</h3>
-          <Toggle checked={verified} onChange={setVerified} label="Verified badge" />
-          <div>
-            <label>Verification note</label>
-            <input value={verificationNote} onChange={(e) => setVerificationNote(e.target.value)} placeholder="Optional note" />
-          </div>
-          <div>
-            <label>Role</label>
-            <select value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="user">user</option>
-              <option value="manager">manager</option>
-              <option value="admin">admin</option>
-            </select>
-          </div>
-          <div>
-            <label>Avatar frame</label>
-            <div className="row" style={{ gap: 12, alignItems: "center", marginTop: 6 }}>
-              <AdminUserAvatar
-                photoURL={u.photoURL}
-                displayName={u.displayName}
-                username={u.username}
-                userId={u.userId}
-                size={52}
-                avatarFrame={avatarFrame || null}
-              />
-              <select value={avatarFrame} onChange={(e) => setAvatarFrame(e.target.value)} style={{ flex: 1 }}>
-                <option value="">None</option>
-                <option value="gold_crown">Gold crown ring</option>
-              </select>
-            </div>
-            <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>
-              Shown as a gold circle with a crown on their avatar across the app.
-            </div>
-          </div>
-          <div className="stack" style={{ gap: 8, marginTop: 4 }}>
-            <Toggle checked={messagingRestricted} onChange={setMessaging} label="Restrict messaging" />
-            <Toggle checked={liveRestricted} onChange={setLive} label="Restrict going live" />
-            <Toggle checked={loginRestricted} onChange={setLogin} label="Restrict login" />
-            <Toggle checked={accountRestricted} onChange={setAccount} label="Restrict account (full)" />
-          </div>
-          <div>
-            <label>Restriction reason</label>
-            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Shown context for the restriction" />
-          </div>
-          <button
-            className="btn"
-            disabled={busy === "caps"}
-            onClick={() =>
-              run("caps", async () => {
-                const res = await api.post<{ detail?: { avatarFrame?: string | null }; ok?: boolean }>(
-                  `/admin/users/${encodeURIComponent(u.userId)}/capabilities`,
-                  {
-                    verified, role, verificationNote,
-                    messagingRestricted, liveRestricted, loginRestricted, accountRestricted, reason,
-                    avatarFrame: avatarFrame || null,
-                  },
-                );
-                const saved = res?.detail?.avatarFrame ?? (avatarFrame || null);
-                setAvatarFrame(saved || "");
-              }, "Capabilities saved.")
-            }
-          >
-            {busy === "caps" ? "Saving…" : "Save capabilities"}
-          </button>
-        </div>
-
-        <div className="stack">
+        <div className="stack" style={{ gap: 16 }}>
           <div className="card stack">
-            <h3 className="panel-title">Account feed priority</h3>
-            <div className="muted" style={{ fontSize: 13 }}>
-              For You / discovery weight for all of this user&apos;s posts. Combines additively with per-post priority
-              (<code style={{ fontSize: 11 }}>effective = account + post</code>). Suppress practically hides them from
-              discovery rails.
+            <h3 className="panel-title">Capabilities</h3>
+            <Toggle checked={verified} onChange={setVerified} label="Verified" />
+            <div>
+              <label>Verification note</label>
+              <input value={verificationNote} onChange={(e) => setVerificationNote(e.target.value)} />
             </div>
             <div>
-              <label>Priority</label>
-              <select
-                value={feedPriorityAccount}
-                onChange={(e) =>
-                  setFeedPriorityAccount(e.target.value as typeof feedPriorityAccount)
-                }
-              >
-                <option value="suppress">Suppress — practically don&apos;t show</option>
-                <option value="low">Low — decreased</option>
-                <option value="standard">Standard — default</option>
-                <option value="high">High — increased</option>
-                <option value="boost">Boost — maximum</option>
+              <label>Role</label>
+              <select value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="user">user</option>
+                <option value="manager">manager</option>
+                <option value="admin">admin</option>
               </select>
+            </div>
+            <div>
+              <label>Avatar frame</label>
+              <select value={avatarFrame} onChange={(e) => setAvatarFrame(e.target.value)}>
+                <option value="">None</option>
+                <option value="gold_crown">gold_crown</option>
+              </select>
+            </div>
+            <Toggle checked={messagingRestricted} onChange={setMessaging} label="Messaging restricted" />
+            <Toggle checked={liveRestricted} onChange={setLive} label="Live restricted" />
+            <Toggle checked={loginRestricted} onChange={setLogin} label="Login restricted" />
+            <Toggle checked={accountRestricted} onChange={setAccount} label="Account restricted" />
+            <div>
+              <label>Reason</label>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} />
             </div>
             <button
               className="btn"
-              disabled={busy === "feedPri"}
+              disabled={busy === "caps" || !canCaps}
+              title={!canCaps ? "Missing users.capabilities" : undefined}
               onClick={() =>
-                run(
-                  "feedPri",
-                  () =>
-                    api.post(`/admin/users/${encodeURIComponent(u.userId)}/feed-priority`, {
-                      priority: feedPriorityAccount,
-                      reason: `Dashboard set account feed priority to ${feedPriorityAccount}`,
-                    }),
-                  "Account feed priority saved.",
-                )
+                run("caps", () => api.post(`/admin/users/${encodeURIComponent(u.userId)}/capabilities`, {
+                  verified, role, verificationNote: verificationNote || null,
+                  messagingRestricted, liveRestricted, loginRestricted, accountRestricted,
+                  reason: reason || null, avatarFrame: avatarFrame || null,
+                }), "Capabilities saved.")
               }
             >
-              {busy === "feedPri" ? "Saving…" : "Save feed priority"}
+              {busy === "caps" ? "Saving…" : "Save capabilities"}
             </button>
           </div>
 
           <div className="card stack">
-            <h3 className="panel-title">Enforcement</h3>
+            <h3 className="panel-title">Feed priority</h3>
+            <select value={feedPriorityAccount} onChange={(e) => setFeedPriorityAccount(e.target.value as typeof feedPriorityAccount)}>
+              {(["suppress", "low", "standard", "high", "boost"] as const).map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+            <button
+              className="btn"
+              disabled={busy === "feed" || !canFeed}
+              title={!canFeed ? "Missing growth.feed_priority" : undefined}
+              onClick={() =>
+                run("feed", () => api.post(`/admin/users/${encodeURIComponent(u.userId)}/feed-priority`, {
+                  priority: feedPriorityAccount,
+                  reason: reason || "admin console",
+                }), "Feed priority updated.")
+              }
+            >
+              {busy === "feed" ? "Saving…" : "Set feed priority"}
+            </button>
+          </div>
+        </div>
+
+        <div className="stack" style={{ gap: 16 }}>
+          <div className="card stack">
+            <h3 className="panel-title">Ban / unban</h3>
             {u.isBanned ? (
-              <>
-                <div className="muted" style={{ fontSize: 13 }}>This user is currently banned{u.banReason ? `: ${u.banReason}` : ""}.</div>
-                <button className="btn success" disabled={busy === "ban"} onClick={() => run("ban", () => api.post(`/admin/users/${encodeURIComponent(u.userId)}/unban`, { reason: banReason || null }), "User unbanned.")}>
-                  {busy === "ban" ? "Working…" : "Unban user"}
-                </button>
-              </>
+              <button className="btn success" disabled={busy === "ban" || !canUnban} onClick={() => run("ban", () => api.post(`/admin/users/${encodeURIComponent(u.userId)}/unban`, { reason: banReason || null }), "User unbanned.")}>
+                {busy === "ban" ? "Working…" : "Unban user"}
+              </button>
             ) : (
               <>
                 <div>
-                  <label>Ban reason</label>
+                  <label>Reason</label>
                   <input value={banReason} onChange={(e) => setBanReason(e.target.value)} placeholder="Reason (recorded in audit log)" />
                 </div>
-                <button className="btn danger" disabled={busy === "ban"} onClick={() => run("ban", () => api.post(`/admin/users/${encodeURIComponent(u.userId)}/ban`, { reason: banReason || null, bannedUntil: null }), "User banned.")}>
+                <button className="btn danger" disabled={busy === "ban" || !canBan} onClick={() => run("ban", () => api.post(`/admin/users/${encodeURIComponent(u.userId)}/ban`, { reason: banReason || null, bannedUntil: null }), "User banned.")}>
                   {busy === "ban" ? "Working…" : "Ban user"}
                 </button>
               </>
             )}
+          </div>
+
+          <div className="card stack">
+            <h3 className="panel-title">Chargeback / fraud flags</h3>
+            <InfoNote>
+              Manual flags feed WithdrawalGuard (<code>OPEN_CHARGEBACK</code> / frozen / fraud review). Stripe/Play ingest is not wired. Withdrawals env remains OFF.
+            </InfoNote>
+            <div className="row wrap" style={{ gap: 10 }}>
+              <label className="row" style={{ gap: 6, margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={(u.fraud?.openChargebackCount || 0) > 0}
+                  disabled={busy === "fraud" || !canBan}
+                  onChange={(e) =>
+                    run(
+                      "fraud",
+                      () =>
+                        api.post(`/admin/users/${encodeURIComponent(u.userId)}/fraud-flags`, {
+                          openChargebackCount: e.target.checked ? 1 : 0,
+                          note: e.target.checked ? "admin console chargeback open" : "cleared",
+                        }),
+                      e.target.checked ? "Chargeback flag set (withdraw block)." : "Chargeback flag cleared.",
+                    )
+                  }
+                />
+                <span>Open chargeback</span>
+              </label>
+              <label className="row" style={{ gap: 6, margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={u.fraud?.accountFrozen === true}
+                  disabled={busy === "fraud" || !canBan}
+                  onChange={(e) =>
+                    run(
+                      "fraud",
+                      () =>
+                        api.post(`/admin/users/${encodeURIComponent(u.userId)}/fraud-flags`, {
+                          accountFrozen: e.target.checked,
+                        }),
+                      "Account frozen flag updated.",
+                    )
+                  }
+                />
+                <span>Account frozen</span>
+              </label>
+              <label className="row" style={{ gap: 6, margin: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={u.fraud?.underFraudReview === true}
+                  disabled={busy === "fraud" || !canBan}
+                  onChange={(e) =>
+                    run(
+                      "fraud",
+                      () =>
+                        api.post(`/admin/users/${encodeURIComponent(u.userId)}/fraud-flags`, {
+                          underFraudReview: e.target.checked,
+                        }),
+                      "Fraud review flag updated.",
+                    )
+                  }
+                />
+                <span>Under fraud review</span>
+              </label>
+            </div>
+            {u.fraud?.chargebackNote && <p className="dim" style={{ fontSize: 12, margin: 0 }}>Note: {u.fraud.chargebackNote}</p>}
           </div>
 
           <div className="card stack">
@@ -318,7 +485,8 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
             </div>
             <button
               className="btn"
-              disabled={busy === "msg" || !msgBody.trim()}
+              disabled={busy === "msg" || !msgBody.trim() || !canMsg}
+              title={!canMsg ? "Missing users.message" : undefined}
               onClick={() =>
                 run("msg", async () => {
                   await api.post(`/admin/users/${encodeURIComponent(u.userId)}/message`, { channel: "in_app", subject: msgSubject || null, message: msgBody });
@@ -338,30 +506,47 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 }
 
 function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
+  const { can } = useAuth();
+  const canCredit = can("economy.credit");
   const [coins, setCoins] = useState("");
   const [reason, setReason] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const dual = useAsync<{ dualControlUi?: { creditCoinsWarnAt: number; note: string } }>(
+    () => api.get("/admin/ops/control-plane"),
+    [],
+  );
+  const warnAt = dual.data?.dualControlUi?.creditCoinsWarnAt ?? 10_000;
 
   const amount = Math.floor(Number(coins));
   const validAmount = Number.isFinite(amount) && amount >= 1 && amount <= 1_000_000;
 
   async function submit() {
+    if (!canCredit) {
+      setErr("Missing economy.credit permission");
+      return;
+    }
     if (!validAmount) return;
+    if (amount >= warnAt) {
+      const ok = window.confirm(
+        `DUAL-CONTROL WARNING (UI only): ${amount.toLocaleString()} coins ≥ ${warnAt.toLocaleString()} threshold.\nMaker-checker is NOT enforced server-side yet. Continue?`,
+      );
+      if (!ok) return;
+    }
     setBusy(true); setErr(null); setMsg(null);
     try {
       const idempotencyKey =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `admin-dash-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const res = await api.post<{ coinsCredited: number; newBalance: number; currency?: string }>(
+      const res = await api.post<{ coinsCredited: number; newBalance: number; currency?: string; ledgerId?: string }>(
         `/admin/users/${encodeURIComponent(u.userId)}/credit-coins`,
         { coins: amount, reason: reason || undefined, idempotencyKey }
       );
       setMsg(
-        `Credited ${res.coinsCredited.toLocaleString()} ${res.currency || "BONUS_COIN"} (non-withdrawable). Bonus balance: ${res.newBalance.toLocaleString()}.`
+        `Credited ${res.coinsCredited.toLocaleString()} ${res.currency || "BONUS_COIN"} (non-withdrawable). Bonus balance: ${res.newBalance.toLocaleString()}.${res.ledgerId ? ` Ledger: ${res.ledgerId}` : ""}`,
       );
       setCoins(""); setReason(""); setConfirming(false);
       reload();
@@ -376,9 +561,12 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
     <div className="card stack">
       <h3 className="panel-title">Wallet · add bonus coins</h3>
       <p className="dim" style={{ fontSize: 12.5, marginTop: 0, lineHeight: 1.5 }}>
-        Credits land as <strong>BONUS_COIN</strong> (spendable, non-withdrawable). They are never mixed with
-        IAP-purchased COIN or creator GEM earnings.
+        Credits land as <strong>BONUS_COIN</strong> (spendable, non-withdrawable). Visible in User 360 ledger and Economy explorer as{" "}
+        <code>ADMIN_CREDIT</code>.
       </p>
+      {amount >= warnAt && validAmount && (
+        <WarnNote>Amount crosses dual-control UI threshold ({warnAt.toLocaleString()}). Second approver not enforced yet.</WarnNote>
+      )}
       {msg && <div style={{ color: "var(--success)", fontSize: 13 }}>{msg}</div>}
       {err && <ErrorNote>{err}</ErrorNote>}
       <div className="row" style={{ gap: 12 }}>
@@ -396,18 +584,18 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
         </div>
       </div>
 
+      {!canCredit && <WarnNote>Credit disabled for your role (needs economy.credit).</WarnNote>}
       {!confirming ? (
-        <button className="btn" disabled={!validAmount} onClick={() => { setErr(null); setMsg(null); setConfirming(true); }}>
+        <button className="btn" disabled={!validAmount || !canCredit} onClick={() => { setErr(null); setMsg(null); setConfirming(true); }}>
           Add bonus coins
         </button>
       ) : (
         <div className="stack" style={{ gap: 8 }}>
           <div className="muted" style={{ fontSize: 13 }}>
             Confirm crediting <strong>{amount.toLocaleString()}</strong> non-withdrawable bonus coins to {u.displayName || u.username || u.userId}.
-            This posts an audited ledger entry via your Cognito admin session.
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <button className="btn" disabled={busy} onClick={submit}>
+            <button className="btn" disabled={busy || !canCredit} onClick={submit}>
               {busy ? "Crediting…" : "Confirm & add bonus coins"}
             </button>
             <button className="btn ghost" disabled={busy} onClick={() => setConfirming(false)}>

@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../auth/useAuth";
 import { useAsync } from "../lib/useAsync";
 import { fmtRelative } from "../lib/format";
-import { PageHeader, Spinner, ErrorNote, Badge, EmptyState } from "../components/ui";
+import { PageHeader, Spinner, ErrorNote, Badge, EmptyState, InfoNote } from "../components/ui";
 import type { MessagesResponse } from "../types";
 
 type Segment = "all" | "active" | "banned";
 
 export default function Comms() {
-  const [segment, setSegment] = useState<Segment>("all");
+  const { can } = useAuth();
+  const canBroadcast = can("comms.broadcast");
+  const canAll = can("comms.broadcast.all");
+  const [segment, setSegment] = useState<Segment>(canAll ? "all" : "active");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,11 +22,20 @@ export default function Comms() {
   const recent = useAsync<MessagesResponse>(() => api.get<MessagesResponse>("/admin/comms/messages?limit=50"), []);
 
   async function send() {
+    if (!canBroadcast) {
+      setErr("Missing comms.broadcast permission");
+      return;
+    }
+    if (segment === "all" && !canAll) {
+      setErr("All-user blast requires comms.broadcast.all (Owner/Exec)");
+      return;
+    }
     if (!message.trim()) return;
+    if (!window.confirm(`Broadcast to segment “${segment}”? This queues in-app messages and is audited.`)) return;
     setBusy(true); setErr(null); setNote(null);
     try {
       const out = await api.post<{ queued: number }>("/admin/comms/broadcast", { segment, subject: subject || null, message });
-      setNote(`Queued to ${out.queued} user${out.queued === 1 ? "" : "s"}.`);
+      setNote(`Queued to ${out.queued} user${out.queued === 1 ? "" : "s"} (audited).`);
       setSubject(""); setMessage("");
       recent.reload();
     } catch (e) {
@@ -43,7 +56,38 @@ export default function Comms() {
             <label>Audience</label>
             <div className="row" style={{ gap: 6 }}>
               {(["all", "active", "banned"] as Segment[]).map((s) => (
-                <button key={s} className={segment === s ? "btn tiny" : "btn ghost tiny"} onClick={() => setSegment(s)} style={{ textTransform: "capitalize" }}>{s}</button>
+                <button
+                  key={s}
+                  className={segment === s ? "btn tiny" : "btn ghost tiny"}
+                  disabled={s === "all" && !canAll}
+                  title={s === "all" && !canAll ? "Owner/Exec only" : undefined}
+                  onClick={() => setSegment(s)}
+                  style={{ textTransform: "capitalize" }}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label>Quick templates</label>
+            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              {[
+                { s: "Service update", m: "We're making improvements to Blyp. Thanks for your patience." },
+                { s: "Policy reminder", m: "Please review our community guidelines. Violations may result in restrictions." },
+                { s: "Incident notice", m: "We are investigating a platform issue and will update you shortly." },
+              ].map((t) => (
+                <button
+                  key={t.s}
+                  type="button"
+                  className="btn ghost tiny"
+                  onClick={() => {
+                    setSubject(t.s);
+                    setMessage(t.m);
+                  }}
+                >
+                  {t.s}
+                </button>
               ))}
             </div>
           </div>
@@ -57,9 +101,10 @@ export default function Comms() {
           </div>
           {note && <div style={{ color: "var(--success)", fontSize: 13 }}>{note}</div>}
           {err && <ErrorNote>{err}</ErrorNote>}
-          <button className="btn" disabled={busy || !message.trim()} onClick={send}>
+          <button className="btn" disabled={busy || !message.trim() || !canBroadcast} title={!canBroadcast ? "Missing permission" : undefined} onClick={send}>
             {busy ? "Sending…" : `Send to ${segment}`}
           </button>
+          {!canBroadcast && <InfoNote>Broadcast disabled for your role.</InfoNote>}
           <div className="dim" style={{ fontSize: 11 }}>
             Messages are queued into each user's in-app inbox. Delivery rendering inside the app is the next app-side step.
           </div>

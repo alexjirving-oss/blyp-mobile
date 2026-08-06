@@ -1,29 +1,36 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   loadSession,
   clearSession,
   login as apiLogin,
   completeMfaLogin,
+  api,
   type AdminSession,
 } from "../api/client";
-import type { CognitoTokens } from "./cognito";
-
-interface AuthContextValue {
-  session: AdminSession | null;
-  isAuthed: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  /** Finish SOFTWARE_TOKEN_MFA / SMS_MFA after CognitoMfaRequiredError. */
-  completeMfa: (
-    completeMfaFn: (otpCode: string) => Promise<CognitoTokens>,
-    otpCode: string
-  ) => Promise<void>;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+import { AuthContext, type AuthContextValue } from "./auth-context";
+import { can as canPerm, type AdminMe, type AdminPermission, type AdminRole } from "./permissions";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AdminSession | null>(() => loadSession());
+  const [me, setMe] = useState<AdminMe | null>(null);
+  const [meLoading, setMeLoading] = useState(false);
+
+  const refreshMe = useCallback(async () => {
+    const s = loadSession();
+    if (!s) {
+      setMe(null);
+      return;
+    }
+    setMeLoading(true);
+    try {
+      const data = await api.get<AdminMe>("/admin/auth/me");
+      setMe(data);
+    } catch {
+      setMe(null);
+    } finally {
+      setMeLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const onStorage = () => setSession(loadSession());
@@ -31,10 +38,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  useEffect(() => {
+    if (session) {
+      void refreshMe();
+    } else {
+      setMe(null);
+    }
+  }, [session, refreshMe]);
+
+  const permissions = me?.permissions || [];
+  const role = (me?.role as AdminRole | undefined) || null;
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
       isAuthed: !!session,
+      me,
+      meLoading,
+      role,
+      permissions,
+      can: (permission: AdminPermission) => canPerm(permissions, permission),
+      refreshMe,
       login: async (email, password) => {
         const s = await apiLogin(email, password);
         setSession(s);
@@ -46,18 +70,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout: () => {
         clearSession();
         setSession(null);
+        setMe(null);
       },
     }),
-    [session]
+    [session, me, meLoading, role, permissions, refreshMe]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// Hook co-located with provider is intentional for this auth module.
-// eslint-disable-next-line react-refresh/only-export-components -- useAuth pairs with AuthProvider
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
-}
+export { useAuth } from "./useAuth";

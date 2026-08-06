@@ -270,3 +270,180 @@ export async function setGiftEnabled(input: { actorUserId: string; giftId: strin
     metadata: { enabled: input.enabled },
   });
 }
+
+type RemovedFilter = 'all' | 'live' | 'removed';
+
+async function loadRemovedPostIds(): Promise<Set<string>> {
+  try {
+    const rows = await db().raw(`SELECT post_id FROM post_admin_state WHERE is_removed = true`);
+    return new Set((((rows as any)?.rows || []) as Array<any>).map((r) => String(r.post_id)));
+  } catch {
+    return new Set();
+  }
+}
+
+export async function listAdminGlobalPosts(input: {
+  q?: string;
+  removed?: RemovedFilter;
+  limit: number;
+  offset: number;
+}): Promise<{
+  items: Array<{
+    postId: string;
+    userId: string;
+    content: string;
+    createdAt: string | null;
+    updatedAt: null;
+    postType: string;
+    mediaUrl: string | null;
+    videoUrl: string | null;
+    thumbnailUrl: string | null;
+    isRemoved: boolean;
+    removedReason: null;
+    removedAt: null;
+    authorUsername: string;
+    authorDisplayName: string;
+    likes: number;
+    views: number;
+    comments: number;
+  }>;
+  total: number;
+  limit: number;
+  offset: number;
+  sourceTable: string;
+  degraded?: boolean;
+  detail?: string;
+}> {
+  const removedFilter: RemovedFilter = input.removed || 'all';
+  const q = String(input.q || '').trim().toLowerCase();
+
+  const [postsWindow, removedIds] = await Promise.all([
+    listFirestorePostsWindow().catch(() => null),
+    loadRemovedPostIds(),
+  ]);
+
+  if (postsWindow === null) {
+    return {
+      items: [],
+      total: 0,
+      limit: input.limit,
+      offset: input.offset,
+      sourceTable: 'firestore.posts',
+      degraded: true,
+      detail: 'firestore_unavailable',
+    };
+  }
+
+  const isPostRemoved = (p: { postId: string; isHidden?: boolean }) =>
+    removedIds.has(p.postId) || p.isHidden === true;
+
+  let filtered = postsWindow;
+  if (q) {
+    filtered = filtered.filter((p) => {
+      const hay = [
+        p.content,
+        p.authorUsername,
+        p.authorDisplayName,
+        p.userId,
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  if (removedFilter === 'live') {
+    filtered = filtered.filter((p) => !isPostRemoved(p));
+  } else if (removedFilter === 'removed') {
+    filtered = filtered.filter((p) => isPostRemoved(p));
+  }
+
+  const total = filtered.length;
+  const page = filtered.slice(input.offset, input.offset + input.limit);
+
+  const items = page.map((p) => ({
+    postId: p.postId,
+    userId: p.userId,
+    content: p.content,
+    createdAt: p.createdAt,
+    updatedAt: null,
+    postType: p.postType,
+    mediaUrl: p.mediaUrl,
+    videoUrl: p.videoUrl,
+    thumbnailUrl: p.thumbnailUrl,
+    isRemoved: isPostRemoved(p),
+    removedReason: null,
+    removedAt: null,
+    authorUsername: p.authorUsername,
+    authorDisplayName: p.authorDisplayName,
+    likes: p.likes,
+    views: p.views,
+    comments: p.comments,
+  }));
+
+  return {
+    items,
+    total,
+    limit: input.limit,
+    offset: input.offset,
+    sourceTable: 'firestore.posts',
+  };
+}
+
+export async function getOpsControlPlane(): Promise<Record<string, unknown>> {
+  let enableWithdrawalsEnv = false;
+  let stripeConfigured = false;
+  let effectivelyEnabled = false;
+  let withdrawalNote = 'Withdrawals disabled (ENABLE_WITHDRAWALS is not 1)';
+
+  try {
+    const { getEconomyEnv } = await import('../config/economyEnv');
+    const { withdrawalsEnabled } = await import('../economy/withdrawalService');
+    const env = getEconomyEnv();
+    enableWithdrawalsEnv = Number(env.ENABLE_WITHDRAWALS || 0) === 1;
+    stripeConfigured = Boolean(String(env.STRIPE_SECRET_KEY || '').trim());
+    effectivelyEnabled = withdrawalsEnabled();
+    if (effectivelyEnabled) {
+      withdrawalNote = 'Withdrawals enabled (ENABLE_WITHDRAWALS=1 and Stripe configured)';
+    } else if (enableWithdrawalsEnv && !stripeConfigured) {
+      withdrawalNote = 'ENABLE_WITHDRAWALS=1 but STRIPE_SECRET_KEY is not configured';
+    }
+  } catch (e: any) {
+    withdrawalNote = `Economy env unavailable: ${e?.message || String(e)}`;
+  }
+
+  const { getStreamingConfig } = await import('./firestoreAdmin');
+  const streaming = await getStreamingConfig();
+  const featureFlags = await getFeatureFlags().catch(() => ({}));
+
+  const liveMarbleRaceEnabled = /^(1|true|yes|on)$/i.test(
+    String(process.env.LIVE_MARBLE_RACE_ENABLED || '').trim(),
+  );
+
+  const { getBanCacheStats } = await import('./banGuard');
+  const banCache = getBanCacheStats();
+
+  const { DUAL_CONTROL_UI } = await import('./adminEconomyReads');
+
+  return {
+    generatedAt: new Date().toISOString(),
+    withdrawals: {
+      enableWithdrawalsEnv,
+      stripeConfigured,
+      effectivelyEnabled,
+      note: withdrawalNote,
+    },
+    killSwitches: {
+      streamingEnabled: streaming.enabled,
+      featureFlags,
+    },
+    envReadOnly: {
+      liveMarbleRaceEnabled,
+    },
+    banCache: {
+      size: banCache.size,
+      ttlMs: banCache.ttlMs,
+      failOpenOnDbMiss: banCache.failOpenOnDbMiss,
+      note: banCache.note,
+    },
+    dualControlUi: DUAL_CONTROL_UI,
+  };
+}

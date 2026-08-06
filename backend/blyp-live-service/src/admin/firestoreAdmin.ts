@@ -81,11 +81,13 @@ export type FsPost = {
   views: number;
   comments: number;
   createdAt: string | null;
+  isHidden?: boolean;
 };
 
 function mapPost(id: string, data: Record<string, any>): FsPost {
   const media = Array.isArray(data.media) ? data.media : [];
   const firstMediaUrl = media.find((m: any) => m && (m.url || m.uri))?.url || media[0]?.uri || null;
+  const moderation = data.moderation && typeof data.moderation === 'object' ? data.moderation : null;
   return {
     postId: id,
     userId: str(data.userId || data.uid || data.authorId),
@@ -100,6 +102,7 @@ function mapPost(id: string, data: Record<string, any>): FsPost {
     views: num(data.viewCount ?? data.views),
     comments: num(data.commentCount ?? data.comments),
     createdAt: tsToIso(data.date || data.createdAt),
+    isHidden: moderation?.hidden === true,
   };
 }
 
@@ -284,12 +287,15 @@ function mapReport(id: string, data: Record<string, any>): FsReport {
 export async function listFirestoreReports(opts?: {
   status?: 'open' | 'resolved' | 'dismissed' | 'all';
   limit?: number;
+  reasonCode?: string;
 }): Promise<{ available: boolean; reports: FsReport[]; detail?: string }> {
   const fs = getFirestore();
   if (!fs) return { available: false, reports: [], detail: 'firestore_unavailable' };
 
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 100);
   const status = opts?.status || 'open';
+  const reasonCode = String(opts?.reasonCode || '').trim().toLowerCase();
+  const fetchLimit = reasonCode ? Math.min(100, Math.max(limit * 3, limit)) : limit;
 
   try {
     let query: Query = fs.collection('reports');
@@ -300,13 +306,18 @@ export async function listFirestoreReports(opts?: {
     // OrderBy may require a composite index for filtered status; fall back to unsorted.
     let snap;
     try {
-      snap = await query.orderBy('createdAt', 'desc').limit(limit).get();
+      snap = await query.orderBy('createdAt', 'desc').limit(fetchLimit).get();
     } catch {
-      snap = await query.limit(limit).get();
+      snap = await query.limit(fetchLimit).get();
     }
 
-    const reports = snap.docs.map((d) => mapReport(d.id, d.data() || {}));
+    let reports = snap.docs.map((d) => mapReport(d.id, d.data() || {}));
     reports.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+    if (reasonCode) {
+      reports = reports.filter((r) => String(r.reasonCode || '').trim().toLowerCase() === reasonCode);
+    }
+
     return { available: true, reports: reports.slice(0, limit) };
   } catch (e: any) {
     logger.error({ err: e?.message || String(e) }, '[firestore-admin] listFirestoreReports failed');
@@ -622,6 +633,33 @@ export async function listFirestoreStreams(status?: 'live' | 'ended'): Promise<F
   }
 }
 
+/** Single liveStreams doc by id (streamId / sessionId). */
+export async function getFirestoreStream(streamId: string): Promise<FsStream | null> {
+  const fs = getFirestore();
+  const id = String(streamId || '').trim();
+  if (!fs || !id) return null;
+  try {
+    const snap = await fs.collection('liveStreams').doc(id).get();
+    if (!snap.exists) {
+      // Some writers use streamId as a field with a different doc id — fall back to query.
+      try {
+        const q = await fs.collection('liveStreams').where('streamId', '==', id).limit(1).get();
+        if (!q.empty) {
+          const d = q.docs[0];
+          return mapStream(d.id, d.data() || {});
+        }
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    return mapStream(snap.id, snap.data() || {});
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e), streamId: id }, '[firestore-admin] getFirestoreStream failed');
+    return null;
+  }
+}
+
 export type FsTeam = {
   teamId: string;
   name: string;
@@ -925,6 +963,68 @@ export async function setPostModerationHiddenFs(
  * Queue a durable FCM/in-app notification for a host-initiated guest invite.
  * Matches the Cloud Functions outbox shape so notificationDispatch can send it.
  */
+/** Remote kill-switch for live streaming (appConfig/streaming). */
+/** Best-effort: mark a Firestore liveStreams doc ended so admin Live list refreshes. */
+export async function endFirestoreStream(streamId: string): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(streamId || '').trim();
+  if (!fs || !id) return { ok: false, detail: 'unavailable' };
+  try {
+    await fs.collection('liveStreams').doc(id).set(
+      {
+        status: 'ended',
+        endedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        adminForceEnded: true,
+      },
+      { merge: true },
+    );
+    return { ok: true };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e), streamId: id }, '[firestore-admin] endFirestoreStream failed');
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
+export async function getStreamingConfig(): Promise<{ enabled: boolean | null; reason?: string | null; detail?: string }> {
+  const fs = getFirestore();
+  if (!fs) return { enabled: null, detail: 'firestore_unavailable' };
+  try {
+    const snap = await fs.collection('appConfig').doc('streaming').get();
+    if (!snap.exists) return { enabled: null };
+    const data = snap.data() || {};
+    const enabled = typeof data.enabled === 'boolean' ? data.enabled : null;
+    const reason = data.reason != null ? String(data.reason) : null;
+    return { enabled, reason };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[firestore-admin] getStreamingConfig failed');
+    return { enabled: null, detail: e?.message || String(e) };
+  }
+}
+
+export async function setStreamingConfig(input: {
+  enabled: boolean;
+  reason?: string | null;
+  actorUserId?: string | null;
+}): Promise<{ ok: boolean; enabled: boolean; detail?: string }> {
+  const fs = getFirestore();
+  if (!fs) return { ok: false, enabled: input.enabled, detail: 'firestore_unavailable' };
+  try {
+    const payload: Record<string, unknown> = {
+      enabled: input.enabled === true,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (input.reason != null) payload.reason = String(input.reason).trim().slice(0, 500) || null;
+    if (input.actorUserId) payload.updatedBy = String(input.actorUserId);
+    await fs.collection('appConfig').doc('streaming').set(payload, { merge: true });
+    return { ok: true, enabled: input.enabled === true };
+  } catch (e: any) {
+    const detail = e?.message || String(e);
+    logger.error({ err: detail }, '[firestore-admin] setStreamingConfig failed');
+    return { ok: false, enabled: input.enabled, detail };
+  }
+}
+
 export async function enqueueGuestInviteNotification(input: {
   guestUserId: string;
   hostUserId: string;

@@ -158,6 +158,46 @@ async function request<T>(method: "GET" | "POST", path: string, body?: unknown):
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
+  /** Authenticated binary/text download (CSV export). */
+  download: async (path: string, filename: string): Promise<void> => {
+    const session = loadSession();
+    if (!session) {
+      onAuthExpired();
+      throw new ApiError(401, "Not authenticated");
+    }
+    const res = await withTimeout((signal) =>
+      fetch(session.apiBase + path, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${session.idToken}` },
+        signal,
+      }),
+      60000,
+    );
+    if (res.status === 401) {
+      onAuthExpired();
+      throw new ApiError(401, "Session expired");
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = `HTTP ${res.status}`;
+      try {
+        const j = JSON.parse(text);
+        detail = j?.detail || j?.error || detail;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, detail);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
   health: async (): Promise<{ ok?: boolean; status?: string; ready?: boolean }> => {
     const res = await withTimeout((signal) => fetch(getApiBase() + "/health", { signal }));
     return res.json();

@@ -74,6 +74,14 @@ type AdminUserDetail = {
     bannedUntil: string | null;
     verification: AdminVerification;
     restrictions: AdminRestrictions;
+    fraud?: {
+        openChargebackCount: number;
+        accountFrozen: boolean;
+        underFraudReview: boolean;
+        chargebackNote: string | null;
+        updatedAt: string | null;
+        updatedBy: string | null;
+    };
     avatarFrame: string | null;
     photoURL: string | null;
     feedPriorityAccount: AccountFeedPriority;
@@ -1346,6 +1354,17 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         bannedUntil: toIso(state?.banned_until),
         verification: buildVerification(metadata),
         restrictions: buildRestrictions(metadata),
+        fraud: (() => {
+            const fraud = asObject(metadata.fraud);
+            return {
+                openChargebackCount: Math.max(0, Math.floor(Number(fraud.openChargebackCount) || 0)),
+                accountFrozen: fraud.accountFrozen === true,
+                underFraudReview: fraud.underFraudReview === true,
+                chargebackNote: asString(fraud.chargebackNote) || null,
+                updatedAt: toIso(fraud.updatedAt),
+                updatedBy: asString(fraud.updatedBy) || null,
+            };
+        })(),
         avatarFrame: publicFields.avatarFrame || null,
         photoURL: publicFields.photoURL || null,
         feedPriorityAccount,

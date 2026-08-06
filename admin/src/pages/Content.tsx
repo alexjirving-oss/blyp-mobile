@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { useAsync } from "../lib/useAsync";
 import { fmtRelative, initials } from "../lib/format";
 import { PageHeader, Spinner, ErrorNote, Badge, EmptyState } from "../components/ui";
+import { useToast } from "../components/Toast";
 import type { GlobalPostsResponse, GlobalPost } from "../types";
 
 const PAGE = 24;
@@ -37,6 +38,7 @@ function Thumb({ post }: { post: GlobalPost }) {
 
 export default function Content() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [query, setQuery] = useState("");
   const [removed, setRemoved] = useState<RemovedFilter>("all");
   const [offset, setOffset] = useState(0);
@@ -58,10 +60,29 @@ export default function Content() {
   const total = data?.total ?? 0;
 
   async function moderate(p: GlobalPost) {
+    const removing = !p.isRemoved;
+    let reason: string | null = null;
+    if (removing) {
+      const typed = window.prompt("Removal reason (required, audited):", "Policy violation");
+      if (typed === null) return;
+      if (!typed.trim()) {
+        toast.push("Reason required to remove content", "err");
+        return;
+      }
+      reason = typed.trim();
+    } else if (!window.confirm("Restore this post to discovery?")) {
+      return;
+    }
     setBusy(p.postId);
     try {
-      await api.post(`/admin/posts/${encodeURIComponent(p.postId)}/${p.isRemoved ? "restore" : "remove"}`, { userId: p.userId, reason: null });
+      await api.post(`/admin/posts/${encodeURIComponent(p.postId)}/${removing ? "remove" : "restore"}`, {
+        userId: p.userId,
+        reason,
+      });
+      toast.push(removing ? "Post removed (server hide)" : "Post restored", "ok");
       res.reload();
+    } catch (e) {
+      toast.push(e instanceof Error ? e.message : String(e), "err");
     } finally {
       setBusy(null);
     }

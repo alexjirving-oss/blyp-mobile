@@ -46,3 +46,29 @@ export function ErrorNote({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+export function Skeleton({ height = 16, width = "100%" }: { height?: number; width?: number | string }) {
+  return (
+    <div
+      className="skeleton"
+      style={{ height, width, borderRadius: 8 }}
+      aria-hidden
+    />
+  );
+}
+
+export function WarnNote({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(251,191,36,0.45)", background: "rgba(251,191,36,0.1)", color: "var(--warning)", fontSize: 13, lineHeight: 1.45 }}>
+      {children}
+    </div>
+  );
+}
+
+export function InfoNote({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(103,232,249,0.35)", background: "rgba(103,232,249,0.08)", color: "var(--electric)", fontSize: 13, lineHeight: 1.45 }}>
+      {children}
+    </div>
+  );
+}

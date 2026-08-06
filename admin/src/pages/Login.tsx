@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { CognitoMfaRequiredError } from "../api/client";
-import { useAuth } from "../auth/AuthContext";
+import { useAuth } from "../auth/useAuth";
 import type { CognitoTokens } from "../auth/cognito";
 import { ErrorNote } from "../components/ui";
 
