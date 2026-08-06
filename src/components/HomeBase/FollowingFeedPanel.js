@@ -21,7 +21,7 @@ import { getFollowingPosts } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
 import { subscribeToFollowingList } from '../../utils/followUtils';
 import { mediaViewerParams, isVideoPost } from '../../utils/mediaViewerPlaylist';
-import { prefetchVideoToCache } from '../../utils/videoCache';
+import { prefetchPostWindow, prefetchUriList, runWhenIdle } from '../../utils/mediaPrefetch';
 import { fixStorageUrl } from '../../utils/urlUtils';
 
 const FollowingFeedPanel = ({ navigation, uid }) => {
@@ -45,14 +45,14 @@ const FollowingFeedPanel = ({ navigation, uid }) => {
     setPosts(res);
     setLoading(false);
     setRefreshing(false);
-    // Light warmup: first few video URIs so MediaViewer opens warm.
-    (res || [])
-      .filter((p) => isVideoPost(p))
-      .slice(0, 3)
-      .forEach((p) => {
-        const uri = fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url);
-        if (uri) prefetchVideoToCache(uri).catch(() => {});
-      });
+    // Warm first rails after paint — disk only, no AV mute thrash.
+    runWhenIdle(() => {
+      prefetchPostWindow(res, 0, { radius: 2, images: true });
+      prefetchUriList(
+        (res || []).slice(0, 12).flatMap((p) => [postThumbnail(p), p.userPhotoURL, p.user?.avatar]),
+        { idle: false },
+      );
+    });
   }, [following]);
 
   useEffect(() => {

@@ -93,6 +93,11 @@ import { getActivity, countUnread } from '../../services/activityService';
 import { subscribeWatchHistory } from '../../services/watchHistoryService';
 import { fixStorageUrl } from '../../utils/urlUtils';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
+import {
+  prefetchPostWindow,
+  prefetchUriList,
+  runWhenIdle,
+} from '../../utils/mediaPrefetch';
 import EnhancedVideo from '../EnhancedVideo';
 import HomeWidgetFrame from './HomeWidgetFrame';
 import SportPagesWidget from './SportPagesWidget';
@@ -219,6 +224,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     let active = true;
     setLoading(true);
     (async () => {
+      // Layout + first rails in parallel so Home paints without serial waterfall.
       const [liveRes, trendRes, creatorRes, prefs] = await Promise.all([
         getLiveNow(10),
         getTrendingPosts(10, interestTerms),
@@ -232,7 +238,16 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       setRecent(prefs.recentSearches || []);
       setLoading(false);
 
-      // Activity badge (separate await so it never blocks the rails).
+      // Non-critical badge + rail image warm after first paint.
+      runWhenIdle(() => {
+        const thumbs = [
+          ...(trendRes || []).map((p) => p.thumbnail || p.imageUrl),
+          ...(liveRes || []).map((l) => l.thumbnail || l.coverUrl || l.photoURL),
+          ...(creatorRes || []).map((c) => c.photoURL || c.avatar),
+        ];
+        prefetchUriList(thumbs, { idle: false });
+      });
+
       try {
         const activity = await getActivity(uid);
         if (active) setUnread(countUnread(activity, prefs.lastSeenActivityAt || 0));
@@ -264,6 +279,13 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       if (active) {
         setForYou(r);
         setActiveForYou(0); // first tile autoplays whenever the rail refreshes
+        runWhenIdle(() => {
+          prefetchPostWindow(r, 0, { radius: 2, images: true });
+          prefetchUriList(
+            (r || []).flatMap((p) => [p.thumbnail, p.imageUrl, p.userPhotoURL, p.user?.avatar]),
+            { idle: false },
+          );
+        });
       }
     });
     return () => {

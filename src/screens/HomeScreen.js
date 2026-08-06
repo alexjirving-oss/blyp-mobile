@@ -20,7 +20,7 @@ import CommentsModal from '../components/CommentsModal';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { fixStorageUrl } from '../utils/urlUtils';
 import AudioTile from '../components/AudioTile';
-import { getPlayableVideoUri } from '../utils/videoCache';
+import { prefetchPostWindow } from '../utils/mediaPrefetch';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import { COLORS } from '../styles/theme';
 import AvatarRing from '../components/motion/AvatarRing';
@@ -92,7 +92,7 @@ const randomCommentsData = [
 ];
 
 // === MediaCarousel (fixed) ===
-const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive, prefetchedUris }) => {
+const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   // Use the live window width so horizontal paging stays aligned after a fold/
   // unfold (Z Fold tablet mode) instead of a width frozen at module load.
@@ -119,14 +119,14 @@ const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive, prefetch
       (item.type && item.type.includes && item.type.includes('video')) ||
       !!item.videoUrl;
 
+    // Disk warm via mediaPrefetch; EnhancedVideo resolves cache without list setState.
     const mediaUri = fixStorageUrl(item.url || item.uri || item.videoUrl || item.imageUrl);
-    const cachedUri = prefetchedUris?.[mediaUri];
 
     if (isVideo) {
       return (
         <View style={[styles.carouselItemContainer, { width: winWidth }]}>
           <PremiumFeedVideo
-            uri={cachedUri || mediaUri}
+            uri={mediaUri}
             poster={item.thumbnail}
             style={StyleSheet.absoluteFill}
             shouldPlay={isDiscoverItemActive ? isDiscoverItemActive(feedIndex) && index === currentIndex : index === currentIndex}
@@ -270,11 +270,7 @@ const HomeScreen = ({ navigation, route }) => {
   const [userPillLayout, setUserPillLayout] = useState({ width: 0, height: 0 });
   const [feedHeight, setFeedHeight] = useState(0);
   // feedHeight will be measured from the available content area (between header and bottom tabs)
-  const [prefetchedUris, setPrefetchedUris] = useState({});
-
   const flatListRef = useRef(null);
-  const prefetchingRef = useRef({});
-  const prefetchedUrisRef = useRef({});
   const likePendingRef = useRef(new Set());
   const commentScrollValue = useRef(new Animated.Value(0)).current;
   const currentDiscoverIndexRef = useRef(0);
@@ -1252,73 +1248,23 @@ const HomeScreen = ({ navigation, route }) => {
     return index === currentDiscoverIndex;
   };
 
-  // Prefetch next video's file for active feed
+  // Disk-warm current ±2 videos + avatars/thumbs. Idle for farther neighbors.
+  // No setState — avoids FlatList thrash that fought the audio flicker fix.
   useEffect(() => {
-    let isMounted = true;
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
-    // Warm current + next four so swipe is almost always a cache hit.
-    const targets = [current, current + 1, current + 2, current + 3, current + 4].filter(
-      (i) => i >= 0 && i < (list?.length || 0),
-    );
-
-    if (!list || list.length === 0 || targets.length === 0) {
-      return () => {
-        isMounted = false;
-      };
+    if (!list?.length) return;
+    prefetchPostWindow(list, current, { radius: 2, images: true });
+    // Also warm +3/+4 ahead while idle so paging never waits on first byte.
+    if (list[current + 3] || list[current + 4]) {
+      prefetchPostWindow(list, current + 3, { radius: 1, images: true });
     }
-
-    targets.forEach((nextIndex) => {
-      const nextItem = list[nextIndex];
-      const isVideo = nextItem?.type === 'video' || nextItem?.media?.[0]?.type?.includes('video');
-      const nextUriCandidate = fixStorageUrl(nextItem?.videoUrl || nextItem?.media?.[0]?.url);
-
-      if (
-        !isVideo ||
-        !nextUriCandidate ||
-        prefetchingRef.current[nextUriCandidate] ||
-        prefetchedUrisRef.current[nextUriCandidate]
-      ) {
-        return;
-      }
-
-      prefetchingRef.current[nextUriCandidate] = true;
-      getPlayableVideoUri(nextUriCandidate, { waitForDownload: true })
-        .then((playableUri) => {
-          if (!isMounted) return;
-          prefetchedUrisRef.current = {
-            ...prefetchedUrisRef.current,
-            [nextUriCandidate]: playableUri,
-          };
-          setPrefetchedUris((prev) => {
-            if (prev[nextUriCandidate]) return prev;
-            return { ...prev, [nextUriCandidate]: playableUri };
-          });
-          const poster = nextItem?.thumbnail || nextItem?.imageUrl;
-          if (poster) {
-            try {
-              Image.prefetch(poster);
-            } catch {
-              /* ignore */
-            }
-          }
-        })
-        .catch(() => {
-          if (isMounted) {
-            prefetchingRef.current[nextUriCandidate] = false;
-          }
-        });
-    });
-
-    return () => {
-      isMounted = false;
-    };
   }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts]);
 
   // (HEAD connection warm removed — it competed with progressive playback.)
 
-  const renderRandomPostItem = ({ item, index, feedHeight }) => {
+  const renderRandomPostItem = useCallback(({ item, index }) => {
     const mediaItems = item.media || [{ url: fixStorageUrl(item.imageUrl || item.videoUrl), type: item.type }];
     const hasMultipleMedia = mediaItems.length > 1;
     const isActive = isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex;
@@ -1419,20 +1365,19 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
 
         {hasMultipleMedia ? (
-          <MediaCarousel media={mediaItems} style={StyleSheet.absoluteFill} feedIndex={index} isDiscoverItemActive={isDiscoverItemActive} prefetchedUris={prefetchedUris} />
+          <MediaCarousel media={mediaItems} style={StyleSheet.absoluteFill} feedIndex={index} isDiscoverItemActive={isDiscoverItemActive} />
         ) : (
           (() => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            const cachedUri = prefetchedUris[videoUri];
             const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 2;
 
             const cellActive = isDiscoverItemActive(index);
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
                 <PremiumFeedVideo
-                  uri={cachedUri || videoUri}
+                  uri={videoUri}
                   poster={item.thumbnail || item.imageUrl || item.user?.avatar}
                   style={StyleSheet.absoluteFill}
                   shouldPlay={cellActive}
@@ -1554,7 +1499,26 @@ const HomeScreen = ({ navigation, route }) => {
         />
       </View>
     );
-  };
+  }, [
+    isScreenFocused,
+    selectedTab,
+    currentDiscoverIndex,
+    descriptionVisibleIndex,
+    giftCoinCounts,
+    userPillLayout,
+    feedHeight,
+    pausedFeedId,
+    following,
+    uid,
+    heartsBurst,
+    forYouOverlayInset,
+    liked,
+  ]);
+
+  const renderForYouItem = useCallback(
+    ({ item, index }) => renderRandomPostItem({ item, index }),
+    [renderRandomPostItem],
+  );
 
   const renderHeader = () => (
     <BlypHeaderFlow
@@ -1764,7 +1728,7 @@ const HomeScreen = ({ navigation, route }) => {
             <FlatList
               ref={flatListRef}
               data={randomPosts}
-              renderItem={(props) => renderRandomPostItem({ ...props, feedHeight })}
+              renderItem={renderForYouItem}
               keyExtractor={(item) => item.feedKey || item.id}
               showsVerticalScrollIndicator={false}
               refreshing={loading}

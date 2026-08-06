@@ -28,6 +28,7 @@ import { firebaseEnabled, firestore as db } from '../config/firebase';
 import { subscribeToFollowingList, subscribeToFollowersList, followUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
 import { subscribeTourSelect } from '../tour/tourBus';
+import { prefetchUriList, runWhenIdle } from '../utils/mediaPrefetch';
 import BlypLogo from '../components/BlypLogo';
 import BlypAvatar from '../components/BlypAvatar';
 import HeaderMenuTabs from '../components/HeaderMenuTabs';
@@ -239,6 +240,15 @@ const MessengerScreen = ({ navigation }) => {
           setChats(visible);
           setLoading(false);
           Logger.firebase('Loaded conversations', { count: visible.length });
+          // Warm chat avatars after first paint so Inbox scroll stays fluent.
+          runWhenIdle(() => {
+            const avatars = (visible || []).flatMap((t) => {
+              const names = t?.participantPhotos || t?.participantAvatars || [];
+              const single = t?.otherPhotoURL || t?.photoURL || t?.avatar;
+              return [...(Array.isArray(names) ? names : []), single].filter(Boolean);
+            });
+            prefetchUriList(avatars, { idle: false });
+          });
         },
         (error) => {
           const msg = String(error?.message || error || '');

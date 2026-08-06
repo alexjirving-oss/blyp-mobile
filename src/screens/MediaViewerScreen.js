@@ -43,7 +43,7 @@ import { followUser, unfollowUser, subscribeToFollowingList } from '../utils/fol
 import { useAuth } from '../hooks/useCommon';
 import { recordWatch } from '../services/watchHistoryService';
 import { setReachSession, reportWatch, reportEngagement, flushReachEvents, reachSummary } from '../services/blypReachClient';
-import { getPlayableVideoUri } from '../utils/videoCache';
+import { prefetchPostWindow } from '../utils/mediaPrefetch';
 import { isVideoPost } from '../utils/mediaViewerPlaylist';
 import { updatePostCategory } from '../services/postEditService';
 import { normalizeProfileCategories } from '../utils/profileCategories';
@@ -1757,9 +1757,10 @@ const MediaViewerScreen = ({ route, navigation }) => {
         isActive={index === activeIndex}
         shouldLoadVideo={
           index === activeIndex ||
+          index === activeIndex - 1 ||
           index === activeIndex + 1 ||
-          index === activeIndex + 2 ||
-          index === activeIndex + 3
+          index === activeIndex - 2 ||
+          index === activeIndex + 2
         }
         pageHeight={pageHeight}
         pageWidth={pageWidth}
@@ -1784,25 +1785,10 @@ const MediaViewerScreen = ({ route, navigation }) => {
     ],
   );
 
-  // Prefetch current + next 3 creator clips so swipe feels instant.
+  // Prefetch adjacent ±2 clips (prev + next) so swipe either way is warm.
+  // Disk-only — no React state thrash; EnhancedVideo hits videoCache.
   useEffect(() => {
-    const list = items || [];
-    [activeIndex, activeIndex + 1, activeIndex + 2, activeIndex + 3].forEach((i) => {
-      const post = list[i];
-      if (!post) return;
-      const uri = fixStorageUrl(post.videoUrl || post.media?.find?.((m) => String(m?.type || '').includes('video'))?.url);
-      if (uri) {
-        getPlayableVideoUri(uri, { waitForDownload: true }).catch(() => {});
-      }
-      const poster = post.thumbnail || post.imageUrl;
-      if (poster) {
-        try {
-          Image.prefetch(poster);
-        } catch {
-          /* ignore */
-        }
-      }
-    });
+    prefetchPostWindow(items, activeIndex, { radius: 2, images: true });
   }, [activeIndex, items]);
 
   const getItemLayout = useCallback(
