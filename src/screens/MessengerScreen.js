@@ -18,6 +18,7 @@ import {
   PixelRatio,
   Dimensions,
   Modal,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
@@ -139,14 +140,16 @@ const MessengerScreen = ({ navigation }) => {
     });
   }, [uid, isAuthenticated, authReady, authLoading, currentUser?.displayName, currentUser?.email]);
 
-  // Calculate total unread messages (memoized to prevent infinite loops)
+  // Calculate total unread messages + inbox notifications (memoized to prevent infinite loops)
   const totalUnreadCount = React.useMemo(() => {
     if (!uid) return 0;
-    return chats.reduce((total, chat) => {
+    const chatUnread = chats.reduce((total, chat) => {
       const unreadCount = chat.unreadCount?.[uid] || 0;
       return total + unreadCount;
     }, 0);
-  }, [chats, uid]);
+    const notifUnread = (notifications || []).filter((n) => n && n.status !== 'read').length;
+    return chatUnread + notifUnread;
+  }, [chats, notifications, uid]);
 
   // Define callback functions BEFORE the useEffect that uses them
   const loadBalances = React.useCallback(async () => {
@@ -774,10 +777,46 @@ const MessengerScreen = ({ navigation }) => {
           chatId: data.conversationId,
           otherUser: { id: data.senderId, displayName: data.senderName, username: data.senderName },
         });
-      } else if (data.teamId) {
+        return;
+      }
+      if (data.teamId) {
         navigation.navigate('MyTeam');
-      } else if (data.battleId) {
+        return;
+      }
+      if (data.battleId) {
         navigation.navigate('BattleDetail', { battleId: data.battleId });
+        return;
+      }
+      // Admin / system deep links
+      const deepLink = String(data.deepLink || data.url || '').trim();
+      if (deepLink && /^https?:\/\//i.test(deepLink)) {
+        Linking.openURL(deepLink).catch(() => {});
+        return;
+      }
+      const screen = String(data.screen || '').trim();
+      const ALLOWED_SCREENS = new Set([
+        'Home',
+        'Feed',
+        'Create',
+        'Live',
+        'LiveStream',
+        'Messages',
+        'Messenger',
+        'MyTeam',
+        'BattleHQ',
+        'BattleDetail',
+        'Profile',
+        'Search',
+        'Wallet',
+        'Settings',
+      ]);
+      if (screen && ALLOWED_SCREENS.has(screen)) {
+        const params = {};
+        if (data.battleId) params.battleId = data.battleId;
+        if (data.streamId || data.sessionId) {
+          params.streamId = data.streamId || data.sessionId;
+        }
+        navigation.navigate(screen, Object.keys(params).length ? params : undefined);
       }
     } catch (e) {
       console.warn('[MESSENGER] notification route failed', e?.message || e);
@@ -791,7 +830,7 @@ const MessengerScreen = ({ navigation }) => {
       case 'live': return 'radio';
       case 'team': return 'people';
       case 'system':
-      case 'tour': return 'sparkles';
+      case 'tour': return 'bell';
       default: return 'notifications';
     }
   };
@@ -1034,7 +1073,13 @@ const MessengerScreen = ({ navigation }) => {
       tabs={[
         { key: 'chats', label: 'Messages' },
         { key: 'calls', label: 'Calls' },
-        { key: 'notifications', label: 'Notifications' },
+        {
+          key: 'notifications',
+          label:
+            (notifications || []).filter((n) => n && n.status !== 'read').length > 0
+              ? `Notifications (${Math.min(99, (notifications || []).filter((n) => n && n.status !== 'read').length)})`
+              : 'Notifications',
+        },
         { key: 'groups', label: 'Groups' },
         { key: 'status', label: 'Status' },
       ]}
@@ -1148,7 +1193,7 @@ const MessengerScreen = ({ navigation }) => {
                 <Icon name="notifications-off-outline" size={64} color={T.textDisabled} />
                 <Text style={styles.emptyTitle}>No notifications yet</Text>
                 <Text style={styles.emptySubtitle}>
-                  Team requests, battles and updates will show up here.
+                  Team requests, battles, and Blyp announcements will show up here.
                 </Text>
               </View>
             ) : (

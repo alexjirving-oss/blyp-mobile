@@ -1091,3 +1091,108 @@ export async function enqueueGuestInviteNotification(input: {
     return { ok: false, detail };
   }
 }
+
+/**
+ * Durable in-app inbox row for an admin Comms message (broadcast or direct).
+ * Same notifications/{id} spine the Messenger -> Notifications tab already reads.
+ * Push delivery is optional (dispatcher picks up status=queued); inbox render is mandatory.
+ */
+export async function enqueueAdminInboxNotification(input: {
+  userId: string;
+  messageId: string;
+  title: string;
+  body: string;
+  batchId?: string | null;
+  segment?: string | null;
+  deepLink?: string | null;
+  screen?: string | null;
+}): Promise<{ ok: boolean; messageId?: string; detail?: string }> {
+  const fs = getFirestore();
+  const userId = String(input.userId || '').trim();
+  const messageId = String(input.messageId || '').trim();
+  const body = String(input.body || '').trim();
+  if (!fs) return { ok: false, messageId, detail: 'firestore_unavailable' };
+  if (!userId || !messageId || !body) return { ok: false, messageId, detail: 'missing_fields' };
+
+  const crypto = await import('crypto');
+  const dedupeKey = `admin_msg:${messageId}`;
+  const id = 'n_' + crypto.createHash('sha1').update(dedupeKey).digest('hex').slice(0, 32);
+  const now = Date.now();
+  const title = String(input.title || '').trim() || 'Blyp';
+  const data: Record<string, string> = {
+    type: 'admin',
+    source: 'admin_comms',
+    messageId,
+  };
+  if (input.batchId) data.batchId = String(input.batchId);
+  if (input.segment) data.segment = String(input.segment);
+  const deepLink = String(input.deepLink || '').trim();
+  if (deepLink) data.deepLink = deepLink;
+  const screen = String(input.screen || '').trim();
+  if (screen) data.screen = screen;
+
+  const doc = {
+    userId,
+    type: 'system',
+    title,
+    body,
+    data,
+    dedupeKey,
+    collapseKey: input.batchId ? `admin_bcast:${input.batchId}` : `admin_msg:${messageId}`,
+    status: 'queued',
+    sendAfter: now,
+    attempts: 0,
+    maxAttempts: 5,
+    nextAttemptAt: 0,
+    createdAt: now,
+  };
+
+  try {
+    await fs.collection('notifications').doc(id).create(doc);
+    return { ok: true, messageId };
+  } catch (e: any) {
+    const code = e?.code || e?.status;
+    if (code === 6 || code === 'already-exists' || /already exists/i.test(String(e?.message || ''))) {
+      return { ok: true, messageId, detail: 'already_queued' };
+    }
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, userId, messageId },
+      '[firestore-admin] enqueueAdminInboxNotification failed',
+    );
+    return { ok: false, messageId, detail };
+  }
+}
+
+/** Fan-out admin inbox docs with bounded concurrency (broadcast scale). */
+export async function enqueueAdminInboxNotifications(
+  items: Array<{
+    userId: string;
+    messageId: string;
+    title: string;
+    body: string;
+    batchId?: string | null;
+    segment?: string | null;
+    deepLink?: string | null;
+    screen?: string | null;
+  }>,
+  concurrency = 40
+): Promise<{ written: number; failed: number; deliveredMessageIds: string[] }> {
+  let written = 0;
+  let failed = 0;
+  const deliveredMessageIds: string[] = [];
+  const limit = Math.max(1, Math.min(80, concurrency));
+  for (let i = 0; i < items.length; i += limit) {
+    const chunk = items.slice(i, i + limit);
+    const results = await Promise.all(chunk.map((item) => enqueueAdminInboxNotification(item)));
+    for (const r of results) {
+      if (r.ok) {
+        written += 1;
+        if (r.messageId) deliveredMessageIds.push(r.messageId);
+      } else {
+        failed += 1;
+      }
+    }
+  }
+  return { written, failed, deliveredMessageIds };
+}

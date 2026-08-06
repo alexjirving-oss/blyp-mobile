@@ -15,6 +15,7 @@ export default function Comms() {
   const [segment, setSegment] = useState<Segment>(canAll ? "all" : "active");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
+  const [deepLink, setDeepLink] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -31,12 +32,22 @@ export default function Comms() {
       return;
     }
     if (!message.trim()) return;
-    if (!window.confirm(`Broadcast to segment “${segment}”? This queues in-app messages and is audited.`)) return;
+    if (!window.confirm(`Broadcast to segment “${segment}”? This delivers to in-app inboxes and is audited.`)) return;
     setBusy(true); setErr(null); setNote(null);
     try {
-      const out = await api.post<{ queued: number }>("/admin/comms/broadcast", { segment, subject: subject || null, message });
-      setNote(`Queued to ${out.queued} user${out.queued === 1 ? "" : "s"} (audited).`);
-      setSubject(""); setMessage("");
+      const out = await api.post<{ queued: number; delivered?: number }>("/admin/comms/broadcast", {
+        segment,
+        subject: subject || null,
+        message,
+        deepLink: deepLink.trim() || null,
+      });
+      const delivered = typeof out.delivered === "number" ? out.delivered : out.queued;
+      setNote(
+        `Delivered to ${delivered} in-app inbox${delivered === 1 ? "" : "es"}` +
+          (out.queued !== delivered ? ` (${out.queued} queued in audit log)` : "") +
+          " (audited)."
+      );
+      setSubject(""); setMessage(""); setDeepLink("");
       recent.reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -99,6 +110,14 @@ export default function Comms() {
             <label>Message</label>
             <textarea rows={5} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Your announcement to the selected audience…" />
           </div>
+          <div>
+            <label>Deep link (optional)</label>
+            <input
+              value={deepLink}
+              onChange={(e) => setDeepLink(e.target.value)}
+              placeholder="https://… or leave blank"
+            />
+          </div>
           {note && <div style={{ color: "var(--success)", fontSize: 13 }}>{note}</div>}
           {err && <ErrorNote>{err}</ErrorNote>}
           <button className="btn" disabled={busy || !message.trim() || !canBroadcast} title={!canBroadcast ? "Missing permission" : undefined} onClick={send}>
@@ -106,7 +125,7 @@ export default function Comms() {
           </button>
           {!canBroadcast && <InfoNote>Broadcast disabled for your role.</InfoNote>}
           <div className="dim" style={{ fontSize: 11 }}>
-            Messages are queued into each user's in-app inbox. Delivery rendering inside the app is the next app-side step.
+            Messages are delivered to each user's in-app inbox (Messages → Notifications). Push is optional when a device is registered.
           </div>
         </div>
 

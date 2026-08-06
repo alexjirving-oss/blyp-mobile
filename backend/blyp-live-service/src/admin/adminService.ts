@@ -12,6 +12,7 @@ import {
     setPostModerationHiddenFs,
     normalizePostFeedPriority,
     normalizeAccountFeedPriority,
+    enqueueAdminInboxNotification,
     type FeedPriority,
     type AccountFeedPriority,
 } from './firestoreAdmin';
@@ -1496,10 +1497,12 @@ export async function queueAdminUserMessage(input: {
     channel: string;
     subject?: string | null;
     message: string;
-}): Promise<{ messageId: string; status: string }> {
+    deepLink?: string | null;
+}): Promise<{ messageId: string; status: string; delivered: boolean }> {
     const db = adminDb();
     const messageId = `admmsg_${crypto.randomBytes(8).toString('hex')}`;
     const channel = asString(input.channel) || 'in_app';
+    const deepLink = asString(input.deepLink || '') || null;
 
     await db.raw(
         `
@@ -1512,9 +1515,32 @@ export async function queueAdminUserMessage(input: {
             channel,
             asString(input.subject || '') || null,
             asString(input.message),
-            JSON.stringify({ actorUserId: input.actorUserId }),
+            JSON.stringify({
+                actorUserId: input.actorUserId,
+                ...(deepLink ? { deepLink } : {}),
+            }),
         ]
     );
+
+    let delivered = false;
+    if (channel === 'in_app' || channel === 'both' || channel === 'push') {
+        const mirror = await enqueueAdminInboxNotification({
+            userId: input.targetUserId,
+            messageId,
+            title: asString(input.subject || '') || 'Blyp',
+            body: asString(input.message),
+            deepLink,
+        });
+        delivered = mirror.ok;
+        if (delivered) {
+            await db.raw(
+                `UPDATE admin_user_messages
+                 SET status = 'delivered', updated_at = CURRENT_TIMESTAMP
+                 WHERE message_id = ?`,
+                [messageId]
+            );
+        }
+    }
 
     await writeAdminAudit({
         actorUserId: input.actorUserId,
@@ -1525,10 +1551,11 @@ export async function queueAdminUserMessage(input: {
             channel,
             messageId,
             subject: asString(input.subject || ''),
+            delivered,
         },
     });
 
-    return { messageId, status: 'queued' };
+    return { messageId, status: delivered ? 'delivered' : 'queued', delivered };
 }
 
 export async function getEffectiveUserControls(userId: string): Promise<{

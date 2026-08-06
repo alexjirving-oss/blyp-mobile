@@ -1543,6 +1543,7 @@ router.post('/admin/comms/broadcast', requireAdmin, requirePermission('comms.bro
             segment: parsed.data.segment,
             subject: parsed.data.subject ?? null,
             message: parsed.data.message,
+            deepLink: parsed.data.deepLink ?? null,
         });
         return res.json(out);
     } catch (e: any) {

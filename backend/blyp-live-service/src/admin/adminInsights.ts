@@ -1,7 +1,11 @@
 import crypto from 'crypto';
 import { getEconomyInfra } from '../economy/infra';
 import { listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
-import { countFirestoreCollection, listFirestorePostsWindow } from './firestoreAdmin';
+import {
+  countFirestoreCollection,
+  enqueueAdminInboxNotifications,
+  listFirestorePostsWindow,
+} from './firestoreAdmin';
 import { writeAdminAudit } from './adminService';
 
 function db() {
@@ -113,11 +117,14 @@ export async function broadcastAdminMessage(input: {
   segment: Segment;
   subject: string | null;
   message: string;
-}): Promise<{ queued: number; segment: Segment }> {
+  deepLink?: string | null;
+}): Promise<{ queued: number; delivered: number; segment: Segment }> {
   const userIds = await resolveSegmentUserIds(input.segment);
   const batchId = `bcast_${crypto.randomBytes(6).toString('hex')}`;
+  const deepLink = String(input.deepLink || '').trim() || null;
 
   let queued = 0;
+  let delivered = 0;
   if (userIds.length > 0) {
     const rows = userIds.map((userId) => ({
       message_id: `admmsg_${crypto.randomBytes(8).toString('hex')}`,
@@ -126,7 +133,13 @@ export async function broadcastAdminMessage(input: {
       status: 'queued',
       subject: input.subject,
       body: input.message,
-      metadata: JSON.stringify({ actorUserId: input.actorUserId, broadcast: true, batchId, segment: input.segment }),
+      metadata: JSON.stringify({
+        actorUserId: input.actorUserId,
+        broadcast: true,
+        batchId,
+        segment: input.segment,
+        ...(deepLink ? { deepLink } : {}),
+      }),
     }));
 
     // Chunked insert to stay well within parameter limits.
@@ -140,6 +153,29 @@ export async function broadcastAdminMessage(input: {
       );
       queued += chunk.length;
     }
+
+    // Mirror into Firestore notifications so Messages → Notifications renders them.
+    const mirror = await enqueueAdminInboxNotifications(
+      rows.map((r) => ({
+        userId: r.user_id,
+        messageId: r.message_id,
+        title: input.subject || 'Blyp',
+        body: input.message,
+        batchId,
+        segment: input.segment,
+        deepLink,
+      }))
+    );
+    delivered = mirror.written;
+
+    if (mirror.deliveredMessageIds.length > 0) {
+      await db().raw(
+        `UPDATE admin_user_messages
+         SET status = 'delivered', updated_at = CURRENT_TIMESTAMP
+         WHERE message_id = ANY(?::text[])`,
+        [mirror.deliveredMessageIds]
+      );
+    }
   }
 
   await writeAdminAudit({
@@ -147,10 +183,10 @@ export async function broadcastAdminMessage(input: {
     action: 'broadcast_message',
     targetType: 'segment',
     targetId: input.segment,
-    metadata: { queued, batchId, subject: input.subject },
+    metadata: { queued, delivered, batchId, subject: input.subject, deepLink },
   });
 
-  return { queued, segment: input.segment };
+  return { queued, delivered, segment: input.segment };
 }
 
 export async function listRecentAdminMessages(input: { limit: number; offset: number }): Promise<{

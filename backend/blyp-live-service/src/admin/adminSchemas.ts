@@ -140,6 +140,7 @@ export const adminBroadcastMessageSchema = z.object({
     segment: z.enum(['all', 'active', 'banned']),
     subject: z.string().trim().max(200).nullable().optional(),
     message: z.string().trim().min(1).max(4000),
+    deepLink: z.string().trim().max(500).nullable().optional(),
 });
 
 export const adminListLiveSchema = z.object({
