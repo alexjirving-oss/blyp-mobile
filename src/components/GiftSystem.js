@@ -991,7 +991,7 @@ const GiftSystem = ({
               >
                 <View style={styles.feedTriggerInner}>
                   <View style={styles.feedTriggerGloss} pointerEvents="none" />
-                  <Icon name="gift" size={26} color={COLORS.white} />
+                  <Icon name="gift" size={22} color={COLORS.white} />
                 </View>
               </LinearGradient>
               <Text style={styles.feedTriggerLabel} allowFontScaling={false}>
@@ -1181,20 +1181,21 @@ const styles = StyleSheet.create({
   feedTriggerOuter: {
     alignItems: 'center',
     justifyContent: 'center',
+    minWidth: 44,
   },
   feedTriggerStack: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   feedTriggerRing: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     padding: 2,
   },
   feedTriggerInner: {
     flex: 1,
-    borderRadius: 26,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(15,23,42,0.78)',
@@ -1203,17 +1204,17 @@ const styles = StyleSheet.create({
   },
   feedTriggerGloss: {
     position: 'absolute',
-    top: 5,
-    left: 6,
-    right: 6,
-    height: 16,
-    borderRadius: 12,
+    top: 4,
+    left: 5,
+    right: 5,
+    height: 14,
+    borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.10)',
   },
   feedTriggerLabel: {
-    marginTop: 6,
+    marginTop: 4,
     color: 'rgba(255,255,255,0.85)',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     includeFontPadding: false,
   },

@@ -6,10 +6,10 @@ import { Alert, Animated, Dimensions, FlatList, Image, Modal, PanResponder, Plat
 import { sharePost as shareServiceSharePost } from '../services/shareService';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { db, auth, firebaseEnabled } from '../config/firebase';
 import EnhancedVideo from '../components/EnhancedVideo';
 import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker';
-import BlypLogo from '../components/BlypLogo';
 import { addTestPostsWithMultiplePhotos } from '../utils/testDataHelper';
 import CategoriesTab from '../components/CategoriesTab';
 import HashtagsTab from '../components/HashtagsTab';
@@ -24,12 +24,12 @@ import { getPlayableVideoUri } from '../utils/videoCache';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import { COLORS } from '../styles/theme';
 import AvatarRing from '../components/motion/AvatarRing';
-import HeaderMenuTabs from '../components/HeaderMenuTabs';
-import HeaderWalletBalances from '../components/HeaderWalletBalances';
-import HeaderContainer, { HEADER_ICON_COLOR } from '../components/HeaderContainer';
+import { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import FeedEmptyState from '../components/Feed/FeedEmptyState';
 import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
+import FeedActionBar, { feedOverlayBottomInset } from '../components/Feed/FeedActionBar';
+import { FeedActionButton, FeedStatBadge } from '../components/Feed/FeedActionButton';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import FeedTopStatPills from '../components/Feed/FeedTopStatPills';
 import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
@@ -56,7 +56,6 @@ import {
   reportEngagement,
   flushReachEvents,
 } from '../services/blypReachClient';
-import { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
 import { useAuth, hardLogout } from '../hooks/useCommon';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import {
@@ -71,7 +70,6 @@ import { attachPromoteBoost } from '../services/promoteBoostService';
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const DEFAULT_HEADER_HEIGHT = responsiveSize(120);
-const footerHeight = responsiveSize(88);
 
 // All mock/fallback video content removed. Feed now relies solely on Firestore.
 
@@ -189,14 +187,6 @@ const formatBalance = (balance) => {
   return balance.toString();
 };
 
-const formatCount = (value) => {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return '0';
-  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-  return String(Math.max(0, Math.trunc(n)));
-};
-
 const getPostGiftCoins = (post) => {
   const a = Number(post?.giftCoins);
   const b = Number(post?.coinsReceived);
@@ -310,6 +300,14 @@ const HomeScreen = ({ navigation, route }) => {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const { uid, authReady, isAuthenticated } = useAuth();
+  // Tab bar is absolute-positioned; sticky actions sit just above it.
+  const tabBarHeight = useBottomTabBarHeight();
+  const forYouActionBottom = tabBarHeight;
+  const forYouOverlayInset = feedOverlayBottomInset(forYouActionBottom);
+  const activeForYouPost =
+    selectedTab === 'A' && randomPosts?.length
+      ? randomPosts[Math.min(Math.max(0, currentDiscoverIndex), randomPosts.length - 1)]
+      : null;
 
   const enabledPages = useMemo(() => getEnabledPages(prefs), [prefs]);
 
@@ -1172,73 +1170,6 @@ const HomeScreen = ({ navigation, route }) => {
     }
   };
 
-  const FeedActionButton = ({ onPress, children, active = false, count = 0 }) => {
-    return (
-      <TouchableOpacity
-        style={styles.actionButtonOuter}
-        activeOpacity={0.85}
-        delayPressIn={0}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        onPress={(event) => {
-          event?.stopPropagation?.();
-          onPress?.(event);
-        }}
-      >
-        <View style={styles.actionButtonStack}>
-          <LinearGradient
-            colors={BLYP_LOGO_GRADIENT_COLORS}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.actionButtonRing}
-          >
-            {active ? (
-              <LinearGradient
-                colors={BLYP_LOGO_GRADIENT_COLORS}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.actionButtonInner}
-              >
-                <View style={styles.actionButtonGloss} pointerEvents="none" />
-                {children}
-              </LinearGradient>
-            ) : (
-              <View style={styles.actionButtonInner}>
-                <View style={styles.actionButtonGloss} pointerEvents="none" />
-                {children}
-              </View>
-            )}
-          </LinearGradient>
-          <Text style={styles.actionButtonCount} allowFontScaling={false}>
-            {formatCount(count)}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  // Non-interactive stat (e.g. views) that matches the themed action buttons so
-  // the row reads as one consistent set instead of a stray icon.
-  const FeedStatBadge = ({ children, count = 0 }) => (
-    <View style={styles.actionButtonOuter} pointerEvents="none">
-      <View style={styles.actionButtonStack}>
-        <LinearGradient
-          colors={BLYP_LOGO_GRADIENT_COLORS}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.actionButtonRing}
-        >
-          <View style={styles.actionButtonInner}>
-            <View style={styles.actionButtonGloss} pointerEvents="none" />
-            {children}
-          </View>
-        </LinearGradient>
-        <Text style={styles.actionButtonCount} allowFontScaling={false}>
-          {formatCount(count)}
-        </Text>
-      </View>
-    </View>
-  );
-
   const handleCloseComments = () => {
     setCommentsVisible(false);
     setSelectedPost(null);
@@ -1571,62 +1502,10 @@ const HomeScreen = ({ navigation, route }) => {
           })()
         )}
 
-        <View style={styles.actionRail} pointerEvents="box-none">
-          <FeedActionButton
-            onPress={() => handleLike(item.id)}
-            active={!!liked[item.id]}
-            count={likeCounts?.[item.id] ?? item.likeCount ?? item.likes ?? item.likedBy?.length ?? 0}
-          >
-            <Icon name={liked[item.id] ? 'heart' : 'heart-outline'} size={28} color={COLORS.white} />
-          </FeedActionButton>
-
-          <FeedActionButton
-            onPress={() => handleOpenComments(item)}
-            count={getPostCommentCount(item)}
-          >
-            <Icon name="chatbubble" size={26} color={COLORS.white} />
-          </FeedActionButton>
-
-          <FeedActionButton
-            onPress={() => handleSharePost(item)}
-            count={item.shareCount ?? item.sharesCount ?? item.shares ?? 0}
-          >
-            <Icon name="share" size={26} color={COLORS.white} />
-          </FeedActionButton>
-
-          <View style={styles.actionButton}>
-            <GiftSystem
-              postId={item.id}
-              creatorId={item.uid || item.userId}
-              creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
-              triggerVariant="feed"
-              giftCoins={giftTotal}
-              onGiftSent={({ postId, coinSpent }) => {
-                const id = String(postId || item.id);
-                const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
-                if (!id || spent <= 0) return;
-                setGiftCoinCounts((prev) => ({
-                  ...prev,
-                  [id]: Math.max(0, Number(prev[id] || getPostGiftCoins(item) || 0)) + spent,
-                }));
-              }}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={styles.expandBtn}
-            activeOpacity={0.85}
-            onPress={() => handlePostPress(item)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Icon name="open-outline" size={22} color={COLORS.white} />
-          </TouchableOpacity>
-        </View>
-
         <FeedCommentOverlay
           postId={item.id}
           active={isActive}
-          bottomInset={96}
+          bottomInset={forYouOverlayInset}
           onCountChange={(postId, count) => {
             setCommentCounts((prev) => {
               if (prev?.[postId] === count) return prev;
@@ -1640,7 +1519,7 @@ const HomeScreen = ({ navigation, route }) => {
           <View
             style={[
               styles.descriptionOverlayTop,
-              { top: showDetailsTop, left: 12, right: 88 },
+              { top: showDetailsTop, left: 12, right: 12 },
             ]}
           >
             <Text style={styles.postTitle} numberOfLines={1} allowFontScaling={false}>
@@ -1670,7 +1549,7 @@ const HomeScreen = ({ navigation, route }) => {
 
         <LiveReactionsHearts
           burstKey={heartsBurst?.postId === item.id ? heartsBurst.key : null}
-          bottomOffset={96}
+          bottomOffset={forYouOverlayInset}
           rightOffset={24}
           heartSize={66}
         />
@@ -1774,66 +1653,56 @@ const HomeScreen = ({ navigation, route }) => {
 
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']} style={styles.videoOverlay} />
 
-      <View style={styles.profileMenuBarContainer} pointerEvents="box-none">
-        <View style={[styles.profileMenuBar, { zIndex: 1000, elevation: 1000 }]}>
-          <View style={styles.profileMenuBarSection}>
-            <View style={{ zIndex: 1000 }}>
-              <FeedActionButton
-                onPress={() => handleLike(item.id)}
-                active={!!liked[item.id]}
-                count={likeCounts?.[item.id] ?? item.likeCount ?? item.likes ?? item.likedBy?.length ?? 0}
-              >
-                <Icon name={liked[item.id] ? 'heart' : 'heart-outline'} size={30} color={COLORS.white} />
-              </FeedActionButton>
-            </View>
+      <FeedActionBar bottomOffset={forYouActionBottom}>
+        <FeedActionButton
+          onPress={() => handleLike(item.id)}
+          active={!!liked[item.id]}
+          count={likeCounts?.[item.id] ?? item.likeCount ?? item.likes ?? item.likedBy?.length ?? 0}
+        >
+          <Icon name={liked[item.id] ? 'heart' : 'heart-outline'} size={24} color={COLORS.white} />
+        </FeedActionButton>
 
-            <FeedActionButton
-              onPress={() => handleOpenComments(item)}
-              count={getPostCommentCount(item)}
-            >
-              <Icon name="chatbubble" size={28} color={COLORS.white} />
-            </FeedActionButton>
+        <FeedActionButton
+          onPress={() => handleOpenComments(item)}
+          count={getPostCommentCount(item)}
+        >
+          <Icon name="chatbubble" size={22} color={COLORS.white} />
+        </FeedActionButton>
 
-            <FeedActionButton
-              onPress={() => handleSharePost(item)}
-              count={item.shareCount ?? item.sharesCount ?? item.shares ?? 0}
-            >
-              <Icon name="share" size={28} color={COLORS.white} />
-            </FeedActionButton>
+        <FeedActionButton
+          onPress={() => handleSharePost(item)}
+          count={item.shareCount ?? item.sharesCount ?? item.shares ?? 0}
+        >
+          <Icon name="share" size={22} color={COLORS.white} />
+        </FeedActionButton>
 
-            <FeedStatBadge count={getPostViewCount(item)}>
-              <Icon name="eye-outline" size={26} color={COLORS.white} />
-            </FeedStatBadge>
+        <FeedStatBadge count={getPostViewCount(item)}>
+          <Icon name="eye-outline" size={22} color={COLORS.white} />
+        </FeedStatBadge>
 
-            <View style={styles.actionButton}>
-              <GiftSystem
-                postId={item.id}
-                creatorId={item.uid || item.userId}
-                creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
-                triggerVariant="feed"
-                giftCoins={giftCoinCounts?.[item.id] ?? getPostGiftCoins(item)}
-                onGiftSent={({ postId, coinSpent }) => {
-                  const id = String(postId || item.id);
-                  const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
-                  if (!id || spent <= 0) return;
-                  setGiftCoinCounts((prev) => ({
-                    ...prev,
-                    [id]: Math.max(0, Number(prev[id] || getPostGiftCoins(item) || 0)) + spent,
-                  }));
-                }}
-              />
-            </View>
-          </View>
-        </View>
-      </View>
+        <GiftSystem
+          postId={item.id}
+          creatorId={item.uid || item.userId}
+          creatorName={typeof item.user === 'object' ? item.user.username : item.user || item.username}
+          triggerVariant="feed"
+          giftCoins={giftCoinCounts?.[item.id] ?? getPostGiftCoins(item)}
+          onGiftSent={({ postId, coinSpent }) => {
+            const id = String(postId || item.id);
+            const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
+            if (!id || spent <= 0) return;
+            setGiftCoinCounts((prev) => ({
+              ...prev,
+              [id]: Math.max(0, Number(prev[id] || getPostGiftCoins(item) || 0)) + spent,
+            }));
+          }}
+        />
+      </FeedActionBar>
 
       <View style={styles.bottomContent}>
         <View style={styles.descriptionContainerBottom}>
           <Text style={styles.description} allowFontScaling={false}>{item.description || item.transcript}</Text>
         </View>
       </View>
-
-      <HeartAnimation key={heartAnimationKey} visible={showHeartAnimation} onAnimationComplete={() => setShowHeartAnimation(false)} />
 
       <TouchableOpacity style={styles.postInfoContainer} activeOpacity={0.7} onPress={() => setIsTitleBarMinimized(!isTitleBarMinimized)}>
         <View style={styles.minimizeButton}>
@@ -1892,7 +1761,7 @@ const HomeScreen = ({ navigation, route }) => {
           return <FeedEmptyState mode="empty" />;
         }
         return (
-          <View style={{ height: feedHeight }}>
+          <View style={{ height: feedHeight, position: 'relative' }}>
             <FlatList
               ref={flatListRef}
               data={randomPosts}
@@ -1928,6 +1797,92 @@ const HomeScreen = ({ navigation, route }) => {
                 minimumViewTime: 1000,
               }}
             />
+            {activeForYouPost ? (
+              <FeedActionBar bottomOffset={forYouActionBottom}>
+                <FeedActionButton
+                  onPress={() => handleLike(activeForYouPost.id)}
+                  active={!!liked[activeForYouPost.id]}
+                  count={
+                    likeCounts?.[activeForYouPost.id] ??
+                    activeForYouPost.likeCount ??
+                    activeForYouPost.likes ??
+                    activeForYouPost.likedBy?.length ??
+                    0
+                  }
+                >
+                  <Icon
+                    name={liked[activeForYouPost.id] ? 'heart' : 'heart-outline'}
+                    size={24}
+                    color={COLORS.white}
+                  />
+                </FeedActionButton>
+
+                <FeedActionButton
+                  onPress={() => handleOpenComments(activeForYouPost)}
+                  count={getPostCommentCount(activeForYouPost)}
+                >
+                  <Icon name="chatbubble" size={22} color={COLORS.white} />
+                </FeedActionButton>
+
+                <FeedActionButton
+                  onPress={() => handleSharePost(activeForYouPost)}
+                  count={
+                    activeForYouPost.shareCount ??
+                    activeForYouPost.sharesCount ??
+                    activeForYouPost.shares ??
+                    0
+                  }
+                >
+                  <Icon name="share" size={22} color={COLORS.white} />
+                </FeedActionButton>
+
+                <GiftSystem
+                  key={`fy-gift-${activeForYouPost.id}`}
+                  postId={activeForYouPost.id}
+                  creatorId={activeForYouPost.uid || activeForYouPost.userId}
+                  creatorName={
+                    typeof activeForYouPost.user === 'object'
+                      ? activeForYouPost.user.username
+                      : activeForYouPost.user || activeForYouPost.username
+                  }
+                  triggerVariant="feed"
+                  giftCoins={
+                    giftCoinCounts?.[activeForYouPost.id] ?? getPostGiftCoins(activeForYouPost)
+                  }
+                  onGiftSent={({ postId, coinSpent }) => {
+                    const id = String(postId || activeForYouPost.id);
+                    const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
+                    if (!id || spent <= 0) return;
+                    setGiftCoinCounts((prev) => ({
+                      ...prev,
+                      [id]:
+                        Math.max(
+                          0,
+                          Number(prev[id] || getPostGiftCoins(activeForYouPost) || 0),
+                        ) + spent,
+                    }));
+                  }}
+                />
+
+                <TouchableOpacity
+                  style={styles.expandBtn}
+                  activeOpacity={0.85}
+                  onPress={() => handlePostPress(activeForYouPost)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open post"
+                >
+                  <View style={styles.expandStack}>
+                    <View style={styles.expandRing}>
+                      <Icon name="open-outline" size={20} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.expandSpacer} allowFontScaling={false}>
+                      {' '}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </FeedActionBar>
+            ) : null}
           </View>
         );
       case 'B':
@@ -2123,16 +2078,29 @@ const styles = StyleSheet.create({
   description: { color: 'white', fontSize: 15, lineHeight: 20, marginBottom: 8, fontWeight: '800' },
   descriptionContainerBottom: { position: 'absolute', top: 164, left: 15, right: 200, paddingHorizontal: 10 },
   profileMenuBar: { position: 'absolute', bottom: 80, left: 10, right: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', zIndex: 1000, gap: 15 },
-  actionRail: {
-    position: 'absolute',
-    right: 10,
-    top: 0,
-    bottom: 0,
-    zIndex: 1000,
-    elevation: 1000,
+  expandBtn: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
+    minWidth: 44,
+  },
+  expandStack: {
+    alignItems: 'center',
+  },
+  expandRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(10,10,12,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandSpacer: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '700',
+    opacity: 0,
   },
   topMetaRow: {
     position: 'absolute',
@@ -2152,17 +2120,6 @@ const styles = StyleSheet.create({
   },
   topStatCluster: {
     marginLeft: 8,
-  },
-  expandBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(10,10,12,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
   },
   creatorPill: {
     flexDirection: 'row',
@@ -2276,48 +2233,6 @@ const styles = StyleSheet.create({
   paginationDots: { position: 'absolute', bottom: 20, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   paginationDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255, 255, 255, 0.5)', marginHorizontal: 4 },
   paginationDotActive: { backgroundColor: COLORS.primary, width: 10, height: 10, borderRadius: 5 },
-  actionButton: { alignItems: 'center', marginHorizontal: 8 },
-  actionButtonOuter: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 8,
-  },
-  actionButtonStack: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButtonRing: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    padding: 2,
-  },
-  actionButtonInner: {
-    flex: 1,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(20,20,24,0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  actionButtonGloss: {
-    position: 'absolute',
-    top: 5,
-    left: 6,
-    right: 6,
-    height: 16,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-  },
-  actionButtonCount: {
-    marginTop: 6,
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 12,
-    fontWeight: '700',
-    includeFontPadding: false,
-    textAlign: 'center',
-  },
   menuOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-start', alignItems: 'flex-start' },
   menuContainer: { width: 250, backgroundColor: COLORS.backgroundLight, borderRadius: 14, padding: 16, margin: 16, marginTop: 8, shadowColor: COLORS.black, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
   menuCloseButton: { alignSelf: 'flex-end', padding: 8 },

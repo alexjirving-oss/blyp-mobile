@@ -19,7 +19,10 @@ import * as MediaLibrary from 'expo-media-library';
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
 import FeedTopStatPills from '../components/Feed/FeedTopStatPills';
+import FeedStickyEngagement from '../components/Feed/FeedStickyEngagement';
+import { feedOverlayBottomInset } from '../components/Feed/FeedActionBar';
 import { useIsFocused } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
 import { db, auth, firebaseEnabled } from '../config/firebase';
@@ -31,13 +34,11 @@ import CommentsModal from '../components/CommentsModal';
 import PostReachSheet from '../components/PostReachSheet';
 import VideoFramingSheet from '../components/VideoFramingSheet';
 import ReportModal from '../components/ReportModal';
-import GiftSystem from '../components/GiftSystem';
 import { blockUser } from '../services/BlockService';
 import { fixStorageUrl } from '../utils/urlUtils';
 import { sharePost as sharePostLink } from '../services/shareService';
 import { COLORS } from '../styles/theme';
 import AvatarRing from '../components/motion/AvatarRing';
-import { BLYP_LOGO_GRADIENT_COLORS } from '../components/BlypLogo';
 import { followUser, unfollowUser, subscribeToFollowingList } from '../utils/followUtils';
 import { useAuth } from '../hooks/useCommon';
 import { recordWatch } from '../services/watchHistoryService';
@@ -97,81 +98,6 @@ const pickAuthorName = (p) => {
   return '';
 };
 
-// Compact count formatter (1.2K / 3.4M) — same rules as the For You feed.
-const formatCount = (value) => {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return '0';
-  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-  return String(Math.max(0, Math.trunc(n)));
-};
-
-// Identical to the Home "For You" FeedActionButton (teal gradient ring + dark
-// inner + gloss, count underneath) so the player reads as the same surface.
-const FeedActionButton = ({ onPress, children, active = false, count = 0 }) => (
-  <TouchableOpacity
-    style={styles.actionButtonOuter}
-    activeOpacity={0.85}
-    delayPressIn={0}
-    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-    onPress={(event) => {
-      event?.stopPropagation?.();
-      onPress?.(event);
-    }}
-  >
-    <View style={styles.actionButtonStack}>
-      <LinearGradient
-        colors={BLYP_LOGO_GRADIENT_COLORS}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.actionButtonRing}
-      >
-        {active ? (
-          <LinearGradient
-            colors={BLYP_LOGO_GRADIENT_COLORS}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.actionButtonInner}
-          >
-            <View style={styles.actionButtonGloss} pointerEvents="none" />
-            {children}
-          </LinearGradient>
-        ) : (
-          <View style={styles.actionButtonInner}>
-            <View style={styles.actionButtonGloss} pointerEvents="none" />
-            {children}
-          </View>
-        )}
-      </LinearGradient>
-      <Text style={styles.actionButtonCount} allowFontScaling={false}>
-        {formatCount(count)}
-      </Text>
-    </View>
-  </TouchableOpacity>
-);
-
-// Non-interactive stat (views) matching the action buttons — same as Home.
-const FeedStatBadge = ({ children, count = 0 }) => (
-  <View style={styles.actionButtonOuter} pointerEvents="none">
-    <View style={styles.actionButtonStack}>
-      <LinearGradient
-        colors={BLYP_LOGO_GRADIENT_COLORS}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.actionButtonRing}
-      >
-        <View style={styles.actionButtonInner}>
-          <View style={styles.actionButtonGloss} pointerEvents="none" />
-          {children}
-        </View>
-      </LinearGradient>
-      <Text style={styles.actionButtonCount} allowFontScaling={false}>
-        {formatCount(count)}
-      </Text>
-    </View>
-  </View>
-);
-
 // A single full-screen video/post "page" inside the vertical pager.
 const MediaViewerItem = ({
   post: actualPost,
@@ -183,6 +109,8 @@ const MediaViewerItem = ({
   effectiveOwnerIds = [],
   followingSet,
   onToggleFollow,
+  commentBottomInset = 96,
+  onRequestLike,
 }) => {
   // useAuth().uid is the app's primary identity id (Cognito user id)
   const { uid, authReady, isAuthenticated } = useAuth();
@@ -675,7 +603,13 @@ const MediaViewerItem = ({
     if (now - screenTapRef.current.at < 320) {
       if (screenTapRef.current.timer) clearTimeout(screenTapRef.current.timer);
       screenTapRef.current = { at: 0, timer: null };
-      handleLike();
+      if (typeof onRequestLike === 'function') {
+        onRequestLike();
+        setShowHeartAnimation(true);
+        setHeartAnimationKey((prev) => prev + 1);
+      } else {
+        handleLike();
+      }
       return;
     }
     screenTapRef.current.at = now;
@@ -1007,56 +941,11 @@ const MediaViewerItem = ({
       <FeedCommentOverlay
         postId={actualPost?.id}
         active={isScreenFocused && !!actualPost?.id && !commentsVisible}
-        bottomInset={96}
+        bottomInset={commentBottomInset}
       />
 
-      {/* Mid-screen action rail — identical to the For You feed */}
-      <Animated.View style={[styles.actionRow, { opacity: uiOpacity }]} pointerEvents="box-none">
-        <View style={styles.actionRowInner}>
-          <Animated.View style={{ transform: [{ scale: likeAnimation }] }}>
-            <FeedActionButton
-              onPress={handleLike}
-              active={isLiked}
-              count={likeCount}
-            >
-              <Icon name={isLiked ? 'heart' : 'heart-outline'} size={30} color={COLORS.white} />
-            </FeedActionButton>
-          </Animated.View>
-
-          <FeedActionButton
-            onPress={() => setCommentsVisible(true)}
-            count={actualPost.commentCount || (Array.isArray(actualPost.comments) ? actualPost.comments.length : actualPost.comments) || 0}
-          >
-            <Icon name="chatbubble" size={28} color={COLORS.white} />
-          </FeedActionButton>
-
-          <FeedActionButton
-            onPress={handleShare}
-            count={actualPost.shareCount ?? actualPost.sharesCount ?? actualPost.shares ?? 0}
-          >
-            <Icon name="share" size={28} color={COLORS.white} />
-          </FeedActionButton>
-
-          <View style={styles.giftSlot}>
-            <GiftSystem
-              postId={actualPost.id}
-              creatorId={actualPost.uid || actualPost.userId}
-              creatorName={displayName}
-              triggerVariant="feed"
-              giftCoins={Math.max(
-                Number(giftCoinsLocal) || 0,
-                Number(actualPost?.giftCoins) || 0,
-                Number(actualPost?.coinsReceived) || 0,
-              )}
-              onGiftSent={({ coinSpent }) => {
-                const spent = Math.max(0, Math.floor(Number(coinSpent) || 0));
-                if (spent <= 0) return;
-                setGiftCoinsLocal((prev) => Math.max(0, Number(prev) || 0) + spent);
-              }}
-            />
-          </View>
-        </View>
-      </Animated.View>
+      {/* Sticky like/comment/share/gift chrome lives on MediaViewerScreen (sibling
+          of the pager) so it does not scroll away with each cell. */}
 
       {/* Comments Modal */}
       <CommentsModal
@@ -1689,66 +1578,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.gradientEnd,
   },
-  // ----- Mid-screen action rail (TikTok-style, matches For You) -----
-  actionRow: {
-    position: 'absolute',
-    right: 10,
-    top: 0,
-    bottom: 0,
-    zIndex: 1000,
-    elevation: 1000,
-    justifyContent: 'center',
-  },
-  actionRowInner: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 14,
-  },
-  actionButtonOuter: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 8,
-  },
-  actionButtonStack: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButtonRing: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    padding: 2,
-  },
-  actionButtonInner: {
-    flex: 1,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(20,20,24,0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  actionButtonGloss: {
-    position: 'absolute',
-    top: 5,
-    left: 6,
-    right: 6,
-    height: 16,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-  },
-  actionButtonCount: {
-    marginTop: 6,
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 12,
-    fontWeight: '700',
-    includeFontPadding: false,
-    textAlign: 'center',
-  },
-  giftSlot: {
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
 });
 
 // Vertical pager: opens on the tapped post and lets the user swipe down through
@@ -1764,6 +1593,10 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
   const { post, postId, posts, initialIndex: initialIndexParam } = route.params;
   const { uid } = useAuth();
+  const insets = useSafeAreaInsets();
+  const engagementRef = useRef(null);
+  const actionBottom = Math.max(insets.bottom, 12);
+  const commentBottomInset = feedOverlayBottomInset(actionBottom);
 
   const initialPost = post || (posts && postId ? posts.find((p) => p.id === postId) : null);
 
@@ -1910,6 +1743,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
 
   const keyExtractor = useCallback((item, index) => String(item?.id || index), []);
 
+  const activePost = items[Math.min(Math.max(0, activeIndex), Math.max(0, items.length - 1))] || null;
+
+  const onRequestLike = useCallback(() => {
+    engagementRef.current?.toggleLike?.();
+  }, []);
+
   const renderItem = useCallback(
     ({ item, index }) => (
       <MediaViewerItem
@@ -1927,9 +1766,21 @@ const MediaViewerScreen = ({ route, navigation }) => {
         effectiveOwnerIds={effectiveOwnerIds}
         followingSet={followingSet}
         onToggleFollow={onToggleFollow}
+        commentBottomInset={commentBottomInset}
+        onRequestLike={index === activeIndex ? onRequestLike : undefined}
       />
     ),
-    [activeIndex, pageHeight, pageWidth, navigation, effectiveOwnerIds, followingSet, onToggleFollow],
+    [
+      activeIndex,
+      pageHeight,
+      pageWidth,
+      navigation,
+      effectiveOwnerIds,
+      followingSet,
+      onToggleFollow,
+      commentBottomInset,
+      onRequestLike,
+    ],
   );
 
   // Prefetch current + next 3 creator clips so swipe feels instant.
@@ -1993,6 +1844,14 @@ const MediaViewerScreen = ({ route, navigation }) => {
         initialNumToRender={2}
         maxToRenderPerBatch={2}
         removeClippedSubviews
+      />
+      <FeedStickyEngagement
+        key={activePost?.id ? `engage-${activePost.id}` : 'engage-none'}
+        ref={engagementRef}
+        post={activePost}
+        bottomOffset={actionBottom}
+        uid={uid}
+        navigation={navigation}
       />
     </View>
   );

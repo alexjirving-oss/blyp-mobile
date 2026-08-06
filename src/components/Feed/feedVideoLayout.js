@@ -7,8 +7,8 @@
  * geometric center of an absolute-fill video sits optically low between the
  * top pill/header band and the footer.
  *
- * Negative Y shifts the decoded frame up without moving overlays (action rail,
- * user pill, comment stream). Wide top-anchored contain clips skip this nudge
- * in PremiumFeedVideo so letterboxing stays under the rail.
+ * Negative Y shifts the decoded frame up without moving overlays (bottom action
+ * bar, user pill, comment stream). Wide top-anchored contain clips skip this nudge
+ * in PremiumFeedVideo so letterboxing stays under the chrome.
  */
 export const FEED_VIDEO_VERTICAL_NUDGE_Y = -20;
