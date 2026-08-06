@@ -100,14 +100,15 @@ const getGemPackages = () => [
 ];
 
 /**
- * @param {object} props
- * @param {any} [props.navigation]
- * @param {any} [props.route]
- * @param {boolean} [props.embedded]
- * @param {string} [props.initialTab]
- * @param {boolean} [props.scrollToPackagesOnMount]
- * @param {number|null|undefined} [props.initialCoins]
- * @param {number|null|undefined} [props.initialGems]
+ * @param {{
+ *   navigation?: any,
+ *   route?: any,
+ *   embedded?: boolean,
+ *   initialTab?: string,
+ *   scrollToPackagesOnMount?: boolean,
+ *   initialCoins?: number | null,
+ *   initialGems?: number | null,
+ * }} [props]
  */
 const CoinStoreScreen = ({
   navigation,
@@ -117,7 +118,7 @@ const CoinStoreScreen = ({
   scrollToPackagesOnMount = false,
   initialCoins = null,
   initialGems = null,
-}) => {
+} = {}) => {
   const insets = useSafeAreaInsets?.() || { top: 0, bottom: 0, left: 0, right: 0 };
   const scrollRef = useRef(null);
   const packagesSectionYRef = useRef(0);
