@@ -1,0 +1,7 @@
+node_modules/
+_frames/
+_qc/
+_composited/
+_stock/
+*.png
+!TIKTOK_BAR_MANIFEST.json

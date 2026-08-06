@@ -1,0 +1,60 @@
+{
+  "generatedAt": "2026-08-06T06:16:38.641Z",
+  "resolution": "720x1280",
+  "fps": 30,
+  "style": "tiktok-bar-dark-key-luxury-fx-v2",
+  "pass": 2,
+  "notes": "Larger heroes, denser glitter/sparks/smoke, stronger bloom. Still procedural 2D — not true TikTok AlphaPlayer 3D packs.",
+  "gifts": [
+    {
+      "id": "rocket",
+      "frames": 102,
+      "durationMs": 3400,
+      "impactAt": 0.28,
+      "gloryMs": 1000,
+      "storyBeat": "Metallic rocket ignition → ascent streak → apex star detonation.",
+      "file": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\rocket.mp4",
+      "bytes": 1060748
+    },
+    {
+      "id": "crown",
+      "frames": 96,
+      "durationMs": 3200,
+      "impactAt": 0.42,
+      "gloryMs": 1100,
+      "storyBeat": "Jeweled gold crown descends on light shaft → contact glitter storm → regal halo.",
+      "file": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\crown.mp4",
+      "bytes": 1197765
+    },
+    {
+      "id": "diamond",
+      "frames": 99,
+      "durationMs": 3300,
+      "impactAt": 0.34,
+      "gloryMs": 1100,
+      "storyBeat": "Crystal rotates with caustic flashes → prism beams → shatter spark bloom.",
+      "file": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\diamond.mp4",
+      "bytes": 1166514
+    },
+    {
+      "id": "cheer_burst",
+      "frames": 96,
+      "durationMs": 3200,
+      "impactAt": 0.3,
+      "gloryMs": 1100,
+      "storyBeat": "Center confetti cannon → stadium light streaks → teal/gold celebration wash.",
+      "file": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\cheer_burst.mp4",
+      "bytes": 1517110
+    },
+    {
+      "id": "fire",
+      "frames": 99,
+      "durationMs": 3300,
+      "impactAt": 0.3,
+      "gloryMs": 1100,
+      "storyBeat": "Ember floor → rising luminous flame column → heat bloom + ember rain.",
+      "file": "C:\\Users\\Alex\\Blyp26-eas-modern\\assets\\gifts\\cinema\\clips\\fire.mp4",
+      "bytes": 905847
+    }
+  ]
+}
