@@ -23,6 +23,7 @@ import { useAuth } from '../hooks/useCommon';
 import ReportModal from './ReportModal';
 import { inspectText } from '../utils/contentFilter';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
+import { reconcileOptimisticComments } from './Feed/feedCommentMarquee';
 import { doc as webDoc, runTransaction as runWebTransaction } from 'firebase/firestore';
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -79,6 +80,9 @@ const CommentsModal = ({
   const likePendingRef = useRef(new Set());
   // Locks a live-chat send while in flight so rapid taps can't post duplicates.
   const liveSendingRef = useRef(false);
+  // Same lock for feed (For You) comments — send used to await the full round-trip
+  // with no guard, so slow UX + double-taps were easy.
+  const feedSendingRef = useRef(false);
 
   // Cache resolved usernames by userId so comments don't display raw uids.
   const usernameCacheRef = useRef(new Map());
@@ -157,16 +161,20 @@ const CommentsModal = ({
               };
             });
             setPostComments((prev) => {
-              if (!likePendingRef.current.size) return next;
-              return next.map((c) => {
-                if (likePendingRef.current.has(c.id)) {
-                  const old = prev.find((p) => p?.id === c.id);
-                  if (old) {
-                    return { ...c, likes: old.likes, likedBy: old.likedBy };
+              let server = next;
+              if (likePendingRef.current.size) {
+                server = next.map((c) => {
+                  if (likePendingRef.current.has(c.id)) {
+                    const old = prev.find((p) => p?.id === c.id);
+                    if (old) {
+                      return { ...c, likes: old.likes, likedBy: old.likedBy };
+                    }
                   }
-                }
-                return c;
-              });
+                  return c;
+                });
+              }
+              // Keep optimistic rows until the matching server doc arrives (by id reconcile).
+              return reconcileOptimisticComments(server, prev);
             });
             setLoadingComments(false);
             try {
@@ -398,21 +406,8 @@ const CommentsModal = ({
         Alert.alert('Sign in required', 'Please sign in to add a comment.');
         return;
       }
-
-      try {
-        await ensureFirebaseAuthReady({ uid, timeoutMs: 15000 });
-      } catch (e) {
-        const code = e?.code || e?.name || 'FIREBASE_AUTH_ERROR';
-        const msg = e?.message || String(e);
-        const status = typeof e?.status === 'number' ? ` (HTTP ${e.status})` : '';
-        setCommentsError(String(msg || 'Auth unavailable'));
-
-        // In production-like builds, do not proceed to a Firestore write that we expect to be rejected.
-        if (!__DEV__) {
-          Alert.alert('Auth Error', `Cannot comment until Firebase auth is ready.\n\n${code}${status}\n${msg}`);
-          return;
-        }
-      }
+      if (feedSendingRef.current) return;
+      feedSendingRef.current = true;
 
       const displayName = (() => {
         const label = String(myUserLabel || '').trim();
@@ -425,7 +420,45 @@ const CommentsModal = ({
         }
       })();
 
+      const replyMeta = replyingTo?.id
+        ? { id: replyingTo.id, username: replyingTo.username }
+        : null;
+      const parentId = replyMeta?.id || null;
+      const avatarUri = myPhotoURLRef.current || avatarCacheRef.current.get(uid) || null;
+      const createdAt = Date.now();
+      const tempId = `temp-${createdAt}-${Math.random().toString(16).slice(2, 8)}`;
+
+      // Optimistic insert + clear input immediately (snappy UX). Reconcile when
+      // the Firestore snapshot echoes the real doc; roll back on failure.
+      const optimistic = {
+        id: tempId,
+        userId: uid,
+        username: displayName,
+        avatar: avatarUri || '',
+        text,
+        likes: 0,
+        likedBy: [],
+        parentId,
+        createdAt,
+        time: 'now',
+        replies: [],
+        _optimistic: true,
+      };
+
+      setNewComment('');
+      setReplyingTo(null);
+      Keyboard.dismiss();
+      setPostComments((prev) => {
+        const next = [optimistic, ...(Array.isArray(prev) ? prev : [])];
+        try {
+          onCommentCountChange?.(postId, next.length);
+        } catch { /* ignore */ }
+        return next;
+      });
+
       try {
+        // Fast no-op when already signed in; only blocks when bridge must mint.
+        await ensureFirebaseAuthReady({ uid, timeoutMs: 8000 });
         await db
           .collection('posts')
           .doc(postId)
@@ -434,23 +467,34 @@ const CommentsModal = ({
             userId: uid,
             username: displayName,
             displayName,
-            avatar: myPhotoURLRef.current || avatarCacheRef.current.get(uid) || null,
-            photoURL: myPhotoURLRef.current || avatarCacheRef.current.get(uid) || null,
+            avatar: avatarUri,
+            photoURL: avatarUri,
             text,
-            createdAt: Date.now(),
+            createdAt,
             likes: 0,
             likedBy: [],
-            parentId: replyingTo?.id || null,
+            parentId,
           });
-        setNewComment('');
-        setReplyingTo(null);
-        Keyboard.dismiss();
+        // Leave optimistic row until snapshot reconcile drops it by match.
       } catch (e) {
+        setPostComments((prev) => (Array.isArray(prev) ? prev.filter((c) => c?.id !== tempId) : []));
+        setNewComment(text);
+        if (replyMeta) {
+          setReplyingTo(replyMeta);
+        }
+
         const rawMsg = String(e?.message || e || 'Failed to send comment');
         const msgLower = rawMsg.toLowerCase();
         setCommentsError(rawMsg);
 
-        // Give a more actionable hint for the common dev failure mode.
+        const code = e?.code || e?.name || 'FIREBASE_AUTH_ERROR';
+        const status = typeof e?.status === 'number' ? ` (HTTP ${e.status})` : '';
+
+        const isAuth =
+          msgLower.includes('firebase_auth') ||
+          msgLower.includes('cognito') ||
+          String(code).toUpperCase().includes('AUTH') ||
+          String(code).toUpperCase().includes('COGNITO');
         const isPermission =
           msgLower.includes('permission') ||
           msgLower.includes('permission-denied') ||
@@ -466,20 +510,20 @@ const CommentsModal = ({
           });
         }
 
-        if (isPermission) {
+        if (isAuth && !__DEV__) {
+          Alert.alert('Auth Error', `Cannot comment until Firebase auth is ready.\n\n${code}${status}\n${rawMsg}`);
+        } else if (isPermission) {
           Alert.alert(
             'Comment failed',
             'Could not save your comment (permission denied).\n\nIf this keeps happening, sign out and back in, then try again.'
           );
-          return;
-        }
-        if (isOffline) {
+        } else if (isOffline) {
           Alert.alert('Comment failed', 'Network/offline error while saving your comment.');
-          return;
+        } else {
+          Alert.alert('Comment failed', __DEV__ ? rawMsg : 'Unable to save your comment right now.');
         }
-
-        // Default: show the actual error text in dev to make debugging fast.
-        Alert.alert('Comment failed', __DEV__ ? rawMsg : 'Unable to save your comment right now.');
+      } finally {
+        feedSendingRef.current = false;
       }
       return;
     }

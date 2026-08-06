@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { db } from '../../config/firebase';
 import { COLORS } from '../../styles/theme';
+import {
+  LOOP_CAP,
+  ROW_ESTIMATE,
+  VISIBLE_ROWS,
+  buildLoopItems,
+  buildMarqueeRenderItems,
+  dedupeCommentsById,
+  shouldMarqueeLoop,
+} from './feedCommentMarquee';
 
-/** Visible comment slots (~3–4 high, not a tall column). */
-const VISIBLE_ROWS = 4;
-/** Approx row height incl. margin (1–2 lines; matches styles below). */
-const ROW_ESTIMATE = 48;
-/** Max comments pulled into the marquee cycle. */
-const LOOP_CAP = 24;
 /** Pixels/sec — steady upward crawl. */
 const SCROLL_PX_PER_SEC = 28;
 
@@ -16,6 +19,10 @@ const SCROLL_PX_PER_SEC = 28;
  * Bottom-left upward comment stream for For You / MediaViewer (TikTok-style).
  * Short viewport (~3–4 comments) with a continuous marquee loop of available
  * comments. Idle (hidden) when there are none.
+ *
+ * Important: the list is only duplicated for seamless wrap when the cycle is
+ * tall enough that the clone starts at/below the clip edge — otherwise a
+ * single comment would render as two stacked bubbles.
  */
 export default function FeedCommentOverlay({
   postId,
@@ -44,16 +51,15 @@ export default function FeedCommentOverlay({
         .limit(40)
         .onSnapshot(
           (snapshot) => {
-            const next = (snapshot?.docs || [])
-              .map((d) => {
-                const data = d?.data?.() || {};
-                return {
-                  id: d.id,
-                  username: data.username || data.displayName || 'User',
-                  text: String(data.text || '').trim(),
-                };
-              })
-              .filter((c) => c.text.length > 0);
+            const mapped = (snapshot?.docs || []).map((d) => {
+              const data = d?.data?.() || {};
+              return {
+                id: d.id,
+                username: data.username || data.displayName || 'User',
+                text: String(data.text || '').trim(),
+              };
+            });
+            const next = dedupeCommentsById(mapped);
             setComments(next);
             try {
               onCountChange?.(String(postId), next.length);
@@ -78,22 +84,16 @@ export default function FeedCommentOverlay({
     };
   }, [active, postId, onCountChange]);
 
-  // Chronological for the rise (oldest first → newest); cap for perf.
-  const loopItems = useMemo(() => {
-    if (!Array.isArray(comments) || comments.length === 0) return [];
-    return comments.slice(0, LOOP_CAP).slice().reverse();
-  }, [comments]);
+  const loopItems = useMemo(() => buildLoopItems(comments, LOOP_CAP), [comments]);
 
   const viewportHeight = VISIBLE_ROWS * ROW_ESTIMATE;
-
-  // Duplicate once so translateY can wrap seamlessly across one cycle.
-  const renderItems = useMemo(() => {
-    if (loopItems.length === 0) return [];
-    // With few comments, still duplicate so the loop has travel distance.
-    return [...loopItems, ...loopItems];
-  }, [loopItems]);
-
   const cycleHeight = loopItems.length * ROW_ESTIMATE;
+  const looping = shouldMarqueeLoop(loopItems.length, cycleHeight, viewportHeight);
+
+  const renderItems = useMemo(
+    () => buildMarqueeRenderItems(loopItems, looping),
+    [loopItems, looping]
+  );
 
   useEffect(() => {
     if (animRef.current) {
@@ -106,12 +106,7 @@ export default function FeedCommentOverlay({
     }
     translateY.setValue(0);
 
-    if (!active || cycleHeight <= 0 || loopItems.length === 0) {
-      return undefined;
-    }
-
-    // One comment: show idle (no pointless spin). Two+ always loop.
-    if (loopItems.length < 2) {
+    if (!active || !looping || cycleHeight <= 0) {
       return undefined;
     }
 
@@ -141,7 +136,7 @@ export default function FeedCommentOverlay({
         animRef.current = null;
       }
     };
-  }, [active, cycleHeight, loopItems.length, translateY, viewportHeight]);
+  }, [active, cycleHeight, looping, translateY]);
 
   if (!active || loopItems.length === 0) return null;
 
@@ -154,9 +149,9 @@ export default function FeedCommentOverlay({
     >
       <View style={[styles.clip, { height: viewportHeight }]}>
         <Animated.View style={{ transform: [{ translateY }] }}>
-          {renderItems.map((item, index) => (
+          {renderItems.map(({ item, key }) => (
             <View
-              key={`${item.id}-${index}`}
+              key={key}
               style={[styles.row, { height: ROW_ESTIMATE - 6 }]}
             >
               <Text style={styles.line} allowFontScaling={false} numberOfLines={2}>
