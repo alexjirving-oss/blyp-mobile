@@ -21,4 +21,4 @@
 - AI create-post `ebb8306`
 - Play fold/edge/R8 `17980e8` (already on branch)
 - This perf commit
-- Wait for profile tab fixes (`_agent/PROFILE_TAB_FIXES_READY.md` / `fix(profile)`)
+- Profile tab fixes (`_agent/PROFILE_TAB_FIXES_READY.md` / `fix(profile)`) — **include tip that contains this SHA**
