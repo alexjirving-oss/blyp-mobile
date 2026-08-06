@@ -4,13 +4,16 @@
 **Worktree:** `C:\Users\Alex\Blyp26-eas-modern`  
 **Status:** Hero clips rebuilt toward TikTok LIVE gift overlays (dark-key luxury FX). Cartoon character-rig cinema rejected and replaced.
 
-## Commit SHA
+## Commit SHA (feature — bake from this or tip)
 
 ```
 b1822a5329b22b7ee0404654f5529789274dac32
 ```
 
-**Message:** `feat(gifts): raise hero FX to TikTok-class gift overlays`
+**Short:** `b1822a5`  
+**Message:** `feat(gifts): raise hero FX to TikTok-class gift overlays`  
+
+Docs stamp tip: `6ec609a` (`docs(gifts): stamp TikTok-bar ready SHA and commission brief`). Clips + player are in `b1822a5` and remain in descendants.
 
 ## What improved vs a686268 Canvas rigs
 
