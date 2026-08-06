@@ -72,6 +72,10 @@
 # Add any project specific keep options here:
 
 # ---- Optional Chromium Cronet (IVS HTTP client; not on compile classpath) ----
+# R8 full mode still errors on missing Cronet types referenced by IVS unless suppressed.
+-dontwarn org.chromium.net.**
+-dontwarn com.amazonaws.ivs.net.**
+-keep class com.amazonaws.ivs.net.** { *; }
 -dontwarn org.chromium.net.CronetEngine$Builder
 -dontwarn org.chromium.net.CronetEngine
 -dontwarn org.chromium.net.CronetException
