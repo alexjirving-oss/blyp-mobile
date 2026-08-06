@@ -734,51 +734,66 @@ def build_brilliant_diamond():
 
 
 def build_cheer_props():
-    """Stadium confetti cannon core + ribbon pieces."""
+    """Stadium confetti cannon — many small chips + wash streaks (Filmic-safe emit)."""
     root = bpy.data.objects.new("CheerRoot", None)
     link(root)
 
     core_m = bpy.data.meshes.new("Core")
     bm = bmesh.new()
-    bmesh.ops.create_icosphere(bm, subdivisions=3, radius=0.35)
+    bmesh.ops.create_icosphere(bm, subdivisions=3, radius=0.32)
     bm.to_mesh(core_m)
     bm.free()
     core = new_mesh_obj("Core", core_m)
-    core.data.materials.append(mat_emit("CoreMat", GOLD, 18.0))
+    # Keep emit moderate so Filmic preserves gold hue
+    core.data.materials.append(mat_emit("CoreMat", (1.0, 0.62, 0.12, 1), 3.2))
     shade_smooth(core)
     apply_subsurf(core, 1, 2)
     core.parent = root
 
-    colors = [GOLD, TEAL, (1, 0.35, 0.3, 1), (0.95, 0.95, 1, 1), (0.25, 0.95, 0.55, 1), (1.0, 0.85, 0.2, 1)]
+    colors = [
+        (1.0, 0.62, 0.1, 1),   # saturated gold
+        (0.0, 0.88, 0.78, 1),  # teal
+        (1.0, 0.28, 0.22, 1),  # coral
+        (0.95, 0.92, 0.85, 1), # soft white
+        (0.15, 0.95, 0.45, 1), # green
+        (1.0, 0.72, 0.08, 1),  # amber
+        (1.0, 0.42, 0.08, 1),  # orange
+        (0.35, 0.75, 1.0, 1),  # sky
+        (1.0, 0.18, 0.38, 1),  # pink
+    ]
     ribbons = []
     rng = random.Random(42)
-    for i in range(72):
+    for i in range(160):
         rm = bpy.data.meshes.new(f"Rib{i}")
         bm = bmesh.new()
         bmesh.ops.create_cube(bm, size=1.0)
         bm.to_mesh(rm)
         bm.free()
         rib = new_mesh_obj(f"Rib{i}", rm)
-        rib.scale = (0.035 + rng.random() * 0.02, 0.14 + rng.random() * 0.1, 0.008)
+        # Mostly small chips; occasional longer streamer
+        if i % 7 == 0:
+            rib.scale = (0.028, 0.16 + rng.random() * 0.1, 0.006)
+        else:
+            rib.scale = (0.018 + rng.random() * 0.012, 0.05 + rng.random() * 0.06, 0.005)
         col = colors[i % len(colors)]
-        rib.data.materials.append(mat_emit(f"RibMat{i}", col, 6.0 + rng.random() * 4))
+        rib.data.materials.append(mat_emit(f"RibMat{i}", col, 2.4 + rng.random() * 1.6))
         shade_smooth(rib)
-        apply_bevel(rib, 0.002, 1)
         rib.parent = root
         ribbons.append(rib)
 
-    # Stadium light streaks (emissive rods)
+    # Stadium light streaks — thin rods, modest emit
     streaks = []
-    for i in range(12):
-        ang = i * 30
+    for i in range(18):
+        ang = i * 20
         sm = bpy.data.meshes.new(f"Streak{i}")
         bm = bmesh.new()
-        bmesh.ops.create_cone(bm, cap_ends=True, segments=8, radius1=0.04, radius2=0.01, depth=3.2)
+        depth = 3.2 if i % 2 == 0 else 2.5
+        bmesh.ops.create_cone(bm, cap_ends=True, segments=6, radius1=0.022, radius2=0.004, depth=depth)
         bm.to_mesh(sm)
         bm.free()
         st = new_mesh_obj(f"Streak{i}", sm)
-        st.rotation_euler = Euler((math.radians(90), 0, math.radians(ang)), "XYZ")
-        st.data.materials.append(mat_emit(f"StreakMat{i}", TEAL if i % 2 == 0 else GOLD, 9.0))
+        st.rotation_euler = Euler((math.radians(88 + (i % 3)), 0, math.radians(ang)), "XYZ")
+        st.data.materials.append(mat_emit(f"StreakMat{i}", TEAL if i % 2 == 0 else GOLD, 3.8))
         st.parent = root
         streaks.append(st)
 
@@ -786,67 +801,96 @@ def build_cheer_props():
 
 
 def build_fire_column():
-    """Luxury flame column — layered emissive volumes + ember particles (not cartoon face)."""
+    """Warm orange flame column — Filmic-safe strengths so hue survives."""
     root = bpy.data.objects.new("FireRoot", None)
     link(root)
 
     layers = []
-    for i in range(10):
-        t = i / 9
-        rad = 0.55 * (1.0 - t * 0.72)
-        z = -0.9 + i * 0.32
+    for i in range(12):
+        t = i / 11
+        rad = 0.58 * (1.0 - t * 0.76)
+        z = -1.0 + i * 0.3
         fm = bpy.data.meshes.new(f"Flame{i}")
         bm = bmesh.new()
         bmesh.ops.create_icosphere(bm, subdivisions=3, radius=rad)
-        # Pull top verts for flame tip
         for v in bm.verts:
             if v.co.z > 0:
-                v.co.z *= 1.55
-                v.co.x *= 0.85
-                v.co.y *= 0.85
-            # Noise displace
-            n = noise.noise(v.co * 2.5 + Vector((i, 0, 0)))
-            v.co += Vector((n * 0.04, n * 0.03, abs(n) * 0.05))
+                v.co.z *= 1.65
+                v.co.x *= 0.82
+                v.co.y *= 0.82
+            n = noise.noise(v.co * 2.8 + Vector((i * 0.4, 0.2, 0)))
+            v.co += Vector((n * 0.05, n * 0.035, abs(n) * 0.06))
         bm.to_mesh(fm)
         bm.free()
         flame = new_mesh_obj(f"Flame{i}", fm)
         flame.location.z = z
-        heat = 1.0 - t * 0.55
-        col = (1.0, 0.25 + 0.55 * heat, 0.05 + 0.15 * heat, 1.0)
-        strength = 12.0 + (1.0 - t) * 10.0
+        heat = 1.0 - t * 0.7
+        # Red-orange base → amber tip (darker so Standard doesn't clip white)
+        col = (1.0, 0.08 + 0.22 * heat, 0.01 + 0.02 * heat, 1.0)
+        strength = 1.15 + (1.0 - t) * 1.6
         flame.data.materials.append(mat_emit(f"FlameMat{i}", col, strength))
         shade_smooth(flame)
         apply_subsurf(flame, 1, 2)
         flame.parent = root
         layers.append(flame)
 
-    # Ember floor discs
+    # Inner hot core — amber, not white
+    core_m = bpy.data.meshes.new("FireCore")
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=2, radius=0.18)
+    for v in bm.verts:
+        if v.co.z > 0:
+            v.co.z *= 1.9
+    bm.to_mesh(core_m)
+    bm.free()
+    fcore = new_mesh_obj("FireCore", core_m)
+    fcore.location.z = -0.4
+    fcore.data.materials.append(mat_emit("FireCoreMat", (1.0, 0.32, 0.04, 1), 2.8))
+    shade_smooth(fcore)
+    fcore.parent = root
+    layers.append(fcore)
+
+    # Outer red wrap layers for warmth
+    for wi, (rad, z) in enumerate(((0.72, -0.85), (0.55, -0.35), (0.4, 0.25))):
+        wm = bpy.data.meshes.new(f"Wrap{wi}")
+        bm = bmesh.new()
+        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=rad)
+        for v in bm.verts:
+            if v.co.z > 0:
+                v.co.z *= 1.4
+        bm.to_mesh(wm)
+        bm.free()
+        wrap = new_mesh_obj(f"FireWrap{wi}", wm)
+        wrap.location.z = z
+        wrap.data.materials.append(mat_emit(f"WrapMat{wi}", (1.0, 0.12, 0.02, 1), 1.4))
+        shade_smooth(wrap)
+        wrap.parent = root
+        layers.append(wrap)
+
+    # Dense ember field
     embers = []
     rng = random.Random(7)
-    for i in range(40):
+    for i in range(200):
         ang = rng.random() * math.pi * 2
-        r = 0.3 + rng.random() * 1.1
+        r = 0.08 + rng.random() * 1.5
         em = bpy.data.meshes.new(f"Ember{i}")
         bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.03 + rng.random() * 0.04)
+        bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.012 + rng.random() * 0.022)
         bm.to_mesh(em)
         bm.free()
         e = new_mesh_obj(f"Ember{i}", em)
-        e.location = (math.cos(ang) * r, math.sin(ang) * r, -1.15 + rng.random() * 0.2)
-        e.data.materials.append(mat_emit(f"EmberMat{i}", (1.0, 0.4, 0.08, 1), 10.0))
+        e.location = (math.cos(ang) * r, math.sin(ang) * r, -1.2 + rng.random() * 2.0)
+        warm = (1.0, 0.14 + rng.random() * 0.2, 0.015 + rng.random() * 0.03, 1)
+        e.data.materials.append(mat_emit(f"EmberMat{i}", warm, 2.0 + rng.random() * 1.8))
         e.parent = root
         embers.append(e)
 
-    # Heat bloom plate
-    hm2 = bpy.data.meshes.new("Heat2")
-    bm = bmesh.new()
-    bmesh.ops.create_cone(bm, cap_ends=True, segments=48, radius1=1.3, radius2=1.3, depth=0.02)
-    bm.to_mesh(hm2)
-    bm.free()
-    heat = new_mesh_obj("HeatBloom", hm2)
-    heat.location.z = -0.85
-    heat.data.materials.append(mat_emit("HeatMat", (1.0, 0.35, 0.05, 1), 5.5))
-    heat.parent = root
+    # Soft ground glow — tiny torus, not opaque plates
+    ring = make_torus_obj("HeatRing", major=0.85, minor=0.04, major_seg=48, minor_seg=10)
+    ring.location.z = -0.95
+    ring.data.materials.append(mat_emit("HeatRingMat", (1.0, 0.2, 0.02, 1), 1.8))
+    shade_smooth(ring)
+    ring.parent = root
 
     return root, layers, embers
 
@@ -1010,72 +1054,161 @@ def animate_diamond(frames):
 def animate_cheer(frames):
     scene_base()
     root, core, ribbons, streaks = build_cheer_props()
-    add_camera(loc=(0, -4.2, 0.55), lens=26, track_to=root)
+    add_camera(loc=(0, -4.0, 0.55), lens=24, track_to=root)
 
     kf_scale(core, 1, 0.15)
-    kf_scale(core, int(frames * 0.28), 1.45)
-    kf_scale(core, int(frames * 0.5), 0.25)
-    kf_scale(core, frames, 0.1)
+    kf_scale(core, int(frames * 0.28), 1.35)
+    kf_scale(core, int(frames * 0.5), 0.35)
+    kf_scale(core, frames, 0.12)
 
     rng = random.Random(99)
     for i, rib in enumerate(ribbons):
-        ang = (i / len(ribbons)) * math.pi * 2
+        ring = i % 3
+        ang = (i / max(1, len(ribbons))) * math.pi * 2 + ring * 0.4
+        elev = (rng.random() - 0.15) * 0.95
         kf_loc(rib, 1, (0, 0, -0.2))
-        kf_rot(rib, 1, (0, 0, i * 10))
-        kf_scale(rib, 1, 0.2)
-        impact = int(frames * 0.30)
-        dist = 1.5 + rng.random() * 1.4
-        ox = math.cos(ang) * dist
-        oy = math.sin(ang) * dist
-        oz = 0.4 + rng.random() * 1.6
-        kf_loc(rib, impact, (ox * 0.25, oy * 0.25, 0.15))
+        kf_rot(rib, 1, (0, 0, i * 7))
+        kf_scale(rib, 1, 0.15)
+        impact = int(frames * 0.28) + (i % 4)
+        dist = (1.35 + ring * 0.9) + rng.random() * 1.5
+        ox = math.cos(ang) * math.cos(elev) * dist
+        oy = math.sin(ang) * math.cos(elev) * dist
+        oz = 0.15 + math.sin(elev) * dist * 0.9 + rng.random() * 1.3
+        kf_loc(rib, impact, (ox * 0.2, oy * 0.2, 0.1))
         kf_scale(rib, impact, 1.0)
-        kf_loc(rib, frames, (ox, oy, oz))
-        kf_rot(rib, frames, (rng.random() * 360, rng.random() * 360, rng.random() * 360))
+        kf_loc(rib, frames, (ox * 1.2, oy * 1.2, oz))
+        kf_rot(rib, frames, (rng.random() * 420, rng.random() * 420, rng.random() * 420))
+        kf_scale(rib, frames, 0.45 + rng.random() * 0.35)
 
-    for st in streaks:
-        kf_scale(st, 1, 0.05)
-        kf_scale(st, int(frames * 0.28), 0.3)
-        kf_scale(st, int(frames * 0.4), 1.1)
-        kf_scale(st, frames, 0.4)
+    for i, st in enumerate(streaks):
+        kf_scale(st, 1, 0.04)
+        kf_scale(st, int(frames * 0.26), 0.3)
+        kf_scale(st, int(frames * 0.38), 1.15 if i % 2 == 0 else 0.95)
+        kf_scale(st, frames, 0.3)
 
-    spark = make_spark_instance("CheerSpark", GOLD, 0.032)
-    emitter = make_uvsphere_obj("ChEmit", radius=0.3, segments=12, rings=8)
+    spark = make_spark_instance("CheerSpark", GOLD, 0.022)
+    # Tone down spark emit for Filmic
+    for slot in spark.material_slots:
+        for n in slot.material.node_tree.nodes:
+            if n.type == "EMISSION":
+                n.inputs[1].default_value = 5.5
+    spark2 = make_spark_instance("CheerSpark2", TEAL, 0.018)
+    for slot in spark2.material_slots:
+        for n in slot.material.node_tree.nodes:
+            if n.type == "EMISSION":
+                n.inputs[1].default_value = 5.0
+    spark3 = make_spark_instance("CheerSpark3", (1.0, 0.35, 0.28, 1), 0.02)
+    for slot in spark3.material_slots:
+        for n in slot.material.node_tree.nodes:
+            if n.type == "EMISSION":
+                n.inputs[1].default_value = 5.0
+    emitter = make_uvsphere_obj("ChEmit", radius=0.35, segments=16, rings=10)
     emitter.hide_render = True
-    add_burst_particles(emitter, spark, count=650, life=42, vel=5.5, start=int(frames * 0.26), end=int(frames * 0.34), gravity=0.4)
+    add_burst_particles(emitter, spark, count=1100, life=48, vel=6.0, start=int(frames * 0.24), end=int(frames * 0.38), gravity=0.35)
+    mod2 = emitter.modifiers.new("Burst2", "PARTICLE_SYSTEM")
+    st2 = emitter.particle_systems[-1].settings
+    st2.count = 650
+    st2.frame_start = int(frames * 0.26)
+    st2.frame_end = int(frames * 0.42)
+    st2.lifetime = 52
+    st2.normal_factor = 4.6
+    st2.factor_random = 0.8
+    st2.render_type = "OBJECT"
+    st2.instance_object = spark2
+    if hasattr(st2, "effector_weights"):
+        st2.effector_weights.gravity = 0.3
+    mod3 = emitter.modifiers.new("Burst3", "PARTICLE_SYSTEM")
+    st3 = emitter.particle_systems[-1].settings
+    st3.count = 480
+    st3.frame_start = int(frames * 0.28)
+    st3.frame_end = int(frames * 0.44)
+    st3.lifetime = 46
+    st3.normal_factor = 5.2
+    st3.render_type = "OBJECT"
+    st3.instance_object = spark3
 
     setup_render(frames, os.path.join(OUTDIR, "cheer_burst", "frame_"))
+    # Standard preserves confetti hue; Filmic crushes gold/teal to pastel
+    bpy.context.scene.view_settings.view_transform = "Standard"
+    bpy.context.scene.view_settings.exposure = 0.0
+    try:
+        bpy.context.scene.view_settings.look = "None"
+    except Exception:
+        pass
 
 
 def animate_fire(frames):
     scene_base()
-    root, layers, embers = build_fire_column()
-    add_camera(loc=(0.15, -3.9, 0.35), lens=28, track_to=root)
+    fd = bpy.data.lights.new("FireKick", "POINT")
+    fd.energy = 90
+    fd.color = (1.0, 0.4, 0.08)
+    fo = bpy.data.objects.new("FireKick", fd)
+    link(fo)
+    fo.location = (0.4, -1.2, 0.2)
 
-    kf_scale(root, 1, 0.2)
-    kf_scale(root, int(frames * 0.30), 1.18)
-    kf_scale(root, frames, 1.0)
+    root, layers, embers = build_fire_column()
+    add_camera(loc=(0.12, -3.7, 0.4), lens=26, track_to=root)
+
+    kf_scale(root, 1, 0.18)
+    kf_scale(root, int(frames * 0.28), 1.2)
+    kf_scale(root, frames, 1.05)
     ease_keys(root)
 
-    # Sway layers
     for i, flame in enumerate(layers):
         z = flame.location.z
-        kf_loc(flame, 1, (0.02 * ((i % 2) * 2 - 1), -0.02, z))
-        kf_loc(flame, int(frames * 0.5), (-0.05 * ((i % 2) * 2 - 1), 0.04, z + 0.08))
-        kf_loc(flame, frames, (0.03 * ((i % 2) * 2 - 1), -0.02, z))
+        side = ((i % 2) * 2 - 1)
+        kf_loc(flame, 1, (0.03 * side, -0.03, z))
+        kf_loc(flame, int(frames * 0.33), (-0.07 * side, 0.05, z + 0.12))
+        kf_loc(flame, int(frames * 0.66), (0.06 * side, -0.04, z + 0.05))
+        kf_loc(flame, frames, (0.025 * side, -0.02, z + 0.08))
+        kf_scale(flame, 1, 0.88)
+        kf_scale(flame, int(frames * 0.4), 1.08)
+        kf_scale(flame, frames, 1.0)
 
     for i, e in enumerate(embers):
         base = e.location.copy()
+        rise = 1.2 + (i % 7) * 0.2 + (i % 3) * 0.06
         kf_loc(e, 1, base)
-        kf_loc(e, frames, (base.x * 1.1, base.y * 1.1, base.z + 0.8 + (i % 5) * 0.1))
+        kf_loc(e, int(frames * 0.45), (base.x * 1.05, base.y * 1.05, base.z + rise * 0.45))
+        kf_loc(e, frames, (base.x * 1.18, base.y * 1.14, base.z + rise))
+        kf_scale(e, 1, 0.7)
+        kf_scale(e, int(frames * 0.5), 1.1)
+        kf_scale(e, frames, 0.3)
 
-    spark = make_spark_instance("FireSpark", (1.0, 0.45, 0.1, 1), 0.024)
-    emitter = make_uvsphere_obj("FEmit", radius=0.35, segments=12, rings=8)
-    emitter.location.z = 0.2
+    spark = make_spark_instance("FireSpark", (1.0, 0.32, 0.05, 1), 0.02)
+    for slot in spark.material_slots:
+        for n in slot.material.node_tree.nodes:
+            if n.type == "EMISSION":
+                n.inputs[1].default_value = 4.5
+    spark2 = make_spark_instance("FireSpark2", (1.0, 0.5, 0.08, 1), 0.015)
+    for slot in spark2.material_slots:
+        for n in slot.material.node_tree.nodes:
+            if n.type == "EMISSION":
+                n.inputs[1].default_value = 4.0
+    emitter = make_uvsphere_obj("FEmit", radius=0.4, segments=16, rings=10)
+    emitter.location.z = 0.15
     emitter.hide_render = True
-    st = add_burst_particles(emitter, spark, count=420, life=48, vel=2.4, start=int(frames * 0.12), end=frames - 4, gravity=-0.55)
+    add_burst_particles(emitter, spark, count=900, life=54, vel=2.6, start=int(frames * 0.06), end=frames - 2, gravity=-0.75)
+    mod2 = emitter.modifiers.new("Burst2", "PARTICLE_SYSTEM")
+    st2 = emitter.particle_systems[-1].settings
+    st2.count = 520
+    st2.frame_start = int(frames * 0.12)
+    st2.frame_end = frames - 4
+    st2.lifetime = 42
+    st2.normal_factor = 3.2
+    st2.factor_random = 0.85
+    st2.render_type = "OBJECT"
+    st2.instance_object = spark2
+    if hasattr(st2, "effector_weights"):
+        st2.effector_weights.gravity = -0.95
 
     setup_render(frames, os.path.join(OUTDIR, "fire", "frame_"))
+    bpy.context.scene.view_settings.view_transform = "Standard"
+    bpy.context.scene.view_settings.exposure = -0.05
+    try:
+        bpy.context.scene.view_settings.look = "None"
+    except Exception:
+        pass
 
 
 BUILDERS = {

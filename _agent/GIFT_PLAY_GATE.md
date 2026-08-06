@@ -3,7 +3,7 @@
 **Verdict: PENDING_USER_REVIEW**  
 **Date:** 2026-08-06  
 **Worktree:** `C:\Users\Alex\Blyp26-eas-modern`  
-**Baseline:** beats `b1822a5` dark-key 2D path with self-authored EEVEE + true alpha
+**Baseline:** densified cheer_burst + warmer fire alpha masters (post-`eb32a27`)
 
 ## Decision
 
@@ -22,9 +22,16 @@ This is **not** blocked on paid freelancers. Masters are self-authored; gate is 
 | `ALPHA_CLIPS` wired | `filmClipRegistry.js` |
 | Blender pipeline | `_agent/gift-animations-20260806/alpha-pipeline/` |
 
+## Latest densify pass
+
+- `cheer_burst`: denser multi-color confetti + stadium streaks + keyed spark layers
+- `fire`: warmer orange/red column, dense ember field, rising sparks (replaces pale-cream wash)
+- rocket / crown / diamond unchanged this pass
+- Same RGB\|A side-by-side alpha encode pipeline
+
 ## Honest visual note
 
-Clear leap past Canvas/dark-key 2D: real 3D PBR (HDRI chrome/gold/crystal), transparent film, RGB\|A playback. Rocket + crown read strongest; cheer/fire still denser/warmer in a follow-up pass if you want TikTok-top density. Not claiming Unreal character-gift parity.
+Clear leap past Canvas/dark-key 2D. Rocket + crown still the strongest heroes; cheer/fire now denser/warmer than `eb32a27`. Not claiming Unreal character-gift parity.
 
 ## Desktop preview
 

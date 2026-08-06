@@ -155,12 +155,25 @@ def main():
     ap.add_argument("--gift", default="all")
     args = ap.parse_args()
     ffmpeg = find_ffmpeg()
-    gifts = list(GIFTS.keys()) if args.gift == "all" else [args.gift]
-    manifest = {"version": 1, "layout": "rgb|alpha side-by-side", "gifts": {}}
-    for g in gifts:
-        manifest["gifts"][g] = encode_gift(g, ffmpeg)
+    if args.gift == "all":
+        gifts = list(GIFTS.keys())
+    elif "," in args.gift:
+        gifts = [g.strip() for g in args.gift.split(",") if g.strip()]
+    else:
+        gifts = [args.gift]
     out = ALPHA_OUT / "manifest.json"
     ALPHA_OUT.mkdir(parents=True, exist_ok=True)
+    manifest = {"version": 1, "layout": "rgb|alpha side-by-side", "gifts": {}}
+    if out.exists() and args.gift != "all":
+        try:
+            manifest = json.loads(out.read_text(encoding="utf-8"))
+            manifest.setdefault("gifts", {})
+        except Exception:
+            pass
+    for g in gifts:
+        if g not in GIFTS:
+            raise SystemExit(f"Unknown gift {g}")
+        manifest["gifts"][g] = encode_gift(g, ffmpeg)
     out.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print("Wrote", out)
 
