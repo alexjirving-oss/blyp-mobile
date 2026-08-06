@@ -1029,11 +1029,16 @@ const MessengerScreen = ({ navigation }) => {
 
   const startNewChat = async (otherUser) => {
     try {
-      console.log('ðŸš€ Starting new chat with:', otherUser.username, 'ID:', otherUser.id);
+      const otherUserId = otherUser?.id || otherUser?.uid || otherUser?.userId;
+      console.log('ðŸš€ Starting new chat with:', otherUser?.username, 'ID:', otherUserId);
       console.log('ðŸ‘¤ Current user:', uid);
 
       if (!uid) {
         Alert.alert('Error', 'Please log in to start a chat');
+        return;
+      }
+      if (!otherUserId) {
+        Alert.alert('Unavailable', 'This profile cannot be messaged yet.');
         return;
       }
 
@@ -1052,13 +1057,17 @@ const MessengerScreen = ({ navigation }) => {
 
       const meName = currentUser?.displayName || currentUser?.username || currentUser?.email || 'Unknown';
       const otherName = otherUser?.username || otherUser?.displayName || 'Unknown';
-      const conversationId = await conversationsMessagingService.createOrGetDirectThread(db, uid, otherUser.id, meName, otherName);
+      const conversationId = await conversationsMessagingService.createOrGetDirectThread(db, uid, otherUserId, meName, otherName);
+      if (!conversationId) {
+        Alert.alert('Error', 'Failed to start new chat');
+        return;
+      }
       console.log('âœ… Conversation ready with ID:', conversationId);
 
       navigation.navigate('ChatConversation', {
         conversationId,
         chatId: conversationId,
-        otherUser: otherUser
+        otherUser: { ...otherUser, id: otherUserId },
       });
     } catch (error) {
       console.error('Error starting new chat:', error);
@@ -1099,8 +1108,8 @@ const MessengerScreen = ({ navigation }) => {
     switch (selectedTab) {
       case 'chats': {
         // Show all chats that include the current user (WhatsApp style)
-        const allUserChats = chats.filter(chat =>
-          chat.participants && chat.participants.includes(uid)
+        const allUserChats = (Array.isArray(chats) ? chats : []).filter(chat =>
+          chat?.participants && chat.participants.includes(uid)
         );
 
         console.log('ðŸ’¬ MESSENGER: Showing', allUserChats.length, 'conversations');
@@ -1140,7 +1149,9 @@ const MessengerScreen = ({ navigation }) => {
                 <Icon name="chatbubble-ellipses-outline" size={64} color={T.textDisabled} />
                 <Text style={styles.emptyTitle}>No conversations yet</Text>
                 <Text style={styles.emptySubtitle}>
-                  Start chatting with someone from your network
+                  {followingUserIds.size === 0
+                    ? 'You are not following anyone yet — find people to message'
+                    : 'Start chatting with someone from your network'}
                 </Text>
                 <TouchableOpacity
                   style={styles.newChatButton}

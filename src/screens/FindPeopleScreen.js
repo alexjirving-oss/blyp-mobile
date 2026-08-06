@@ -29,8 +29,19 @@ const withAlpha = (hex, alpha) => {
 const T = blypTheme.colors;
 
 const FindPeopleScreen = ({ navigation, route }) => {
-  const initialQuery = String(route?.params?.initialQuery || route?.params?.clubId || '').trim();
+  const routeClubId = String(route?.params?.clubId || '').trim();
+  const routeClubLabel = String(route?.params?.clubLabel || '').trim();
+  const initialQuery = String(route?.params?.initialQuery || '').trim();
   const [searchText, setSearchText] = useState(initialQuery);
+  const [clubFilterId, setClubFilterId] = useState(routeClubId || null);
+  const [clubFilterLabel, setClubFilterLabel] = useState(() => {
+    if (routeClubLabel) return routeClubLabel;
+    if (routeClubId) {
+      const club = getClubById(routeClubId);
+      return club?.shortLabel || club?.label || routeClubId;
+    }
+    return '';
+  });
   const [allUsers, setAllUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [recommendedUsers, setRecommendedUsers] = useState([]);
@@ -43,6 +54,18 @@ const FindPeopleScreen = ({ navigation, route }) => {
     if (q && q !== searchText) setSearchText(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.initialQuery]);
+
+  useEffect(() => {
+    const nextClubId = String(route?.params?.clubId || '').trim() || null;
+    const nextLabel = String(route?.params?.clubLabel || '').trim();
+    setClubFilterId(nextClubId);
+    if (nextClubId) {
+      const club = getClubById(nextClubId);
+      setClubFilterLabel(nextLabel || club?.shortLabel || club?.label || nextClubId);
+    } else {
+      setClubFilterLabel('');
+    }
+  }, [route?.params?.clubId, route?.params?.clubLabel]);
 
   useEffect(() => {
     console.log('ðŸ” FIND PEOPLE: Screen active', { uidPresent: !!uid });
@@ -62,7 +85,29 @@ const FindPeopleScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     filterUsers();
-  }, [searchText, allUsers]);
+  }, [searchText, allUsers, clubFilterId]);
+
+  // When opened for a club, seed the list from the membership index so
+  // empty following graphs / slow users snapshot still show members.
+  useEffect(() => {
+    let cancelled = false;
+    if (!clubFilterId) return undefined;
+    (async () => {
+      try {
+        const members = await getMembersByClubId(clubFilterId, { limit: 24, excludeUid: uid });
+        if (cancelled || !Array.isArray(members)) return;
+        setRecommendedUsers(members);
+        if (!String(searchText || '').trim()) {
+          setFilteredUsers(members.filter((u) => u?.id));
+        }
+      } catch (e) {
+        console.warn('[FIND PEOPLE] club members load failed', e?.message || String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+    // searchText intentionally omitted — only seed when club filter changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubFilterId, uid]);
 
   const loadUsers = () => {
     let unsubscribe = null;
@@ -98,10 +143,12 @@ const FindPeopleScreen = ({ navigation, route }) => {
 
           setAllUsers(usersList);
 
-          // Set recommended users (first 10 users for now)
-          const recommended = usersList.slice(0, 10);
-          console.log('ðŸ” FIND PEOPLE: Setting recommended users:', recommended.length);
-          setRecommendedUsers(recommended);
+          // Browse list for empty search (skip overwrite when club filter owns the list)
+          if (!clubFilterId) {
+            const recommended = usersList.filter((u) => u?.id).slice(0, 10);
+            console.log('ðŸ” FIND PEOPLE: Setting recommended users:', recommended.length);
+            setRecommendedUsers(recommended);
+          }
           setLoading(false);
         }, (error) => {
           console.error('ðŸ” FIND PEOPLE: Snapshot error:', error);
@@ -149,7 +196,7 @@ const FindPeopleScreen = ({ navigation, route }) => {
   };
 
   const filterUsers = () => {
-    const q = searchText.trim();
+    const q = String(searchText || '').trim();
     const resolvedFromQuery = q ? resolveClubIdFromQuery(q) : null;
     const activeClubId = clubFilterId || resolvedFromQuery;
 
@@ -159,7 +206,9 @@ const FindPeopleScreen = ({ navigation, route }) => {
     }
 
     const needle = q.toLowerCase();
-    const filtered = allUsers.filter((user) => {
+    const users = Array.isArray(allUsers) ? allUsers : [];
+    const filtered = users.filter((user) => {
+      if (!user?.id) return false;
       const clubs = Array.isArray(user.profileClubs) ? user.profileClubs : [];
       if (activeClubId && !clubs.includes(activeClubId)) return false;
       if (!q) return true;
@@ -176,10 +225,15 @@ const FindPeopleScreen = ({ navigation, route }) => {
 
   const startNewChat = async (otherUser) => {
     try {
-      console.log('ðŸš€ Starting new chat with:', otherUser.username, 'from Find People');
+      const otherUserId = otherUser?.id || otherUser?.uid || otherUser?.userId;
+      console.log('ðŸš€ Starting new chat with:', otherUser?.username, 'from Find People');
 
       if (!uid) {
         Alert.alert('Sign in required', 'Please sign in to start a chat.');
+        return;
+      }
+      if (!otherUserId) {
+        Alert.alert('Unavailable', 'This profile cannot be messaged yet.');
         return;
       }
 
@@ -198,13 +252,17 @@ const FindPeopleScreen = ({ navigation, route }) => {
 
       const meName = authUser?.displayName || authUser?.username || authUser?.email || 'Unknown';
       const otherName = otherUser?.username || otherUser?.displayName || otherUser?.email || 'Unknown';
-      const conversationId = await conversationsMessagingService.createOrGetDirectThread(db, uid, otherUser.id, meName, otherName);
+      const conversationId = await conversationsMessagingService.createOrGetDirectThread(db, uid, otherUserId, meName, otherName);
+      if (!conversationId) {
+        Alert.alert('Error', 'Failed to start new chat');
+        return;
+      }
       console.log('âœ… Conversation ready with ID:', conversationId);
 
       navigation.navigate('ChatConversation', {
         conversationId,
         chatId: conversationId,
-        otherUser: otherUser,
+        otherUser: { ...otherUser, id: otherUserId },
       });
     } catch (error) {
       console.error('Error starting new chat:', error);
@@ -250,6 +308,7 @@ const FindPeopleScreen = ({ navigation, route }) => {
   };
 
   const renderUserItem = ({ item }) => {
+    if (!item?.id) return null;
     const isFollowing = followingUserIds.has(item.id);
 
     return (
@@ -284,6 +343,37 @@ const FindPeopleScreen = ({ navigation, route }) => {
       </View>
     );
   };
+
+  const listEmptySearch = (
+    <View style={styles.emptyState}>
+      <Icon name="search" size={48} color={T.textDisabled} />
+      <Text style={styles.emptyStateText}>No users found</Text>
+      <Text style={styles.emptyStateSubtext}>Try a different name or club</Text>
+    </View>
+  );
+
+  const listEmptyBrowse = loading ? (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyStateText}>Loading people…</Text>
+    </View>
+  ) : (
+    <View style={styles.emptyState}>
+      <Icon name="people-outline" size={48} color={T.textDisabled} />
+      <Text style={styles.emptyStateText}>
+        {clubFilterId ? 'No members found yet' : 'No one to message yet'}
+      </Text>
+      <Text style={styles.emptyStateSubtext}>
+        {clubFilterId
+          ? 'Follow people in this club, or search by name'
+          : 'Search for people above — new accounts start with an empty network'}
+      </Text>
+    </View>
+  );
+
+  const showSearchOrClubList = Boolean(String(searchText || '').trim() || clubFilterId);
+  const listData = showSearchOrClubList
+    ? (Array.isArray(filteredUsers) ? filteredUsers : [])
+    : (Array.isArray(recommendedUsers) ? recommendedUsers : []);
 
   const renderSectionHeader = (title, subtitle) => (
     <View style={styles.sectionHeader}>
@@ -326,69 +416,67 @@ const FindPeopleScreen = ({ navigation, route }) => {
                 value={searchText}
                 onChangeText={setSearchText}
               />
-              {searchText.length > 0 && (
+              {String(searchText || '').length > 0 && (
                 <TouchableOpacity onPress={() => setSearchText('')}>
                   <Icon name="close-circle" size={20} color={T.textMuted} />
                 </TouchableOpacity>
               )}
             </View>
+            {clubFilterId ? (
+              <TouchableOpacity
+                style={styles.clubFilterChip}
+                onPress={() => {
+                  setClubFilterId(null);
+                  setClubFilterLabel('');
+                  if (route?.params?.clubId) {
+                    navigation.setParams?.({ clubId: undefined, clubLabel: undefined });
+                  }
+                }}
+                accessibilityLabel="Clear club filter"
+              >
+                <Icon name="football" size={14} color={T.primary} />
+                <Text style={styles.clubFilterChipText}>{clubFilterLabel || 'Club'}</Text>
+                <Icon name="close" size={14} color={T.textMuted} />
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Content */}
           <View style={styles.content}>
-            {(() => {
-              console.log('ðŸ” FIND PEOPLE: Rendering content. Search text:', searchText.trim());
-              console.log('ðŸ” FIND PEOPLE: Filtered users count:', filteredUsers.length);
-              console.log('ðŸ” FIND PEOPLE: Recommended users count:', recommendedUsers.length);
-              console.log('ðŸ” FIND PEOPLE: Loading state:', loading);
-              return null;
-            })()}
-            {searchText.trim() ? (
-              // Search Results
+            {showSearchOrClubList ? (
               <>
                 {renderSectionHeader(
-                  `Search Results (${filteredUsers.length})`,
-                  searchText.trim() ? `Searching for "${searchText}"` : ''
+                  clubFilterId && !String(searchText || '').trim()
+                    ? `${clubFilterLabel || 'Club'} members (${listData.length})`
+                    : `Search Results (${listData.length})`,
+                  String(searchText || '').trim()
+                    ? `Searching for "${searchText}"`
+                    : clubFilterId
+                      ? 'People in this club'
+                      : ''
                 )}
                 <FlatList
-                  data={filteredUsers}
+                  data={listData}
                   renderItem={renderUserItem}
-                  keyExtractor={(item) => item.id}
+                  keyExtractor={(item, index) => item?.id || `user-${index}`}
                   showsVerticalScrollIndicator={false}
-                  ListEmptyComponent={
-                    <View style={styles.emptyState}>
-                      <Icon name="search" size={48} color={T.textDisabled} />
-                      <Text style={styles.emptyStateText}>No users found</Text>
-                      <Text style={styles.emptyStateSubtext}>Try a different search term</Text>
-                    </View>
-                  }
+                  ListEmptyComponent={listEmptySearch}
                 />
               </>
             ) : (
-              // Recommended Users
               <>
                 {renderSectionHeader(
-                  'Recommended for You',
-                  'People you might want to connect with'
+                  'Find someone to message',
+                  followingUserIds.size === 0
+                    ? 'You are not following anyone yet — search by name or club'
+                    : 'People you might want to connect with'
                 )}
                 <FlatList
-                  data={recommendedUsers}
+                  data={listData}
                   renderItem={renderUserItem}
-                  keyExtractor={(item) => item.id}
+                  keyExtractor={(item, index) => item?.id || `user-${index}`}
                   showsVerticalScrollIndicator={false}
-                  ListEmptyComponent={
-                    loading ? (
-                      <View style={styles.emptyState}>
-                        <Text style={styles.emptyStateText}>Loading users...</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.emptyState}>
-                        <Icon name="people" size={48} color={T.textDisabled} />
-                        <Text style={styles.emptyStateText}>No users found</Text>
-                        <Text style={styles.emptyStateSubtext}>Check back later for new users</Text>
-                      </View>
-                    )
-                  }
+                  ListEmptyComponent={listEmptyBrowse}
                 />
               </>
             )}

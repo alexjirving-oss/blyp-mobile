@@ -158,12 +158,19 @@ export const conversationsMessagingService = {
   },
 
   async createOrGetDirectThread(db, uid, otherUserId, meName, otherName) {
+    if (!uid || !otherUserId) {
+      throw new Error('createOrGetDirectThread requires uid and otherUserId');
+    }
+    if (String(uid) === String(otherUserId)) {
+      throw new Error('Cannot start a direct chat with yourself');
+    }
     // [BLYP][PROD_DIAG] Log auth state at query time
     try {
       const fbAuth = getAuth();
       const fbUser = fbAuth?.currentUser;
       console.warn('[CONVERSATIONS][DIAG] createOrGetDirectThread', {
         queryUid: uid,
+        otherUserId,
         fbAuthUid: fbUser?.uid || 'NULL',
         fbAuthMatch: fbUser?.uid === uid,
       });
