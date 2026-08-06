@@ -72,6 +72,11 @@ const DEFAULT_PREFS = {
   /** Product tour — healed via Firestore like onboarded so reinstall doesn't re-nag forever. */
   tourCompleted: false,
   tourStartedAt: null,
+  /**
+   * Ordered Home hub widgets (`HomeBasePanel`). Normalized lazily via
+   * homeLayoutService so new catalog types heal in without forcing a migrate.
+   */
+  homeLayout: null,
   updatedAt: 0,
 };
 
@@ -185,6 +190,9 @@ function normalize(raw) {
     lastSeenActivityAt: Number(raw.lastSeenActivityAt) || 0,
     tourCompleted: !!raw.tourCompleted,
     tourStartedAt: tourStartedAt && tourStartedAt > 0 ? tourStartedAt : null,
+    // Pass through raw layout; homeLayoutService.normalizeHomeLayout heals shape.
+    homeLayout:
+      raw.homeLayout && typeof raw.homeLayout === 'object' ? raw.homeLayout : null,
     updatedAt: Number(raw.updatedAt) || 0,
   };
 }
@@ -428,6 +436,12 @@ export async function resetTour(uid) {
   });
 }
 
+/** Persist Home hub widget layout (ordered list). */
+export async function setHomeLayout(uid, homeLayout) {
+  const prev = await getPreferences(uid);
+  return persist(uid, { ...prev, homeLayout: homeLayout || null });
+}
+
 export async function isOnboarded(uid) {
   const prefs = await getPreferences(uid);
   if (prefs.onboarded) return true;
@@ -493,6 +507,7 @@ export default {
   markTourStarted,
   setTourCompleted,
   resetTour,
+  setHomeLayout,
   isOnboarded,
   getEnabledPages,
   interestLabels,

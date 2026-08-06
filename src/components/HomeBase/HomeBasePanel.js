@@ -63,6 +63,16 @@ import {
   topicPageForInterest,
 } from '../../services/userPreferencesService';
 import {
+  subscribeHomeLayout,
+  reorderHomeWidget,
+  setHomeWidgetEnabled,
+  removeHomeWidget,
+  addHomeWidget,
+  updateHomeWidgetConfig,
+  resetHomeLayout,
+  getCatalogEntry,
+} from '../../services/homeLayoutService';
+import {
   getLiveNow,
   getTrendingPosts,
   getForYouPosts,
@@ -82,6 +92,10 @@ import { subscribeWatchHistory } from '../../services/watchHistoryService';
 import { fixStorageUrl } from '../../utils/urlUtils';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
 import EnhancedVideo from '../EnhancedVideo';
+import HomeWidgetFrame from './HomeWidgetFrame';
+import SportPagesWidget from './SportPagesWidget';
+import QuickDmWidget from './QuickDmWidget';
+import EditHomeSheet from './EditHomeSheet';
 
 const GENERIC_SUGGESTIONS = [
   "What's worth watching right now?",
@@ -172,12 +186,22 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const [watchNotice, setWatchNotice] = useState('');
   const [locationPrompt, setLocationPrompt] = useState(null);
 
+  // Home Layout Engine — ordered widgets persisted in blyp.prefs.homeLayout.
+  const [homeLayout, setHomeLayoutState] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [addSheetOpen, setAddSheetOpen] = useState(false);
+
   // Voice: the home Blyp bar listens in place (same engine as the Blyp screen),
   // then routes the transcript into the one unified assistant flow.
   const aiEntitled = useHasAI();
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const pulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!uid) return undefined;
+    return subscribeHomeLayout(uid, (layout) => setHomeLayoutState(layout));
+  }, [uid]);
 
   const interestTerms = useMemo(() => {
     const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i.label]));
@@ -722,6 +746,567 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
 
   const otherPages = (pages || []).filter((p) => p.key !== 'home');
 
+  const layoutWidgets = homeLayout?.widgets || [];
+
+  const onMoveWidget = useCallback(
+    async (widgetId, direction) => {
+      if (!uid) return;
+      const next = await reorderHomeWidget(uid, widgetId, direction);
+      if (next) setHomeLayoutState(next);
+    },
+    [uid]
+  );
+
+  const onToggleWidget = useCallback(
+    async (widget) => {
+      if (!uid || !widget?.id) return;
+      const next = await setHomeWidgetEnabled(uid, widget.id, widget.enabled === false);
+      if (next) setHomeLayoutState(next);
+    },
+    [uid]
+  );
+
+  const onRemoveWidget = useCallback(
+    async (widgetId) => {
+      if (!uid) return;
+      const next = await removeHomeWidget(uid, widgetId);
+      if (next) setHomeLayoutState(next);
+    },
+    [uid]
+  );
+
+  const onAddWidget = useCallback(
+    async (type) => {
+      if (!uid) return;
+      const next = await addHomeWidget(uid, type);
+      if (next) setHomeLayoutState(next);
+      setAddSheetOpen(false);
+    },
+    [uid]
+  );
+
+  const onResetLayout = useCallback(async () => {
+    if (!uid) return;
+    const next = await resetHomeLayout(uid);
+    if (next) setHomeLayoutState(next);
+    setAddSheetOpen(false);
+  }, [uid]);
+
+  const onToggleSportPageKey = useCallback(
+    async (widgetId, pageKey, add) => {
+      if (!uid || !widgetId) return;
+      const widget = layoutWidgets.find((w) => w.id === widgetId);
+      const current = Array.isArray(widget?.config?.pageKeys) ? [...widget.config.pageKeys] : [];
+      const nextKeys = add
+        ? Array.from(new Set([...current, pageKey]))
+        : current.filter((k) => k !== pageKey);
+      const next = await updateHomeWidgetConfig(uid, widgetId, { pageKeys: nextKeys });
+      if (next) setHomeLayoutState(next);
+    },
+    [uid, layoutWidgets]
+  );
+
+  const onToggleDmPerson = useCallback(
+    async (widgetId, personId, pin) => {
+      if (!uid || !widgetId || !personId) return;
+      const widget = layoutWidgets.find((w) => w.id === widgetId);
+      const current = Array.isArray(widget?.config?.peopleIds) ? [...widget.config.peopleIds] : [];
+      const nextIds = pin
+        ? Array.from(new Set([...current, personId])).slice(0, 16)
+        : current.filter((id) => id !== personId);
+      const next = await updateHomeWidgetConfig(uid, widgetId, { peopleIds: nextIds });
+      if (next) setHomeLayoutState(next);
+    },
+    [uid, layoutWidgets]
+  );
+
+  const renderWidgetBody = (widget) => {
+    switch (widget.type) {
+      case 'suggestions':
+        return (
+          <View style={styles.chipRowWrap}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {smartSuggestions.map((s) => (
+                <TouchableOpacity key={s} style={styles.suggestChip} activeOpacity={0.85} onPress={() => blyp(s)}>
+                  <Icon name="sparkles-outline" size={13} color={COLORS.primary} />
+                  <Text style={styles.suggestChipText}>{s}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        );
+      case 'recentSearches':
+        if (recent.length === 0 && !editMode) return null;
+        return recent.length > 0 ? (
+          <View style={styles.chipRowWrap}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {recent.slice(0, 8).map((r) => (
+                <TouchableOpacity key={r} style={styles.recentChip} activeOpacity={0.85} onPress={() => blyp(r)}>
+                  <Icon name="time-outline" size={13} color={COLORS.textMuted} />
+                  <Text style={styles.recentChipText} numberOfLines={1}>{r}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : (
+          <Text style={styles.widgetEmptyHint}>Recent searches will appear here</Text>
+        );
+      case 'forYou':
+        if (forYou.length === 0 && !editMode) return null;
+        if (forYou.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>For you rail populates as you watch</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>For you</Text>
+              <TouchableOpacity onPress={() => onOpenPage?.('A')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={styles.editLink}>Open feed</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.railRow}
+              snapToInterval={FORYOU_SNAP}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              disableIntervalMomentum
+              onMomentumScrollEnd={onForYouScrollEnd}
+            >
+              {forYou.map((p, index) => {
+                const uri = postThumbnail(p);
+                const isVideo = p.type === 'video' || !!p.videoUrl;
+                const videoUri = isVideo
+                  ? fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url)
+                  : '';
+                const isActive = index === activeForYou;
+                const mountVideo = (isActive || index === activeForYou + 1) && isVideo && !!videoUri;
+                return (
+                  <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openPost(p, forYou)}>
+                    <View>
+                      {uri ? (
+                        <Image source={{ uri }} style={styles.forYouThumb} resizeMode="cover" />
+                      ) : (
+                        <View style={[styles.forYouThumb, styles.thumbFallback]}>
+                          <Icon name="sparkles-outline" size={24} color={COLORS.textMuted} />
+                        </View>
+                      )}
+                      {mountVideo && (
+                        <EnhancedVideo
+                          uri={videoUri}
+                          poster={uri}
+                          style={[styles.forYouThumb, StyleSheet.absoluteFill, !isActive && styles.forYouPreloadHidden]}
+                          resizeMode="cover"
+                          shouldLoad
+                          shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
+                          isLooping
+                          isMuted={!isActive || !isScreenFocused || listening || transcribing}
+                        />
+                      )}
+                      {isVideo && !isActive && (
+                        <View style={styles.resumeBadge}>
+                          <Icon name="play" size={12} color={COLORS.white} />
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.trendTitle} numberOfLines={2}>
+                      {p.title || p.caption || p.description || 'Post'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        );
+      case 'continueWatching':
+        if (watch.length === 0 && !editMode) return null;
+        if (watch.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>Continue watching shows up after you start a video</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Continue watching</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+              {watch.map((w) => {
+                const uri = fixStorageUrl(w.thumbnail);
+                return (
+                  <TouchableOpacity key={w.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(w, watch)}>
+                    <View>
+                      {uri ? (
+                        <Image source={{ uri }} style={styles.trendThumb} resizeMode="cover" />
+                      ) : (
+                        <View style={[styles.trendThumb, styles.thumbFallback]}>
+                          <Icon name="play-circle-outline" size={26} color={COLORS.textMuted} />
+                        </View>
+                      )}
+                      {w.type === 'video' && (
+                        <View style={styles.resumeBadge}>
+                          <Icon name="play" size={12} color={COLORS.white} />
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.trendTitle} numberOfLines={2}>{w.title}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        );
+      case 'liveNow':
+        if (live.length === 0 && !editMode) return null;
+        if (live.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>No one is live right now</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.liveTitleWrap}>
+                <View style={styles.liveDot} />
+                <Text style={styles.sectionTitle}>Live now</Text>
+              </View>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+              {live.map((s) => {
+                const uri = streamThumbnail(s);
+                return (
+                  <TouchableOpacity key={s.id || s.streamId} style={styles.liveCard} activeOpacity={0.85} onPress={() => openLive(s)}>
+                    {uri ? (
+                      <Image source={{ uri }} style={styles.liveThumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.liveThumb, styles.thumbFallback]}>
+                        <Icon name="radio" size={22} color={COLORS.textMuted} />
+                      </View>
+                    )}
+                    <View style={styles.liveBadge}>
+                      <Text style={styles.liveBadgeText}>LIVE</Text>
+                    </View>
+                    <Text style={styles.liveCardTitle} numberOfLines={1}>
+                      {s.title || s.hostDisplayName || s.hostUsername || 'Live stream'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        );
+      case 'trending':
+        if (trending.length === 0 && !editMode) return null;
+        if (trending.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>Trending will fill in as the network heats up</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Trending now</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+              {trending.map((p) => {
+                const uri = postThumbnail(p);
+                return (
+                  <TouchableOpacity key={p.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(p, trending)}>
+                    {uri ? (
+                      <Image source={{ uri }} style={styles.trendThumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.trendThumb, styles.thumbFallback]}>
+                        <Icon name="image-outline" size={22} color={COLORS.textMuted} />
+                      </View>
+                    )}
+                    <Text style={styles.trendTitle} numberOfLines={2}>
+                      {p.title || p.caption || p.description || 'Post'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        );
+      case 'creators':
+        if (creators.length === 0 && !editMode) return null;
+        if (creators.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>Creator suggestions appear as you follow interests</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Creators to follow</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('FindPeople')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={styles.editLink}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+              {creators.map((c) => {
+                const avatar = creatorAvatar(c);
+                const targetId = c.id || c.uid || c.userId;
+                const isF = followingSet.has(targetId);
+                const initial = (c.displayName || c.username || '?').slice(0, 1).toUpperCase();
+                return (
+                  <View key={targetId} style={styles.creatorCard}>
+                    <TouchableOpacity activeOpacity={0.85} onPress={() => openCreator(c)}>
+                      {avatar ? (
+                        <Image source={{ uri: avatar }} style={styles.creatorAvatar} />
+                      ) : (
+                        <View style={[styles.creatorAvatar, styles.creatorAvatarFallback]}>
+                          <Text style={styles.creatorInitial}>{initial}</Text>
+                        </View>
+                      )}
+                      <Text style={styles.creatorName} numberOfLines={1}>
+                        @{c.username || c.displayName || 'user'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.followBtn, isF && styles.followingBtn]}
+                      activeOpacity={0.85}
+                      onPress={() => toggleFollow(c)}
+                    >
+                      <Text style={[styles.followText, isF && styles.followingText]}>{isF ? 'Following' : 'Follow'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </>
+        );
+      case 'sportPages':
+        return (
+          <SportPagesWidget
+            pages={pages}
+            interests={interests}
+            config={widget.config}
+            editMode={editMode}
+            onOpenPage={onOpenPage}
+            onTogglePageKey={(key, add) => onToggleSportPageKey(widget.id, key, add)}
+          />
+        );
+      case 'quickDm':
+        return (
+          <QuickDmWidget
+            uid={uid}
+            navigation={navigation}
+            config={widget.config}
+            editMode={editMode}
+            onTogglePerson={(personId, pin) => onToggleDmPerson(widget.id, personId, pin)}
+          />
+        );
+      case 'clubs':
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>
+                {myClubDefs.length > 0 ? 'Your clubs' : 'Explore clubs'}
+              </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('EditProfile')}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.editLink}>{myClubDefs.length > 0 ? 'Edit' : 'Join'}</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+              {exploreClubs.map((club) => (
+                <TouchableOpacity
+                  key={club.id}
+                  style={styles.clubChip}
+                  activeOpacity={0.85}
+                  onPress={() => openClubPeople(club)}
+                >
+                  <Icon name={club.icon || 'football'} size={15} color={COLORS.textPrimary} />
+                  <Text style={styles.clubChipText}>{club.shortLabel || club.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </>
+        );
+      case 'clubPeople':
+        if (clubPeople.length === 0 && !editMode) return null;
+        if (clubPeople.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>Join clubs to meet people who share them</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>People in your clubs</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  const first = myClubDefs[0];
+                  if (first) openClubPeople(first);
+                  else navigation.navigate('FindPeople');
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.editLink}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+              {clubPeople.map((c) => {
+                const avatar = creatorAvatar(c);
+                const targetId = c.id || c.uid || c.userId;
+                const isF = followingSet.has(targetId);
+                const initial = (c.displayName || c.username || '?').slice(0, 1).toUpperCase();
+                const shared = (c.sharedClubIds || [])
+                  .map((id) => getClubById(id)?.shortLabel || getClubById(id)?.label)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join(' · ');
+                return (
+                  <View key={targetId} style={styles.creatorCard}>
+                    <TouchableOpacity activeOpacity={0.85} onPress={() => openCreator(c)}>
+                      {avatar ? (
+                        <Image source={{ uri: avatar }} style={styles.creatorAvatar} />
+                      ) : (
+                        <View style={[styles.creatorAvatar, styles.creatorAvatarFallback]}>
+                          <Text style={styles.creatorInitial}>{initial}</Text>
+                        </View>
+                      )}
+                      <Text style={styles.creatorName} numberOfLines={1}>
+                        @{c.username || c.displayName || 'user'}
+                      </Text>
+                      {!!shared && (
+                        <Text style={styles.clubSharedHint} numberOfLines={1}>
+                          {shared}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.followBtn, isF && styles.followingBtn]}
+                      activeOpacity={0.85}
+                      onPress={() => toggleFollow(c)}
+                    >
+                      <Text style={[styles.followText, isF && styles.followingText]}>{isF ? 'Following' : 'Follow'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </>
+        );
+      case 'quickActions':
+        return (
+          <>
+            <Text style={styles.sectionTitle}>Jump in</Text>
+            <View style={styles.actionsGrid}>
+              {QUICK_ACTIONS.map((a) => (
+                <TouchableOpacity key={a.id} style={styles.actionTile} activeOpacity={0.85} onPress={() => openAction(a)}>
+                  <View style={styles.actionIcon}>
+                    <Icon name={a.icon} size={22} color={COLORS.primary} />
+                    {a.plus ? (
+                      <View style={styles.actionPlusBadge}>
+                        <Text style={styles.actionPlusText}>Plus</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.actionLabel}>{a.label}</Text>
+                  {a.plus && !aiEntitled ? (
+                    <Text style={styles.actionHint}>Free trial / Plus</Text>
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        );
+      case 'interests':
+        if (interestChips.length === 0 && !editMode) return null;
+        if (interestChips.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>Pick interests in Customize to pin them here</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Your interests</Text>
+              <TouchableOpacity onPress={onEditPages} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={styles.editLink}>Customize</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.interestWrap}>
+              {interestChips.map((i) => (
+                <TouchableOpacity
+                  key={i.id}
+                  style={styles.interestChip}
+                  activeOpacity={0.85}
+                  onPress={() => openInterestPage(i)}
+                >
+                  <Icon name={i.icon} size={15} color={COLORS.textPrimary} />
+                  <Text style={styles.interestText}>{i.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        );
+      case 'pageList':
+        if (otherPages.length === 0 && !editMode) return null;
+        if (otherPages.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>No extra pages yet</Text>;
+        }
+        return (
+          <>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>All pages</Text>
+              <TouchableOpacity onPress={onEditPages} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={styles.editLink}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.pageList}>
+              {otherPages.map((p) => (
+                <TouchableOpacity
+                  key={p.key}
+                  style={styles.pageRow}
+                  activeOpacity={0.85}
+                  onPress={() => onOpenPage?.(p.key)}
+                >
+                  <Text style={styles.pageRowText}>{p.label}</Text>
+                  <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        );
+      case 'battles':
+        return (
+          <TouchableOpacity
+            style={styles.featureCard}
+            activeOpacity={0.88}
+            onPress={() => {
+              try {
+                navigation.navigate('Chat', { initialTab: 'battles' });
+              } catch {
+                navigation.navigate('Chat');
+              }
+            }}
+          >
+            <View style={[styles.featureOrb, { backgroundColor: 'rgba(251,113,133,0.14)' }]}>
+              <Icon name="flame" size={22} color="#FB7185" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.featureTitle}>Battles</Text>
+              <Text style={styles.featureSub}>Jump into live battles and challenges</Text>
+            </View>
+            <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        );
+      case 'rankings':
+        return (
+          <TouchableOpacity
+            style={styles.featureCard}
+            activeOpacity={0.88}
+            onPress={() => navigation.navigate('Rankings')}
+          >
+            <View style={[styles.featureOrb, { backgroundColor: 'rgba(251,191,36,0.14)' }]}>
+              <Icon name="trophy" size={22} color="#FBBF24" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.featureTitle}>Rankings</Text>
+              <Text style={styles.featureSub}>Leaderboards, standings, and climbers</Text>
+            </View>
+            <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
+          </TouchableOpacity>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <>
     <ScrollView
@@ -742,6 +1327,17 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         <Text style={styles.greetText}>{greeting()}</Text>
         <View style={styles.greetActions}>
           <TouchableOpacity
+            style={[styles.savedBtn, editMode && styles.editHomeBtnActive]}
+            onPress={() => setEditMode((v) => !v)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Icon
+              name={editMode ? 'checkmark' : 'grid-outline'}
+              size={18}
+              color={editMode ? COLORS.black : COLORS.textPrimary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
             style={styles.savedBtn}
             onPress={() => {
               setUnread(0);
@@ -761,6 +1357,22 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </TouchableOpacity>
         </View>
       </View>
+
+      {editMode && (
+        <View style={styles.editBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.editBannerTitle}>Editing Home</Text>
+            <Text style={styles.editBannerSub}>Reorder, hide, or remove modules. Add more anytime.</Text>
+          </View>
+          <TouchableOpacity style={styles.addWidgetBtn} activeOpacity={0.88} onPress={() => setAddSheetOpen(true)}>
+            <Icon name="add" size={16} color={COLORS.black} />
+            <Text style={styles.addWidgetText}>Add</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.doneEditBtn} activeOpacity={0.88} onPress={() => setEditMode(false)}>
+            <Text style={styles.doneEditText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* The one Blyp bar (hero): type to ask or set a reminder, or tap the mic. */}
       <View style={styles.blypBar}>
@@ -911,400 +1523,47 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         </TouchableOpacity>
       </Modal>
 
-      {/* Smart suggestions */}
-      <View style={styles.chipRowWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-          {smartSuggestions.map((s) => (
-            <TouchableOpacity key={s} style={styles.suggestChip} activeOpacity={0.85} onPress={() => blyp(s)}>
-              <Icon name="sparkles-outline" size={13} color={COLORS.primary} />
-              <Text style={styles.suggestChipText}>{s}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Recent searches */}
-      {recent.length > 0 && (
-        <View style={styles.chipRowWrap}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {recent.slice(0, 8).map((r) => (
-              <TouchableOpacity key={r} style={styles.recentChip} activeOpacity={0.85} onPress={() => blyp(r)}>
-                <Icon name="time-outline" size={13} color={COLORS.textMuted} />
-                <Text style={styles.recentChipText} numberOfLines={1}>{r}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-
       {loading && (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={COLORS.primary} />
         </View>
       )}
 
-      {/* For You — personalized rail */}
-      {forYou.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>For you</Text>
-            <TouchableOpacity onPress={() => onOpenPage?.('A')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.editLink}>Open feed</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.railRow}
-            snapToInterval={FORYOU_SNAP}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            disableIntervalMomentum
-            onMomentumScrollEnd={onForYouScrollEnd}
+      {/* Home Layout Engine — ordered, user-customizable widgets */}
+      {layoutWidgets.map((widget, index) => {
+        const body = renderWidgetBody(widget);
+        if (!body && !editMode) return null;
+        return (
+          <HomeWidgetFrame
+            key={widget.id}
+            widget={widget}
+            editMode={editMode}
+            canMoveUp={index > 0}
+            canMoveDown={index < layoutWidgets.length - 1}
+            onMoveUp={() => onMoveWidget(widget.id, -1)}
+            onMoveDown={() => onMoveWidget(widget.id, 1)}
+            onToggle={() => onToggleWidget(widget)}
+            onRemove={() => onRemoveWidget(widget.id)}
           >
-            {forYou.map((p, index) => {
-              const uri = postThumbnail(p);
-              const isVideo = p.type === 'video' || !!p.videoUrl;
-              const videoUri = isVideo
-                ? fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url)
-                : '';
-              const isActive = index === activeForYou;
-              // Mount the active tile's video AND pre-warm the next one (paused,
-              // hidden) so snapping to it plays instantly instead of cold-starting
-              // a fresh player. A thumbnail backdrop always renders underneath so
-              // there's never a black "refresh" flash during the swap.
-              const mountVideo = (isActive || index === activeForYou + 1) && isVideo && !!videoUri;
-              return (
-                <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openPost(p, forYou)}>
-                  <View>
-                    {uri ? (
-                      <Image source={{ uri }} style={styles.forYouThumb} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.forYouThumb, styles.thumbFallback]}>
-                        <Icon name="sparkles-outline" size={24} color={COLORS.textMuted} />
-                      </View>
-                    )}
-                    {mountVideo && (
-                      <EnhancedVideo
-                        uri={videoUri}
-                        poster={uri}
-                        style={[styles.forYouThumb, StyleSheet.absoluteFill, !isActive && styles.forYouPreloadHidden]}
-                        resizeMode="cover"
-                        shouldLoad
-                        shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
-                        isLooping
-                        isMuted={!isActive || !isScreenFocused || listening || transcribing}
-                      />
-                    )}
-                    {isVideo && !isActive && (
-                      <View style={styles.resumeBadge}>
-                        <Icon name="play" size={12} color={COLORS.white} />
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.trendTitle} numberOfLines={2}>
-                    {p.title || p.caption || p.description || 'Post'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
+            {body || (
+              <Text style={styles.widgetEmptyHint}>
+                {(getCatalogEntry(widget.type)?.title || widget.type) + ' — empty for now'}
+              </Text>
+            )}
+          </HomeWidgetFrame>
+        );
+      })}
 
-      {/* Continue watching */}
-      {watch.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Continue watching</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-            {watch.map((w) => {
-              const uri = fixStorageUrl(w.thumbnail);
-              return (
-                <TouchableOpacity key={w.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(w, watch)}>
-                  <View>
-                    {uri ? (
-                      <Image source={{ uri }} style={styles.trendThumb} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.trendThumb, styles.thumbFallback]}>
-                        <Icon name="play-circle-outline" size={26} color={COLORS.textMuted} />
-                      </View>
-                    )}
-                    {w.type === 'video' && (
-                      <View style={styles.resumeBadge}>
-                        <Icon name="play" size={12} color={COLORS.white} />
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.trendTitle} numberOfLines={2}>{w.title}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
-
-      {/* Live now */}
-      {live.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <View style={styles.liveTitleWrap}>
-              <View style={styles.liveDot} />
-              <Text style={styles.sectionTitle}>Live now</Text>
-            </View>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-            {live.map((s) => {
-              const uri = streamThumbnail(s);
-              return (
-                <TouchableOpacity key={s.id || s.streamId} style={styles.liveCard} activeOpacity={0.85} onPress={() => openLive(s)}>
-                  {uri ? (
-                    <Image source={{ uri }} style={styles.liveThumb} resizeMode="cover" />
-                  ) : (
-                    <View style={[styles.liveThumb, styles.thumbFallback]}>
-                      <Icon name="radio" size={22} color={COLORS.textMuted} />
-                    </View>
-                  )}
-                  <View style={styles.liveBadge}>
-                    <Text style={styles.liveBadgeText}>LIVE</Text>
-                  </View>
-                  <Text style={styles.liveCardTitle} numberOfLines={1}>
-                    {s.title || s.hostDisplayName || s.hostUsername || 'Live stream'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
-
-      {/* Trending now */}
-      {trending.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Trending now</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-            {trending.map((p) => {
-              const uri = postThumbnail(p);
-              return (
-                <TouchableOpacity key={p.id} style={styles.trendCard} activeOpacity={0.85} onPress={() => openPost(p, trending)}>
-                  {uri ? (
-                    <Image source={{ uri }} style={styles.trendThumb} resizeMode="cover" />
-                  ) : (
-                    <View style={[styles.trendThumb, styles.thumbFallback]}>
-                      <Icon name="image-outline" size={22} color={COLORS.textMuted} />
-                    </View>
-                  )}
-                  <Text style={styles.trendTitle} numberOfLines={2}>
-                    {p.title || p.caption || p.description || 'Post'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
-
-      {/* Suggested creators */}
-      {creators.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Creators to follow</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('FindPeople')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.editLink}>See all</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-            {creators.map((c) => {
-              const avatar = creatorAvatar(c);
-              const targetId = c.id || c.uid || c.userId;
-              const isF = followingSet.has(targetId);
-              const initial = (c.displayName || c.username || '?').slice(0, 1).toUpperCase();
-              return (
-                <View key={targetId} style={styles.creatorCard}>
-                  <TouchableOpacity activeOpacity={0.85} onPress={() => openCreator(c)}>
-                    {avatar ? (
-                      <Image source={{ uri: avatar }} style={styles.creatorAvatar} />
-                    ) : (
-                      <View style={[styles.creatorAvatar, styles.creatorAvatarFallback]}>
-                        <Text style={styles.creatorInitial}>{initial}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.creatorName} numberOfLines={1}>
-                      @{c.username || c.displayName || 'user'}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.followBtn, isF && styles.followingBtn]}
-                    activeOpacity={0.85}
-                    onPress={() => toggleFollow(c)}
-                  >
-                    <Text style={[styles.followText, isF && styles.followingText]}>{isF ? 'Following' : 'Follow'}</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
-
-      
-      {/* Clubs — browse + people who share your clubs */}
-      <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>
-          {myClubDefs.length > 0 ? 'Your clubs' : 'Explore clubs'}
-        </Text>
+      {!editMode && (
         <TouchableOpacity
-          onPress={() => navigation.navigate('EditProfile')}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.editHomeCta}
+          activeOpacity={0.88}
+          onPress={() => setEditMode(true)}
+          onLongPress={() => setEditMode(true)}
         >
-          <Text style={styles.editLink}>{myClubDefs.length > 0 ? 'Edit' : 'Join'}</Text>
+          <Icon name="grid-outline" size={16} color={COLORS.primary} />
+          <Text style={styles.editHomeCtaText}>Edit Home</Text>
         </TouchableOpacity>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-        {exploreClubs.map((club) => (
-          <TouchableOpacity
-            key={club.id}
-            style={styles.clubChip}
-            activeOpacity={0.85}
-            onPress={() => openClubPeople(club)}
-          >
-            <Icon name={club.icon || 'football'} size={15} color={COLORS.textPrimary} />
-            <Text style={styles.clubChipText}>{club.shortLabel || club.label}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {clubPeople.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>People in your clubs</Text>
-            <TouchableOpacity
-              onPress={() => {
-                const first = myClubDefs[0];
-                if (first) openClubPeople(first);
-                else navigation.navigate('FindPeople');
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.editLink}>See all</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-            {clubPeople.map((c) => {
-              const avatar = creatorAvatar(c);
-              const targetId = c.id || c.uid || c.userId;
-              const isF = followingSet.has(targetId);
-              const initial = (c.displayName || c.username || '?').slice(0, 1).toUpperCase();
-              const shared = (c.sharedClubIds || [])
-                .map((id) => getClubById(id)?.shortLabel || getClubById(id)?.label)
-                .filter(Boolean)
-                .slice(0, 2)
-                .join(' · ');
-              return (
-                <View key={targetId} style={styles.creatorCard}>
-                  <TouchableOpacity activeOpacity={0.85} onPress={() => openCreator(c)}>
-                    {avatar ? (
-                      <Image source={{ uri: avatar }} style={styles.creatorAvatar} />
-                    ) : (
-                      <View style={[styles.creatorAvatar, styles.creatorAvatarFallback]}>
-                        <Text style={styles.creatorInitial}>{initial}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.creatorName} numberOfLines={1}>
-                      @{c.username || c.displayName || 'user'}
-                    </Text>
-                    {!!shared && (
-                      <Text style={styles.clubSharedHint} numberOfLines={1}>
-                        {shared}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.followBtn, isF && styles.followingBtn]}
-                    activeOpacity={0.85}
-                    onPress={() => toggleFollow(c)}
-                  >
-                    <Text style={[styles.followText, isF && styles.followingText]}>{isF ? 'Following' : 'Follow'}</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-          </ScrollView>
-        </>
-      )}
-
-      {/* Quick actions */}
-      <Text style={styles.sectionTitle}>Jump in</Text>
-      <View style={styles.actionsGrid}>
-        {QUICK_ACTIONS.map((a) => (
-          <TouchableOpacity key={a.id} style={styles.actionTile} activeOpacity={0.85} onPress={() => openAction(a)}>
-            <View style={styles.actionIcon}>
-              <Icon name={a.icon} size={22} color={COLORS.primary} />
-              {a.plus ? (
-                <View style={styles.actionPlusBadge}>
-                  <Text style={styles.actionPlusText}>Plus</Text>
-                </View>
-              ) : null}
-            </View>
-            <Text style={styles.actionLabel}>{a.label}</Text>
-            {a.plus && !aiEntitled ? (
-              <Text style={styles.actionHint}>Free trial / Plus</Text>
-            ) : null}
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Your interests */}
-      {interestChips.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Your interests</Text>
-            <TouchableOpacity onPress={onEditPages} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.editLink}>Customize</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.interestWrap}>
-            {interestChips.map((i) => (
-              <TouchableOpacity
-                key={i.id}
-                style={styles.interestChip}
-                activeOpacity={0.85}
-                onPress={() => openInterestPage(i)}
-              >
-                <Icon name={i.icon} size={15} color={COLORS.textPrimary} />
-                <Text style={styles.interestText}>{i.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </>
-      )}
-
-      {/* Your pages */}
-      {otherPages.length > 0 && (
-        <>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Your pages</Text>
-            <TouchableOpacity onPress={onEditPages} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.editLink}>Edit</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.pageList}>
-            {otherPages.map((p) => (
-              <TouchableOpacity
-                key={p.key}
-                style={styles.pageRow}
-                activeOpacity={0.85}
-                onPress={() => onOpenPage?.(p.key)}
-              >
-                <Text style={styles.pageRowText}>{p.label}</Text>
-                <Icon name="chevron-forward" size={18} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        </>
       )}
 
       <View style={{ height: responsiveSize(100) }} />
@@ -1320,6 +1579,13 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         if (pending) navigation.navigate('Blyp', { initialQuery: pending, locationDenied: true });
       }}
       onGranted={onLocationGranted}
+    />
+    <EditHomeSheet
+      visible={addSheetOpen}
+      layout={homeLayout}
+      onClose={() => setAddSheetOpen(false)}
+      onAdd={onAddWidget}
+      onReset={onResetLayout}
     />
     </>
   );
@@ -1639,6 +1905,80 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   pageRowText: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '600' },
+
+  editHomeBtnActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  editBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,210,190,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.35)',
+  },
+  editBannerTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(14), fontWeight: '800' },
+  editBannerSub: { color: COLORS.textMuted, fontSize: responsiveFont(11), marginTop: 2, lineHeight: 15 },
+  addWidgetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.primary,
+  },
+  addWidgetText: { color: COLORS.black, fontSize: responsiveFont(12), fontWeight: '800' },
+  doneEditBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  doneEditText: { color: COLORS.textPrimary, fontSize: responsiveFont(12), fontWeight: '800' },
+  editHomeCta: {
+    marginTop: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,210,190,0.35)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(0,210,190,0.05)',
+  },
+  editHomeCtaText: { color: COLORS.primary, fontSize: responsiveFont(14), fontWeight: '800' },
+  widgetEmptyHint: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(12),
+    paddingHorizontal: 4,
+    paddingVertical: 10,
+  },
+  featureCard: {
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  featureOrb: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '800' },
+  featureSub: { color: COLORS.textMuted, fontSize: responsiveFont(12), marginTop: 2 },
 });
 
 export default HomeBasePanel;
