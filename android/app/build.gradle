@@ -98,8 +98,8 @@ android {
         applicationId 'com.blyp.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2026313238
-        versionName "1.0.17"
+        versionCode 2026313239
+        versionName "1.0.18"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -384,6 +384,8 @@ dependencies {
     implementation("com.android.billingclient:billing-ktx:7.1.1")
     // Explicit so BlypCallMessagingService can compile (Expo only brings this transitively).
     implementation("com.google.firebase:firebase-messaging:24.1.1")
+    // enableEdgeToEdge / SystemBarStyle (Android 15 deprecated window color APIs).
+    implementation("androidx.activity:activity-ktx:1.9.3")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

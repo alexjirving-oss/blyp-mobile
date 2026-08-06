@@ -5,6 +5,8 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 
 import com.facebook.react.ReactActivity
@@ -23,11 +25,18 @@ class MainActivity : ReactActivity() {
     // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
-    super.onCreate(null)
+    // Android 15: prefer enableEdgeToEdge over deprecated statusBarColor /
+    // navigationBarColor / setDecorFitsSystemWindows window APIs.
     val chrome = Color.parseColor("#0A0A0C")
-    window.statusBarColor = chrome
-    window.navigationBarColor = chrome
-    WindowCompat.setDecorFitsSystemWindows(window, false)
+    enableEdgeToEdge(
+      statusBarStyle = SystemBarStyle.dark(chrome),
+      navigationBarStyle = SystemBarStyle.dark(chrome),
+    )
+    super.onCreate(null)
+    WindowCompat.getInsetsController(window, window.decorView).apply {
+      isAppearanceLightStatusBars = false
+      isAppearanceLightNavigationBars = false
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       window.isStatusBarContrastEnforced = false
       window.isNavigationBarContrastEnforced = false

@@ -15,13 +15,15 @@
   <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
   <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
-  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <!-- Android 15: no BOOT_COMPLETED → restricted FGS (mediaPlayback). Strip permission + boot intents. -->
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
   <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
   <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <!-- Not used for overlays; Android 15 also restricts FGS while this is held. -->
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove"/>
   <!-- Block merge of USE_EXACT_ALARM from deps — Play restricts it to calendar/alarm apps. -->
   <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove"/>
   <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
@@ -97,6 +99,23 @@
       <intent-filter>
         <action android:name="com.blyp.mobile.calls.ACTION_ANSWER"/>
         <action android:name="com.blyp.mobile.calls.ACTION_DECLINE"/>
+      </intent-filter>
+    </receiver>
+    <!--
+      Replace expo-notifications' NotificationsService so BOOT_COMPLETED / REBOOT /
+      QUICKBOOT never reach the process. Those intents + mediaPlayback FGS crash on
+      Android 15+ and fail Play's "Restricted foreground service types" check.
+      Keep NOTIFICATION_EVENT + MY_PACKAGE_REPLACED (update re-arm only).
+      Reminders re-arm on app open via reminderService.ensureRemindersArmed.
+    -->
+    <receiver
+      android:name="expo.modules.notifications.service.NotificationsService"
+      android:enabled="true"
+      android:exported="false"
+      tools:node="replace">
+      <intent-filter android:priority="-1">
+        <action android:name="expo.modules.notifications.NOTIFICATION_EVENT"/>
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
       </intent-filter>
     </receiver>
   </application>

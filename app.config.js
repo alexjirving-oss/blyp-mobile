@@ -115,7 +115,7 @@ module.exports = () => {
     name: 'Blyp',
     slug: 'blyp-mobile',
     scheme: 'blyp',
-    version: '1.0.1',
+    version: '1.0.18',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'dark',
@@ -163,7 +163,9 @@ module.exports = () => {
         // Do NOT declare FOREGROUND_SERVICE_MICROPHONE: no service uses type=microphone;
         // mic-typed FGS is also killed on API 34+ when the mic is not actively captured.
         'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
-        'android.permission.RECEIVE_BOOT_COMPLETED',
+        // Do NOT declare RECEIVE_BOOT_COMPLETED: Android 15 forbids launching
+        // mediaPlayback (and other restricted) FGS from BOOT_COMPLETED. Incoming-call
+        // FGS starts from FCM only. Local reminders re-arm on app open.
         // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM —
         // Play only allows that for calendar/alarm-clock core apps (Blyp is neither).
         'android.permission.SCHEDULE_EXACT_ALARM',
@@ -216,6 +218,8 @@ module.exports = () => {
       // Integrates the Amazon IVS iOS SDKs (Stages + Player) and Blyp's native
       // Swift/ObjC bridge so live streaming works on iOS at parity with Android.
       './plugins/withIVSiOS',
+      // Strip BOOT_COMPLETED from expo-notifications (Android 15 mediaPlayback FGS).
+      './plugins/withAndroid15BootFgsCompliance',
       // In-app audio calls (LiveKit + WebRTC). Requires a native rebuild / new AAB.
       '@livekit/react-native-expo-plugin',
       '@config-plugins/react-native-webrtc',

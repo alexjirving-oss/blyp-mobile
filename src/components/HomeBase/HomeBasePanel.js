@@ -33,6 +33,7 @@ import {
   formatLead,
   listReminders,
   repairUnscheduledReminders,
+  ensureRemindersArmed,
   removeReminder,
 } from '../../services/reminderService';
 import ReminderEditSheet from '../ReminderEditSheet';
@@ -277,16 +278,21 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   // (so reminders created from the full Blyp screen also appear here).
   const refreshReminders = useCallback(async () => {
     try {
-      // Repair any reminders that were saved without a local notification
-      // (permission denied / old trigger formats), then refresh the list.
-      const rows = await repairUnscheduledReminders(uid);
+      // Re-arm AlarmManager schedules (lost across reboot after Android 15
+      // BOOT_COMPLETED strip) and repair any never-scheduled rows.
+      const rows = await ensureRemindersArmed(uid);
       setReminders(rows);
     } catch {
       try {
-        const rows = await listReminders(uid);
+        const rows = await repairUnscheduledReminders(uid);
         setReminders(rows);
       } catch {
-        /* ignore */
+        try {
+          const rows = await listReminders(uid);
+          setReminders(rows);
+        } catch {
+          /* ignore */
+        }
       }
     }
   }, [uid]);

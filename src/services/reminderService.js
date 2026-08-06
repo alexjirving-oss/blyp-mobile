@@ -538,6 +538,57 @@ export async function repairUnscheduledReminders(uid) {
   return sortByEvent(next);
 }
 
+/**
+ * Re-arm every future local reminder. Required on Android after we dropped
+ * BOOT_COMPLETED (AlarmManager alarms die across reboot; storage still has ids).
+ * Safe to call on every cold start / home focus — cancels then reschedules.
+ */
+export async function ensureRemindersArmed(uid) {
+  const rows = await listReminders(uid);
+  if (!rows.length) return rows;
+  const Notifications = getNotifications();
+  let changed = false;
+  const next = [];
+  for (const rem of rows) {
+    const fire = clampFuture(new Date(rem.whenISO || rem.eventISO));
+    if (!Number.isFinite(fire.getTime()) || fire.getTime() <= Date.now()) {
+      next.push(rem);
+      continue;
+    }
+    if (Notifications && rem?.notificationId) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await Notifications.cancelScheduledNotificationAsync(String(rem.notificationId));
+      } catch {
+        /* ignore — id may already be gone after reboot */
+      }
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const sched = await scheduleReminder({ task: rem.task, when: fire });
+    if (sched?.ok) {
+      changed = true;
+      next.push({
+        ...rem,
+        whenISO: fire.toISOString(),
+        whenLabel: formatWhen(fire),
+        notificationId: sched.id,
+        scheduled: true,
+      });
+    } else {
+      changed = true;
+      next.push({ ...rem, scheduled: false, notificationId: null });
+    }
+  }
+  if (changed) {
+    try {
+      await AsyncStorage.setItem(remindersKey(uid), JSON.stringify(sortByEvent(next)));
+    } catch {
+      /* ignore */
+    }
+  }
+  return sortByEvent(next);
+}
+
 /** Persist a reminder (event time + lead) and return the stored record. */
 export async function saveReminder(uid, { task, event, when, leadMinutes = 0, notificationId = null, scheduled = false }) {
   const eventDate = new Date(event != null ? event : when);
@@ -720,4 +771,6 @@ export default {
   createReminder,
   rescheduleReminder,
   removeReminder,
+  repairUnscheduledReminders,
+  ensureRemindersArmed,
 };

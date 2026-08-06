@@ -59,3 +59,16 @@ Expected declared sensitive permissions related to this questionnaire:
 - `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK`
 - `USE_FULL_SCREEN_INTENT`
 - `RECORD_AUDIO` (separate mic runtime permission for in-call / recording — not an FGS type declaration)
+
+## Android 15 — Restricted foreground service types / BOOT_COMPLETED
+
+**Issue:** Play flags apps that combine `BOOT_COMPLETED` receivers with restricted FGS types (`mediaPlayback`, etc.). On API 35 those boot→FGS starts throw `ForegroundServiceStartNotAllowedException`.
+
+**Root cause:** `expo-notifications` merges `NotificationsService` with `BOOT_COMPLETED` (alarm re-arm only) while Blyp declares `IncomingCallForegroundService` (`mediaPlayback`) for FCM-woken call ringtones.
+
+**Fix (versionCode ≥ 2026313239):**
+- Manifest `tools:node="replace"` on `NotificationsService` — keep `NOTIFICATION_EVENT` + `MY_PACKAGE_REPLACED`, strip boot/reboot/quickboot.
+- `RECEIVE_BOOT_COMPLETED` + unused `SYSTEM_ALERT_WINDOW` removed via `tools:node="remove"`.
+- Plugin `plugins/withAndroid15BootFgsCompliance.js` keeps prebuild aligned.
+- Incoming-call FGS still starts from FCM / user call UI only — never from boot.
+- Local reminders re-arm on app open via `ensureRemindersArmed` (AlarmManager does not survive reboot without boot receivers).

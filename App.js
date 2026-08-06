@@ -939,6 +939,12 @@ function AppInner() {
     };
     (async () => {
       try {
+        // Android 15: no BOOT_COMPLETED re-arm — refresh AlarmManager after process start.
+        try {
+          // eslint-disable-next-line global-require
+          const { ensureRemindersArmed } = require('./src/services/reminderService');
+          await ensureRemindersArmed(fbUid);
+        } catch { /* optional */ }
         // eslint-disable-next-line global-require
         const Push = require('./src/services/PushService');
         await Push.registerForPush(fbUid);

@@ -106,6 +106,13 @@
         "track": "internal",
         "releaseStatus": "completed"
       }
+    },
+    "playProduction": {
+      "android": {
+        "serviceAccountKeyPath": "./android-service-account.json",
+        "track": "production",
+        "releaseStatus": "draft"
+      }
     }
   }
 }
