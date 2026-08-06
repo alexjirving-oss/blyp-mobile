@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Blyp Gift Film Clips — Trailer Reel</title>
+  <title>Blyp Gift FX — TikTok-bar overlays</title>
   <style>
     :root {
       --bg: #070b12;
@@ -44,7 +44,7 @@
     }
     .lede {
       color: var(--muted);
-      max-width: 40rem;
+      max-width: 42rem;
       margin: 0 auto 1.25rem;
       line-height: 1.5;
     }
@@ -71,7 +71,7 @@
       border: 1px solid rgba(255,255,255,0.2);
     }
     .reel {
-      max-width: 960px;
+      max-width: 720px;
       margin: 0 auto;
       padding: 0 1rem 3rem;
       display: grid;
@@ -87,45 +87,32 @@
     .clip video {
       display: block;
       width: 100%;
-      aspect-ratio: 16 / 9;
+      aspect-ratio: 9 / 16;
       background: #000;
+      object-fit: contain;
     }
     .meta { padding: 1rem 1.15rem 1.2rem; }
     .meta h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
     .meta p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
-    .storyboards {
-      max-width: 960px;
-      margin: 0 auto 3rem;
-      padding: 0 1rem;
-    }
-    .storyboards h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
-    .sb-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 0.5rem;
-    }
-    .sb-grid img {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      object-fit: cover;
-      border-radius: 8px;
-      background: #111;
-    }
     footer {
       text-align: center;
       color: var(--muted);
       font-size: 0.8rem;
       padding: 0 1rem 2.5rem;
+      max-width: 40rem;
+      margin: 0 auto;
+      line-height: 1.45;
     }
   </style>
 </head>
 <body>
   <header>
-    <div class="tag">Gift cinema · true motion</div>
-    <h1>Blyp Gift Film Trailer Reel</h1>
+    <div class="tag">TikTok-bar · dark-key gift overlays</div>
+    <h1>Blyp Gift FX Trailer Reel</h1>
     <p class="lede">
-      Five hero gifts as continuous 30fps character motion — anticipation, arcs, particles —
-      not Ken Burns slideshows. Double-click this file or use Play full reel.
+      Large center-stage luxury FX on black (screen-composited glitter plate) —
+      metallic rocket, jeweled crown, crystal diamond, confetti cannon, flame column.
+      Not cartoon character cinema. Not Ken Burns. Still short of TikTok’s best paid 3D AlphaPlayer packs.
     </p>
     <div class="controls">
       <button type="button" id="playAll">Play full reel</button>
@@ -134,20 +121,15 @@
   </header>
 
   <main class="reel">
-    <article class="clip"><video controls playsinline preload="metadata" src="../clips/rocket.mp4"></video><div class="meta"><h2>Rocket — Ultimate</h2><p>Toy rocket with eyes: pad anticipation → ignition → ascent → star glory.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../clips/crown.mp4"></video><div class="meta"><h2>Crown — Legendary</h2><p>Jeweled crown character descends and crowns the stage.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../clips/diamond.mp4"></video><div class="meta"><h2>Diamond — Epic</h2><p>Diamond character facet-dances into a light burst.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../clips/cheer_burst.mp4"></video><div class="meta"><h2>Cheer Burst — Epic</h2><p>Stadium figures erupt in a celebration wave.</p></div></article>
-    <article class="clip"><video controls playsinline preload="metadata" src="../clips/fire.mp4"></video><div class="meta"><h2>Fire — Mid / Spotlight</h2><p>Phoenix fire-spirit rises from embers to glory.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/rocket.mp4"></video><div class="meta"><h2>Rocket — Ultimate</h2><p>Metallic rocket ignition → ascent streak → apex star detonation + sparkle plate.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/crown.mp4"></video><div class="meta"><h2>Crown — Legendary</h2><p>Jeweled gold crown descends on light shaft → contact glitter storm → regal halo.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/diamond.mp4"></video><div class="meta"><h2>Diamond — Epic</h2><p>Crystal rotates with caustic flashes → prism beams → shatter spark bloom.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/cheer_burst.mp4"></video><div class="meta"><h2>Cheer Burst — Epic</h2><p>Confetti cannon → stadium light streaks → teal/gold celebration wash.</p></div></article>
+    <article class="clip"><video controls playsinline preload="metadata" src="../../assets/gifts/cinema/clips/fire.mp4"></video><div class="meta"><h2>Fire — Mid / Spotlight</h2><p>Ember floor → luminous flame column → heat bloom + ember rain.</p></div></article>
   </main>
 
-  <section class="storyboards">
-    <h2>Storyboard stills</h2>
-    <div class="sb-grid" id="sb"></div>
-  </section>
-
   <footer>
-    True-motion procedural cinema (character rig every frame @ 30fps → H.264). Not a stills slideshow.
+    Dark-keyed H.264 @ 720×1280 / 30fps. In-app: GiftFilmPlayer uses transparent root, glow plate, impact flash, screen blend.
   </footer>
 
   <script>
@@ -169,21 +151,6 @@
       chainToken++;
       videos.forEach((v) => v.pause());
     };
-    const frames = [
-      'rocket-01-anticipation.png','rocket-02-ignition.png','rocket-03-ascent.png','rocket-04-glory.png',
-      'crown-01-descent.png','crown-02-crowning.png','crown-03-glory.png',
-      'diamond-01-reveal.png','diamond-02-dance.png','diamond-03-glory.png',
-      'cheer-01-stadium.png','cheer-02-wave.png','cheer-03-glory.png',
-      'fire-01-embers.png','fire-02-rise.png','fire-03-glory.png',
-    ];
-    const sb = document.getElementById('sb');
-    for (const f of frames) {
-      const img = document.createElement('img');
-      img.src = '../storyboards/' + f;
-      img.alt = f;
-      img.loading = 'lazy';
-      sb.appendChild(img);
-    }
   </script>
 </body>
 </html>
