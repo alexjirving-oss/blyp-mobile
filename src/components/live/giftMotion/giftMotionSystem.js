@@ -139,6 +139,8 @@ export const GIFT_MOTION = {
     rarity: 'rare',
     motionTier: 'mid',
     motif: 'flame_column',
+    cinemaId: 'fire',
+    cinematicV2: true,
     palette: ['#7C2D12', ENERGY_RED, ENERGY_ORANGE],
     particles: ['🔥', '✨', '💥'],
     audioKey: 'gift_fire',
@@ -165,6 +167,8 @@ export const GIFT_MOTION = {
     rarity: 'epic',
     motionTier: 'epic',
     motif: 'crystal_prism',
+    cinemaId: 'diamond',
+    cinematicV2: true,
     palette: ['#0E7490', CRYSTAL, TEAL_LIGHT],
     particles: ['💎', '✨', '💠'],
     audioKey: 'gift_diamond',
@@ -178,6 +182,8 @@ export const GIFT_MOTION = {
     rarity: 'rare',
     motionTier: 'epic',
     motif: 'stadium_wave',
+    cinemaId: 'cheer_burst',
+    cinematicV2: true,
     palette: [TEAL_DARK, TEAL, ENERGY_ORANGE],
     particles: ['💨', '👏', '✨'],
     audioKey: 'gift_cheer',
@@ -204,6 +210,8 @@ export const GIFT_MOTION = {
     rarity: 'legendary',
     motionTier: 'legendary',
     motif: 'regal_drop',
+    cinemaId: 'crown',
+    cinematicV2: true,
     palette: ['#92400E', GOLD, TEAL],
     particles: ['👑', '✨', '⭐'],
     audioKey: 'gift_crown',
@@ -217,12 +225,17 @@ export const GIFT_MOTION = {
     rarity: 'legendary',
     motionTier: 'ultimate',
     motif: 'orbital_launch',
+    cinemaId: 'rocket',
+    cinematicV2: true,
     palette: [INK, TEAL, ENERGY_ORANGE],
     particles: ['🚀', '✨', '🔥', '💫'],
     audioKey: 'gift_rocket',
     p0: true,
   },
 };
+
+/** Hero gifts that use GiftCinematicPlayer (Skia cinema), not emoji overlays. */
+export const CINEMATIC_V2_IDS = Object.keys(GIFT_MOTION).filter((k) => GIFT_MOTION[k].cinematicV2);
 
 export function resolveMotion(giftId, fallback = {}) {
   const key = String(giftId || '').toLowerCase();
@@ -324,6 +337,11 @@ export function getFxBudget() {
       shake: true,
       svgLayers: true,
       trail: true,
+      cinemaParticles: 48,
+      bloom: true,
+      chromatic: true,
+      letterbox: true,
+      skiaCinema: true,
     },
     mid: {
       tier: 'mid',
@@ -337,6 +355,11 @@ export function getFxBudget() {
       shake: true,
       svgLayers: true,
       trail: true,
+      cinemaParticles: 32,
+      bloom: true,
+      chromatic: true,
+      letterbox: true,
+      skiaCinema: true,
     },
     low: {
       tier: 'low',
@@ -350,9 +373,35 @@ export function getFxBudget() {
       shake: false,
       svgLayers: false,
       trail: false,
+      cinemaParticles: 14,
+      bloom: false,
+      chromatic: false,
+      letterbox: false,
+      skiaCinema: true,
     },
   };
   return budgets[tier] || budgets.mid;
+}
+
+/**
+ * Full duration for cinematic V2 heroes (longer glory hold than P0 emoji path).
+ */
+export function cinemaHoldMs(motion) {
+  const tier = getTierConfig(motion?.motionTier);
+  const base = {
+    mid: 2200,
+    epic: 3200,
+    legendary: 4200,
+    ultimate: 5200,
+  };
+  const ms = base[tier.id] || heroHoldMs(motion);
+  try {
+    const budget = getFxBudget();
+    if (budget.tier === 'low') return Math.round(ms * 0.82);
+  } catch {
+    // keep base
+  }
+  return ms;
 }
 
 /** Hold duration for hero takeover from tier + coin intensity. */

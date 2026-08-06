@@ -20,7 +20,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import BlypCoinService from '../../services/BlypCoinService';
 import GiftHeroFx, { ShimmerSweep } from './giftMotion/GiftHeroFx';
+import GiftCinematicPlayer from './giftMotion/GiftCinematicPlayer';
 import {
+  cinemaHoldMs,
   comboHeat,
   crossedComboMilestone,
   getFxBudget,
@@ -111,6 +113,11 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
         // ignore
       }
     });
+    if (target.cinematicV2) {
+      if (bigGiftEntryRef.current === target) bigGiftEntryRef.current = null;
+      setBigGift(null);
+      return;
+    }
     Animated.parallel([
       Animated.timing(target.opacity, { toValue: 0, duration: 280, useNativeDriver: true }),
       Animated.timing(target.scale, { toValue: 1.25, duration: 280, useNativeDriver: true }),
@@ -287,12 +294,15 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
 
       const motion = gift.motion;
       const tier = getTierConfig(motion.motionTier);
+      const useCinema = !!motion.cinematicV2 && budget.skiaCinema !== false;
       const intensity = Math.max(0.35, Math.min(1, (Number(motion.coinCost) || 25) / 100));
       const emojiSize =
         tier.takeover === 'spotlight' ? 64 + intensity * 28 : 88 + intensity * 48;
-      const holdMs = heroHoldMs(motion);
+      const holdMs = useCinema ? cinemaHoldMs(motion) : heroHoldMs(motion);
       const power = 150 + intensity * 150;
-      const wave1 = Math.round(budget.burstBig * (0.55 + intensity * 0.45));
+      const wave1 = Math.round(
+        budget.burstBig * (0.55 + intensity * 0.45) * (useCinema ? 0.35 : 1)
+      );
       const wave2 = Math.round(wave1 * 0.65);
 
       const entry = {
@@ -300,6 +310,7 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
         motion,
         sender,
         receiver,
+        cinematicV2: useCinema,
         size: emojiSize,
         scale: new Animated.Value(0.28),
         opacity: new Animated.Value(0),
@@ -313,6 +324,24 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
       };
       bigGiftEntryRef.current = entry;
       setBigGift(entry);
+
+      if (useCinema) {
+        // Cinema player owns its clock / dismiss; keep a safety timer only.
+        Animated.timing(entry.opacity, { toValue: 1, duration: 120, useNativeDriver: true }).start();
+        // Soft ambient burst (geometry cinema is the hero — avoid emoji spam)
+        const origin = {
+          x: SCREEN_W / 2 - 16,
+          y: SCREEN_H * (tier.takeover === 'spotlight' ? 0.28 : 0.34),
+        };
+        spawnBurst(origin, {
+          count: Math.max(4, wave1),
+          emojis: ['✨', '✦'],
+          power: power * 0.55,
+          big: false,
+        });
+        bigGiftTimerRef.current = setTimeout(() => dismissBigGift(entry), holdMs + 500);
+        return;
+      }
 
       const glowLoop = Animated.loop(
         Animated.sequence([
@@ -520,7 +549,13 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
         style={[styles.edgeFlash, { borderColor: edgeColor, opacity: edgeFlash }]}
       />
 
-      {bigGift ? (
+      {bigGift?.cinematicV2 ? (
+        <GiftCinematicPlayer
+          entry={bigGift}
+          onSkip={() => dismissBigGift(bigGift)}
+          onDone={() => dismissBigGift(bigGift)}
+        />
+      ) : bigGift ? (
         <GiftHeroFx entry={bigGift} onSkip={() => dismissBigGift(bigGift)} />
       ) : null}
 
