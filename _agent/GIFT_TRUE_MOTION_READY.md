@@ -7,10 +7,13 @@
 ## Commit SHA (use this for Play AAB bake)
 
 ```
-29588f329a6acbc8f45a70a2cd7b373e4ea28b77
+a686268d388fdad85f53e1318bb628ec62ca0e36
 ```
 
-*(Filled immediately after `git commit` — see bottom of this file / re-read after commit.)*
+**Short:** `a686268`  
+**Message:** `feat(gifts): replace slideshow clips with true motion cinema`
+
+If a later docs-only stamp sits on top of this SHA, bake from tip — clips are already in `a686268` and remain in descendants.
 
 ## What changed
 
@@ -66,14 +69,6 @@ C:\Users\Alex\Desktop\Blyp-Gift-Animations-Copy\previews\film-reel.html
 
 ## AAB agent handoff
 
-1. Checkout / use commit SHA above on `Blyp26-eas-modern`
+1. Checkout `a686268` (or tip that contains it) on `Blyp26-eas-modern`
 2. Bake Play AAB with bundled `assets/gifts/cinema/clips/*.mp4`
 3. Upload only when Alex asks (`npm run play:upload`)
-
----
-
-## Resolved commit SHA
-
-```
-29588f329a6acbc8f45a70a2cd7b373e4ea28b77
-```
