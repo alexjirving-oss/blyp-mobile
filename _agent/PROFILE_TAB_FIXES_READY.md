@@ -1,4 +1,4 @@
-# Profile tab fixes — READY for tip AAB
+# Profile tab fixes - READY for tip AAB
 
 ## Commit SHA (include in Play AAB bake)
 
@@ -6,7 +6,7 @@
 
 Message: `fix(profile): speed save/wallet and stop Promote tab crash`
 
-Branch tip (eas-modern): `feat/rooms-presence-ambassador` — bake from tip that **contains** this SHA (or later).
+Branch tip (eas-modern): `feat/rooms-presence-ambassador` - bake from tip that **contains** this SHA (or later).
 
 ## Also pending on tip AAB stack
 
@@ -16,13 +16,13 @@ Branch tip (eas-modern): `feat/rooms-presence-ambassador` — bake from tip that
 
 ## Root causes + fixes
 
-1. **Edit profile save slow** — Save awaited username collision queries (even when unchanged), club membership sync, and sequential post author-meta backfill (up to 200 docs) before `Alert` + goBack.
-   - Fix: write user doc → update `ownProfileCache` → toast → goBack immediately; club sync + backfill run in background; skip uniqueness queries when username unchanged.
+1. **Edit profile save slow** - Save awaited username collision queries (even when unchanged), club membership sync, and sequential post author-meta backfill (up to 200 docs) before Alert + goBack.
+   - Fix: write user doc -> update `ownProfileCache` -> toast -> goBack immediately; club sync + backfill run in background; skip uniqueness queries when username unchanged.
 
-2. **Promote tab crash** — Promote Studio (`a5136e9`) called `subscribeMyBattles(callback)` without `uid`, so `cb` was undefined and Firestore snapshots crashed (`cb is not a function`). Empty/undefined catalog fields could also throw on `.replace` / `Math.min(...)`.
+2. **Promote tab crash** - Promote Studio (`a5136e9`) called `subscribeMyBattles(callback)` without `uid`, so `cb` was undefined and Firestore snapshots crashed (`cb is not a function`). Empty/undefined catalog fields could also throw on `.replace` / `Math.min(...)`.
    - Fix: restore `useAuth` + `subscribeMyBattles(uid, cb)`; harden `battleService.subscribeMyBattles`; empty-catalog / missing-field guards; show fallback catalog without blocking on pricing.
 
-3. **Wallet tab forever loading** — Profile gated Wallet/Promote on full `loadAll` `busy` (`isLoading`), so switching tabs waited on posts/stats. Balance fetches were sequential; no last-wallet cache; Stripe Connect only needed for withdraw but UX felt blocked.
+3. **Wallet tab forever loading** - Profile gated Wallet/Promote on full `loadAll` `busy` (`isLoading`), so switching tabs waited on posts/stats. Balance fetches were sequential; no last-wallet cache; Stripe Connect only needed for withdraw but UX felt blocked.
    - Fix: mount Wallet/Promote immediately after auth; seed from `walletBalanceCache` + parent balances; `Promise.all` coin/gem fetches; skeleton while refreshing; Stripe Connect stays withdraw-only.
 
 ## Files
