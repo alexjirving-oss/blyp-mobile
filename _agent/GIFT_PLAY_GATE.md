@@ -1,17 +1,15 @@
 # Gift Play upload gate
 
-**Verdict: PENDING_USER_REVIEW**  
+**Verdict: SHIPPED_FOR_LAUNCH**  
 **Date:** 2026-08-06  
 **Worktree:** `C:\Users\Alex\Blyp26-eas-modern`  
-**Baseline:** densified cheer_burst + warmer fire alpha masters (post-`eb32a27`)
+**Baseline:** densified cheer_burst + warmer fire alpha masters (`869aef8` / `eb32a27`)
 
 ## Decision
 
-**Do not bake / upload to Play yet.** Watch the Desktop reel and reply `PLAY GATE: PASS` (or request another in-house pass).
+**User override for same-day launch:** bake and upload to Play **now**. Gift visual perfection deferred to a post-launch follow-up pass. Do not re-block Play on Desktop reel sign-off.
 
-This is **not** blocked on paid freelancers. Masters are self-authored; gate is visual sign-off only.
-
-## Shipped
+## Shipped in this launch bake
 
 | Item | Path |
 |------|------|
@@ -22,25 +20,12 @@ This is **not** blocked on paid freelancers. Masters are self-authored; gate is 
 | `ALPHA_CLIPS` wired | `filmClipRegistry.js` |
 | Blender pipeline | `_agent/gift-animations-20260806/alpha-pipeline/` |
 
-## Latest densify pass
-
-- `cheer_burst`: denser multi-color confetti + stadium streaks + keyed spark layers
-- `fire`: warmer orange/red column, dense ember field, rising sparks (replaces pale-cream wash)
-- rocket / crown / diamond unchanged this pass
-- Same RGB\|A side-by-side alpha encode pipeline
-
 ## Honest visual note
 
-Clear leap past Canvas/dark-key 2D. Rocket + crown still the strongest heroes; cheer/fire now denser/warmer than `eb32a27`. Not claiming Unreal character-gift parity.
+Clear leap past Canvas/dark-key 2D. Rocket + crown still the strongest heroes; cheer/fire denser/warmer than `eb32a27`. Not claiming Unreal character-gift parity — polish queue remains open after launch.
 
-## Desktop preview
+## Follow-up (post-launch)
 
-```
-C:\Users\Alex\Desktop\Blyp-Gift-Animations-Copy\previews\film-reel.html
-```
-
-## Unblock Play
-
-1. Watch Desktop reel (alpha WebM over live stand-in)
-2. Reply `PLAY GATE: PASS`
-3. Only then bake / upload
+1. Optional Desktop reel QC at `C:\Users\Alex\Desktop\Blyp-Gift-Animations-Copy\previews\film-reel.html`
+2. Further densify / hero parity pass if Alex wants another in-house iteration
+3. Do **not** hold production promotion on gift polish
