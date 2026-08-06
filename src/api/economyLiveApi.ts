@@ -173,10 +173,22 @@ export interface EconomyCatalog {
   gifts: EconomyCatalogGift[];
 }
 
+export type PromoteCatalogMethod = {
+  methodId: string;
+  type: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  packages: Array<{ id: string; label: string; hours: number; coins: number }>;
+};
+
 export type PromotePricing = {
   battle: { coins: number; durationHours: number };
   timeSlot: { per30MinCoins: number };
   spotlight: { coins1h: number; coins24h: number; coins7d: number };
+  catalog?: PromoteCatalogMethod[];
+  packages?: Record<string, Array<{ id: string; label: string; hours: number; coins: number }>>;
+  limits?: { maxActivePerUser: number; searchGlobalCap: number };
 };
 
 export type SpotlightAvailability = {
@@ -201,11 +213,28 @@ export type ActivePromotion = {
   startsAt: string;
   endsAt: string;
   battleRef: string | null;
+  postRef?: string | null;
+  streamRef?: string | null;
+  methodId?: string | null;
+  note?: string | null;
+  targeting?: { sports?: string[]; geos?: string[]; interests?: string[] } | null;
 };
 
 export type ActivePromotionsResponse = {
   asOf: string;
   promotions: ActivePromotion[];
+};
+
+export type MyPromotion = ActivePromotion & {
+  status: string;
+  coinCost?: number;
+  createdAt?: string;
+};
+
+export type MyPromotionsResponse = {
+  asOf: string;
+  active: MyPromotion[];
+  history: MyPromotion[];
 };
 
 export interface SendGiftInput {
@@ -325,6 +354,28 @@ export async function getSpotlightAvailability(input: { durationKey: '1h' | '24h
 export async function promoteBookSpotlight(input: { idempotencyKey: string; startsAt: string; durationKey: '1h' | '24h' | '7d'; note?: string }): Promise<PromotePurchaseResponse> {
   return await callEconomyBackend<PromotePurchaseResponse>('/promote/spotlight/book', 'POST', input);
 }
+
+
+export async function promoteBookMethod(input: {
+  idempotencyKey: string;
+  methodId: string;
+  packageId?: string;
+  startsAt?: string;
+  durationKey?: '1h' | '24h' | '7d';
+  durationMinutes?: number;
+  battleRef?: string;
+  postRef?: string;
+  streamRef?: string;
+  note?: string;
+  targeting?: { sports?: string[]; geos?: string[]; interests?: string[] };
+}): Promise<PromotePurchaseResponse> {
+  return await callEconomyBackend<PromotePurchaseResponse>('/promote/method/book', 'POST', input);
+}
+
+export async function getMyPromotions(): Promise<MyPromotionsResponse> {
+  return await callEconomyBackend<MyPromotionsResponse>('/promote/mine', 'GET');
+}
+
 
 export async function getEconomyStreamSummary(streamId: string): Promise<StreamSummaryResponse> {
   return await callEconomyBackend<StreamSummaryResponse>(`/economy/stream/${encodeURIComponent(streamId)}/summary`, 'GET');

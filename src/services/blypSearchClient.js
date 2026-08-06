@@ -83,6 +83,38 @@ function mapResponse(query, data) {
  * Run a search against the Blyp backend. Returns the mapped result, or null if
  * the backend is unconfigured/unreachable (caller should fall back).
  */
+
+/**
+ * Inject at most one labelled SEARCH_SPONSORED slot from active promotions.
+ * Best-effort; never throws.
+ */
+async function injectSponsoredFromPromote(mapped) {
+  if (!mapped || typeof mapped !== 'object') return mapped;
+  try {
+    const { getActivePromotions } = await import('../api/economyLiveApi');
+    const res = await getActivePromotions();
+    const list = Array.isArray(res?.promotions) ? res.promotions : [];
+    const hit = list.find((p) => String(p?.promotionType || '').toUpperCase() === 'SEARCH_SPONSORED');
+    if (!hit) return mapped;
+    const existing = Array.isArray(mapped.sponsored) ? mapped.sponsored : [];
+    if (existing.some((s) => s?.sponsoredLabel || s?._promoteSponsored)) return mapped;
+    const slot = {
+      title: 'Sponsored creator',
+      url: '',
+      snippet: hit.note || 'Promoted on Blyp Search',
+      source: 'Blyp Promote',
+      sponsoredLabel: 'Sponsored',
+      _promoteSponsored: true,
+      promotionId: hit.promotionId,
+      userId: hit.userId,
+    };
+    return { ...mapped, sponsored: [slot, ...existing].slice(0, 1) };
+  } catch (e) {
+    console.warn('[blypSearchClient] injectSponsoredFromPromote failed', e?.message || String(e));
+    return mapped;
+  }
+}
+
 export async function backendSearch(query, options = {}) {
   if (!SEARCH_URL) return null;
   const controller = new AbortController();
@@ -102,7 +134,8 @@ export async function backendSearch(query, options = {}) {
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || typeof data !== 'object') return null;
-    return mapResponse(query, data);
+    const mapped = mapResponse(query, data);
+    return await injectSponsoredFromPromote(mapped);
   } catch (e) {
     clearTimeout(timer);
     console.warn('[blypSearchClient] backend search failed, falling back', e?.message || String(e));

@@ -33,7 +33,7 @@ const STAGE_COLOR = {
   resting: '#8e8e93',
 };
 
-const PostReachSheet = ({ visible, onClose, post, isOwner = false, onEdited }) => {
+const PostReachSheet = ({ visible, onClose, post, isOwner = false, onEdited, navigation }) => {
   const summary = useMemo(() => reachSummary(post || {}), [post]);
   const [editing, setEditing] = useState(false);
   const [caption, setCaption] = useState('');
@@ -89,6 +89,13 @@ const PostReachSheet = ({ visible, onClose, post, isOwner = false, onEdited }) =
             </TouchableOpacity>
           </View>
 
+          {Boolean(post?.reach?.boosted || post?.promoteType === 'FEED_BOOST' || post?.promoteBoostWeight > 0) && (
+            <View style={styles.boostBanner}>
+              <Icon name="flash" size={16} color={COLORS.primary} />
+              <Text style={styles.boostBannerText}>Feed Boost is amplifying this post</Text>
+            </View>
+          )}
+
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
             {/* Score + stage */}
             <View style={styles.scoreRow}>
@@ -136,7 +143,25 @@ const PostReachSheet = ({ visible, onClose, post, isOwner = false, onEdited }) =
             )}
 
             {/* Owner edit / re-audition */}
-            {isOwner && !editing && (
+            
+            {isOwner && (
+              <TouchableOpacity
+                style={styles.boostCta}
+                activeOpacity={0.85}
+                onPress={() => {
+                  onClose?.();
+                  navigation?.navigate?.('Profile', {
+                    openPromote: true,
+                    promoteMethodId: 'feed_boost',
+                  });
+                }}
+              >
+                <Icon name="rocket-outline" size={17} color={COLORS.black} />
+                <Text style={styles.boostCtaText}>Boost this post</Text>
+              </TouchableOpacity>
+            )}
+
+{isOwner && !editing && (
               <TouchableOpacity style={styles.editBtn} activeOpacity={0.85} onPress={startEdit}>
                 <Icon name="create-outline" size={17} color={COLORS.black} />
                 <Text style={styles.editBtnText}>Edit & re-audition</Text>
@@ -217,6 +242,30 @@ const styles = StyleSheet.create({
   tipsTitle: { color: COLORS.textMuted, fontSize: responsiveFont(11), fontWeight: '800', letterSpacing: 1, marginBottom: 10 },
   tipRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   tipText: { flex: 1, color: COLORS.textSecondary, fontSize: responsiveFont(13), lineHeight: responsiveFont(18) },
+  boostBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.backgroundCard,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    marginBottom: 10,
+  },
+  boostBannerText: { color: COLORS.textPrimary, fontSize: responsiveFont(12), fontWeight: '700', flex: 1 },
+  boostCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  boostCtaText: { color: COLORS.black, fontWeight: '800', fontSize: responsiveFont(14) },
   editBtn: {
     flexDirection: 'row',
     alignItems: 'center',

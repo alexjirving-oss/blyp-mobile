@@ -14,16 +14,27 @@ describe('promoteBoostService', () => {
     expect(promoteWeightForType('BATTLE')).toBe(50);
     expect(promoteWeightForType('TIME_SLOT')).toBe(70);
     expect(promoteWeightForType('SPOTLIGHT')).toBe(95);
+    expect(promoteWeightForType('FEED_BOOST')).toBe(65);
+    expect(promoteWeightForType('PROFILE')).toBe(55);
+    expect(promoteWeightForType('LIVE')).toBe(60);
+    expect(promoteWeightForType('SEARCH_SPONSORED')).toBe(40);
+    expect(promoteWeightForType('FOLLOWERS_NOTIFY')).toBe(35);
+    expect(promoteWeightForType('TEAM_SHOUTOUT')).toBe(45);
+    expect(promoteWeightForType('CROSS_SPORT')).toBe(40);
+    expect(promoteWeightForType('REMATCH')).toBe(50);
+    expect(promoteWeightForType('UNKNOWN_TYPE')).toBe(0);
   });
 
-  test('buildPromoteBoostByUser keeps strongest type per user', () => {
+  test('buildPromoteBoostByUser keeps strongest type per user and postRef', () => {
     const map = buildPromoteBoostByUser([
       { userId: 'u1', promotionType: 'BATTLE', battleRef: 'b1' },
       { userId: 'u1', promotionType: 'SPOTLIGHT' },
       { userId: 'u2', promotionType: 'TIME_SLOT' },
+      { userId: 'u3', promotionType: 'FEED_BOOST', postRef: 'post99' },
     ]);
-    expect(map.get('u1')).toEqual({ type: 'SPOTLIGHT', weight: 95, battleRef: null });
-    expect(map.get('u2')).toEqual({ type: 'TIME_SLOT', weight: 70, battleRef: null });
+    expect(map.get('u1')).toEqual({ type: 'SPOTLIGHT', weight: 95, battleRef: null, postRef: null });
+    expect(map.get('u2')).toEqual({ type: 'TIME_SLOT', weight: 70, battleRef: null, postRef: null });
+    expect(map.get('u3')).toEqual({ type: 'FEED_BOOST', weight: 65, battleRef: null, postRef: 'post99' });
   });
 
   test('applyPromoteFairCap limits promote share in top window', () => {

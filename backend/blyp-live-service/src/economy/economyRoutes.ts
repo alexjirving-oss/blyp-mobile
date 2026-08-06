@@ -14,6 +14,7 @@ import {
   paginationSchema,
   promoteBattleSchema,
   promoteSpotlightBookSchema,
+  promoteMethodBookSchema,
   promoteTimeSlotBookSchema,
   battleDepositSchema,
   battleCancelRefundSchema,
@@ -37,6 +38,8 @@ import {
 import {
   bookPromoteSpotlight,
   bookPromoteTimeSlot,
+  purchasePromoteMethod,
+  getMyPromotions,
   claimDailyReward,
   creditCoinsAdmin,
   finalizeLiveGame,
@@ -188,6 +191,41 @@ router.post('/promote/spotlight/book', async (req: AuthedRequest, res) => {
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
 });
+
+
+router.post('/promote/method/book', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+
+    const parsed = promoteMethodBookSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+
+    const out = await purchasePromoteMethod(userId, parsed.data);
+    if (out.kind === 'replay') {
+      return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
+    }
+
+    res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/promote/mine', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+
+    const result = await getMyPromotions(userId);
+    res.json(result);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
 
 router.get('/wallet', async (req: AuthedRequest, res) => {
   try {

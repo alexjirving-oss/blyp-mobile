@@ -186,7 +186,7 @@ const ProfileScreenV3: React.FC = () => {
     setActiveTab('Promote');
     setProfileTab('tab1');
     try {
-      (nav as any)?.setParams?.({ openPromote: undefined });
+      (nav as any)?.setParams?.({ openPromote: undefined, promoteMethodId: undefined });
     } catch {
       /* ignore */
     }
@@ -1381,6 +1381,14 @@ const ProfileScreenV3: React.FC = () => {
                 currentCoins={coinBalance}
                 onCoinsChanged={(next: number) => setCoinBalance(Number.isFinite(Number(next)) ? Number(next) : 0)}
                 navigation={nav as any}
+                posts={(userPosts || []).map((p: any) => ({
+                  id: String(p?.id || ''),
+                  caption: String(p?.caption || p?.description || p?.title || ''),
+                  thumbnail: p?.thumbnail || p?.imageUrl || undefined,
+                })).filter((p: any) => p.id)}
+                initialMethodId={
+                  typeof route?.params?.promoteMethodId === 'string' ? route.params.promoteMethodId : null
+                }
               />
             )}
           </View>

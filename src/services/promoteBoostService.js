@@ -1,4 +1,4 @@
-﻿// promoteBoostService.js
+// promoteBoostService.js
 //
 // Loads active coin-promote windows from the economy backend and attaches a
 // capped boost onto posts / creators so discovery + For You can surface paid
@@ -12,12 +12,20 @@ export const PROMOTE_TYPE_WEIGHTS = Object.freeze({
   SPOTLIGHT: 95,
   TIME_SLOT: 70,
   BATTLE: 50,
+  FEED_BOOST: 65,
+  PROFILE: 55,
+  LIVE: 60,
+  SEARCH_SPONSORED: 40,
+  FOLLOWERS_NOTIFY: 35,
+  TEAM_SHOUTOUT: 45,
+  CROSS_SPORT: 40,
+  REMATCH: 50,
 });
 
 /** Hard ceiling so stacked promos cannot dominate admin / organic ranking. */
 export const PROMOTE_WEIGHT_CAP = 95;
 
-/** Max share of promoted items in any fair-cap window (≈ 1 in 3). */
+/** Max share of promoted items in any fair-cap window (~ 1 in 3). */
 export const PROMOTE_MAX_SHARE = 1 / 3;
 
 /** Max posts from the same promoted author inside one fair-cap window. */
@@ -25,14 +33,14 @@ export const PROMOTE_MAX_PER_USER = 2;
 
 const CACHE_TTL_MS = 45_000;
 
-/** @type {{ at: number, byUser: Map<string, { type: string, weight: number, battleRef: string|null }> } | null} */
+/** @type {{ at: number, byUser: Map<string, { type: string, weight: number, battleRef: string|null, postRef: string|null }> } | null} */
 let cache = null;
-/** @type {Promise<Map<string, { type: string, weight: number, battleRef: string|null }>> | null} */
+/** @type {Promise<Map<string, { type: string, weight: number, battleRef: string|null, postRef: string|null }>> | null} */
 let inflight = null;
 
 function normalizeType(raw) {
   const t = String(raw || '').trim().toUpperCase();
-  if (t === 'SPOTLIGHT' || t === 'TIME_SLOT' || t === 'BATTLE') return t;
+  if (Object.prototype.hasOwnProperty.call(PROMOTE_TYPE_WEIGHTS, t)) return t;
   return '';
 }
 
@@ -43,10 +51,10 @@ export function promoteWeightForType(type) {
 
 /**
  * Collapse overlapping promos for one user to the strongest active type.
- * @param {Array<{ userId?: string, promotionType?: string, battleRef?: string|null }>} promotions
+ * @param {Array<{ userId?: string, promotionType?: string, battleRef?: string|null, postRef?: string|null }>} promotions
  */
 export function buildPromoteBoostByUser(promotions) {
-  /** @type {Map<string, { type: string, weight: number, battleRef: string|null }>} */
+  /** @type {Map<string, { type: string, weight: number, battleRef: string|null, postRef: string|null }>} */
   const byUser = new Map();
   for (const p of promotions || []) {
     const userId = String(p?.userId || '').trim();
@@ -56,9 +64,11 @@ export function buildPromoteBoostByUser(promotions) {
     if (weight <= 0) continue;
     const battleRef =
       p?.battleRef != null && String(p.battleRef).trim() ? String(p.battleRef).trim() : null;
+    const postRef =
+      p?.postRef != null && String(p.postRef).trim() ? String(p.postRef).trim() : null;
     const prev = byUser.get(userId);
     if (!prev || weight > prev.weight) {
-      byUser.set(userId, { type, weight, battleRef });
+      byUser.set(userId, { type, weight, battleRef, postRef });
     }
   }
   return byUser;
@@ -93,7 +103,7 @@ export async function loadPromoteBoostByUser() {
   return inflight;
 }
 
-/** Test helper — clear cache between tests. */
+/** Test helper - clear cache between tests. */
 export function clearPromoteBoostCache() {
   cache = null;
   inflight = null;
@@ -103,8 +113,13 @@ function authorIdOf(post) {
   return String(post?.userId || post?.uid || post?.authorId || post?.id || '').trim();
 }
 
+function postIdOf(post) {
+  return String(post?.id || post?.postId || '').trim();
+}
+
 /**
  * Attach promoteType / promoteBoostWeight onto posts from active promotions.
+ * FEED_BOOST is post-scoped: only the boosted postRef receives weight.
  * Best-effort: returns original posts (with zero boost) if the API is down.
  * @param {any[]} posts
  */
@@ -117,6 +132,7 @@ export async function attachPromoteBoost(posts) {
       promoteType: null,
       promoteBoostWeight: 0,
       promoteBattleRef: null,
+      promotePostRef: null,
     }));
   }
 
@@ -129,13 +145,28 @@ export async function attachPromoteBoost(posts) {
         promoteType: null,
         promoteBoostWeight: 0,
         promoteBattleRef: null,
+        promotePostRef: null,
       };
+    }
+    // Charter Feed Boost applies only to the nominated post.
+    if (hit.type === 'FEED_BOOST' && hit.postRef) {
+      const pid = postIdOf(p);
+      if (!pid || pid !== hit.postRef) {
+        return {
+          ...p,
+          promoteType: null,
+          promoteBoostWeight: 0,
+          promoteBattleRef: null,
+          promotePostRef: null,
+        };
+      }
     }
     return {
       ...p,
       promoteType: hit.type,
       promoteBoostWeight: hit.weight,
       promoteBattleRef: hit.battleRef,
+      promotePostRef: hit.postRef,
     };
   });
 }
@@ -205,7 +236,7 @@ export function applyPromoteFairCap(posts, opts = {}) {
       continue;
     }
 
-    // Organic exhausted — append remaining promote (may land outside the top window).
+    // Organic exhausted - append remaining promote (may land outside the top window).
     if (nextPromote) {
       out.push(nextPromote);
       pi += 1;

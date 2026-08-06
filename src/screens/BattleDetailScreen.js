@@ -363,7 +363,7 @@ const BattleDetailScreen = ({ navigation, route }) => {
         {(scheduled || pending) && isParticipant && (
           <TouchableOpacity
             style={styles.linkBtn}
-            onPress={() => navigation?.navigate?.('Profile', { openPromote: true })}
+            onPress={() => navigation?.navigate?.('Profile', { openPromote: true, promoteMethodId: 'battle' })}
           >
             <Text style={[styles.linkText, { color: COLORS.primary }]}>Promote this battle</Text>
           </TouchableOpacity>

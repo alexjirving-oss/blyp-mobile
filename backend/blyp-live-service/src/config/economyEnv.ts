@@ -22,6 +22,17 @@ const economyEnvSchema = z.object({
   PROMOTE_SPOTLIGHT_24H_COINS: z.coerce.number().int().min(0).optional(),
   PROMOTE_SPOTLIGHT_7D_COINS: z.coerce.number().int().min(0).optional(),
 
+  PROMOTE_FEED_BOOST_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_PROFILE_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_LIVE_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_SEARCH_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_FOLLOWERS_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_TEAM_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_CROSS_SPORT_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_REMATCH_COINS: z.coerce.number().int().min(0).optional(),
+  PROMOTE_MAX_ACTIVE_PER_USER: z.coerce.number().int().min(1).max(50).optional(),
+  PROMOTE_SEARCH_GLOBAL_CAP: z.coerce.number().int().min(1).max(100).optional(),
+
   APPLE_BUNDLE_ID: z.string().optional(),
   APPLE_ISSUER_ID: z.string().optional(),
   APPLE_KEY_ID: z.string().optional(),

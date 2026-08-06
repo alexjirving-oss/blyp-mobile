@@ -255,7 +255,7 @@ export default function BattlesContent({ navigation }) {
   const openLeaderboard = useCallback(() => navigation?.navigate?.('BattleLeaderboard'), [navigation]);
   const openDiary = useCallback(() => navigation?.navigate?.('BattleDiary'), [navigation]);
   const openPromote = useCallback(() => {
-    navigation?.navigate?.('Profile', { openPromote: true });
+    navigation?.navigate?.('Profile', { openPromote: true, promoteMethodId: 'battle' });
   }, [navigation]);
   const openMyTeam = useCallback(() => navigation?.navigate?.('MyTeam'), [navigation]);
 
@@ -328,7 +328,7 @@ export default function BattlesContent({ navigation }) {
 
       <View style={styles.hqGrid}>
         <HqAction icon="flash" label="Prearrange" sub="Pick opponent & time" onPress={openCreate} accent />
-        <HqAction icon="megaphone-outline" label="Promote" sub="Boost a battle" onPress={openPromote} />
+        <HqAction icon="megaphone-outline" label="Promote" sub="Studio · battle boost+" onPress={openPromote} />
         <HqAction icon="trophy-outline" label="Leaderboard" sub="Glory ranks" onPress={openLeaderboard} />
         <HqAction icon="ribbon-outline" label="Diary" sub="Your history" onPress={openDiary} />
       </View>

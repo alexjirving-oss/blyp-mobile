@@ -98,6 +98,43 @@ export const promoteSpotlightBookSchema = z
   })
   .strict();
 
+export const PROMOTE_METHOD_IDS = [
+  'spotlight',
+  'time_slot',
+  'battle',
+  'feed_boost',
+  'profile',
+  'live',
+  'search',
+  'followers',
+  'team',
+  'cross_sport',
+  'rematch',
+] as const;
+
+export const promoteMethodBookSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    methodId: z.enum(PROMOTE_METHOD_IDS),
+    packageId: z.string().min(1).max(40).optional(),
+    startsAt: z.string().min(1).optional(),
+    durationKey: z.enum(['1h', '24h', '7d']).optional(),
+    durationMinutes: z.coerce.number().int().min(15).max(24 * 60).optional(),
+    battleRef: z.string().min(1).max(120).optional(),
+    postRef: z.string().min(1).max(120).optional(),
+    streamRef: z.string().min(1).max(120).optional(),
+    note: z.string().max(200).optional(),
+    targeting: z
+      .object({
+        sports: z.array(z.string().min(1).max(40)).max(8).optional(),
+        geos: z.array(z.string().min(1).max(40)).max(8).optional(),
+        interests: z.array(z.string().min(1).max(40)).max(8).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const matchdayPurchaseSchema = z
   .object({
     idempotencyKey: z.string().min(1),
@@ -212,6 +249,7 @@ export type AdminCreditCoinsInput = z.infer<typeof adminCreditCoinsSchema>;
 export type PromoteBattleInput = z.infer<typeof promoteBattleSchema>;
 export type PromoteTimeSlotBookInput = z.infer<typeof promoteTimeSlotBookSchema>;
 export type PromoteSpotlightBookInput = z.infer<typeof promoteSpotlightBookSchema>;
+export type PromoteMethodBookInput = z.infer<typeof promoteMethodBookSchema>;
 export type MatchdayPurchaseInput = z.infer<typeof matchdayPurchaseSchema>;
 export type MatchdayPredictionPlaceInput = z.infer<typeof matchdayPredictionPlaceSchema>;
 export type MatchdayPredictionSettleInput = z.infer<typeof matchdayPredictionSettleSchema>;

@@ -9,11 +9,11 @@ import { findIapCatalogEntry } from './iapCatalog';
 import { emitGiftEvent, emitLiveGameEvent, emitGameEvent } from '../realtime/realtimeBus';
 import { applyReviveForReceiver, getRoom } from '../games/artillery/gameRoomService';
 import { applyCheerForReceiver } from '../games/marble/marbleRoomService';
-import { getUserTeamForEarnings, mirrorTeamEarnings, incrementPostGiftTotals } from '../admin/firestoreAdmin';
+import { getUserTeamForEarnings, mirrorTeamEarnings, incrementPostGiftTotals, setPostReachBoostedFs } from '../admin/firestoreAdmin';
 import { getSessionById } from '../live/liveSessionStore';
 import { listGuests } from '../live/guestSlotStore';
 import { logger } from '../config/logger';
-import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
+import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteMethodBookInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
 
 // Team gift bonus rates, expressed in micro-gems per base gem so all accrual is
 // done in integers (1 gem = 1_000_000 micro). Member earns +10% of base gems,
@@ -52,10 +52,22 @@ type ProviderVerifyResult = {
   detail?: string;
 };
 
+type PromoteCatalogMethod = {
+  methodId: string;
+  type: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  packages: Array<{ id: string; label: string; hours: number; coins: number }>;
+};
+
 type PromotePricing = {
   battle: { coins: number; durationHours: number };
   timeSlot: { per30MinCoins: number };
   spotlight: { coins1h: number; coins24h: number; coins7d: number };
+  catalog: PromoteCatalogMethod[];
+  packages: Record<string, Array<{ id: string; label: string; hours: number; coins: number }>>;
+  limits: { maxActivePerUser: number; searchGlobalCap: number };
 };
 
 function clampInt(n: number, min: number, max: number) {
@@ -273,10 +285,151 @@ export async function getPromotePricing(): Promise<PromotePricing> {
   const spot24h = clampInt(Number((env as any).PROMOTE_SPOTLIGHT_24H_COINS ?? 5000), 0, 10_000_000);
   const spot7d = clampInt(Number((env as any).PROMOTE_SPOTLIGHT_7D_COINS ?? 25000), 0, 10_000_000);
 
+  const feedBoost = clampInt(Number((env as any).PROMOTE_FEED_BOOST_COINS ?? 150), 0, 1_000_000);
+  const profileCoins = clampInt(Number((env as any).PROMOTE_PROFILE_COINS ?? 200), 0, 1_000_000);
+  const liveCoins = clampInt(Number((env as any).PROMOTE_LIVE_COINS ?? 300), 0, 1_000_000);
+  const searchCoins = clampInt(Number((env as any).PROMOTE_SEARCH_COINS ?? 350), 0, 1_000_000);
+  const followersCoins = clampInt(Number((env as any).PROMOTE_FOLLOWERS_COINS ?? 120), 0, 1_000_000);
+  const teamCoins = clampInt(Number((env as any).PROMOTE_TEAM_COINS ?? 220), 0, 1_000_000);
+  const crossSportCoins = clampInt(Number((env as any).PROMOTE_CROSS_SPORT_COINS ?? 260), 0, 1_000_000);
+  const rematchCoins = clampInt(Number((env as any).PROMOTE_REMATCH_COINS ?? 180), 0, 1_000_000);
+  const maxActivePerUser = clampInt(Number((env as any).PROMOTE_MAX_ACTIVE_PER_USER ?? 5), 1, 50);
+  const searchGlobalCap = clampInt(Number((env as any).PROMOTE_SEARCH_GLOBAL_CAP ?? 8), 1, 100);
+
+  const catalog: PromoteCatalogMethod[] = [
+    {
+      methodId: 'spotlight',
+      type: 'SPOTLIGHT',
+      title: 'Spotlight',
+      subtitle: 'Exclusive homepage spotlight window',
+      category: 'exclusive',
+      packages: [
+        { id: '1h', label: '1 hour', hours: 1, coins: spot1h },
+        { id: '24h', label: '24 hours', hours: 24, coins: spot24h },
+        { id: '7d', label: '7 days', hours: 168, coins: spot7d },
+      ],
+    },
+    {
+      methodId: 'time_slot',
+      type: 'TIME_SLOT',
+      title: 'Prime Time Slot',
+      subtitle: 'Book an exclusive discovery slot',
+      category: 'exclusive',
+      packages: [
+        { id: '30m', label: '30 min', hours: 0.5, coins: timeSlot30 },
+        { id: '60m', label: '60 min', hours: 1, coins: timeSlot30 * 2 },
+        { id: '120m', label: '2 hours', hours: 2, coins: timeSlot30 * 4 },
+      ],
+    },
+    {
+      methodId: 'battle',
+      type: 'BATTLE',
+      title: 'Battle Boost+',
+      subtitle: 'Amplify an upcoming or live battle',
+      category: 'battle',
+      packages: [{ id: '24h', label: '24 hours', hours: battleDurationHours, coins: battleCoins }],
+    },
+    {
+      methodId: 'feed_boost',
+      type: 'FEED_BOOST',
+      title: 'Feed Boost',
+      subtitle: 'Charter boost for one post in For You',
+      category: 'feed',
+      packages: [
+        { id: '6h', label: '6 hours', hours: 6, coins: feedBoost },
+        { id: '24h', label: '24 hours', hours: 24, coins: Math.round(feedBoost * 2.6) },
+        { id: '72h', label: '3 days', hours: 72, coins: Math.round(feedBoost * 6) },
+      ],
+    },
+    {
+      methodId: 'profile',
+      type: 'PROFILE',
+      title: 'Profile Amplify',
+      subtitle: 'Surface your profile to interested fans',
+      category: 'profile',
+      packages: [
+        { id: '12h', label: '12 hours', hours: 12, coins: profileCoins },
+        { id: '48h', label: '48 hours', hours: 48, coins: Math.round(profileCoins * 2.75) },
+      ],
+    },
+    {
+      methodId: 'live',
+      type: 'LIVE',
+      title: 'Live Amplify',
+      subtitle: 'Push viewers toward your live session',
+      category: 'live',
+      packages: [
+        { id: '2h', label: '2 hours', hours: 2, coins: liveCoins },
+        { id: '6h', label: '6 hours', hours: 6, coins: Math.round(liveCoins * 2.3) },
+      ],
+    },
+    {
+      methodId: 'search',
+      type: 'SEARCH_SPONSORED',
+      title: 'Search Sponsored',
+      subtitle: 'One labelled sponsored slot in search',
+      category: 'search',
+      packages: [
+        { id: '12h', label: '12 hours', hours: 12, coins: searchCoins },
+        { id: '48h', label: '48 hours', hours: 48, coins: Math.round(searchCoins * 2.5) },
+      ],
+    },
+    {
+      methodId: 'followers',
+      type: 'FOLLOWERS_NOTIFY',
+      title: 'Followers Notify',
+      subtitle: 'Nudge followers about new content',
+      category: 'audience',
+      packages: [
+        { id: '6h', label: '6 hours', hours: 6, coins: followersCoins },
+        { id: '24h', label: '24 hours', hours: 24, coins: Math.round(followersCoins * 2.3) },
+      ],
+    },
+    {
+      methodId: 'team',
+      type: 'TEAM_SHOUTOUT',
+      title: 'Team Shoutout',
+      subtitle: 'Reach fans of your team affinity',
+      category: 'audience',
+      packages: [
+        { id: '12h', label: '12 hours', hours: 12, coins: teamCoins },
+        { id: '48h', label: '48 hours', hours: 48, coins: Math.round(teamCoins * 2.7) },
+      ],
+    },
+    {
+      methodId: 'cross_sport',
+      type: 'CROSS_SPORT',
+      title: 'Cross-Sport Push',
+      subtitle: 'Cross into adjacent sport audiences',
+      category: 'audience',
+      packages: [
+        { id: '12h', label: '12 hours', hours: 12, coins: crossSportCoins },
+        { id: '48h', label: '48 hours', hours: 48, coins: Math.round(crossSportCoins * 2.7) },
+      ],
+    },
+    {
+      methodId: 'rematch',
+      type: 'REMATCH',
+      title: 'Rematch Promo',
+      subtitle: 'Promote a rematch or sequel battle',
+      category: 'battle',
+      packages: [
+        { id: '24h', label: '24 hours', hours: 24, coins: rematchCoins },
+        { id: '72h', label: '3 days', hours: 72, coins: Math.round(rematchCoins * 2.5) },
+      ],
+    },
+  ];
+
+  const packages: Record<string, Array<{ id: string; label: string; hours: number; coins: number }>> = {};
+  for (const m of catalog) packages[m.methodId] = m.packages;
+
   return {
     battle: { coins: battleCoins, durationHours: battleDurationHours },
     timeSlot: { per30MinCoins: timeSlot30 },
     spotlight: { coins1h: spot1h, coins24h: spot24h, coins7d: spot7d },
+    catalog,
+    packages,
+    limits: { maxActivePerUser, searchGlobalCap },
   };
 }
 
@@ -443,6 +596,15 @@ export async function getActivePromotions(limit = 200) {
         meta?.battleRef != null && String(meta.battleRef).trim()
           ? String(meta.battleRef).trim()
           : null;
+      const postRef =
+        meta?.postRef != null && String(meta.postRef).trim() ? String(meta.postRef).trim() : null;
+      const streamRef =
+        meta?.streamRef != null && String(meta.streamRef).trim() ? String(meta.streamRef).trim() : null;
+      const methodId =
+        meta?.methodId != null && String(meta.methodId).trim() ? String(meta.methodId).trim() : null;
+      const note = meta?.note != null && String(meta.note).trim() ? String(meta.note).trim() : null;
+      const targeting =
+        meta?.targeting && typeof meta.targeting === 'object' ? meta.targeting : null;
       return {
         promotionId: String(r.promotionId),
         userId: String(r.userId),
@@ -450,6 +612,11 @@ export async function getActivePromotions(limit = 200) {
         startsAt: new Date(r.startsAt).toISOString(),
         endsAt: new Date(r.endsAt).toISOString(),
         battleRef,
+        postRef,
+        streamRef,
+        methodId,
+        note,
+        targeting,
       };
     }),
   };
@@ -664,6 +831,256 @@ export async function bookPromoteSpotlight(userId: string, input: PromoteSpotlig
     };
   });
 }
+
+
+const METHOD_TYPE: Record<string, string> = {
+  spotlight: 'SPOTLIGHT',
+  time_slot: 'TIME_SLOT',
+  battle: 'BATTLE',
+  feed_boost: 'FEED_BOOST',
+  profile: 'PROFILE',
+  live: 'LIVE',
+  search: 'SEARCH_SPONSORED',
+  followers: 'FOLLOWERS_NOTIFY',
+  team: 'TEAM_SHOUTOUT',
+  cross_sport: 'CROSS_SPORT',
+  rematch: 'REMATCH',
+};
+
+async function assertPromoteFairCaps(
+  trx: Knex.Transaction,
+  userId: string,
+  promotionType: string,
+  limits: { maxActivePerUser: number; searchGlobalCap: number },
+) {
+  const now = nowIso();
+  const activeForUser = await trx('promotions')
+    .where({ user_id: userId, status: 'ACTIVE' })
+    .andWhere('ends_at', '>', now)
+    .count<{ count: string }>({ count: '*' })
+    .first();
+  const activeCount = Number((activeForUser as any)?.count || 0);
+  if (activeCount >= limits.maxActivePerUser) {
+    throw new EconomyError('PROMOTE_CAP', 409, 'Too many active promotions');
+  }
+
+  const sameType = await trx('promotions')
+    .where({ user_id: userId, status: 'ACTIVE', promotion_type: promotionType })
+    .andWhere('ends_at', '>', now)
+    .first();
+  if (sameType) {
+    throw new EconomyError('PROMOTE_TYPE_ACTIVE', 409, 'You already have an active campaign of this type');
+  }
+
+  if (promotionType === 'SEARCH_SPONSORED') {
+    const searchActive = await trx('promotions')
+      .where({ status: 'ACTIVE', promotion_type: 'SEARCH_SPONSORED' })
+      .andWhere('starts_at', '<=', now)
+      .andWhere('ends_at', '>', now)
+      .count<{ count: string }>({ count: '*' })
+      .first();
+    const searchCount = Number((searchActive as any)?.count || 0);
+    if (searchCount >= limits.searchGlobalCap) {
+      throw new EconomyError('SEARCH_CAP', 409, 'Search sponsored slots are full');
+    }
+  }
+}
+
+function pickPackage(
+  pricing: PromotePricing,
+  methodId: string,
+  packageId?: string | null,
+): { id: string; label: string; hours: number; coins: number } {
+  const list = pricing.packages?.[methodId] || pricing.catalog.find((m) => m.methodId === methodId)?.packages || [];
+  if (!list.length) throw new EconomyError('INVALID_INPUT', 400, 'Unknown promote method');
+  const id = String(packageId || list[0].id);
+  const found = list.find((p) => p.id === id) || list[0];
+  return found;
+}
+
+export async function purchasePromoteMethod(userId: string, input: PromoteMethodBookInput) {
+  const methodId = String(input.methodId || '').trim();
+  const promotionType = METHOD_TYPE[methodId];
+  if (!promotionType) throw new EconomyError('INVALID_INPUT', 400, 'Unknown methodId');
+
+  // Route legacy exclusive / battle bookings through existing helpers when possible.
+  if (methodId === 'spotlight') {
+    const durationKey = (input.durationKey || (input.packageId as '1h' | '24h' | '7d') || '1h') as '1h' | '24h' | '7d';
+    if (!input.startsAt) throw new EconomyError('INVALID_INPUT', 400, 'startsAt required for spotlight');
+    return bookPromoteSpotlight(userId, {
+      idempotencyKey: input.idempotencyKey,
+      startsAt: input.startsAt,
+      durationKey,
+      note: input.note,
+    });
+  }
+  if (methodId === 'time_slot') {
+    if (!input.startsAt) throw new EconomyError('INVALID_INPUT', 400, 'startsAt required for time_slot');
+    const pkg = (await getPromotePricing()).packages.time_slot?.find((p) => p.id === input.packageId);
+    const durationMinutes =
+      input.durationMinutes ||
+      (pkg ? Math.max(15, Math.round(pkg.hours * 60)) : 30);
+    return bookPromoteTimeSlot(userId, {
+      idempotencyKey: input.idempotencyKey,
+      startsAt: input.startsAt,
+      durationMinutes,
+      note: input.note,
+    });
+  }
+  if (methodId === 'battle') {
+    return purchasePromoteBattle(userId, {
+      idempotencyKey: input.idempotencyKey,
+      battleRef: input.battleRef,
+    });
+  }
+
+  const { db } = getEconomyInfra();
+  const pricing = await getPromotePricing();
+  const pkg = pickPackage(pricing, methodId, input.packageId);
+  const coins = BigInt(pkg.coins);
+  const { idempotencyKey } = input;
+
+  if (methodId === 'feed_boost' && !String(input.postRef || '').trim()) {
+    throw new EconomyError('INVALID_INPUT', 400, 'postRef required for feed_boost');
+  }
+  if ((methodId === 'rematch') && !String(input.battleRef || '').trim()) {
+    throw new EconomyError('INVALID_INPUT', 400, 'battleRef required for rematch');
+  }
+
+  return await db.transaction(async (trx) => {
+    const existing = await trx('promotions').where({ user_id: userId, idempotency_key: idempotencyKey }).first();
+    if (existing) {
+      const wallet = await ensureWalletRow(trx, userId);
+      return {
+        kind: 'replay' as const,
+        response: {
+          promotionId: existing.promotion_id,
+          promotionType: existing.promotion_type,
+          status: existing.status,
+          startsAt: new Date(existing.starts_at).toISOString(),
+          endsAt: new Date(existing.ends_at).toISOString(),
+          coinCost: Number(existing.coin_cost),
+          newBalances: {
+            coinBalance: Number(wallet.coin_balance),
+            bonusCoinBalance: Number(wallet.bonus_coin_balance),
+          },
+        },
+      };
+    }
+
+    await assertPromoteFairCaps(trx, userId, promotionType, pricing.limits);
+
+    const start = new Date();
+    const end = new Date(start);
+    end.setMinutes(end.getMinutes() + Math.max(15, Math.round(pkg.hours * 60)));
+
+    const promotionId = randomUUID();
+    const meta: Record<string, any> = {
+      originalIdempotencyKey: idempotencyKey,
+      methodId,
+      packageId: pkg.id,
+      note: input.note ?? null,
+      battleRef: input.battleRef ?? null,
+      postRef: input.postRef ?? null,
+      streamRef: input.streamRef ?? null,
+      targeting: input.targeting ?? null,
+    };
+
+    await trx('promotions').insert({
+      promotion_id: promotionId,
+      user_id: userId,
+      promotion_type: promotionType,
+      status: 'ACTIVE',
+      starts_at: start.toISOString(),
+      ends_at: end.toISOString(),
+      coin_cost: coins.toString(),
+      idempotency_key: idempotencyKey,
+      metadata: meta,
+      created_at: nowIso(),
+    });
+
+    const newBalances = await debitCoinsForPromotion(trx, userId, coins, idempotencyKey, promotionId, meta);
+
+    // Best-effort Firestore reach.boosted for FEED_BOOST (outside strict trx semantics).
+    if (promotionType === 'FEED_BOOST' && meta.postRef) {
+      try {
+        await setPostReachBoostedFs(String(meta.postRef), true, {
+          boostEndsAt: end.toISOString(),
+          boostPromotionId: promotionId,
+          actorUserId: userId,
+        });
+      } catch (e: any) {
+        logger.warn({ err: e?.message || String(e), postRef: meta.postRef }, '[promote] setPostReachBoostedFs failed');
+      }
+    }
+
+    return {
+      kind: 'ok' as const,
+      response: {
+        promotionId,
+        promotionType,
+        status: 'ACTIVE',
+        startsAt: start.toISOString(),
+        endsAt: end.toISOString(),
+        coinCost: Number(coins),
+        newBalances,
+      },
+    };
+  });
+}
+
+export async function getMyPromotions(userId: string, limit = 50) {
+  const { db } = getEconomyInfra();
+  const cap = clampInt(Number(limit) || 50, 1, 200);
+  const now = nowIso();
+
+  const rows = await db('promotions')
+    .select({
+      promotionId: 'promotion_id',
+      userId: 'user_id',
+      promotionType: 'promotion_type',
+      status: 'status',
+      startsAt: 'starts_at',
+      endsAt: 'ends_at',
+      coinCost: 'coin_cost',
+      metadata: 'metadata',
+      createdAt: 'created_at',
+    })
+    .where({ user_id: userId })
+    .orderBy('created_at', 'desc')
+    .limit(cap);
+
+  const mapRow = (r: any) => {
+    const meta = r?.metadata && typeof r.metadata === 'object' ? r.metadata : {};
+    const endsAt = new Date(r.endsAt).toISOString();
+    const startsAt = new Date(r.startsAt).toISOString();
+    const stillActive =
+      String(r.status || '').toUpperCase() === 'ACTIVE' && new Date(endsAt).getTime() > Date.now();
+    return {
+      promotionId: String(r.promotionId),
+      userId: String(r.userId),
+      promotionType: String(r.promotionType || '').toUpperCase(),
+      status: stillActive ? 'ACTIVE' : String(r.status || 'ENDED').toUpperCase() === 'ACTIVE' ? 'ENDED' : String(r.status || 'ENDED').toUpperCase(),
+      startsAt,
+      endsAt,
+      coinCost: Number(r.coinCost || 0),
+      battleRef: meta?.battleRef != null && String(meta.battleRef).trim() ? String(meta.battleRef).trim() : null,
+      postRef: meta?.postRef != null && String(meta.postRef).trim() ? String(meta.postRef).trim() : null,
+      streamRef: meta?.streamRef != null && String(meta.streamRef).trim() ? String(meta.streamRef).trim() : null,
+      methodId: meta?.methodId != null && String(meta.methodId).trim() ? String(meta.methodId).trim() : null,
+      note: meta?.note != null && String(meta.note).trim() ? String(meta.note).trim() : null,
+      targeting: meta?.targeting && typeof meta.targeting === 'object' ? meta.targeting : null,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : startsAt,
+    };
+  };
+
+  const mapped = (rows || []).map(mapRow);
+  const active = mapped.filter((p: any) => p.status === 'ACTIVE');
+  const history = mapped.filter((p: any) => p.status !== 'ACTIVE');
+
+  return { asOf: now, active, history };
+}
+
 
 async function ensureWalletRow(trx: Knex.Transaction, userId: string) {
   await trx('wallets')

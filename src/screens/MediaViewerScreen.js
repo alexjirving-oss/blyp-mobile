@@ -959,6 +959,7 @@ const MediaViewerItem = ({
         onClose={() => setReachSheetVisible(false)}
         post={actualPost}
         isOwner={canDeletePost}
+        navigation={navigation}
       />
       <VideoFramingSheet
         visible={framingSheetVisible}

@@ -898,6 +898,39 @@ export async function setPostFeedPriorityFs(
 }
 
 /** Account-wide feed weight on users/{uid} — read by For You / discovery. */
+
+export async function setPostReachBoostedFs(
+  postId: string,
+  boosted: boolean,
+  opts?: { boostEndsAt?: string | null; boostPromotionId?: string | null; actorUserId?: string | null },
+): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(postId || '').trim();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!id) return { ok: false, detail: 'missing_post_id' };
+  try {
+    const reach: Record<string, unknown> = {
+      boosted: Boolean(boosted),
+    };
+    if (opts?.boostEndsAt != null) reach.boostEndsAt = opts.boostEndsAt;
+    if (opts?.boostPromotionId != null) reach.boostPromotionId = opts.boostPromotionId;
+    const payload: Record<string, unknown> = {
+      reach,
+      reachBoostUpdatedAt: FieldValue.serverTimestamp(),
+    };
+    if (opts?.actorUserId) payload.reachBoostUpdatedBy = String(opts.actorUserId);
+    await fs.collection('posts').doc(id).set(payload, { merge: true });
+    return { ok: true };
+  } catch (e: any) {
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, postId: id, boosted },
+      '[firestore-admin] setPostReachBoostedFs failed',
+    );
+    return { ok: false, detail };
+  }
+}
+
 export async function setUserFeedPriorityFs(
   userId: string,
   priority: AccountFeedPriority,
