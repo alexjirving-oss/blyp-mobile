@@ -1,16 +1,21 @@
 /**
- * Frenemies prize wheel — 11 visible segments, top pointer, ease-out land
+ * Frenemies prize wheel — 11 segments, right-side pointer, ease-out land
  * on the authoritative server slot (targetSlot / landedSlot).
  */
 import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import Svg, { G, Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import { Audio } from 'expo-av';
+import { ensureMediaPlaybackAudioMode } from '../../../services/notifySound';
 
 const TEAL_DEEP = '#0A6B62';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
 const INK = '#0A0A0C';
 const ROSE = '#FB7185';
+
+/** Pointer sits at 3 o'clock (degrees from top, clockwise). */
+const POINTER_DEG = 90;
 
 const SEG_COLORS = [
   '#0E3D38',
@@ -25,6 +30,8 @@ const SEG_COLORS = [
   '#124F48',
   '#0A6B62',
 ];
+
+const WHEEL_TICK = require('../../../../assets/sounds/wheel_tick.wav');
 
 function polar(cx, cy, r, deg) {
   const rad = ((deg - 90) * Math.PI) / 180;
@@ -46,13 +53,13 @@ function segmentPath(cx, cy, rOuter, rInner, startDeg, endDeg) {
   ].join(' ');
 }
 
-/** Degrees to rotate so slot (1..n) center sits under the top pointer. */
+/** Degrees to rotate so slot (1..n) center sits under the right-side pointer. */
 export function landRotationForSlot(slot, maxSlots, extraSpins = 8) {
   const n = Math.max(1, maxSlots);
   const i = Math.max(1, Math.min(n, Number(slot) || 1)) - 1;
   const seg = 360 / n;
   const centerFromTop = (i + 0.5) * seg;
-  return extraSpins * 360 - centerFromTop;
+  return extraSpins * 360 + POINTER_DEG - centerFromTop;
 }
 
 function easeOutCubic(t) {
@@ -65,6 +72,13 @@ function spinsForDuration(ms) {
   if (s <= 20) return 6;
   if (s <= 40) return 9;
   return 12;
+}
+
+function segUnderPointer(rotationDeg, maxSlots) {
+  const n = Math.max(1, maxSlots);
+  const seg = 360 / n;
+  const under = ((POINTER_DEG - rotationDeg) % 360 + 360) % 360;
+  return Math.floor(under / seg) % n;
 }
 
 export default function PrizeWheel({
@@ -80,6 +94,9 @@ export default function PrizeWheel({
 }) {
   const spinAnim = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const tickSoundRef = useRef(null);
+  const lastTickSeg = useRef(-1);
+  const tickBusy = useRef(false);
 
   const slot = landedSlot || targetSlot;
   const cx = size / 2;
@@ -106,14 +123,56 @@ export default function PrizeWheel({
     });
   }, [maxSlots, seg, cx, cy, rOuter, rInner, occupiedBySlot]);
 
+  // Load tick once; unload on unmount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await ensureMediaPlaybackAudioMode({ background: false });
+        const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
+          shouldPlay: false,
+          volume: 0.55,
+          isLooping: false,
+        });
+        if (cancelled) {
+          await sound.unloadAsync().catch(() => {});
+          return;
+        }
+        tickSoundRef.current = sound;
+      } catch {
+        // Best-effort — wheel still works silent.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const s = tickSoundRef.current;
+      tickSoundRef.current = null;
+      if (s) s.unloadAsync().catch(() => {});
+    };
+  }, []);
+
+  const playTick = () => {
+    const s = tickSoundRef.current;
+    if (!s || tickBusy.current) return;
+    tickBusy.current = true;
+    s.replayAsync()
+      .catch(() => s.setPositionAsync(0).then(() => s.playAsync()).catch(() => {}))
+      .finally(() => {
+        setTimeout(() => {
+          tickBusy.current = false;
+        }, 28);
+      });
+  };
+
   useEffect(() => {
     if (phase !== 'spinning') {
       const land = landRotationForSlot(slot || 1, maxSlots, 0);
       spinAnim.setValue(land);
+      lastTickSeg.current = -1;
       return undefined;
     }
 
-    const endMs = Date.parse(spinEndsAt || '') || Date.now() + 60_000;
+    const endMs = Date.parse(spinEndsAt || '') || Date.now() + 30_000;
     const startMs = Date.parse(spinStartedAt || '') || Date.now();
     const total = Math.max(1, endMs - startMs);
     const remaining = Math.max(120, endMs - Date.now());
@@ -124,6 +183,15 @@ export default function PrizeWheel({
     const finalDeg = landRotationForSlot(targetSlot || slot || 1, maxSlots, extra);
     const fromDeg = easeOutCubic(progress) * finalDeg;
     spinAnim.setValue(fromDeg);
+    lastTickSeg.current = segUnderPointer(fromDeg, maxSlots);
+
+    const id = spinAnim.addListener(({ value }) => {
+      const idx = segUnderPointer(value, maxSlots);
+      if (idx !== lastTickSeg.current) {
+        lastTickSeg.current = idx;
+        playTick();
+      }
+    });
 
     const anim = Animated.timing(spinAnim, {
       toValue: finalDeg,
@@ -133,7 +201,10 @@ export default function PrizeWheel({
     });
     anim.start();
 
-    return () => anim.stop();
+    return () => {
+      anim.stop();
+      spinAnim.removeListener(id);
+    };
   }, [phase, roundId, targetSlot, slot, maxSlots, spinStartedAt, spinEndsAt, spinAnim]);
 
   useEffect(() => {
@@ -169,11 +240,7 @@ export default function PrizeWheel({
   const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.045] });
 
   return (
-    <View style={[styles.wrap, { width: size + 8, height: size + 28 }]}>
-      <View style={styles.pointerWrap} pointerEvents="none">
-        <View style={styles.pointer} />
-      </View>
-
+    <View style={[styles.wrap, { width: size + 28, height: size + 8 }]}>
       <Animated.View
         style={[
           styles.wheelStage,
@@ -235,6 +302,10 @@ export default function PrizeWheel({
           </View>
         </View>
       </Animated.View>
+
+      <View style={[styles.pointerWrap, { height: size }]} pointerEvents="none">
+        <View style={styles.pointer} />
+      </View>
     </View>
   );
 }
@@ -242,29 +313,30 @@ export default function PrizeWheel({
 const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 10,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    paddingRight: 2,
   },
   pointerWrap: {
-    position: 'absolute',
-    top: 0,
+    width: 22,
+    marginLeft: -6,
     zIndex: 6,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   pointer: {
     width: 0,
     height: 0,
-    borderLeftWidth: 11,
-    borderRightWidth: 11,
-    borderTopWidth: 20,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    borderTopColor: ROSE,
-    // Drop shadow via twin
+    borderTopWidth: 11,
+    borderBottomWidth: 11,
+    borderRightWidth: 20,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderRightColor: ROSE,
     shadowColor: '#000',
     shadowOpacity: 0.45,
     shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: -1, height: 0 },
   },
   wheelStage: {
     alignItems: 'center',

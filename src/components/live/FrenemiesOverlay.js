@@ -175,8 +175,8 @@ export default function FrenemiesOverlay({
   const active = state?.active && phase && phase !== 'ended' && phase !== 'idle';
   const maxSlots = event?.maxSlots || MAX_GUEST_SLOTS;
   const houseCoins = event?.houseCoins || 25;
-  const spinMs = event?.spinMs || 60_000;
-  const chooseMs = event?.chooseMs || 30_000;
+  const spinMs = event?.spinMs || 30_000;
+  const chooseMs = event?.chooseMs || 20_000;
 
   const occupiedBySlot = useMemo(() => {
     const map = {};
@@ -204,7 +204,7 @@ export default function FrenemiesOverlay({
     [rosterByUser]
   );
 
-  // Spin tension pulse — keeps a long ~60s wait feeling alive.
+  // Spin tension pulse — keeps the wait feeling alive.
   useEffect(() => {
     if (phase !== 'spinning') {
       tension.setValue(0);
@@ -439,15 +439,15 @@ export default function FrenemiesOverlay({
             ) : null}
 
             {(phase === 'choosing' || phase === 'challenge' || phase === 'resolving') &&
-            state.landedSlot ? (
+              state.landedSlot ? (
               <Text style={styles.landText} allowFontScaling={false}>
                 Landed on box {state.landedSlot}
                 {state.landedOccupied
                   ? ` · ${resolveName(
-                      Object.values(occupiedBySlot).find((g) => g.slotIndex === state.landedSlot)
-                        ?.userId || state.chooserUserId,
-                      chooserName
-                    )}`
+                    Object.values(occupiedBySlot).find((g) => g.slotIndex === state.landedSlot)
+                      ?.userId || state.chooserUserId,
+                    chooserName
+                  )}`
                   : ' · empty box challenge'}
               </Text>
             ) : null}
@@ -485,7 +485,7 @@ export default function FrenemiesOverlay({
             <View style={styles.timerRow}>
               <TimerRing
                 endsAt={challenge.endsAt}
-                totalMs={event?.challengeMs || 45_000}
+                totalMs={event?.challengeMs || 20_000}
                 size={70}
                 tone="teal"
                 label="SEC"

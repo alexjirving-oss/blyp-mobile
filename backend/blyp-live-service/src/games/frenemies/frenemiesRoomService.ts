@@ -18,13 +18,13 @@ const stateKey = (sessionId: string) => `frenemies:game:${sessionId}`;
 const lockKey = (sessionId: string) => `frenemies:lock:${sessionId}`;
 const engageKey = (sessionId: string) => `frenemies:engage:${sessionId}`;
 
-/** Default spin ~60s; override with FRENEMIES_SPIN_MS for faster demos. */
+/** Default spin 30s; override with FRENEMIES_SPIN_MS for demos. */
 export const SPIN_MS = Math.max(
   5_000,
-  Number(process.env.FRENEMIES_SPIN_MS || 60_000) || 60_000,
+  Number(process.env.FRENEMIES_SPIN_MS || 30_000) || 30_000,
 );
-export const CHOOSE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHOOSE_MS || 30_000) || 30_000);
-export const CHALLENGE_MS = Math.max(10_000, Number(process.env.FRENEMIES_CHALLENGE_MS || 45_000) || 45_000);
+export const CHOOSE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHOOSE_MS || 20_000) || 20_000);
+export const CHALLENGE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHALLENGE_MS || 20_000) || 20_000);
 export const HOUSE_COINS = 25;
 export const LIKES_TARGET = Math.max(5, Number(process.env.FRENEMIES_LIKES_TARGET || 50) || 50);
 
