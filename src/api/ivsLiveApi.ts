@@ -1432,3 +1432,105 @@ export async function marblePick(sessionId: string, racerUserId: string): Promis
 export async function marbleGetState(sessionId: string): Promise<MarbleGameEvent> {
   return callLiveBackend<MarbleGameEvent>('/api/live-game/marble/state', 'GET', { sessionId });
 }
+
+// ============================================================================
+// FRENEMIES — live party game (server-authoritative)
+// ============================================================================
+
+export interface FrenemiesGameEvent {
+  game: 'frenemies';
+  sessionId: string;
+  type: 'PHASE' | 'SNAPSHOT' | 'RESULT' | 'ENDED';
+  version: number;
+  hostUserId: string;
+  startedByUserId?: string;
+  state: any;
+  spinMs?: number;
+  chooseMs?: number;
+  challengeMs?: number;
+  houseCoins?: number;
+  maxSlots?: number;
+}
+
+export async function frenemiesStart(sessionId: string): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/start', 'POST', { sessionId });
+}
+
+export async function frenemiesEnd(sessionId: string): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/end', 'POST', { sessionId });
+}
+
+export async function frenemiesThrow(sessionId: string, targetUserId: string): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/throw', 'POST', {
+    sessionId,
+    targetUserId,
+  });
+}
+
+export async function frenemiesQuizAnswer(
+  sessionId: string,
+  choiceIndex: number,
+  displayName?: string
+): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/quiz-answer', 'POST', {
+    sessionId,
+    choiceIndex,
+    ...(displayName ? { displayName } : {}),
+  });
+}
+
+export async function frenemiesChat(
+  sessionId: string,
+  text: string,
+  displayName?: string
+): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/chat', 'POST', {
+    sessionId,
+    text,
+    ...(displayName ? { displayName } : {}),
+  });
+}
+
+export async function frenemiesLike(
+  sessionId: string,
+  count = 1,
+  displayName?: string
+): Promise<FrenemiesGameEvent | { ok: boolean }> {
+  return callLiveBackend<FrenemiesGameEvent | { ok: boolean }>('/api/live-game/frenemies/like', 'POST', {
+    sessionId,
+    count,
+    ...(displayName ? { displayName } : {}),
+  });
+}
+
+export async function frenemiesGetState(sessionId: string): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/state', 'GET', { sessionId });
+}
+
+export type SessionEngagement = {
+  likes: number;
+  shares: number;
+  comments: number;
+  coinsSpent: number;
+  coinsReceived: number;
+};
+
+export async function bumpLiveEngagement(
+  sessionId: string,
+  delta: Partial<SessionEngagement>
+): Promise<{ ok: boolean }> {
+  return callLiveBackend<{ ok: boolean }>('/api/live/engagement/bump', 'POST', {
+    sessionId,
+    ...delta,
+  });
+}
+
+export async function getLiveEngagementSession(
+  sessionId: string
+): Promise<{ sessionId: string; byUser: Record<string, SessionEngagement> }> {
+  return callLiveBackend<{ sessionId: string; byUser: Record<string, SessionEngagement> }>(
+    '/api/live/engagement/session',
+    'GET',
+    { sessionId }
+  );
+}

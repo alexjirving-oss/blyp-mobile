@@ -11,6 +11,7 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { enqueueNotification } from '../notifications/outbox';
+import { isUsablePublicLabel, resolveUserLabel } from '../notifications/resolveUserLabel';
 import {
   applyBattleGiftPledgesFromFunction,
   refundBattleGiftPledgesFromFunction,
@@ -20,16 +21,12 @@ const ENQUEUE_CHUNK = 50;
 const MAX_FOLLOWERS_FANOUT = 5000;
 
 async function resolveName(uid: string): Promise<string> {
-  const db = admin.firestore();
-  try {
-    const u = await db.collection('users').doc(uid).get();
-    const d = (u.data() as any) || {};
-    const name = d.displayName || d.username || d.name;
-    if (name) return String(name);
-  } catch {
-    // fall through
-  }
-  return 'Someone';
+  return resolveUserLabel(uid, 'Someone');
+}
+
+async function resolveBattleActorName(raw: unknown, uid: string): Promise<string> {
+  if (isUsablePublicLabel(raw, uid)) return String(raw).trim().replace(/^@/, '');
+  return resolveName(uid);
 }
 
 function whenLabel(ms: number): string {
@@ -149,7 +146,7 @@ export const onBattleCreate = functions.firestore
     initFirebaseAdmin();
     const b = snap.data() as any;
     if (!b || b.status !== 'pending' || !b.opponentUid) return null;
-    const creatorName = b.creatorName || (await resolveName(b.creatorUid));
+    const creatorName = await resolveBattleActorName(b.creatorName, b.creatorUid);
     const stakeNote = Number(b.stakeCoins) > 0 ? ` (${b.stakeCoins} coin battle)` : '';
     await enqueueNotification({
       userId: b.opponentUid,
@@ -158,7 +155,12 @@ export const onBattleCreate = functions.firestore
       body: `Tap to accept or decline${stakeNote}`,
       dedupeKey: `battle_invite:${context.params.battleId}`,
       collapseKey: `battle_invite:${context.params.battleId}`,
-      data: { type: 'battle_invite', battleId: context.params.battleId },
+      data: {
+        type: 'battle_invite',
+        battleId: context.params.battleId,
+        actorId: String(b.creatorUid || ''),
+        actorUsername: creatorName,
+      },
     });
     return null;
   });
@@ -185,7 +187,7 @@ export const onBattleStatusChange = functions.firestore
 
     // Accepted -> notify creator + (optionally) fan out to both fanbases.
     if (before.status === 'pending' && after.status === 'scheduled') {
-      const opponentName = after.opponentName || (await resolveName(after.opponentUid));
+      const opponentName = await resolveBattleActorName(after.opponentName, after.opponentUid);
       await enqueueNotification({
         userId: after.creatorUid,
         type: 'battle',
@@ -193,13 +195,19 @@ export const onBattleStatusChange = functions.firestore
         body: `Battle ${whenLabel(Number(after.scheduledStartAt))} UTC`,
         dedupeKey: `battle_accepted:${battleId}`,
         collapseKey: `battle:${battleId}`,
-        data: { type: 'battle', battleId },
+        data: {
+          type: 'battle',
+          battleId,
+          actorId: String(after.opponentUid || ''),
+          actorUsername: opponentName,
+        },
       });
 
       if (after.notifySupporters !== false) {
         const claimed = await claimSupporterFanout(battleId);
         if (claimed) {
-          const title = `${after.creatorName} vs ${after.opponentName}`;
+          const creatorLabel = await resolveBattleActorName(after.creatorName, after.creatorUid);
+          const title = `${creatorLabel} vs ${opponentName}`;
           const body = `Battle ${whenLabel(Number(after.scheduledStartAt))} UTC — tap to set a reminder`;
           await fanOutToFollowers(after.creatorUid, battleId, title, body);
           await fanOutToFollowers(after.opponentUid, battleId, title, body);
@@ -213,7 +221,7 @@ export const onBattleStatusChange = functions.firestore
       await refundBattleGiftPledgesFromFunction(battleId).catch((e) =>
         console.error('[battleNotify] gift pledge refund failed', e?.message)
       );
-      const opponentName = after.opponentName || (await resolveName(after.opponentUid));
+      const opponentName = await resolveBattleActorName(after.opponentName, after.opponentUid);
       await enqueueNotification({
         userId: after.creatorUid,
         type: 'battle',
@@ -221,7 +229,12 @@ export const onBattleStatusChange = functions.firestore
         body: 'Try challenging someone else.',
         dedupeKey: `battle_rejected:${battleId}`,
         collapseKey: `battle:${battleId}`,
-        data: { type: 'battle', battleId },
+        data: {
+          type: 'battle',
+          battleId,
+          actorId: String(after.opponentUid || ''),
+          actorUsername: opponentName,
+        },
       });
       return null;
     }

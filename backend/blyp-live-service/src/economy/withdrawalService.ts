@@ -8,12 +8,71 @@ import Stripe from 'stripe';
 import type { Knex } from 'knex';
 import { getEconomyEnv } from '../config/economyEnv';
 import { logger } from '../config/logger';
-import { EconomyError } from './economyErrors';
+import {
+  EconomyError,
+  isStripeConnectSetupError,
+  stripeConnectSetupRequiredError,
+} from './economyErrors';
 import { getEconomyInfra } from './infra';
 import { getWallet } from './economyService';
 import { assessWithdrawal, type KycStatus, type WithdrawalContext } from './withdrawalGuard';
 import { WITHDRAWAL_POLICY as P } from './withdrawalPolicy';
 import { isWithdrawLaunchTestUser } from './withdrawLaunchTest';
+import {
+  asReqList,
+  deriveConnectFlags,
+  humanizeConnectBlocker,
+  type ConnectStatus,
+} from './connectStatus';
+
+export type { ConnectStatus } from './connectStatus';
+export { deriveConnectFlags } from './connectStatus';
+
+function mapStripeConnectError(err: any): never {
+  if (isStripeConnectSetupError(err)) {
+    throw stripeConnectSetupRequiredError(err);
+  }
+  // Preserve Stripe provider failures as actionable PROVIDER_ERROR (not opaque INTERNAL).
+  const msg = typeof err?.message === 'string' ? err.message : 'Stripe Connect request failed';
+  throw new EconomyError('PROVIDER_ERROR', 502, msg.slice(0, 280), {
+    stripeType: err?.type || err?.rawType || null,
+    stripeCode: err?.code || null,
+  });
+}
+
+/** Stripe Account Links reject custom schemes (e.g. blyp://) with url_invalid. */
+const DEFAULT_CONNECT_RETURN_URL = 'https://blyp.world/withdraw/connect-return';
+const DEFAULT_CONNECT_REFRESH_URL = 'https://blyp.world/withdraw/connect-refresh';
+
+function resolveStripeConnectHttpsUrl(
+  requested: string | undefined,
+  envValue: string | undefined,
+  fallbackHttps: string,
+): string {
+  for (const candidate of [requested, envValue, fallbackHttps]) {
+    const u = String(candidate || '').trim();
+    if (/^https:\/\//i.test(u)) return u;
+  }
+  return fallbackHttps;
+}
+
+function connectStatusFromAccount(
+  accountId: string,
+  account: Stripe.Account,
+): ConnectStatus {
+  const req = account.requirements;
+  return deriveConnectFlags({
+    linked: true,
+    stripeAccountId: accountId,
+    payoutsEnabled: !!account.payouts_enabled,
+    detailsSubmitted: !!account.details_submitted,
+    chargesEnabled: !!account.charges_enabled,
+    currentlyDue: asReqList(req?.currently_due),
+    pastDue: asReqList(req?.past_due),
+    pendingVerification: asReqList(req?.pending_verification),
+    disabledReason: typeof req?.disabled_reason === 'string' ? req.disabled_reason : null,
+  });
+}
 
 function stripeSecretConfigured(): boolean {
   return Boolean(String(getEconomyEnv().STRIPE_SECRET_KEY || '').trim());
@@ -242,6 +301,9 @@ export async function getWithdrawEligibility(
   claims: { emailVerified?: boolean } = {},
 ) {
   assertWithdrawalsEnabled();
+  // Always re-fetch Stripe Connect flags before deciding Connect vs withdraw UI.
+  // Relying on stale payout_accounts rows (webhook lag) caused a Connect loop.
+  const connect = await getConnectStatus(userId);
   const bal = await computeWithdrawableGems(userId);
   const previewAmount = Math.max(P.MIN_PAYOUT_COINS, Math.min(bal.withdrawableGems, P.MIN_PAYOUT_COINS));
   const ctx = await buildContext(userId, previewAmount > 0 ? previewAmount : P.MIN_PAYOUT_COINS, claims);
@@ -252,7 +314,7 @@ export async function getWithdrawEligibility(
   });
 
   const fee = feeSplit(P.MIN_PAYOUT_COINS);
-  const payout = await getEconomyInfra().db('payout_accounts').where({ user_id: userId }).first();
+  const connectBlocker = humanizeConnectBlocker(connect);
 
   return {
     enabled: true,
@@ -277,16 +339,15 @@ export async function getWithdrawEligibility(
       netMinor: fee.netMinor,
     },
     connect: {
-      linked: !!payout?.stripe_account_id,
-      payoutsEnabled: !!payout?.payouts_enabled,
-      detailsSubmitted: !!payout?.details_submitted,
+      ...connect,
+      blockerMessage: connectBlocker,
     },
     blockers: assessment.decision === 'deny' ? assessment.reasons : [],
     reviewReasons: assessment.decision === 'review' ? assessment.reasons : [],
     canRequest:
       bal.withdrawableGems >= P.MIN_PAYOUT_COINS &&
       assessment.decision !== 'deny' &&
-      !!payout?.payouts_enabled,
+      !!connect.payoutsEnabled,
     policyCopy: {
       coinsNotCashable: true,
       gemsFromGiftsCashable: true,
@@ -309,62 +370,92 @@ export async function createConnectOnboardLink(
   let row = await db('payout_accounts').where({ user_id: userId }).first();
   let accountId = row?.stripe_account_id as string | undefined;
 
-  if (!accountId) {
-    const account = await stripe.accounts.create({
-      type: 'express',
-      country: 'GB',
-      email: opts.email || undefined,
-      capabilities: {
-        transfers: { requested: true },
-      },
-      business_type: 'individual',
-      metadata: { blyp_user_id: userId },
-    });
-    accountId = account.id;
-    await db('payout_accounts')
-      .insert({
-        user_id: userId,
-        stripe_account_id: accountId,
-        payouts_enabled: !!account.payouts_enabled,
-        details_submitted: !!account.details_submitted,
-        charges_enabled: !!account.charges_enabled,
-        updated_at: db.fn.now(),
-      })
-      .onConflict('user_id')
-      .merge({
-        stripe_account_id: accountId,
-        payouts_enabled: !!account.payouts_enabled,
-        details_submitted: !!account.details_submitted,
-        charges_enabled: !!account.charges_enabled,
-        updated_at: db.fn.now(),
+  try {
+    if (!accountId) {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        country: 'GB',
+        email: opts.email || undefined,
+        capabilities: {
+          transfers: { requested: true },
+        },
+        business_type: 'individual',
+        metadata: { blyp_user_id: userId },
       });
+      accountId = account.id;
+      await db('payout_accounts')
+        .insert({
+          user_id: userId,
+          stripe_account_id: accountId,
+          payouts_enabled: !!account.payouts_enabled,
+          details_submitted: !!account.details_submitted,
+          charges_enabled: !!account.charges_enabled,
+          updated_at: db.fn.now(),
+        })
+        .onConflict('user_id')
+        .merge({
+          stripe_account_id: accountId,
+          payouts_enabled: !!account.payouts_enabled,
+          details_submitted: !!account.details_submitted,
+          charges_enabled: !!account.charges_enabled,
+          updated_at: db.fn.now(),
+        });
+    } else {
+      // Existing Express account: refresh from Stripe and skip a new Account Link
+      // when onboarding is already complete (breaks the Connect → return → Connect loop).
+      const status = await getConnectStatus(userId);
+      if (!status.needsOnboarding) {
+        return {
+          url: undefined as string | undefined,
+          stripeAccountId: status.stripeAccountId || accountId,
+          alreadyComplete: true as const,
+          connect: status,
+          expiresAt: undefined as number | undefined,
+        };
+      }
+    }
+
+    const returnUrl = resolveStripeConnectHttpsUrl(
+      opts.returnUrl,
+      env.STRIPE_CONNECT_RETURN_URL,
+      DEFAULT_CONNECT_RETURN_URL,
+    );
+    const refreshUrl = resolveStripeConnectHttpsUrl(
+      opts.refreshUrl,
+      env.STRIPE_CONNECT_REFRESH_URL,
+      DEFAULT_CONNECT_REFRESH_URL,
+    );
+
+    const link = await stripe.accountLinks.create({
+      account: accountId!,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+      type: 'account_onboarding',
+    });
+
+    return {
+      url: link.url as string | undefined,
+      stripeAccountId: accountId,
+      alreadyComplete: false as const,
+      expiresAt: link.expires_at as number | undefined,
+    };
+  } catch (e: any) {
+    if (e instanceof EconomyError) throw e;
+    mapStripeConnectError(e);
   }
-
-  const returnUrl =
-    opts.returnUrl ||
-    String(env.STRIPE_CONNECT_RETURN_URL || '').trim() ||
-    'blyp://withdraw/connect-return';
-  const refreshUrl =
-    opts.refreshUrl ||
-    String(env.STRIPE_CONNECT_REFRESH_URL || '').trim() ||
-    'blyp://withdraw/connect-refresh';
-
-  const link = await stripe.accountLinks.create({
-    account: accountId!,
-    refresh_url: refreshUrl,
-    return_url: returnUrl,
-    type: 'account_onboarding',
-  });
-
-  return { url: link.url, stripeAccountId: accountId, expiresAt: link.expires_at };
 }
 
-export async function getConnectStatus(userId: string) {
+export async function getConnectStatus(userId: string): Promise<ConnectStatus> {
   assertWithdrawalsEnabled();
   const { db } = getEconomyInfra();
   const row = await db('payout_accounts').where({ user_id: userId }).first();
   if (!row?.stripe_account_id) {
-    return { linked: false, payoutsEnabled: false, detailsSubmitted: false };
+    return deriveConnectFlags({
+      linked: false,
+      payoutsEnabled: false,
+      detailsSubmitted: false,
+      chargesEnabled: false,
+    });
   }
 
   try {
@@ -378,22 +469,16 @@ export async function getConnectStatus(userId: string) {
         charges_enabled: !!account.charges_enabled,
         updated_at: db.fn.now(),
       });
-    return {
-      linked: true,
-      stripeAccountId: row.stripe_account_id,
-      payoutsEnabled: !!account.payouts_enabled,
-      detailsSubmitted: !!account.details_submitted,
-      chargesEnabled: !!account.charges_enabled,
-    };
+    return connectStatusFromAccount(row.stripe_account_id, account);
   } catch (e: any) {
     logger.warn({ err: e?.message || String(e) }, '[withdraw] connect status refresh failed');
-    return {
+    return deriveConnectFlags({
       linked: true,
       stripeAccountId: row.stripe_account_id,
       payoutsEnabled: !!row.payouts_enabled,
       detailsSubmitted: !!row.details_submitted,
       chargesEnabled: !!row.charges_enabled,
-    };
+    });
   }
 }
 

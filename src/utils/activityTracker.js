@@ -1,7 +1,32 @@
 import { serverTimestamp, writeBatch, doc as webDoc } from 'firebase/firestore';
 import { db, firestore } from '../config/firebase';
+import { looksLikeRawId, pickPublicLabel } from './publicLabel';
 
 let hasWarnedActivityPermissions = false;
+
+async function resolveActorFields(actorId, metadata = {}) {
+  const fromMeta = pickPublicLabel(
+    {
+      username: metadata.actorUsername || metadata.username,
+      displayName: metadata.actorDisplayName || metadata.displayName,
+    },
+    { uid: actorId, fallback: '' }
+  );
+  if (fromMeta) {
+    return { actorUsername: fromMeta, actorDisplayName: fromMeta };
+  }
+  try {
+    const snap = await db.collection('users').doc(actorId).get();
+    const d = typeof snap?.data === 'function' ? snap.data() : snap?.data || {};
+    const label = pickPublicLabel(d || {}, { uid: actorId, fallback: '' });
+    if (label && !looksLikeRawId(label)) {
+      return { actorUsername: label, actorDisplayName: label };
+    }
+  } catch {
+    /* best-effort denormalization */
+  }
+  return { actorUsername: null, actorDisplayName: null };
+}
 
 function isFirestorePermissionError(error) {
   const code = String(error?.code || '').toLowerCase();
@@ -35,15 +60,22 @@ export const trackActivity = async (activityType, actorId, targetUserId, metadat
       return;
     }
 
+    const actorFields = await resolveActorFields(actorId, metadata);
     const activityData = {
       type: activityType,
       actorId,
       targetUserId,
+      // Denormalized at write time so inbox/activity UIs don't depend on a
+      // live profile read (and never persist a raw uid as the label).
+      actorUsername: actorFields.actorUsername,
+      actorDisplayName: actorFields.actorDisplayName,
       timestamp: serverTimestamp(),
       read: false,
       metadata: {
-        ...metadata
-      }
+        ...metadata,
+        ...(actorFields.actorUsername ? { actorUsername: actorFields.actorUsername } : {}),
+        ...(actorFields.actorDisplayName ? { actorDisplayName: actorFields.actorDisplayName } : {}),
+      },
     };
 
     await db.collection('activities').add(activityData);

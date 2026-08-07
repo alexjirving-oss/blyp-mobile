@@ -22,6 +22,20 @@ import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
 import { getActivity } from '../services/activityService';
 import { setActivitySeen } from '../services/userPreferencesService';
+import { looksLikeRawId, pickPublicLabel } from '../utils/publicLabel';
+
+function actorLabel(item) {
+  const label = pickPublicLabel(
+    {
+      username: item?.username,
+      displayName: item?.displayName,
+      actorUsername: item?.actorUsername,
+      actorDisplayName: item?.actorDisplayName,
+    },
+    { uid: item?.actorId, fallback: 'Someone' }
+  );
+  return looksLikeRawId(label) ? 'Someone' : label;
+}
 
 function timeAgo(ts) {
   if (!ts) return '';
@@ -64,8 +78,9 @@ const ActivityScreen = ({ navigation }) => {
   }, [load, uid]);
 
   const openItem = (item) => {
+    const name = actorLabel(item);
     if (item.type === 'follow') {
-      navigation.navigate('UserProfile', { userId: item.actorId, username: item.username });
+      navigation.navigate('UserProfile', { userId: item.actorId, username: name });
     } else if (item.post) {
       navigation.navigate('MediaViewer', { post: item.post });
     }
@@ -78,7 +93,8 @@ const ActivityScreen = ({ navigation }) => {
   };
 
   const renderItem = ({ item }) => {
-    const initial = (item.username || '?').slice(0, 1).toUpperCase();
+    const name = actorLabel(item);
+    const initial = (name || '?').slice(0, 1).toUpperCase();
     const badge = ICON[item.type] || ICON.like;
     return (
       <TouchableOpacity style={styles.row} activeOpacity={0.85} onPress={() => openItem(item)}>
@@ -97,7 +113,7 @@ const ActivityScreen = ({ navigation }) => {
 
         <View style={styles.rowBody}>
           <Text style={styles.rowText} numberOfLines={2}>
-            <Text style={styles.username}>@{item.username}</Text>
+            <Text style={styles.username}>@{name}</Text>
             {label(item)}
           </Text>
           <Text style={styles.time}>{timeAgo(item.ts)}</Text>

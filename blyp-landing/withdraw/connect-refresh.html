@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Blyp — Resume payout setup</title>
+  <style>
+    :root { --bg:#0A0A0C; --text:#F5F5F7; --muted:#A1A1AA; --accent:#00D2BE; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text); }
+    .box { max-width:420px; padding:28px 22px; text-align:center; }
+    h1 { font-size:22px; margin:0 0 10px; font-weight:700; }
+    p { color:var(--muted); line-height:1.5; margin:0 0 18px; }
+    a.btn { display:inline-block; padding:12px 18px; border-radius:12px; background:var(--accent);
+      color:#041714; font-weight:700; text-decoration:none; }
+    a.btn:hover { filter:brightness(1.05); }
+  </style>
+  <script>
+    (function () {
+      var deep = 'blyp://withdraw/connect-refresh';
+      try { window.location.replace(deep); } catch (e) {}
+      setTimeout(function () {
+        try { window.location.href = deep; } catch (e2) {}
+      }, 400);
+    })();
+  </script>
+</head>
+<body>
+  <div class="box">
+    <h1>Resume payout setup</h1>
+    <p>Your Stripe session expired. Opening Blyp so you can continue Connect onboarding.</p>
+    <a class="btn" href="blyp://withdraw/connect-refresh">Open Blyp</a>
+  </div>
+</body>
+</html>

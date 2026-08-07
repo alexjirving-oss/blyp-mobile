@@ -51,31 +51,11 @@ exports.onLiveStreamGoLive = exports.onLiveStreamCreate = void 0;
 const functions = __importStar(require("firebase-functions"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const outbox_1 = require("./outbox");
+const resolveUserLabel_1 = require("./resolveUserLabel");
 const MAX_FOLLOWERS_FANOUT = 5000;
 const ENQUEUE_CHUNK = 50;
 async function resolveHostName(hostUid) {
-    const db = firebaseAdmin_1.admin.firestore();
-    try {
-        const u = await db.collection('users').doc(hostUid).get();
-        const d = u.data() || {};
-        const name = d.displayName || d.username || d.name;
-        if (name)
-            return String(name);
-    }
-    catch (_a) {
-        // fall through
-    }
-    try {
-        const p = await db.collection('userProfiles').doc(hostUid).get();
-        const d = p.data() || {};
-        const name = d.displayName || d.username || d.name;
-        if (name)
-            return String(name);
-    }
-    catch (_b) {
-        // fall through
-    }
-    return 'Someone you follow';
+    return (0, resolveUserLabel_1.resolveUserLabel)(hostUid, 'Someone you follow');
 }
 async function claimLiveAlert(streamId) {
     const db = firebaseAdmin_1.admin.firestore();
@@ -101,7 +81,7 @@ async function claimLiveAlert(streamId) {
  * blyp bar. These are one-shot — we notify, then deactivate the watch so it
  * doesn't fire on the host's next stream.
  */
-async function notifyLiveWatchers(hostUid, streamId, title, body) {
+async function notifyLiveWatchers(hostUid, streamId, title, body, hostName) {
     const db = firebaseAdmin_1.admin.firestore();
     let snap;
     try {
@@ -130,7 +110,13 @@ async function notifyLiveWatchers(hostUid, streamId, title, body) {
                 body,
                 dedupeKey: `livewatch:${streamId}:${watcherUid}`,
                 collapseKey: `livewatch:${streamId}`,
-                data: { type: 'live', streamId, hostId: hostUid },
+                data: {
+                    type: 'live',
+                    streamId,
+                    hostId: hostUid,
+                    actorUsername: hostName,
+                    hostName,
+                },
             }).catch(() => false);
         }));
         enqueued += results.filter(Boolean).length;
@@ -157,7 +143,7 @@ async function fanOutLiveAlert(streamId, stream) {
     const body = String((stream === null || stream === void 0 ? void 0 : stream.title) || '').trim() || 'Tap to watch now';
     // Opt-in watchers first — they asked specifically for this host, and should be
     // notified even if the host has no followers.
-    await notifyLiveWatchers(hostUid, streamId, title, body);
+    await notifyLiveWatchers(hostUid, streamId, title, body, hostName);
     const followersSnap = await db
         .collection('users')
         .doc(hostUid)
@@ -180,7 +166,13 @@ async function fanOutLiveAlert(streamId, stream) {
             body,
             dedupeKey: `live:${streamId}:${uid}`,
             collapseKey: `live:${streamId}`,
-            data: { type: 'live', streamId, hostId: hostUid },
+            data: {
+                type: 'live',
+                streamId,
+                hostId: hostUid,
+                actorUsername: hostName,
+                hostName,
+            },
         }).catch(() => false)));
         enqueued += results.filter(Boolean).length;
     }

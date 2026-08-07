@@ -651,6 +651,22 @@ export async function refundBattleGiftPledges(input: {
   return await callEconomyBackend('/economy/battle/gift-pledges/refund', 'POST', input);
 }
 
+export interface WithdrawConnectStatus {
+  linked: boolean;
+  payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  chargesEnabled?: boolean;
+  stripeAccountId?: string;
+  currentlyDue?: string[];
+  pastDue?: string[];
+  pendingVerification?: string[];
+  disabledReason?: string | null;
+  /** Server-computed: reopen Stripe Account Link only when user action is still required. */
+  needsOnboarding?: boolean;
+  onboardingComplete?: boolean;
+  blockerMessage?: string | null;
+}
+
 export interface WithdrawEligibility {
   enabled: boolean;
   currency: string;
@@ -670,7 +686,7 @@ export interface WithdrawEligibility {
     feeMinor: number;
     netMinor: number;
   };
-  connect: { linked: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean };
+  connect: WithdrawConnectStatus;
   blockers: string[];
   reviewReasons: string[];
   canRequest: boolean;
@@ -683,16 +699,17 @@ export async function getWithdrawEligibility(): Promise<WithdrawEligibility> {
 export async function startWithdrawConnectOnboard(input: {
   returnUrl?: string;
   refreshUrl?: string;
-} = {}): Promise<{ url: string; stripeAccountId: string; expiresAt?: number }> {
+} = {}): Promise<{
+  url: string | null;
+  stripeAccountId: string;
+  expiresAt?: number;
+  alreadyComplete?: boolean;
+  connect?: WithdrawConnectStatus;
+}> {
   return await callEconomyBackend('/withdraw/connect/onboard', 'POST', input);
 }
 
-export async function getWithdrawConnectStatus(): Promise<{
-  linked: boolean;
-  payoutsEnabled?: boolean;
-  detailsSubmitted?: boolean;
-  stripeAccountId?: string;
-}> {
+export async function getWithdrawConnectStatus(): Promise<WithdrawConnectStatus> {
   return await callEconomyBackend('/withdraw/connect/status', 'GET');
 }
 

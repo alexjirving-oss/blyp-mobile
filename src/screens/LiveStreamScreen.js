@@ -42,7 +42,7 @@ import { useAuth, useFirestoreDoc, clearCognitoSessions, refreshAuthNow, userPoo
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
-import { isArtilleryEnabled, isMarbleRaceEnabled } from '../config/LiveGamesFlags';
+import { isArtilleryEnabled, isMarbleRaceEnabled, isFrenemiesEnabled } from '../config/LiveGamesFlags';
 import { useLockPortraitWhileFocused } from '../utils/lockPortraitWhileFocused';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import CommentsModal from '../components/CommentsModal';
@@ -51,8 +51,12 @@ import LiveGiftOverlay from '../components/live/LiveGiftOverlay';
 import BattleOverlay from '../components/Battles/BattleOverlay';
 import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
 import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
+import FrenemiesOverlay from '../components/live/FrenemiesOverlay';
+import LiveGamesPicker from '../components/live/LiveGamesPicker';
 import GuestControlSheet from '../components/live/GuestControlSheet';
+import useIsAdmin from '../hooks/useIsAdmin';
 import LiveInviteGuestsModal from '../components/live/LiveInviteGuestsModal';
+import ReservedGuestTile from '../components/live/ReservedGuestTile';
 import LiveDashboardSheet from '../components/live/dashboard/LiveDashboardSheet';
 import StageDeskChrome from '../components/live/dashboard/StageDeskChrome';
 import {
@@ -72,7 +76,7 @@ import {
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
 import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
-import { listGuestRequests, inviteGuest, rejectGuest, kickGuest, muteGuest, setGuestCamera, hostInviteGuest, MAX_GUEST_SLOTS } from '../api/ivsLiveApi';
+import { listGuestRequests, inviteGuest, rejectGuest, kickGuest, muteGuest, setGuestCamera, hostInviteGuest, MAX_GUEST_SLOTS, bumpLiveEngagement, getLiveEngagementSession, frenemiesChat } from '../api/ivsLiveApi';
 // IVS Architecture imports (feature-flagged, default OFF)
 import { streamingConfig } from '../config/StreamingFeatureConfig';
 import { StreamingBackend } from '../config/StreamingBackend';
@@ -204,6 +208,7 @@ const LiveStreamScreen = (props) => {
   }, []);
   const trackAsync = useTrackAsync();
   const { uid, isAuthenticated, authReady, loading: authLoading, getDisplayName } = useAuth();
+  const { isAdmin } = useIsAdmin();
 
   const {
     normalizedParams,
@@ -235,8 +240,11 @@ const LiveStreamScreen = (props) => {
 
   // Marble Race (Guest Grand Prix). Reads expo.extra + env (not bare process.env).
   const MARBLE_ENABLED = isMarbleRaceEnabled();
-  // Games bottom-tab panel (Marble Race / battle game). Host starts Race from here.
+  const FRENEMIES_ENABLED = isFrenemiesEnabled();
+  // Games bottom-tab panel (Marble Race / Frenemies / battle game). Host starts from here.
   const [gamesOpen, setGamesOpen] = useState(false);
+  /** null = branded picker; 'marble' | 'frenemies' = that game's start chrome. */
+  const [selectedLiveGame, setSelectedLiveGame] = useState(null);
   const [inviteGuestsOpen, setInviteGuestsOpen] = useState(false);
   const [invitingGuestUid, setInvitingGuestUid] = useState(null);
   const [stageDeskOpen, setStageDeskOpen] = useState(false);
@@ -268,20 +276,35 @@ const LiveStreamScreen = (props) => {
     return null;
   };
 
-  const liveGamesAvailable = (!!activeBattleId && ARTILLERY_ENABLED) || (MARBLE_ENABLED && !activeBattleId);
+  const liveGamesAvailable =
+    (!!activeBattleId && ARTILLERY_ENABLED) ||
+    ((MARBLE_ENABLED || FRENEMIES_ENABLED) && !activeBattleId);
+
+  const closeLiveGames = useCallback(() => {
+    setGamesOpen(false);
+    setSelectedLiveGame(null);
+  }, []);
 
   const openLiveGames = useCallback(() => {
     if (activeBattleId && ARTILLERY_ENABLED) {
       setShowArtillery(true);
       setGamesOpen(false);
+      setSelectedLiveGame(null);
       return;
     }
-    if (MARBLE_ENABLED && !activeBattleId) {
-      setGamesOpen((v) => !v);
+    if ((MARBLE_ENABLED || FRENEMIES_ENABLED) && !activeBattleId) {
+      setGamesOpen((v) => {
+        if (v) {
+          setSelectedLiveGame(null);
+          return false;
+        }
+        setSelectedLiveGame(null);
+        return true;
+      });
       return;
     }
     Alert.alert('Games', 'Live games are not available in this room yet.');
-  }, [activeBattleId, ARTILLERY_ENABLED, MARBLE_ENABLED]);
+  }, [activeBattleId, ARTILLERY_ENABLED, MARBLE_ENABLED, FRENEMIES_ENABLED]);
 
   // Marble Race translucent overlay on non-battle lives.
   // Host start chrome is gated by the Games bottom tab; active races always show.
@@ -302,13 +325,51 @@ const LiveStreamScreen = (props) => {
         currentUid={uid}
         hostName={resolvedHostName || 'Host'}
         liveGuestCount={guestCount}
-        controlsVisible={gamesOpen}
-        onClose={() => setGamesOpen(false)}
+        controlsVisible={gamesOpen && selectedLiveGame === 'marble'}
+        onClose={() => setSelectedLiveGame(null)}
         onInviteGuest={
           isHost
             ? () => setInviteGuestsOpen(true)
             : undefined
         }
+      />
+    );
+  };
+
+  const renderFrenemiesLayer = () => {
+    if (!FRENEMIES_ENABLED || activeBattleId) return null;
+    const gameSessionId = routeStreamId || streamId;
+    if (!gameSessionId) return null;
+    if (isHost && !isStreaming) return null;
+    return (
+      <FrenemiesOverlay
+        sessionId={gameSessionId}
+        currentUid={uid}
+        displayName={typeof getDisplayName === 'function' ? getDisplayName() : 'Player'}
+        isAdmin={!!isAdmin}
+        isHost={isHost}
+        liveGuests={liveGuests || []}
+        controlsVisible={gamesOpen && selectedLiveGame === 'frenemies' && !!isAdmin}
+        onClose={closeLiveGames}
+        onBackToPicker={() => setSelectedLiveGame(null)}
+      />
+    );
+  };
+
+  const renderLiveGamesPicker = () => {
+    if (!gamesOpen || selectedLiveGame || activeBattleId) return null;
+    if (isHost && !isStreaming) return null;
+    const showMarble = !!MARBLE_ENABLED && !!isHost;
+    const showFrenemies = !!FRENEMIES_ENABLED && !!isAdmin;
+    if (!showMarble && !showFrenemies) return null;
+    return (
+      <LiveGamesPicker
+        visible
+        showMarble={showMarble}
+        showFrenemies={showFrenemies}
+        onPickMarble={() => setSelectedLiveGame('marble')}
+        onPickFrenemies={() => setSelectedLiveGame('frenemies')}
+        onClose={closeLiveGames}
       />
     );
   };
@@ -468,6 +529,8 @@ const LiveStreamScreen = (props) => {
   // recipient. Defaults to the host; viewers/host can pick a guest instead so
   // everyone on stage can be gifted.
   const [liveGuests, setLiveGuests] = useState([]);
+  // INVITED guests painted into their Dynamo slot before IVS media arrives.
+  const reservedGuestsRef = useRef(new Map()); // userId -> { userId, slotIndex, name, photoUrl, status }
   const [giftRecipient, setGiftRecipient] = useState(null);
   const [reactionBurst, setReactionBurst] = useState({ key: 0, emoji: null });
   // Start hidden so a solo host is full-bleed (no empty guest tiles over their
@@ -697,7 +760,37 @@ const LiveStreamScreen = (props) => {
     const id = toTrimmedString(activeGuestRequest?.userId);
     if (!id) return closeGuestRequestOverlay(true);
     try {
-      await inviteGuest(streamId, id);
+      const res = await inviteGuest(streamId, id);
+      const slotIndex =
+        typeof res?.slotIndex === 'number' && res.slotIndex >= 1 ? res.slotIndex : null;
+      if (slotIndex != null && streamId) {
+        // Reserve the authoritative box immediately (before IVS media arrives).
+        const reserved = {
+          userId: id,
+          slotIndex,
+          name:
+            activeGuestRequestProfile?.username ||
+            activeGuestRequest?.displayName ||
+            null,
+          photoUrl:
+            activeGuestRequestProfile?.photoUrl ||
+            activeGuestRequest?.photoUrl ||
+            null,
+          status: 'INVITED',
+        };
+        reservedGuestsRef.current.set(id, reserved);
+        setLiveGuests((prev) => {
+          const next = (Array.isArray(prev) ? prev : []).filter(
+            (g) =>
+              g &&
+              String(g.userId) !== id &&
+              !(typeof g.slotIndex === 'number' && g.slotIndex === slotIndex),
+          );
+          next.push(reserved);
+          mirrorLiveGuests(streamId, next);
+          return next;
+        });
+      }
     } catch (e) {
       console.warn('[HOST][INVITE_GUEST_FAILED]', e);
       const isPanelFull = String(e?.message || '').includes('PANEL_FULL');
@@ -1163,16 +1256,21 @@ const LiveStreamScreen = (props) => {
     mirrorActiveBattleId(sid, activeBattleId);
   }, [isViewer, isStreaming, streamId, activeBattleId, ivsHostSession?.sessionId, ivsHostSession?.streamId]);
 
-  // Number of real (remote) guests currently on stage for the host.
+  // Number of real (remote) guests currently on stage for the host —
+  // includes INVITED reservations so the tray opens before IVS media arrives.
   const hostGuestCount = useMemo(() => {
     try {
-      return (ivsHostSession?.participants || []).filter(
+      const fromIvs = (ivsHostSession?.participants || []).filter(
         (p) => p && !p.isLocal && typeof p.slotIndex === 'number' && p.slotIndex >= 1
       ).length;
+      const fromRoster = (liveGuests || []).filter(
+        (g) => g && typeof g.slotIndex === 'number' && g.slotIndex >= 1
+      ).length;
+      return Math.max(fromIvs, fromRoster);
     } catch {
       return 0;
     }
-  }, [ivsHostSession?.participants]);
+  }, [ivsHostSession?.participants, liveGuests]);
 
   // Auto-reveal the guest tray the moment the first guest joins (so a host who
   // started solo/full-bleed isn't left with guests hidden behind the handle).
@@ -1400,6 +1498,29 @@ const LiveStreamScreen = (props) => {
                 },
               };
             });
+            setSessionEngagementByUser((prev) => {
+              const cur = prev[rid] || { likes: 0, shares: 0, comments: 0, coinsSpent: 0, coinsReceived: 0 };
+              return {
+                ...prev,
+                [rid]: {
+                  ...cur,
+                  coinsReceived: (cur.coinsReceived || 0) + (Number(payload?.coinSpent) || 0),
+                },
+              };
+            });
+          }
+          const sidGift = payload?.sender?.userId;
+          if (sidGift) {
+            setSessionEngagementByUser((prev) => {
+              const cur = prev[sidGift] || { likes: 0, shares: 0, comments: 0, coinsSpent: 0, coinsReceived: 0 };
+              return {
+                ...prev,
+                [sidGift]: {
+                  ...cur,
+                  coinsSpent: (cur.coinsSpent || 0) + (Number(payload?.coinSpent) || 0),
+                },
+              };
+            });
           }
           // The backend only sends sender.userId (handle/avatar are null), so the
           // overlay was showing a generic "Someone". Resolve the real sender's
@@ -1529,40 +1650,66 @@ const LiveStreamScreen = (props) => {
 
   // Host: mirror the on-stage guest roster onto the stream doc so that viewers
   // (who don't have the IVS participant list) can see and gift guests too.
+  // INVITED reservations live in reservedGuestsRef so boxes paint before IVS media.
   const lastGuestSigRef = useRef('');
   useEffect(() => {
     if (backend !== StreamingBackend.IVS) return;
     if (isViewer || !isStreaming || !streamId) return;
 
     const byUser = new Map();
+    reservedGuestsRef.current.forEach((g, userId) => {
+      if (!g || typeof g.slotIndex !== 'number' || g.slotIndex < 1) return;
+      byUser.set(String(userId), { ...g, userId: String(userId) });
+    });
     (ivsHostSession.participants || []).forEach((p) => {
       if (!p || p.isLocal || !p.userId || p.userId === uid) return;
       const userId = String(p.userId);
-      if (!byUser.has(userId)) {
-        byUser.set(userId, { userId, slotIndex: typeof p.slotIndex === 'number' ? p.slotIndex : null });
+      const slotIndex = typeof p.slotIndex === 'number' ? p.slotIndex : null;
+      const prev = byUser.get(userId) || reservedGuestsRef.current.get(userId) || {};
+      byUser.set(userId, {
+        userId,
+        slotIndex: slotIndex ?? prev.slotIndex ?? null,
+        name: prev.name || null,
+        photoUrl: prev.photoUrl || null,
+        status: 'LIVE',
+      });
+      // Media arrived — drop INVITED reservation so kick/leave cleans cleanly.
+      if (reservedGuestsRef.current.has(userId)) {
+        reservedGuestsRef.current.delete(userId);
       }
     });
-    const guests = Array.from(byUser.values());
+    const guests = Array.from(byUser.values()).filter(
+      (g) => typeof g.slotIndex === 'number' && g.slotIndex >= 1,
+    );
 
-    const sig = guests.map((g) => `${g.userId}:${g.slotIndex}`).sort().join('|');
+    const sig = guests.map((g) => `${g.userId}:${g.slotIndex}:${g.status || ''}`).sort().join('|');
     if (sig === lastGuestSigRef.current) return;
     lastGuestSigRef.current = sig;
 
     let cancelled = false;
     (async () => {
       const resolved = await Promise.all(guests.map(async (g) => {
-        let name = null;
-        let photoUrl = null;
-        try {
-          const snap = await db.collection('users').doc(g.userId).get();
-          const d = (snap && typeof snap.data === 'function' ? snap.data() : null) || {};
-          name = d.displayName || d.username || d.handle || null;
-          photoUrl = d.photoURL || d.userPhotoURL || null;
-        } catch { /* best effort */ }
-        return { userId: g.userId, slotIndex: g.slotIndex, name, photoUrl };
+        let name = g.name || null;
+        let photoUrl = g.photoUrl || null;
+        if (!name || !photoUrl) {
+          try {
+            const snap = await db.collection('users').doc(g.userId).get();
+            const d = (snap && typeof snap.data === 'function' ? snap.data() : null) || {};
+            name = name || d.displayName || d.username || d.handle || null;
+            photoUrl = photoUrl || d.photoURL || d.userPhotoURL || null;
+          } catch { /* best effort */ }
+        }
+        return {
+          userId: g.userId,
+          slotIndex: g.slotIndex,
+          name,
+          photoUrl,
+          status: g.status || null,
+        };
       }));
       if (cancelled) return;
       mirrorLiveGuests(streamId, resolved);
+      setLiveGuests(resolved);
     })();
 
     return () => { cancelled = true; };
@@ -1577,7 +1724,17 @@ const LiveStreamScreen = (props) => {
       return;
     }
     const unsub = HLSLiveStreamServiceInstance.subscribeToStream(activeStreamId, (data) => {
-      setLiveGuests(data && Array.isArray(data.guests) ? data.guests : []);
+      const fromDoc = data && Array.isArray(data.guests) ? data.guests : [];
+      // Merge INVITED reservations so a stale Firestore snapshot cannot blank
+      // a box the host already reserved from the invite response.
+      const byUser = new Map();
+      fromDoc.forEach((g) => {
+        if (g?.userId) byUser.set(String(g.userId), g);
+      });
+      reservedGuestsRef.current.forEach((g, userId) => {
+        if (!byUser.has(String(userId))) byUser.set(String(userId), g);
+      });
+      setLiveGuests(Array.from(byUser.values()));
       if (data && data.guestLayoutMode) {
         setGuestLayoutMode(normalizeLiveLayoutMode(data.guestLayoutMode));
       }
@@ -2529,6 +2686,8 @@ const LiveStreamScreen = (props) => {
 
   // Launch a floating reaction (emoji=null => heart) and record it as engagement.
   // `emoji` null keeps the classic heart icon; any emoji floats that sticker.
+  // Rapid taps are batched so Frenemies 50-like challenges stay achievable.
+  const likeBatchRef = useRef({ count: 0, timer: null });
   const triggerReaction = async (emoji = null) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2559,24 +2718,30 @@ const LiveStreamScreen = (props) => {
     const activeStreamId = routeStreamId || streamId;
     if (!activeStreamId || !uid) return;
 
-    try {
-      // Route ALL likes (IVS and HLS) through the Cloud Function so every tap
-      // lands on the single authoritative liveStreams/{id}.likes counter via the
-      // Admin SDK. The previous IVS-only client write to streams/{id}.likes was
-      // blocked by Firestore rules for viewers (and even the host, since stream
-      // docs key on hostUid not userId), so likes never aggregated across
-      // host + viewers. The shared count streams back via subscribeToStream.
-      const token = await getCognitoJwtForApi({ tokenType: 'id' });
-      await HLSLiveStreamServiceInstance.addLike(activeStreamId, uid, token);
-    } catch (_e) {
-      // Cloud Function path failed — still persist engagement via Firestore so
-      // likes are not silently dropped (BLYP-ISSUE-001).
+    likeBatchRef.current.count += 1;
+    if (likeBatchRef.current.timer) clearTimeout(likeBatchRef.current.timer);
+    likeBatchRef.current.timer = setTimeout(async () => {
+      const batch = Math.min(20, likeBatchRef.current.count || 1);
+      likeBatchRef.current.count = 0;
+      likeBatchRef.current.timer = null;
       try {
-        await HLSLiveStreamServiceInstance.toggleLike(activeStreamId, uid, true);
+        // Session engagement + Frenemies likes challenge (batched).
+        await bumpLiveEngagement(String(activeStreamId), { likes: batch });
       } catch {
-        // ignore — optimistic UI already updated
+        // non-fatal
       }
-    }
+      try {
+        const token = await getCognitoJwtForApi({ tokenType: 'id' });
+        // Fire one CF like per batch unit (cap) so shared counter still moves.
+        await HLSLiveStreamServiceInstance.addLike(activeStreamId, uid, token);
+      } catch (_e) {
+        try {
+          await HLSLiveStreamServiceInstance.toggleLike(activeStreamId, uid, true);
+        } catch {
+          // ignore — optimistic UI already updated
+        }
+      }
+    }, 180);
   };
 
   const sendHeart = () => triggerReaction(null);
@@ -2624,6 +2789,17 @@ const LiveStreamScreen = (props) => {
     try {
       const token = await getCognitoJwtForApi({ tokenType: 'id' });
       await HLSLiveStreamServiceInstance.addComment(activeStreamId, content, uid, token);
+      try {
+        await bumpLiveEngagement(String(activeStreamId), { comments: 1 });
+      } catch {
+        // ignore
+      }
+      try {
+        const dn = typeof getDisplayName === 'function' ? getDisplayName() : undefined;
+        await frenemiesChat(String(activeStreamId), content, dn);
+      } catch {
+        // no active challenge / non-fatal
+      }
     } catch (error) {
       console.error('Error sending comment:', error);
       clearTimeout(safetyTimer);
@@ -2685,6 +2861,11 @@ const LiveStreamScreen = (props) => {
 
     try {
       await Share.share({ message, url });
+      try {
+        await bumpLiveEngagement(String(activeStreamId), { shares: 1 });
+      } catch {
+        // ignore
+      }
     } catch (e) {
       // If the share sheet fails (rare), still allow the user to copy the link.
     }
@@ -2723,7 +2904,30 @@ const LiveStreamScreen = (props) => {
     }
     setInvitingGuestUid(String(targetId));
     try {
-      await hostInviteGuest(String(sid), String(targetId));
+      const res = await hostInviteGuest(String(sid), String(targetId));
+      const slotIndex =
+        typeof res?.slotIndex === 'number' && res.slotIndex >= 1 ? res.slotIndex : null;
+      if (slotIndex != null) {
+        const reserved = {
+          userId: String(targetId),
+          slotIndex,
+          name: user?.displayName || user?.username || null,
+          photoUrl: user?.photoURL || user?.photoUrl || user?.avatar || null,
+          status: 'INVITED',
+        };
+        reservedGuestsRef.current.set(String(targetId), reserved);
+        setLiveGuests((prev) => {
+          const next = (Array.isArray(prev) ? prev : []).filter(
+            (g) =>
+              g &&
+              String(g.userId) !== String(targetId) &&
+              !(typeof g.slotIndex === 'number' && g.slotIndex === slotIndex),
+          );
+          next.push(reserved);
+          mirrorLiveGuests(String(sid), next);
+          return next;
+        });
+      }
       Toast.show?.({
         type: 'success',
         text1: 'Invite sent',
@@ -3014,6 +3218,7 @@ const LiveStreamScreen = (props) => {
   // Tapping a guest tile opens one shared sheet to act on that guest: identity,
   // relationship, session stats, gift, mute/camera/report/disconnect.
   const [giftTotalsByUser, setGiftTotalsByUser] = useState({});
+  const [sessionEngagementByUser, setSessionEngagementByUser] = useState({});
   const [guestControlVisible, setGuestControlVisible] = useState(false);
   const [selectedGuestControlId, setSelectedGuestControlId] = useState(null);
   const [guestReportTarget, setGuestReportTarget] = useState(null);
@@ -3056,6 +3261,43 @@ const LiveStreamScreen = (props) => {
     setSelectedGuestControlId(String(id));
     setGuestControlVisible(true);
   };
+
+  // Refresh session engagement tallies while the guest control sheet is open.
+  useEffect(() => {
+    if (!guestControlVisible) return undefined;
+    const sid = String(routeStreamId || streamId || '');
+    if (!sid) return undefined;
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const res = await getLiveEngagementSession(sid);
+        if (!cancelled && res?.byUser) {
+          setSessionEngagementByUser((prev) => {
+            const next = { ...prev };
+            Object.entries(res.byUser).forEach(([uidKey, eng]) => {
+              const cur = next[uidKey] || { likes: 0, shares: 0, comments: 0, coinsSpent: 0, coinsReceived: 0 };
+              next[uidKey] = {
+                likes: Math.max(cur.likes || 0, eng.likes || 0),
+                shares: Math.max(cur.shares || 0, eng.shares || 0),
+                comments: Math.max(cur.comments || 0, eng.comments || 0),
+                coinsSpent: Math.max(cur.coinsSpent || 0, eng.coinsSpent || 0),
+                coinsReceived: Math.max(cur.coinsReceived || 0, eng.coinsReceived || 0),
+              };
+            });
+            return next;
+          });
+        }
+      } catch {
+        // non-fatal
+      }
+    };
+    pull();
+    const t = setInterval(pull, 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [guestControlVisible, routeStreamId, streamId]);
 
   const handleGuestGift = (guest) => {
     setGuestControlVisible(false);
@@ -3161,6 +3403,16 @@ const LiveStreamScreen = (props) => {
           onPress: async () => {
             try {
               await kickGuest(String(sid), String(guestUserId));
+              try {
+                reservedGuestsRef.current.delete(String(guestUserId));
+              } catch { /* ignore */ }
+              setLiveGuests((prev) => {
+                const next = (Array.isArray(prev) ? prev : []).filter(
+                  (g) => g && String(g.userId) !== String(guestUserId),
+                );
+                mirrorLiveGuests(String(sid), next);
+                return next;
+              });
             } catch (e) {
               console.warn('[LIVE][KICK_GUEST_FAILED]', e?.message || String(e));
               Alert.alert('Couldn’t remove guest', 'Please try again.');
@@ -3430,6 +3682,8 @@ const LiveStreamScreen = (props) => {
         ) : null}
         {renderArtilleryLayer()}
         {renderMarbleLayer()}
+        {renderFrenemiesLayer()}
+        {renderLiveGamesPicker()}
       </View>
     );
   }
@@ -3727,6 +3981,8 @@ const LiveStreamScreen = (props) => {
                                     <Icon name="person" size={28} color="rgba(255,255,255,0.85)" />
                                   )}
                                 </View>
+                              ) : rosterGuest ? (
+                                <ReservedGuestTile photoUrl={guestPhoto} label="Joining…" />
                               ) : (
                                 <View style={styles.ivsEmptyTile}>
                                   <View style={styles.ivsEmptyTileInner} />
@@ -3866,7 +4122,12 @@ const LiveStreamScreen = (props) => {
 
                       const firstInviteSlotId = (() => {
                         for (let i = 1; i <= guestSlotsTotal; i += 1) {
-                          if (!guestBySlot.has(i)) return i;
+                          if (guestBySlot.has(i)) continue;
+                          const reserved = (liveGuests || []).some(
+                            (g) => g && typeof g.slotIndex === 'number' && g.slotIndex === i,
+                          );
+                          if (reserved) continue;
+                          return i;
                         }
                         return null;
                       })();
@@ -3925,6 +4186,8 @@ const LiveStreamScreen = (props) => {
                                           <Icon name="person" size={28} color="rgba(255,255,255,0.85)" />
                                         )}
                                       </View>
+                                    ) : rosterGuest ? (
+                                      <ReservedGuestTile photoUrl={guestPhoto} label="Joining…" />
                                     ) : slotId === firstInviteSlotId ? (
                                       <TouchableOpacity
                                         style={styles.ivsInviteTile}
@@ -4272,6 +4535,8 @@ const LiveStreamScreen = (props) => {
                 ) : null}
                 {renderArtilleryLayer()}
                 {renderMarbleLayer()}
+                {renderFrenemiesLayer()}
+                {renderLiveGamesPicker()}
 
                 <GuestControlSheet
                   visible={guestControlVisible}
@@ -4293,6 +4558,7 @@ const LiveStreamScreen = (props) => {
                   challengeBusy={challengeBusy}
                   giftTotalsByUser={giftTotalsByUser}
                   joinedAtByUser={guestJoinedAt}
+                  sessionEngagementByUser={sessionEngagementByUser}
                 />
 
                 <LiveInviteGuestsModal

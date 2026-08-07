@@ -7,6 +7,7 @@ import liveRoutes from './routes/liveRoutes';
 import roomsRoutes from './routes/roomsRoutes';
 import gameRoutes from './routes/gameRoutes';
 import marbleRoutes from './routes/marbleRoutes';
+import frenemiesRoutes from './routes/frenemiesRoutes';
 import economyRoutes from './economy/economyRoutes';
 import internalRoutes from './internal/internalRoutes';
 import adminRoutes from './admin/adminRoutes';
@@ -163,6 +164,9 @@ app.use('/api', gameRoutes);
 
 // Blyp Marble Race — Guest Grand Prix overlay (gated by LIVE_MARBLE_RACE_ENABLED).
 app.use('/api', marbleRoutes);
+
+// Frenemies live party game + session engagement tallies.
+app.use('/api', frenemiesRoutes);
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   // Central error handler to avoid unhandled rejections leaking details

@@ -97,6 +97,8 @@ export default function GuestControlSheet({
   challengeBusy = false,
   giftTotalsByUser = {},
   joinedAtByUser = {},
+  /** Per-user session engagement for THIS live (likes/shares/comments/coins). */
+  sessionEngagementByUser = {},
 }) {
   const selected = useMemo(
     () => guests.find((g) => (g.userId || g.participantId) === selectedGuestId) || guests[0] || null,
@@ -176,6 +178,17 @@ export default function GuestControlSheet({
   const isCamOff = cameraOffGuestIds?.has?.(selectedId);
   const onStage = formatDuration(nowTick - (joinedAtByUser[selectedId] || 0));
   const gifts = giftTotalsByUser[selectedId] || { count: 0, coins: 0 };
+  const engage = sessionEngagementByUser[selectedId] || {};
+  const likesGiven = typeof engage.likes === 'number' ? engage.likes : null;
+  const sharesGiven = typeof engage.shares === 'number' ? engage.shares : null;
+  const commentsGiven = typeof engage.comments === 'number' ? engage.comments : null;
+  const coinsSpent = typeof engage.coinsSpent === 'number' ? engage.coinsSpent : null;
+  const coinsReceived =
+    typeof engage.coinsReceived === 'number'
+      ? engage.coinsReceived
+      : typeof gifts.coins === 'number'
+        ? gifts.coins
+        : null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -237,7 +250,7 @@ export default function GuestControlSheet({
             </TouchableOpacity>
           </View>
 
-          {/* Stats */}
+          {/* Profile stats */}
           <View style={styles.statsRow}>
             <View style={styles.stat}>
               <Text style={styles.statValue} allowFontScaling={false}>{rel.followers ?? '—'}</Text>
@@ -257,12 +270,31 @@ export default function GuestControlSheet({
                 <Text style={styles.statLabel} allowFontScaling={false}>On stage</Text>
               </View>
             ) : null}
-            {gifts.count > 0 ? (
-              <View style={styles.stat}>
-                <Text style={styles.statValue} allowFontScaling={false}>{gifts.coins}</Text>
-                <Text style={styles.statLabel} allowFontScaling={false}>Gift coins</Text>
-              </View>
-            ) : null}
+          </View>
+
+          {/* This-live engagement */}
+          <Text style={styles.sectionLabel} allowFontScaling={false}>This live</Text>
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statValue} allowFontScaling={false}>{likesGiven ?? '—'}</Text>
+              <Text style={styles.statLabel} allowFontScaling={false}>Likes</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue} allowFontScaling={false}>{sharesGiven ?? '—'}</Text>
+              <Text style={styles.statLabel} allowFontScaling={false}>Shares</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue} allowFontScaling={false}>{commentsGiven ?? '—'}</Text>
+              <Text style={styles.statLabel} allowFontScaling={false}>Comments</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue} allowFontScaling={false}>{coinsSpent ?? '—'}</Text>
+              <Text style={styles.statLabel} allowFontScaling={false}>Spent</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue} allowFontScaling={false}>{coinsReceived ?? '—'}</Text>
+              <Text style={styles.statLabel} allowFontScaling={false}>Received</Text>
+            </View>
           </View>
 
           {/* Primary actions */}

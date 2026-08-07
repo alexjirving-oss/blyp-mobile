@@ -69,6 +69,27 @@
   to = "/privacy.html"
   status = 200
 
+# Stripe Connect Account Link return/refresh (HTTPS bridge → app deep link)
+[[redirects]]
+  from = "/withdraw/connect-return"
+  to = "/withdraw/connect-return.html"
+  status = 200
+
+[[redirects]]
+  from = "/withdraw/connect-return/"
+  to = "/withdraw/connect-return.html"
+  status = 200
+
+[[redirects]]
+  from = "/withdraw/connect-refresh"
+  to = "/withdraw/connect-refresh.html"
+  status = 200
+
+[[redirects]]
+  from = "/withdraw/connect-refresh/"
+  to = "/withdraw/connect-refresh.html"
+  status = 200
+
 # Optional: 404 fallback to index (in case someone tries wrong paths)
 [[redirects]]
   from = "/*"

@@ -16,29 +16,13 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { enqueueNotification } from './outbox';
+import { resolveUserLabel } from './resolveUserLabel';
 
 const MAX_FOLLOWERS_FANOUT = 5000;
 const ENQUEUE_CHUNK = 50;
 
 async function resolveHostName(hostUid: string): Promise<string> {
-  const db = admin.firestore();
-  try {
-    const u = await db.collection('users').doc(hostUid).get();
-    const d = (u.data() as any) || {};
-    const name = d.displayName || d.username || d.name;
-    if (name) return String(name);
-  } catch {
-    // fall through
-  }
-  try {
-    const p = await db.collection('userProfiles').doc(hostUid).get();
-    const d = (p.data() as any) || {};
-    const name = d.displayName || d.username || d.name;
-    if (name) return String(name);
-  } catch {
-    // fall through
-  }
-  return 'Someone you follow';
+  return resolveUserLabel(hostUid, 'Someone you follow');
 }
 
 async function claimLiveAlert(streamId: string): Promise<boolean> {
@@ -67,7 +51,8 @@ async function notifyLiveWatchers(
   hostUid: string,
   streamId: string,
   title: string,
-  body: string
+  body: string,
+  hostName: string
 ): Promise<void> {
   const db = admin.firestore();
   let snap;
@@ -97,7 +82,13 @@ async function notifyLiveWatchers(
           body,
           dedupeKey: `livewatch:${streamId}:${watcherUid}`,
           collapseKey: `livewatch:${streamId}`,
-          data: { type: 'live', streamId, hostId: hostUid },
+          data: {
+            type: 'live',
+            streamId,
+            hostId: hostUid,
+            actorUsername: hostName,
+            hostName,
+          },
         }).catch(() => false);
       })
     );
@@ -129,7 +120,7 @@ async function fanOutLiveAlert(streamId: string, stream: any): Promise<void> {
 
   // Opt-in watchers first — they asked specifically for this host, and should be
   // notified even if the host has no followers.
-  await notifyLiveWatchers(hostUid, streamId, title, body);
+  await notifyLiveWatchers(hostUid, streamId, title, body, hostName);
 
   const followersSnap = await db
     .collection('users')
@@ -157,7 +148,13 @@ async function fanOutLiveAlert(streamId: string, stream: any): Promise<void> {
           body,
           dedupeKey: `live:${streamId}:${uid}`,
           collapseKey: `live:${streamId}`,
-          data: { type: 'live', streamId, hostId: hostUid },
+          data: {
+            type: 'live',
+            streamId,
+            hostId: hostUid,
+            actorUsername: hostName,
+            hostName,
+          },
         }).catch(() => false)
       )
     );

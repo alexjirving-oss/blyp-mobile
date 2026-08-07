@@ -51,3 +51,8 @@ export function isMarbleRaceEnabled() {
 export function isArtilleryEnabled() {
   return readPublicFlag('EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED', { defaultOn: false });
 }
+
+/** Frenemies live party game — ON by default (backend LIVE_FRENEMIES_ENABLED defaults on). */
+export function isFrenemiesEnabled() {
+  return readPublicFlag('EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED', { defaultOn: true });
+}

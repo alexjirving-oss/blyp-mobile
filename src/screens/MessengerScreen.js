@@ -847,6 +847,8 @@ const MessengerScreen = ({ navigation }) => {
 
   const renderNotificationItem = ({ item }) => {
     const unread = item.status !== 'read';
+    // Inbox service rewrites opaque-id titles; actorUsername is the fallback label.
+    const title = item.title || item.actorUsername || 'Notification';
     return (
       <TouchableOpacity
         style={[styles.whatsappChatItem, unread && { backgroundColor: withAlpha(T.success, 0.06) }]}
@@ -861,7 +863,7 @@ const MessengerScreen = ({ navigation }) => {
         <View style={styles.chatContent}>
           <View style={styles.chatHeader}>
             <Text style={[styles.chatName, unread && { fontWeight: 'bold' }]} numberOfLines={1}>
-              {item.title || 'Notification'}
+              {title}
             </Text>
             <Text style={styles.chatTime}>{formatLastMessageTime(item.createdAt)}</Text>
           </View>

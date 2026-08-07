@@ -122,22 +122,37 @@ router.post('/internal/economy/credit-launch-test-gems', requireInternalSecret, 
       idempotencyKey,
       reason: reason || 'owner_launch_test_withdraw',
     });
-    let connect: { url?: string; stripeAccountId?: string; expiresAt?: number } | null = null;
+    let connect: {
+      url?: string;
+      stripeAccountId?: string;
+      expiresAt?: number;
+      alreadyComplete?: boolean;
+      error?: string;
+      code?: string;
+    } | null = null;
     if (includeConnectLink) {
       try {
-        connect = await createConnectOnboardLink(userId, {
+        const link = await createConnectOnboardLink(userId, {
           email: email || undefined,
-          returnUrl: 'blyp://withdraw/connect-return',
-          refreshUrl: 'blyp://withdraw/connect-refresh',
+          returnUrl: 'https://blyp.world/withdraw/connect-return',
+          refreshUrl: 'https://blyp.world/withdraw/connect-refresh',
         });
+        connect = {
+          url: link?.url,
+          stripeAccountId: link?.stripeAccountId,
+          expiresAt: link?.expiresAt,
+          alreadyComplete: link?.alreadyComplete,
+        };
       } catch (e: any) {
+        const mapped = toEconomyError(e);
         logger.warn(
-          { err: e?.message || String(e), userId },
+          { err: mapped.message, code: mapped.code, userId },
           '[internal] connect link after gem credit failed',
         );
         connect = {
           url: undefined,
-          error: String(e?.message || e || 'connect_failed').slice(0, 300),
+          error: String(mapped.message || e?.message || 'connect_failed').slice(0, 300),
+          code: mapped.code,
         };
       }
     }

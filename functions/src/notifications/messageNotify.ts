@@ -17,6 +17,7 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { enqueueNotification } from './outbox';
+import { isUsablePublicLabel, resolveUserLabel } from './resolveUserLabel';
 
 const MAX_BODY_LEN = 180;
 
@@ -68,7 +69,10 @@ export const onDirectMessageCreate = functions.firestore
       .filter((id) => id && id !== senderId);
     if (recipients.length === 0) return null;
 
-    const senderName = String(msg?.senderName || '').trim() || 'New message';
+    const rawSender = String(msg?.senderName || '').trim();
+    const senderName = isUsablePublicLabel(rawSender, senderId)
+      ? rawSender.replace(/^@/, '')
+      : await resolveUserLabel(senderId, 'New message');
     // For 1:1 DMs the title is just the sender; for groups, include the group name.
     const isGroup = String(conv.type || 'dm') === 'group' && recipients.length > 1;
     const groupName = String(conv.name || conv.title || '').trim();
@@ -89,6 +93,7 @@ export const onDirectMessageCreate = functions.firestore
             conversationId: convId,
             senderId,
             senderName,
+            actorUsername: senderName,
           },
         }).catch((e) => {
           console.warn('[messageNotify] enqueue failed', (e as any)?.message || String(e));

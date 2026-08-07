@@ -7,9 +7,12 @@
 //   - likes on my posts    (posts.likedBy)
 //
 // Read-bounded and best-effort: never throws, returns [] when Firebase is off.
+// Actor labels skip Cognito-sub / UUID-shaped usernames and resolve profiles
+// on read so the Activity UI never shows a raw uid as @handle.
 
 import { db, firebaseEnabled } from '../config/firebase';
 import { fixStorageUrl } from '../utils/urlUtils';
+import { looksLikeRawId, pickPublicLabel } from '../utils/publicLabel';
 
 const ready = () => firebaseEnabled && !!db?.collection;
 
@@ -34,16 +37,45 @@ async function getProfile(id) {
   try {
     const snap = await db.collection('users').doc(id).get();
     const d = snap?.data?.() || {};
+    let username = pickPublicLabel(d, { uid: id, fallback: '' });
+    if (!username) {
+      try {
+        const pSnap = await db.collection('userProfiles').doc(id).get();
+        const p = pSnap?.data?.() || {};
+        username = pickPublicLabel(p, { uid: id, fallback: '' });
+      } catch {
+        /* ignore */
+      }
+    }
     const profile = {
       id,
-      username: d.username || d.displayName || d.name || 'user',
+      username: username || 'Someone',
+      displayName: pickPublicLabel(
+        { displayName: d.displayName, name: d.name },
+        { uid: id, fallback: username || 'Someone' }
+      ),
       avatar: fixStorageUrl(d.avatar || d.photoURL || d.profilePicture || d.userPhotoURL) || null,
     };
     profileCache.set(id, profile);
     return profile;
   } catch {
-    return { id, username: 'user', avatar: null };
+    const fallback = { id, username: 'Someone', displayName: 'Someone', avatar: null };
+    profileCache.set(id, fallback);
+    return fallback;
   }
+}
+
+function denormalizedActorLabel(data, actorId) {
+  return pickPublicLabel(
+    {
+      username: data?.username || data?.actorUsername,
+      handle: data?.handle,
+      displayName: data?.displayName || data?.actorDisplayName,
+      name: data?.name,
+      userName: data?.userName,
+    },
+    { uid: actorId, fallback: '' }
+  );
 }
 
 async function getFollowerActivity(uid) {
@@ -59,13 +91,16 @@ async function getFollowerActivity(uid) {
       docs.map(async (d) => {
         const data = d.data() || {};
         const followerId = data.userId || d.id;
-        const profile = await getProfile(followerId);
+        const fromDoc = denormalizedActorLabel(data, followerId);
+        const profile = fromDoc ? null : await getProfile(followerId);
+        const username = fromDoc || profile?.username || 'Someone';
         return {
           id: `follow_${followerId}`,
           type: 'follow',
           actorId: followerId,
-          username: profile?.username || 'user',
-          avatar: profile?.avatar || null,
+          username,
+          displayName: profile?.displayName || username,
+          avatar: profile?.avatar || fixStorageUrl(data.avatar || data.photoURL) || null,
           ts: toMillis(data.timestamp),
         };
       })
@@ -96,22 +131,32 @@ async function getPostActivity(uid) {
             .orderBy('createdAt', 'desc')
             .limit(4)
             .get();
-          (cSnap?.docs || []).forEach((c) => {
-            const cd = c.data() || {};
-            const commenterId = cd.userId || cd.uid;
-            if (commenterId === uid) return; // skip my own comments
-            items.push({
-              id: `comment_${c.id}`,
-              type: 'comment',
-              actorId: commenterId,
-              username: cd.username || cd.displayName || 'Someone',
-              avatar: fixStorageUrl(cd.avatar || cd.photoURL || cd.profilePicture) || null,
-              text: cd.text || '',
-              post,
-              thumbnail: postThumb(post),
-              ts: toMillis(cd.createdAt) || toMillis(post.date),
-            });
-          });
+          await Promise.all(
+            (cSnap?.docs || []).map(async (c) => {
+              const cd = c.data() || {};
+              const commenterId = cd.userId || cd.uid;
+              if (!commenterId || commenterId === uid) return; // skip my own comments
+              let username = denormalizedActorLabel(cd, commenterId);
+              let avatar = fixStorageUrl(cd.avatar || cd.photoURL || cd.profilePicture) || null;
+              if (!username || looksLikeRawId(username)) {
+                const profile = await getProfile(commenterId);
+                username = profile?.username || 'Someone';
+                avatar = avatar || profile?.avatar || null;
+              }
+              items.push({
+                id: `comment_${c.id}`,
+                type: 'comment',
+                actorId: commenterId,
+                username,
+                displayName: username,
+                avatar,
+                text: cd.text || '',
+                post,
+                thumbnail: postThumb(post),
+                ts: toMillis(cd.createdAt) || toMillis(post.date),
+              });
+            })
+          );
         } catch {
           /* one post's comments failing shouldn't kill the feed */
         }
@@ -139,6 +184,7 @@ async function getPostActivity(uid) {
           type: 'like',
           actorId: likerId,
           username: profile?.username || 'Someone',
+          displayName: profile?.displayName || profile?.username || 'Someone',
           avatar: profile?.avatar || null,
           post,
           thumbnail: postThumb(post),

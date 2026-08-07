@@ -47,6 +47,12 @@ export function emitMarbleGameEvent(streamId: string, payload: any) {
   ioRef.to(`stream:${streamId}`).emit('marble_game_event', payload);
 }
 
+// Frenemies live party game — dedicated channel (spin / challenge / choose).
+export function emitFrenemiesGameEvent(streamId: string, payload: any) {
+  if (!ioRef) return;
+  ioRef.to(`stream:${streamId}`).emit('frenemies_game_event', payload);
+}
+
 // Matchday Live rooms reuse the stream room naming so clients join with
 // streamId = `matchday:{eventId}`.
 export function emitMatchdayEvent(eventId: string, payload: any) {

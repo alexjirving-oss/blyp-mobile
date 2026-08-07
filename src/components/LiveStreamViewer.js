@@ -49,6 +49,7 @@ import { StreamingBackend } from '../config/StreamingBackend';
 import { useIVSViewerSession } from '../live/ivs/hooks/useIVSViewerSession';
 import { COLORS } from '../styles/theme';
 import Icon from './Icon';
+import ReservedGuestTile from './live/ReservedGuestTile';
 import { createGuestToken, requestGuestSlot, getMyGuestRequest, leaveGuest, guestHeartbeat, MAX_GUEST_SLOTS } from '../api/ivsLiveApi';
 import { requestCameraAndAudioPermission } from '../utils/permissions';
 import { getIVSNativeClient } from '../streaming/IVSNativeClient';
@@ -1592,18 +1593,31 @@ const IVSLiveStreamViewer = ({
                                 showAvatar ? (
                                   <View style={[styles.tileVideoSurface, styles.camOffFill]} />
                                 ) : (
-                                  <NativeIVSRealTimeView
-                                    style={styles.realTimeView}
-                                    stageArn={stageArnForSurface}
-                                    token={tokenForSurface}
-                                    sessionId={streamId}
-                                    slotId={globalSlotId}
-                                    participantId={stream.participantId}
-                                    remoteTrackCount={ivsSession.remoteVideoTracks}
-                                    zoom={GUEST_TILE_ZOOM}
-                                    testID={`ivs-realtime-viewer-guest-${globalSlotId}`}
-                                  />
+                                  <View style={styles.tileVideoSurface}>
+                                    <NativeIVSRealTimeView
+                                      style={styles.realTimeView}
+                                      stageArn={stageArnForSurface}
+                                      token={tokenForSurface}
+                                      sessionId={streamId}
+                                      slotId={globalSlotId}
+                                      participantId={stream.participantId}
+                                      remoteTrackCount={ivsSession.remoteVideoTracks}
+                                      zoom={GUEST_TILE_ZOOM}
+                                      testID={`ivs-realtime-viewer-guest-${globalSlotId}`}
+                                    />
+                                    {!stream.hasFirstFrame ? (
+                                      <View style={styles.joiningOverlay} pointerEvents="none">
+                                        <ReservedGuestTile
+                                          photoUrl={tilePhoto}
+                                          label="Joining…"
+                                          style={StyleSheet.absoluteFill}
+                                        />
+                                      </View>
+                                    ) : null}
+                                  </View>
                                 )
+                              ) : userBySlotIndex.has(globalSlotId) ? (
+                                <ReservedGuestTile photoUrl={tilePhoto} label="Joining…" />
                               ) : (
                                 globalSlotId === firstJoinSlotId ? (
                                   (() => {
@@ -2931,6 +2945,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.backgroundLight,
     borderWidth: 1,
     borderColor: COLORS.backgroundLight,
+  },
+  joiningOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
   },
   joinTile: {
     flex: 1,

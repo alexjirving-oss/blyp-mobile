@@ -238,8 +238,6 @@ const HomeScreen = ({ navigation, route }) => {
   const [likeCounts, setLikeCounts] = useState({});
   // postId -> coins gifted (optimistic + snapshot).
   const [giftCoinCounts, setGiftCoinCounts] = useState({});
-  // postId -> intrinsic aspect ratio (width / height) reported by the player.
-  const [videoAspect, setVideoAspect] = useState({});
   // Which feed video is manually paused (tap-to-pause).
   const [pausedFeedId, setPausedFeedId] = useState(null);
   const [commentCounts, setCommentCounts] = useState({});
@@ -701,57 +699,121 @@ const HomeScreen = ({ navigation, route }) => {
                 (async () => {
                   try {
                     if (initial) {
+                      // Paint immediately from the snapshot — do not block first frame
+                      // on account hydrate + promote API.
+                      const provisional = stampFeedKeys(validPosts, cycle);
+                      setRandomPosts(provisional);
+                      randomPostsRef.current = provisional;
+                      setCurrentIndex(0);
+                      setCurrentDiscoverIndex(0);
+                      currentDiscoverIndexRef.current = 0;
+                      setIsEmptyFeed(false);
+                      setLoading(false);
+
                       const ordered = await prepareForYouOrder(validPosts);
                       if (!mounted) return;
-                      const shuffled = stampFeedKeys(ordered, cycle);
-                      setRandomPosts(shuffled);
-                      randomPostsRef.current = shuffled;
-                      setCurrentIndex(0);
+                      // Soft re-rank only if the user is still on the first clip
+                      // (avoid jumping mid-swipe).
+                      if (currentDiscoverIndexRef.current === 0) {
+                        const shuffled = stampFeedKeys(ordered, cycle);
+                        setRandomPosts(shuffled);
+                        randomPostsRef.current = shuffled;
+                      }
                     } else {
-                      const withAccount = await attachAccountFeedPriority(validPosts);
-                      const withPromote = await attachPromoteBoost(withAccount);
-                      if (!mounted) return;
-                      const visible = filterSuppressedAccounts(withPromote);
-                      setRandomPosts((prev) => {
-                        if (!Array.isArray(prev) || prev.length === 0) {
-                          const next = stampFeedKeys(shufflePosts(visible), cycle);
+                      // Fast path: likes/views/gifts on the live page must not
+                      // re-hit promote/account APIs or reshuffle the feed.
+                      const liveIds = new Set(validPosts.map((p) => p.id));
+                      const prev = randomPostsRef.current || [];
+                      const prevIds = new Set(prev.map((p) => p.id));
+                      const hasBrandNew = validPosts.some((p) => !prevIds.has(p.id));
+
+                      if (!hasBrandNew && prev.length > 0) {
+                        let changed = false;
+                        const byId = new Map(validPosts.map((p) => [p.id, p]));
+                        const next = prev.map((existing) => {
+                          if (!liveIds.has(existing.id)) return existing;
+                          const updated = byId.get(existing.id);
+                          if (!updated) return existing;
+                          const nextLike = Number(
+                            updated.likeCount ?? updated.likes ?? updated.likedBy?.length ?? 0,
+                          );
+                          const prevLike = Number(
+                            existing.likeCount ?? existing.likes ?? existing.likedBy?.length ?? 0,
+                          );
+                          const nextGift = getPostGiftCoins(updated);
+                          const prevGift = getPostGiftCoins(existing);
+                          const nextViews = getPostViewCount(updated);
+                          const prevViews = getPostViewCount(existing);
+                          if (
+                            nextLike === prevLike &&
+                            nextGift === prevGift &&
+                            nextViews === prevViews &&
+                            updated.likedBy === existing.likedBy
+                          ) {
+                            return existing;
+                          }
+                          changed = true;
+                          return {
+                            ...existing,
+                            likeCount: updated.likeCount ?? existing.likeCount,
+                            likes: updated.likes ?? existing.likes,
+                            likedBy: updated.likedBy ?? existing.likedBy,
+                            giftCoins: updated.giftCoins ?? existing.giftCoins,
+                            gifts: updated.gifts ?? existing.gifts,
+                            viewCount: updated.viewCount ?? existing.viewCount,
+                            views: updated.views ?? existing.views,
+                          };
+                        });
+                        if (changed) {
+                          randomPostsRef.current = next;
+                          setRandomPosts(next);
+                        }
+                      } else {
+                        const withAccount = await attachAccountFeedPriority(validPosts);
+                        const withPromote = await attachPromoteBoost(withAccount);
+                        if (!mounted) return;
+                        const visible = filterSuppressedAccounts(withPromote);
+                        setRandomPosts((prevList) => {
+                          if (!Array.isArray(prevList) || prevList.length === 0) {
+                            const stamped = stampFeedKeys(shufflePosts(visible), cycle);
+                            randomPostsRef.current = stamped;
+                            return stamped;
+                          }
+
+                          const byId = new Map(visible.map((p) => [p.id, p]));
+                          const next = [];
+
+                          prevList.forEach((existing) => {
+                            const updated = byId.get(existing.id);
+                            if (updated) {
+                              next.push({
+                                ...updated,
+                                feedKey: existing.feedKey || `${updated.id}__${cycle}`,
+                                promoteType: updated.promoteType ?? existing.promoteType ?? null,
+                                promoteBoostWeight:
+                                  updated.promoteBoostWeight ?? existing.promoteBoostWeight ?? 0,
+                                promoteBattleRef:
+                                  updated.promoteBattleRef ?? existing.promoteBattleRef ?? null,
+                              });
+                              byId.delete(existing.id);
+                            } else if (!isAccountFeedSuppressed(existing)) {
+                              next.push(existing);
+                            }
+                          });
+
+                          const brandNew = shufflePosts(visible.filter((p) => byId.has(p.id)));
+                          brandNew.forEach((p) => {
+                            next.push({ ...p, feedKey: `${p.id}__${cycle}` });
+                          });
+
                           randomPostsRef.current = next;
                           return next;
-                        }
-
-                        const byId = new Map(visible.map((p) => [p.id, p]));
-                        const next = [];
-
-                        prev.forEach((existing) => {
-                          const updated = byId.get(existing.id);
-                          if (updated) {
-                            next.push({
-                              ...updated,
-                              feedKey: existing.feedKey || `${updated.id}__${cycle}`,
-                              promoteType: updated.promoteType ?? existing.promoteType ?? null,
-                              promoteBoostWeight:
-                                updated.promoteBoostWeight ?? existing.promoteBoostWeight ?? 0,
-                              promoteBattleRef:
-                                updated.promoteBattleRef ?? existing.promoteBattleRef ?? null,
-                            });
-                            byId.delete(existing.id);
-                          } else if (!isAccountFeedSuppressed(existing)) {
-                            next.push(existing);
-                          }
                         });
-
-                        const brandNew = shufflePosts(visible.filter((p) => byId.has(p.id)));
-                        brandNew.forEach((p) => {
-                          next.push({ ...p, feedKey: `${p.id}__${cycle}` });
-                        });
-
-                        randomPostsRef.current = next;
-                        return next;
-                      });
+                      }
+                      if (!mounted) return;
+                      setIsEmptyFeed(false);
+                      setLoading(false);
                     }
-                    if (!mounted) return;
-                    setIsEmptyFeed(false);
-                    setLoading(false);
                   } catch (e) {
                     console.warn('HOME: For You priority hydrate failed', e?.message || String(e));
                     if (!mounted) return;
@@ -1269,7 +1331,7 @@ const HomeScreen = ({ navigation, route }) => {
     const hasMultipleMedia = mediaItems.length > 1;
     const isActive = isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex;
     const showFullDescription = isActive && descriptionVisibleIndex === index;
-    const giftTotal = giftCoinCounts?.[item.id] ?? getPostGiftCoins(item);
+    const giftTotal = getPostGiftCoins(item);
     const viewTotal = getPostViewCount(item);
     const pillTop = 12;
     const pillLeft = 12;
@@ -1388,15 +1450,6 @@ const HomeScreen = ({ navigation, route }) => {
                   // shouldPlay→isFocused inside EnhancedVideo (preload thrash).
                   isMuted={!cellActive}
                   mediaDisplay={item.mediaDisplay || null}
-                  onNaturalSize={(ns) => {
-                    const a = ns.width / ns.height;
-                    if (!(a > 0)) return;
-                    setVideoAspect((prev) =>
-                      Math.abs((prev[item.id] || 0) - a) < 0.001
-                        ? prev
-                        : { ...prev, [item.id]: a }
-                    );
-                  }}
                   onError={(e) => {
                     console.log('[FEED] Video error', { id: item.id, uri: videoUri, error: e });
                   }}
@@ -1490,13 +1543,6 @@ const HomeScreen = ({ navigation, route }) => {
             <Text style={styles.descriptionInfoChipText} allowFontScaling={false}>Show details</Text>
           </TouchableOpacity>
         )}
-
-        <LiveReactionsHearts
-          burstKey={heartsBurst?.postId === item.id ? heartsBurst.key : null}
-          bottomOffset={forYouOverlayInset}
-          rightOffset={24}
-          heartSize={66}
-        />
       </View>
     );
   }, [
@@ -1504,15 +1550,12 @@ const HomeScreen = ({ navigation, route }) => {
     selectedTab,
     currentDiscoverIndex,
     descriptionVisibleIndex,
-    giftCoinCounts,
     userPillLayout,
     feedHeight,
     pausedFeedId,
     following,
     uid,
-    heartsBurst,
     forYouOverlayInset,
-    liked,
   ]);
 
   const renderForYouItem = useCallback(
@@ -1761,6 +1804,15 @@ const HomeScreen = ({ navigation, route }) => {
               }}
             />
             {activeForYouPost ? (
+              <>
+                <LiveReactionsHearts
+                  burstKey={
+                    heartsBurst?.postId === activeForYouPost.id ? heartsBurst.key : null
+                  }
+                  bottomOffset={forYouOverlayInset}
+                  rightOffset={24}
+                  heartSize={66}
+                />
               <FeedActionBar bottomOffset={forYouActionBottom}>
                 <FeedActionButton
                   onPress={() => handleLike(activeForYouPost.id)}
@@ -1845,6 +1897,7 @@ const HomeScreen = ({ navigation, route }) => {
                   </View>
                 </TouchableOpacity>
               </FeedActionBar>
+              </>
             ) : null}
           </View>
         );

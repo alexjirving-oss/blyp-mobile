@@ -43,8 +43,8 @@ ENABLE_WITHDRAWALS=0
 STRIPE_SECRET_KEY=<Secret Manager: blyp-stripe-secret-key>
 STRIPE_WEBHOOK_SECRET=<Secret Manager: blyp-stripe-webhook-secret>
 STRIPE_PLATFORM_CURRENCY=GBP
-STRIPE_CONNECT_RETURN_URL=blyp://withdraw/connect-return
-STRIPE_CONNECT_REFRESH_URL=blyp://withdraw/connect-refresh
+STRIPE_CONNECT_RETURN_URL=https://blyp.world/withdraw/connect-return
+STRIPE_CONNECT_REFRESH_URL=https://blyp.world/withdraw/connect-refresh
 WITHDRAW_GEM_MINOR_UNITS=1
 PENDING_GEMS_HOLD_SECONDS=604800
 ```

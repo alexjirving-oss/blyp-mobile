@@ -13,6 +13,7 @@ import firebase, { auth as authExport, db } from '../config/firebase';
 import { snapData } from '../utils/firestoreSnap';
 import { getUserActivities, ACTIVITY_TYPES } from '../utils/activityTracker';
 import { COLORS } from '../styles/theme';
+import { pickPublicLabel } from '../utils/publicLabel';
 
 const ActivityFeed = ({ navigation }) => {
   const [activities, setActivities] = useState([]);
@@ -41,26 +42,26 @@ const ActivityFeed = ({ navigation }) => {
         if (!actorProfiles[actorId]) {
           try {
             const userDoc = await db.collection('users').doc(actorId).get();
-            const ud = snapData(userDoc);
-            if (ud) {
-              profiles[actorId] = ud;
-            } else {
-              // Create fallback profile based on user ID
-              const fallbackName = generateFallbackName(actorId);
+            const ud = snapData(userDoc) || {};
+            const label = pickPublicLabel(ud, { uid: actorId, fallback: '' });
+            if (label) {
               profiles[actorId] = {
-                displayName: fallbackName,
-                username: fallbackName.toLowerCase().replace(' ', '_'),
-                photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=374151&color=e5e7eb&size=100`
+                ...ud,
+                displayName: label,
+                username: label,
+              };
+            } else {
+              profiles[actorId] = {
+                displayName: 'Someone',
+                username: 'Someone',
+                photoURL: ud.photoURL || ud.avatar || null,
               };
             }
           } catch (error) {
             console.error('❌ Error fetching actor profile for', actorId, ':', error);
-            // Create fallback profile based on user ID
-            const fallbackName = generateFallbackName(actorId);
             profiles[actorId] = {
-              displayName: fallbackName,
-              username: fallbackName.toLowerCase().replace(' ', '_'),
-              photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=374151&color=e5e7eb&size=100`
+              displayName: 'Someone',
+              username: 'Someone',
             };
           }
         }
@@ -77,19 +78,6 @@ const ActivityFeed = ({ navigation }) => {
 
   const onRefresh = () => {
     setRefreshing(true);
-  };
-
-  const generateFallbackName = (userId) => {
-    // Create a consistent name based on user ID
-    // Removed hardcoded user ID check
-    
-    // Generate names based on hash of user ID for consistency
-    const names = ['Alex Smith', 'Jordan Lee', 'Casey Brown', 'Riley Davis', 'Morgan Wilson'];
-    const hash = userId.split('').reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
-    return names[Math.abs(hash) % names.length];
   };
 
   const getActivityIcon = (type) => {
@@ -112,8 +100,15 @@ const ActivityFeed = ({ navigation }) => {
   };
 
   const getActivityText = (activity) => {
-    const actorName = actorProfiles[activity.actorId]?.displayName || 'Someone';
-    
+    const actorName = pickPublicLabel(
+      {
+        username: activity.actorUsername || activity.metadata?.actorUsername,
+        displayName: activity.actorDisplayName || activity.metadata?.actorDisplayName,
+        ...actorProfiles[activity.actorId],
+      },
+      { uid: activity.actorId, fallback: 'Someone' }
+    );
+
     switch (activity.type) {
       case ACTIVITY_TYPES.LIKE:
         return `${actorName} liked your ${activity.metadata?.postTitle ? 'video' : 'post'}`;
@@ -200,6 +195,19 @@ const ActivityFeed = ({ navigation }) => {
       {activities.map((activity) => {
         const icon = getActivityIcon(activity.type);
         const actorProfile = actorProfiles[activity.actorId];
+        const actorName = pickPublicLabel(
+          {
+            username: activity.actorUsername || activity.metadata?.actorUsername,
+            displayName: activity.actorDisplayName || activity.metadata?.actorDisplayName,
+            ...actorProfile,
+          },
+          { uid: activity.actorId, fallback: 'Someone' }
+        );
+        const initial = (actorName || 'U').charAt(0).toUpperCase();
+        const photo =
+          actorProfile?.photoURL ||
+          actorProfile?.avatar ||
+          `https://placehold.co/40x40/475569/e2e8f0?text=${initial}`;
 
         return (
           <TouchableOpacity
@@ -208,10 +216,7 @@ const ActivityFeed = ({ navigation }) => {
             onPress={() => handleActivityPress(activity)}
           >
             <Image
-              source={{
-                uri: actorProfile?.photoURL || 
-                  `https://placehold.co/40x40/475569/e2e8f0?text=${actorProfile?.displayName?.charAt(0)?.toUpperCase() || 'U'}`
-              }}
+              source={{ uri: photo }}
               style={styles.actorAvatar}
             />
             

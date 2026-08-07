@@ -15,30 +15,14 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { enqueueNotification } from '../notifications/outbox';
+import { resolveUserLabel } from '../notifications/resolveUserLabel';
 
 const ENQUEUE_CHUNK = 50;
 const STALE_MS = 5 * 60 * 1000; // a session quiet for 5+ minutes counts as offline
 const SWEEP_LIMIT = 400;
 
 async function resolveUserName(uid: string): Promise<string> {
-  const db = admin.firestore();
-  try {
-    const u = await db.collection('users').doc(uid).get();
-    const d = (u.data() as any) || {};
-    const name = d.displayName || d.username || d.name;
-    if (name) return String(name);
-  } catch {
-    // fall through
-  }
-  try {
-    const p = await db.collection('userProfiles').doc(uid).get();
-    const d = (p.data() as any) || {};
-    const name = d.displayName || d.username || d.name;
-    if (name) return String(name);
-  } catch {
-    // fall through
-  }
-  return 'Someone';
+  return resolveUserLabel(uid, 'Someone');
 }
 
 async function notifyOnlineWatchers(targetUid: string, transitionId: string | number): Promise<void> {
@@ -76,7 +60,12 @@ async function notifyOnlineWatchers(targetUid: string, transitionId: string | nu
           // re-watch + new transition can fire again.
           dedupeKey: `presence:${targetUid}:${watcherUid}:${transitionId}`,
           collapseKey: `presence:${targetUid}`,
-          data: { type: 'presence', targetId: targetUid, targetName: name },
+          data: {
+            type: 'presence',
+            targetId: targetUid,
+            targetName: name,
+            actorUsername: name,
+          },
         }).catch(() => false);
       })
     );

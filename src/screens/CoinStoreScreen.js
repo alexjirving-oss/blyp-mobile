@@ -9,6 +9,7 @@ import GemService from '../services/GemService';
 import { COLORS } from '../styles/theme';
 import {
   getEconomyWallet,
+  getWithdrawConnectStatus,
   getWithdrawEligibility,
   makeIdempotencyKey,
   requestWithdrawGems,
@@ -122,6 +123,7 @@ const CoinStoreScreen = ({
   const insets = useSafeAreaInsets?.() || { top: 0, bottom: 0, left: 0, right: 0 };
   const scrollRef = useRef(null);
   const packagesSectionYRef = useRef(0);
+  const withdrawResumeAtRef = useRef(0);
 
   const seedCoins = Number.isFinite(Number(initialCoins)) ? Number(initialCoins) : 0;
   const seedGems = Number.isFinite(Number(initialGems)) ? Number(initialGems) : 0;
@@ -190,7 +192,7 @@ const CoinStoreScreen = ({
     setOverlayError('');
   };
 
-  const openWithdrawOverlay = async () => {
+  const openWithdrawOverlay = async ({ fromResume = false } = {}) => {
     if (!uid) {
       Alert.alert('Error', 'Please log in first');
       return;
@@ -199,14 +201,33 @@ const CoinStoreScreen = ({
       Alert.alert('Unavailable', 'Withdrawals are currently disabled.');
       return;
     }
+    // Debounce deep-link + focus resume so we don't stack Connect alerts.
+    if (fromResume) {
+      const now = Date.now();
+      if (now - withdrawResumeAtRef.current < 2000) return;
+      withdrawResumeAtRef.current = now;
+    }
     // Stripe Connect eligibility is checked only when the user taps Withdraw —
-    // never on Wallet mount / balance refresh.
+    // never on Wallet mount / balance refresh. Force a live Connect status
+    // refresh first so Account Link return does not use stale DB flags.
     try {
+      try {
+        await getWithdrawConnectStatus();
+      } catch {
+        // Eligibility also refreshes Connect; continue.
+      }
       const eligibility = await getWithdrawEligibility();
-      if (!eligibility?.connect?.linked || !eligibility?.connect?.payoutsEnabled) {
+      const connect = eligibility?.connect || {};
+      const needsOnboarding =
+        typeof connect.needsOnboarding === 'boolean'
+          ? connect.needsOnboarding
+          : !connect.linked || (!connect.payoutsEnabled && !connect.detailsSubmitted);
+
+      if (needsOnboarding) {
         Alert.alert(
           'Connect payout account',
-          'Gems from gifts can be cashed out after Stripe onboarding. Purchased coins are never cashable. Min 1000 gems, 30% platform fee. Normal accounts have a clearance hold before gems are available.',
+          connect.blockerMessage ||
+            'Gems from gifts can be cashed out after Stripe onboarding. Purchased coins are never cashable. Min 1000 gems, 30% platform fee. Normal accounts have a clearance hold before gems are available.',
           [
             { text: 'Cancel', style: 'cancel' },
             {
@@ -214,12 +235,39 @@ const CoinStoreScreen = ({
               onPress: async () => {
                 try {
                   const link = await startWithdrawConnectOnboard({
-                    returnUrl: 'blyp://withdraw/connect-return',
-                    refreshUrl: 'blyp://withdraw/connect-refresh',
+                    // Stripe Account Links require HTTPS; blyp.world pages deep-link back to the app.
+                    returnUrl: 'https://blyp.world/withdraw/connect-return',
+                    refreshUrl: 'https://blyp.world/withdraw/connect-refresh',
                   });
-                  if (link?.url) await Linking.openURL(link.url);
+                  if (link?.alreadyComplete || !link?.url) {
+                    // Account already ready — reopen withdraw without looping Stripe.
+                    openWithdrawOverlay();
+                    return;
+                  }
+                  await Linking.openURL(link.url);
                 } catch (e) {
-                  Alert.alert('Connect failed', e?.message || 'Could not start Stripe onboarding');
+                  const msg = e?.message || String(e);
+                  const code = e?.code || '';
+                  const needsPlatformSetup =
+                    code === 'STRIPE_CONNECT_SETUP_REQUIRED' ||
+                    /STRIPE_CONNECT_SETUP_REQUIRED|platform profile|questionnaire|Connect setup/i.test(msg);
+                  if (needsPlatformSetup) {
+                    Alert.alert(
+                      'Stripe Connect setup required',
+                      'Withdrawals are blocked until the Blyp Stripe Connect platform profile is finished.\n\n1. Open Stripe Dashboard (Connect → Accounts overview)\n2. Complete the platform questionnaire\n3. Upload ID if Stripe asks\n4. Return here and tap Withdraw → Continue',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Open Stripe',
+                          onPress: () => {
+                            Linking.openURL('https://dashboard.stripe.com/connect/accounts/overview').catch(() => {});
+                          },
+                        },
+                      ],
+                    );
+                    return;
+                  }
+                  Alert.alert('Connect failed', msg || 'Could not start Stripe onboarding');
                 }
               },
             },
@@ -227,6 +275,17 @@ const CoinStoreScreen = ({
         );
         return;
       }
+
+      if (!connect.payoutsEnabled) {
+        Alert.alert(
+          'Payout account pending',
+          connect.blockerMessage ||
+            'Your Stripe payout account is linked, but payouts are not enabled yet. If Stripe is still verifying your details, wait and try again shortly.',
+          [{ text: 'OK' }],
+        );
+        return;
+      }
+
       setOverlayType('withdraw');
       setOverlayAmount(String(eligibility.minPayoutGems || 1000));
       setOverlayError('');
@@ -240,13 +299,32 @@ const CoinStoreScreen = ({
     }
   };
 
-  // Stripe Connect return deep link → resume withdraw flow.
+  // Stripe Connect return deep link → force Connect status refresh, then resume withdraw.
+  const connectReturnKey = `${route?.params?.openWithdraw ? '1' : '0'}:${route?.params?.withdrawReturn || ''}`;
   useEffect(() => {
-    if (route?.params?.openWithdraw && uid) {
-      openWithdrawOverlay();
-    }
+    if (!route?.params?.openWithdraw || !uid) return undefined;
+    let cancelled = false;
+    (async () => {
+      // Small delay so Stripe has a moment to settle account.updated before we retrieve.
+      await new Promise((r) => setTimeout(r, 600));
+      if (!cancelled) await openWithdrawOverlay({ fromResume: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route?.params?.openWithdraw, uid]);
+  }, [connectReturnKey, uid]);
+
+  // App resume / screen focus after Connect: re-check status without requiring a fresh deep link.
+  useEffect(() => {
+    if (!navigation?.addListener || !uid || !ENABLE_WITHDRAWALS) return undefined;
+    const unsub = navigation.addListener('focus', () => {
+      if (String(route?.params?.withdrawReturn || '') !== 'connect-return') return;
+      openWithdrawOverlay({ fromResume: true });
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation, uid, route?.params?.withdrawReturn]);
 
   const refreshLiveWallet = async () => {
     try {

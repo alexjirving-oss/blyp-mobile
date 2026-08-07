@@ -52,6 +52,7 @@ exports.onDirectMessageCreate = void 0;
 const functions = __importStar(require("firebase-functions"));
 const firebaseAdmin_1 = require("../firebaseAdmin");
 const outbox_1 = require("./outbox");
+const resolveUserLabel_1 = require("./resolveUserLabel");
 const MAX_BODY_LEN = 180;
 function previewForMessage(msg) {
     const type = String((msg === null || msg === void 0 ? void 0 : msg.type) || 'text');
@@ -100,7 +101,10 @@ exports.onDirectMessageCreate = functions.firestore
         .filter((id) => id && id !== senderId);
     if (recipients.length === 0)
         return null;
-    const senderName = String((msg === null || msg === void 0 ? void 0 : msg.senderName) || '').trim() || 'New message';
+    const rawSender = String((msg === null || msg === void 0 ? void 0 : msg.senderName) || '').trim();
+    const senderName = (0, resolveUserLabel_1.isUsablePublicLabel)(rawSender, senderId)
+        ? rawSender.replace(/^@/, '')
+        : await (0, resolveUserLabel_1.resolveUserLabel)(senderId, 'New message');
     // For 1:1 DMs the title is just the sender; for groups, include the group name.
     const isGroup = String(conv.type || 'dm') === 'group' && recipients.length > 1;
     const groupName = String(conv.name || conv.title || '').trim();
@@ -118,6 +122,7 @@ exports.onDirectMessageCreate = functions.firestore
             conversationId: convId,
             senderId,
             senderName,
+            actorUsername: senderName,
         },
     }).catch((e) => {
         console.warn('[messageNotify] enqueue failed', (e === null || e === void 0 ? void 0 : e.message) || String(e));

@@ -25,6 +25,7 @@ import { inspectText } from '../utils/contentFilter';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { reconcileOptimisticComments } from './Feed/feedCommentMarquee';
 import { doc as webDoc, runTransaction as runWebTransaction } from 'firebase/firestore';
+import { looksLikeRawId, pickPublicLabel } from '../utils/publicLabel';
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 function toLikeInt(value) {
@@ -227,8 +228,6 @@ const CommentsModal = ({
       try {
         const snap = await db.collection('users').doc(uid).get();
         const data = typeof snap?.data === 'function' ? snap.data() : null;
-        const fromProfile = String(data?.username || data?.handle || '').trim();
-        const fromDisplay = String(data?.displayName || '').trim();
         const fromAuth = (() => {
           try {
             const n = getDisplayName?.();
@@ -237,8 +236,16 @@ const CommentsModal = ({
             return '';
           }
         })();
-
-        const label = fromProfile || fromDisplay || fromAuth || '';
+        // Never denormalize a Cognito-sub / UUID into comment.username.
+        const label = pickPublicLabel(
+          {
+            username: data?.username,
+            handle: data?.handle,
+            displayName: data?.displayName,
+            name: fromAuth,
+          },
+          { uid, fallback: fromAuth || 'User' }
+        );
         const photoURL = String(data?.photoURL || data?.avatar || data?.profilePicture || '').trim();
         if (!cancelled && photoURL) {
           myPhotoURLRef.current = photoURL;
@@ -277,7 +284,8 @@ const CommentsModal = ({
               comment?.avatar || comment?.photoURL || comment?.profilePicture || '',
             ).trim();
             const needsUsername =
-              !usernameCacheRef.current.has(id) && (!uname || uname === id);
+              !usernameCacheRef.current.has(id) &&
+              (!uname || uname === id || looksLikeRawId(uname));
             const needsAvatar = !hasAvatarOnComment && !avatarCacheRef.current.has(id);
             return needsUsername || needsAvatar;
           })
@@ -292,7 +300,7 @@ const CommentsModal = ({
         try {
           const snap = await db.collection('users').doc(id).get();
           const data = typeof snap?.data === 'function' ? snap.data() : null;
-          const label = String(data?.username || data?.handle || data?.displayName || '').trim();
+          const label = pickPublicLabel(data || {}, { uid: id, fallback: '' });
           if (label) {
             usernameCacheRef.current.set(id, label);
             if (!cancelled) setUsernameCacheTick((n) => n + 1);

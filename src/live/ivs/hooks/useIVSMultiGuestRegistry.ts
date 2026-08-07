@@ -105,12 +105,10 @@ export function useIVSMultiGuestRegistry(config: MultiGuestRegistryConfig = {}):
       batchTimerRef.current = null;
       const registry = registryRef.current;
       const entries = Array.from(registry.values());
-      let renderable = entries.filter((entry) => entry.hasFirstFrame);
-
-      // If first-frame events are missing, fall back so UI can render instead of stalling.
-      if (renderable.length === 0 && entries.length > 0) {
-        renderable = entries;
-      }
+      // Always expose every publisher for sticky slot placement. Hiding until
+      // first-frame left reserved boxes empty/black while peers already painted.
+      // Tiles show a Joining placeholder when hasFirstFrame is still false.
+      const renderable = entries;
 
       // Sticky: keep every renderable stream in its slot order. Do NOT dense-fill
       // vacated indices from a priority pool (that compacted box 3 into box 2).
