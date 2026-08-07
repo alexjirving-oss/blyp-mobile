@@ -20,6 +20,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { serverTimestamp, increment, Timestamp } from 'firebase/firestore';
 import { snapExists, snapData } from '../utils/firestoreSnap';
+import { pickPublicLabel } from '../utils/publicLabel';
 
 async function uriToBlob(uri) {
   const res = await fetch(uri);
@@ -1009,43 +1010,6 @@ class HLSLiveStreamService {
         return trimmed || '';
       };
 
-      const isPlaceholderName = (value) => {
-        const normalized = pickTrimmed(value).replace(/^@+/, '').toLowerCase();
-        return !normalized || normalized === 'anonymous' || normalized === 'anonymous user' || normalized === 'anon';
-      };
-
-      const pickBestFallbackUsername = (profileData, fallbackUserId, currentUserData) => {
-        const explicitUsername =
-          pickTrimmed(profileData?.username) ||
-          pickTrimmed(profileData?.handle) ||
-          pickTrimmed(profileData?.userName);
-
-        if (explicitUsername && explicitUsername !== fallbackUserId && !isPlaceholderName(explicitUsername)) {
-          return explicitUsername;
-        }
-
-        const displayName =
-          pickTrimmed(profileData?.displayName) ||
-          pickTrimmed(currentUserData?.displayName);
-
-        if (displayName && displayName !== fallbackUserId && !isPlaceholderName(displayName)) {
-          return displayName;
-        }
-
-        const email =
-          pickTrimmed(profileData?.email) ||
-          pickTrimmed(currentUserData?.email);
-
-        if (email && email.includes('@')) {
-          const emailPrefix = pickTrimmed(email.split('@')[0]);
-          if (emailPrefix && emailPrefix !== fallbackUserId && !isPlaceholderName(emailPrefix)) {
-            return emailPrefix;
-          }
-        }
-
-        return null;
-      };
-
       const deriveFallbackIdentity = async () => {
         const currentUser = auth?.currentUser || null;
         let profileData = null;
@@ -1079,7 +1043,15 @@ class HLSLiveStreamService {
           profileData = null;
         }
 
-        const username = pickBestFallbackUsername(profileData, userId, currentUser);
+        const username = pickPublicLabel(
+          {
+            username: profileData?.username,
+            handle: profileData?.handle,
+            displayName: profileData?.displayName,
+            name: currentUser?.displayName,
+          },
+          { uid: userId, fallback: 'User' },
+        );
 
         const emailPrefix = (() => {
           const email = pickTrimmed(profileData?.email) || pickTrimmed(currentUser?.email);
@@ -1087,12 +1059,15 @@ class HLSLiveStreamService {
           return pickTrimmed(email.split('@')[0]);
         })();
 
-        const userName =
-          pickTrimmed(profileData?.displayName) ||
-          username ||
-          pickTrimmed(currentUser?.displayName) ||
-          emailPrefix ||
-          userId;
+        const userName = pickPublicLabel(
+          {
+            username,
+            displayName: profileData?.displayName,
+            name: currentUser?.displayName,
+            title: emailPrefix,
+          },
+          { uid: userId, fallback: 'User' },
+        );
 
         const userPhotoURL =
           pickTrimmed(profileData?.photoURL) ||

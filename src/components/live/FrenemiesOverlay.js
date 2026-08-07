@@ -23,6 +23,7 @@ import {
 } from '../../api/ivsLiveApi';
 import { subscribeToFrenemiesGameEvents } from '../../realtime/frenemiesGameSocket';
 import PrizeWheel from './frenemies/PrizeWheel';
+import { pickPublicLabel } from '../../utils/publicLabel';
 import CelebrationBurst from './frenemies/CelebrationBurst';
 import TimerRing from './frenemies/TimerRing';
 
@@ -47,7 +48,7 @@ function initialsFor(name) {
 
 function guestLabel(g) {
   if (!g) return null;
-  return g.name || g.displayName || g.username || g.handle || null;
+  return pickPublicLabel(g, { uid: g.userId, fallback: 'Guest' });
 }
 
 function guestPhoto(g) {
@@ -199,7 +200,10 @@ export default function FrenemiesOverlay({
   const resolveName = useCallback(
     (userId, fallback) => {
       const g = userId ? rosterByUser[userId] : null;
-      return guestLabel(g) || fallback || 'Guest';
+      return guestLabel(g) || pickPublicLabel(
+        { displayName: fallback },
+        { uid: userId, fallback: 'Guest' },
+      );
     },
     [rosterByUser]
   );

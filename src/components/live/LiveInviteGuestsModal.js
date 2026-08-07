@@ -16,6 +16,7 @@ import {
   subscribeToFollowingList,
   subscribeToFollowersList,
 } from '../../utils/followUtils';
+import { pickPublicLabel, looksLikeRawId } from '../../utils/publicLabel';
 
 const TEAL = '#00D2BE';
 
@@ -32,8 +33,8 @@ async function loadPublicUser(uid) {
     if (!u) return { id: uid, displayName: 'Blyp user', username: '', photoURL: '' };
     return {
       id: uid,
-      displayName: u.displayName || u.name || u.username || 'Blyp user',
-      username: u.username || '',
+      displayName: pickPublicLabel(u, { uid, fallback: 'Blyp user' }),
+      username: looksLikeRawId(u.username) ? '' : String(u.username || '').replace(/^@/, '').trim(),
       photoURL: u.photoURL || u.avatar || u.photo || '',
     };
   } catch {

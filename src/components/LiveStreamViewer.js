@@ -43,7 +43,8 @@ import { decideNextQuality, createSlidingWindowCounter, emitQualitySwitchEvent }
 import SegmentBandwidthEstimatorService from '../services/SegmentBandwidthEstimatorService';
 import NetInfo from '@react-native-community/netinfo';
 import { isManifestEnabled, isPlaylistViewerEnabled, getFeatureFlags } from '../config/FeatureFlags';
-import { useAuth } from '../hooks/useCommon';
+import { useAuth, useFirestoreDoc } from '../hooks/useCommon';
+import { pickPublicLabel } from '../utils/publicLabel';
 import { streamingConfig } from '../config/StreamingFeatureConfig';
 import { StreamingBackend } from '../config/StreamingBackend';
 import { useIVSViewerSession } from '../live/ivs/hooks/useIVSViewerSession';
@@ -151,13 +152,24 @@ const IVSLiveStreamViewer = ({
   const NativeIVSRealTimeView = getNativeIVSRealTimeView();
 
   const { uid, getDisplayName } = useAuth();
+  const { data: viewerUserDoc } = useFirestoreDoc('users', uid);
   const viewerDisplayName = useMemo(() => {
+    let authName;
     try {
-      return (typeof getDisplayName === 'function' ? getDisplayName() : null) || undefined;
+      authName = typeof getDisplayName === 'function' ? getDisplayName() : null;
     } catch {
-      return undefined;
+      authName = null;
     }
-  }, [getDisplayName]);
+    return pickPublicLabel(
+      {
+        username: viewerUserDoc?.username,
+        handle: viewerUserDoc?.handle,
+        displayName: viewerUserDoc?.displayName,
+        name: authName,
+      },
+      { uid, fallback: 'Viewer' },
+    );
+  }, [getDisplayName, uid, viewerUserDoc]);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [layout, setLayout] = useState({ width: 0, height: 0 });
   const [guestRequestStatus, setGuestRequestStatus] = useState('idle'); // idle | sending | sent | error
@@ -172,9 +184,9 @@ const IVSLiveStreamViewer = ({
   const [guestJoinError, setGuestJoinError] = useState(null);
   const [guestGridHeight, setGuestGridHeight] = useState(0);
   const [guestPagerMeasuredHeight, setGuestPagerMeasuredHeight] = useState(0);
-  // Default hidden so a solo host is full-bleed (no empty tiles squishing the
-  // video mid-screen). Auto-opens when real guests are on stage (effect below).
-  const [guestTrayMode, setGuestTrayMode] = useState('hidden'); // expanded | collapsed | hidden
+  // Guest boxes are visible on entry; viewers can still swipe down when they
+  // explicitly want a full-bleed host view.
+  const [guestTrayMode, setGuestTrayMode] = useState('expanded'); // expanded | collapsed | hidden
   const [suspendViewerAutoJoin, setSuspendViewerAutoJoin] = useState(false);
   // Host-applied mute on this user (when on stage as a guest). Host controls it;
   // the guest cannot self-unmute while true.
@@ -757,8 +769,8 @@ const IVSLiveStreamViewer = ({
   const ivsSession = useIVSViewerSession({
     streamId: streamId || '',
     enabled: !!streamId,
-    // Keep the viewer subscription active even in guestMode so the guest can still
-    // see the host/participants while publishing.
+    // Guest publish replaces this read-only session in the singleton native
+    // module; suspend auto-join until the guest session ends.
     autoJoin: !suspendViewerAutoJoin && !guestMode,
     displayName: viewerDisplayName,
   });

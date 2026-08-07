@@ -1,5 +1,6 @@
 import React, { useMemo, useEffect } from 'react';
 import { View, Text, Image, FlatList, StyleSheet, useWindowDimensions, Pressable } from 'react-native';
+import { pickPublicLabel } from '../../utils/publicLabel';
 
 /**
  * Bottom-anchored live chat overlay (YouTube / TikTok Live style).
@@ -42,6 +43,16 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
   // fully opaque, older ones progressively fading so they melt into the video
   // instead of covering it.
   const renderItem = ({ item, index }) => {
+    const username = pickPublicLabel(
+      {
+        username: item?.username,
+        handle: item?.handle,
+        displayName: item?.displayName,
+        userName: item?.userName,
+        name: item?.name,
+      },
+      { uid: item?.userId || item?.uid, fallback: item?.system ? 'Viewer' : 'User' },
+    );
     const RowComponent = onPressUser ? Pressable : View;
     const rowProps = onPressUser
       ? { onPress: () => onPressUser(item), android_ripple: { color: 'rgba(255,255,255,0.12)', borderless: false } }
@@ -53,13 +64,13 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Text style={styles.avatarInitial} allowFontScaling={false}>
-              {String(item.username || 'U').trim().charAt(0).toUpperCase()}
+              {username.charAt(0).toUpperCase()}
             </Text>
           </View>
         )}
         <View style={styles.bubble}>
           <Text style={styles.line} allowFontScaling={false}>
-            <Text style={styles.username}>{String(item.username || 'User')}</Text>
+            <Text style={styles.username}>{username}</Text>
             <Text style={styles.sep}>{'  '}</Text>
             <Text style={styles.text}>{String(item.text || '')}</Text>
           </Text>

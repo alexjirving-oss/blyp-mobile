@@ -13,10 +13,15 @@ export function looksLikeRawId(value) {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) {
     return true;
   }
+  if (/^\d{10,}$/.test(t)) return true;
+  // Firebase/Cognito identifiers are often long URL-safe tokens without UUID
+  // dashes. Blyp usernames cap at 20 chars, so longer single tokens are IDs.
+  if (t.length > 20 && /^[A-Za-z0-9_-]+$/.test(t)) return true;
   // Longer opaque hex/hyphen tokens
   if (t.length >= 20 && /[0-9]/.test(t) && /[a-f]/i.test(t) && /[-_]/.test(t)) {
     return true;
   }
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return true;
   return false;
 }
 
@@ -24,6 +29,10 @@ function cleanCandidate(value) {
   const t = String(value || '').trim();
   if (!t) return '';
   return t.startsWith('@') ? t.slice(1).trim() : t;
+}
+
+function isGenericLabel(value) {
+  return /^(anonymous(?: user)?|anon|user|viewer|guest|someone|blyp user)$/i.test(value);
 }
 
 /**
@@ -51,6 +60,7 @@ export function pickPublicLabel(fields = {}, opts = {}) {
   for (const raw of ordered) {
     const t = cleanCandidate(raw);
     if (!t) continue;
+    if (isGenericLabel(t)) continue;
     if (uid && t === uid) continue;
     if (looksLikeRawId(t)) continue;
     if (/^user_/i.test(t)) continue;

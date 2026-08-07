@@ -168,7 +168,7 @@ router.post('/live/join-realtime', async (req: AuthedRequest, res) => {
 
 router.post('/live/join', async (req: AuthedRequest, res) => {
   try {
-    const { sessionId, streamId } = req.body || {};
+    const { sessionId, streamId, displayName } = req.body || {};
     const id = String(sessionId || streamId || '').trim();
     const viewerUserId = req.user?.sub;
     if (!id) {
@@ -177,7 +177,7 @@ router.post('/live/join', async (req: AuthedRequest, res) => {
     if (!viewerUserId) {
       return res.status(401).json({ error: 'User not found in token' });
     }
-    const result = await joinLiveMass(id, viewerUserId);
+    const result = await joinLiveMass(id, viewerUserId, displayName);
     return res.json(result);
   } catch (err: any) {
     const notFound = String(err?.message || '').includes('not found');

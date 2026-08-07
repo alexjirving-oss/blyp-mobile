@@ -20,6 +20,7 @@ export default function StageDeskChrome({
   viewCount = 0,
   heartCount = 0,
   giftTotalsByUser = {},
+  publicLabelsByUser = {},
   topInset = 0,
 }) {
   const chrome = useMemo(
@@ -83,7 +84,7 @@ export default function StageDeskChrome({
           return (
             <View key={widget.id} style={styles.pill}>
               <Text style={styles.pillText} numberOfLines={1}>
-                Top · {topGifters.map((g) => `${String(g.userId).slice(0, 6)} ${g.total}`).join(' · ')}
+                Top · {topGifters.map((g) => `${publicLabelsByUser[g.userId] || 'Supporter'} ${g.total}`).join(' · ')}
               </Text>
             </View>
           );

@@ -47,6 +47,7 @@ export default function LiveDashboardSheet({
   viewCount = 0,
   heartCount = 0,
   giftTotalsByUser = {},
+  publicLabelsByUser = {},
   guestLayoutMode,
   micOn = true,
   cameraOn = true,
@@ -364,6 +365,7 @@ export default function LiveDashboardSheet({
                         viewCount={viewCount}
                         heartCount={heartCount}
                         giftTotalsByUser={giftTotalsByUser}
+                        publicLabelsByUser={publicLabelsByUser}
                         guestLayoutMode={guestLayoutMode}
                         micOn={micOn}
                         cameraOn={cameraOn}

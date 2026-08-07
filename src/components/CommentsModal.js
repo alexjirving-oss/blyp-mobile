@@ -266,19 +266,23 @@ const CommentsModal = ({
     };
   }, [visible, firebaseEnabled, db, authReady, isAuthenticated, uid, getDisplayName]);
 
-  // For comments that came in with username == userId (uid), look up the user's profile username.
+  // Resolve profile labels for both feed comments and externally supplied live
+  // comments. The old Firestore-only gate left the live modal with an empty
+  // cache, so its renderer fell back to the raw Cognito sub.
   useEffect(() => {
-    if (!shouldUseFirestoreComments) return;
+    if (!visible) return;
+    if (!isLiveMode && !shouldUseFirestoreComments) return;
     if (!firebaseEnabled || !db) return;
-    if (!Array.isArray(postComments) || postComments.length === 0) return;
+    const identityComments = isLiveMode ? externalComments : postComments;
+    if (!Array.isArray(identityComments) || identityComments.length === 0) return;
 
     const needed = Array.from(
       new Set(
-        postComments
+        identityComments
           .map((c) => String(c?.userId || '').trim())
           .filter((id) => !!id)
           .filter((id) => {
-            const comment = postComments.find((c) => String(c?.userId || '').trim() === id);
+            const comment = identityComments.find((c) => String(c?.userId || '').trim() === id);
             const uname = String(comment?.username || '').trim();
             const hasAvatarOnComment = String(
               comment?.avatar || comment?.photoURL || comment?.profilePicture || '',
@@ -320,7 +324,7 @@ const CommentsModal = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldUseFirestoreComments, firebaseEnabled, db, postComments, usernameCacheTick]);
+  }, [visible, isLiveMode, shouldUseFirestoreComments, firebaseEnabled, db, postComments, externalComments, usernameCacheTick]);
 
   const threadedPostComments = useMemo(() => {
     if (!shouldUseFirestoreComments) return [];
@@ -359,15 +363,18 @@ const CommentsModal = ({
 
   const resolveDisplayUsername = useCallback(
     (item) => {
-      const raw = String(item?.username || '').trim();
       const userId = String(item?.userId || item?.uid || '').trim();
-      if (!raw) {
-        return usernameCacheRef.current.get(userId) || 'User';
-      }
-      if (userId && raw === userId) {
-        return usernameCacheRef.current.get(userId) || raw;
-      }
-      return raw;
+      const cached = usernameCacheRef.current.get(userId);
+      return pickPublicLabel(
+        {
+          username: cached || item?.username,
+          handle: item?.handle,
+          displayName: item?.displayName,
+          userName: item?.userName,
+          name: item?.name,
+        },
+        { uid: userId, fallback: 'User' },
+      );
     },
     // cache tick triggers recalculation when the cache updates
     // eslint-disable-next-line react-hooks/exhaustive-deps

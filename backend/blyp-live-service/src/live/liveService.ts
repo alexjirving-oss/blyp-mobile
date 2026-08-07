@@ -40,6 +40,7 @@ import {
   collectUsedGuestSlots,
   pickSlotIndex,
 } from './guestSlotAllocator';
+import { safeLiveDisplayName } from './liveDisplayName';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -503,13 +504,14 @@ export async function joinLiveRealtime(
   if (!session || session.status !== 'LIVE') {
     throw new Error('Live session not found or not live');
   }
+  const publicDisplayName = safeLiveDisplayName(displayName, viewerUserId);
 
   const client = getIvsRealtimeClient(getRegionFromStageArn(session.stageArn));
   const tokenRes = await client.send(new CreateParticipantTokenCommand({
     stageArn: session.stageArn,
     userId: viewerUserId,
     capabilities: ['SUBSCRIBE'],
-    attributes: { role: 'viewer', sessionId, displayName: displayName || viewerUserId },
+    attributes: { role: 'viewer', sessionId, displayName: publicDisplayName },
     duration: 60,
   }));
 
@@ -519,7 +521,7 @@ export async function joinLiveRealtime(
   }
 
   // Announce the join so all clients can show an "X joined" chat line in real time.
-  emitRoomEvent(sessionId, { type: 'viewer.joined', viewerUserId, displayName: displayName || undefined });
+  emitRoomEvent(sessionId, { type: 'viewer.joined', viewerUserId, displayName: publicDisplayName });
 
   return {
     token,
@@ -537,6 +539,7 @@ export async function joinLiveRealtime(
 export async function joinLiveMass(
   sessionId: string,
   viewerUserId: string,
+  displayName?: string,
 ): Promise<{ sessionId: string; playbackUrl?: string; mode: 'playback' | 'realtime' }> {
   const session = await getSessionById(sessionId);
   if (!session || session.status !== 'LIVE') {
@@ -545,7 +548,11 @@ export async function joinLiveMass(
 
   const firestore = await getStreamPlaybackForViewer(sessionId);
   if (firestore.playbackUrl) {
-    emitRoomEvent(sessionId, { type: 'viewer.joined', viewerUserId });
+    emitRoomEvent(sessionId, {
+      type: 'viewer.joined',
+      viewerUserId,
+      displayName: safeLiveDisplayName(displayName, viewerUserId),
+    });
     return { sessionId, playbackUrl: firestore.playbackUrl, mode: 'playback' };
   }
 

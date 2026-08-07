@@ -21,6 +21,7 @@ import * as Haptics from 'expo-haptics';
 import BlypCoinService from '../../services/BlypCoinService';
 import GiftHeroFx, { ShimmerSweep } from './giftMotion/GiftHeroFx';
 import GiftCinematicPlayer from './giftMotion/GiftCinematicPlayer';
+import { pickPublicLabel } from '../../utils/publicLabel';
 import {
   cinemaHoldMs,
   comboHeat,
@@ -62,19 +63,13 @@ function resolveGift(giftId) {
 }
 
 function senderLabel(sender) {
-  const handle = sender?.handle;
-  if (typeof handle === 'string' && handle.trim()) {
-    return handle.startsWith('@') ? handle : `@${handle}`;
-  }
-  return 'Someone';
+  const label = pickPublicLabel(sender || {}, { uid: sender?.userId, fallback: 'Someone' });
+  return label === 'Someone' ? label : `@${label.replace(/^@/, '')}`;
 }
 
 function receiverLabel(receiver) {
-  const handle = receiver?.handle;
-  if (typeof handle === 'string' && handle.trim()) {
-    return handle.startsWith('@') ? handle : `@${handle}`;
-  }
-  return 'host';
+  const label = pickPublicLabel(receiver || {}, { uid: receiver?.userId, fallback: 'host' });
+  return label === 'host' ? label : `@${label.replace(/^@/, '')}`;
 }
 
 let UID = 0;

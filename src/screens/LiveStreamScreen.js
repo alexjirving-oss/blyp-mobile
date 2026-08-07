@@ -98,6 +98,7 @@ import LiveReactionTray from '../components/live/LiveReactionTray';
 import ReportModal from '../components/ReportModal';
 import { blockUser, loadBlockedUsers } from '../services/BlockService';
 import { inspectText } from '../utils/contentFilter';
+import { pickPublicLabel } from '../utils/publicLabel';
 // Live Service for Firestore registration
 import {
   createStream as createFirestoreStream,
@@ -427,33 +428,37 @@ const LiveStreamScreen = (props) => {
     finalMode: mode,
   });
 
-  // STEP 2: Safe displayName resolution
+  // STEP 2: Safe public display-name resolution. Auth fallbacks can be the
+  // Cognito sub; never let that identifier become a user-facing live label.
   const getDisplayNameSafe = () => {
     try {
       if (typeof getDisplayName === 'function') {
         const val = getDisplayName();
         if (val && typeof val === 'string') {
-          return val;
+          return pickPublicLabel({ displayName: val }, { uid, fallback: 'User' });
         }
       }
     } catch (e) {
       console.warn('[LIVE][DISPLAYNAME_RESOLVE_ERROR]', e);
     }
-    return uid || null;
+    return 'User';
   };
 
   const hostUid = isViewer ? routeHostUid : uid;
   const hostDisplayName = isViewer
-    ? routeHostDisplayName || routeHostUid
+    ? pickPublicLabel({ displayName: routeHostDisplayName }, { uid: routeHostUid, fallback: 'Host' })
     : getDisplayNameSafe();
 
   const { data: hostUserDoc } = useFirestoreDoc('users', hostUid);
-  const resolvedHostName =
-    (typeof hostUserDoc?.displayName === 'string' && hostUserDoc.displayName.trim())
-      ? hostUserDoc.displayName.trim()
-      : (typeof hostUserDoc?.username === 'string' && hostUserDoc.username.trim())
-        ? hostUserDoc.username.trim()
-        : hostDisplayName;
+  const resolvedHostName = pickPublicLabel(
+    {
+      username: hostUserDoc?.username,
+      handle: hostUserDoc?.handle,
+      displayName: hostUserDoc?.displayName,
+      name: hostDisplayName,
+    },
+    { uid: hostUid, fallback: 'Host' },
+  );
 
   const resolvedHostPhotoUrl =
     (typeof hostUserDoc?.photoURL === 'string' && hostUserDoc.photoURL.trim())
@@ -533,9 +538,9 @@ const LiveStreamScreen = (props) => {
   const reservedGuestsRef = useRef(new Map()); // userId -> { userId, slotIndex, name, photoUrl, status }
   const [giftRecipient, setGiftRecipient] = useState(null);
   const [reactionBurst, setReactionBurst] = useState({ key: 0, emoji: null });
-  // Start hidden so a solo host is full-bleed (no empty guest tiles over their
-  // face); auto-reveals when a guest actually joins (effect below).
-  const [hostGuestTrayMode, setHostGuestTrayMode] = useState('hidden'); // expanded | collapsed | hidden
+  // Guest boxes are part of the default live surface. Hosts can still swipe the
+  // tray down, but entering a live no longer starts with every slot hidden.
+  const [hostGuestTrayMode, setHostGuestTrayMode] = useState('expanded'); // expanded | collapsed | hidden
   /** Compositional layout (sticky slots apply inside each mode). Mirrored to viewers. */
   const [guestLayoutMode, setGuestLayoutMode] = useState(LIVE_LAYOUT_MODES.BOTTOM_GRID);
   const prevHostGuestCountRef = useRef(0);
@@ -721,7 +726,10 @@ const LiveStreamScreen = (props) => {
       ...prev,
       userId: id,
       loading: true,
-      username: activeGuestRequest?.displayName || (prev.userId === id ? prev.username : ''),
+      username: pickPublicLabel(
+        { displayName: activeGuestRequest?.displayName },
+        { uid: id, fallback: prev.userId === id ? prev.username : 'Guest' },
+      ),
       photoUrl: activeGuestRequest?.photoUrl || (prev.userId === id ? prev.photoUrl : null),
     }));
 
@@ -768,10 +776,13 @@ const LiveStreamScreen = (props) => {
         const reserved = {
           userId: id,
           slotIndex,
-          name:
-            activeGuestRequestProfile?.username ||
-            activeGuestRequest?.displayName ||
-            null,
+          name: pickPublicLabel(
+            {
+              username: activeGuestRequestProfile?.username,
+              displayName: activeGuestRequest?.displayName,
+            },
+            { uid: id, fallback: 'Guest' },
+          ),
           photoUrl:
             activeGuestRequestProfile?.photoUrl ||
             activeGuestRequest?.photoUrl ||
@@ -896,7 +907,16 @@ const LiveStreamScreen = (props) => {
     const s = String(value).trim();
     if (!s) return true;
     const normalized = s.replace(/^@+/, '').trim().toLowerCase();
-    return normalized === 'anonymous' || normalized === 'anonymous user' || normalized === 'anon';
+    return [
+      'anonymous',
+      'anonymous user',
+      'anon',
+      'user',
+      'viewer',
+      'guest',
+      'someone',
+      'blyp user',
+    ].includes(normalized);
   };
 
   const toTrimmedString = (value) => {
@@ -954,7 +974,7 @@ const LiveStreamScreen = (props) => {
 
     const cachedUsername = userNameCacheRef.current.get(id) || '';
     const cachedPhotoUrl = userPhotoCacheRef.current.get(id) || '';
-    if (cachedUsername || cachedPhotoUrl) {
+    if (cachedUsername && cachedPhotoUrl) {
       return { username: cachedUsername, photoUrl: cachedPhotoUrl };
     }
 
@@ -992,8 +1012,8 @@ const LiveStreamScreen = (props) => {
         }
       }
 
-      let username = '';
-      let photoUrl = '';
+      let username = cachedUsername;
+      let photoUrl = cachedPhotoUrl;
 
       for (const candidate of candidateDocs) {
         if (!username) {
@@ -1689,13 +1709,17 @@ const LiveStreamScreen = (props) => {
     let cancelled = false;
     (async () => {
       const resolved = await Promise.all(guests.map(async (g) => {
-        let name = g.name || null;
+        let name = pickPublicLabel(
+          { name: g.name, username: g.username, displayName: g.displayName },
+          { uid: g.userId, fallback: '' },
+        );
+        if (name === 'Someone') name = '';
         let photoUrl = g.photoUrl || null;
         if (!name || !photoUrl) {
           try {
             const snap = await db.collection('users').doc(g.userId).get();
             const d = (snap && typeof snap.data === 'function' ? snap.data() : null) || {};
-            name = name || d.displayName || d.username || d.handle || null;
+            name = name || pickPublicLabel(d, { uid: g.userId, fallback: 'Guest' });
             photoUrl = photoUrl || d.photoURL || d.userPhotoURL || null;
           } catch { /* best effort */ }
         }
@@ -1729,10 +1753,20 @@ const LiveStreamScreen = (props) => {
       // a box the host already reserved from the invite response.
       const byUser = new Map();
       fromDoc.forEach((g) => {
-        if (g?.userId) byUser.set(String(g.userId), g);
+        if (g?.userId) {
+          byUser.set(String(g.userId), {
+            ...g,
+            name: pickPublicLabel(g, { uid: g.userId, fallback: 'Guest' }),
+          });
+        }
       });
       reservedGuestsRef.current.forEach((g, userId) => {
-        if (!byUser.has(String(userId))) byUser.set(String(userId), g);
+        if (!byUser.has(String(userId))) {
+          byUser.set(String(userId), {
+            ...g,
+            name: pickPublicLabel(g, { uid: userId, fallback: 'Guest' }),
+          });
+        }
       });
       setLiveGuests(Array.from(byUser.values()));
       if (data && data.guestLayoutMode) {
@@ -2774,7 +2808,14 @@ const LiveStreamScreen = (props) => {
     const optimistic = {
       id: tempId,
       userId: uid,
-      username: getDisplayNameSafe() || 'You',
+      username: pickPublicLabel(
+        {
+          username: hostUserDoc?.username,
+          handle: hostUserDoc?.handle,
+          displayName: isViewer ? getDisplayNameSafe() : resolvedHostName,
+        },
+        { uid, fallback: 'You' },
+      ),
       text: content,
       createdAt: Date.now(),
       pending: true,
@@ -2795,7 +2836,7 @@ const LiveStreamScreen = (props) => {
         // ignore
       }
       try {
-        const dn = typeof getDisplayName === 'function' ? getDisplayName() : undefined;
+        const dn = getDisplayNameSafe();
         await frenemiesChat(String(activeStreamId), content, dn);
       } catch {
         // no active challenge / non-fatal
@@ -2892,7 +2933,10 @@ const LiveStreamScreen = (props) => {
     const targetId = item?.userId;
     if (!targetId) return;
     if (uid && targetId === uid) return;
-    openGift({ userId: String(targetId), name: item.username || 'Viewer' });
+    openGift({
+      userId: String(targetId),
+      name: pickPublicLabel(item, { uid: targetId, fallback: 'Viewer' }),
+    });
   };
 
   const inviteGuestFromFollowGraph = useCallback(async (user) => {
@@ -2911,7 +2955,7 @@ const LiveStreamScreen = (props) => {
         const reserved = {
           userId: String(targetId),
           slotIndex,
-          name: user?.displayName || user?.username || null,
+          name: pickPublicLabel(user || {}, { uid: targetId, fallback: 'Guest' }),
           photoUrl: user?.photoURL || user?.photoUrl || user?.avatar || null,
           status: 'INVITED',
         };
@@ -2931,7 +2975,7 @@ const LiveStreamScreen = (props) => {
       Toast.show?.({
         type: 'success',
         text1: 'Invite sent',
-        text2: `${user?.displayName || user?.username || 'Guest'} got a Blyp ping`,
+        text2: `${pickPublicLabel(user || {}, { uid: targetId, fallback: 'Guest' })} got a Blyp ping`,
       });
     } catch (e) {
       const msg = String(e?.message || e?.code || '');
@@ -2958,7 +3002,7 @@ const LiveStreamScreen = (props) => {
       giftCommenter(item);
       return;
     }
-    const label = item.username || 'this viewer';
+    const label = pickPublicLabel(item, { uid: targetId, fallback: 'this viewer' });
     Alert.alert(label, 'What would you like to do?', [
       { text: 'Send gift', onPress: () => giftCommenter(item) },
       {
@@ -2994,15 +3038,15 @@ const LiveStreamScreen = (props) => {
     if (!isSelfHost) {
       recipients.push({
         userId: hostUid,
-        name: resolvedHostName || hostUid,
-        label: `Host · @${normalizeHandle(resolvedHostName || hostUid)}`,
+        name: resolvedHostName || 'Host',
+        label: `Host · ${normalizeHandle(resolvedHostName || 'Host')}`,
       });
     }
     guests.forEach((g) => {
       recipients.push({
         userId: g.userId,
-        name: g.name || 'Guest',
-        label: `Guest · ${g.name ? '@' + normalizeHandle(g.name) : 'Guest'}`,
+        name: pickPublicLabel(g, { uid: g.userId, fallback: 'Guest' }),
+        label: `Guest · ${normalizeHandle(pickPublicLabel(g, { uid: g.userId, fallback: 'Guest' }))}`,
       });
     });
 
@@ -3070,13 +3114,17 @@ const LiveStreamScreen = (props) => {
           if (!evt || evt.type !== 'viewer.joined') return;
           if (evt.id && seen.has(evt.id)) return;
           if (evt.id) seen.add(evt.id);
-          const name = (evt.displayName && String(evt.displayName).trim()) || 'Someone';
+          const viewerUserId = evt.viewerUserId || null;
+          const name = pickPublicLabel(
+            { displayName: evt.displayName },
+            { uid: viewerUserId, fallback: 'Viewer' },
+          );
           setJoinMessages((prev) => {
             const next = [
               ...prev,
               {
                 id: `join-${evt.id || `${evt.viewerUserId || ''}-${Date.now()}`}`,
-                userId: evt.viewerUserId || null,
+                userId: viewerUserId,
                 username: name,
                 avatar: null,
                 text: 'joined',
@@ -3224,6 +3272,25 @@ const LiveStreamScreen = (props) => {
   const [guestReportTarget, setGuestReportTarget] = useState(null);
   const [guestJoinedAt, setGuestJoinedAt] = useState({});
 
+  const publicLabelsByUser = useMemo(() => {
+    const labels = {};
+    const add = (person, personId) => {
+      const id = toTrimmedString(personId || person?.userId || person?.uid);
+      if (!id) return;
+      const cached = userNameCacheRef.current.get(id);
+      labels[id] = pickPublicLabel(
+        { ...(person || {}), username: cached || person?.username },
+        { uid: id, fallback: labels[id] || 'Supporter' },
+      );
+    };
+    add(hostUserDoc, hostUid);
+    (liveGuests || []).forEach((g) => add(g, g?.userId));
+    (comments || []).forEach((c) => add(c, c?.userId));
+    add(incomingGiftEvent?.sender, incomingGiftEvent?.sender?.userId);
+    add(incomingGiftEvent?.receiver, incomingGiftEvent?.receiver?.userId);
+    return labels;
+  }, [comments, hostUid, hostUserDoc, incomingGiftEvent, liveGuests]);
+
   // Build the guest roster for the sheet (name/avatar from the mirrored roster).
   const guestControlList = useMemo(() => {
     const list = Array.isArray(liveGuests) ? liveGuests : [];
@@ -3232,7 +3299,7 @@ const LiveStreamScreen = (props) => {
       .map((g) => ({
         userId: g.userId,
         participantId: g.participantId,
-        name: g.name || g.username || 'Guest',
+        name: pickPublicLabel(g, { uid: g.userId || g.participantId, fallback: 'Guest' }),
         photoUrl: g.photoUrl || g.photoURL || null,
         slotIndex: g.slotIndex,
       }));
@@ -3346,7 +3413,7 @@ const LiveStreamScreen = (props) => {
     }
     setChallengeBusy(true);
     try {
-      const hostName = getDisplayNameSafe() || 'Host';
+      const hostName = resolvedHostName || 'Host';
       const res = await challengeGuestInLive(
         {
           id: uid,
@@ -3570,7 +3637,7 @@ const LiveStreamScreen = (props) => {
               <View style={styles.liveHeaderAvatarPlaceholder} />
             )}
             <Text style={styles.liveHeaderName} numberOfLines={1} allowFontScaling={false}>
-              {normalizeHandle(resolvedHostName || hostUid)}
+              {normalizeHandle(resolvedHostName || 'Host')}
             </Text>
             <View style={styles.liveHeaderLivePill}>
               <View style={styles.liveHeaderLiveDot} />
@@ -3667,7 +3734,7 @@ const LiveStreamScreen = (props) => {
           openSignal={giftOpenSignal}
           postId={routeStreamId || streamId}
           creatorId={giftRecipient?.userId || hostUid}
-          creatorName={giftRecipient?.name || resolvedHostName || hostUid}
+          creatorName={giftRecipient?.name || resolvedHostName || 'Host'}
           navigation={navigation}
           incomingGiftEvent={incomingGiftEvent}
         />
@@ -4044,7 +4111,7 @@ const LiveStreamScreen = (props) => {
                   style={styles.hostIdentityPill}
                 >
                   <Text style={styles.hostIdentityText} numberOfLines={1} allowFontScaling={false}>
-                    {normalizeHandle(resolvedHostName || hostUid)}
+                    {normalizeHandle(resolvedHostName || 'Host')}
                   </Text>
                   {resolvedHostPhotoUrl ? (
                     <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.hostIdentityAvatar} />
@@ -4349,7 +4416,7 @@ const LiveStreamScreen = (props) => {
                       <View style={styles.liveHeaderAvatarPlaceholder} />
                     )}
                     <Text style={styles.liveHeaderName} numberOfLines={1} allowFontScaling={false}>
-                      {normalizeHandle(resolvedHostName || hostUid)}
+                      {normalizeHandle(resolvedHostName || 'Host')}
                     </Text>
                     <View style={styles.liveHeaderLivePill}>
                       <View style={styles.liveHeaderLiveDot} />
@@ -4378,6 +4445,7 @@ const LiveStreamScreen = (props) => {
                     viewCount={viewCount}
                     heartCount={heartCount}
                     giftTotalsByUser={giftTotalsByUser}
+                    publicLabelsByUser={publicLabelsByUser}
                     topInset={LIVE_TOP_INSET + 52}
                   />
                 ) : null}
@@ -4520,7 +4588,7 @@ const LiveStreamScreen = (props) => {
                   openSignal={giftOpenSignal}
                   postId={routeStreamId || streamId}
                   creatorId={giftRecipient?.userId || hostUid}
-                  creatorName={giftRecipient?.name || resolvedHostName || hostUid}
+                  creatorName={giftRecipient?.name || resolvedHostName || 'Host'}
                   navigation={navigation}
                   incomingGiftEvent={incomingGiftEvent}
                 />
@@ -4591,6 +4659,7 @@ const LiveStreamScreen = (props) => {
             viewCount={viewCount}
             heartCount={heartCount}
             giftTotalsByUser={giftTotalsByUser}
+            publicLabelsByUser={publicLabelsByUser}
             guestLayoutMode={guestLayoutMode}
             micOn={ivsHostSession?.isMicEnabled ?? true}
             cameraOn={ivsHostSession?.isCameraEnabled ?? true}

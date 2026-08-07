@@ -6,7 +6,6 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import Svg, { G, Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Audio } from 'expo-av';
-import { ensureMediaPlaybackAudioMode } from '../../../services/notifySound';
 
 const TEAL_DEEP = '#0A6B62';
 const GOLD = '#F5C542';
@@ -128,7 +127,10 @@ export default function PrizeWheel({
     let cancelled = false;
     (async () => {
       try {
-        await ensureMediaPlaybackAudioMode({ background: false });
+        // Do not call Audio.setAudioModeAsync here. IVS StageAudioManager owns
+        // the active live session; replacing its PlayAndRecord/video-chat setup
+        // would disable the publishing mic/AEC and can move remote speech back
+        // onto the receiver route. The short tick plays inside the IVS session.
         const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
           shouldPlay: false,
           volume: 0.25,

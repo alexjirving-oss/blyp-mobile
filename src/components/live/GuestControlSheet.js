@@ -18,6 +18,7 @@ import {
   getFollowingCount,
   getMutualFollowCount,
 } from '../../utils/followUtils';
+import { pickPublicLabel } from '../../utils/publicLabel';
 
 const TEAL = '#00D2BE';
 const ROSE = '#FB7185';
@@ -100,9 +101,24 @@ export default function GuestControlSheet({
   /** Per-user session engagement for THIS live (likes/shares/comments/coins). */
   sessionEngagementByUser = {},
 }) {
+  const safeGuests = useMemo(
+    () => guests.map((g) => ({
+      ...g,
+      name: pickPublicLabel(
+        {
+          username: g?.username,
+          handle: g?.handle,
+          displayName: g?.displayName,
+          name: g?.name,
+        },
+        { uid: g?.userId || g?.participantId, fallback: 'Guest' },
+      ),
+    })),
+    [guests],
+  );
   const selected = useMemo(
-    () => guests.find((g) => (g.userId || g.participantId) === selectedGuestId) || guests[0] || null,
-    [guests, selectedGuestId]
+    () => safeGuests.find((g) => (g.userId || g.participantId) === selectedGuestId) || safeGuests[0] || null,
+    [safeGuests, selectedGuestId]
   );
   const selectedId = selected ? selected.userId || selected.participantId : null;
 
@@ -202,7 +218,7 @@ export default function GuestControlSheet({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.switcherRow}
           >
-            {guests.map((g) => {
+            {safeGuests.map((g) => {
               const gid = g.userId || g.participantId;
               const active = gid === selectedId;
               return (

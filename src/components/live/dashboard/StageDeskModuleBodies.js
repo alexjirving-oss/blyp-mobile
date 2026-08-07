@@ -42,6 +42,7 @@ export function StageDeskModuleBody({
   viewCount = 0,
   heartCount = 0,
   giftTotalsByUser = {},
+  publicLabelsByUser = {},
   guestLayoutMode,
   micOn = true,
   cameraOn = true,
@@ -166,7 +167,7 @@ export function StageDeskModuleBody({
               <View key={g.userId} style={styles.gifterRow}>
                 <Text style={[styles.gifterRank, { color: accent }]}>#{i + 1}</Text>
                 <Text style={styles.gifterId} numberOfLines={1}>
-                  {String(g.userId).slice(0, 12)}
+                  {publicLabelsByUser[g.userId] || 'Supporter'}
                 </Text>
                 <Text style={styles.gifterTotal}>{g.total}</Text>
               </View>

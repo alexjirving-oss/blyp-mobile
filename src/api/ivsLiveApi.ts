@@ -991,9 +991,13 @@ export async function joinLiveRealtime(
 /**
  * Join a live session in mass mode (for future HLS support).
  */
-export async function joinLiveMass(sessionId: string): Promise<JoinLiveMassResponse> {
+export async function joinLiveMass(sessionId: string, displayName?: string): Promise<JoinLiveMassResponse> {
   console.log('[LIVE_API][JOIN_LIVE_MASS]', { sessionId });
-  return callLiveBackend<JoinLiveMassResponse>('/api/live/join', 'POST', { sessionId, streamId: sessionId });
+  return callLiveBackend<JoinLiveMassResponse>('/api/live/join', 'POST', {
+    sessionId,
+    streamId: sessionId,
+    ...(displayName && displayName.trim() ? { displayName: displayName.trim() } : {}),
+  });
 }
 
 /**

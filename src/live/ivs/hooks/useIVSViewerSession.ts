@@ -160,7 +160,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
 
       if (preferPlayback) {
         try {
-          const mass = await joinLiveMass(streamId);
+          const mass = await joinLiveMass(streamId, displayName);
           if (mass?.mode === 'playback' && mass.playbackUrl) {
             console.log('[IVS_VIEWER][JOIN_PLAYBACK]', { streamId, playbackUrlLength: mass.playbackUrl.length });
             await client.joinAsViewerPlayback({
