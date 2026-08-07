@@ -56,3 +56,8 @@ export function isArtilleryEnabled() {
 export function isFrenemiesEnabled() {
   return readPublicFlag('EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED', { defaultOn: true });
 }
+
+/** Reaction Duel paid skill game — ON by default for demo/live Games picker. */
+export function isReactionDuelEnabled() {
+  return readPublicFlag('EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED', { defaultOn: true });
+}

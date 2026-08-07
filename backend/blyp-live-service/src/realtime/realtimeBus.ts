@@ -53,6 +53,12 @@ export function emitFrenemiesGameEvent(streamId: string, payload: any) {
   ioRef.to(`stream:${streamId}`).emit('frenemies_game_event', payload);
 }
 
+// Reaction Duel — dedicated channel for lock, prompt, tap and settlement state.
+export function emitReactionDuelEvent(streamId: string, payload: any) {
+  if (!ioRef) return;
+  ioRef.to(`stream:${streamId}`).emit('reaction_duel_event', payload);
+}
+
 // Matchday Live rooms reuse the stream room naming so clients join with
 // streamId = `matchday:{eventId}`.
 export function emitMatchdayEvent(eventId: string, payload: any) {

@@ -177,6 +177,22 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           UNIQUE (host_user_id, idempotency_key)
         )`,
 
+        `CREATE TABLE IF NOT EXISTS reaction_duel_entries (
+          duel_id text NOT NULL,
+          session_id text NOT NULL,
+          user_id text NOT NULL,
+          status text NOT NULL DEFAULT 'PENDING',
+          coin_cost bigint NOT NULL DEFAULT 0,
+          bonus_coin_cost bigint NOT NULL DEFAULT 0,
+          refund_reason text,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          locked_at timestamptz,
+          refunded_at timestamptz,
+          settled_at timestamptz,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (duel_id, user_id)
+        )`,
+
         `CREATE TABLE IF NOT EXISTS matchday_entitlements (
           entitlement_id text PRIMARY KEY,
           user_id text NOT NULL,
@@ -336,6 +352,8 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_live_games_host_user_id ON live_games (host_user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_live_game_entries_game_id ON live_game_entries (game_id)`,
         `CREATE INDEX IF NOT EXISTS idx_live_game_entries_user_id ON live_game_entries (user_id)`,
+        `CREATE INDEX IF NOT EXISTS idx_reaction_duel_entries_session ON reaction_duel_entries (session_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_reaction_duel_entries_user ON reaction_duel_entries (user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_matchday_entitlements_user ON matchday_entitlements (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_matchday_predictions_event ON matchday_predictions (event_id)`,
         `CREATE INDEX IF NOT EXISTS idx_matchday_predictions_user ON matchday_predictions (user_id)`,

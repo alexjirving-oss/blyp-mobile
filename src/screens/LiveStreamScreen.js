@@ -42,7 +42,12 @@ import { useAuth, useFirestoreDoc, clearCognitoSessions, refreshAuthNow, userPoo
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { isLiveStreamingEnabled } from '../config/StreamingFeatureFlag';
-import { isArtilleryEnabled, isMarbleRaceEnabled, isFrenemiesEnabled } from '../config/LiveGamesFlags';
+import {
+  isArtilleryEnabled,
+  isMarbleRaceEnabled,
+  isFrenemiesEnabled,
+  isReactionDuelEnabled,
+} from '../config/LiveGamesFlags';
 import { useLockPortraitWhileFocused } from '../utils/lockPortraitWhileFocused';
 import LiveStreamViewer from '../components/LiveStreamViewer';
 import CommentsModal from '../components/CommentsModal';
@@ -52,6 +57,7 @@ import BattleOverlay from '../components/Battles/BattleOverlay';
 import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
 import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
 import FrenemiesOverlay from '../components/live/FrenemiesOverlay';
+import ReactionDuelOverlay from '../components/live/ReactionDuelOverlay';
 import LiveGamesPicker from '../components/live/LiveGamesPicker';
 import GuestControlSheet from '../components/live/GuestControlSheet';
 import useIsAdmin from '../hooks/useIsAdmin';
@@ -242,9 +248,10 @@ const LiveStreamScreen = (props) => {
   // Marble Race (Guest Grand Prix). Reads expo.extra + env (not bare process.env).
   const MARBLE_ENABLED = isMarbleRaceEnabled();
   const FRENEMIES_ENABLED = isFrenemiesEnabled();
-  // Games bottom-tab panel (Marble Race / Frenemies / battle game). Host starts from here.
+  const REACTION_DUEL_ENABLED = isReactionDuelEnabled();
+  // Games bottom-tab panel (Marble Race / Frenemies / Reaction Duel / battle game).
   const [gamesOpen, setGamesOpen] = useState(false);
-  /** null = branded picker; 'marble' | 'frenemies' = that game's start chrome. */
+  /** null = branded picker; otherwise the selected game's start chrome. */
   const [selectedLiveGame, setSelectedLiveGame] = useState(null);
   const [inviteGuestsOpen, setInviteGuestsOpen] = useState(false);
   const [invitingGuestUid, setInvitingGuestUid] = useState(null);
@@ -279,7 +286,7 @@ const LiveStreamScreen = (props) => {
 
   const liveGamesAvailable =
     (!!activeBattleId && ARTILLERY_ENABLED) ||
-    ((MARBLE_ENABLED || FRENEMIES_ENABLED) && !activeBattleId);
+    ((MARBLE_ENABLED || FRENEMIES_ENABLED || REACTION_DUEL_ENABLED) && !activeBattleId);
 
   const closeLiveGames = useCallback(() => {
     setGamesOpen(false);
@@ -293,7 +300,7 @@ const LiveStreamScreen = (props) => {
       setSelectedLiveGame(null);
       return;
     }
-    if ((MARBLE_ENABLED || FRENEMIES_ENABLED) && !activeBattleId) {
+    if ((MARBLE_ENABLED || FRENEMIES_ENABLED || REACTION_DUEL_ENABLED) && !activeBattleId) {
       setGamesOpen((v) => {
         if (v) {
           setSelectedLiveGame(null);
@@ -305,7 +312,13 @@ const LiveStreamScreen = (props) => {
       return;
     }
     Alert.alert('Games', 'Live games are not available in this room yet.');
-  }, [activeBattleId, ARTILLERY_ENABLED, MARBLE_ENABLED, FRENEMIES_ENABLED]);
+  }, [
+    activeBattleId,
+    ARTILLERY_ENABLED,
+    MARBLE_ENABLED,
+    FRENEMIES_ENABLED,
+    REACTION_DUEL_ENABLED,
+  ]);
 
   // Marble Race translucent overlay on non-battle lives.
   // Host start chrome is gated by the Games bottom tab; active races always show.
@@ -357,19 +370,47 @@ const LiveStreamScreen = (props) => {
     );
   };
 
+  const renderReactionDuelLayer = () => {
+    if (!REACTION_DUEL_ENABLED || activeBattleId) return null;
+    const gameSessionId = routeStreamId || streamId;
+    if (!gameSessionId) return null;
+    if (isHost && !isStreaming) return null;
+    return (
+      <ReactionDuelOverlay
+        sessionId={gameSessionId}
+        currentUid={uid}
+        currentDisplayName={typeof getDisplayName === 'function' ? getDisplayName() : 'Player'}
+        hostDisplayName={resolvedHostName || 'Host'}
+        isAdmin={!!isAdmin}
+        isHost={isHost}
+        liveGuests={liveGuests || []}
+        controlsVisible={
+          gamesOpen &&
+          selectedLiveGame === 'reaction-duel' &&
+          !!isAdmin
+        }
+        onClose={closeLiveGames}
+        onBackToPicker={() => setSelectedLiveGame(null)}
+      />
+    );
+  };
+
   const renderLiveGamesPicker = () => {
     if (!gamesOpen || selectedLiveGame || activeBattleId) return null;
     if (isHost && !isStreaming) return null;
     const showMarble = !!MARBLE_ENABLED && !!isHost;
     const showFrenemies = !!FRENEMIES_ENABLED && !!isAdmin;
-    if (!showMarble && !showFrenemies) return null;
+    const showReactionDuel = !!REACTION_DUEL_ENABLED && !!isAdmin;
+    if (!showMarble && !showFrenemies && !showReactionDuel) return null;
     return (
       <LiveGamesPicker
         visible
         showMarble={showMarble}
         showFrenemies={showFrenemies}
+        showReactionDuel={showReactionDuel}
         onPickMarble={() => setSelectedLiveGame('marble')}
         onPickFrenemies={() => setSelectedLiveGame('frenemies')}
+        onPickReactionDuel={() => setSelectedLiveGame('reaction-duel')}
         onClose={closeLiveGames}
       />
     );
@@ -3750,6 +3791,7 @@ const LiveStreamScreen = (props) => {
         {renderArtilleryLayer()}
         {renderMarbleLayer()}
         {renderFrenemiesLayer()}
+        {renderReactionDuelLayer()}
         {renderLiveGamesPicker()}
       </View>
     );
@@ -4604,6 +4646,7 @@ const LiveStreamScreen = (props) => {
                 {renderArtilleryLayer()}
                 {renderMarbleLayer()}
                 {renderFrenemiesLayer()}
+                {renderReactionDuelLayer()}
                 {renderLiveGamesPicker()}
 
                 <GuestControlSheet

@@ -118,6 +118,15 @@ module.exports = () => {
       if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
       return isProductionProfile ? '1' : '1';
     })(),
+    // Reaction Duel paid skill game — ON unless explicitly disabled.
+    EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED: (() => {
+      const raw = String(process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED || '')
+        .trim()
+        .toLowerCase();
+      if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return '0';
+      if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
+      return '1';
+    })(),
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
     },

@@ -1,5 +1,5 @@
 /**
- * Branded Games picker — Frenemies vs Marble Race entry from the live Games tab.
+ * Branded Games picker for server-authoritative live overlays.
  */
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
@@ -13,12 +13,14 @@ export default function LiveGamesPicker({
   visible,
   showMarble = true,
   showFrenemies = true,
+  showReactionDuel = true,
   onPickMarble,
   onPickFrenemies,
+  onPickReactionDuel,
   onClose,
 }) {
   if (!visible) return null;
-  if (!showMarble && !showFrenemies) return null;
+  if (!showMarble && !showFrenemies && !showReactionDuel) return null;
 
   return (
     <View style={styles.root} pointerEvents="box-none">
@@ -66,6 +68,42 @@ export default function LiveGamesPicker({
                   Prize wheel · throw · HOUSE coins
                 </Text>
                 <View style={[styles.cta, { backgroundColor: TEAL }]}>
+                  <Text style={styles.ctaText} allowFontScaling={false}>
+                    Open
+                  </Text>
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : null}
+
+          {showReactionDuel ? (
+            <TouchableOpacity
+              style={styles.cardWrap}
+              onPress={onPickReactionDuel}
+              activeOpacity={0.9}
+              accessibilityLabel="Play Reaction Duel"
+            >
+              <LinearGradient
+                colors={['#082F49', '#0A0A0C']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.card}
+              >
+                <View style={[styles.badge, { backgroundColor: '#22D3EE' }]}>
+                  <Text style={styles.badgeText} allowFontScaling={false}>
+                    ADMIN
+                  </Text>
+                </View>
+                <Text style={styles.cardIcon} allowFontScaling={false}>
+                  ⚡
+                </Text>
+                <Text style={styles.cardTitle} allowFontScaling={false}>
+                  Reaction Duel
+                </Text>
+                <Text style={styles.cardSub} allowFontScaling={false}>
+                  100 in each · 300 coin prize
+                </Text>
+                <View style={[styles.cta, { backgroundColor: '#22D3EE' }]}>
                   <Text style={styles.ctaText} allowFontScaling={false}>
                     Open
                   </Text>
@@ -146,8 +184,8 @@ const styles = StyleSheet.create({
   },
   closeBtn: { position: 'absolute', right: 0, top: 0, padding: 4 },
   closeText: { color: 'rgba(255,255,255,0.55)', fontWeight: '700', fontSize: 13 },
-  row: { flexDirection: 'row', gap: 10 },
-  cardWrap: { flex: 1 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  cardWrap: { flexGrow: 1, flexBasis: '45%' },
   card: {
     borderRadius: 16,
     padding: 12,

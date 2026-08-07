@@ -10,6 +10,7 @@ describe('LiveGamesFlags', () => {
   let Constants;
   let isMarbleRaceEnabled;
   let isArtilleryEnabled;
+  let isReactionDuelEnabled;
 
   beforeEach(() => {
     jest.resetModules();
@@ -18,7 +19,12 @@ describe('LiveGamesFlags', () => {
     Constants.manifest = { extra: {} };
     delete process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED;
     delete process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED;
-    ({ isArtilleryEnabled, isMarbleRaceEnabled } = require('../src/config/LiveGamesFlags'));
+    delete process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED;
+    ({
+      isArtilleryEnabled,
+      isMarbleRaceEnabled,
+      isReactionDuelEnabled,
+    } = require('../src/config/LiveGamesFlags'));
   });
 
   test('marble defaults ON when env and extra are empty (production ship path)', () => {
@@ -39,5 +45,11 @@ describe('LiveGamesFlags', () => {
     expect(isArtilleryEnabled()).toBe(false);
     Constants.expoConfig.extra.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED = 'true';
     expect(isArtilleryEnabled()).toBe(true);
+  });
+
+  test('Reaction Duel defaults ON and respects an explicit off switch', () => {
+    expect(isReactionDuelEnabled()).toBe(true);
+    process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED = 'off';
+    expect(isReactionDuelEnabled()).toBe(false);
   });
 });

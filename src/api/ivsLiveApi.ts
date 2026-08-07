@@ -1511,6 +1511,78 @@ export async function frenemiesGetState(sessionId: string): Promise<FrenemiesGam
   return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/state', 'GET', { sessionId });
 }
 
+// ============================================================================
+// REACTION DUEL — paid, server-authoritative live skill game
+// ============================================================================
+
+export interface ReactionDuelGameEvent {
+  game: 'reaction-duel';
+  sessionId: string;
+  type: 'PHASE' | 'SNAPSHOT' | 'LOCK' | 'ROUND' | 'RESULT' | 'ENDED' | 'REFUNDED';
+  version: number;
+  serverNow: string;
+  hostUserId: string;
+  state: any;
+  rules: {
+    entryCoins: number;
+    prizeCoins: number;
+    maxRounds: number;
+    winScore: number;
+    promptWindowMs: number;
+    disconnectTimeoutMs: number;
+    summary: string;
+  };
+}
+
+export async function reactionDuelStart(
+  sessionId: string,
+  opponentUserId: string,
+  names?: { hostDisplayName?: string; opponentDisplayName?: string }
+): Promise<ReactionDuelGameEvent> {
+  return callLiveBackend<ReactionDuelGameEvent>('/api/live-game/reaction-duel/start', 'POST', {
+    sessionId,
+    opponentUserId,
+    ...(names?.hostDisplayName ? { hostDisplayName: names.hostDisplayName } : {}),
+    ...(names?.opponentDisplayName ? { opponentDisplayName: names.opponentDisplayName } : {}),
+  });
+}
+
+export async function reactionDuelLock(sessionId: string): Promise<ReactionDuelGameEvent> {
+  return callLiveBackend<ReactionDuelGameEvent>('/api/live-game/reaction-duel/lock', 'POST', {
+    sessionId,
+  });
+}
+
+export async function reactionDuelTap(
+  sessionId: string,
+  promptId: string,
+  targetId: string
+): Promise<ReactionDuelGameEvent> {
+  return callLiveBackend<ReactionDuelGameEvent>('/api/live-game/reaction-duel/tap', 'POST', {
+    sessionId,
+    promptId,
+    targetId,
+  });
+}
+
+export async function reactionDuelHeartbeat(sessionId: string): Promise<{ ok: boolean }> {
+  return callLiveBackend<{ ok: boolean }>('/api/live-game/reaction-duel/heartbeat', 'POST', {
+    sessionId,
+  });
+}
+
+export async function reactionDuelEnd(sessionId: string): Promise<ReactionDuelGameEvent> {
+  return callLiveBackend<ReactionDuelGameEvent>('/api/live-game/reaction-duel/end', 'POST', {
+    sessionId,
+  });
+}
+
+export async function reactionDuelGetState(sessionId: string): Promise<ReactionDuelGameEvent> {
+  return callLiveBackend<ReactionDuelGameEvent>('/api/live-game/reaction-duel/state', 'GET', {
+    sessionId,
+  });
+}
+
 export type SessionEngagement = {
   likes: number;
   shares: number;
