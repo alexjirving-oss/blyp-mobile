@@ -127,10 +127,10 @@ export default function PrizeWheel({
     let cancelled = false;
     (async () => {
       try {
-        // Do not call Audio.setAudioModeAsync here. IVS StageAudioManager owns
-        // the active live session; replacing its PlayAndRecord/video-chat setup
-        // would disable the publishing mic/AEC and can move remote speech back
-        // onto the receiver route. The short tick plays inside the IVS session.
+        // Do not call Audio.setAudioModeAsync here. The native IVS live-audio
+        // guard owns PlayAndRecord/video-chat + the speaker route; replacing it
+        // would briefly disable the publishing mic/AEC until the guard repairs
+        // the session. The short tick plays inside the existing IVS session.
         const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
           shouldPlay: false,
           volume: 0.25,

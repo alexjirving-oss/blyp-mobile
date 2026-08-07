@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import AVFoundation
 import AmazonIVSBroadcast
 
 /// iOS counterpart of the Android `IVSBroadcastModule` (Kotlin).
@@ -43,6 +44,31 @@ final class IVSBroadcastModule: RCTEventEmitter {
     private var participantsWithVideo = Set<String>()
 
     private var hasListeners = false
+    private var routeChangeObserver: NSObjectProtocol?
+    private var liveAudioGuardActive = false
+    private var liveAudioPublishing = false
+    private var liveAudioGuardGeneration = 0
+
+    override init() {
+        super.init()
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.liveAudioGuardActive else { return }
+            self.forceSystemLoudspeaker(
+                publishing: self.liveAudioPublishing,
+                reason: "route-change"
+            )
+        }
+    }
+
+    deinit {
+        if let routeChangeObserver = routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
+    }
 
     // All work that touches the SDK/UI is funnelled to main to keep ordering simple
     // and because preview UIViews must be created on the main thread.
@@ -152,8 +178,26 @@ final class IVSBroadcastModule: RCTEventEmitter {
     @objc(forceReattach:callback:)
     func forceReattach(_ reason: String, callback: @escaping RCTResponseSenderBlock) {
         // iOS attaches preview UIViews directly; nudge views to re-bind.
-        runOnMain {
+        runOnMain { [weak self] in
             NotificationCenter.default.post(name: BlypIVSRenderRegistry.didChangeNotification, object: BlypIVSRenderRegistry.shared)
+            if let self = self {
+                self.forceSystemLoudspeaker(
+                    publishing: self.role == .host || self.role == .guest,
+                    reason: "render-reattach:\(reason)"
+                )
+            }
+            callback([])
+        }
+    }
+
+    @objc(forceLiveLoudspeaker:callback:)
+    func forceLiveLoudspeaker(_ reason: String, callback: @escaping RCTResponseSenderBlock) {
+        runOnMain { [weak self] in
+            guard let self = self else { return }
+            self.forceSystemLoudspeaker(
+                publishing: self.role == .host || self.role == .guest,
+                reason: "js:\(reason)"
+            )
             callback([])
         }
     }
@@ -164,6 +208,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
             guard let self = self else { return }
             self.micEnabled = enabled
             self.micStream?.setMuted(!enabled)
+            self.forceSystemLoudspeaker(publishing: true, reason: "mic-state-changed")
             self.emitLocalTrackUpdate()
             callback([])
         }
@@ -218,6 +263,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
 
         // Audio routing must be configured before creating DeviceDiscovery / Stage.
         configureStageAudio(publishing: publish, role: role.rawValue)
+        startLoudspeakerGuard(publishing: publish, reason: "\(role.rawValue)-before-stage-create")
 
         if publish {
             try setupLocalStreams()
@@ -228,6 +274,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
         stage.addRenderer(self)
         self.stage = stage
         try stage.join()
+        forceSystemLoudspeaker(publishing: publish, reason: "\(role.rawValue)-stage-join-returned")
 
         emit("IVS_BROADCAST_STATE_CHANGED", ["state": "CONNECTING"])
     }
@@ -250,15 +297,95 @@ final class IVSBroadcastModule: RCTEventEmitter {
         } else {
             audioManager.setPreset(.subscribeOnly)
         }
+        forceSystemLoudspeaker(publishing: publishing, reason: "configure-stage:\(role)")
 
         NSLog(
-            "[IVS_AUDIO_ROUTE] role=%@ publishing=%@ category=%ld mode=%ld defaultToSpeaker=%@",
+            "[IVS_AUDIO_ROUTE] role=%@ publishing=%@ category=%@ mode=%@ defaultToSpeaker=%@",
             role,
             publishing ? "true" : "false",
             audioManager.category.rawValue,
             audioManager.mode.rawValue,
             audioManager.options.contains(.defaultToSpeaker) ? "true" : "false"
         )
+    }
+
+    /// Select the physical speaker, not merely a category that permits it.
+    ///
+    /// expo-av and the IVS SDK can both replace AVAudioSession after initial setup.
+    /// The route observer plus the session watchdog below repairs those changes for the
+    /// full live lifetime. Publishing keeps videoChat voice processing/AEC.
+    private func forceSystemLoudspeaker(publishing: Bool, reason: String) {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            if publishing {
+                let options: AVAudioSession.CategoryOptions = [
+                    .allowBluetooth,
+                    .allowBluetoothA2DP,
+                    .defaultToSpeaker,
+                    .mixWithOthers,
+                ]
+                if session.category != .playAndRecord ||
+                    session.mode != .videoChat ||
+                    !session.categoryOptions.contains(.defaultToSpeaker) {
+                    try session.setCategory(.playAndRecord, mode: .videoChat, options: options)
+                }
+                try session.setActive(true)
+                try session.overrideOutputAudioPort(.speaker)
+            } else {
+                // Playback/moviePlayback never selects the receiver. This covers both
+                // subscribe-only Stage viewers and one-shot JS reassertion for IVS Player.
+                if session.category != .playback || session.mode != .moviePlayback {
+                    try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+                }
+                try session.setActive(true)
+            }
+
+            let outputs = session.currentRoute.outputs
+                .map { "\($0.portType.rawValue):\($0.portName)" }
+                .joined(separator: ",")
+            NSLog(
+                "[IVS_AUDIO_ROUTE] forced reason=%@ publishing=%@ category=%@ mode=%@ outputs=%@",
+                reason,
+                publishing ? "true" : "false",
+                session.category.rawValue,
+                session.mode.rawValue,
+                outputs
+            )
+        } catch {
+            NSLog(
+                "[IVS_AUDIO_ROUTE] force failed reason=%@ publishing=%@ error=%@",
+                reason,
+                publishing ? "true" : "false",
+                error.localizedDescription
+            )
+        }
+    }
+
+    private func startLoudspeakerGuard(publishing: Bool, reason: String) {
+        liveAudioPublishing = publishing
+        liveAudioGuardActive = true
+        liveAudioGuardGeneration += 1
+        let generation = liveAudioGuardGeneration
+        forceSystemLoudspeaker(publishing: publishing, reason: reason)
+        scheduleLoudspeakerGuard(generation: generation)
+    }
+
+    private func scheduleLoudspeakerGuard(generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self,
+                  self.liveAudioGuardActive,
+                  self.liveAudioGuardGeneration == generation else { return }
+            self.forceSystemLoudspeaker(
+                publishing: self.liveAudioPublishing,
+                reason: "watchdog"
+            )
+            self.scheduleLoudspeakerGuard(generation: generation)
+        }
+    }
+
+    private func stopLoudspeakerGuard() {
+        liveAudioGuardActive = false
+        liveAudioGuardGeneration += 1
     }
 
     private func setupLocalStreams() throws {
@@ -310,6 +437,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
     }
 
     private func teardownStage(reason: String) {
+        stopLoudspeakerGuard()
         stage?.leave()
         stage?.removeRenderer(self)
         stage = nil
@@ -354,6 +482,13 @@ extension IVSBroadcastModule: IVSStageStrategy {
 extension IVSBroadcastModule: IVSStageRenderer {
 
     func stage(_ stage: IVSStage, participantDidJoin participant: IVSParticipantInfo) {
+        runOnMain { [weak self] in
+            guard let self = self else { return }
+            self.forceSystemLoudspeaker(
+                publishing: self.role == .host || self.role == .guest,
+                reason: participant.isLocal ? "local-participant-joined" : "remote-participant-joined"
+            )
+        }
         if participant.isLocal {
             localParticipantId = participant.participantId
             return
@@ -389,6 +524,13 @@ extension IVSBroadcastModule: IVSStageRenderer {
     }
 
     func stage(_ stage: IVSStage, participant: IVSParticipantInfo, didChange publishState: IVSParticipantPublishState) {
+        runOnMain { [weak self] in
+            guard let self = self else { return }
+            self.forceSystemLoudspeaker(
+                publishing: self.role == .host || self.role == .guest,
+                reason: "publish-state-changed"
+            )
+        }
         guard participant.isLocal else { return }
         if publishState == .published && !hasEmittedLocalJoined {
             hasEmittedLocalJoined = true
@@ -406,13 +548,25 @@ extension IVSBroadcastModule: IVSStageRenderer {
     }
 
     func stage(_ stage: IVSStage, participant: IVSParticipantInfo, didChange subscribeState: IVSParticipantSubscribeState) {
-        // No-op: video add/remove drives the UI.
+        runOnMain { [weak self] in
+            guard let self = self else { return }
+            self.forceSystemLoudspeaker(
+                publishing: self.role == .host || self.role == .guest,
+                reason: "subscribe-state-changed"
+            )
+        }
     }
 
     func stage(_ stage: IVSStage, participant: IVSParticipantInfo, didAdd streams: [IVSStageStream]) {
         guard !participant.isLocal else { return }
         runOnMain { [weak self] in
             guard let self = self else { return }
+            if streams.contains(where: { $0.device is IVSAudioDevice }) {
+                self.forceSystemLoudspeaker(
+                    publishing: self.role == .host || self.role == .guest,
+                    reason: "remote-audio-stream-added"
+                )
+            }
             let pid = participant.participantId
             var attrs: [String: String] = [:]
             for (k, v) in participant.attributes {
@@ -496,6 +650,12 @@ extension IVSBroadcastModule: IVSStageRenderer {
         }
         runOnMain { [weak self] in
             guard let self = self else { return }
+            if connectionState == .connecting || connectionState == .connected {
+                self.forceSystemLoudspeaker(
+                    publishing: self.role == .host || self.role == .guest,
+                    reason: "stage-\(stateString.lowercased())"
+                )
+            }
             self.emit("IVS_BROADCAST_STATE_CHANGED", ["state": stateString])
             if let error = error {
                 self.emit("IVS_BROADCAST_ERROR", self.errorBody("STAGE_ERROR", error.localizedDescription))

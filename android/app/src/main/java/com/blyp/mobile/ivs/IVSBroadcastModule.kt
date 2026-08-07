@@ -51,6 +51,7 @@ class IVSBroadcastModule(
 ) : ReactContextBaseJavaModule(reactContext), LifecycleEventListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val loudspeakerController = LiveLoudspeakerController(reactContext, IVS_TAG)
     private enum class SessionMode { NONE, HOST, VIEWER, GUEST }
     private enum class RenderOwner { NONE, HOST_PREVIEW, VIEWER_REMOTE }
 
@@ -146,7 +147,7 @@ class IVSBroadcastModule(
     }
 
     override fun onHostResume() {
-        // No-op for now; broadcast can continue across resume.
+        loudspeakerController.forceActive("host-resume")
     }
 
     override fun onHostPause() {
@@ -444,6 +445,7 @@ class IVSBroadcastModule(
             }
             try {
                 audioStream.setMuted(!enabled)
+                loudspeakerController.forceActive("mic-state-changed")
                 callback.invoke()
             } catch (e: Exception) {
                 callback.invoke(errorMap("MIC_SET_FAILED", e.message ?: "Failed to update mic state"))
@@ -653,9 +655,38 @@ class IVSBroadcastModule(
                 reattachHostPreviewSurfaceIfReady(r)
                 configureStageForRendering(r)
                 reattachViewerSurfaces(r)
+                loudspeakerController.forceActive("render-reattach:$reason")
                 callback.invoke()
             } catch (e: Exception) {
                 callback.invoke(errorMap("FORCE_REATTACH_FAILED", e.message ?: "Failed to force reattach"))
+            }
+        }
+    }
+
+    /**
+     * Explicit JS/native escape hatch used after connect, publish, participant join, and
+     * any JS audio-mode churn. The native watchdog continues enforcing the route after
+     * this callback returns.
+     */
+    @ReactMethod
+    fun forceLiveLoudspeaker(reason: String, callback: Callback) {
+        mainHandler.post {
+            try {
+                val profile = when (sessionMode) {
+                    SessionMode.HOST, SessionMode.GUEST ->
+                        LiveLoudspeakerController.Profile.PUBLISHING
+                    SessionMode.VIEWER, SessionMode.NONE ->
+                        LiveLoudspeakerController.Profile.PLAYBACK
+                }
+                loudspeakerController.force(profile, "js:$reason")
+                callback.invoke()
+            } catch (e: Exception) {
+                callback.invoke(
+                    errorMap(
+                        "FORCE_LOUDSPEAKER_FAILED",
+                        e.message ?: "Failed to force live loudspeaker",
+                    )
+                )
             }
         }
     }
@@ -669,6 +700,10 @@ class IVSBroadcastModule(
         configureStageAudio(publishing = true, role = "host")
 
         sessionMode = SessionMode.HOST
+        loudspeakerController.start(
+            LiveLoudspeakerController.Profile.PUBLISHING,
+            "host-before-device-discovery",
+        )
         renderOwner = RenderOwner.HOST_PREVIEW
         Log.d(IVS_TAG, "[IVS_RENDER][HOST] sessionMode=HOST set, renderOwner=HOST_PREVIEW (startSession)")
 
@@ -704,6 +739,7 @@ class IVSBroadcastModule(
             stageInstance.join()
             Log.i(IVS_HOST_NATIVE_TAG, "STAGE_JOIN_RETURNED")
             Log.d(IVS_TAG, "[NATIVE_DEBUG] stage.join() returned without exception")
+            loudspeakerController.forceActive("host-stage-join-returned")
             
             stage = stageInstance
             Log.d(IVS_TAG, "[NATIVE] Stage joined successfully with new token")
@@ -742,6 +778,10 @@ class IVSBroadcastModule(
         configureStageAudio(publishing = true, role = "guest")
 
         sessionMode = SessionMode.GUEST
+        loudspeakerController.start(
+            LiveLoudspeakerController.Profile.PUBLISHING,
+            "guest-before-device-discovery",
+        )
         // Keep HOST_PREVIEW render owner so local preview can still bind via IVSBroadcastView,
         // while remote rendering uses per-slot surfaces.
         renderOwner = RenderOwner.HOST_PREVIEW
@@ -762,6 +802,7 @@ class IVSBroadcastModule(
         try {
             stageInstance.addRenderer(stageRenderer)
             stageInstance.join()
+            loudspeakerController.forceActive("guest-stage-join-returned")
             stage = stageInstance
             Log.d(IVS_TAG, "[GUEST] Guest stage joined successfully")
 
@@ -788,6 +829,7 @@ class IVSBroadcastModule(
     }
 
     private fun stopSession() {
+        loudspeakerController.stop("stage-session-stop")
         pendingCameraSwitchOpen?.let { mainHandler.removeCallbacks(it) }
         pendingCameraSwitchSettle?.let { mainHandler.removeCallbacks(it) }
         pendingCameraSwitchOpen = null
@@ -835,8 +877,9 @@ class IVSBroadcastModule(
      * but mark subscribed stage audio as MEDIA so the built-in loudspeaker/media path is
      * the default. Read-only viewers use the SDK's SUBSCRIBE_ONLY media preset.
      *
-     * Do not manipulate Android AudioManager directly while IVS is active; AWS documents
-     * StageAudioManager as the single owner of stage audio routing.
+     * StageAudioManager's attributes do not select a physical output device. Disable its
+     * AudioManager-mode ownership while active, then let LiveLoudspeakerController own
+     * MODE_IN_COMMUNICATION + the built-in speaker for publishers (MODE_NORMAL for viewers).
      */
     private fun configureStageAudio(publishing: Boolean, role: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -849,7 +892,10 @@ class IVSBroadcastModule(
 
         try {
             val audioManager = StageAudioManager.getInstance(reactApplicationContext)
-            audioManager.setAudioModeManagementEnabled(true)
+            val isIdle = role == "idle"
+            // If left enabled, IVS can re-apply MODE_IN_COMMUNICATION after join/publish
+            // and silently select the receiver again. Active sessions own mode explicitly.
+            audioManager.setAudioModeManagementEnabled(isIdle)
 
             if (publishing) {
                 audioManager.setConfiguration(
@@ -893,6 +939,10 @@ class IVSBroadcastModule(
         configureStageAudio(publishing = false, role = "viewer")
 
         sessionMode = SessionMode.VIEWER
+        loudspeakerController.start(
+            LiveLoudspeakerController.Profile.PLAYBACK,
+            "viewer-before-stage-create",
+        )
         renderOwner = RenderOwner.VIEWER_REMOTE
         firstFrameSignalKeys.clear()
 
@@ -914,6 +964,7 @@ class IVSBroadcastModule(
             
             // Join the stage as a read-only participant
             stageInstance.join()
+            loudspeakerController.forceActive("viewer-stage-join-returned")
             
             stage = stageInstance
             Log.d(IVS_TAG, "[VIEWER] Viewer stage joined successfully with new token")
@@ -1764,6 +1815,9 @@ class IVSBroadcastModule(
     private val stageRenderer: StageRenderer = object : StageRenderer {
         override fun onConnectionStateChanged(stage: Stage, state: Stage.ConnectionState, exception: BroadcastException?) {
             Log.d("IVS_STAGE", "[IVS_STAGE] Connection state: $state")
+            if (state == Stage.ConnectionState.CONNECTING || state == Stage.ConnectionState.CONNECTED) {
+                loudspeakerController.forceActive("stage-state-${state.name.lowercase()}")
+            }
             emit("IVS_BROADCAST_STATE_CHANGED", Arguments.createMap().apply {
                 putString("state", state.name)
             })
@@ -1779,6 +1833,9 @@ class IVSBroadcastModule(
 
         override fun onParticipantJoined(stage: Stage, participant: ParticipantInfo) {
             Log.d(IVS_TAG, "[IVS_STAGE] Participant joined: id=${participant.participantId}, local=${participant.isLocal}")
+            loudspeakerController.forceActive(
+                if (participant.isLocal) "local-participant-joined" else "remote-participant-joined"
+            )
             if (participant.isLocal) {
                 emitLocalJoined(participant)
             } else {
@@ -1809,6 +1866,7 @@ class IVSBroadcastModule(
 
         override fun onParticipantPublishStateChanged(stage: Stage, participant: ParticipantInfo, publishState: Stage.PublishState) {
             Log.d(IVS_TAG, "[IVS_STAGE] Publish state changed: id=${participant.participantId}, state=$publishState")
+            loudspeakerController.forceActive("publish-state-${publishState.name.lowercase()}")
             if (participant.isLocal && publishState == Stage.PublishState.PUBLISHED) {
                 if (sessionMode == SessionMode.GUEST) {
                     Log.i(
@@ -1822,6 +1880,7 @@ class IVSBroadcastModule(
 
         override fun onParticipantSubscribeStateChanged(stage: Stage, participant: ParticipantInfo, subscribeState: Stage.SubscribeState) {
             Log.d(IVS_TAG, "[IVS_STAGE] Subscribe state changed: id=${participant.participantId}, state=$subscribeState")
+            loudspeakerController.forceActive("subscribe-state-${subscribeState.name.lowercase()}")
         }
 
         override fun onStreamsAdded(stage: Stage, participant: ParticipantInfo, streams: List<StageStream>) {
@@ -1837,6 +1896,9 @@ class IVSBroadcastModule(
                 "IVS_REMOTE_STREAMS",
                 "LOG: IVS_REMOTE_STREAMS added count=${streams.size} participants=$participantId streamTypes=$streamTypes"
             )
+            if (streams.any { it.streamType == Type.AUDIO }) {
+                loudspeakerController.forceActive("remote-audio-stream-added")
+            }
             Log.d(IVS_TAG, "[IVS_STAGE] Streams added for ${participant.participantId}: count=${streams.size}, isLocal=${participant.isLocal}")
             attachStreamListeners(participant, streams)
             

@@ -732,6 +732,7 @@ const IVSLiveStreamViewer = ({
       });
 
       await Promise.race([startPromise, timeoutPromise]);
+      await nativeClient.forceLiveLoudspeaker('guest-join-flow-complete');
 
       guestModeRef.current = true;
       setGuestMode(true);

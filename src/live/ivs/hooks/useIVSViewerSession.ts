@@ -167,6 +167,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
               sessionId: streamId,
               playbackUrl: mass.playbackUrl,
             });
+            await client.forceLiveLoudspeaker('viewer-hook-player-joined');
             setViewerTransport('playback');
             usedPlayback = true;
             markJoined();
@@ -210,6 +211,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       };
 
       await client.joinAsViewer(viewerParams);
+      await client.forceLiveLoudspeaker('viewer-hook-stage-joined');
       markJoined();
       console.log('[IVS_VIEWER][JOIN_COMPLETED]', { streamId });
       console.log('[IVS_VIEWER][STAGE_JOIN_SUCCESS]', {
@@ -278,6 +280,9 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     // Remote participant joined (host or guest)
     const unsubParticipantJoined = client.on('remoteParticipantJoined', (event) => {
       console.log('[IVS_VIEWER][REMOTE_PARTICIPANT_JOINED]', event.payload);
+      void client.forceLiveLoudspeaker('viewer-hook-remote-joined').catch((routeError) => {
+        console.warn('[IVS_VIEWER][LOUDSPEAKER_REASSERT_FAILED]', routeError);
+      });
       setRemoteParticipants((prev) => {
         const payload = event.payload as any;
         participantMetaRef.current.set(payload.participantId, {

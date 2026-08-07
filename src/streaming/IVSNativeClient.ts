@@ -33,6 +33,8 @@ type EventSubscription = {
   remove: () => void;
 };
 
+type NativeAudioPath = 'stage-publishing' | 'stage-viewing' | 'player-viewing';
+
 /**
  * IVS Native Client – Production implementation for Android and iOS.
  * Both platforms bridge to the native Amazon IVS Stages + Player SDKs.
@@ -50,6 +52,7 @@ export class IVSNativeClient implements LiveStreamingClient {
   private networkQuality: NetworkQuality = NetworkQuality.UNKNOWN;
   private isHostOrGuestActive = false;
   private isViewerActive = false;
+  private activeAudioPath: NativeAudioPath | null = null;
   private currentSessionId: string | null = null;
   private ivsEnv = getIVSEnv();
 
@@ -100,6 +103,16 @@ export class IVSNativeClient implements LiveStreamingClient {
     }
   }
 
+  private reassertLiveLoudspeaker(reason: string) {
+    void this.forceLiveLoudspeaker(reason).catch((error) => {
+      console.warn('[IVS_AUDIO_ROUTE][JS_REASSERT_FAILED]', {
+        reason,
+        path: this.activeAudioPath,
+        message: error?.message || String(error),
+      });
+    });
+  }
+
   private initializeEventEmitters() {
     // Broadcast emitter for host/guest sessions (Android verified in constructor)
     this.broadcastEventEmitter = new NativeEventEmitter(IVSBroadcastModule);
@@ -131,6 +144,9 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Broadcast session connection state
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_BROADCAST_STATE_CHANGED', (data: any) => {
+        if (data?.state === 'CONNECTING' || data?.state === 'CONNECTED') {
+          this.reassertLiveLoudspeaker(`broadcast-state-${String(data.state).toLowerCase()}`);
+        }
         this.emit('broadcastStateChanged', {
           state: data.state,
         });
@@ -162,6 +178,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_HOST_LOCAL_JOINED', (data: any) => {
         console.log('[IVS_CLIENT] Local broadcast joined:', data);
+        this.reassertLiveLoudspeaker('local-participant-joined');
         const participantId = data.participantId || data.sessionId || 'local';
         const role = data.role || 'host';
         const slotIndex = data.slotIndex;
@@ -205,6 +222,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_PARTICIPANT_JOINED', (data: any) => {
         console.log('[IVS_CLIENT] Remote participant joined:', data);
+        this.reassertLiveLoudspeaker('remote-participant-joined');
         const participantId = data.participantId;
         const slotIndex = data.slotIndex;
 
@@ -324,6 +342,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Remote video track added/removed events to help viewer diagnostics
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_VIDEO_ADDED', (data: any) => {
+        this.reassertLiveLoudspeaker('remote-media-added');
         const participantId = data.participantId || 'unknown';
         const current = this.remoteVideoTrackCounts.get(participantId) || 0;
         const next = current + 1;
@@ -399,6 +418,20 @@ export class IVSNativeClient implements LiveStreamingClient {
   private setupPlayerEventListeners() {
     if (!this.playerEventEmitter) return;
 
+    this.playerSubscriptions.push(
+      this.playerEventEmitter.addListener('IVS_PLAYER_STATE_CHANGED', (data: any) => {
+        if (data?.state === 'READY' || data?.state === 'PLAYING') {
+          this.reassertLiveLoudspeaker(`player-state-${String(data.state).toLowerCase()}`);
+        }
+      })
+    );
+
+    this.playerSubscriptions.push(
+      this.playerEventEmitter.addListener('IVS_PLAYER_FIRST_FRAME', () => {
+        this.reassertLiveLoudspeaker('player-first-frame');
+      })
+    );
+
     // Player error
     this.playerSubscriptions.push(
       this.playerEventEmitter.addListener('IVS_PLAYER_ERROR', (data: any) => {
@@ -443,6 +476,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     });
 
     this.currentSessionId = params.sessionId;
+    this.activeAudioPath = 'stage-publishing';
 
     return new Promise((resolve, reject) => {
       IVSBroadcastModule.startHostSession(
@@ -451,6 +485,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.sessionId,
         (error: any) => {
           if (error) {
+            this.activeAudioPath = null;
             console.error('[IVS_CLIENT][HOST_START_FAILED]', {
               error: error.message || error,
               code: error.code || 'unknown',
@@ -462,6 +497,7 @@ export class IVSNativeClient implements LiveStreamingClient {
               sessionId: params.sessionId,
             });
             this.isHostOrGuestActive = true;
+            this.reassertLiveLoudspeaker('host-start-callback');
             resolve();
           }
         }
@@ -476,6 +512,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
     console.log('[IVS_CLIENT] Stopping host session');
     this.isHostOrGuestActive = false;
+    this.activeAudioPath = null;
     this.participants.clear();
     this.remoteVideoTrackCounts.clear();
     this.localMediaState = { videoEnabled: false, audioEnabled: false };
@@ -524,6 +561,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     });
 
     this.currentSessionId = params.sessionId;
+    this.activeAudioPath = 'stage-publishing';
 
     return new Promise((resolve, reject) => {
       IVSBroadcastModule.startGuestSession(
@@ -533,11 +571,13 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.slotIndex,
         (error: any) => {
           if (error) {
+            this.activeAudioPath = null;
             console.error('[IVS_CLIENT] Guest start failed:', error);
             reject(new Error(error.message || 'Failed to start guest session'));
           } else {
             console.log('[IVS_CLIENT][GUEST_SESSION_STARTED]', { sessionId: params.sessionId });
             this.isHostOrGuestActive = true;
+            this.reassertLiveLoudspeaker('guest-start-callback');
             resolve();
           }
         }
@@ -555,6 +595,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
     console.log('[IVS_CLIENT] Stopping guest session');
     this.isHostOrGuestActive = false;
+    this.activeAudioPath = null;
     this.participants.clear();
     this.remoteVideoTrackCounts.clear();
     this.localMediaState = { videoEnabled: false, audioEnabled: false };
@@ -584,6 +625,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       region: this.ivsEnv.region,
     });
     this.currentSessionId = params.sessionId;
+    this.activeAudioPath = 'stage-viewing';
 
     // For IVS Real-Time viewers, use the broadcast module's read-only stage join
     // instead of trying to load an HLS playback URL
@@ -594,11 +636,13 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.sessionId,
         (error: any) => {
           if (error) {
+            this.activeAudioPath = null;
             console.error('[IVS_CLIENT] Viewer join failed:', error);
             reject(new Error(error.message || 'Failed to join as viewer'));
           } else {
             console.log('[IVS_CLIENT] Viewer session joined as read-only participant');
             this.isViewerActive = true;
+            this.reassertLiveLoudspeaker('stage-viewer-join-callback');
             resolve();
           }
         }
@@ -624,6 +668,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       playbackUrlLength: params.playbackUrl.length,
     });
     this.currentSessionId = params.sessionId;
+    this.activeAudioPath = 'player-viewing';
 
     return new Promise((resolve, reject) => {
       IVSPlayerModule.joinAsViewer(
@@ -631,11 +676,13 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.sessionId,
         (error: any) => {
           if (error) {
+            this.activeAudioPath = null;
             console.error('[IVS_CLIENT] Viewer playback join failed:', error);
             reject(new Error(error.message || 'Failed to join as viewer'));
           } else {
             console.log('[IVS_CLIENT] Viewer playback session joined');
             this.isViewerActive = true;
+            this.reassertLiveLoudspeaker('player-viewer-join-callback');
             resolve();
           }
         }
@@ -657,17 +704,35 @@ export class IVSNativeClient implements LiveStreamingClient {
     });
   }
 
-  async leaveAsViewer(): Promise<void> {
-    if (!IVSBroadcastModule) {
-      throw new Error('IVSBroadcastModule not available');
+  async forceLiveLoudspeaker(reason: string): Promise<void> {
+    const path = this.activeAudioPath;
+    if (!path) return;
+
+    const nativeModule = path === 'player-viewing' ? IVSPlayerModule : IVSBroadcastModule;
+    if (!nativeModule || typeof nativeModule.forceLiveLoudspeaker !== 'function') {
+      throw new Error(`Native loudspeaker control unavailable for ${path}`);
     }
 
+    return new Promise((resolve, reject) => {
+      nativeModule.forceLiveLoudspeaker(reason, (error: any) => {
+        if (error) {
+          reject(new Error(error.message || `Failed to force loudspeaker for ${path}`));
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async leaveAsViewer(): Promise<void> {
     console.log('[IVS_CLIENT] Leaving viewer session');
+    const audioPath = this.activeAudioPath;
     this.isViewerActive = false;
+    this.activeAudioPath = null;
     this.remoteVideoTrackCounts.clear();
 
     return new Promise((resolve, reject) => {
-      IVSBroadcastModule.leaveAsViewerReadOnly((error: any) => {
+      const callback = (error: any) => {
         if (error) {
           console.error('[IVS_CLIENT] Viewer leave failed:', error);
           reject(new Error(error.message || 'Failed to leave viewer session'));
@@ -675,7 +740,21 @@ export class IVSNativeClient implements LiveStreamingClient {
           console.log('[IVS_CLIENT] Viewer session left');
           resolve();
         }
-      });
+      };
+
+      if (audioPath === 'player-viewing') {
+        if (!IVSPlayerModule || typeof IVSPlayerModule.leaveAsViewer !== 'function') {
+          reject(new Error('IVSPlayerModule not available'));
+          return;
+        }
+        IVSPlayerModule.leaveAsViewer(callback);
+      } else {
+        if (!IVSBroadcastModule || typeof IVSBroadcastModule.leaveAsViewerReadOnly !== 'function') {
+          reject(new Error('IVSBroadcastModule not available'));
+          return;
+        }
+        IVSBroadcastModule.leaveAsViewerReadOnly(callback);
+      }
     });
   }
 
@@ -689,6 +768,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         if (error) {
           reject(new Error(error.message || 'Failed to set mic'));
         } else {
+          this.reassertLiveLoudspeaker('mic-toggle-callback');
           resolve();
         }
       });
@@ -705,6 +785,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         if (error) {
           reject(new Error(error.message || 'Failed to set camera'));
         } else {
+          this.reassertLiveLoudspeaker('camera-toggle-callback');
           resolve();
         }
       });
@@ -721,6 +802,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         if (error) {
           reject(new Error(error.message || 'Failed to switch camera'));
         } else {
+          this.reassertLiveLoudspeaker('camera-switch-callback');
           resolve();
         }
       });

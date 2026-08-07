@@ -232,6 +232,12 @@ export interface LiveStreamingClient {
   switchCamera(): Promise<void>;
 
   /**
+   * Re-assert the native loudspeaker route for the active host, guest, or viewer path.
+   * Native code also runs a session-scoped watchdog; this method closes lifecycle races.
+   */
+  forceLiveLoudspeaker(reason: string): Promise<void>;
+
+  /**
    * Subscribe to a streaming event.
    * Returns an unsubscribe function.
    */

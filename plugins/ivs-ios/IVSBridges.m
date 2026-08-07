@@ -31,6 +31,9 @@ RCT_EXTERN_METHOD(leaveAsViewerReadOnly:(RCTResponseSenderBlock)callback)
 RCT_EXTERN_METHOD(forceReattach:(NSString *)reason
                   callback:(RCTResponseSenderBlock)callback)
 
+RCT_EXTERN_METHOD(forceLiveLoudspeaker:(NSString *)reason
+                  callback:(RCTResponseSenderBlock)callback)
+
 RCT_EXTERN_METHOD(setMicEnabled:(BOOL)enabled
                   callback:(RCTResponseSenderBlock)callback)
 
@@ -53,6 +56,8 @@ RCT_EXTERN_METHOD(leaveAsViewer:(RCTResponseSenderBlock)callback)
 RCT_EXTERN_METHOD(play:(RCTResponseSenderBlock)callback)
 RCT_EXTERN_METHOD(pause:(RCTResponseSenderBlock)callback)
 RCT_EXTERN_METHOD(stop:(RCTResponseSenderBlock)callback)
+RCT_EXTERN_METHOD(forceLiveLoudspeaker:(NSString *)reason
+                  callback:(RCTResponseSenderBlock)callback)
 
 @end
 

@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import CoreMedia
+import AVFoundation
 import AmazonIVSPlayer
 
 /// iOS counterpart of the Android `IVSPlayerModule` (Kotlin).
@@ -18,6 +19,27 @@ final class IVSPlayerModule: RCTEventEmitter {
 
     private var currentSessionId: String?
     private var hasListeners = false
+    private var routeChangeObserver: NSObjectProtocol?
+    private var loudspeakerGuardActive = false
+    private var loudspeakerGuardGeneration = 0
+
+    override init() {
+        super.init()
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.loudspeakerGuardActive else { return }
+            self.forcePlayerLoudspeaker(reason: "route-change")
+        }
+    }
+
+    deinit {
+        if let routeChangeObserver = routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
+    }
 
     private func runOnMain(_ block: @escaping () -> Void) {
         if Thread.isMainThread { block() } else { DispatchQueue.main.async(execute: block) }
@@ -71,6 +93,55 @@ final class IVSPlayerModule: RCTEventEmitter {
         return player
     }
 
+    private func forcePlayerLoudspeaker(reason: String) {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            if session.category != .playback || session.mode != .moviePlayback {
+                try session.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            }
+            try session.setActive(true)
+            let outputs = session.currentRoute.outputs
+                .map { "\($0.portType.rawValue):\($0.portName)" }
+                .joined(separator: ",")
+            NSLog(
+                "[IVS_PLAYER_AUDIO] forced reason=%@ category=%@ mode=%@ outputs=%@",
+                reason,
+                session.category.rawValue,
+                session.mode.rawValue,
+                outputs
+            )
+        } catch {
+            NSLog(
+                "[IVS_PLAYER_AUDIO] force failed reason=%@ error=%@",
+                reason,
+                error.localizedDescription
+            )
+        }
+    }
+
+    private func startLoudspeakerGuard(reason: String) {
+        loudspeakerGuardActive = true
+        loudspeakerGuardGeneration += 1
+        let generation = loudspeakerGuardGeneration
+        forcePlayerLoudspeaker(reason: reason)
+        scheduleLoudspeakerGuard(generation: generation)
+    }
+
+    private func scheduleLoudspeakerGuard(generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self,
+                  self.loudspeakerGuardActive,
+                  self.loudspeakerGuardGeneration == generation else { return }
+            self.forcePlayerLoudspeaker(reason: "watchdog")
+            self.scheduleLoudspeakerGuard(generation: generation)
+        }
+    }
+
+    private func stopLoudspeakerGuard() {
+        loudspeakerGuardActive = false
+        loudspeakerGuardGeneration += 1
+    }
+
     // MARK: - Bridge API (matches IVSNativeClient.ts)
 
     @objc(joinAsViewer:sessionId:callback:)
@@ -82,9 +153,11 @@ final class IVSPlayerModule: RCTEventEmitter {
                 return
             }
             self.currentSessionId = sessionId
+            self.startLoudspeakerGuard(reason: "player-before-load")
             let player = self.ensurePlayer()
             player.load(url)
             player.play()
+            self.forcePlayerLoudspeaker(reason: "player-after-play")
             self.emit("IVS_VIEWER_JOINED", ["sessionId": sessionId, "playbackUrl": playbackUrl])
             self.emit("IVS_PLAYER_STATE_CHANGED", ["state": self.stateName(player.state), "sessionId": sessionId])
             callback([])
@@ -96,6 +169,7 @@ final class IVSPlayerModule: RCTEventEmitter {
         runOnMain { [weak self] in
             guard let self = self else { return }
             IVSPlayerModule.sharedPlayer?.pause()
+            self.stopLoudspeakerGuard()
             self.emit("IVS_VIEWER_LEFT", ["sessionId": self.currentSessionId as Any, "reason": "leave"])
             callback([])
         }
@@ -105,8 +179,10 @@ final class IVSPlayerModule: RCTEventEmitter {
     func play(_ callback: @escaping RCTResponseSenderBlock) {
         runOnMain { [weak self] in
             guard let self = self else { return }
+            self.startLoudspeakerGuard(reason: "player-play")
             let player = self.ensurePlayer()
             player.play()
+            self.forcePlayerLoudspeaker(reason: "player-play-returned")
             self.emit("IVS_PLAYER_STATE_CHANGED", ["state": self.stateName(player.state)])
             callback([])
         }
@@ -129,9 +205,19 @@ final class IVSPlayerModule: RCTEventEmitter {
         runOnMain { [weak self] in
             guard let self = self else { return }
             IVSPlayerModule.sharedPlayer?.pause()
+            self.stopLoudspeakerGuard()
             IVSPlayerModule.sharedPlayer = nil
             NotificationCenter.default.post(name: IVSPlayerModule.playerDidChangeNotification, object: nil)
             self.emit("IVS_VIEWER_LEFT", ["sessionId": self.currentSessionId as Any, "reason": "stop"])
+            callback([])
+        }
+    }
+
+    @objc(forceLiveLoudspeaker:callback:)
+    func forceLiveLoudspeaker(_ reason: String, callback: @escaping RCTResponseSenderBlock) {
+        runOnMain { [weak self] in
+            guard let self = self else { return }
+            self.forcePlayerLoudspeaker(reason: "js:\(reason)")
             callback([])
         }
     }
@@ -142,6 +228,9 @@ final class IVSPlayerModule: RCTEventEmitter {
 extension IVSPlayerModule: IVSPlayer.Delegate {
 
     func player(_ player: IVSPlayer, didChangeState state: IVSPlayer.State) {
+        if state == .ready || state == .playing {
+            forcePlayerLoudspeaker(reason: "player-state-\(stateName(state).lowercased())")
+        }
         emit("IVS_PLAYER_STATE_CHANGED", ["state": stateName(state), "sessionId": currentSessionId as Any])
     }
 

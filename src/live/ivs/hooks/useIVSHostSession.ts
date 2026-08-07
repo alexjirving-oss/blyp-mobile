@@ -203,6 +203,7 @@ export function useIVSHostSession(args: UseIVSHostSessionArgs): UseIVSHostSessio
 
       console.log('[TRACE][HOST] calling native startHostSession');
       await client.startHostSession(hostParams);
+      await client.forceLiveLoudspeaker('host-hook-after-start');
       console.log('[TRACE][HOST] native startHostSession INVOKED');
 
       // Best-effort: ensure local media is actually enabled.
@@ -330,6 +331,9 @@ export function useIVSHostSession(args: UseIVSHostSessionArgs): UseIVSHostSessio
     // Local participant joined – this is the TRUE "connected" signal from native
     const unsubLocalJoined = client.on('localJoined', (event) => {
       console.log('[IVS_HOST][LOCAL_JOINED]', event.payload);
+      void client.forceLiveLoudspeaker('host-hook-local-joined').catch((routeError) => {
+        console.warn('[IVS_HOST][LOUDSPEAKER_REASSERT_FAILED]', routeError);
+      });
       // Transition to "connected" only when we receive native confirmation that the local
       // participant successfully joined the stage.
       setConnectionState('connected');
@@ -361,6 +365,9 @@ export function useIVSHostSession(args: UseIVSHostSessionArgs): UseIVSHostSessio
     // Remote participant joined
     const unsubRemoteJoined = client.on('remoteParticipantJoined', (event) => {
       console.log('[IVS_HOST][REMOTE_JOINED]', event.payload);
+      void client.forceLiveLoudspeaker('host-hook-remote-joined').catch((routeError) => {
+        console.warn('[IVS_HOST][LOUDSPEAKER_REASSERT_FAILED]', routeError);
+      });
       // Update participants list
       setParticipants(client.getParticipants());
     });

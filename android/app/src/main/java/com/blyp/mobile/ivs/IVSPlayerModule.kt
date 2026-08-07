@@ -21,6 +21,8 @@ class IVSPlayerModule(
 ) : ReactContextBaseJavaModule(reactContext), LifecycleEventListener {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val loudspeakerController =
+        LiveLoudspeakerController(reactContext, "IVS_PLAYER_AUDIO")
     private var player: Player? = null
     private var currentSessionId: String? = null
 
@@ -41,7 +43,7 @@ class IVSPlayerModule(
     }
 
     override fun onHostResume() {
-        // No-op for now; we let the UI decide whether to resume playback.
+        loudspeakerController.forceActive("player-host-resume")
     }
 
     override fun onHostPause() {
@@ -52,6 +54,7 @@ class IVSPlayerModule(
     override fun onHostDestroy() {
         // Fully tear down the player when the app host is destroyed.
         mainHandler.post {
+            loudspeakerController.stop("player-host-destroy")
             player?.pause()
             player?.release()
             player = null
@@ -74,11 +77,16 @@ class IVSPlayerModule(
                     return@post
                 }
 
+                loudspeakerController.start(
+                    LiveLoudspeakerController.Profile.PLAYBACK,
+                    "player-before-load",
+                )
                 ensurePlayer()
                 currentSessionId = sessionId
                 val uri = Uri.parse(playbackUrl)
                 player?.load(uri)
                 player?.play()
+                loudspeakerController.forceActive("player-after-play")
                 emit("IVS_VIEWER_JOINED", Arguments.createMap().apply {
                     putString("sessionId", sessionId)
                     putString("playbackUrl", playbackUrl)
@@ -98,6 +106,7 @@ class IVSPlayerModule(
         mainHandler.post {
             try {
                 player?.pause()
+                loudspeakerController.stop("player-viewer-leave")
                 emit("IVS_VIEWER_LEFT", Arguments.createMap().apply {
                     putString("sessionId", currentSessionId)
                     putString("reason", "leave")
@@ -113,8 +122,13 @@ class IVSPlayerModule(
     fun play(callback: Callback) {
         mainHandler.post {
             try {
+                loudspeakerController.start(
+                    LiveLoudspeakerController.Profile.PLAYBACK,
+                    "player-play",
+                )
                 ensurePlayer()
                 player?.play()
+                loudspeakerController.forceActive("player-play-returned")
                 emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
                     putString("state", player?.state?.name ?: "UNKNOWN")
                 })
@@ -129,6 +143,7 @@ class IVSPlayerModule(
     fun pause(callback: Callback) {
         mainHandler.post {
             try {
+                loudspeakerController.stop("player-stop")
                 player?.pause()
                 emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
                     putString("state", player?.state?.name ?: "UNKNOWN")
@@ -136,6 +151,26 @@ class IVSPlayerModule(
                 callback.invoke()
             } catch (e: Exception) {
                 callback.invoke(errorMap("PAUSE_FAILED", e.message ?: "Failed to pause"))
+            }
+        }
+    }
+
+    @ReactMethod
+    fun forceLiveLoudspeaker(reason: String, callback: Callback) {
+        mainHandler.post {
+            try {
+                loudspeakerController.force(
+                    LiveLoudspeakerController.Profile.PLAYBACK,
+                    "js:$reason",
+                )
+                callback.invoke()
+            } catch (e: Exception) {
+                callback.invoke(
+                    errorMap(
+                        "FORCE_LOUDSPEAKER_FAILED",
+                        e.message ?: "Failed to force viewer loudspeaker",
+                    )
+                )
             }
         }
     }
@@ -170,6 +205,9 @@ class IVSPlayerModule(
 
     private val playerListener: Player.Listener = object : Player.Listener() {
         override fun onStateChanged(state: Player.State) {
+            if (state == Player.State.READY || state == Player.State.PLAYING) {
+                loudspeakerController.forceActive("player-state-${state.name.lowercase()}")
+            }
             emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
                 putString("state", state.name)
                 putString("sessionId", currentSessionId)
@@ -221,6 +259,7 @@ class IVSPlayerModule(
         }
 
         override fun onVideoFirstFrame(position: Long) {
+            loudspeakerController.forceActive("player-first-frame")
             emit("IVS_PLAYER_FIRST_FRAME", Arguments.createMap())
         }
     }
