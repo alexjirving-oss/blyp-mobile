@@ -1,5 +1,6 @@
 package com.blyp.mobile.ivs
 
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -22,6 +23,7 @@ import com.amazonaws.ivs.broadcast.QualityStats
 import com.amazonaws.ivs.broadcast.RemoteStageStream
 import com.amazonaws.ivs.broadcast.Stage
 import com.amazonaws.ivs.broadcast.StageAudioConfiguration
+import com.amazonaws.ivs.broadcast.StageAudioManager
 import com.amazonaws.ivs.broadcast.StageRenderer
 import com.amazonaws.ivs.broadcast.StageStream
 import com.amazonaws.ivs.broadcast.StageStream.Type
@@ -664,6 +666,7 @@ class IVSBroadcastModule(
         // CRITICAL FIX: Always destroy any previous session first
         // This prevents "token exchange" errors from trying to reuse/update existing session
         stopSession()
+        configureStageAudio(publishing = true, role = "host")
 
         sessionMode = SessionMode.HOST
         renderOwner = RenderOwner.HOST_PREVIEW
@@ -736,6 +739,7 @@ class IVSBroadcastModule(
         Log.d(IVS_TAG, "[GUEST] startGuestPublishingSession() stageArn=$stageArn sessionId=$sessionId")
 
         stopSession()
+        configureStageAudio(publishing = true, role = "guest")
 
         sessionMode = SessionMode.GUEST
         // Keep HOST_PREVIEW render owner so local preview can still bind via IVSBroadcastView,
@@ -819,6 +823,59 @@ class IVSBroadcastModule(
         deviceDiscovery?.release()
         deviceDiscovery = null
         guestSlotIndex = null
+        configureStageAudio(publishing = false, role = "idle")
+    }
+
+    /**
+     * StageAudioManager must be configured before creating DeviceDiscovery or Stage.
+     *
+     * The SDK default VIDEO_CHAT preset uses VOICE_COMMUNICATION for both capture and
+     * playback, which selects the call-volume path and can route remote guests through
+     * the receiver/earpiece. Keep the voice-processed microphone and echo cancellation,
+     * but mark subscribed stage audio as MEDIA so the built-in loudspeaker/media path is
+     * the default. Read-only viewers use the SDK's SUBSCRIBE_ONLY media preset.
+     *
+     * Do not manipulate Android AudioManager directly while IVS is active; AWS documents
+     * StageAudioManager as the single owner of stage audio routing.
+     */
+    private fun configureStageAudio(publishing: Boolean, role: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            Log.w(
+                IVS_TAG,
+                "[IVS_AUDIO_ROUTE] StageAudioManager requires API 28; keeping SDK routing role=$role"
+            )
+            return
+        }
+
+        try {
+            val audioManager = StageAudioManager.getInstance(reactApplicationContext)
+            audioManager.setAudioModeManagementEnabled(true)
+
+            if (publishing) {
+                audioManager.setConfiguration(
+                    StageAudioManager.Source.VOICE_COMMUNICATION,
+                    StageAudioManager.ContentType.SPEECH,
+                    StageAudioManager.Usage.MEDIA,
+                )
+                // setConfiguration may follow a previous SUBSCRIBE_ONLY session, which
+                // disables AEC. Explicitly restore AEC so speaker output does not feed the
+                // host/guest microphone.
+                audioManager.enableEchoCancellation(true)
+            } else {
+                audioManager.setPreset(StageAudioManager.UseCasePreset.SUBSCRIBE_ONLY)
+            }
+
+            Log.i(
+                IVS_TAG,
+                "[IVS_AUDIO_ROUTE] role=$role publishing=$publishing usage=${audioManager.usage} source=${audioManager.source} contentType=${audioManager.contentType}"
+            )
+        } catch (e: Exception) {
+            Log.e(
+                IVS_TAG,
+                "[IVS_AUDIO_ROUTE] Failed to configure loudspeaker/media routing role=$role: ${e.message}",
+                e,
+            )
+        }
     }
 
     /**
@@ -833,6 +890,7 @@ class IVSBroadcastModule(
         
         // Always destroy any previous session first
         stopSession()
+        configureStageAudio(publishing = false, role = "viewer")
 
         sessionMode = SessionMode.VIEWER
         renderOwner = RenderOwner.VIEWER_REMOTE

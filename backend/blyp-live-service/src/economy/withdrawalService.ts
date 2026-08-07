@@ -40,6 +40,112 @@ function mapStripeConnectError(err: any): never {
   });
 }
 
+type StripeTransferFailureReason =
+  | 'PLATFORM_BALANCE_INSUFFICIENT'
+  | 'CONNECT_ACCOUNT_NOT_READY'
+  | 'PAYOUT_BANK_REQUIRED'
+  | 'PAYOUT_CURRENCY_UNSUPPORTED'
+  | 'STRIPE_TRANSFER_FAILED';
+
+type StripeTransferFailureDetail = {
+  reason: StripeTransferFailureReason;
+  userMessage: string;
+  action: string;
+  retryable: boolean;
+  providerMessage: string;
+  stripeType: string | null;
+  stripeCode: string | null;
+};
+
+function describeStripeTransferFailure(
+  err: any,
+  gemsRestored = false,
+): StripeTransferFailureDetail {
+  const providerMessage = String(
+    err?.raw?.message || err?.message || 'Stripe could not create the payout transfer',
+  ).slice(0, 500);
+  const normalized = providerMessage.toLowerCase();
+  const restoredCopy = gemsRestored ? ' Your gems were restored.' : '';
+  const common = {
+    providerMessage,
+    stripeType: String(err?.type || err?.rawType || err?.raw?.type || '').trim() || null,
+    stripeCode: String(err?.code || err?.raw?.code || '').trim() || null,
+  };
+
+  if (/insufficient funds|insufficient.*balance|balance.*insufficient/.test(normalized)) {
+    return {
+      ...common,
+      reason: 'PLATFORM_BALANCE_INSUFFICIENT',
+      userMessage:
+        `Blyp's Stripe payout balance is temporarily too low.${restoredCopy} Please retry after the payout balance is funded.`,
+      action: 'Fund the Blyp Stripe GBP balance, then retry the withdrawal.',
+      retryable: true,
+    };
+  }
+
+  if (
+    /external account|bank account|payout method/.test(normalized) &&
+    /missing|required|invalid|disabled|not.*available|no /.test(normalized)
+  ) {
+    return {
+      ...common,
+      reason: 'PAYOUT_BANK_REQUIRED',
+      userMessage:
+        'Stripe needs a valid payout bank account. Open your Stripe payout details, add or fix the bank account, then retry.',
+      action: 'Add or repair the connected Stripe bank account.',
+      retryable: true,
+    };
+  }
+
+  if (
+    /currency/.test(normalized) &&
+    /not supported|unsupported|cannot|invalid|does not support/.test(normalized)
+  ) {
+    return {
+      ...common,
+      reason: 'PAYOUT_CURRENCY_UNSUPPORTED',
+      userMessage:
+        'Your Stripe payout account cannot receive this GBP payout. Add a GBP-capable bank account in Stripe, then retry.',
+      action: 'Configure a GBP-capable bank account for the connected Stripe account.',
+      retryable: true,
+    };
+  }
+
+  if (
+    /account|destination|transfer|payout/.test(normalized) &&
+    /disabled|not enabled|restricted|requirements|verification|cannot receive/.test(normalized)
+  ) {
+    return {
+      ...common,
+      reason: 'CONNECT_ACCOUNT_NOT_READY',
+      userMessage:
+        'Your Stripe payout account is not ready to receive funds. Open Stripe, finish any verification or payout requirements, then retry.',
+      action: 'Complete the connected account payout requirements in Stripe.',
+      retryable: true,
+    };
+  }
+
+  return {
+    ...common,
+    reason: 'STRIPE_TRANSFER_FAILED',
+    userMessage:
+      `Stripe could not process this payout.${restoredCopy} Check your Stripe payout details, then try again or contact Blyp support.`,
+    action: 'Check the connected Stripe account and retry, or contact Blyp support.',
+    retryable: true,
+  };
+}
+
+function stripeTransferProviderError(detail: StripeTransferFailureDetail): EconomyError {
+  return new EconomyError('PROVIDER_ERROR', 502, detail.userMessage, {
+    reason: detail.reason,
+    userMessage: detail.userMessage,
+    action: detail.action,
+    retryable: detail.retryable,
+    stripeType: detail.stripeType,
+    stripeCode: detail.stripeCode,
+  });
+}
+
 /** Stripe Account Links reject custom schemes (e.g. blyp://) with url_invalid. */
 const DEFAULT_CONNECT_RETURN_URL = 'https://blyp.world/withdraw/connect-return';
 const DEFAULT_CONNECT_REFRESH_URL = 'https://blyp.world/withdraw/connect-refresh';
@@ -630,18 +736,26 @@ export async function requestWithdrawal(
       },
     };
   } catch (e: any) {
-    logger.error({ err: e?.message || String(e), withdrawalId }, '[withdraw] stripe transfer failed');
+    const provider = describeStripeTransferFailure(e, true);
+    logger.error(
+      {
+        err: provider.providerMessage,
+        providerReason: provider.reason,
+        stripeType: provider.stripeType,
+        stripeCode: provider.stripeCode,
+        withdrawalId,
+      },
+      '[withdraw] stripe transfer failed',
+    );
     await reverseWithdrawalReserve({
       withdrawalId,
       userId,
       amountGems,
       idempotencyKey,
-      error: e?.message || String(e),
+      error: provider.providerMessage,
       nextStatus: 'failed',
     });
-    throw new EconomyError('PROVIDER_ERROR', 502, 'Payout provider failed', {
-      detail: e?.message || String(e),
-    });
+    throw stripeTransferProviderError(provider);
   }
 }
 
@@ -850,7 +964,17 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
       stripeTransferId: settled.stripeTransferId,
     };
   } catch (e: any) {
-    logger.error({ err: e?.message || String(e), withdrawalId: id }, '[withdraw] admin approve transfer failed');
+    const provider = describeStripeTransferFailure(e);
+    logger.error(
+      {
+        err: provider.providerMessage,
+        providerReason: provider.reason,
+        stripeType: provider.stripeType,
+        stripeCode: provider.stripeCode,
+        withdrawalId: id,
+      },
+      '[withdraw] admin approve transfer failed',
+    );
     // Return to pending_review so ops can retry after fixing Stripe; do NOT reverse gems yet.
     await db('withdrawal_requests')
       .where({ withdrawal_id: id })
@@ -859,15 +983,14 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
         updated_at: db.fn.now(),
         metadata: db.raw(`COALESCE(metadata, '{}'::jsonb) || ?::jsonb`, [
           JSON.stringify({
-            lastApproveError: e?.message || String(e),
+            lastApproveError: provider.providerMessage,
+            lastApproveErrorReason: provider.reason,
             lastApproveAttemptAt: new Date().toISOString(),
             lastApproveBy: actorUserId,
           }),
         ]),
       });
-    throw new EconomyError('PROVIDER_ERROR', 502, 'Payout provider failed', {
-      detail: e?.message || String(e),
-    });
+    throw stripeTransferProviderError(provider);
   }
 }
 

@@ -26,7 +26,11 @@ function marbleEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(String(process.env.LIVE_MARBLE_RACE_ENABLED || '').trim());
 }
 
-router.use((_req, res, next) => {
+// Scope to marble paths only — do not block sibling `/api` routers (frenemies).
+router.use((req, res, next) => {
+  if (!req.path.startsWith('/live-game/marble')) {
+    return next();
+  }
   if (!marbleEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }

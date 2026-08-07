@@ -332,7 +332,7 @@ export default function FrenemiesOverlay({
             style={styles.startGrad}
           >
             <Text style={styles.brandKicker} allowFontScaling={false}>
-              BLYP LIVE
+              BLYP
             </Text>
             <Text style={styles.title} allowFontScaling={false}>
               Frenemies

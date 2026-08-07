@@ -53,8 +53,11 @@ class MainApplication : Application(), ReactApplication {
     get() = ReactNativeHostWrapper.createReactHost(applicationContext, reactNativeHost)
 
   override fun onCreate() {
-    // LiveKit audio calls — must run before other RN initialization.
-    LiveKitReactNative.setup(this, AudioType.CommunicationAudioType())
+    // LiveKit ADM default = media/loudspeaker. CommunicationAudioType uses
+    // USAGE_VOICE_COMMUNICATION + MODE_IN_COMMUNICATION which routes app audio
+    // (including chat notify beeps via expo-av) to the earpiece. Switch to
+    // CommunicationAudioType only for the duration of an active LiveKit call.
+    LiveKitReactNative.setup(this, AudioType.MediaAudioType())
     super.onCreate()
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())

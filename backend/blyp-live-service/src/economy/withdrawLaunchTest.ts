@@ -1,8 +1,9 @@
 /**
  * Launch / Owner self-test unblocks for withdrawals.
  *
- * Softens account-age + new-payout-account holds ONLY. Fraud freezes,
- * chargebacks, KYC, min payout, fee, and velocity caps still apply.
+ * Softens account-age/new-payout holds and request velocity so a provider
+ * failure can be retried immediately. Fraud freezes/review, chargebacks, KYC,
+ * min payout, fee, open-request lock, and payout-value caps still apply.
  *
  * Eligible when userId is in:
  *   - WITHDRAW_TEST_SUBS (explicit env), or

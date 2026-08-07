@@ -24,7 +24,8 @@ export interface WithdrawalContext {
   selfFundedCoins: number;
   /**
    * Owner / ADMIN_ALLOWLIST / WITHDRAW_TEST_SUBS launch-test path.
-   * Softens ACCOUNT_TOO_NEW + NEW_PAYOUT_ACCOUNT only — fraud rails stay on.
+   * Softens account/new-payout holds and request velocity. Balance, KYC,
+   * open-request, freeze, chargeback, and fraud-review rails stay on.
    */
   launchTestBypass?: boolean;
 }
@@ -71,11 +72,15 @@ export function assessWithdrawal(ctx: WithdrawalContext): WithdrawalAssessment {
   if (P.REQUIRE_PAYOUT_ACCOUNT && !ctx.hasPayoutAccount) denies.push('NO_PAYOUT_ACCOUNT');
 
   if (ctx.openRequestCount >= P.MAX_OPEN_REQUESTS) denies.push('OPEN_REQUEST_EXISTS');
-  if (ctx.lastRequestAt != null && ctx.now - ctx.lastRequestAt < P.MIN_TIME_BETWEEN_REQUESTS_MS) {
-    denies.push('TOO_SOON_SINCE_LAST_REQUEST');
+  // Owner/allowlisted launch testing must be immediately retryable after a
+  // provider failure. Normal-user anti-abuse velocity remains unchanged.
+  if (!ctx.launchTestBypass) {
+    if (ctx.lastRequestAt != null && ctx.now - ctx.lastRequestAt < P.MIN_TIME_BETWEEN_REQUESTS_MS) {
+      denies.push('TOO_SOON_SINCE_LAST_REQUEST');
+    }
+    if (ctx.requestsLast24h >= P.MAX_REQUESTS_PER_DAY) denies.push('DAILY_REQUEST_LIMIT');
+    if (ctx.requestsLast7d >= P.MAX_REQUESTS_PER_WEEK) denies.push('WEEKLY_REQUEST_LIMIT');
   }
-  if (ctx.requestsLast24h >= P.MAX_REQUESTS_PER_DAY) denies.push('DAILY_REQUEST_LIMIT');
-  if (ctx.requestsLast7d >= P.MAX_REQUESTS_PER_WEEK) denies.push('WEEKLY_REQUEST_LIMIT');
 
   if (ctx.paidOutLast24hCoins + ctx.amountCoins > P.DAILY_PAYOUT_CAP_COINS) reviews.push('OVER_DAILY_CAP');
   if (ctx.paidOutLast7dCoins + ctx.amountCoins > P.WEEKLY_PAYOUT_CAP_COINS) reviews.push('OVER_WEEKLY_CAP');

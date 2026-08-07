@@ -23,7 +23,13 @@ function artilleryEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(String(process.env.LIVE_ARTILLERY_ENABLED || '').trim());
 }
 
+// Only gate artillery paths. This router is mounted at `/api` alongside marble
+// and frenemies; a blanket DISABLED here would 404 those sibling games when
+// LIVE_ARTILLERY_ENABLED=0 (authed clients never fall through).
 router.use((req, res, next) => {
+  if (!req.path.startsWith('/live-game/artillery')) {
+    return next();
+  }
   if (!artilleryEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }

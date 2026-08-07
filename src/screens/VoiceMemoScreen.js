@@ -63,6 +63,22 @@ const VoiceMemoScreen = () => {
     const uri = recording.getURI();
     setRecordingUri(uri);
     setRecording(null);
+    // Drop PlayAndRecord so later chat / UI sounds use the loudspeaker.
+    try {
+      // eslint-disable-next-line global-require
+      const { ensureMediaPlaybackAudioMode } = require('../services/notifySound');
+      await ensureMediaPlaybackAudioMode({ background: false });
+    } catch {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const playRecording = async () => {
@@ -70,6 +86,17 @@ const VoiceMemoScreen = () => {
 
     try {
       setIsPlaying(true);
+      try {
+        // eslint-disable-next-line global-require
+        const { ensureMediaPlaybackAudioMode } = require('../services/notifySound');
+        await ensureMediaPlaybackAudioMode({ background: false });
+      } catch {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          playThroughEarpieceAndroid: false,
+        });
+      }
       const { sound } = await Audio.Sound.createAsync({ uri: recordingUri });
       setSound(sound);
       

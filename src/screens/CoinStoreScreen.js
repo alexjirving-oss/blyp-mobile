@@ -8,6 +8,7 @@ import BlypCoinService from '../services/BlypCoinService';
 import GemService from '../services/GemService';
 import { COLORS } from '../styles/theme';
 import {
+  formatWithdrawalError,
   getEconomyWallet,
   getWithdrawConnectStatus,
   getWithdrawEligibility,
@@ -499,9 +500,7 @@ const CoinStoreScreen = ({
               : `Request ${status}.`,
         );
       } catch (e) {
-        const detail = e?.detail?.reasons || e?.reasons;
-        const reasons = Array.isArray(detail) ? detail.join(', ') : '';
-        setOverlayError(reasons || e?.message || 'Withdrawal failed');
+        setOverlayError(formatWithdrawalError(e));
       }
       return;
     }

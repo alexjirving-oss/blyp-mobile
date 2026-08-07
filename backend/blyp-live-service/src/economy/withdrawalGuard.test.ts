@@ -84,6 +84,33 @@ test('launch-test bypass still denies fraud freeze', () => {
   assert.ok(a.reasons.includes('ACCOUNT_FROZEN'));
 });
 
+test('normal users retain withdrawal request velocity limits', () => {
+  const a = assessWithdrawal({
+    ...base,
+    lastRequestAt: base.now - 1_000,
+    requestsLast24h: 1,
+    requestsLast7d: 3,
+  });
+  assert.equal(a.decision, 'deny');
+  assert.ok(a.reasons.includes('TOO_SOON_SINCE_LAST_REQUEST'));
+  assert.ok(a.reasons.includes('DAILY_REQUEST_LIMIT'));
+  assert.ok(a.reasons.includes('WEEKLY_REQUEST_LIMIT'));
+});
+
+test('launch-test bypass permits immediate retry after provider failure', () => {
+  const a = assessWithdrawal({
+    ...base,
+    lastRequestAt: base.now - 1_000,
+    requestsLast24h: 5,
+    requestsLast7d: 20,
+    launchTestBypass: true,
+  });
+  assert.equal(a.decision, 'allow');
+  assert.ok(!a.reasons.includes('TOO_SOON_SINCE_LAST_REQUEST'));
+  assert.ok(!a.reasons.includes('DAILY_REQUEST_LIMIT'));
+  assert.ok(!a.reasons.includes('WEEKLY_REQUEST_LIMIT'));
+});
+
 test('launch-test bypass still denies account too new when flag off', () => {
   const a = assessWithdrawal({
     ...base,

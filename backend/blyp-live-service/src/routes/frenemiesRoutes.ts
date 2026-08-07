@@ -31,7 +31,13 @@ function frenemiesEnabled(): boolean {
   return !/^(0|false|no|off)$/i.test(raw);
 }
 
-router.use((_req, res, next) => {
+// Scope to this router's paths only — do not block sibling `/api` routers.
+router.use((req, res, next) => {
+  const ours =
+    req.path.startsWith('/live-game/frenemies') || req.path.startsWith('/live/engagement');
+  if (!ours) {
+    return next();
+  }
   if (!frenemiesEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }

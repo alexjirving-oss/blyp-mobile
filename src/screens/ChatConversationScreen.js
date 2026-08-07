@@ -3,7 +3,6 @@ import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useFocusEffect } from '@react-navigation/native';
@@ -111,17 +110,13 @@ const ChatScreen = ({ route, navigation }) => {
   const alertedMessageIdsRef = useRef(new Set());
   const playingAlertRef = useRef(false);
 
-  // Initialize sound
+  // Media / loudspeaker routing for message stings (not voice-call / earpiece).
   useEffect(() => {
     const setupAudio = async () => {
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          staysActiveInBackground: false,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
+        // eslint-disable-next-line global-require
+        const { ensureMediaPlaybackAudioMode } = require('../services/notifySound');
+        await ensureMediaPlaybackAudioMode({ background: false });
       } catch (error) {
         console.error('Error setting up audio:', error);
       }
@@ -131,7 +126,18 @@ const ChatScreen = ({ route, navigation }) => {
 
     return () => {
       if (soundRef.current) {
-        soundRef.current.unloadAsync();
+        try {
+          // eslint-disable-next-line global-require
+          const { stopBlypNotify } = require('../services/notifySound');
+          stopBlypNotify(soundRef.current);
+        } catch {
+          try {
+            soundRef.current.unloadAsync();
+          } catch {
+            // ignore
+          }
+        }
+        soundRef.current = null;
       }
     };
   }, []);

@@ -651,6 +651,64 @@ export async function refundBattleGiftPledges(input: {
   return await callEconomyBackend('/economy/battle/gift-pledges/refund', 'POST', input);
 }
 
+const WITHDRAWAL_REASON_COPY: Record<string, string> = {
+  INVALID_AMOUNT: 'Enter a valid whole-gem amount.',
+  NON_INTEGER_AMOUNT: 'Enter a whole number of gems.',
+  BELOW_MIN_PAYOUT: 'The minimum withdrawal is 1,000 gems.',
+  ABOVE_MAX_SINGLE_PAYOUT: 'This amount is above the maximum single withdrawal.',
+  INSUFFICIENT_WITHDRAWABLE_BALANCE: 'You do not have enough cleared, withdrawable gems.',
+  ACCOUNT_FROZEN: 'Withdrawals are unavailable while this account is frozen. Contact Blyp support.',
+  UNDER_FRAUD_REVIEW: 'Withdrawals are paused while this account is under review. Contact Blyp support.',
+  OPEN_CHARGEBACK: 'Resolve the open payment dispute before withdrawing.',
+  ACCOUNT_TOO_NEW: 'This account is not old enough to withdraw yet.',
+  EMAIL_NOT_VERIFIED: 'Verify your email address before withdrawing.',
+  KYC_NOT_VERIFIED: 'Finish Stripe identity verification before withdrawing.',
+  NO_PAYOUT_ACCOUNT: 'Connect a Stripe payout account before withdrawing.',
+  OPEN_REQUEST_EXISTS: 'A withdrawal is already in progress. Wait for it to finish before trying again.',
+  TOO_SOON_SINCE_LAST_REQUEST: 'Please wait 24 hours between withdrawal requests.',
+  DAILY_REQUEST_LIMIT: 'The daily withdrawal request limit has been reached. Try again tomorrow.',
+  WEEKLY_REQUEST_LIMIT: 'The weekly withdrawal request limit has been reached. Try again later.',
+};
+
+/** Convert server withdrawal codes/details into copy safe to show in the app. */
+export function formatWithdrawalError(error: any): string {
+  const detail = error?.detail;
+  const userMessage =
+    detail && typeof detail === 'object' && typeof detail.userMessage === 'string'
+      ? detail.userMessage.trim()
+      : '';
+  if (userMessage) return userMessage;
+
+  const reasons =
+    detail && typeof detail === 'object' && Array.isArray(detail.reasons)
+      ? detail.reasons
+      : Array.isArray(error?.reasons)
+        ? error.reasons
+        : [];
+  if (reasons.length > 0) {
+    const messages = reasons
+      .map((reason: unknown) => {
+        const code = String(reason || '').trim();
+        return WITHDRAWAL_REASON_COPY[code] || '';
+      })
+      .filter(Boolean);
+    if (messages.length > 0) return Array.from(new Set(messages)).join(' ');
+  }
+
+  const code = String(error?.code || '').trim();
+  if (code === 'PROVIDER_ERROR') {
+    return 'Stripe could not process this payout. Check your Stripe payout details, then try again or contact Blyp support.';
+  }
+  if (code === 'WITHDRAWALS_DISABLED' || code === 'STRIPE_NOT_CONFIGURED') {
+    return 'Withdrawals are temporarily unavailable. Please try again later.';
+  }
+
+  const raw = String(error?.message || 'Withdrawal failed').trim();
+  const withoutPrefix = raw.replace(/^\[ECONOMY_API\]\s*/i, '');
+  const withoutCodeSuffix = withoutPrefix.replace(/\s+\([A-Z][A-Z0-9_]+\)\s*$/, '');
+  return withoutCodeSuffix || 'Withdrawal failed. Please try again.';
+}
+
 export interface WithdrawConnectStatus {
   linked: boolean;
   payoutsEnabled: boolean;

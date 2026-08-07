@@ -1,9 +1,13 @@
 /**
  * Shared Blyp notify sting — same asset for push, in-app messages, and call ringtone.
  * Call ringing uses play → 2s silence → play (never seamless isLooping).
+ *
+ * Chat / notify beeps MUST use media loudspeaker routing — never voice-call / earpiece.
+ * expo-av merges partial setAudioModeAsync with the prior mode, so we always set a full
+ * playback profile (especially allowsRecordingIOS: false + playThroughEarpieceAndroid: false).
  */
 
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 
 const BLYP_NOTIFY = require('../../assets/sounds/blyp_notify.wav');
 
@@ -12,21 +16,36 @@ export const RING_GAP_MS = 2000;
 
 let ringModeActive = false;
 
-async function setNotifyAudioMode({ background = false } = {}) {
+/**
+ * Force media / loudspeaker playback (not PlayAndRecord / MODE_IN_COMMUNICATION).
+ * Safe to call before any UI sting; does not enable mic recording.
+ *
+ * @param {{ background?: boolean }} [opts]
+ */
+export async function ensureMediaPlaybackAudioMode({ background = false } = {}) {
   try {
     await Audio.setAudioModeAsync({
+      // iOS: true → AVAudioSession PlayAndRecord → earpiece. Always false for UI sounds.
+      allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
       // Only stay active in background for looping call ringtone.
       // Leaving this true after a message sting made feed video keep
       // playing audio after the user left the app.
       staysActiveInBackground: !!background,
       shouldDuckAndroid: true,
+      // Android: true → MODE_IN_COMMUNICATION / earpiece.
       playThroughEarpieceAndroid: false,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
     });
     ringModeActive = !!background;
   } catch {
     // Best-effort — still try to play.
   }
+}
+
+async function setNotifyAudioMode({ background = false } = {}) {
+  await ensureMediaPlaybackAudioMode({ background });
 }
 
 /**
@@ -35,6 +54,8 @@ async function setNotifyAudioMode({ background = false } = {}) {
  */
 export async function playBlypNotify({ looping = false, volume = 1, gapMs = RING_GAP_MS } = {}) {
   try {
+    // Always re-assert media routing — recording / LiveKit / prior sessions can leave
+    // the process in voice-call mode which routes expo-av to the earpiece.
     await setNotifyAudioMode({ background: !!looping });
     const { sound } = await Audio.Sound.createAsync(
       BLYP_NOTIFY,
@@ -111,10 +132,16 @@ export async function stopBlypNotify(sound) {
   } catch {
     // ignore
   }
-  // Restore foreground-only audio so feed video cannot keep playing on Home.
+  // Restore foreground-only media mode so feed video cannot keep playing on Home.
   await setNotifyAudioMode({ background: false });
 }
 
 export const BLYP_NOTIFY_ASSET = BLYP_NOTIFY;
 
-export default { playBlypNotify, stopBlypNotify, BLYP_NOTIFY_ASSET, RING_GAP_MS };
+export default {
+  playBlypNotify,
+  stopBlypNotify,
+  ensureMediaPlaybackAudioMode,
+  BLYP_NOTIFY_ASSET,
+  RING_GAP_MS,
+};

@@ -217,11 +217,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
         BlypIVSRenderRegistry.shared.setCurrentSessionId(sessionId)
 
         // Audio routing must be configured before creating DeviceDiscovery / Stage.
-        if publish {
-            IVSStageAudioManager.sharedInstance().setPreset(.videoChat)
-        } else {
-            IVSStageAudioManager.sharedInstance().setPreset(.subscribeOnly)
-        }
+        configureStageAudio(publishing: publish, role: role.rawValue)
 
         if publish {
             try setupLocalStreams()
@@ -234,6 +230,35 @@ final class IVSBroadcastModule: RCTEventEmitter {
         try stage.join()
 
         emit("IVS_BROADCAST_STATE_CHANGED", ["state": "CONNECTING"])
+    }
+
+    /// Keep remote stage speech on the loudspeaker while preserving the publishing mic.
+    ///
+    /// The explicit `defaultToSpeaker` option matters for host/guest sessions because
+    /// `playAndRecord` otherwise permits receiver/earpiece routing. Voice processing and
+    /// the video-chat mode remain enabled so loudspeaker output does not feed the mic.
+    /// Read-only viewers use the media-quality subscribe-only preset.
+    private func configureStageAudio(publishing: Bool, role: String) {
+        let audioManager = IVSStageAudioManager.sharedInstance()
+        if publishing {
+            audioManager.setCategory(
+                .playAndRecord,
+                options: [.allowBluetooth, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers],
+                mode: .videoChat
+            )
+            audioManager.isEchoCancellationEnabled = true
+        } else {
+            audioManager.setPreset(.subscribeOnly)
+        }
+
+        NSLog(
+            "[IVS_AUDIO_ROUTE] role=%@ publishing=%@ category=%ld mode=%ld defaultToSpeaker=%@",
+            role,
+            publishing ? "true" : "false",
+            audioManager.category.rawValue,
+            audioManager.mode.rawValue,
+            audioManager.options.contains(.defaultToSpeaker) ? "true" : "false"
+        )
     }
 
     private func setupLocalStreams() throws {
@@ -298,6 +323,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
         hasEmittedLocalJoined = false
         participantsWithVideo.removeAll()
         BlypIVSRenderRegistry.shared.reset()
+        configureStageAudio(publishing: false, role: Role.idle.rawValue)
     }
 }
 

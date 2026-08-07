@@ -114,10 +114,10 @@ class SpeechToTextService {
           await Audio.setAudioModeAsync({
             allowsRecordingIOS: true,
             playsInSilentModeIOS: true,
-            interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
             shouldDuckAndroid: true,
-            stayActiveInBackground: false,
-            playThroughEarpieceAndroid: false
+            staysActiveInBackground: false,
+            // Recording session only — restored to media/loudspeaker on stop.
+            playThroughEarpieceAndroid: false,
           });
         }
       } catch (androidModeErr) {
@@ -255,6 +255,9 @@ class SpeechToTextService {
       this.recording = null;
       this._stopping = false;
 
+      // Clear PlayAndRecord / earpiece routing — chat + feed sounds need media/loudspeaker.
+      await this.restorePlaybackAudioMode();
+
       // Validate URI exists
       if (!uri) {
         throw new Error('No audio file generated');
@@ -268,9 +271,33 @@ class SpeechToTextService {
       this.isRecording = false;
       this.recording = null;
       this._stopping = false;
+      await this.restorePlaybackAudioMode();
       
       // Throw the error so it can be handled by the calling function
       throw new Error(`Stop encountered an error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Clear recording audio session so UI sounds use loudspeaker / media stream.
+   */
+  async restorePlaybackAudioMode() {
+    try {
+      // eslint-disable-next-line global-require
+      const { ensureMediaPlaybackAudioMode } = require('./notifySound');
+      await ensureMediaPlaybackAudioMode({ background: false });
+    } catch {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -288,9 +315,13 @@ class SpeechToTextService {
       await this.recording.stopAndUnloadAsync();
       this.isRecording = false;
       this.recording = null;
+      await this.restorePlaybackAudioMode();
 
     } catch (error) {
       console.error('Error cancelling recording:', error);
+      this.isRecording = false;
+      this.recording = null;
+      await this.restorePlaybackAudioMode();
     }
   }
 
