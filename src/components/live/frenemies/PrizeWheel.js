@@ -131,7 +131,7 @@ export default function PrizeWheel({
         await ensureMediaPlaybackAudioMode({ background: false });
         const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
           shouldPlay: false,
-          volume: 0.55,
+          volume: 0.25,
           isLooping: false,
         });
         if (cancelled) {

@@ -25,6 +25,7 @@ export const SPIN_MS = Math.max(
 );
 export const CHOOSE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHOOSE_MS || 20_000) || 20_000);
 export const CHALLENGE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHALLENGE_MS || 20_000) || 20_000);
+export const RESULT_DISPLAY_MS = 6_000;
 export const HOUSE_COINS = 25;
 export const LIKES_TARGET = Math.max(5, Number(process.env.FRENEMIES_LIKES_TARGET || 50) || 50);
 
@@ -366,8 +367,8 @@ async function afterChooserReady(room: FrenemiesRoom, userId: string, displayNam
     };
     room.state.phase = 'resolving';
     room.version += 1;
-    // Brief pause then next spin handled in tick.
-    room.state.chooseEndsAt = new Date(Date.now() + 2500).toISOString();
+    // Keep the win visible before the next spin is handled in tick.
+    room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
     return;
   }
   enterChoosing(room, userId, displayName);
@@ -386,7 +387,7 @@ async function onChooseTimeout(room: FrenemiesRoom): Promise<void> {
     kickedUserId: chooser,
   };
   room.state.phase = 'resolving';
-  room.state.chooseEndsAt = new Date(Date.now() + 2500).toISOString();
+  room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
   room.version += 1;
 }
 
@@ -397,7 +398,7 @@ async function onChallengeTimeout(room: FrenemiesRoom): Promise<void> {
   };
   room.state.phase = 'resolving';
   room.state.challenge = null;
-  room.state.chooseEndsAt = new Date(Date.now() + 2500).toISOString();
+  room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
   room.version += 1;
 }
 
@@ -578,7 +579,7 @@ export async function throwGuest(args: {
       coins: HOUSE_COINS,
     };
     room.state.phase = 'resolving';
-    room.state.chooseEndsAt = new Date(Date.now() + 2500).toISOString();
+    room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
     room.version += 1;
     await saveRoom(room);
     emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'RESULT'));

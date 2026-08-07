@@ -7,6 +7,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 const GOLD = '#F5C542';
 const TEAL = '#00D2BE';
 const ROSE = '#FB7185';
+const CELEBRATION_DISPLAY_MS = 6_000;
 
 function particlesForKind(kind) {
   const k = String(kind || '');
@@ -48,13 +49,13 @@ export default function CelebrationBurst({ resultKey, kind }) {
     next.forEach((it, i) => {
       Animated.timing(it.progress, {
         toValue: 1,
-        duration: 1100 + i * 40,
+        duration: CELEBRATION_DISPLAY_MS - 300 - i * 28,
         delay: i * 28,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
     });
-    const clear = setTimeout(() => setItems([]), 1600);
+    const clear = setTimeout(() => setItems([]), CELEBRATION_DISPLAY_MS);
     return () => clearTimeout(clear);
   }, [resultKey, kind]);
 
