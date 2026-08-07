@@ -280,7 +280,11 @@ export default function ReactionDuelOverlay({
   const visibleAtMs = prompt?.visibleAt ? Date.parse(prompt.visibleAt) : 0;
   const endsAtMs = prompt?.endsAt ? Date.parse(prompt.endsAt) : 0;
   const promptReady =
-    !!prompt && Number.isFinite(visibleAtMs) && nowMs >= visibleAtMs;
+    !!prompt?.revealed &&
+    !!prompt?.cue &&
+    (prompt?.targets || []).length === 4 &&
+    Number.isFinite(visibleAtMs) &&
+    nowMs >= visibleAtMs;
   const countdownMs = prompt ? Math.max(0, visibleAtMs - nowMs) : 0;
   const promptMsLeft = prompt ? Math.max(0, endsAtMs - nowMs) : 0;
   const canTap =

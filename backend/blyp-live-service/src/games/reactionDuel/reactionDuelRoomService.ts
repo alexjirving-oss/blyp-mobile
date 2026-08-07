@@ -73,6 +73,7 @@ export interface ReactionDuelState {
   players: [ReactionDuelPlayer, ReactionDuelPlayer];
   roundNumber: number;
   prompt: ReactionPrompt | null;
+  promptRevealed: boolean;
   lastRound: ReactionDuelLastRound | null;
   nextRoundAt: string | null;
   winnerUserId: string | null;
@@ -168,8 +169,16 @@ async function withLock<T>(
   throw gameError('GAME_BUSY');
 }
 
-function publicPrompt(prompt: ReactionPrompt | null) {
+function publicPrompt(prompt: ReactionPrompt | null, revealed: boolean) {
   if (!prompt) return null;
+  if (!revealed) {
+    return {
+      roundNumber: prompt.roundNumber,
+      visibleAt: prompt.visibleAt,
+      endsAt: prompt.endsAt,
+      revealed: false,
+    };
+  }
   return {
     promptId: prompt.promptId,
     roundNumber: prompt.roundNumber,
@@ -177,6 +186,7 @@ function publicPrompt(prompt: ReactionPrompt | null) {
     targets: prompt.targets,
     visibleAt: prompt.visibleAt,
     endsAt: prompt.endsAt,
+    revealed: true,
   };
 }
 
@@ -200,7 +210,7 @@ export function publicEvent(
         locked: player.locked,
         score: player.score,
       })),
-      prompt: publicPrompt(room.state.prompt),
+      prompt: publicPrompt(room.state.prompt, room.state.promptRevealed),
     },
     rules: {
       entryCoins: REACTION_DUEL_ENTRY_COINS,
@@ -261,6 +271,7 @@ function beginRound(room: ReactionDuelRoom, nowMs = Date.now()) {
     visibleAtMs: nowMs + PROMPT_LEAD_MS,
     windowMs: PROMPT_WINDOW_MS,
   });
+  room.state.promptRevealed = false;
   room.state.lastRound = null;
   room.state.nextRoundAt = null;
 }
@@ -278,6 +289,7 @@ async function settleRefund(
   room.state.phase = 'refunded';
   room.state.active = false;
   room.state.prompt = null;
+  room.state.promptRevealed = false;
   room.state.nextRoundAt = null;
   room.state.winnerUserId = null;
   room.state.winnerDisplayName = null;
@@ -311,6 +323,7 @@ async function settleWinner(
   room.state.phase = 'ended';
   room.state.active = false;
   room.state.prompt = null;
+  room.state.promptRevealed = false;
   room.state.nextRoundAt = null;
   room.state.winnerUserId = winner.userId;
   room.state.winnerDisplayName = winner.displayName;
@@ -341,6 +354,7 @@ async function finishRound(
       : `Round ${room.state.roundNumber} is a draw.`,
   };
   room.state.prompt = null;
+  room.state.promptRevealed = false;
 
   const decision = decideReactionDuelMatch({
     roundNumber: room.state.roundNumber,
@@ -429,6 +443,21 @@ async function tickOnce(sessionId: string) {
     } else if (
       room.state.phase === 'prompt' &&
       room.state.prompt &&
+      !room.state.promptRevealed &&
+      nowMs >= Date.parse(room.state.prompt.visibleAt)
+    ) {
+      // The countdown event intentionally withholds cue/targets. Reveal from the
+      // server at round start and reset the authoritative reaction clock here.
+      room.state.prompt.visibleAt = new Date(nowMs).toISOString();
+      room.state.prompt.endsAt = new Date(
+        nowMs + PROMPT_WINDOW_MS,
+      ).toISOString();
+      room.state.promptRevealed = true;
+      type = 'PHASE';
+    } else if (
+      room.state.phase === 'prompt' &&
+      room.state.prompt &&
+      room.state.promptRevealed &&
       nowMs > Date.parse(room.state.prompt.endsAt)
     ) {
       await finishRound(room, null, null);
@@ -512,6 +541,7 @@ export async function startDuel(args: {
         ],
         roundNumber: 0,
         prompt: null,
+        promptRevealed: false,
         lastRound: null,
         nextRoundAt: null,
         winnerUserId: null,
@@ -576,6 +606,9 @@ export async function submitTap(args: {
     if (!room || !room.state.active) throw gameError('GAME_NOT_FOUND');
     if (room.state.phase !== 'prompt' || !room.state.prompt) {
       throw gameError('NO_ACTIVE_PROMPT');
+    }
+    if (!room.state.promptRevealed) {
+      throw gameError('IMPOSSIBLE_TAP');
     }
     const player = room.state.players.find(
       (candidate) => candidate.userId === args.userId,
