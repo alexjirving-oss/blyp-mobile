@@ -11,8 +11,10 @@
 import { firestore as db } from '../config/firebase';
 import {
   collection,
+  limit,
   query,
   where,
+  orderBy,
   onSnapshot,
   doc,
   getDoc,
@@ -140,26 +142,53 @@ export function subscribeNotifications(uid, callback, max = 100) {
     return () => {};
   }
   try {
-    const q = query(collection(db, 'notifications'), where('userId', '==', uid));
-    return onSnapshot(
-      q,
-      (snap) => {
-        const items = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .filter((notification) => notification.status !== 'suppressed')
-          .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt))
-          .slice(0, max);
-        // Immediate paint, then resolve opaque actor ids for the UI.
-        callback(items);
-        enrichNotifications(items)
-          .then((enriched) => callback(enriched))
-          .catch(() => {});
-      },
+    const notificationsRef = collection(db, 'notifications');
+    const orderedQuery = query(
+      notificationsRef,
+      where('userId', '==', uid),
+      orderBy('createdAt', 'desc'),
+      limit(max),
+    );
+    const fallbackQuery = query(notificationsRef, where('userId', '==', uid));
+    let activeUnsubscribe = null;
+    const onNext = (snap) => {
+      const items = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((notification) => notification.status !== 'suppressed')
+        .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt))
+        .slice(0, max);
+      // Immediate paint, then resolve opaque actor ids for the UI.
+      callback(items);
+      enrichNotifications(items)
+        .then((enriched) => callback(enriched))
+        .catch(() => {});
+    };
+    const subscribeFallback = () => onSnapshot(
+      fallbackQuery,
+      onNext,
       (err) => {
+        console.warn('[notificationsInbox] fallback subscribe error', err?.message || err);
+        callback([]);
+      },
+    );
+    activeUnsubscribe = onSnapshot(
+      orderedQuery,
+      onNext,
+      (err) => {
+        const code = String(err?.code || '');
+        const message = String(err?.message || '').toLowerCase();
+        if (code === 'failed-precondition' || message.includes('index')) {
+          try { activeUnsubscribe?.(); } catch {}
+          activeUnsubscribe = subscribeFallback();
+          return;
+        }
         console.warn('[notificationsInbox] subscribe error', err?.message || err);
         callback([]);
-      }
+      },
     );
+    return () => {
+      try { activeUnsubscribe?.(); } catch {}
+    };
   } catch (e) {
     console.warn('[notificationsInbox] setup failed', e?.message || e);
     callback([]);

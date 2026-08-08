@@ -67,6 +67,100 @@ const withAlpha = (hex, alpha) => {
 };
 
 const T = blypTheme.colors;
+const DATING_ACCENT = '#E83E5A';
+
+const ChatRow = React.memo(({
+  item,
+  otherParticipant,
+  unreadCount,
+  datingContext,
+  timeLabel,
+  onOpen,
+  onDelete,
+}) => {
+  const panX = React.useRef(new Animated.Value(0)).current;
+  const panResponder = React.useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) =>
+      Math.abs(gesture.dx) > 20 && Math.abs(gesture.dy) < 40,
+    onPanResponderMove: (_event, gesture) => {
+      if (gesture.dx < 0) panX.setValue(Math.max(-110, gesture.dx));
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      if (gesture.dx < -90) onDelete(item, otherParticipant);
+      Animated.spring(panX, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 24,
+        bounciness: 4,
+      }).start();
+    },
+  }), [item, onDelete, otherParticipant, panX]);
+  const handleOpen = React.useCallback(
+    () => onOpen(item, otherParticipant, datingContext),
+    [datingContext, item, onOpen, otherParticipant],
+  );
+  const hasUnread = unreadCount > 0;
+  const accent = datingContext ? DATING_ACCENT : T.success;
+
+  return (
+    <View style={styles.chatItemWrapper}>
+      <View style={styles.deleteBackground}>
+        <Icon name="trash" size={22} color={T.textPrimary} />
+        <Text style={styles.deleteText}>Delete</Text>
+      </View>
+      <Animated.View
+        style={[styles.swipeableItem, { transform: [{ translateX: panX }] }]}
+        {...panResponder.panHandlers}
+      >
+        <TouchableOpacity
+          style={[styles.whatsappChatItem, hasUnread && { backgroundColor: withAlpha(accent, 0.09) }]}
+          onPress={handleOpen}
+          activeOpacity={0.72}
+        >
+          <View style={styles.avatarContainer}>
+            <BlypAvatar
+              uri={resolveUserPhoto(otherParticipant)}
+              name={otherParticipant.username || otherParticipant.displayName}
+              profile={otherParticipant}
+              size={50}
+              showBadge={false}
+              style={hasUnread ? { borderRadius: 25, borderWidth: 2, borderColor: accent } : undefined}
+            />
+            {hasUnread ? <View style={[styles.unreadIndicator, { backgroundColor: accent }]} /> : null}
+          </View>
+          <View style={styles.chatContent}>
+            <View style={styles.chatHeader}>
+              <View style={styles.chatTitleRow}>
+                <Text style={[styles.chatName, hasUnread && { color: accent, fontWeight: '800' }]} numberOfLines={1}>
+                  {otherParticipant.username || otherParticipant.displayName || 'Unknown User'}
+                </Text>
+                {datingContext ? (
+                  <View style={styles.datingThreadBadge}>
+                    <Icon name="heart" size={9} color="#FFD8DF" />
+                    <Text style={styles.datingThreadBadgeText}>Dating</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={[styles.chatTime, hasUnread && { color: accent, fontWeight: '700' }]}>
+                {timeLabel}
+              </Text>
+            </View>
+            <View style={styles.messagePreview}>
+              <Text style={[styles.lastMessage, hasUnread && { color: T.textSecondary, fontWeight: '600' }]} numberOfLines={1}>
+                {item.lastMessage || 'No messages yet'}
+              </Text>
+              {hasUnread ? (
+                <View style={[styles.unreadBadge, { backgroundColor: accent }]}>
+                  <Text style={styles.unreadCount}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
+  );
+});
 
 // Resolve a user's profile photo across the various field names used in the
 // codebase (canonical is photoURL; older docs use avatar/userPhotoURL/photo).
@@ -186,14 +280,15 @@ const MessengerScreen = ({ navigation }) => {
     if (!uid || !chats.length) return undefined;
     let cancelled = false;
     (async () => {
-      const updates = {};
-      for (const chat of chats) {
-        const otherId = chat.participants?.find((id) => id !== uid);
-        if (!otherId) continue;
-        if (allUsers.some((u) => u.id === otherId)) continue;
-        const profile = await fetchMessengerUserProfile(otherId);
-        if (profile) updates[otherId] = profile;
-      }
+      const missingIds = [...new Set(
+        chats
+          .map((chat) => chat.participants?.find((id) => id !== uid))
+          .filter((id) => id && !participantProfiles[id]),
+      )];
+      const resolved = await Promise.all(
+        missingIds.map(async (id) => [id, await fetchMessengerUserProfile(id)]),
+      );
+      const updates = Object.fromEntries(resolved.filter(([, profile]) => profile));
       if (!cancelled && Object.keys(updates).length) {
         setParticipantProfiles((prev) => ({ ...prev, ...updates }));
       }
@@ -201,19 +296,24 @@ const MessengerScreen = ({ navigation }) => {
     return () => {
       cancelled = true;
     };
-  }, [chats, uid, allUsers]);
+  }, [chats, uid, participantProfiles]);
+
+  const allUsersById = React.useMemo(
+    () => new Map(allUsers.map((profile) => [profile.id, profile])),
+    [allUsers],
+  );
 
   const resolveOtherParticipant = React.useCallback((item) => {
     const otherId = item.participants?.find((id) => id !== uid);
     if (!otherId) return null;
-    const known = allUsers.find((user) => item.participants.includes(user.id) && user.id !== uid);
+    const known = allUsersById.get(otherId);
     if (known) return known;
     if (participantProfiles[otherId]) return participantProfiles[otherId];
     return {
       id: otherId,
       username: item.participantNames?.find((name) => name !== currentUser?.displayName) || 'Unknown User',
     };
-  }, [allUsers, participantProfiles, uid, currentUser]);
+  }, [allUsersById, participantProfiles, uid, currentUser]);
 
   const loadChats = React.useCallback(() => {
     if (!uid) {
@@ -471,15 +571,13 @@ const MessengerScreen = ({ navigation }) => {
       if (cancelled) return;
       console.log('ðŸš€ MESSENGER: Loading chat data for user:', uid);
 
-      // Load chats, following users, all users, calls, and statuses with proper cleanup
+      // Keep the inbox hot; expensive secondary feeds are subscribed lazily by tab.
       subs.push(loadChats());
       subs.push(loadFollowingUsers());
-      subs.push(loadAllUsers());
       // Calls tab is Coming Soon — skip live call history subscription.
       setCalls([]);
       setCallsLoading(false);
       setCallsError(null);
-      subs.push(loadStatuses());
       loadBalances();
     };
 
@@ -506,7 +604,17 @@ const MessengerScreen = ({ navigation }) => {
       console.log('ðŸ§¹ MESSENGER: Cleaning up Firebase listeners');
       subs.forEach((unsub) => { if (typeof unsub === 'function') unsub(); });
     };
-  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadAllUsers, loadStatuses, loadBalances]);
+  }, [authReady, authLoading, isAuthenticated, uid, loadChats, loadFollowingUsers, loadBalances]);
+
+  useEffect(() => {
+    if (!authReady || !isAuthenticated || !uid || selectedTab !== 'status') return undefined;
+    const unsubscribeUsers = loadAllUsers();
+    const unsubscribeStatuses = loadStatuses();
+    return () => {
+      try { unsubscribeUsers?.(); } catch {}
+      try { unsubscribeStatuses?.(); } catch {}
+    };
+  }, [authReady, isAuthenticated, uid, selectedTab, loadAllUsers, loadStatuses]);
 
   // Update unread count manager when total count changes
   useEffect(() => {
@@ -539,22 +647,22 @@ const MessengerScreen = ({ navigation }) => {
 
     const fetchFollowingUserData = async () => {
       try {
-        const followingUsersData = [];
-        for (const userId of followingUserIds) {
+        const followingUsersData = await Promise.all(Array.from(followingUserIds).map(async (userId) => {
           try {
             const userDoc = await getDoc(doc(db, 'users', userId));
             if (userDoc.exists()) {
-              followingUsersData.push({
+              return {
                 id: userDoc.id,
                 ...userDoc.data()
-              });
+              };
             }
           } catch (error) {
             console.error('Error fetching individual user data:', error);
           }
-        }
+          return null;
+        }));
 
-        setFollowingUsers(followingUsersData);
+        setFollowingUsers(followingUsersData.filter(Boolean));
       } catch (error) {
         console.error('Error in fetchFollowingUserData:', error);
       }
@@ -563,7 +671,7 @@ const MessengerScreen = ({ navigation }) => {
     fetchFollowingUserData();
   }, [followingUserIds]);
 
-  const formatLastMessageTime = (timestamp) => {
+  const formatLastMessageTime = React.useCallback((timestamp) => {
     if (!timestamp) return '';
 
     const now = new Date();
@@ -585,9 +693,9 @@ const MessengerScreen = ({ navigation }) => {
     if (diffInDays < 7) return `${diffInDays}d`;
 
     return messageTime.toLocaleDateString();
-  };
+  }, []);
 
-  const handleDeleteChat = async (chatId, username) => {
+  const handleDeleteChat = React.useCallback(async (chatId, username) => {
     try {
       Alert.alert(
         'Delete Conversation',
@@ -619,7 +727,7 @@ const MessengerScreen = ({ navigation }) => {
       console.error('âŒ Error deleting chat:', error);
       Alert.alert('Error', 'Failed to delete conversation. Please try again.');
     }
-  };
+  }, []);
 
   const deleteChat = async (chatId) => {
     try {
@@ -876,11 +984,45 @@ const MessengerScreen = ({ navigation }) => {
     );
   };
 
-  const renderChatItem = ({ item }) => {
+  const openChatThread = React.useCallback((item, otherParticipant, datingContext) => {
+    navigation.navigate('ChatConversation', {
+      chatId: item.id,
+      conversationId: item.id,
+      chatContext: datingContext ? 'dating' : 'messages',
+      datingMatchId: item.datingMatchId || null,
+      otherUser: otherParticipant,
+    });
+  }, [navigation]);
+
+  const deleteChatThread = React.useCallback((item, otherParticipant) => {
+    handleDeleteChat(item.id, otherParticipant.username || otherParticipant.displayName);
+  }, [handleDeleteChat]);
+
+  const renderChatItem = React.useCallback(({ item }) => {
     const otherParticipant = resolveOtherParticipant(item);
     if (!otherParticipant) return null;
-    return renderChatBar(item, otherParticipant);
-  };
+    const datingContext =
+      item.chatContext === 'dating' ||
+      item.context === 'dating' ||
+      item.contexts?.includes?.('dating');
+    return (
+      <ChatRow
+        item={item}
+        otherParticipant={otherParticipant}
+        unreadCount={item.unreadCount?.[uid] || 0}
+        datingContext={datingContext}
+        timeLabel={formatLastMessageTime(item.lastMessageTime)}
+        onOpen={openChatThread}
+        onDelete={deleteChatThread}
+      />
+    );
+  }, [
+    deleteChatThread,
+    formatLastMessageTime,
+    openChatThread,
+    resolveOtherParticipant,
+    uid,
+  ]);
 
   // Create a separate component for swipeable chat items
   const SwipeableChatBar = ({ item, otherParticipant }) => {
@@ -1134,10 +1276,19 @@ const MessengerScreen = ({ navigation }) => {
         // preserves recency within each group.
         const otherIdOf = (chat) =>
           (chat.participants || []).find((id) => id !== uid) || null;
+        const datingChats = [];
         const mutualChats = [];
         const followedNotBackChats = [];
         const otherChats = [];
         for (const chat of allUserChats) {
+          const isDating =
+            chat.chatContext === 'dating' ||
+            chat.context === 'dating' ||
+            chat.contexts?.includes?.('dating');
+          if (isDating) {
+            datingChats.push(chat);
+            continue;
+          }
           const other = otherIdOf(chat);
           const iFollow = other && followingUserIds.has(other);
           const followsMe = other && followerUserIds.has(other);
@@ -1146,6 +1297,9 @@ const MessengerScreen = ({ navigation }) => {
           else otherChats.push(chat);
         }
         const chatSections = [];
+        if (datingChats.length) {
+          chatSections.push({ key: 'dating', title: 'Dating matches', data: datingChats, dating: true });
+        }
         if (mutualChats.length) {
           chatSections.push({ key: 'mutual', title: 'Friends · you follow each other', data: mutualChats });
         }
@@ -1187,8 +1341,10 @@ const MessengerScreen = ({ navigation }) => {
                 renderItem={renderChatItem}
                 renderSectionHeader={({ section }) =>
                   chatSections.length > 1 ? (
-                    <View style={styles.chatSectionHeader}>
-                      <Text style={styles.chatSectionHeaderText}>{section.title}</Text>
+                    <View style={[styles.chatSectionHeader, section.dating && styles.datingSectionHeader]}>
+                      <Text style={[styles.chatSectionHeaderText, section.dating && styles.datingSectionHeaderText]}>
+                        {section.dating ? '♥  ' : ''}{section.title}
+                      </Text>
                     </View>
                   ) : null
                 }
@@ -1196,7 +1352,10 @@ const MessengerScreen = ({ navigation }) => {
                 showsVerticalScrollIndicator={false}
                 style={styles.chatList}
                 stickySectionHeadersEnabled={false}
-                removeClippedSubviews={false}
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={12}
+                maxToRenderPerBatch={10}
+                windowSize={7}
               />
             )}
           </View>
@@ -1226,7 +1385,9 @@ const MessengerScreen = ({ navigation }) => {
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
                 style={styles.chatList}
-                removeClippedSubviews={false}
+                removeClippedSubviews={Platform.OS === 'android'}
+                initialNumToRender={12}
+                windowSize={7}
               />
             )}
           </View>
@@ -1261,7 +1422,9 @@ const MessengerScreen = ({ navigation }) => {
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
             style={styles.chatList}
-            removeClippedSubviews={false}
+            removeClippedSubviews={Platform.OS === 'android'}
+            initialNumToRender={12}
+            windowSize={7}
             contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
           />
         );
@@ -1308,7 +1471,9 @@ const MessengerScreen = ({ navigation }) => {
             data={visibleStatuses}
             keyExtractor={(item) => item.id}
             showsVerticalScrollIndicator={false}
-            removeClippedSubviews={false}
+            removeClippedSubviews={Platform.OS === 'android'}
+            initialNumToRender={12}
+            windowSize={7}
             contentContainerStyle={{ paddingBottom: tabBarHeight + 12 }}
             renderItem={({ item }) => {
               const authorId = item.userId || item.authorId;
@@ -1339,7 +1504,7 @@ const MessengerScreen = ({ navigation }) => {
       default:
         return null;
     }
-  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, tabBarHeight, navigation, currentUser]);
+  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, tabBarHeight, navigation, currentUser, renderChatItem]);
 
   // Simple user list for messaging
   const renderSimpleChatList = () => {
@@ -1692,6 +1857,39 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  datingSectionHeader: {
+    borderLeftWidth: 3,
+    borderLeftColor: DATING_ACCENT,
+    marginLeft: 12,
+    paddingLeft: 10,
+  },
+  datingSectionHeaderText: {
+    color: '#FF9BAD',
+  },
+  chatTitleRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginRight: 8,
+  },
+  datingThreadBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: withAlpha(DATING_ACCENT, 0.18),
+    borderWidth: 1,
+    borderColor: withAlpha(DATING_ACCENT, 0.35),
+  },
+  datingThreadBadgeText: {
+    color: '#FFD8DF',
+    fontSize: 9,
+    fontWeight: '800',
   },
   whatsappChatItem: {
     flexDirection: 'row',

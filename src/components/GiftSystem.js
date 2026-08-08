@@ -507,6 +507,9 @@ const GiftSystem = ({
             coinSpent: Number.isFinite(spent) ? spent : Number(gift.cost || 0),
             quantity: Number(out?.gift?.quantity || 1),
             giftId: String(gift.id),
+            name: gift.name,
+            emoji: gift.emoji,
+            coinCost: Number.isFinite(spent) ? spent : Number(gift.cost || 0),
           });
         } catch { /* UI callback best-effort */ }
       } else {
@@ -521,6 +524,9 @@ const GiftSystem = ({
             coinSpent: Number(gift.cost || 0),
             quantity: 1,
             giftId: String(gift.id),
+            name: gift.name,
+            emoji: gift.emoji,
+            coinCost: Number(gift.cost || 0),
           });
         } catch { /* UI callback best-effort */ }
       }

@@ -1058,11 +1058,17 @@ const DatingScreen = ({ navigation, embedded = false }) => {
             otherUserId,
             ownName,
             otherName,
+            {
+              context: 'dating',
+              matchId: item.matchId || null,
+            },
           );
 
         navigation.navigate('ChatConversation', {
           conversationId,
           chatId: conversationId,
+          chatContext: 'dating',
+          datingMatchId: item.matchId || null,
           otherUser: {
             id: otherUserId,
             username: item.username || null,

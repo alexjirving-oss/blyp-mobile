@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { memo, useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
-import { Alert, FlatList, Image, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useFocusEffect } from '@react-navigation/native';
+import { FlashList } from '@shopify/flash-list';
 import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../utils/scaleUtils';
 import { firestore as db, db as compatDb } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
@@ -13,6 +13,7 @@ import { useAuth } from '../hooks/useCommon';
 import { conversationsMessagingService } from '../services/messaging';
 import { theme as blypTheme } from '../styles/blypTheme';
 import ReportModal from '../components/ReportModal';
+import GiftSystem from '../components/GiftSystem';
 import { inspectText } from '../utils/contentFilter';
 
 const withAlpha = (hex, alpha) => {
@@ -30,6 +31,68 @@ const T = blypTheme.colors;
 // heartbeat is fresh (presence is written on AppState changes, and a hard kill
 // can leave a stale 'online'); 2 minutes is a safe freshness window.
 const ONLINE_FRESHNESS_MS = 2 * 60 * 1000;
+const MESSAGE_PAGE_SIZE = 50;
+const DATING_ACCENT = '#E83E5A';
+
+const formatTime = (timestamp) => {
+  if (!timestamp) return '';
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+const MessageRow = memo(({ item, isMe, datingContext }) => {
+  const isGift = item.type === 'gift';
+  return (
+    <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.otherMessage]}>
+      <View
+        style={[
+          styles.messageBubble,
+          isMe ? styles.myBubble : styles.otherBubble,
+          datingContext && isMe ? styles.datingBubble : null,
+          isGift ? styles.giftBubble : null,
+        ]}
+      >
+        {isGift ? (
+          <View style={styles.giftMessageHeader}>
+            <Text style={styles.giftMessageEmoji}>{item.giftEmoji || '🎁'}</Text>
+            <View style={styles.giftMessageCopy}>
+              <Text style={[styles.giftMessageTitle, isMe && styles.myMessageText]}>
+                {isMe ? 'Gift sent' : 'Gift received'}
+              </Text>
+              <Text style={[styles.giftMessageName, isMe && styles.myMessageText]}>
+                {item.giftName || 'Blyp gift'}
+                {Number(item.coinCost) > 0 ? ` · ${Number(item.coinCost).toLocaleString()} coins` : ''}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
+            {item.text}
+          </Text>
+        )}
+        <View style={styles.messageFooter}>
+          <Text style={[styles.messageTime, isMe ? styles.myMessageTime : styles.otherMessageTime]}>
+            {formatTime(item.timestamp)}
+          </Text>
+          {isMe ? (
+            <View style={styles.messageStatus}>
+              <Icon
+                name={item.status === 'sent' ? 'checkmark' : 'checkmark-done'}
+                size={16}
+                color={item.status === 'read' ? '#003B30' : 'rgba(0,0,0,0.55)'}
+              />
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+});
 
 const formatLastSeen = (ms) => {
   const ts = Number(ms);
@@ -53,6 +116,7 @@ const formatLastSeen = (ms) => {
 const ChatScreen = ({ route, navigation }) => {
   const { participant, otherUser, chatId } = route.params || {};
   const conversationId = route?.params?.conversationId || chatId;
+  const datingContext = route?.params?.chatContext === 'dating';
 
   const user = useMemo(() =>
     otherUser || participant || {
@@ -64,6 +128,10 @@ const ChatScreen = ({ route, navigation }) => {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(true);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [giftOpenSignal, setGiftOpenSignal] = useState(0);
   const { user: authUser, uid } = useAuth();
 
   // Resolve the other participant's uid so we can show GENUINE presence
@@ -104,6 +172,8 @@ const ChatScreen = ({ route, navigation }) => {
   }, [participantUid]);
 
   const flatListRef = useRef(null);
+  const oldestCursorRef = useRef(null);
+  const loadingOlderRef = useRef(false);
   const initialLoadRef = useRef(true);
   const soundRef = useRef(null);
   /** Message ids we have already alerted for — prevents re-sting on every snapshot. */
@@ -216,12 +286,17 @@ const ChatScreen = ({ route, navigation }) => {
     // Reset per-thread alert memory when switching chats.
     alertedMessageIdsRef.current = new Set();
     initialLoadRef.current = true;
+    oldestCursorRef.current = null;
+    loadingOlderRef.current = false;
+    setHasOlder(true);
 
     const unsubscribe = conversationsMessagingService.subscribeToMessages(
       db,
       conversationId,
-      (messagesList) => {
+      (messagesList, pageInfo) => {
         const list = Array.isArray(messagesList) ? messagesList : [];
+        oldestCursorRef.current = pageInfo?.oldestCursor || null;
+        setHasOlder(pageInfo?.hasMore !== false);
 
         if (initialLoadRef.current) {
           // Seed seen ids so historical "sent" messages never re-trigger the sting.
@@ -248,7 +323,11 @@ const ChatScreen = ({ route, navigation }) => {
           }
         });
 
-        setMessages(list);
+        // Keep paged historical rows while replacing the live newest page.
+        setMessages((previous) => {
+          const liveIds = new Set(list.map((item) => item.id));
+          return [...previous.filter((item) => !liveIds.has(item.id)), ...list];
+        });
         setLoading(false);
 
         if (shouldAlert) {
@@ -258,7 +337,8 @@ const ChatScreen = ({ route, navigation }) => {
       (e) => {
         console.error('Error subscribing to messages:', e);
         setLoading(false);
-      }
+      },
+      MESSAGE_PAGE_SIZE,
     );
 
     return () => {
@@ -300,14 +380,35 @@ const ChatScreen = ({ route, navigation }) => {
     }, [conversationId]),
   );
 
-  useEffect(() => {
-    // Auto scroll to bottom when messages change
-    if (flatListRef.current && messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current.scrollToEnd({ animated: true });
-      }, 100);
+  const loadOlderMessages = useCallback(async () => {
+    if (
+      !conversationId ||
+      !oldestCursorRef.current ||
+      !hasOlder ||
+      loadingOlderRef.current
+    ) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const page = await conversationsMessagingService.loadOlderMessages(
+        db,
+        conversationId,
+        oldestCursorRef.current,
+        MESSAGE_PAGE_SIZE,
+      );
+      oldestCursorRef.current = page.oldestCursor;
+      setHasOlder(page.hasMore);
+      setMessages((previous) => {
+        const seen = new Set(previous.map((item) => item.id));
+        return [...page.messages.filter((item) => !seen.has(item.id)), ...previous];
+      });
+    } catch (error) {
+      console.warn('[CHAT] Could not load older messages', error?.message || error);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
     }
-  }, [messages]);
+  }, [conversationId, hasOlder]);
 
   // Clear Phone-tab badge as soon as the chat is opened/read — not only after a reply.
   // Per-message status updates are blocked by Firestore rules; conversation.unreadCount
@@ -328,30 +429,14 @@ const ChatScreen = ({ route, navigation }) => {
       } catch {
         // ignore
       }
-      // Best-effort per-message status (may be denied by rules — non-fatal).
-      try {
-        const unreadMessages = (messages || []).filter(
-          (msg) => msg.senderId !== uid && msg.status !== 'read',
-        );
-        if (unreadMessages.length > 0) {
-          await conversationsMessagingService.markMessagesRead(
-            db,
-            conversationId,
-            uid,
-            unreadMessages.map((m) => m.id),
-          );
-        }
-      } catch {
-        // ignore
-      }
     };
 
     const timeoutId = setTimeout(markRead, 300);
     return () => clearTimeout(timeoutId);
-  }, [conversationId, uid, messages.length]);
+  }, [conversationId, uid]);
 
-  const sendMessage = async () => {
-    if (!message.trim() || !conversationId) {
+  const sendMessage = useCallback(async () => {
+    if (!message.trim() || !conversationId || sendingMessage) {
       console.log('âŒ Cannot send message - missing text or chatId:', { message: message.trim(), chatId });
       return;
     }
@@ -368,6 +453,7 @@ const ChatScreen = ({ route, navigation }) => {
       return;
     }
 
+    setSendingMessage(true);
     try {
       const senderName = authUser?.displayName || authUser?.username || authUser?.email || 'Unknown';
       await conversationsMessagingService.sendMessage(db, conversationId, uid, senderName, clean);
@@ -375,56 +461,34 @@ const ChatScreen = ({ route, navigation }) => {
     } catch (error) {
       console.error('âŒ Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
+    } finally {
+      setSendingMessage(false);
     }
-  };
+  }, [authUser, chatId, conversationId, message, sendingMessage, uid]);
 
-  const formatTime = (timestamp) => {
-    if (!timestamp) return '';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
+  const renderMessage = useCallback(
+    ({ item }) => (
+      <MessageRow item={item} isMe={item.senderId === uid} datingContext={datingContext} />
+    ),
+    [datingContext, uid],
+  );
 
-  const renderMessage = ({ item }) => {
-    const isMe = item.senderId === uid;
-
-    return (
-      <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.otherMessage]}>
-        <View style={[styles.messageBubble, isMe ? styles.myBubble : styles.otherBubble]}>
-          <Text style={[styles.messageText, isMe ? styles.myMessageText : styles.otherMessageText]}>
-            {item.text}
-          </Text>
-          <View style={styles.messageFooter}>
-            <Text style={[styles.messageTime, isMe ? styles.myMessageTime : styles.otherMessageTime]}>
-              {formatTime(item.timestamp)}
-            </Text>
-            {isMe && (
-              <View style={styles.messageStatus}>
-                {item.status === 'sent' && (
-                  <Icon name="checkmark" size={16} color="rgba(0,0,0,0.55)" />
-                )}
-                {item.status === 'delivered' && (
-                  <View style={styles.doubleCheck}>
-                    <Icon name="checkmark" size={16} color="rgba(0,0,0,0.55)" style={styles.check1} />
-                    <Icon name="checkmark" size={16} color="rgba(0,0,0,0.55)" style={styles.check2} />
-                  </View>
-                )}
-                {item.status === 'read' && (
-                  <View style={styles.doubleCheck}>
-                    <Icon name="checkmark" size={16} color="#003B30" style={styles.check1} />
-                    <Icon name="checkmark" size={16} color="#003B30" style={styles.check2} />
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-        </View>
-      </View>
-    );
-  };
+  const handleGiftSent = useCallback(async (gift) => {
+    if (!conversationId || !uid) return;
+    try {
+      const senderName = authUser?.displayName || authUser?.username || authUser?.email || 'Unknown';
+      await conversationsMessagingService.sendGiftMessage(
+        db,
+        conversationId,
+        uid,
+        senderName,
+        gift,
+      );
+    } catch (error) {
+      // The economy transfer already succeeded; do not imply that it failed.
+      console.warn('[CHAT] Gift sent but receipt message failed', error?.message || error);
+    }
+  }, [authUser, conversationId, uid]);
 
   const renderBlypHeader = () => (
     <View style={styles.blypHeader}>
@@ -434,6 +498,15 @@ const ChatScreen = ({ route, navigation }) => {
         </TouchableOpacity>
         <BlypLogo useGradientBackground={true} />
         <View style={styles.headerActions}>
+          {participantUid && participantUid !== uid ? (
+            <TouchableOpacity
+              style={[styles.headerActionButton, styles.giftHeaderButton]}
+              onPress={() => setGiftOpenSignal((value) => value + 1)}
+              accessibilityLabel={`Send a gift to ${user.username || user.name || 'this person'}`}
+            >
+              <Icon name="gift" size={21} color={datingContext ? DATING_ACCENT : T.primary} />
+            </TouchableOpacity>
+          ) : null}
           {participantUid && participantUid !== uid ? (
             <TouchableOpacity
               style={styles.headerActionButton}
@@ -452,7 +525,15 @@ const ChatScreen = ({ route, navigation }) => {
           style={styles.participantAvatar}
         />
         <View style={styles.participantInfo}>
-          <Text style={styles.participantName}>{user.username || user.name || 'Unknown'}</Text>
+          <View style={styles.participantNameRow}>
+            <Text style={styles.participantName}>{user.username || user.name || 'Unknown'}</Text>
+            {datingContext ? (
+              <View style={styles.datingPill}>
+                <Icon name="heart" size={10} color="#FFD8DF" />
+                <Text style={styles.datingPillText}>Dating</Text>
+              </View>
+            ) : null}
+          </View>
           {(() => {
             const isOnline =
               presence?.state === 'online' &&
@@ -486,10 +567,10 @@ const ChatScreen = ({ route, navigation }) => {
           {renderBlypHeader()}
           <KeyboardAvoidingView
             style={styles.keyboardContainer}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           >
-            <FlatList
+            <FlashList
               ref={flatListRef}
               data={messages}
               renderItem={renderMessage}
@@ -497,7 +578,32 @@ const ChatScreen = ({ route, navigation }) => {
               style={styles.messagesList}
               contentContainerStyle={styles.messagesContainer}
               showsVerticalScrollIndicator={false}
-              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              onStartReached={loadOlderMessages}
+              onStartReachedThreshold={0.35}
+              maintainVisibleContentPosition={{
+                autoscrollToBottomThreshold: 0.2,
+                startRenderingFromBottom: true,
+              }}
+              ListHeaderComponent={
+                loadingOlder ? (
+                  <View style={styles.olderLoader}>
+                    <ActivityIndicator size="small" color={datingContext ? DATING_ACCENT : T.primary} />
+                  </View>
+                ) : null
+              }
+              ListEmptyComponent={
+                loading ? (
+                  <View style={styles.emptyMessages}>
+                    <ActivityIndicator color={datingContext ? DATING_ACCENT : T.primary} />
+                    <Text style={styles.emptyMessagesText}>Loading messages…</Text>
+                  </View>
+                ) : (
+                  <View style={styles.emptyMessages}>
+                    <Icon name="chatbubble-ellipses-outline" size={38} color={T.textDisabled} />
+                    <Text style={styles.emptyMessagesText}>Start the conversation</Text>
+                  </View>
+                )
+              }
             />
 
             <View style={styles.inputContainer}>
@@ -529,14 +635,14 @@ const ChatScreen = ({ route, navigation }) => {
               <TouchableOpacity
                 style={[styles.sendButton, message.trim() ? styles.sendButtonActive : null]}
                 onPress={sendMessage}
-                disabled={!message.trim()}
+                disabled={!message.trim() || sendingMessage}
               >
                 <LinearGradient
                   colors={message.trim() ? [T.gradientStart, T.gradientMiddle, T.gradientEnd] : [T.textDisabled, T.textMuted]}
                   style={styles.sendButtonGradient}
                 >
                   <Icon
-                    name={message.trim() ? "send" : "mic"}
+                    name={sendingMessage ? 'hourglass-outline' : message.trim() ? 'send' : 'mic'}
                     size={20}
                     color={T.textPrimary}
                   />
@@ -554,6 +660,17 @@ const ChatScreen = ({ route, navigation }) => {
         reportedUserId={participantUid}
         targetLabel={user?.username || user?.name || 'this person'}
       />
+      {participantUid && participantUid !== uid ? (
+        <GiftSystem
+          postId={`chat:${conversationId}`}
+          creatorId={participantUid}
+          creatorName={user?.username || user?.name || user?.displayName || 'Blyp member'}
+          hideTrigger
+          openSignal={giftOpenSignal}
+          navigation={navigation}
+          onGiftSent={handleGiftSent}
+        />
+      ) : null}
     </ScreenContainer>
   );
 };
@@ -590,6 +707,12 @@ const styles = StyleSheet.create({
     padding: 8,
     marginLeft: 8,
   },
+  giftHeaderButton: {
+    borderRadius: 18,
+    backgroundColor: withAlpha(T.surface, 0.72),
+    borderWidth: 1,
+    borderColor: withAlpha(T.textPrimary, 0.1),
+  },
   chatInfo: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -605,6 +728,11 @@ const styles = StyleSheet.create({
   participantInfo: {
     flex: 1,
   },
+  participantNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   participantName: {
     color: T.textPrimary,
     fontSize: 18,
@@ -614,6 +742,22 @@ const styles = StyleSheet.create({
   participantStatus: {
     color: T.primary,
     fontSize: 14,
+  },
+  datingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: withAlpha(DATING_ACCENT, 0.2),
+    borderWidth: 1,
+    borderColor: withAlpha(DATING_ACCENT, 0.38),
+  },
+  datingPillText: {
+    color: '#FFD8DF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   statusOnline: {
     color: T.primary,
@@ -653,8 +797,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   messagesContainer: {
-    padding: 15,
-    paddingBottom: 5,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  olderLoader: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  emptyMessages: {
+    minHeight: 240,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  emptyMessagesText: {
+    color: T.textMuted,
+    fontSize: 14,
   },
   messageContainer: {
     marginVertical: 2,
@@ -675,6 +833,35 @@ const styles = StyleSheet.create({
   myBubble: {
     backgroundColor: T.primary,
     borderBottomRightRadius: 5,
+  },
+  datingBubble: {
+    backgroundColor: DATING_ACCENT,
+  },
+  giftBubble: {
+    minWidth: 190,
+    borderWidth: 1,
+    borderColor: withAlpha('#FBBF24', 0.38),
+  },
+  giftMessageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  giftMessageEmoji: {
+    fontSize: 30,
+    marginRight: 9,
+  },
+  giftMessageCopy: {
+    flex: 1,
+  },
+  giftMessageTitle: {
+    color: T.textPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  giftMessageName: {
+    color: T.textMuted,
+    fontSize: 12,
+    marginTop: 2,
   },
   otherBubble: {
     backgroundColor: withAlpha(T.surface, 0.9),

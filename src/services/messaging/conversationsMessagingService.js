@@ -5,12 +5,15 @@
   getDoc,
   getDocs,
   increment,
+  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   updateDoc,
   where,
+  arrayUnion,
 } from 'firebase/firestore';
 
 import { getAuth } from 'firebase/auth';
@@ -138,16 +141,21 @@ export const conversationsMessagingService = {
     }
   },
 
-  subscribeToMessages(db, conversationId, onMessages, onError) {
+  subscribeToMessages(db, conversationId, onMessages, onError, pageSize = 50) {
     try {
       const messagesRef = collection(db, 'conversations', conversationId, 'messages');
-      const q = query(messagesRef, orderBy('timestamp', 'asc'));
+      const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(pageSize));
 
       return onSnapshot(
         q,
         (snapshot) => {
-          const messages = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-          onMessages(messages);
+          const messages = snapshot.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .reverse();
+          onMessages(messages, {
+            oldestCursor: snapshot.docs[snapshot.docs.length - 1] || null,
+            hasMore: snapshot.docs.length === pageSize,
+          });
         },
         (err) => onError?.(err),
       );
@@ -157,7 +165,24 @@ export const conversationsMessagingService = {
     }
   },
 
-  async createOrGetDirectThread(db, uid, otherUserId, meName, otherName) {
+  async loadOlderMessages(db, conversationId, oldestCursor, pageSize = 50) {
+    if (!conversationId || !oldestCursor) return { messages: [], oldestCursor: null, hasMore: false };
+    const messagesRef = collection(db, 'conversations', conversationId, 'messages');
+    const q = query(
+      messagesRef,
+      orderBy('timestamp', 'desc'),
+      startAfter(oldestCursor),
+      limit(pageSize),
+    );
+    const snapshot = await getDocs(q);
+    return {
+      messages: snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).reverse(),
+      oldestCursor: snapshot.docs[snapshot.docs.length - 1] || oldestCursor,
+      hasMore: snapshot.docs.length === pageSize,
+    };
+  },
+
+  async createOrGetDirectThread(db, uid, otherUserId, meName, otherName, options = {}) {
     if (!uid || !otherUserId) {
       throw new Error('createOrGetDirectThread requires uid and otherUserId');
     }
@@ -196,7 +221,20 @@ export const conversationsMessagingService = {
         return isDirect && participants.includes(uid) && participants.includes(otherUserId);
       });
 
-    if (existing?.id) return existing.id;
+    if (existing?.id) {
+      if (options.context) {
+        try {
+          await updateDoc(doc(db, 'conversations', existing.id), {
+            contexts: arrayUnion(String(options.context)),
+            ...(options.matchId ? { datingMatchId: String(options.matchId) } : {}),
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          // Context is presentation metadata; never block an existing DM from opening.
+        }
+      }
+      return existing.id;
+    }
 
     // Production-hardened schema (required by firestore.rules):
     // - type: 'dm'
@@ -211,6 +249,8 @@ export const conversationsMessagingService = {
 
       // Extras used by the UI; rules allow additional fields.
       participantNames: [meName, otherName],
+      contexts: options.context ? [String(options.context)] : [],
+      ...(options.matchId ? { datingMatchId: String(options.matchId) } : {}),
       unreadCount: {
         [uid]: 0,
         [otherUserId]: 0,
@@ -226,16 +266,39 @@ export const conversationsMessagingService = {
   },
 
   async sendMessage(db, conversationId, senderId, senderName, text) {
+    return this.sendStructuredMessage(db, conversationId, senderId, senderName, {
+      text,
+      type: 'text',
+    });
+  },
+
+  async sendGiftMessage(db, conversationId, senderId, senderName, gift) {
+    const giftName = String(gift?.name || 'Gift');
+    const emoji = String(gift?.emoji || '🎁');
+    const coinCost = Math.max(0, Number(gift?.coinCost || gift?.cost || 0));
+    return this.sendStructuredMessage(db, conversationId, senderId, senderName, {
+      text: `${emoji} Sent ${giftName}`,
+      type: 'gift',
+      giftId: String(gift?.giftId || ''),
+      giftName,
+      giftEmoji: emoji,
+      coinCost,
+    });
+  },
+
+  async sendStructuredMessage(db, conversationId, senderId, senderName, payload) {
     const messagesRef = collection(db, 'conversations', conversationId, 'messages');
     const { ref: conversationRef, snap } = await getConversationDoc(db, conversationId);
     const conversation = snap.exists() ? snap.data() : null;
+    const text = String(payload?.text || '').trim();
 
     // Create message
     await addDoc(messagesRef, {
       senderId,
       senderName,
       text,
-      type: 'text',
+      ...payload,
+      type: payload?.type || 'text',
       createdAt: serverTimestamp(),
       timestamp: serverTimestamp(),
       status: 'sent',
