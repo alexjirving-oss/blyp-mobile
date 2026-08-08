@@ -1,5 +1,5 @@
 ﻿import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, FlatList, ScrollView, TouchableOpacity, Image, StyleSheet, ActivityIndicator, RefreshControl, Modal } from "react-native";
+import { View, Text, FlatList, ScrollView, TouchableOpacity, Image, StyleSheet, ActivityIndicator, RefreshControl, Modal, Alert } from "react-native";
 import { subscribeToLiveStreams } from "../services/LiveService";
 import { useNavigation, CommonActions, StackActions } from "@react-navigation/native";
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,6 +9,7 @@ import AvatarRing from './motion/AvatarRing';
 import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import { useAuth } from '../hooks/useCommon';
 import { isFollowing, followUser, unfollowUser, getFollowersCount } from '../utils/followUtils';
+import { getLiveSessionStatus } from '../api/ivsLiveApi';
 
 export default function LiveUsersTab() {
   const [liveUsers, setLiveUsers] = useState([]);
@@ -73,10 +74,30 @@ export default function LiveUsersTab() {
     }
   }, [uid, previewHostUid, rel.iFollow, relBusy]);
 
-  const joinLive = useCallback((item) => {
+  const joinLive = useCallback(async (item) => {
     if (!item?.id && !item?.streamId) return;
     const streamId = item.streamId || item.id || item.liveId || item.sessionId || null;
     if (!streamId) return;
+
+    // Preflight against Dynamo LIVE before pushing viewer UI. Ghost Firestore
+    // cards (ended host, client cleanup missed) used to land Alex on a dead
+    // join that looked like "cannot watch as guest/viewer".
+    try {
+      const status = await getLiveSessionStatus(String(streamId));
+      if (!status?.live) {
+        setPreviewItem(null);
+        setRefreshTick((n) => n + 1);
+        Alert.alert(
+          'Stream ended',
+          'This live is no longer available. Pull to refresh the Live list.',
+        );
+        return;
+      }
+    } catch (probeErr) {
+      console.warn('[LiveUsersTab][JOIN_PREFLIGHT_FAIL]', probeErr?.message || String(probeErr));
+      // Fall through — join path still clears ghosts on session_not_found.
+    }
+
     const params = {
       mode: 'viewer',
       streamId,

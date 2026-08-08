@@ -1064,33 +1064,248 @@ export async function setPostModerationHiddenFs(
  * Matches the Cloud Functions outbox shape so notificationDispatch can send it.
  */
 /** Remote kill-switch for live streaming (appConfig/streaming). */
-/** Best-effort: mark a Firestore liveStreams doc ended so admin Live list refreshes. */
+/**
+ * Server-authoritative live directory publish.
+ * Card visibility must track Dynamo LIVE — never rely solely on the host client
+ * Firestore write (Cognito/Firebase uid mismatch or rules can leave ghosts).
+ */
+export async function publishFirestoreLiveDirectory(input: {
+  streamId: string;
+  hostUserId: string;
+  title?: string | null;
+}): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const streamId = String(input.streamId || '').trim();
+  const hostUserId = String(input.hostUserId || '').trim();
+  if (!fs || !streamId || !hostUserId) return { ok: false, detail: 'unavailable' };
+
+  let hostUsername: string | null = null;
+  let hostDisplayName: string | null = null;
+  let hostPhotoURL: string | null = null;
+  try {
+    const userSnap = await fs.collection('users').doc(hostUserId).get();
+    if (userSnap.exists) {
+      const u = userSnap.data() || {};
+      hostUsername = str(u.username || u.handle || '') || null;
+      hostDisplayName =
+        str(u.displayName || u.name || u.username || u.handle || '') || hostUserId;
+      hostPhotoURL = str(u.photoURL || u.avatarUrl || u.profilePicture || '') || null;
+    }
+  } catch {
+    // best-effort identity enrichment
+  }
+  if (!hostDisplayName) hostDisplayName = hostUserId;
+
+  const title = str(input.title || '').trim() || 'Live Stream';
+  const livePayload = {
+    streamId,
+    userId: hostUserId,
+    hostUid: hostUserId,
+    hostDisplayName,
+    hostUsername,
+    hostPhotoURL,
+    title,
+    status: 'live',
+    directoryReady: true,
+    viewerCount: 0,
+    peakViewerCount: 0,
+    totalViews: 0,
+    likes: 0,
+    lastHeartbeatAt: FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+    adminForceEnded: false,
+  };
+
+  try {
+    await Promise.all([
+      fs.collection('liveStreams').doc(streamId).set(livePayload, { merge: true }),
+      fs.collection('streams').doc(streamId).set(
+        {
+          hostUid: hostUserId,
+          hostDisplayName,
+          hostUsername,
+          hostPhotoURL,
+          title,
+          status: 'live',
+          directoryReady: true,
+          createdAt: FieldValue.serverTimestamp(),
+          viewerCount: 0,
+          peakViewerCount: 0,
+          totalViews: 0,
+          likes: 0,
+        },
+        { merge: true },
+      ),
+      fs.collection('users').doc(hostUserId).set(
+        {
+          status: 'live',
+          currentStreamId: streamId,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    ]);
+    logger.info({ streamId, hostUserId }, '[firestore-admin] publishFirestoreLiveDirectory ok');
+    return { ok: true };
+  } catch (e: any) {
+    logger.error(
+      { err: e?.message || String(e), streamId, hostUserId },
+      '[firestore-admin] publishFirestoreLiveDirectory failed',
+    );
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
+/** End every status=live directory card for a host except the active session. */
+export async function endPriorLiveDirectoryForHost(
+  hostUserId: string,
+  exceptStreamId?: string | null,
+): Promise<{ ok: boolean; ended: number; detail?: string }> {
+  const fs = getFirestore();
+  const hostId = String(hostUserId || '').trim();
+  const exceptId = String(exceptStreamId || '').trim();
+  if (!fs || !hostId) return { ok: false, ended: 0, detail: 'unavailable' };
+
+  const endOne = async (id: string) => {
+    await endFirestoreStream(id);
+  };
+
+  try {
+    const fields = ['hostUid', 'userId'] as const;
+    const seen = new Set<string>();
+    for (const field of fields) {
+      let snap;
+      try {
+        snap = await fs
+          .collection('liveStreams')
+          .where(field, '==', hostId)
+          .where('status', '==', 'live')
+          .limit(25)
+          .get();
+      } catch (indexErr: any) {
+        // Composite index may be missing — fall back to host field only and filter.
+        logger.warn(
+          { field, err: indexErr?.message || String(indexErr) },
+          '[firestore-admin] endPriorLiveDirectoryForHost falling back',
+        );
+        snap = await fs.collection('liveStreams').where(field, '==', hostId).limit(40).get();
+      }
+      for (const doc of snap.docs) {
+        if (exceptId && doc.id === exceptId) continue;
+        if (seen.has(doc.id)) continue;
+        const status = String((doc.data() || {}).status || '').toLowerCase();
+        if (status && status !== 'live') continue;
+        seen.add(doc.id);
+        await endOne(doc.id);
+      }
+    }
+    return { ok: true, ended: seen.size };
+  } catch (e: any) {
+    logger.warn(
+      { err: e?.message || String(e), hostUserId: hostId },
+      '[firestore-admin] endPriorLiveDirectoryForHost failed',
+    );
+    return { ok: false, ended: 0, detail: e?.message || String(e) };
+  }
+}
+
+/** Best-effort: mark a Firestore liveStreams doc ended so discovery + profile badges clear. */
 export async function endFirestoreStream(streamId: string): Promise<{ ok: boolean; detail?: string }> {
   const fs = getFirestore();
   const id = String(streamId || '').trim();
   if (!fs || !id) return { ok: false, detail: 'unavailable' };
   try {
+    let hostUid: string | null = null;
+    try {
+      const existing = await fs.collection('liveStreams').doc(id).get();
+      if (existing.exists) {
+        const data = existing.data() || {};
+        hostUid = str(data.hostUid || data.userId || '') || null;
+      }
+    } catch {
+      // ignore — still attempt end write
+    }
+
     const endedPayload = {
       status: 'ended',
       directoryReady: false,
       endedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
+      lastHeartbeatAt: FieldValue.serverTimestamp(),
       adminForceEnded: true,
+      viewerCount: 0,
     };
     await Promise.all([
       fs.collection('liveStreams').doc(id).set(endedPayload, { merge: true }),
       fs.collection('streams').doc(id).set(
         {
           status: 'ended',
+          directoryReady: false,
           endedAt: FieldValue.serverTimestamp(),
+          viewerCount: 0,
         },
         { merge: true },
       ),
     ]);
+
+    // Clear profile "is live" badge / currentStreamId when it still points here.
+    if (hostUid) {
+      try {
+        const userRef = fs.collection('users').doc(hostUid);
+        const userSnap = await userRef.get();
+        const cur = userSnap.exists ? str((userSnap.data() || {}).currentStreamId || '') : '';
+        if (!cur || cur === id) {
+          await userRef.set(
+            {
+              status: 'offline',
+              currentStreamId: null,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+        }
+      } catch (userErr: any) {
+        logger.warn(
+          { err: userErr?.message || String(userErr), streamId: id, hostUid },
+          '[firestore-admin] endFirestoreStream user status clear failed',
+        );
+      }
+    }
+
     return { ok: true };
   } catch (e: any) {
     logger.error({ err: e?.message || String(e), streamId: id }, '[firestore-admin] endFirestoreStream failed');
     return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
+/** Ops / join-path: end status=live cards whose heartbeat is stale. */
+export async function sweepStaleLiveDirectory(opts?: {
+  staleMs?: number;
+  limit?: number;
+}): Promise<{ ok: boolean; swept: number; ids: string[]; detail?: string }> {
+  const fs = getFirestore();
+  if (!fs) return { ok: false, swept: 0, ids: [], detail: 'unavailable' };
+  const staleMs = Math.max(60_000, Number(opts?.staleMs) || 5 * 60_000);
+  const limit = Math.min(100, Math.max(1, Number(opts?.limit) || 40));
+  const cutoff = new Date(Date.now() - staleMs);
+  const ids: string[] = [];
+  try {
+    // status=live without a recent heartbeat — these are unjoinable ghosts.
+    const snap = await fs.collection('liveStreams').where('status', '==', 'live').limit(limit).get();
+    for (const doc of snap.docs) {
+      const data = doc.data() || {};
+      const hb = data.lastHeartbeatAt?.toDate?.() as Date | undefined;
+      if (hb && hb.getTime() >= cutoff.getTime()) continue;
+      const result = await endFirestoreStream(doc.id);
+      if (result.ok) ids.push(doc.id);
+    }
+    logger.warn({ swept: ids.length, staleMs, ids }, '[firestore-admin] sweepStaleLiveDirectory');
+    return { ok: true, swept: ids.length, ids };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[firestore-admin] sweepStaleLiveDirectory failed');
+    return { ok: false, swept: ids.length, ids, detail: e?.message || String(e) };
   }
 }
 

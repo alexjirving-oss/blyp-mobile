@@ -9,6 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   Image,
@@ -94,6 +95,7 @@ import { subscribeWatchHistory } from '../../services/watchHistoryService';
 import { fixStorageUrl } from '../../utils/urlUtils';
 import { resolveFeedVideoUri } from '../../utils/forYouFeedList';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
+import { getLiveSessionStatus } from '../../api/ivsLiveApi';
 import {
   prefetchPostWindow,
   prefetchUriList,
@@ -273,8 +275,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     return unsub;
   }, [uid]);
 
-  // Personalized "For You" rail — ranked mix of follows + interests.
-  useEffect(() => {
+  // Personalized "For You" rail — ranked mix of follows + interests, then a
+  // fresh session mix so order changes on each load / Home revisit / pull-refresh.
+  const refreshForYouRail = useCallback(() => {
     let active = true;
     getForYouPosts(interestTerms, Array.from(followingSet), 12).then((r) => {
       if (active) {
@@ -292,9 +295,25 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, interestKey, followingSet]);
+  }, [interestTerms, followingSet]);
 
+  useEffect(() => {
+    const cancel = refreshForYouRail();
+    return cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, interestKey, followingSet, refreshForYouRail]);
+
+  // Re-mix the rail when Home regains focus (mount effect already loaded once).
+  const forYouFocusArmedRef = useRef(false);
+  useEffect(() => {
+    if (!isScreenFocused) return undefined;
+    if (!forYouFocusArmedRef.current) {
+      forYouFocusArmedRef.current = true;
+      return undefined;
+    }
+    const cancel = refreshForYouRail();
+    return cancel;
+  }, [isScreenFocused, refreshForYouRail]);
   const blyp = (initialQuery) => navigation.navigate('Blyp', initialQuery ? { initialQuery } : undefined);
 
   // Load saved reminders, and refresh whenever the home screen regains focus
@@ -639,8 +658,21 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     if (typeof onOpenPage === 'function') onOpenPage('A');
   };
 
-  const openLive = (stream) => {
+  const openLive = async (stream) => {
     const streamId = stream.streamId || stream.id || stream.liveId;
+    if (!streamId) return;
+    try {
+      const status = await getLiveSessionStatus(String(streamId));
+      if (!status?.live) {
+        Alert.alert(
+          'Stream ended',
+          'This live is no longer available. Pull to refresh.',
+        );
+        return;
+      }
+    } catch (probeErr) {
+      console.warn('[home] openLive preflight failed', probeErr?.message || String(probeErr));
+    }
     navigation.navigate('LiveStreamScreen', {
       mode: 'viewer',
       streamId,

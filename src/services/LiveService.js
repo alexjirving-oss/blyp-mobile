@@ -293,12 +293,16 @@ export async function endStream(streamId, userId) {
   // as "live" after the host ends it.
   // Reset concurrent viewerCount to 0 (no one is watching an ended stream), but
   // preserve cumulative stats (likes, totalViews, peakViewerCount) for the summary.
+  // Always clear directoryReady so discovery + HomeBase hide the card immediately
+  // (do not wait for the 90s heartbeat grace window).
+  const endedPatch = {
+    status: "ended",
+    directoryReady: false,
+    endedAt: serverTimestamp(),
+    viewerCount: 0,
+  };
   try {
-    await db.collection("streams").doc(streamId).update({
-      status: "ended",
-      endedAt: serverTimestamp(),
-      viewerCount: 0,
-    });
+    await db.collection("streams").doc(streamId).set(endedPatch, { merge: true });
   } catch (error) {
     console.warn('[LiveService][endStream] streams update failed', {
       streamId,
@@ -307,11 +311,7 @@ export async function endStream(streamId, userId) {
   }
 
   try {
-    await db.collection("liveStreams").doc(streamId).update({
-      status: "ended",
-      endedAt: serverTimestamp(),
-      viewerCount: 0,
-    });
+    await db.collection("liveStreams").doc(streamId).set(endedPatch, { merge: true });
   } catch (error) {
     console.warn('[LiveService][endStream] liveStreams update failed', {
       streamId,
@@ -647,7 +647,10 @@ export function subscribeToLiveStreams({ onChange, onError } = {}) {
 
       const registeredStreams = streams.filter((s) => {
         const raw = snapshot.docs.find((d) => d.id === s.id);
-        return isDirectoryVisible(raw?.data?.() || {});
+        const data = raw?.data?.() || {};
+        // Fail closed: require explicit live status + directoryReady.
+        if (String(data.status || '').toLowerCase() !== 'live') return false;
+        return isDirectoryVisible(data);
       });
 
       // Hide streams hosted by anyone the viewer has blocked. (Block list is

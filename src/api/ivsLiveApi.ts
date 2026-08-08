@@ -1001,6 +1001,25 @@ export async function joinLiveMass(sessionId: string, displayName?: string): Pro
 }
 
 /**
+ * Probe whether a Live-tab card is still joinable (Dynamo LIVE).
+ * On miss the backend clears the Firestore ghost.
+ */
+export async function getLiveSessionStatus(
+  sessionId: string,
+): Promise<{ sessionId: string; live: boolean; status: string; hostUserId: string | null }> {
+  const id = String(sessionId || '').trim();
+  if (!id) {
+    return { sessionId: '', live: false, status: 'MISSING', hostUserId: null };
+  }
+  return callLiveBackend<{
+    sessionId: string;
+    live: boolean;
+    status: string;
+    hostUserId: string | null;
+  }>(`/api/live/session/${encodeURIComponent(id)}/status`, 'GET');
+}
+
+/**
  * Request to join as a guest (applies for invitation).
  */
 export async function requestGuestSlot(sessionId: string, slotIndexRequested?: number): Promise<void> {

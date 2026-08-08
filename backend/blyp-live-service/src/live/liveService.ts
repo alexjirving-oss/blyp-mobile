@@ -229,7 +229,7 @@ export async function startLiveSession(hostUserId: string, title: string, region
     createdAt,
   };
 
-  // 2. Persist session
+  // 2. Persist session (Dynamo is source of truth for joinability).
   await createSession(session);
 
   // 3. Create host token (same region as the stage).
@@ -246,6 +246,34 @@ export async function startLiveSession(hostUserId: string, title: string, region
   const hostToken = tokenRes.participantToken?.token;
   if (!hostToken) {
     throw new Error('Failed to create host participant token');
+  }
+
+  // 4. Server-authoritative discovery card. Publish ONLY after Dynamo LIVE exists
+  // so viewers never see a joinable card for a missing session. Also retire any
+  // prior status=live cards for this host (stale ghosts / crashed ends).
+  try {
+    const { publishFirestoreLiveDirectory, endPriorLiveDirectoryForHost } = await import(
+      '../admin/firestoreAdmin'
+    );
+    const prior = await endPriorLiveDirectoryForHost(hostUserId, sessionId);
+    const published = await publishFirestoreLiveDirectory({
+      streamId: sessionId,
+      hostUserId,
+      title,
+    });
+    console.log('[LIVE][DIRECTORY_PUBLISH]', {
+      sessionId,
+      hostUserId,
+      priorEnded: prior.ended,
+      published: published.ok,
+      detail: published.detail,
+    });
+  } catch (fsErr: any) {
+    console.warn('[LIVE][DIRECTORY_PUBLISH_FAIL]', {
+      sessionId,
+      hostUserId,
+      message: fsErr?.message || String(fsErr),
+    });
   }
 
   return { session, hostToken };

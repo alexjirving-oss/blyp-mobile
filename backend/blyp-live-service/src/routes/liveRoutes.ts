@@ -29,7 +29,11 @@ import { logger } from '../config/logger';
 import { headerValueDiagnostics } from '../utils/headerSanitize';
 import { requireNotBanned } from '../admin/banGuard';
 import { requireCanGoLive } from '../admin/liveRestrictionGuard';
-import { endFirestoreStream } from '../admin/firestoreAdmin';
+import {
+  endFirestoreStream,
+  sweepStaleLiveDirectory,
+} from '../admin/firestoreAdmin';
+import { getSessionById } from '../live/liveSessionStore';
 
 const router = Router();
 
@@ -124,6 +128,38 @@ router.post('/live/start', requireNotBanned, requireCanGoLive, async (req: Authe
       error: 'Failed to start live session',
       code: err?.code ?? 'UNKNOWN_ERROR',
       detail: err?.originalMessage ?? err?.message,
+    });
+  }
+});
+
+/**
+ * Lightweight joinability probe for client Live-tab taps.
+ * Returns whether Dynamo still has a LIVE session for this id.
+ * Also opportunistically sweeps stale Firestore ghosts so badges/cards clear.
+ */
+router.get('/live/session/:sessionId/status', async (req: AuthedRequest, res) => {
+  try {
+    const sessionId = String(req.params?.sessionId || '').trim();
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId required', code: 'MISSING_SESSION_ID' });
+    }
+    const session = await getSessionById(sessionId);
+    const live = !!(session && session.status === 'LIVE');
+    if (!live) {
+      void clearDirectoryGhost(sessionId, 'status_probe_miss');
+    }
+    // Best-effort background sweep of other stale cards (non-blocking).
+    void sweepStaleLiveDirectory({ staleMs: 3 * 60_000, limit: 25 });
+    return res.json({
+      sessionId,
+      live,
+      status: session?.status || 'MISSING',
+      hostUserId: session?.hostUserId || null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'Failed to resolve session status',
+      detail: err?.message || String(err),
     });
   }
 });

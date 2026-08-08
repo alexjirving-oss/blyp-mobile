@@ -54,7 +54,7 @@ type UseIVSViewerSessionResult = {
 };
 
 export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewerSessionResult {
-  const { streamId, enabled, autoJoin = true, preferPlayback = true, displayName } = args;
+  const { streamId, enabled, autoJoin = true, preferPlayback = false, displayName } = args;
   const [connectionState, setConnectionState] = useState<IVSConnectionState>('idle');
   const [viewerTransport, setViewerTransport] = useState<IVSViewerTransport>('realtime');
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>(NetworkQuality.UNKNOWN);
@@ -232,7 +232,14 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       });
     } catch (err) {
       console.error('[IVS_VIEWER][JOIN_ERROR]', err);
-      const msg = err instanceof Error ? err.message : 'Failed to join stream';
+      const raw = err instanceof Error ? err.message : String(err || 'Failed to join stream');
+      // Preserve structured codes so LiveStreamScreen can map SESSION_NOT_FOUND
+      // without treating every failure as a generic "ended" toast.
+      const code = (err as any)?.code || (err as any)?.response?.code;
+      const msg =
+        code === 'SESSION_NOT_FOUND' || /session_not_found|not found or not live/i.test(raw)
+          ? `session_not_found: ${raw}`
+          : raw;
       setError(msg);
       setConnectionState('disconnected');
       setStageArn(undefined);
