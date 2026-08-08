@@ -456,15 +456,32 @@ export async function fetchDiscoveryCards(uid) {
     candidates.push({ id, data: cand });
   }
 
-  const cards = [];
-  for (const c of candidates) {
-    try {
-      cards.push(await enrichCard(c.id, c.data));
-    } catch {
-      /* skip bad profile */
-    }
-  }
-  return cards;
+  const cards = await Promise.all(
+    candidates.map(async (candidate) => {
+      try {
+        const card = await enrichCard(candidate.id, candidate.data);
+        const hasViewerGeo =
+          Number.isFinite(viewerPrefs.geoLat) && Number.isFinite(viewerPrefs.geoLon);
+        const hasCandidateGeo =
+          Number.isFinite(candidate.data.geoLat) && Number.isFinite(candidate.data.geoLon);
+        const distanceKm =
+          hasViewerGeo && hasCandidateGeo
+            ? Math.round(
+                haversineKm(
+                  viewerPrefs.geoLat,
+                  viewerPrefs.geoLon,
+                  candidate.data.geoLat,
+                  candidate.data.geoLon,
+                ),
+              )
+            : null;
+        return { ...card, distanceKm };
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return cards.filter(Boolean);
 }
 
 /**
@@ -610,6 +627,85 @@ export async function fetchMatches(uid) {
 
   out.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   return out;
+}
+
+/**
+ * People who liked the current user. Firestore rules only expose likes where
+ * the signed-in user is sender or recipient, so this can safely power the
+ * existing Plus "Likes you" experience without adding a second write path.
+ */
+export async function fetchIncomingLikes(uid) {
+  if (!uid || !firebaseEnabled || !db) return [];
+  await loadBlockedUsers().catch(() => {});
+  const blocked = getBlockedSet();
+  // A reverse like or pass means this incoming like has already been handled.
+  // Keep Likes focused on pending decisions; mutual likes live in Matches.
+  const handled = await loadSeenTargetIds(uid);
+  const viewerPrefs = await getDatingPrefs(uid);
+
+  let docs = [];
+  try {
+    const snap = await db
+      .collection('datingLikes')
+      .where('toUid', '==', uid)
+      .limit(50)
+      .get();
+    docs = snap?.docs || [];
+  } catch (e) {
+    console.warn('[dating] incoming likes query failed', e?.message || String(e));
+    return [];
+  }
+
+  const likes = await Promise.all(
+    docs.map(async (doc) => {
+      const data = typeof doc.data === 'function' ? doc.data() : doc.data;
+      const fromUid = typeof data?.fromUid === 'string' ? data.fromUid : '';
+      if (!fromUid || fromUid === uid || blocked.has(fromUid) || handled.has(fromUid)) {
+        return null;
+      }
+
+      try {
+        const prefsSnap = await db.collection('datingPrefs').doc(fromUid).get();
+        if (!snapExists(prefsSnap)) return null;
+        const candidatePrefs = normalize(snapData(prefsSnap));
+        if (!canParticipateInDiscover(candidatePrefs)) return null;
+
+        const card = await enrichCard(fromUid, candidatePrefs);
+        if (card.unavailable) return null;
+
+        const hasViewerGeo =
+          Number.isFinite(viewerPrefs.geoLat) && Number.isFinite(viewerPrefs.geoLon);
+        const hasCandidateGeo =
+          Number.isFinite(candidatePrefs.geoLat) && Number.isFinite(candidatePrefs.geoLon);
+        const distanceKm =
+          hasViewerGeo && hasCandidateGeo
+            ? Math.round(
+                haversineKm(
+                  viewerPrefs.geoLat,
+                  viewerPrefs.geoLon,
+                  candidatePrefs.geoLat,
+                  candidatePrefs.geoLon,
+                ),
+              )
+            : null;
+
+        return {
+          ...card,
+          id: fromUid,
+          otherUserId: fromUid,
+          likeId: doc.id,
+          likedAt: Number(data?.createdAt || 0) || 0,
+          distanceKm,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return likes
+    .filter(Boolean)
+    .sort((a, b) => (b.likedAt || 0) - (a.likedAt || 0));
 }
 
 /** @deprecated Phase 1 stub — kept for any leftover imports. */
