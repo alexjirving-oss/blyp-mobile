@@ -103,7 +103,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
       await setPushEnabled(uid, next);
       if (next && !granted) await requestPermission();
     } catch (error) {
-      Alert.alert('CouldnÔÇÖt save', error?.message || 'Try again.');
+      Alert.alert('Couldn't save', error?.message || 'Try again.');
     } finally {
       setBusyKey(null);
     }
@@ -119,7 +119,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
       await setCategoryEnabled(uid, category, next);
       if (next && !granted) await requestPermission();
     } catch (error) {
-      Alert.alert('CouldnÔÇÖt save', error?.message || 'Try again.');
+      Alert.alert('Couldn't save', error?.message || 'Try again.');
     } finally {
       setBusyKey(null);
     }
@@ -230,7 +230,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
 
       <Text style={[styles.sectionTitle, styles.sectionSpaced]}>People</Text>
       <Text style={styles.hint}>
-        Open someoneÔÇÖs profile → Notifications from @user — or manage overrides below.
+        Open someone's profile → Notifications from @user — or manage overrides below.
       </Text>
 
       {overrideRows.length === 0 ? (
@@ -256,7 +256,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
             <Icon name="person-outline" size={22} color="#A1A1AA" />
             <View style={styles.rowText}>
               <Text style={styles.actionText} numberOfLines={1}>
-                Custom ┬À {row.targetUid.slice(0, 10)}…
+                Custom · {row.targetUid.slice(0, 10)}…
               </Text>
               <Text style={styles.rowSubtitle}>
                 {row.mode === 'everything'

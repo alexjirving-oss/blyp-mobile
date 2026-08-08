@@ -228,7 +228,7 @@ export function spotifyConnectSetupHint() {
   return (
     `Create a Spotify Developer app, enable Spotify PKCE, add redirect URI:\n${redirect}\n` +
     `Put the Client ID in EXPO_PUBLIC_SPOTIFY_CLIENT_ID (EAS + local), then rebuild. Package: ${
-      Platform.OS === 'android' ? 'com.blyp.app' : 'iOS bundle'
+      Platform.OS === 'android' ? 'com.blyp.mobile' : 'iOS bundle'
     }. Full steps: docs/SPOTIFY_CONNECT.md`
   );
 }

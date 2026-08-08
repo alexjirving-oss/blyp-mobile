@@ -62,6 +62,17 @@ export async function mintLiveKitToken(callId) {
   }
 }
 
+function pauseSpotifyForCall(reason) {
+  try {
+    // Soft-fail: never block call setup if Spotify is unreachable / unlinked.
+    // eslint-disable-next-line global-require
+    const { pauseSpotifyForBlypAudio } = require('./spotifyAudioCoordinator');
+    pauseSpotifyForBlypAudio(reason).catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function startCall({
   callerId,
   calleeId,
@@ -71,6 +82,8 @@ export async function startCall({
 }) {
   const micOk = await ensureMicPermission();
   if (!micOk) return { ok: false, reason: 'mic-denied' };
+
+  pauseSpotifyForCall('call_start');
 
   const created = await messengerExtrasService.createCall(db, {
     callerId,
@@ -90,6 +103,7 @@ export async function answerCall(callId, uid) {
   if (!micOk) {
     return { ok: false, reason: 'mic-denied' };
   }
+  pauseSpotifyForCall('call_answer');
   await messengerExtrasService.updateCallStatus(db, callId, 'active', {
     answeredBy: uid,
   });

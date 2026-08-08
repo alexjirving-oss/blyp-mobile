@@ -370,7 +370,7 @@ export async function clearPersonOverride(uid, targetUidValue) {
 }
 
 /**
- * List people the user has customized (for the settings ÔÇ£PeopleÔÇØ section).
+ * List people the user has customized (for the settings "People" section).
  */
 export function subscribePersonOverridesList(uid, callback) {
   if (!uid || uid === 'anon' || typeof callback !== 'function') return () => {};

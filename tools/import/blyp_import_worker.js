@@ -13,9 +13,9 @@
  * containerise it for Cloud Run later. It loops forever, one job at a time.
  *
  * Prerequisites:
- *   ÔÇó yt-dlp on PATH                (https://github.com/yt-dlp/yt-dlp)
- *   ÔÇó ffmpeg on PATH (yt-dlp merges)
- *   ÔÇó Admin credentials, either:
+ *   • yt-dlp on PATH                (https://github.com/yt-dlp/yt-dlp)
+ *   • ffmpeg on PATH (yt-dlp merges)
+ *   • Admin credentials, either:
  *       - GOOGLE_APPLICATION_CREDENTIALS=<path to service-account.json>, or
  *       - `gcloud auth application-default login` (uses your ADC)
  *
@@ -310,7 +310,7 @@ async function processJob(ref) {
       skipped += 1;
       if (!(await safeJobUpdate({
         done, skipped, failed,
-        message: `Skipping ${skipped} already imported ┬À ${done + skipped} of ${total}…`,
+        message: `Skipping ${skipped} already imported · ${done + skipped} of ${total}…`,
       }))) {
         await finishCanceled(n - 1);
         return;

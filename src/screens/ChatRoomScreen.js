@@ -309,8 +309,12 @@ const ChatRoomScreen = ({ route, navigation }) => {
           enabled={Platform.OS === 'ios'}
           style={[
             styles.inputContainer,
-            // Single pad owner: IME lift or home-indicator — never both.
-            { paddingBottom: Math.max(12, bottomInset || 12) },
+            // Android: hook owns IME/safe pad. iOS: KAV lifts; closed-keyboard safe area here.
+            {
+              paddingBottom: Platform.OS === 'android'
+                ? Math.max(12, bottomInset || 12)
+                : Math.max(12, keyboardOpen ? 12 : bottomInset || 12),
+            },
           ]}
         >
           <View ref={composerRef} style={styles.inputRow}>

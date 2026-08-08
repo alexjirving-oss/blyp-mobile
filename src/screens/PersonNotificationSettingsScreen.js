@@ -66,7 +66,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
         categories: nextMode === 'custom' ? categories : {},
       });
     } catch (error) {
-      Alert.alert('CouldnÔÇÖt save', error?.message || 'Try again.');
+      Alert.alert('Couldn't save', error?.message || 'Try again.');
     } finally {
       setBusy(null);
     }
@@ -87,7 +87,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
         categories: nextCategories,
       });
     } catch (error) {
-      Alert.alert('CouldnÔÇÖt save', error?.message || 'Try again.');
+      Alert.alert('Couldn't save', error?.message || 'Try again.');
     } finally {
       setBusy(null);
     }
@@ -107,7 +107,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
             try {
               await clearPersonOverride(uid, targetUid);
             } catch (error) {
-              Alert.alert('CouldnÔÇÖt reset', error?.message || 'Try again.');
+              Alert.alert('Couldn't reset', error?.message || 'Try again.');
             } finally {
               setBusy(null);
             }
@@ -165,7 +165,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
           <Text style={[styles.sectionTitle, styles.sectionSpaced]}>Categories</Text>
           <Text style={styles.hint}>
             Off = never from this person. On = always from them. Leave unset to follow global.
-            Tap a switch twice after On to clear back to ÔÇ£follow globalÔÇØ via long-press reset
+            Tap a switch twice after On to clear back to "follow global" via long-press reset
             below, or use Reset.
           </Text>
           {CATEGORY_KEYS.map((key) => {

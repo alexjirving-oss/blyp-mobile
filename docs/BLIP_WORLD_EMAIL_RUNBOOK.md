@@ -64,7 +64,7 @@ Do **not** put Cognito codes on Workspace, and do **not** expect SES alone to gi
 | Type | What it is | Send? | Receive? | Example |
 |---|---|---|---|---|
 | **Human mailbox** | Paid Workspace user seat | Yes | Yes | `alex@blip.world` |
-| **Alias** | Extra address on a mailbox (free) | Optional | Yes → owner | `william@` → AlexÔÇÖs mailbox until William has a seat |
+| **Alias** | Extra address on a mailbox (free) | Optional | Yes → owner | `william@` → Alex's mailbox until William has a seat |
 | **Shared inbox / Group** | Multi-person destination (Google Group recommended) | Via group settings | Yes → members | `support@`, `sales@` |
 | **Transactional-only sender** | App/API sends; humans should not use as primary inbox | System only | Prefer none / discard | `noreply@` |
 
@@ -133,7 +133,7 @@ App Cognito still targets **`no-reply@blyp.world`** via SES — keep that on `bl
 
 ## Alex runbook — finish Google Workspace on blip.world
 
-Agent **cannot** complete this without AlexÔÇÖs Google admin + GoDaddy logins (no DNS API / Workspace admin credentials in repo).
+Agent **cannot** complete this without Alex's Google admin + GoDaddy logins (no DNS API / Workspace admin credentials in repo).
 
 ### A. Subscribe / activate (Alex)
 
@@ -142,7 +142,7 @@ Agent **cannot** complete this without AlexÔÇÖs Google admin + GoDaddy logins
 3. Confirm domain verification (TXT already present — Workspace should see it).
 4. Confirm MX status in Admin → Apps → Google Workspace → Gmail → **MX records** = verified.
 
-### B. DNS at GoDaddy (Alex) — only whatÔÇÖs still missing
+### B. DNS at GoDaddy (Alex) — only what's still missing
 
 Path: **GoDaddy → Domains → blip.world → DNS**.
 
@@ -152,7 +152,7 @@ Path: **GoDaddy → Domains → blip.world → DNS**.
 | Keep SPF | Current flatten already includes `_spf.google.com` — OK |
 | Add DKIM | In Workspace Admin → Gmail → Authenticate email → generate DKIM → add the TXT (or CNAME) at GoDaddy → Start authentication |
 | Clean DMARC | Delete **one** of the duplicate `_dmarc` TXT records; keep a single `v=DMARC1; p=none; rua=mailto:dmarc@blip.world; fo=1` |
-| Later | After 1ÔÇô2 weeks of clean mail, tighten DMARC to `p=quarantine` then `p=reject` |
+| Later | After 1–2 weeks of clean mail, tighten DMARC to `p=quarantine` then `p=reject` |
 
 If Klaviyo (or SES) later sends from `blip.world`, **merge** their `include:` into SPF (one SPF TXT only).
 
@@ -195,7 +195,7 @@ Cursor browser automation reached `about:blank` / empty tab list only — **coul
 
 ## Domain mismatch summary (repo)
 
-| In repo / product | On AlexÔÇÖs stated mailbox domain |
+| In repo / product | On Alex's stated mailbox domain |
 |---|---|
 | `blyp.world` — landing, admin, privacy, share links, SES | `blip.world` — Google MX ready for human mail |
 | Cited: `privacy@`, `hello@`, `support@`, `safety@`, `no-reply@` **@blyp.world** | Create parallel `@blip.world` set now; later decide whether public pages should switch or keep product domain |

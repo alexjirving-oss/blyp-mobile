@@ -33,7 +33,21 @@ EXPO_PUBLIC_SPOTIFY_REDIRECT_URI=blyp://spotify
 - User opens **Hub → Spotify Connect** (or navigates to `SpotifyConnect`)
 - Links account once; tokens stored on-device
 - Resume/Pause uses Spotify Web API player endpoints (requires an active Spotify device — user should open Spotify once)
-- Unmuted For You / live / calls call `pauseSpotifyForBlypAudio`
+- Blyp pauses Spotify (soft-fail) when it needs audio focus:
+  - unmuted For You (`HomeScreen` → `pauseSpotifyForBlypAudio('for_you_unmuted')`)
+  - live join (`LiveStreamScreen` → `live_join`)
+  - call start / answer (`callService` → `call_start` / `call_answer`)
+
+## Dashboard checklist (copy/paste)
+
+| Setting | Value |
+|---------|--------|
+| App type | Web / mobile (PKCE; no client secret in the app) |
+| Redirect URI | `blyp://spotify` |
+| Client ID env | `EXPO_PUBLIC_SPOTIFY_CLIENT_ID` |
+| Redirect env (optional) | `EXPO_PUBLIC_SPOTIFY_REDIRECT_URI=blyp://spotify` |
+| Android package | `com.blyp.mobile` |
+| Scopes requested | `user-read-email`, `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`, `streaming` |
 
 ## Blocked without Alex
 

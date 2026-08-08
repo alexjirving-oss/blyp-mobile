@@ -1,33 +1,22 @@
-import { useEffect, useState } from 'react';
-import { Keyboard, Platform } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Dimensions, Keyboard, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 
 /**
  * Bottom inset for chat composers.
  *
- * 1.0.36-38 inferred the Android keyboard height from `Dimensions`/window
- * resize deltas plus a `measureInWindow` shortfall guess, sampled on a
- * setTimeout race (64/180/320/400ms). That mixed window vs screen coordinate
- * spaces and under/over-counted tall Gboard chrome, and the races settled at
- * different times than on slab phones — on Z Flip the composer would clip or
- * float with a visible gap depending on which timeout won, and re-folding
- * mid-type (cover -> main) was never re-measured correctly.
- *
- * Fix: read the real IME inset straight from the OS via Reanimated's
- * `useAnimatedKeyboard`, which drives a native WindowInsetsCompat /
- * WindowInsetsAnimationCallback listener (reanimated is already a native
- * dependency here — no new library, no rebuild). This is authoritative for
- * any screen shape or fold state and tracks live height changes, so it also
- * self-corrects if the keyboard height changes while still open (e.g.
- * unfolding a Flip mid-conversation). `isStatusBarTranslucentAndroid` /
- * `isNavigationBarTranslucentAndroid` match this app's real edge-to-edge
- * config (transparent status + nav bars everywhere via
- * `edgeToEdgeEnabled`/`styles.xml`), so Reanimated's own decor-margin
- * bookkeeping stays a no-op and the only effect is the height value.
+ * Hard Z Flip / foldable IME fix:
+ * - Authoritative height from Reanimated `useAnimatedKeyboard` (WindowInsetsCompat
+ *   / WindowInsetsAnimationCallback) — no measureInWindow races, live updates on
+ *   unfold / Gboard chrome growth.
+ * - Subtract any window shrink already applied by `adjustResize` so slab phones
+ *   that DO resize are not double-padded, while edge-to-edge Flip (often no
+ *   shrink) still gets the full IME inset.
+ * - Never stack safe-area under an open IME (nav bar sits under the keyboard).
  *
  * iOS: KeyboardAvoidingView owns IME lift; this hook reports `keyboardOpen`
- * and safe-area bottom when the keyboard is closed (unchanged behavior).
+ * and safe-area bottom when the keyboard is closed.
  *
  * @param {React.RefObject} [_composerRef] Unused — kept so existing call
  *   sites (`useKeyboardBottomInset(composerRef)`) don't need to change.
@@ -39,7 +28,9 @@ export default function useKeyboardBottomInset(_composerRef) {
     isNavigationBarTranslucentAndroid: true,
   });
   const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+  const [androidWindowShrink, setAndroidWindowShrink] = useState(0);
   const [iosKeyboardOpen, setIosKeyboardOpen] = useState(false);
+  const baselineWindowHRef = useRef(Dimensions.get('window').height);
 
   // Mirror the UI-thread keyboard height to JS state. Rounding to 2px avoids
   // a JS render on every sub-pixel animation tick while still tracking the
@@ -52,6 +43,30 @@ export default function useKeyboardBottomInset(_composerRef) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+
+    const refreshShrink = (winH) => {
+      const h = Math.round(winH || Dimensions.get('window').height || 0);
+      if (!h) return;
+      if (androidKeyboardHeight <= 0) {
+        baselineWindowHRef.current = h;
+        setAndroidWindowShrink(0);
+        return;
+      }
+      const baseline = baselineWindowHRef.current || h;
+      setAndroidWindowShrink(Math.max(0, Math.round(baseline - h)));
+    };
+
+    refreshShrink(Dimensions.get('window').height);
+    const dimSub = Dimensions.addEventListener?.('change', ({ window: win }) => {
+      refreshShrink(win?.height);
+    });
+    return () => {
+      try { dimSub?.remove?.(); } catch { /* ignore */ }
+    };
+  }, [androidKeyboardHeight]);
 
   useEffect(() => {
     if (Platform.OS === 'android') return undefined;
@@ -67,11 +82,11 @@ export default function useKeyboardBottomInset(_composerRef) {
 
   const keyboardOpen = Platform.OS === 'android' ? androidKeyboardHeight > 0 : iosKeyboardOpen;
   const safeBottom = Math.max(0, insets.bottom || 0);
+  const androidLift = Math.max(0, androidKeyboardHeight - androidWindowShrink);
 
-  // Single padding owner: IME inset while open, safe-area only while closed.
-  // Never add safe-area on top of the IME inset (nav bar is under the keyboard).
+  // Single padding owner: IME lift while open, safe-area only while closed.
   const bottomInset = Platform.OS === 'android'
-    ? (keyboardOpen ? androidKeyboardHeight : safeBottom)
+    ? (keyboardOpen ? androidLift : safeBottom)
     : (keyboardOpen ? 0 : safeBottom);
 
   return {

@@ -64,7 +64,7 @@ export default function ImportSchedule() {
     setBusy(postId + action);
     try {
       await api.post(`/admin/scheduled-posts/${encodeURIComponent(postId)}/action`, { action });
-      toast.push(`${action.replace("_", " ")} ┬À ${postId.slice(0, 8)}…`, "ok");
+      toast.push(`${action.replace("_", " ")} · ${postId.slice(0, 8)}…`, "ok");
       scheduled.reload();
     } catch (e) {
       toast.push(e instanceof Error ? e.message : String(e), "err");
@@ -87,7 +87,7 @@ export default function ImportSchedule() {
         stagger: { enabled: true, postsPerDay, startAt: Date.now(), isAdmin: true },
       };
       const out = await api.post<{ ok: boolean; id: string }>("/admin/social-imports", body);
-      toast.push(`Import queued ┬À ${out.id}`, "ok");
+      toast.push(`Import queued · ${out.id}`, "ok");
       setHandle("");
       imports.reload();
     } catch (e) {
@@ -226,14 +226,14 @@ export default function ImportSchedule() {
                     {r.createdAt ? fmtRelative(new Date(r.createdAt).toISOString()) : "—"}
                   </td>
                   <td><Badge kind="neutral">{r.status}</Badge></td>
-                  <td>@{r.handle} ┬À {r.platform}</td>
+                  <td>@{r.handle} · {r.platform}</td>
                   <td className="mono" style={{ fontSize: 12 }}>
-                    {r.done}/{r.total || "?"}{r.scheduled ? ` ┬À ${r.scheduled} queued` : ""}
+                    {r.done}/{r.total || "?"}{r.scheduled ? ` · ${r.scheduled} queued` : ""}
                   </td>
                   <td style={{ fontSize: 12 }}>
                     {r.stagger?.enabled === false
                       ? "instant"
-                      : `${r.stagger?.postsPerDay || "?"} /day${r.stagger?.isAdmin ? " ┬À admin" : ""}`}
+                      : `${r.stagger?.postsPerDay || "?"} /day${r.stagger?.isAdmin ? " · admin" : ""}`}
                   </td>
                   <td className="muted" style={{ fontSize: 12, maxWidth: 280 }}>{r.message}</td>
                 </tr>

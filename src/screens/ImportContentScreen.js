@@ -107,7 +107,7 @@ const ImportContentScreen = ({ navigation }) => {
       return;
     }
     if (!isValidHandleFor(platform, normalized)) {
-      setError(`That doesnÔÇÖt look like a valid ${platformLabel} username.`);
+      setError(`That doesn't look like a valid ${platformLabel} username.`);
       return;
     }
     setBusy(true);
@@ -135,7 +135,7 @@ const ImportContentScreen = ({ navigation }) => {
       setHandle('');
       setOwns(false);
     } catch (e) {
-      setError(e?.message || 'CouldnÔÇÖt start the import. Please try again.');
+      setError(e?.message || 'Couldn't start the import. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -149,10 +149,10 @@ const ImportContentScreen = ({ navigation }) => {
     try {
       const results = await Promise.allSettled(targets.map((r) => cancelImport(r.id)));
       if (results.some((x) => x.status === 'rejected')) {
-        setError('CouldnÔÇÖt cancel everything. Please try again.');
+        setError('Couldn't cancel everything. Please try again.');
       }
     } catch (e) {
-      setError(e?.message || 'CouldnÔÇÖt cancel. Please try again.');
+      setError(e?.message || 'Couldn't cancel. Please try again.');
     } finally {
       setCanceling(false);
     }
@@ -169,7 +169,7 @@ const ImportContentScreen = ({ navigation }) => {
         stagger: { enabled: true, postsPerDay, startAt: Date.now() },
       });
     } catch (e) {
-      setError(e?.message || 'CouldnÔÇÖt update the publish queue.');
+      setError(e?.message || 'Couldn't update the publish queue.');
     } finally {
       setQueueBusy(false);
     }
@@ -194,7 +194,7 @@ const ImportContentScreen = ({ navigation }) => {
           <Ionicons name="cloud-download-outline" size={26} color={COLORS.primary} />
           <Text style={styles.heroText}>
             {hasHistory
-              ? 'Got videos on more than one account? Add another and weÔÇÖll bring those over too.'
+              ? 'Got videos on more than one account? Add another and we'll bring those over too.'
               : 'Already make videos elsewhere? Pull them in so your Blyp profile feels like home from day one.'}
           </Text>
         </View>
@@ -332,7 +332,7 @@ const ImportContentScreen = ({ navigation }) => {
             <Ionicons name="cloud-done-outline" size={18} color={COLORS.primary} />
             <Text style={styles.howText}>
               Importing happens on our servers — you can close the app or lose signal and it keeps
-              going. Come back any time to see how itÔÇÖs getting on.
+              going. Come back any time to see how it's getting on.
             </Text>
           </View>
           <View style={styles.howRow}>
@@ -346,7 +346,7 @@ const ImportContentScreen = ({ navigation }) => {
             <Ionicons name="copy-outline" size={18} color={COLORS.primary} />
             <Text style={styles.howText}>
               We never import the same video twice. If an import stops early, just start it again for
-              the same account — weÔÇÖll skip everything thatÔÇÖs already here and only bring over whatÔÇÖs new.
+              the same account — we'll skip everything that's already here and only bring over what's new.
             </Text>
           </View>
         </View>
@@ -358,7 +358,7 @@ const ImportContentScreen = ({ navigation }) => {
               <Text style={[styles.progressTitle, { color: '#FBBF24' }]}>This import is taking too long</Text>
             </View>
             <Text style={styles.progressMsg}>
-              We couldnÔÇÖt make progress on @{stalledReq.handle}. This usually means the import service is
+              We couldn't make progress on @{stalledReq.handle}. This usually means the import service is
               temporarily offline. You can cancel and try again later.
             </Text>
             <TouchableOpacity
@@ -418,9 +418,9 @@ const ScheduleQueue = ({
   const upcoming = posts.filter((p) => p.publishStatus === 'scheduled').length;
   return (
     <View style={styles.historyWrap}>
-      <Text style={styles.sectionLabel}>Publish queue ┬À {posts.length}</Text>
+      <Text style={styles.sectionLabel}>Publish queue · {posts.length}</Text>
       <Text style={styles.progressMeta}>
-        {upcoming} scheduled{paused ? ` ┬À ${paused} paused` : ''}
+        {upcoming} scheduled{paused ? ` · ${paused} paused` : ''}
       </Text>
       <View style={[styles.platformRow, { marginTop: 10 }]}>
         <TouchableOpacity style={styles.queueBtn} disabled={busy} onPress={onPauseAll}>
@@ -480,7 +480,7 @@ const ImportProgress = ({ request }) => {
       : status === IMPORT_STATUS.RUNNING ? `Importing @${handle}…`
         : status === IMPORT_STATUS.DONE
           ? (stagger?.enabled
-            ? `Imported ${done} ┬À publishing ~${stagger.postsPerDay || 3}/day`
+            ? `Imported ${done} · publishing ~${stagger.postsPerDay || 3}/day`
             : `Imported ${done} video${done === 1 ? '' : 's'} from @${handle}`)
           : status === IMPORT_STATUS.ERROR ? 'Import hit a snag'
             : status === IMPORT_STATUS.CANCELED ? 'Import canceled'
@@ -513,8 +513,8 @@ const ImportProgress = ({ request }) => {
 
       {status === IMPORT_STATUS.RUNNING && total > 0 && (
         <Text style={styles.progressMeta}>
-          {processed} of {total} ÔÇó {pct}%{skipped ? ` ÔÇó ${skipped} already imported (skipped)` : ''}
-          {scheduled ? ` ÔÇó ${scheduled} queued to publish` : ''}
+          {processed} of {total} • {pct}%{skipped ? ` • ${skipped} already imported (skipped)` : ''}
+          {scheduled ? ` • ${scheduled} queued to publish` : ''}
         </Text>
       )}
 
@@ -535,8 +535,8 @@ const ImportProgress = ({ request }) => {
       {status === IMPORT_STATUS.DONE && (
         <Text style={styles.progressMeta}>
           {stagger?.enabled
-            ? `Uploaded and queued — theyÔÇÖll go live on your pace${skipped ? ` ÔÇó ${skipped} already there` : ''}${failed ? ` ÔÇó ${failed} couldnÔÇÖt import` : ''}.`
-            : `TheyÔÇÖre live on your profile now${skipped ? ` ÔÇó ${skipped} already there` : ''}${failed ? ` ÔÇó ${failed} couldnÔÇÖt import` : ''}.`}
+            ? `Uploaded and queued — they'll go live on your pace${skipped ? ` • ${skipped} already there` : ''}${failed ? ` • ${failed} couldn't import` : ''}.`
+            : `They're live on your profile now${skipped ? ` • ${skipped} already there` : ''}${failed ? ` • ${failed} couldn't import` : ''}.`}
         </Text>
       )}
 
@@ -570,7 +570,7 @@ const ImportHistory = ({ imports }) => {
             <Ionicons name={meta.icon} size={16} color={meta.color} />
             <Text style={styles.historyHandle} numberOfLines={1}>
               @{r?.handle}
-              <Text style={styles.historyPlatform}>  ┬À  {labelFor(r?.platform)}</Text>
+              <Text style={styles.historyPlatform}>  ·  {labelFor(r?.platform)}</Text>
             </Text>
             <Text style={[styles.historyStatus, { color: meta.color }]}>{meta.text}</Text>
           </View>

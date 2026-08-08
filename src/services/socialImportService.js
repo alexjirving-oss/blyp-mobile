@@ -66,8 +66,8 @@ export function normalizeHandleFor(platform, input) {
 
 /**
  * Platform-aware handle validation.
- *  - tiktok: letters, numbers, underscore and dot, 2ÔÇô24 chars.
- *  - youtube: a YouTube URL, or a bare handle (3ÔÇô30 chars, letters/digits/._-).
+ *  - tiktok: letters, numbers, underscore and dot, 2–24 chars.
+ *  - youtube: a YouTube URL, or a bare handle (3–30 chars, letters/digits/._-).
  */
 export function isValidHandleFor(platform, value) {
   const v = String(value || '');
@@ -100,7 +100,7 @@ export function normalizeHandle(input) {
   return normalizeHandleFor('tiktok', input);
 }
 
-/** TikTok handles: letters, numbers, underscore and dot, 2ÔÇô24 chars. (Legacy.) */
+/** TikTok handles: letters, numbers, underscore and dot, 2–24 chars. (Legacy.) */
 export function isValidHandle(handle) {
   return isValidHandleFor('tiktok', handle);
 }
@@ -122,12 +122,12 @@ export async function requestImport({
   claimedOwnership,
   stagger,
 }) {
-  if (!fsReady()) throw new Error('Importing isnÔÇÖt available right now.');
+  if (!fsReady()) throw new Error('Importing isn't available right now.');
   if (!uid) throw new Error('Please sign in to import your content.');
 
   const normalized = normalizeHandleFor(platform, handle);
   if (!isValidHandleFor(platform, normalized)) {
-    throw new Error('That doesnÔÇÖt look like a valid username.');
+    throw new Error('That doesn't look like a valid username.');
   }
 
   try {
@@ -158,8 +158,8 @@ export async function requestImport({
     stagger: staggerNorm,
     staggerPaused: false,
     message: staggerNorm.enabled
-      ? `Queued — weÔÇÖll import your videos, then publish about ${staggerNorm.postsPerDay}/day.`
-      : 'Queued — weÔÇÖll start bringing your videos over shortly.',
+      ? `Queued — we'll import your videos, then publish about ${staggerNorm.postsPerDay}/day.`
+      : 'Queued — we'll start bringing your videos over shortly.',
     createdAt: now,
     updatedAt: now,
   };
@@ -171,7 +171,7 @@ export async function requestImport({
     const code = e?.code || e?.message || '';
     if (String(code).includes('permission') || String(code).includes('PERMISSION')) {
       throw new Error(
-        'Import isnÔÇÖt allowed for this account yet. Update the app / wait for permissions to deploy, then try again.',
+        'Import isn't allowed for this account yet. Update the app / wait for permissions to deploy, then try again.',
       );
     }
     throw e instanceof Error ? e : new Error(String(e?.message || e));
