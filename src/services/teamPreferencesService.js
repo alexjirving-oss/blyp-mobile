@@ -51,6 +51,7 @@ function compactTeam(team) {
     badge: team.badge || null,
     league: team.league || '',
     stadium: team.stadium || '',
+    website: team.website || '',
     sport: team.sport || 'Soccer',
   };
   if (team.leagueId) out.leagueId = String(team.leagueId);

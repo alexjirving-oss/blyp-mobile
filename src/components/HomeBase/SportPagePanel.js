@@ -15,6 +15,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Linking,
   Modal,
   RefreshControl,
   ScrollView,
@@ -31,8 +32,17 @@ import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import { getTopicPosts, getSuggestedCreators, creatorAvatar } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
 import { followUser, unfollowUser, subscribeToFollowingList } from '../../utils/followUtils';
-import { searchFootballTeams, getNextMatches, getLastMatches, getLeagueTable } from '../../services/footballDataService';
+import {
+  searchFootballTeams,
+  getFootballTeam,
+  getNextMatches,
+  getLastMatches,
+  getTeamSquad,
+  getLeagueTable,
+} from '../../services/footballDataService';
 import { getF1Teams, getNextRace, getLastRaceResult, getSeasonRaces } from '../../services/formula1DataService';
+import { getHowToWatch } from '../../services/broadcastService';
+import { subscribeRooms } from '../../services/roomsService';
 import {
   subscribeFollowedTeams,
   addFollowedTeam,
@@ -124,6 +134,12 @@ function describeResult(ev, teamName) {
   return { outcome, score: `${teamScore}-${oppScore}`, opponent: opponent || '' };
 }
 
+function officialUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
+
 function TeamBadge({ uri, size = 40, accent }) {
   if (uri) return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 8 }} resizeMode="contain" />;
   return (
@@ -146,10 +162,15 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
   // Team following
   const [teams, setTeams] = useState([]);
   const [matches, setMatches] = useState({}); // football: { [teamId]: { next, last, upcoming } }
+  const [teamDetails, setTeamDetails] = useState({});
+  const [squads, setSquads] = useState({});
+  const [expandedTeamId, setExpandedTeamId] = useState(undefined);
+  const [expandedResultId, setExpandedResultId] = useState(null);
   const [standings, setStandings] = useState([]); // league table rows
   const [standingsLeague, setStandingsLeague] = useState('');
   const [f1, setF1] = useState({ next: null, lastRace: null, podium: [], calendar: [], loaded: false });
   const [profileSeedTried, setProfileSeedTried] = useState(false);
+  const [footballRooms, setFootballRooms] = useState([]);
 
   // Picker
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -174,6 +195,16 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
     return [];
   }, [teams, cfg.kind]);
 
+  useEffect(() => {
+    if (cfg.kind !== 'football' || myTeams.length === 0) return;
+    if (
+      expandedTeamId === undefined ||
+      (expandedTeamId && !myTeams.some((team) => String(team.id) === String(expandedTeamId)))
+    ) {
+      setExpandedTeamId(myTeams[0].id);
+    }
+  }, [cfg.kind, myTeams, expandedTeamId]);
+
   // Sport terms + followed club/constructor names so the rail prefers team content.
   const contentTerms = useMemo(() => {
     const base = [...(cfg.terms || [])];
@@ -190,29 +221,54 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
 
   const termsKey = contentTerms.join(',');
 
-  // Football: fetch next/last + upcoming list per followed team.
+  // Football: fetch the match centre, club metadata and current squad.
   useEffect(() => {
     if (cfg.kind !== 'football') return;
     myTeams.forEach((t) => {
       if (matches[t.id]) return;
       (async () => {
         try {
-          const [next, last] = await Promise.all([getNextMatches(t.id), getLastMatches(t.id)]);
+          const [next, last, detail, squad] = await Promise.all([
+            getNextMatches(t.id),
+            getLastMatches(t.id),
+            getFootballTeam(t.id),
+            getTeamSquad(t.id),
+          ]);
           setMatches((prev) => ({
             ...prev,
             [t.id]: {
               next: next?.[0] || null,
               last: last?.[0] || null,
               upcoming: Array.isArray(next) ? next.slice(0, 5) : [],
+              results: Array.isArray(last) ? last.slice(0, 5) : [],
             },
           }));
+          setTeamDetails((prev) => ({ ...prev, [t.id]: detail || t }));
+          setSquads((prev) => ({ ...prev, [t.id]: Array.isArray(squad) ? squad : [] }));
         } catch {
-          setMatches((prev) => ({ ...prev, [t.id]: { next: null, last: null, upcoming: [] } }));
+          setMatches((prev) => ({
+            ...prev,
+            [t.id]: { next: null, last: null, upcoming: [], results: [] },
+          }));
+          setTeamDetails((prev) => ({ ...prev, [t.id]: t }));
+          setSquads((prev) => ({ ...prev, [t.id]: [] }));
         }
       })();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myTeams, cfg.kind]);
+
+  useEffect(() => {
+    if (cfg.kind !== 'football') return undefined;
+    return subscribeRooms((rooms) => {
+      setFootballRooms(
+        (rooms || [])
+          .filter((room) => room?.topicId === 'football')
+          .sort((a, b) => (Number(b?.publisherCount) || 0) - (Number(a?.publisherCount) || 0))
+          .slice(0, 4)
+      );
+    });
+  }, [cfg.kind]);
 
   // Football standings strip — prefer followed team's league, else Premier League.
   useEffect(() => {
@@ -431,6 +487,25 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
     const fixture = m?.next ? describeFixture(m.next, team.name) : null;
     const result = m?.last ? describeResult(m.last, team.name) : null;
     const upcoming = Array.isArray(m?.upcoming) ? m.upcoming : [];
+    const results = Array.isArray(m?.results) ? m.results : [];
+    const detail = teamDetails[team.id] || team;
+    const squad = Array.isArray(squads[team.id]) ? squads[team.id] : [];
+    const expanded = String(expandedTeamId) === String(team.id);
+    const watch = getHowToWatch({ tvStation: m?.next?.tvStation });
+    const clubUrl = officialUrl(detail.website);
+    const form = results.map((ev) => describeResult(ev, team.name)).filter(Boolean);
+    const h2h = fixture
+      ? results
+          .filter((ev) =>
+            [ev.homeTeam, ev.awayTeam].some(
+              (name) => String(name || '').toLowerCase() === fixture.opponent.toLowerCase()
+            )
+          )
+          .slice(0, 3)
+      : [];
+    const squadGroups = ['Goalkeepers', 'Defenders', 'Midfielders', 'Forwards', 'Squad']
+      .map((name) => ({ name, players: squad.filter((player) => player.positionGroup === name) }))
+      .filter((group) => group.players.length > 0);
     return (
       <View style={[styles.teamCard, { borderLeftColor: cfg.accent }]}>
         <View style={styles.teamHeader}>
@@ -464,28 +539,153 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
             <Text style={styles.teamRowMuted}>{m ? 'No recent result' : 'Loading…'}</Text>
           )}
         </View>
-        {upcoming.length > 1 && (
-          <View style={styles.fixtureList}>
-            <Text style={styles.teamRowLabel}>FIXTURES</Text>
-            {upcoming.map((ev) => {
-              const d = describeFixture(ev, team.name);
+        <TouchableOpacity
+          style={styles.supporterHubToggle}
+          activeOpacity={0.85}
+          onPress={() => setExpandedTeamId(expanded ? null : team.id)}
+        >
+          <Text style={[styles.supporterHubToggleText, { color: cfg.accent }]}>
+            {expanded ? 'Hide supporter hub' : 'Open supporter hub'}
+          </Text>
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={cfg.accent} />
+        </TouchableOpacity>
+
+        {expanded && (
+          <View style={styles.supporterHub}>
+            <Text style={styles.hubSectionTitle}>Match centre</Text>
+            {m?.next ? (
+              <View style={styles.matchCentre}>
+                <Text style={styles.matchCompetition}>{m.next.league || 'Competition TBC'}</Text>
+                <Text style={styles.matchTeams}>
+                  {m.next.homeTeam || team.name} <Text style={{ color: COLORS.textMuted }}>vs</Text> {m.next.awayTeam || fixture?.opponent}
+                </Text>
+                <Text style={styles.matchMeta}>{formatKickoff(m.next)}</Text>
+                <Text style={styles.matchMeta}>
+                  {m.next.venue || detail.stadium || 'Venue TBC'} · {fixture?.homeAway === 'H' ? 'Home' : 'Away'}
+                </Text>
+                <View style={styles.watchRow}>
+                  <Icon name="tv-outline" size={15} color={watch.available ? cfg.accent : COLORS.textMuted} />
+                  <Text style={styles.watchText}>
+                    {watch.available ? `Watch: ${watch.label}` : 'Broadcaster not supplied for your region'}
+                  </Text>
+                </View>
+                <View style={styles.matchActions}>
+                  {!!m.next.id && (
+                    <TouchableOpacity style={[styles.primaryAction, { backgroundColor: cfg.accent }]} onPress={() => openMatchday(m.next, team)}>
+                      <Icon name="radio" size={14} color={COLORS.black} />
+                      <Text style={styles.primaryActionText}>{isMatchdayLiveEnabled() ? 'Matchday Live' : 'Match preview'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!clubUrl && (
+                    <TouchableOpacity style={styles.secondaryAction} onPress={() => Linking.openURL(clubUrl)}>
+                      <Icon name="open-outline" size={14} color={COLORS.textSecondary} />
+                      <Text style={styles.secondaryActionText}>Official club site</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.unavailable}>No upcoming fixture supplied by TheSportsDB.</Text>
+            )}
+
+            <View style={styles.insightRow}>
+              <View style={styles.insightBlock}>
+                <Text style={styles.insightLabel}>FORM · LAST 5</Text>
+                <View style={styles.formRow}>
+                  {form.length ? form.map((item, index) => (
+                    <View key={`${item.opponent}-${index}`} style={[styles.formBadge, { backgroundColor: outcomeColor(item.outcome) }]}>
+                      <Text style={styles.formBadgeText}>{item.outcome}</Text>
+                    </View>
+                  )) : <Text style={styles.unavailableInline}>Unavailable</Text>}
+                </View>
+              </View>
+              <View style={styles.insightBlock}>
+                <Text style={styles.insightLabel}>RECENT H2H</Text>
+                <Text style={styles.insightValue}>
+                  {h2h.length ? `${h2h.length} meeting${h2h.length === 1 ? '' : 's'} in recent results` : 'No recent meeting in feed'}
+                </Text>
+              </View>
+            </View>
+
+            {upcoming.length > 1 && (
+              <>
+                <Text style={styles.hubSectionTitle}>Upcoming</Text>
+                <View style={styles.fixtureList}>
+                  {upcoming.map((ev) => {
+                    const d = describeFixture(ev, team.name);
+                    return (
+                      <TouchableOpacity key={ev.id || `${ev.date}-${ev.homeTeam}`} style={styles.fixtureRow} activeOpacity={0.85} onPress={() => openMatchday(ev, team)}>
+                        <Text style={styles.fixtureWhen} numberOfLines={1}>{formatKickoff(ev)}</Text>
+                        <Text style={styles.fixtureWho} numberOfLines={1}>
+                          {d ? `${d.homeAway === 'H' ? 'vs' : '@'} ${d.opponent}` : ev.name || 'Fixture'}
+                        </Text>
+                        <Icon name="chevron-forward" size={14} color={COLORS.textMuted} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            <Text style={styles.hubSectionTitle}>Results</Text>
+            {results.length ? results.map((ev) => {
+              const item = describeResult(ev, team.name);
+              const isOpen = String(expandedResultId) === String(ev.id);
               return (
                 <TouchableOpacity
                   key={ev.id || `${ev.date}-${ev.homeTeam}`}
-                  style={styles.fixtureRow}
+                  style={styles.resultRow}
                   activeOpacity={0.85}
-                  onPress={() => openMatchday(ev, team)}
+                  onPress={() => setExpandedResultId(isOpen ? null : ev.id)}
                 >
-                  <Text style={styles.fixtureWhen} numberOfLines={1}>{formatKickoff(ev)}</Text>
-                  <Text style={styles.fixtureWho} numberOfLines={1}>
-                    {d ? `${d.homeAway === 'H' ? 'vs' : '@'} ${d.opponent}` : ev.name || 'Fixture'}
-                  </Text>
+                  <View style={[styles.resultOutcome, { backgroundColor: outcomeColor(item?.outcome) }]}>
+                    <Text style={styles.resultOutcomeText}>{item?.outcome || '–'}</Text>
+                  </View>
+                  <View style={styles.resultCopy}>
+                    <Text style={styles.resultTeams}>{ev.homeTeam} {ev.homeScore}–{ev.awayScore} {ev.awayTeam}</Text>
+                    <Text style={styles.resultMeta}>{ev.league || 'Competition'} · {formatKickoff(ev)}</Text>
+                    {isOpen && (
+                      <Text style={styles.resultDetail}>
+                        {[ev.venue, ev.round ? `Round ${ev.round}` : ''].filter(Boolean).join(' · ') || 'No additional match detail supplied'}
+                      </Text>
+                    )}
+                  </View>
+                  <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={14} color={COLORS.textMuted} />
                 </TouchableOpacity>
               );
-            })}
+            }) : <Text style={styles.unavailable}>Recent results are unavailable from the provider.</Text>}
+
+            <Text style={styles.hubSectionTitle}>Squad</Text>
+            {squadGroups.length ? squadGroups.map((group) => (
+              <View key={group.name} style={styles.squadGroup}>
+                <Text style={styles.squadGroupTitle}>{group.name}</Text>
+                <View style={styles.squadGrid}>
+                  {group.players.map((player) => (
+                    <View key={player.id} style={styles.playerChip}>
+                      <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
+                      <Text style={styles.playerMeta} numberOfLines={1}>
+                        {[player.number ? `#${player.number}` : '', player.position].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )) : <Text style={styles.unavailable}>Current squad is unavailable from TheSportsDB for this club.</Text>}
+
+            <View style={styles.availabilityGrid}>
+              <View style={styles.availabilityCard}>
+                <Text style={styles.availabilityTitle}>Availability</Text>
+                <Text style={styles.unavailable}>Injuries and suspensions need a licensed live football feed.</Text>
+              </View>
+              <View style={styles.availabilityCard}>
+                <Text style={styles.availabilityTitle}>Transfers</Text>
+                <Text style={styles.unavailable}>Confirmed moves and rumours are not supplied by the current provider.</Text>
+              </View>
+            </View>
           </View>
         )}
-        {!!m?.next?.id && (
+
+        {!!m?.next?.id && !expanded && (
           <TouchableOpacity
             style={[styles.teamAsk, { marginBottom: 6 }]}
             activeOpacity={0.85}
@@ -697,7 +897,8 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
                       <TeamBadge uri={row.badge} size={28} accent={cfg.accent} />
                       <Text style={styles.standingTeam} numberOfLines={1}>{row.team}</Text>
                       <Text style={styles.standingPts}>{row.points} pts</Text>
-                      <Text style={styles.standingForm}>{row.played} played</Text>
+                      <Text style={styles.standingForm}>GD {row.goalDiff > 0 ? '+' : ''}{row.goalDiff} · {row.played} played</Text>
+                      {!!row.form && <Text style={styles.standingForm} numberOfLines={1}>{row.form}</Text>}
                     </View>
                   );
                 })}
@@ -718,11 +919,38 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
         </ScrollView>
       )}
 
-      {/* Trending rail */}
+      {/* Topic rooms are real-time Firestore-backed Blyp rooms. */}
+      {cfg.kind === 'football' && footballRooms.length > 0 && (
+        <>
+          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Football rooms</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
+            {footballRooms.map((room) => (
+              <TouchableOpacity
+                key={room.roomId}
+                style={styles.roomCard}
+                activeOpacity={0.85}
+                onPress={() => navigation.navigate('Room', {
+                  roomId: room.roomId,
+                  title: room.title,
+                  topicLabel: room.topicLabel,
+                })}
+              >
+                <View style={[styles.roomLiveDot, { backgroundColor: room.publisherCount > 0 ? cfg.accent : COLORS.textMuted }]} />
+                <Text style={styles.roomTitle} numberOfLines={2}>{room.title}</Text>
+                <Text style={styles.roomMeta}>
+                  {room.publisherCount > 0 ? `${room.publisherCount} on stage · Join live` : 'Room open'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
+
+      {/* News and media from the real Firestore topic feed. */}
       {rail.length > 0 && (
         <>
           <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>
-            {myTeams.length > 0 ? `Videos for you` : `Trending in ${cfg.title}`}
+            {myTeams.length > 0 ? 'Club news & media' : `Trending in ${cfg.title}`}
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
             {rail.map((p) => {
@@ -755,7 +983,7 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       {/* Creators to follow */}
       {creators.length > 0 && (
         <>
-          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>{cfg.title} creators to follow</Text>
+          <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>{cfg.title} voices to follow</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
             {creators.map((u) => {
               const avatar = creatorAvatar(u);
@@ -787,7 +1015,7 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
         </>
       )}
 
-      <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Latest</Text>
+      <Text style={[styles.sectionTitle, styles.sectionTitleSpaced]}>Latest Blyp posts</Text>
     </View>
   );
 
@@ -941,6 +1169,48 @@ const styles = StyleSheet.create({
   teamRowMuted: { color: COLORS.textMuted, fontSize: responsiveFont(13), flex: 1 },
   teamAsk: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   teamAskText: { fontSize: responsiveFont(12), fontWeight: '700' },
+  supporterHubToggle: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border, paddingTop: 10, marginTop: 2,
+  },
+  supporterHubToggleText: { fontSize: responsiveFont(12), fontWeight: '800' },
+  supporterHub: { gap: 10, marginTop: 4 },
+  hubSectionTitle: {
+    color: COLORS.textPrimary, fontSize: responsiveFont(14), fontWeight: '900',
+    marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: COLORS.border,
+  },
+  matchCentre: {
+    backgroundColor: COLORS.surface, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border,
+    padding: 14, gap: 5,
+  },
+  matchCompetition: { color: COLORS.primary, fontSize: responsiveFont(10), fontWeight: '900', textTransform: 'uppercase' },
+  matchTeams: { color: COLORS.textPrimary, fontSize: responsiveFont(17), fontWeight: '900', marginVertical: 2 },
+  matchMeta: { color: COLORS.textSecondary, fontSize: responsiveFont(12) },
+  watchRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 6 },
+  watchText: { color: COLORS.textSecondary, fontSize: responsiveFont(11), flex: 1 },
+  matchActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  primaryAction: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  primaryActionText: { color: COLORS.black, fontSize: responsiveFont(11), fontWeight: '900' },
+  secondaryAction: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: COLORS.borderStrong,
+  },
+  secondaryActionText: { color: COLORS.textSecondary, fontSize: responsiveFont(11), fontWeight: '800' },
+  insightRow: { flexDirection: 'row', gap: 8 },
+  insightBlock: {
+    flex: 1, minHeight: 68, backgroundColor: COLORS.surface, borderRadius: 12,
+    borderWidth: 1, borderColor: COLORS.border, padding: 10,
+  },
+  insightLabel: { color: COLORS.textMuted, fontSize: responsiveFont(9), fontWeight: '900' },
+  insightValue: { color: COLORS.textSecondary, fontSize: responsiveFont(11), lineHeight: responsiveFont(15), marginTop: 6 },
+  formRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 7 },
+  formBadge: { width: 21, height: 21, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  formBadgeText: { color: COLORS.white, fontSize: responsiveFont(9), fontWeight: '900' },
+  unavailable: { color: COLORS.textMuted, fontSize: responsiveFont(11), lineHeight: responsiveFont(16) },
+  unavailableInline: { color: COLORS.textMuted, fontSize: responsiveFont(10) },
 
   fixtureList: { gap: 6, marginTop: 4 },
   fixtureRow: {
@@ -949,6 +1219,31 @@ const styles = StyleSheet.create({
   },
   fixtureWhen: { color: COLORS.textMuted, fontSize: responsiveFont(11), width: 108 },
   fixtureWho: { color: COLORS.textSecondary, fontSize: responsiveFont(12), flex: 1, fontWeight: '600' },
+  resultRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: COLORS.border,
+  },
+  resultOutcome: { width: 25, height: 25, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+  resultOutcomeText: { color: COLORS.white, fontSize: responsiveFont(10), fontWeight: '900' },
+  resultCopy: { flex: 1 },
+  resultTeams: { color: COLORS.textPrimary, fontSize: responsiveFont(11), fontWeight: '700' },
+  resultMeta: { color: COLORS.textMuted, fontSize: responsiveFont(9), marginTop: 2 },
+  resultDetail: { color: COLORS.textSecondary, fontSize: responsiveFont(10), marginTop: 5 },
+  squadGroup: { gap: 7 },
+  squadGroupTitle: { color: COLORS.textSecondary, fontSize: responsiveFont(11), fontWeight: '900' },
+  squadGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  playerChip: {
+    width: '48%', backgroundColor: COLORS.surface, borderRadius: 10,
+    borderWidth: 1, borderColor: COLORS.border, padding: 9,
+  },
+  playerName: { color: COLORS.textPrimary, fontSize: responsiveFont(11), fontWeight: '800' },
+  playerMeta: { color: COLORS.textMuted, fontSize: responsiveFont(9), marginTop: 3 },
+  availabilityGrid: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  availabilityCard: {
+    flex: 1, backgroundColor: COLORS.surface, borderRadius: 12,
+    borderWidth: 1, borderColor: COLORS.border, padding: 10,
+  },
+  availabilityTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(11), fontWeight: '900', marginBottom: 4 },
 
   standingsStrip: { gap: 10, paddingBottom: 4 },
   standingCard: {
@@ -988,6 +1283,13 @@ const styles = StyleSheet.create({
   railCard: { width: 140 },
   railThumb: { width: 140, height: 180, borderRadius: 12, backgroundColor: COLORS.surface },
   railTitle: { color: COLORS.textSecondary, fontSize: responsiveFont(12), marginTop: 6, lineHeight: responsiveFont(16) },
+  roomCard: {
+    width: 160, minHeight: 92, borderRadius: 14, padding: 12,
+    backgroundColor: COLORS.backgroundCard, borderWidth: 1, borderColor: COLORS.border,
+  },
+  roomLiveDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 10 },
+  roomTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(13), fontWeight: '800', flex: 1 },
+  roomMeta: { color: COLORS.textMuted, fontSize: responsiveFont(10), marginTop: 7 },
 
   creatorCard: { width: 110, alignItems: 'center' },
   creatorAvatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: COLORS.surface, alignSelf: 'center' },

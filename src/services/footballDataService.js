@@ -50,6 +50,7 @@ function normalizeTeam(raw) {
     league: raw.strLeague || '',
     leagueId: raw.idLeague || null,
     stadium: raw.strStadium || '',
+    website: raw.strWebsite || '',
     country: raw.strCountry || '',
     sport: raw.strSport || 'Soccer',
   };
@@ -84,6 +85,29 @@ function normalizeEvent(raw) {
     round: raw.intRound || null,
     // Often empty on the free tier; broadcastService falls back to a curated map.
     tvStation: raw.strTVStation || raw.strChannel || '',
+  };
+}
+
+function normalizePlayer(raw) {
+  if (!raw) return null;
+  const position = raw.strPosition || 'Squad';
+  return {
+    id: raw.idPlayer,
+    name: raw.strPlayer || '',
+    position,
+    positionGroup: position.toLowerCase().includes('goalkeeper')
+      ? 'Goalkeepers'
+      : position.toLowerCase().includes('defen')
+        ? 'Defenders'
+        : position.toLowerCase().includes('midfield')
+          ? 'Midfielders'
+          : position.toLowerCase().includes('forward') || position.toLowerCase().includes('wing')
+            ? 'Forwards'
+            : 'Squad',
+    number: raw.strNumber || '',
+    nationality: raw.strNationality || '',
+    image: raw.strCutout || raw.strThumb || null,
+    status: raw.strStatus || '',
   };
 }
 
@@ -130,6 +154,14 @@ export async function searchFootballTeams(query) {
     .filter(Boolean);
 }
 
+/** Full team metadata, including stadium and official website when supplied. */
+export async function getFootballTeam(teamId) {
+  if (!teamId) return null;
+  const data = await fetchJson(`${BASE_URL}/lookupteam.php?id=${encodeURIComponent(teamId)}`);
+  const raw = Array.isArray(data?.teams) ? data.teams[0] : null;
+  return normalizeTeam(raw);
+}
+
 /**
  * Upcoming fixtures for a team.
  * @param {string} teamId
@@ -152,6 +184,17 @@ export async function getLastMatches(teamId) {
   const data = await fetchJson(`${BASE_URL}/eventslast.php?id=${encodeURIComponent(teamId)}`);
   const events = Array.isArray(data?.results) ? data.results : [];
   return events.map(normalizeEvent).filter(Boolean);
+}
+
+/**
+ * Current first-team squad. Availability varies by club on the free provider.
+ * Empty means unavailable; callers must not infer that the club has no players.
+ */
+export async function getTeamSquad(teamId) {
+  if (!teamId) return [];
+  const data = await fetchJson(`${BASE_URL}/lookup_all_players.php?id=${encodeURIComponent(teamId)}`);
+  const players = Array.isArray(data?.player) ? data.player : [];
+  return players.map(normalizePlayer).filter((p) => p?.id && p?.name);
 }
 
 /**
@@ -194,8 +237,10 @@ export async function getLeagueTable(leagueId, season) {
 export default {
   searchFootballTeams,
   getBrowsableFootballTeams,
+  getFootballTeam,
   getNextMatches,
   getLastMatches,
+  getTeamSquad,
   getLeagueTable,
   currentFootballSeason,
 };
