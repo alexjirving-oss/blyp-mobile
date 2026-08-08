@@ -74,10 +74,14 @@ export default function LiveUsersTab() {
   }, [uid, previewHostUid, rel.iFollow, relBusy]);
 
   const joinLive = useCallback((item) => {
-    if (!item?.id) return;
+    if (!item?.id && !item?.streamId) return;
+    const streamId = item.streamId || item.id || item.liveId || item.sessionId || null;
+    if (!streamId) return;
     const params = {
       mode: 'viewer',
-      streamId: item.streamId || item.id || item.liveId || item.sessionId || null,
+      streamId,
+      // hostUid may be missing on legacy/partial docs — LiveStreamScreen still
+      // treats explicit mode:'viewer' + streamId as viewer (not Go Live).
       hostUid: item.hostUid || item.userId || item.uid || item.creatorId || null,
       hostDisplayName: item.hostDisplayName || item.hostUsername || 'Live Stream',
       source: 'LiveUsersTab',

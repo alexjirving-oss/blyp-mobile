@@ -447,10 +447,12 @@ const LiveStreamScreen = (props) => {
     );
   };
 
-  // Determine mode: viewer ONLY if all required params present
-  // If mode is missing but hostUid+streamId are present, assume viewer (prevents silent HOST fallback).
+  // Determine mode: explicit viewer intent must never fall through to HOST/Go Live.
+  // streamId alone is enough for join (hostUid is display/block metadata).
+  // Missing hostUid previously forced HOST mode — Alex saw Go Live instead of joining.
   const isViewerRoute =
-    (routeMode === 'viewer' || routeMode === null) && !!routeHostUid && !!routeStreamId;
+    (routeMode === 'viewer' && !!routeStreamId) ||
+    ((routeMode === null || routeMode === undefined) && !!routeHostUid && !!routeStreamId);
 
   const mode = isViewerRoute ? 'viewer' : 'host';
   const isViewer = isViewerRoute;
@@ -690,6 +692,7 @@ const LiveStreamScreen = (props) => {
 
   // Viewer entry gate: never let someone sit in a live hosted by a user they
   // have blocked (deep links / stale directory entries bypass the list filter).
+  // Missing hostUid is allowed for explicit viewer routes (join still works).
   useEffect(() => {
     if (!isViewer || !hostUid || !uid || hostUid === uid) return;
     let cancelled = false;
@@ -1445,9 +1448,10 @@ const LiveStreamScreen = (props) => {
 
   // STEP 3 + Guard: Validate viewer route params and enforce single source of truth
   useEffect(() => {
-    // Viewer mode requires streamId and hostUid from route params
-    if (isViewer && (!routeStreamId || !routeHostUid)) {
-      console.warn('âš ï¸ [LIVE][GUARD] Viewer mode with invalid params, navigating back', {
+    // Viewer mode requires streamId. hostUid is preferred for block/gift chrome
+    // but must not bounce the viewer back to the Live list when missing.
+    if (isViewer && !routeStreamId) {
+      console.warn('[LIVE][GUARD] Viewer mode with invalid params, navigating back', {
         mode,
         isViewer,
         routeStreamId,
@@ -3770,10 +3774,17 @@ const LiveStreamScreen = (props) => {
             // Map structured errors to user messages
             if (errorMsg.includes('ended') || errorMsg.includes('Stream has ended')) {
               userMsg = 'This stream has ended.';
-            } else if (errorMsg.includes('not found') || errorMsg.includes('does not exist')) {
-              userMsg = 'This stream does not exist.';
+            } else if (
+              errorMsg.includes('not found') ||
+              errorMsg.includes('does not exist') ||
+              errorMsg.includes('not live') ||
+              errorMsg.includes('session_not_found')
+            ) {
+              userMsg = 'This stream is no longer available. Pull to refresh the Live list.';
             } else if (errorMsg.includes('connection') || errorMsg.includes('network')) {
               userMsg = 'Connection error. Please check your internet and try again.';
+            } else if (errorMsg.includes('COGNITO') || errorMsg.includes('401') || errorMsg.includes('Invalid token')) {
+              userMsg = 'Sign in again, then retry joining the live.';
             }
 
             Alert.alert(

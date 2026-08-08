@@ -1070,15 +1070,23 @@ export async function endFirestoreStream(streamId: string): Promise<{ ok: boolea
   const id = String(streamId || '').trim();
   if (!fs || !id) return { ok: false, detail: 'unavailable' };
   try {
-    await fs.collection('liveStreams').doc(id).set(
-      {
-        status: 'ended',
-        endedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-        adminForceEnded: true,
-      },
-      { merge: true },
-    );
+    const endedPayload = {
+      status: 'ended',
+      directoryReady: false,
+      endedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      adminForceEnded: true,
+    };
+    await Promise.all([
+      fs.collection('liveStreams').doc(id).set(endedPayload, { merge: true }),
+      fs.collection('streams').doc(id).set(
+        {
+          status: 'ended',
+          endedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      ),
+    ]);
     return { ok: true };
   } catch (e: any) {
     logger.error({ err: e?.message || String(e), streamId: id }, '[firestore-admin] endFirestoreStream failed');

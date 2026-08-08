@@ -167,7 +167,12 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
               sessionId: streamId,
               playbackUrl: mass.playbackUrl,
             });
-            await client.forceLiveLoudspeaker('viewer-hook-player-joined');
+            // Loudspeaker is best-effort — never abort a successful player join.
+            try {
+              await client.forceLiveLoudspeaker('viewer-hook-player-joined');
+            } catch (routeErr) {
+              console.warn('[IVS_VIEWER][LOUDSPEAKER_SOFT_FAIL]', routeErr);
+            }
             setViewerTransport('playback');
             usedPlayback = true;
             markJoined();
@@ -211,7 +216,14 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       };
 
       await client.joinAsViewer(viewerParams);
-      await client.forceLiveLoudspeaker('viewer-hook-stage-joined');
+      // Loudspeaker must not roll back a successful stage join (cross-account
+      // viewers were getting kicked with a false join failure when audio route
+      // reassert threw after IVS subscribe succeeded).
+      try {
+        await client.forceLiveLoudspeaker('viewer-hook-stage-joined');
+      } catch (routeErr) {
+        console.warn('[IVS_VIEWER][LOUDSPEAKER_SOFT_FAIL]', routeErr);
+      }
       markJoined();
       console.log('[IVS_VIEWER][JOIN_COMPLETED]', { streamId });
       console.log('[IVS_VIEWER][STAGE_JOIN_SUCCESS]', {
@@ -220,7 +232,8 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       });
     } catch (err) {
       console.error('[IVS_VIEWER][JOIN_ERROR]', err);
-      setError(err instanceof Error ? err.message : 'Failed to join stream');
+      const msg = err instanceof Error ? err.message : 'Failed to join stream';
+      setError(msg);
       setConnectionState('disconnected');
       setStageArn(undefined);
       setToken(undefined);

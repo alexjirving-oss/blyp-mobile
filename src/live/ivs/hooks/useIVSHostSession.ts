@@ -203,7 +203,11 @@ export function useIVSHostSession(args: UseIVSHostSessionArgs): UseIVSHostSessio
 
       console.log('[TRACE][HOST] calling native startHostSession');
       await client.startHostSession(hostParams);
-      await client.forceLiveLoudspeaker('host-hook-after-start');
+      try {
+        await client.forceLiveLoudspeaker('host-hook-after-start');
+      } catch (routeErr) {
+        console.warn('[IVS_HOST][LOUDSPEAKER_SOFT_FAIL]', routeErr);
+      }
       console.log('[TRACE][HOST] native startHostSession INVOKED');
 
       // Best-effort: ensure local media is actually enabled.

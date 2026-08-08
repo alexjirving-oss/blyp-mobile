@@ -318,8 +318,11 @@ service cloud.firestore {
           && request.resource.data.get('userId', '') == resource.data.get('userId', '')
           && request.resource.data.get('hostUid', '') == resource.data.get('hostUid', '')
         )
+        // Viewers / service may bump counters and heartbeat-ish fields. Also allow
+        // marking status ended so ghost directory cards (Dynamo already ENDED) can
+        // be cleared without waiting for the 90s heartbeat grace window.
         || request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['viewCount','viewerCount','likes','peakViewerCount','lastUpdated','lastActivity','totalViews','lastHeartbeatAt','directoryReady','status'])
+             .hasOnly(['viewCount','viewerCount','likes','peakViewerCount','lastUpdated','lastActivity','totalViews','lastHeartbeatAt','directoryReady','status','endedAt','updatedAt','adminForceEnded'])
       );
       allow delete: if isSignedIn() &&
         (resource.data.get('userId', '') == request.auth.uid

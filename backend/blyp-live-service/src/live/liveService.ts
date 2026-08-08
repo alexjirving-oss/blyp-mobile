@@ -742,6 +742,19 @@ export async function endLiveSession(sessionId: string): Promise<void> {
   await updateSessionStatus(sessionId, 'ENDED', endedAt);
   emitRoomEvent(sessionId, { type: 'room.ended' });
 
+  // Always mirror ENDED into Firestore discovery so viewers stop seeing a
+  // joinable card whose Dynamo session is already dead (cross-account
+  // session_not_found). Best-effort — host client also calls endStream.
+  try {
+    const { endFirestoreStream } = await import('../admin/firestoreAdmin');
+    await endFirestoreStream(sessionId);
+  } catch (fsErr: any) {
+    console.warn('[LIVE][END_FIRESTORE_MIRROR_FAIL]', {
+      sessionId,
+      message: fsErr?.message || String(fsErr),
+    });
+  }
+
   // Reap the IVS stage so it does not linger and consume the per-region stage
   // quota (1,000/region) — the previous behavior leaked a stage per stream.
   // Best-effort: a deletion failure must never fail the host's end action; an

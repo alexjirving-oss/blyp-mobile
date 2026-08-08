@@ -172,6 +172,7 @@ const IVSLiveStreamViewer = ({
   }, [getDisplayName, uid, viewerUserDoc]);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [layout, setLayout] = useState({ width: 0, height: 0 });
+  const everConnectedRef = useRef(false);
   const [guestRequestStatus, setGuestRequestStatus] = useState('idle'); // idle | sending | sent | error
   const [guestMode, setGuestMode] = useState(false);
   const guestModeRef = useRef(false);
@@ -861,10 +862,16 @@ const IVSLiveStreamViewer = ({
       if (onError) onError({ message: ivsSession.error });
       setConnectionStatus('error');
     } else if (ivsSession.connectionState === 'connected') {
+      everConnectedRef.current = true;
       setConnectionStatus('connected');
     } else if (ivsSession.connectionState === 'disconnected') {
       setConnectionStatus('disconnected');
-      if (onError) onError({ message: 'Stream has ended' });
+      // Only treat as "ended" if we previously had a live connection. Join
+      // failures also land in disconnected+error (handled above); a bare
+      // disconnected without a prior connect is a failed join, not host end.
+      if (onError && everConnectedRef.current) {
+        onError({ message: 'Stream has ended' });
+      }
     }
   }, [ivsSession.error, ivsSession.connectionState, onError]);
 

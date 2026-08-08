@@ -29,10 +29,26 @@ import { logger } from '../config/logger';
 import { headerValueDiagnostics } from '../utils/headerSanitize';
 import { requireNotBanned } from '../admin/banGuard';
 import { requireCanGoLive } from '../admin/liveRestrictionGuard';
+import { endFirestoreStream } from '../admin/firestoreAdmin';
 
 const router = Router();
 
 router.use(cognitoJwtMiddleware);
+
+function resolveLiveSessionId(body: any): string {
+  return String(body?.streamId || body?.sessionId || '').trim();
+}
+
+/** Clear Firestore discovery when Dynamo says the session is gone/ended. */
+async function clearDirectoryGhost(sessionId: string, reason: string): Promise<void> {
+  if (!sessionId) return;
+  try {
+    const result = await endFirestoreStream(sessionId);
+    logger.warn({ sessionId, reason, ok: result.ok, detail: result.detail }, '[LIVE][DIRECTORY_GHOST_CLEAR]');
+  } catch (e: any) {
+    logger.warn({ sessionId, reason, err: e?.message || String(e) }, '[LIVE][DIRECTORY_GHOST_CLEAR_FAIL]');
+  }
+}
 
 function logRedisSoftFail(tag: '[LIVE_START_REDIS_SOFT_FAIL]' | '[GUEST_JOIN_REDIS_SOFT_FAIL]', payload: Record<string, unknown>) {
   // Use structured logging so Cloud Run log filters can reliably match `jsonPayload.msg`.
@@ -114,62 +130,72 @@ router.post('/live/start', requireNotBanned, requireCanGoLive, async (req: Authe
 
 router.post('/live/join-realtime', async (req: AuthedRequest, res) => {
   try {
-    const { streamId, displayName } = req.body || {};
+    const streamId = resolveLiveSessionId(req.body || {});
+    const { displayName } = req.body || {};
     const viewerUserId = req.user?.sub;
 
     if (!streamId) {
-      console.warn('[LIVE_BACKEND][JOIN_REALTIME_FAIL]', {
+      console.warn('[LIVE_BACKEND][JOIN_REALTIME_FAIL]', JSON.stringify({
         streamId,
         viewerUserId,
         reason: 'missing_streamId',
-      });
-      return res.status(400).json({ error: 'streamId is required' });
+      }));
+      return res.status(400).json({ error: 'streamId is required', code: 'MISSING_STREAM_ID' });
     }
 
     if (!viewerUserId) {
-      console.warn('[LIVE_BACKEND][JOIN_REALTIME_FAIL]', {
+      console.warn('[LIVE_BACKEND][JOIN_REALTIME_FAIL]', JSON.stringify({
         streamId,
         viewerUserId,
         reason: 'missing_viewer_user',
-      });
+      }));
       return res.status(401).json({ error: 'User not found in token' });
     }
 
-    console.log('[LIVE_API][JOIN_REALTIME]', {
+    console.log('[LIVE_API][JOIN_REALTIME]', JSON.stringify({
       sessionId: streamId,
       viewerUserId,
       displayName,
-    });
+    }));
 
     const result = await joinLiveRealtime(streamId, viewerUserId, displayName);
 
-    console.log('[LIVE_BACKEND][JOIN_REALTIME_SUCCESS]', {
+    console.log('[LIVE_BACKEND][JOIN_REALTIME_SUCCESS]', JSON.stringify({
       streamId,
       viewerUserId,
       stageArn: result.stageArn,
       role: 'viewer',
       status: 'live',
-    });
+    }));
 
     res.json(result);
   } catch (err: any) {
-    const reason = err.message.includes('not found') ? 'session_not_found' : 'ivs_error';
-    console.warn('[LIVE_BACKEND][JOIN_REALTIME_FAIL]', {
-      streamId: req.body?.streamId,
+    const message = String(err?.message || 'Failed to join');
+    const notFound = /not found|not live/i.test(message);
+    const reason = notFound ? 'session_not_found' : 'ivs_error';
+    const streamId = resolveLiveSessionId(req.body || {});
+    console.warn('[LIVE_BACKEND][JOIN_REALTIME_FAIL]', JSON.stringify({
+      streamId,
       viewerUserId: req.user?.sub,
       reason,
-      error: err.message,
-    });
-    res.status(err.message.includes('not found') ? 404 : 500).json({
-      error: err.message,
+      error: message,
+    }));
+    // Split-brain: Firestore still lists a card whose Dynamo session is gone/ENDED.
+    // Clear the directory entry so account B stops trying to join a dead id.
+    if (notFound && streamId) {
+      void clearDirectoryGhost(streamId, 'join_realtime_miss');
+    }
+    res.status(notFound ? 404 : 500).json({
+      error: message,
+      code: reason === 'session_not_found' ? 'SESSION_NOT_FOUND' : 'JOIN_FAILED',
     });
   }
 });
 
 router.post('/live/join', async (req: AuthedRequest, res) => {
   try {
-    const { sessionId, streamId, displayName } = req.body || {};
-    const id = String(sessionId || streamId || '').trim();
+    const id = resolveLiveSessionId(req.body || {});
+    const { displayName } = req.body || {};
     const viewerUserId = req.user?.sub;
     if (!id) {
       return res.status(400).json({ error: 'sessionId is required' });
@@ -180,8 +206,16 @@ router.post('/live/join', async (req: AuthedRequest, res) => {
     const result = await joinLiveMass(id, viewerUserId, displayName);
     return res.json(result);
   } catch (err: any) {
-    const notFound = String(err?.message || '').includes('not found');
-    return res.status(notFound ? 404 : 500).json({ error: err?.message || 'Failed to join live session' });
+    const message = String(err?.message || 'Failed to join live session');
+    const notFound = /not found|not live/i.test(message);
+    const id = resolveLiveSessionId(req.body || {});
+    if (notFound && id) {
+      void clearDirectoryGhost(id, 'join_mass_miss');
+    }
+    return res.status(notFound ? 404 : 500).json({
+      error: message,
+      code: notFound ? 'SESSION_NOT_FOUND' : 'JOIN_FAILED',
+    });
   }
 });
 
