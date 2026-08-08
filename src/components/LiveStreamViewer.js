@@ -184,9 +184,9 @@ const IVSLiveStreamViewer = ({
   const [guestJoinError, setGuestJoinError] = useState(null);
   const [guestGridHeight, setGuestGridHeight] = useState(0);
   const [guestPagerMeasuredHeight, setGuestPagerMeasuredHeight] = useState(0);
-  // Guest boxes are visible on entry; viewers can still swipe down when they
-  // explicitly want a full-bleed host view.
-  const [guestTrayMode, setGuestTrayMode] = useState('expanded'); // expanded | collapsed | hidden
+  // Guest boxes are visible on entry as one compact row; viewers can swipe up
+  // for a second row or down to hide the tray completely.
+  const [guestTrayMode, setGuestTrayMode] = useState('collapsed'); // expanded | collapsed | hidden
   const [suspendViewerAutoJoin, setSuspendViewerAutoJoin] = useState(false);
   // Host-applied mute on this user (when on stage as a guest). Host controls it;
   // the guest cannot self-unmute while true.
@@ -798,8 +798,8 @@ const IVSLiveStreamViewer = ({
   useEffect(() => {
     const had = prevGuestCountRef.current;
     if (had === 0 && guestStreamCount > 0) {
-      // Show the full guest grid by default when guests are on stage.
-      setGuestTrayMode('expanded');
+      // Keep the default reveal compact; a second row is an explicit swipe up.
+      setGuestTrayMode('collapsed');
     } else if (had > 0 && guestStreamCount === 0 && !guestMode) {
       setGuestTrayMode('collapsed');
     }

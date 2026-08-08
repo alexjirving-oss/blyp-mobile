@@ -578,9 +578,9 @@ const LiveStreamScreen = (props) => {
   const reservedGuestsRef = useRef(new Map()); // userId -> { userId, slotIndex, name, photoUrl, status }
   const [giftRecipient, setGiftRecipient] = useState(null);
   const [reactionBurst, setReactionBurst] = useState({ key: 0, emoji: null });
-  // Guest boxes are part of the default live surface. Hosts can still swipe the
-  // tray down, but entering a live no longer starts with every slot hidden.
-  const [hostGuestTrayMode, setHostGuestTrayMode] = useState('expanded'); // expanded | collapsed | hidden
+  // Guest boxes are part of the default live surface, but start as one compact
+  // visible row. ("collapsed" is the one-row tray, not the hidden state.)
+  const [hostGuestTrayMode, setHostGuestTrayMode] = useState('collapsed'); // expanded | collapsed | hidden
   /** Compositional layout (sticky slots apply inside each mode). Mirrored to viewers. */
   const [guestLayoutMode, setGuestLayoutMode] = useState(LIVE_LAYOUT_MODES.BOTTOM_GRID);
   const prevHostGuestCountRef = useRef(0);
@@ -1349,8 +1349,9 @@ const LiveStreamScreen = (props) => {
     }
   }, [ivsHostSession?.participants, liveGuests]);
 
-  // Auto-reveal the guest tray the moment the first guest joins (so a host who
-  // started solo/full-bleed isn't left with guests hidden behind the handle).
+  // Auto-reveal one guest row the moment the first guest joins (so a host who
+  // hid the tray isn't left with guests behind the handle). A second row remains
+  // an explicit swipe-up action.
   // Battles use a dedicated side-by-side stage — keep the multi-guest tray closed.
   useEffect(() => {
     if (activeBattleId) {
@@ -1358,7 +1359,7 @@ const LiveStreamScreen = (props) => {
       return;
     }
     if (hostGuestCount > 0 && prevHostGuestCountRef.current === 0) {
-      setHostGuestTrayMode((prev) => (prev === 'hidden' ? 'expanded' : prev));
+      setHostGuestTrayMode((prev) => (prev === 'hidden' ? 'collapsed' : prev));
     }
     prevHostGuestCountRef.current = hostGuestCount;
   }, [hostGuestCount, activeBattleId]);

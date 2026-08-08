@@ -29,6 +29,7 @@ import { subscribeWalletUpdated } from '../utils/walletEvents';
 import TourTarget from '../tour/TourTarget';
 
 const { width } = Dimensions.get('window');
+const GIFT_TILE_WIDTH = Math.min(148, Math.max(128, Math.round(width * 0.36)));
 
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 
@@ -857,8 +858,12 @@ const GiftSystem = ({
   };
 
   const renderGift = (gift) => {
-    const rarity = String(gift?.rarity || 'common');
+    const rarity = String(gift?.rarity || 'common').toLowerCase();
     const isPremium = rarity === 'epic' || rarity === 'legendary';
+    const cost = Math.max(0, Number(gift?.cost) || 0);
+    const balanceKnown = walletState?.status === 'ok';
+    const isAffordable = !balanceKnown || userBalance >= cost;
+    const shortfall = balanceKnown ? Math.max(0, cost - userBalance) : 0;
     const shimmerTranslate = giftShimmer.interpolate({
       inputRange: [0, 1],
       outputRange: [-40, 40],
@@ -881,12 +886,15 @@ const GiftSystem = ({
         onPress={() => setSelectedGift(gift)}
         disabled={sending}
         activeOpacity={0.9}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isSelected, disabled: sending }}
+        accessibilityLabel={`${gift.name}, ${cost.toLocaleString()} coins${isSelected ? ', selected' : ''}`}
       >
         <LinearGradient
           colors={rarityColors}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.giftOuterFrame}
+          style={[styles.giftOuterFrame, isSelected && styles.giftOuterFrameSelected]}
         >
           <View style={[styles.giftInnerFrame, isPremium && { shadowColor: glowColor }]}>
             <LinearGradient
@@ -933,6 +941,22 @@ const GiftSystem = ({
 
                 <View style={styles.giftGloss} pointerEvents="none" />
 
+                <View
+                  style={[
+                    styles.giftRarityChip,
+                    isPremium && styles.giftRarityChipPremium,
+                  ]}
+                  pointerEvents="none"
+                >
+                  <Text style={styles.giftRarityText}>{rarity.toUpperCase()}</Text>
+                </View>
+
+                {isSelected ? (
+                  <View style={styles.giftSelectedBadge} pointerEvents="none">
+                    <Text style={styles.giftSelectedBadgeText}>✓</Text>
+                  </View>
+                ) : null}
+
                 <View style={styles.giftEmojiWrap}>
                   <Text style={styles.giftEmoji}>{gift.emoji}</Text>
                 </View>
@@ -943,53 +967,32 @@ const GiftSystem = ({
                 <Text style={styles.giftName} numberOfLines={1}>
                   {gift.name}
                 </Text>
-                <View style={styles.giftPriceRow}>
+                <View style={[styles.giftPriceRow, isSelected && styles.giftPriceRowSelected]}>
                   <Text style={styles.coinIcon}>🪙</Text>
-                  <Text style={styles.costText}>{gift.cost}</Text>
+                  <Text style={styles.costText}>{formatGiftCoins(cost)}</Text>
+                  <Text style={styles.costUnit}>coins</Text>
                 </View>
+                <Text
+                  style={isAffordable ? styles.giftAvailabilityText : styles.giftShortfallText}
+                  numberOfLines={1}
+                >
+                  {isAffordable
+                    ? isSelected
+                      ? 'Ready to send'
+                      : 'Tap to select'
+                    : `Need ${formatGiftCoins(shortfall)} more`}
+                </Text>
               </View>
-
-              {/* Selected: dim the tile and float a centered Send button on top.
-                  Absolutely positioned so it's always visible/centered regardless
-                  of tile size (the old in-flow button was clipped on narrow tiles).
-                  Tap repeatedly to stack/combo gifts. */}
-              {isSelected ? (
-                <View style={styles.giftSelectedOverlay} pointerEvents="box-none">
-                  <TouchableOpacity
-                    style={styles.giftSendCenter}
-                    activeOpacity={0.85}
-                    // Only hard-disable once the wallet is loaded and truly short on
-                    // coins. While the wallet is still loading/idle we keep it
-                    // tappable so handleSendGift can surface "Loading your wallet…".
-                    disabled={sending || (walletState?.status === 'ok' && userBalance < gift.cost)}
-                    onPress={() => handleSendGift(gift)}
-                  >
-                    <LinearGradient
-                      colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.giftSendButton}
-                    >
-                      <Text style={styles.giftSendText}>{sending ? 'Sending…' : 'Send'}</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-
-              {/* Only show the lock once we KNOW the balance is too low (wallet
-                  loaded). Showing it during load made every gift look locked even
-                  when the user had plenty of coins. */}
-              {walletState?.status === 'ok' && userBalance < gift.cost && (
-                <View style={styles.insufficientOverlay} pointerEvents="none">
-                  <Icon name="lock-closed" size={16} color={COLORS.white} />
-                </View>
-              )}
             </LinearGradient>
           </View>
         </LinearGradient>
       </TouchableOpacity>
     );
   };
+
+  const selectedGiftCost = Math.max(0, Number(selectedGift?.cost) || 0);
+  const selectedGiftAffordable =
+    walletState?.status !== 'ok' || userBalance >= selectedGiftCost;
 
   return (
     <>
@@ -1139,30 +1142,50 @@ const GiftSystem = ({
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={() => setShowGiftModal(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close gifts"
               >
                 <Icon  name="close" size={24} color="#fff"  />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>Send Gift</Text>
-              <View style={styles.balanceContainer}>
-                <TouchableOpacity onPress={showWalletDebug} activeOpacity={0.8}>
-                  <Text style={styles.balanceText}>
-                    🪙{' '}
-                    {walletState?.status === 'ok' || walletState?.lastUpdatedAt
-                      ? Number(userBalance || 0).toLocaleString()
-                      : walletState?.status === 'loading'
-                        ? '…'
-                        : '—'}
-                  </Text>
-                </TouchableOpacity>
+              <View style={styles.modalTitleBlock}>
+                <Text style={styles.modalTitle}>Send a gift</Text>
+                <Text style={styles.modalSubtitle}>Pick one, then send</Text>
               </View>
+              <TouchableOpacity
+                style={styles.balanceContainer}
+                onPress={showWalletDebug}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={`Coin balance ${
+                  walletState?.status === 'ok' || walletState?.lastUpdatedAt
+                    ? Number(userBalance || 0).toLocaleString()
+                    : 'unavailable'
+                }`}
+              >
+                <Text style={styles.balanceLabel}>BALANCE</Text>
+                <Text style={styles.balanceText}>
+                  🪙{' '}
+                  {walletState?.status === 'ok' || walletState?.lastUpdatedAt
+                    ? Number(userBalance || 0).toLocaleString()
+                    : walletState?.status === 'loading'
+                      ? '…'
+                      : '—'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {/* Creator Info */}
             <View style={styles.creatorInfo}>
+              <Text style={styles.recipientLabel}>RECIPIENT</Text>
               <Text style={styles.creatorText}>
-                {battleSide ? `Sending to SIDE ${battleSide}: ` : 'Sending to: '}
+                {battleSide ? `Side ${battleSide} · ` : ''}
                 {getCreatorName()}
               </Text>
+            </View>
+
+            <View style={styles.giftSectionHeader}>
+              <Text style={styles.giftSectionTitle}>Choose a gift</Text>
+              <Text style={styles.giftSectionHint}>Every price below is per gift</Text>
             </View>
 
             {/* Horizontal gift carousel (swipe left/right) */}
@@ -1177,6 +1200,74 @@ const GiftSystem = ({
                 .sort((a, b) => Number(a?.cost || 0) - Number(b?.cost || 0))
                 .map(renderGift)}
             </ScrollView>
+
+            <View style={styles.giftActionBar}>
+              <View style={styles.selectedGiftSummary}>
+                {selectedGift ? (
+                  <>
+                    <Text style={styles.selectedGiftLabel}>SELECTED GIFT</Text>
+                    <Text style={styles.selectedGiftName} numberOfLines={1}>
+                      {selectedGift.emoji} {selectedGift.name}
+                    </Text>
+                    <Text
+                      style={
+                        selectedGiftAffordable
+                          ? styles.selectedGiftCost
+                          : styles.selectedGiftCostInsufficient
+                      }
+                    >
+                      🪙 {formatGiftCoins(selectedGiftCost)} coins
+                      {!selectedGiftAffordable
+                        ? ` · need ${formatGiftCoins(selectedGiftCost - userBalance)} more`
+                        : ''}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.selectedGiftName}>Select a gift</Text>
+                    <Text style={styles.selectedGiftEmptyHint}>
+                      Its coin cost will stay visible here.
+                    </Text>
+                  </>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.giftActionButtonWrap,
+                  (!selectedGift || sending || !selectedGiftAffordable) &&
+                    styles.giftActionButtonWrapDisabled,
+                ]}
+                activeOpacity={0.85}
+                disabled={!selectedGift || sending || !selectedGiftAffordable}
+                onPress={() => selectedGift && handleSendGift(selectedGift)}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: !selectedGift || sending || !selectedGiftAffordable,
+                }}
+                accessibilityLabel={
+                  selectedGift
+                    ? `Send ${selectedGift.name} for ${selectedGiftCost.toLocaleString()} coins`
+                    : 'Select a gift before sending'
+                }
+              >
+                <LinearGradient
+                  colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.giftActionButton}
+                >
+                  <Text style={styles.giftActionButtonText}>
+                    {sending ? 'Sending…' : selectedGift ? 'Send gift' : 'Choose gift'}
+                  </Text>
+                  {selectedGift ? (
+                    <Text style={styles.giftActionButtonCost}>
+                      🪙 {formatGiftCoins(selectedGiftCost)} coins
+                    </Text>
+                  ) : null}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
 
           </View>
         </View>
@@ -1267,12 +1358,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.40)',
   },
   modalContainer: {
-    backgroundColor: 'rgba(10, 10, 12, 0.94)',
+    maxHeight: '82%',
+    backgroundColor: '#0A0A0C',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    paddingBottom: 22,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
   },
   sheetHandle: {
     alignSelf: 'center',
@@ -1284,7 +1376,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   giftCarousel: {
-    paddingVertical: 14,
+    paddingVertical: 10,
   },
   giftCarouselContent: {
     paddingHorizontal: 14,
@@ -1296,53 +1388,112 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#27272E',
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    backgroundColor: '#111114',
   },
   closeButton: {
-    padding: 4,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  modalTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 10,
   },
   modalTitle: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+  },
+  modalSubtitle: {
+    marginTop: 1,
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 11,
+    fontWeight: '600',
   },
   balanceContainer: {
-    backgroundColor: '#fbbf24',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
+    minWidth: 92,
+    alignItems: 'flex-end',
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.48)',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  balanceLabel: {
+    color: '#FDE68A',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
   balanceText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '900',
+    includeFontPadding: false,
   },
   creatorInfo: {
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    paddingVertical: 9,
+    backgroundColor: 'rgba(0,210,190,0.08)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,210,190,0.18)',
+  },
+  recipientLabel: {
+    color: '#7FEDE2',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.9,
+    textAlign: 'center',
   },
   creatorText: {
     color: '#fff',
-    fontSize: 14,
+    marginTop: 2,
+    fontSize: 15,
+    fontWeight: '800',
     textAlign: 'center',
   },
+  giftSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingTop: 12,
+  },
+  giftSectionTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  giftSectionHint: {
+    color: 'rgba(255,255,255,0.52)',
+    fontSize: 10,
+    fontWeight: '600',
+  },
   giftItem: {
-    width: 104,
-    aspectRatio: 1,
+    width: GIFT_TILE_WIDTH,
+    height: 184,
     borderRadius: 18,
     overflow: 'hidden',
   },
   selectedGift: {
-    transform: [{ scale: 0.95 }],
+    transform: [{ scale: 1.015 }],
   },
   giftOuterFrame: {
     flex: 1,
-    padding: 1.25,
+    padding: 1.5,
     borderRadius: 18,
+  },
+  giftOuterFrameSelected: {
+    padding: 3,
   },
   giftInnerFrame: {
     flex: 1,
@@ -1371,6 +1522,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(10,10,12,0.64)',
     zIndex: 20,
     elevation: 20,
   },
@@ -1379,9 +1531,30 @@ const styles = StyleSheet.create({
   },
   giftRarityText: {
     color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.2,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.45,
+    includeFontPadding: false,
+  },
+  giftSelectedBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#00D2BE',
+    borderWidth: 2,
+    borderColor: '#fff',
+    zIndex: 22,
+    elevation: 22,
+  },
+  giftSelectedBadgeText: {
+    color: '#071513',
+    fontSize: 14,
+    fontWeight: '900',
     includeFontPadding: false,
   },
   giftGlow: {
@@ -1395,7 +1568,7 @@ const styles = StyleSheet.create({
   },
   giftArtPanel: {
     width: '100%',
-    height: 64,
+    height: 82,
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
@@ -1473,9 +1646,9 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   giftEmojiWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(15,23,42,0.25)',
@@ -1483,107 +1656,133 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.18)',
   },
   giftEmoji: {
-    fontSize: 26,
+    fontSize: 31,
   },
   giftTileMeta: {
+    flex: 1,
     width: '100%',
-    paddingTop: 6,
+    paddingTop: 8,
     alignItems: 'center',
   },
   giftPriceRow: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 3,
-    marginTop: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15, 23, 42, 0.28)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  giftNamePlate: {
-    position: 'absolute',
-    left: 6,
-    right: 6,
-    bottom: 6,
-    paddingVertical: 5,
+    marginTop: 6,
     paddingHorizontal: 8,
-    borderRadius: 12,
+    paddingVertical: 6,
+    borderRadius: 11,
+    backgroundColor: 'rgba(10,10,12,0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    zIndex: 15,
-    elevation: 15,
+    borderColor: 'rgba(251,191,36,0.54)',
+  },
+  giftPriceRowSelected: {
+    backgroundColor: 'rgba(0,210,190,0.18)',
+    borderColor: '#7FEDE2',
   },
   giftName: {
     color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '900',
     textAlign: 'center',
     includeFontPadding: false,
   },
-  giftSelectedOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 16,
-    backgroundColor: 'rgba(10,10,12,0.58)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 25,
-  },
-  giftSendCenter: {
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  giftSendButton: {
-    paddingVertical: 9,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 999,
-  },
-  giftSendText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '800',
-    includeFontPadding: false,
-  },
-  giftPriceBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15, 23, 42, 0.42)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    zIndex: 20,
-    elevation: 20,
-  },
   coinIcon: {
-    fontSize: 12,
+    fontSize: 14,
   },
   costText: {
-    color: '#fff',
-    fontSize: 12,
+    color: '#FDE68A',
+    fontSize: 17,
+    fontWeight: '900',
+  },
+  costUnit: {
+    color: '#FDE68A',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  giftAvailabilityText: {
+    marginTop: 5,
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 10,
     fontWeight: '700',
   },
-  insufficientOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  giftShortfallText: {
+    marginTop: 5,
+    color: '#FDA4AF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  giftActionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 18,
+    backgroundColor: '#111114',
+    borderTopWidth: 1,
+    borderTopColor: '#27272E',
+  },
+  selectedGiftSummary: {
+    flex: 1,
+    minWidth: 0,
+  },
+  selectedGiftLabel: {
+    color: '#7FEDE2',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  selectedGiftName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  selectedGiftCost: {
+    marginTop: 3,
+    color: '#FDE68A',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  selectedGiftCostInsufficient: {
+    marginTop: 3,
+    color: '#FDA4AF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  selectedGiftEmptyHint: {
+    marginTop: 3,
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  giftActionButtonWrap: {
+    width: 148,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  giftActionButtonWrapDisabled: {
+    opacity: 0.42,
+  },
+  giftActionButton: {
+    minHeight: 58,
+    paddingHorizontal: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  giftActionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  giftActionButtonCost: {
+    marginTop: 2,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
   },
   modalFooter: {
     paddingHorizontal: 14,
