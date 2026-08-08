@@ -128,6 +128,7 @@ import LiveErrorBoundary from './src/components/LiveErrorBoundary';
 import ScreenErrorBoundary from './src/components/ScreenErrorBoundary';
 import GlobalImportProgress from './src/components/GlobalImportProgress';
 import GlobalPostUploadProgress from './src/components/GlobalPostUploadProgress';
+import ProfileCompletionGate from './src/components/ProfileCompletionGate';
 // Lazy screens (defer heavy modules until navigated)
 const ArtilleryGameScreen = React.lazy(() => import('./src/games/artillery/ArtilleryGameScreen'));
 const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
@@ -1390,9 +1391,11 @@ function AppInner() {
             ) : onboarded === false ? (
               <OnboardingScreen uid={uid} onDone={() => setOnboarded(true)} />
             ) : (
-              <GuidedTourProvider navigationRef={navigationRef}>
-                <AppStack />
-              </GuidedTourProvider>
+              <ProfileCompletionGate uid={uid} user={user}>
+                <GuidedTourProvider navigationRef={navigationRef}>
+                  <AppStack />
+                </GuidedTourProvider>
+              </ProfileCompletionGate>
             )
           ) : (
             <AuthScreen />

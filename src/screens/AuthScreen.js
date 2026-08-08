@@ -15,9 +15,20 @@ import { COLORS } from '../styles/theme';
 import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
 import { flushCognitoStorageWrites } from '../lib/auth/cognitoStorage';
-import { isSocialAuthEnabled, signInWithGoogle, signInWithFacebook } from '../services/socialAuthService';
+import {
+  isSocialAuthEnabled,
+  isSocialProviderEnabled,
+  signInWithApple,
+  signInWithFacebook,
+  signInWithGoogle,
+} from '../services/socialAuthService';
 import { ensureUserProfile } from '../services/LiveService';
 import { enterGuestMode } from '../services/guestSessionService';
+import {
+  clearPendingProfile,
+  rememberPendingProfile,
+  validateUsername,
+} from '../services/usernameProfileService';
 
 const MIN_SIGNUP_AGE = 13;
 
@@ -396,14 +407,15 @@ const AuthScreen = () => {
           return;
         }
 
-        const usernameNorm = String(username || '').trim().replace(/^@/, '');
-        if (!/^[A-Za-z0-9_.]{3,20}$/.test(usernameNorm)) {
-          const msg = 'Choose a username (3–20 characters: letters, numbers, underscore, or dot).';
+        const usernameValidation = validateUsername(username);
+        if (!usernameValidation.ok) {
+          const msg = usernameValidation.message;
           setLastError(msg);
           Alert.alert('Username required', msg);
           setLoading(false);
           return;
         }
+        const usernameNorm = usernameValidation.username;
         const displayName = usernameNorm;
 
         console.log('ðŸ“ Starting signup for:', maskEmail(emailNorm), 'displayName:', displayName);
@@ -494,6 +506,9 @@ const AuthScreen = () => {
             // username is opaque and the email alias is not active until AFTER confirmation,
             // so confirmRegistration must target this username, not the email.
             const actualUsername = (result && result.user && typeof result.user.getUsername === 'function' && result.user.getUsername()) || cognitoUsername;
+            rememberPendingProfile({ source: 'signup', username: usernameNorm }).catch((pendingError) => {
+              console.warn('[AUTH][SIGNUP] Could not persist pending profile', pendingError?.message || pendingError);
+            });
             setConfirmUsername(actualUsername);
             setNeedsConfirm(true);
             setConfirmEmail(emailNorm);
@@ -512,65 +527,30 @@ const AuthScreen = () => {
     }
   };
 
-  const handleGoogleSignInPress = async () => {
-    if (!isSocialAuthEnabled()) {
-      Alert.alert('Unavailable', 'Social sign-in is not enabled in this build.');
-      return;
-    }
-
+  const handleSocialSignInPress = async (provider, signIn) => {
     if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
-      console.log('[AUTH][SOCIAL] Ignoring Google tap while auth is busy or cooled down');
+      console.log(`[AUTH][SOCIAL] Ignoring ${provider} tap while auth is busy or cooled down`);
       return;
     }
 
     setIsSocialAuthInProgress(true);
-    console.log('[AUTH][SOCIAL] Starting Google sign-in at', new Date().toISOString());
+    console.log(`[AUTH][SOCIAL] Starting ${provider} Cognito sign-in at`, new Date().toISOString());
 
     try {
-      const result = await signInWithGoogle();
-      console.log('[AUTH][SOCIAL] Google sign-in result', result);
-      // Cognito session is required for app auth. Without Hosted UI / IdP linking,
-      // do not pretend the user is signed in.
-      Alert.alert(
-        'Almost there',
-        'Google sign-in worked, but this app still needs Cognito identity linking before social login can finish. Please sign in with email for now.',
-      );
+      await rememberPendingProfile({ source: 'social' });
+      await signIn();
     } catch (err) {
-      console.log('[AUTH][SOCIAL] Google sign-in error', { message: err?.message, code: err?.code });
-      Alert.alert('Google sign-in failed', err?.message || 'Please try again or use email.');
+      await clearPendingProfile().catch(() => {});
+      console.log(`[AUTH][SOCIAL] ${provider} sign-in error`, { message: err?.message, code: err?.code });
+      Alert.alert(`${provider} sign-in failed`, err?.message || 'Please try again or use email.');
     } finally {
       setIsSocialAuthInProgress(false);
     }
   };
 
-  const handleFacebookSignInPress = async () => {
-    if (!isSocialAuthEnabled()) {
-      Alert.alert('Unavailable', 'Social sign-in is not enabled in this build.');
-      return;
-    }
-
-    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
-      console.log('[AUTH][SOCIAL] Ignoring Facebook tap while auth is busy or cooled down');
-      return;
-    }
-
-    setIsSocialAuthInProgress(true);
-    console.log('[AUTH][SOCIAL] Starting Facebook sign-in at', new Date().toISOString());
-
-    try {
-      const result = await signInWithFacebook();
-      console.log('[AUTH][SOCIAL] Facebook sign-in result', result);
-      Alert.alert(
-        'Almost there',
-        'Facebook sign-in worked, but this app still needs Cognito identity linking before social login can finish. Please sign in with email for now.',
-      );
-    } catch (err) {
-      console.log('[AUTH][SOCIAL] Facebook sign-in error', { message: err?.message, code: err?.code });
-      Alert.alert('Facebook sign-in failed', err?.message || 'Please try again or use email.');
-    } finally {
-      setIsSocialAuthInProgress(false);
-    }
-  };
+  const handleGoogleSignInPress = () => handleSocialSignInPress('Google', signInWithGoogle);
+  const handleFacebookSignInPress = () => handleSocialSignInPress('Facebook', signInWithFacebook);
+  const handleAppleSignInPress = () => handleSocialSignInPress('Apple', signInWithApple);
 
   const handleReset = async () => {
     setLoading(true);
@@ -605,17 +585,22 @@ const AuthScreen = () => {
               {isLogin ? 'Log In' : 'Create Account'}
             </Text>
 
-            {!isLogin && (
-              <TextInput
-                style={styles.input}
-                placeholder="Username (required)"
-                placeholderTextColor="#9ca3af"
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={20}
-              />
+            {!isLogin && !needsConfirm && (
+              <>
+                <TextInput
+                  style={[styles.input, styles.usernameInput]}
+                  placeholder="Public username (required)"
+                  placeholderTextColor="#9ca3af"
+                  value={username}
+                  onChangeText={setUsername}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={20}
+                />
+                <Text style={styles.usernameHint}>
+                  Your unique @handle · 3–20 letters, numbers, underscores, or dots
+                </Text>
+              </>
             )}
 
             {!isLogin && !needsConfirm && (
@@ -714,7 +699,7 @@ const AuthScreen = () => {
                     - Confirm brand guidelines (Google / Meta)
                     - Decide button ordering and spacing relative to email/password form
                     - Add tracking for tap events (provider, success/failure, latency) */}
-                  <TouchableOpacity
+                  {isSocialProviderEnabled('Google') && <TouchableOpacity
                     style={[
                       styles.socialButton,
                       isSocialAuthInProgress && styles.socialButtonDisabled,
@@ -726,9 +711,9 @@ const AuthScreen = () => {
                     <Text style={styles.socialButtonText} allowFontScaling={false}>
                       Continue with Google
                     </Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity>}
 
-                  <TouchableOpacity
+                  {isSocialProviderEnabled('Facebook') && <TouchableOpacity
                     style={[
                       styles.socialButton,
                       isSocialAuthInProgress && styles.socialButtonDisabled,
@@ -740,7 +725,23 @@ const AuthScreen = () => {
                     <Text style={styles.socialButtonText} allowFontScaling={false}>
                       Continue with Facebook
                     </Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity>}
+
+                  {Platform.OS === 'ios' && isSocialProviderEnabled('Apple') && (
+                    <TouchableOpacity
+                      style={[
+                        styles.socialButton,
+                        isSocialAuthInProgress && styles.socialButtonDisabled,
+                      ]}
+                      onPress={handleAppleSignInPress}
+                      disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
+                      activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
+                    >
+                      <Text style={styles.socialButtonText} allowFontScaling={false}>
+                        Continue with Apple
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </>
             )}
@@ -1326,7 +1327,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   socialButtonsRow: {
-    flexDirection: 'row',
     gap: 12,
   },
   socialButton: {
@@ -1346,6 +1346,15 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     fontSize: 14,
     fontWeight: '500',
+  },
+  usernameInput: {
+    marginBottom: 6,
+  },
+  usernameHint: {
+    color: '#71717A',
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 16,
   },
 });
 

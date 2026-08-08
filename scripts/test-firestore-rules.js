@@ -23,6 +23,7 @@ const {
   collection,
   addDoc,
   writeBatch,
+  runTransaction,
 } = require('firebase/firestore');
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-rules';
@@ -161,6 +162,46 @@ const RULES_PATH = path.join(__dirname, '..', 'firestore.wave0-live.rules');
   await expectDeny(
     setDoc(doc(ownerDb, 'users', otherId), { displayName: 'Hijack' }),
     'cannot write another user doc'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', ownerId), {
+      username: 'Owner.Name',
+      usernameKey: 'owner.name',
+      handle: 'Owner.Name',
+    }, { merge: true }),
+    'username cannot change without an atomic claim'
+  );
+  await expectAllow(
+    runTransaction(ownerDb, async (tx) => {
+      tx.set(doc(ownerDb, 'usernameClaims', 'owner.name'), {
+        uid: ownerId,
+        username: 'Owner.Name',
+        updatedAt: Date.now(),
+      });
+      tx.set(doc(ownerDb, 'users', ownerId), {
+        username: 'Owner.Name',
+        usernameKey: 'owner.name',
+        handle: 'Owner.Name',
+        displayName: 'Owner.Name',
+      }, { merge: true });
+    }),
+    'owner claims username atomically'
+  );
+  await expectDeny(
+    runTransaction(otherDb, async (tx) => {
+      tx.set(doc(otherDb, 'usernameClaims', 'owner.name'), {
+        uid: otherId,
+        username: 'owner.name',
+        updatedAt: Date.now(),
+      }, { merge: true });
+      tx.set(doc(otherDb, 'users', otherId), {
+        username: 'owner.name',
+        usernameKey: 'owner.name',
+        handle: 'owner.name',
+        displayName: 'owner.name',
+      }, { merge: true });
+    }),
+    'another account cannot claim username with different casing'
   );
 
   // Per-topic notifications: explicit owner-only preference; topic event input is server-only.

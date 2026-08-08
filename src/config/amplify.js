@@ -15,7 +15,14 @@ try { Amplify = require('aws-amplify').Amplify; } catch (e) { console.warn('[Amp
 const LOCKED_USER_POOL_WEB_CLIENT_ID = '4a7r115hllaedriqsjlsa00snj';
 
 const shouldEnableAmplify = (() => {
-	try { return ['1', 'true', 'yes'].includes(String(process.env?.EXPO_PUBLIC_ENABLE_AMPLIFY ?? '').toLowerCase()); } catch { return false; }
+	try {
+		const enabled = (value) =>
+			['1', 'true', 'yes', 'on'].includes(String(value ?? '').toLowerCase());
+		return enabled(process.env?.EXPO_PUBLIC_ENABLE_AMPLIFY)
+			|| enabled(process.env?.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH);
+	} catch {
+		return false;
+	}
 })();
 
 if (!shouldEnableAmplify || !Amplify) {
@@ -49,6 +56,31 @@ if (!shouldEnableAmplify || !Amplify) {
 				aws_user_pools_web_client_id: LOCKED_USER_POOL_WEB_CLIENT_ID,
 			};
 		}
+	}
+
+	// Hosted UI settings are public identifiers. Merge them at runtime as well
+	// as build time so local dev and EAS use the same Cognito federation path.
+	const hostedUiDomain = String(process.env?.EXPO_PUBLIC_COGNITO_DOMAIN || '')
+		.trim()
+		.replace(/^https?:\/\//, '')
+		.replace(/\/+$/, '');
+	if (hostedUiDomain) {
+		const socialProviders = String(
+			process.env?.EXPO_PUBLIC_SOCIAL_PROVIDERS || 'Google,Facebook'
+		).split(',').map((provider) => provider.trim()).filter(Boolean);
+		awsconfig = {
+			...awsconfig,
+			aws_cognito_social_providers: socialProviders,
+			oauth: {
+				domain: hostedUiDomain,
+				scope: ['openid', 'email', 'profile'],
+				redirectSignIn:
+					process.env?.EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN || 'blyp://auth/',
+				redirectSignOut:
+					process.env?.EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT || 'blyp://auth/signout/',
+				responseType: 'code',
+			},
+		};
 	}
 
 	// Only configure Amplify when we have a plausible config (presence of at least one expected key)

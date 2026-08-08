@@ -41,6 +41,30 @@ service cloud.firestore {
           == resource.data.get('earnedBadgeIdsUpdatedAt', null);
     }
 
+    function validUsernameClaim(userId) {
+      return request.resource.data.keys().hasAll(['username', 'usernameKey', 'handle'])
+        && request.resource.data.username is string
+        && request.resource.data.usernameKey is string
+        && request.resource.data.username == request.resource.data.handle
+        && getAfter(
+          /databases/$(database)/documents/usernameClaims/$(request.resource.data.usernameKey)
+        ).data.uid == userId
+        && getAfter(
+          /databases/$(database)/documents/usernameClaims/$(request.resource.data.usernameKey)
+        ).data.username == request.resource.data.username;
+    }
+
+    function usernameClaimValidOnCreate(userId) {
+      return !request.resource.data.keys().hasAny(['username', 'usernameKey', 'handle'])
+        || validUsernameClaim(userId);
+    }
+
+    function usernameClaimValidOnUpdate(userId) {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['username', 'usernameKey', 'handle'])
+        || validUsernameClaim(userId);
+    }
+
     // Admin hide / priority on posts — clients cannot set or clear.
     function postModerationFrozenOnCreate() {
       return request.resource.data.get('moderation', {}).get('hidden', false) == false
@@ -107,8 +131,12 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isOwner(userId) && userPrivFieldsFrozenOnCreate();
-      allow update: if isOwner(userId) && userPrivFieldsFrozenOnUpdate();
+      allow create: if isOwner(userId)
+        && userPrivFieldsFrozenOnCreate()
+        && usernameClaimValidOnCreate(userId);
+      allow update: if isOwner(userId)
+        && userPrivFieldsFrozenOnUpdate()
+        && usernameClaimValidOnUpdate(userId);
       allow delete: if false;
 
       match /followers/{followerId} {
@@ -156,6 +184,21 @@ service cloud.firestore {
     match /userProfiles/{userId} {
       allow read: if isSignedIn();
       allow write: if isOwner(userId);
+    }
+
+    // Atomic, lowercase public-handle ownership. Profile writes pair this claim
+    // with users/{uid}.usernameKey in a single client transaction.
+    match /usernameClaims/{usernameKey} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username is string
+        && usernameKey.matches('^[a-z0-9_.]{3,20}$');
+      allow update: if isSignedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && usernameKey.matches('^[a-z0-9_.]{3,20}$');
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     match /posts/{postId} {

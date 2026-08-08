@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from 'react-native-toast-message';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, limit as fsLimit } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { storage, firestore as db } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
 import { useHasAI } from '../hooks/useEntitlement';
@@ -24,6 +24,7 @@ import {
 import { syncClubMembershipIndex } from '../services/clubDiscoveryService';
 import { fetchEarnedBadgeIds, syncBadgeAwards } from '../services/badgeAwardsService';
 import { setOwnProfileCache } from '../services/ownProfileCache';
+import { claimUsername, validateUsername } from '../services/usernameProfileService';
 
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
@@ -291,46 +292,17 @@ const EditProfileScreen = ({ navigation, route }) => {
     }
 
     // Username is required and is the single source of truth for display name.
-    const normalizedUsername = (() => {
-      const raw = String(username || '').trim();
-      if (!raw) return null;
-      const noAt = raw.startsWith('@') ? raw.slice(1) : raw;
-      // Allow letters/numbers/underscore/dot, 3-20 chars (basic guard; not enforcing uniqueness here)
-      const cleaned = noAt.trim();
-      if (!/^[A-Za-z0-9_.]{3,20}$/.test(cleaned)) {
-        return null;
-      }
-      return cleaned;
-    })();
+    const usernameValidation = validateUsername(username, uid);
+    const normalizedUsername = usernameValidation.ok ? usernameValidation.username : null;
 
     if (!normalizedUsername) {
-      Alert.alert('Invalid username', 'Enter a username (3-20 chars: letters, numbers, underscore, or dot).');
+      Alert.alert('Invalid username', usernameValidation.message);
       return;
     }
 
     setIsSaving(true);
 
     try {
-      const prevUsername = String(initialUsernameRef.current || '').trim();
-      const usernameChanged =
-        !prevUsername || prevUsername.toLowerCase() !== normalizedUsername.toLowerCase();
-
-      // Only hit uniqueness queries when the username actually changed.
-      if (usernameChanged) {
-        const collisions = await Promise.all([
-          getDocs(query(collection(db, 'users'), where('username', '==', normalizedUsername), fsLimit(5))),
-          getDocs(query(collection(db, 'users'), where('handle', '==', normalizedUsername), fsLimit(5))),
-        ]);
-        const taken = collisions.some((snap) =>
-          snap.docs.some((d) => d.id !== uid)
-        );
-        if (taken) {
-          Alert.alert('Username taken', 'That username is already in use. Pick another.');
-          setIsSaving(false);
-          return;
-        }
-      }
-
       let photoURL = profileImage;
 
       // Upload new profile image if a local URI is present
@@ -350,9 +322,16 @@ const EditProfileScreen = ({ navigation, route }) => {
       );
       const bioTrimmed = bio.trim();
       const userDocRef = doc(db, 'users', uid);
+      await claimUsername({
+        uid,
+        username: normalizedUsername,
+        email: resolvedEmail,
+        photoURL,
+      });
       await setDoc(userDocRef, {
         displayName: normalizedUsername,
         username: normalizedUsername,
+        usernameKey: normalizedUsername.toLowerCase(),
         handle: normalizedUsername,
         photoURL: photoURL,
         bio: bioTrimmed,

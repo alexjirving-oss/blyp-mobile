@@ -23,6 +23,13 @@ function pickEnv(...keys) {
 
 const LOCKED_USER_POOL_WEB_CLIENT_ID = '4a7r115hllaedriqsjlsa00snj';
 const LOCKED_USER_POOL_ID = 'eu-west-2_ITX07Zvnt';
+const cognitoDomain = pickEnv('EXPO_PUBLIC_COGNITO_DOMAIN');
+const redirectSignIn = pickEnv('EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN') || 'blyp://auth/';
+const redirectSignOut = pickEnv('EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT') || 'blyp://auth/signout/';
+const socialProviders = (pickEnv('EXPO_PUBLIC_SOCIAL_PROVIDERS') || 'Google,Facebook')
+  .split(',')
+  .map((provider) => provider.trim())
+  .filter(Boolean);
 
 const config = {
   aws_project_region: pickEnv('EXPO_PUBLIC_AWS_REGION', 'EXPO_PUBLIC_AMPLIFY_REGION', 'AWS_REGION', 'AMPLIFY_REGION') || 'eu-west-2',
@@ -30,7 +37,16 @@ const config = {
   aws_user_pools_id: pickEnv('EXPO_PUBLIC_AWS_USER_POOL_ID', 'EXPO_PUBLIC_AMPLIFY_USER_POOL_ID') || LOCKED_USER_POOL_ID,
   aws_user_pools_web_client_id: LOCKED_USER_POOL_WEB_CLIENT_ID,
   aws_cognito_identity_pool_id: pickEnv('EXPO_PUBLIC_AWS_IDENTITY_POOL_ID', 'EXPO_PUBLIC_AMPLIFY_IDENTITY_POOL_ID'),
-  oauth: {}
+  aws_cognito_social_providers: cognitoDomain ? socialProviders : [],
+  oauth: cognitoDomain
+    ? {
+        domain: cognitoDomain.replace(/^https?:\/\//, '').replace(/\/+$/, ''),
+        scope: ['openid', 'email', 'profile'],
+        redirectSignIn,
+        redirectSignOut,
+        responseType: 'code',
+      }
+    : {}
 };
 
 const envClient = pickEnv('EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID', 'EXPO_PUBLIC_AMPLIFY_USER_POOL_WEB_CLIENT_ID', 'EXPO_PUBLIC_USER_POOL_WEB_CLIENT_ID');

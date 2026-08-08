@@ -2,6 +2,7 @@
 // Non-breaking introduction: screens can adopt this without changing behavior elsewhere
 
 import { mapAuthError } from './errors';
+import { rememberPendingProfile } from '../../services/usernameProfileService';
 
 // Amplify v6 modular Auth imports
 // Note: Ensure Amplify.configure(...) is called once at app bootstrap (already present per logs)
@@ -15,16 +16,27 @@ import {
   getCurrentUser as amplifyGetCurrentUser,
 } from 'aws-amplify/auth';
 
-export async function signUp({ email, password }) {
+export async function signUp({ email, password, username }) {
   try {
+    const publicUsername = String(username || '').trim().replace(/^@/, '');
+    const looksOpaque =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicUsername);
+    if (!/^[A-Za-z0-9_.]{3,20}$/.test(publicUsername) || looksOpaque) {
+      throw new Error('A valid public username is required to create an account.');
+    }
     const res = await amplifySignUp({
       username: email,
       password,
       options: {
-        userAttributes: { email },
+        userAttributes: {
+          email,
+          preferred_username: publicUsername,
+          name: publicUsername,
+        },
         autoSignIn: true, // attempt auto sign-in after confirmation
       },
     });
+    await rememberPendingProfile({ source: 'signup', username: publicUsername });
     return res; // { isSignUpComplete, nextStep, userId }
   } catch (err) {
     throw mapAuthError(err);

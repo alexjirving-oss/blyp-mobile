@@ -155,8 +155,11 @@ export async function ensureUserProfile({ userId, displayName, photoURL, email, 
   const existingUsernameBad =
     (existingUsernameRaw && isPlaceholderName(existingUsernameRaw, userId)) ||
     (existingHandleRaw && isPlaceholderName(existingHandleRaw, userId));
-  // undefined = leave alone; null = clear bad value; string = set
-  const usernameToWrite = finalUsername || (existingUsernameBad ? null : undefined);
+  // Username creation/changes go through usernameProfileService.claimUsername,
+  // which atomically owns the lowercase handle in usernameClaims. This ensure
+  // path may repair a bad legacy value, but must not bypass uniqueness.
+  // undefined = leave alone; null = clear bad value.
+  const usernameToWrite = existingUsernameBad ? null : undefined;
 
   // Only write when something actually changed (or the doc doesn't exist yet).
   // This avoids bumping `updatedAt` on every login, which previously churned any
