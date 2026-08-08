@@ -9,7 +9,13 @@ import { findIapCatalogEntry } from './iapCatalog';
 import { emitGiftEvent, emitLiveGameEvent, emitGameEvent } from '../realtime/realtimeBus';
 import { applyReviveForReceiver, getRoom } from '../games/artillery/gameRoomService';
 import { applyCheerForReceiver } from '../games/marble/marbleRoomService';
-import { getUserTeamForEarnings, mirrorTeamEarnings, incrementPostGiftTotals, setPostReachBoostedFs } from '../admin/firestoreAdmin';
+import {
+  enqueuePostGiftNotification,
+  getUserTeamForEarnings,
+  incrementPostGiftTotals,
+  mirrorTeamEarnings,
+  setPostReachBoostedFs,
+} from '../admin/firestoreAdmin';
 import { getSessionById } from '../live/liveSessionStore';
 import { listGuests } from '../live/guestSlotStore';
 import { logger } from '../config/logger';
@@ -1672,6 +1678,7 @@ export async function sendGift(senderUserId: string, input: {
 
       return {
         kind: 'replay' as const,
+        notificationGiftName: String(gift.name || giftId).trim() || giftId,
         response: {
           giftEventId: existing.gift_event_id,
           streamId: existing.stream_id,
@@ -1886,6 +1893,7 @@ export async function sendGift(senderUserId: string, input: {
 
     return {
       kind: 'success' as const,
+      notificationGiftName: String(gift.name || giftId).trim() || giftId,
       response: {
         giftEventId,
         streamId,
@@ -2025,6 +2033,41 @@ export async function sendGift(senderUserId: string, input: {
       logger.warn(
         { err: e?.message || String(e), streamId, giftEventId: result.response.giftEventId },
         '[economy] incrementPostGiftTotals failed (non-fatal)',
+      );
+    }
+  }
+
+  // Feed/video gift notification. Live and battle gifts share /gift/send, so the
+  // Firestore helper only queues when posts/{streamId} exists and its canonical
+  // owner matches the credited receiver. It uses giftEventId as the durable
+  // dedupe key and also runs on idempotent replays to repair a failed first
+  // post-commit enqueue without ever double-pushing.
+  if (!battleId && result.response.coinSpent > 0) {
+    try {
+      const notification = await enqueuePostGiftNotification({
+        giftEventId: result.response.giftEventId,
+        senderUserId,
+        receiverUserId,
+        postId: streamId,
+        giftId,
+        giftName: result.notificationGiftName,
+        quantity: result.response.gift.quantity,
+        coinSpent: result.response.coinSpent,
+      });
+      if (!notification.ok) {
+        logger.warn(
+          {
+            detail: notification.detail,
+            giftEventId: result.response.giftEventId,
+            postId: streamId,
+          },
+          '[economy] post gift notification enqueue failed (non-fatal)',
+        );
+      }
+    } catch (e: any) {
+      logger.warn(
+        { err: e?.message || String(e), giftEventId: result.response.giftEventId, postId: streamId },
+        '[economy] post gift notification enqueue failed (non-fatal)',
       );
     }
   }

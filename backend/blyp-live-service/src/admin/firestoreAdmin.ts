@@ -2,6 +2,12 @@ import { getApps, getApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore, FieldValue, type Firestore, type Query } from 'firebase-admin/firestore';
 import { logger } from '../config/logger';
 import { safeLiveDisplayName } from '../live/liveDisplayName';
+import {
+  buildPostGiftNotification,
+  isPostGiftPushEnabled,
+  pickPostGiftSenderName,
+  postGiftBlockReason,
+} from '../economy/postGiftNotification';
 
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'blyp-master';
 
@@ -1116,6 +1122,118 @@ export async function setStreamingConfig(input: {
     const detail = e?.message || String(e);
     logger.error({ err: detail }, '[firestore-admin] setStreamingConfig failed');
     return { ok: false, enabled: input.enabled, detail };
+  }
+}
+
+/**
+ * Queue one content-gift push/inbox item on the shared notification spine.
+ *
+ * A Firestore post lookup is the context gate: live/battle gifts share the same
+ * economy endpoint but do not have a matching posts/{streamId} document. The
+ * post's canonical owner must also match the credited receiver, otherwise no
+ * potentially false earnings notification is sent.
+ */
+export async function enqueuePostGiftNotification(input: {
+  giftEventId: string;
+  senderUserId: string;
+  receiverUserId: string;
+  postId: string;
+  giftId: string;
+  giftName?: string | null;
+  quantity: number;
+  coinSpent: number;
+}): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const giftEventId = String(input.giftEventId || '').trim();
+  const senderUserId = String(input.senderUserId || '').trim();
+  const receiverUserId = String(input.receiverUserId || '').trim();
+  const postId = String(input.postId || '').trim();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!giftEventId || !senderUserId || !receiverUserId || !postId) {
+    return { ok: false, detail: 'missing_fields' };
+  }
+
+  try {
+    const postSnap = await fs.collection('posts').doc(postId).get();
+    if (!postSnap.exists) return { ok: true, detail: 'not_post' };
+
+    const post = (postSnap.data() || {}) as Record<string, any>;
+    const contentOwnerUserId = String(
+      post.userId ||
+        post.uid ||
+        post.authorId ||
+        post.creatorId ||
+        post.user?.uid ||
+        post.user?.id ||
+        '',
+    ).trim();
+    if (!contentOwnerUserId) return { ok: true, detail: 'post_owner_missing' };
+    if (contentOwnerUserId !== receiverUserId) {
+      logger.warn(
+        { postId, receiverUserId, contentOwnerUserId, giftEventId },
+        '[firestore-admin] post gift notification skipped: credited receiver is not content owner',
+      );
+      return { ok: true, detail: 'post_owner_mismatch' };
+    }
+
+    const senderUserRef = fs.collection('users').doc(senderUserId);
+    const ownerUserRef = fs.collection('users').doc(contentOwnerUserId);
+    const [
+      senderUserSnap,
+      senderProfileSnap,
+      ownerUserSnap,
+      ownerProfileSnap,
+      ownerBlockedSenderSnap,
+      senderBlockedOwnerSnap,
+    ] = await Promise.all([
+      senderUserRef.get(),
+      fs.collection('userProfiles').doc(senderUserId).get(),
+      ownerUserRef.get(),
+      fs.collection('userProfiles').doc(contentOwnerUserId).get(),
+      ownerUserRef.collection('blocks').doc(senderUserId).get(),
+      senderUserRef.collection('blocks').doc(contentOwnerUserId).get(),
+    ]);
+
+    const blocked = postGiftBlockReason(ownerBlockedSenderSnap.exists, senderBlockedOwnerSnap.exists);
+    if (blocked) return { ok: true, detail: blocked };
+
+    const senderUser = (senderUserSnap.data() || {}) as Record<string, any>;
+    const senderProfile = (senderProfileSnap.data() || {}) as Record<string, any>;
+    const ownerUser = (ownerUserSnap.data() || {}) as Record<string, any>;
+    const ownerProfile = (ownerProfileSnap.data() || {}) as Record<string, any>;
+    const senderName = pickPostGiftSenderName(senderUserId, senderUser, senderProfile);
+    const pushEnabled = isPostGiftPushEnabled(ownerUser, ownerProfile);
+    const notification = buildPostGiftNotification({
+      giftEventId,
+      senderUserId,
+      contentOwnerUserId,
+      postId,
+      senderName,
+      giftId: input.giftId,
+      giftName: input.giftName,
+      quantity: input.quantity,
+      coinSpent: input.coinSpent,
+      post,
+      pushEnabled,
+    });
+
+    try {
+      await fs.collection('notifications').doc(notification.id).create(notification.doc);
+      return { ok: true, detail: pushEnabled ? 'queued' : 'inbox_only_preference' };
+    } catch (e: any) {
+      const code = e?.code || e?.status;
+      if (code === 6 || code === 'already-exists' || /already exists/i.test(String(e?.message || ''))) {
+        return { ok: true, detail: 'already_queued' };
+      }
+      throw e;
+    }
+  } catch (e: any) {
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, giftEventId, postId, receiverUserId },
+      '[firestore-admin] enqueuePostGiftNotification failed',
+    );
+    return { ok: false, detail };
   }
 }
 
