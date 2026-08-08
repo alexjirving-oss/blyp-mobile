@@ -3873,12 +3873,12 @@ const LiveStreamScreen = (props) => {
         />
 
         <LinearGradient
-          colors={['transparent', 'rgba(10,10,12,0.28)', 'rgba(10,10,12,0.82)']}
-          locations={[0, 0.4, 1]}
+          colors={['transparent', 'rgba(10,10,12,0.18)', 'rgba(10,10,12,0.72)']}
+          locations={[0, 0.45, 1]}
           pointerEvents="none"
           style={[
             styles.viewerBottomVignette,
-            { height: Math.max(180, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 96) },
+            { height: Math.max(168, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 88) },
           ]}
         />
 
@@ -5219,27 +5219,27 @@ const styles = StyleSheet.create({
   },
   ivsGuestTile: {
     // Fluid 3-wide default; width overridden per visible count for 1→2→3 reflow.
-    width: '30.5%',
-    marginHorizontal: '1.25%',
+    width: '31%',
+    marginHorizontal: '1.1%',
     aspectRatio: 1,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.78)',
+    backgroundColor: 'rgba(10,10,12,0.92)',
     marginBottom: 10,
     borderWidth: 1.5,
-    borderColor: 'rgba(0, 210, 190, 0.42)',
+    borderColor: 'rgba(0, 210, 190, 0.45)',
   },
   ivsGuestTileCollapsed: {
     // Fluid 3-wide row; width overridden when fewer guests for bigger tiles.
-    width: '30.5%',
-    marginHorizontal: '1.25%',
+    width: '31%',
+    marginHorizontal: '1.1%',
     aspectRatio: 1,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.78)',
+    backgroundColor: 'rgba(10,10,12,0.92)',
     marginBottom: 0,
     borderWidth: 1.5,
-    borderColor: 'rgba(0, 210, 190, 0.42)',
+    borderColor: 'rgba(0, 210, 190, 0.45)',
   },
   ivsGuestTileHidden: {
     opacity: 0,

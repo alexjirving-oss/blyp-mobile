@@ -1,6 +1,6 @@
 /**
- * TikTok / IG Live–class viewer chrome: host chip, LIVE pill, stats, actions.
- * Visual language matches gift sheet + games picker (glass / teal / near-black).
+ * Immersive live viewer header — gift/games sheet quality bar.
+ * Near-black ink glass, PETRONAS teal, 900 type, restrained chrome.
  */
 import React from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../Icon';
 
 const TEAL = '#00D2BE';
+const INK = '#0A0A0C';
 
 function formatCount(n) {
   const v = Number(n) || 0;
@@ -29,49 +30,66 @@ export default function LiveViewerHeader({
   return (
     <View style={[styles.root, { top: topInset }]} pointerEvents="box-none">
       <LinearGradient
-        colors={['rgba(10,10,12,0.55)', 'rgba(10,10,12,0.18)', 'transparent']}
-        locations={[0, 0.55, 1]}
+        colors={['rgba(10,10,12,0.72)', 'rgba(10,10,12,0.28)', 'transparent']}
+        locations={[0, 0.62, 1]}
         pointerEvents="none"
         style={styles.topVignette}
       />
 
       <View style={styles.row} pointerEvents="box-none">
-        <View style={styles.hostChip}>
-          {hostPhotoUrl ? (
-            <Image source={{ uri: hostPhotoUrl }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarFallback]}>
-              <Text style={styles.avatarInitial} allowFontScaling={false}>
-                {String(hostName || 'H').charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
+        <View style={styles.hostCard}>
+          <LinearGradient
+            colors={['rgba(0,210,190,0.55)', 'rgba(0,210,190,0.12)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatarRing}
+          >
+            {hostPhotoUrl ? (
+              <Image source={{ uri: hostPhotoUrl }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarFallback]}>
+                <Text style={styles.avatarInitial} allowFontScaling={false}>
+                  {String(hostName || 'H').charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </LinearGradient>
+
           <View style={styles.hostMeta}>
             <Text style={styles.hostName} numberOfLines={1} allowFontScaling={false}>
               {hostName}
             </Text>
-            <View style={styles.livePill}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveText} allowFontScaling={false}>
-                LIVE
+            <View style={styles.liveRow}>
+              <View style={styles.livePill}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText} allowFontScaling={false}>
+                  LIVE
+                </Text>
+              </View>
+              <Text style={styles.watchingKicker} allowFontScaling={false}>
+                WATCHING
               </Text>
             </View>
           </View>
         </View>
 
         <View style={styles.rightCluster}>
-          <View style={styles.statChip}>
-            <Icon name="eye" size={13} color="#fff" />
-            <Text style={styles.statText} allowFontScaling={false}>
-              {formatCount(viewCount)}
-            </Text>
+          <View style={styles.statsCard}>
+            <View style={styles.statCell}>
+              <Icon name="eye" size={12} color="rgba(255,255,255,0.92)" />
+              <Text style={styles.statText} allowFontScaling={false}>
+                {formatCount(viewCount)}
+              </Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statCell}>
+              <Icon name="heart" size={12} color="#FB7185" />
+              <Text style={styles.statText} allowFontScaling={false}>
+                {formatCount(heartCount)}
+              </Text>
+            </View>
           </View>
-          <View style={styles.statChip}>
-            <Icon name="heart" size={13} color="#FB7185" />
-            <Text style={styles.statText} allowFontScaling={false}>
-              {formatCount(heartCount)}
-            </Text>
-          </View>
+
           <TouchableOpacity
             style={styles.iconBtn}
             onPress={onPressMore}
@@ -86,7 +104,7 @@ export default function LiveViewerHeader({
             hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
             accessibilityLabel="Leave live"
           >
-            <Icon name="close" size={18} color="#fff" />
+            <Icon name="close" size={17} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -106,36 +124,41 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    top: -8,
-    height: 96,
+    top: -10,
+    height: 108,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    gap: 8,
+    gap: 10,
   },
-  hostChip: {
+  hostCard: {
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 1,
     minWidth: 0,
-    maxWidth: '58%',
-    paddingLeft: 3,
-    paddingRight: 10,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,10,12,0.72)',
+    maxWidth: '62%',
+    paddingLeft: 4,
+    paddingRight: 12,
+    paddingVertical: 4,
+    borderRadius: 18,
+    backgroundColor: 'rgba(10,10,12,0.82)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.38)',
+    borderColor: 'rgba(0,210,190,0.42)',
+  },
+  avatarRing: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    padding: 1.5,
+    marginRight: 9,
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    marginRight: 8,
-    borderWidth: 1.5,
-    borderColor: TEAL,
+    width: '100%',
+    height: '100%',
+    borderRadius: 18.5,
+    backgroundColor: INK,
   },
   avatarFallback: {
     alignItems: 'center',
@@ -144,31 +167,34 @@ const styles = StyleSheet.create({
   },
   avatarInitial: {
     color: '#fff',
-    fontWeight: '800',
-    fontSize: 14,
+    fontWeight: '900',
+    fontSize: 15,
   },
   hostMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
     flexShrink: 1,
     minWidth: 0,
-    gap: 8,
+    paddingVertical: 1,
   },
   hostName: {
     color: '#fff',
-    fontWeight: '800',
+    fontWeight: '900',
     fontSize: 14,
+    letterSpacing: 0.15,
     flexShrink: 1,
-    minWidth: 0,
-    letterSpacing: 0.1,
+  },
+  liveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+    gap: 7,
   },
   livePill: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#E11D48',
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   liveDot: {
     width: 5,
@@ -180,8 +206,14 @@ const styles = StyleSheet.create({
   liveText: {
     color: '#fff',
     fontWeight: '900',
-    fontSize: 10,
-    letterSpacing: 0.6,
+    fontSize: 9,
+    letterSpacing: 0.9,
+  },
+  watchingKicker: {
+    color: TEAL,
+    fontWeight: '900',
+    fontSize: 9,
+    letterSpacing: 1.4,
   },
   rightCluster: {
     marginLeft: 'auto',
@@ -189,34 +221,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  statChip: {
+  statsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 14,
+    backgroundColor: 'rgba(10,10,12,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    gap: 8,
+  },
+  statCell: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,10,12,0.62)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  statDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
   statText: {
     color: '#fff',
     fontWeight: '800',
     fontSize: 12,
+    letterSpacing: 0.1,
   },
   iconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(10,10,12,0.62)',
+    backgroundColor: 'rgba(10,10,12,0.78)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
   },
   closeBtn: {
-    borderColor: 'rgba(0,210,190,0.35)',
+    borderColor: 'rgba(0,210,190,0.42)',
+    backgroundColor: 'rgba(0,210,190,0.12)',
   },
 });
-

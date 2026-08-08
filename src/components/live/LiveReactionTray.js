@@ -1,11 +1,10 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const DEFAULT_REACTIONS = ['❤️', '😂', '🔥', '👏', '😮'];
+const DEFAULT_REACTIONS = ['❤️', '🔥', '😂', '👏', '😮'];
 
 /**
- * Compact emoji reaction strip for live viewers — glass rail matching gift/games chrome.
- * Shorter glyph set + tighter padding to cut bottom clutter.
+ * Soft reaction dock for live viewers — ink glass, no heavy pill chrome.
  */
 export default function LiveReactionTray({ onReact, reactions = DEFAULT_REACTIONS, style }) {
   return (
@@ -14,8 +13,8 @@ export default function LiveReactionTray({ onReact, reactions = DEFAULT_REACTION
         <TouchableOpacity
           key={emoji}
           style={styles.button}
-          activeOpacity={0.7}
-          hitSlop={{ top: 6, bottom: 6, left: 3, right: 3 }}
+          activeOpacity={0.65}
+          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
           onPress={() => onReact?.(emoji)}
           accessibilityRole="button"
           accessibilityLabel={`React ${emoji}`}
@@ -34,14 +33,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    maxWidth: '68%',
-    gap: 0,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(10,10,12,0.68)',
+    maxWidth: '64%',
+    gap: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: 'rgba(10,10,12,0.55)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(255,255,255,0.10)',
     overflow: 'hidden',
   },
   button: {
@@ -49,9 +48,8 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   emoji: {
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 17,
+    lineHeight: 21,
     textAlign: 'center',
   },
 });
-

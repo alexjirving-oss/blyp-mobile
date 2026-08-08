@@ -14,12 +14,12 @@ export default function ReservedGuestTile({ photoUrl = null, label = 'Joining…
         <Image source={{ uri: String(photoUrl) }} style={styles.avatar} />
       ) : (
         <View style={styles.avatarFallback}>
-          <Icon name="person" size={28} color="rgba(255,255,255,0.85)" />
+          <Icon name="person" size={26} color="rgba(255,255,255,0.88)" />
         </View>
       )}
       <ActivityIndicator size="small" color={COLORS.primary || '#00D2BE'} style={styles.spinner} />
       <Text style={styles.label} allowFontScaling={false}>
-        {label}
+        {String(label || 'Joining…').toUpperCase()}
       </Text>
     </View>
   );
@@ -32,34 +32,34 @@ const styles = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(10,10,12,0.92)',
+    backgroundColor: 'rgba(10,10,12,0.94)',
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     marginBottom: 8,
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.55)',
+    borderColor: 'rgba(0,210,190,0.65)',
   },
   avatarFallback: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     marginBottom: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0,210,190,0.14)',
     borderWidth: 1.5,
-    borderColor: 'rgba(0,210,190,0.45)',
+    borderColor: 'rgba(0,210,190,0.5)',
   },
   spinner: {
     marginBottom: 6,
   },
   label: {
-    color: 'rgba(255,255,255,0.78)',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    color: 'rgba(127,237,226,0.92)',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
   },
 });

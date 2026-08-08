@@ -88,15 +88,17 @@ import {
 const tileCoinStyles = StyleSheet.create({
   badge: {
     position: 'absolute',
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(251,191,36,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.55)',
     paddingHorizontal: 7,
     paddingVertical: 3,
-    borderRadius: 11,
+    borderRadius: 10,
     zIndex: 40,
   },
   guestPos: { left: 6, bottom: 6 },
   hostPos: { left: 12, top: 12 },
-  text: { color: '#FFD54A', fontSize: 11, fontWeight: '800' },
+  text: { color: '#FDE68A', fontSize: 11, fontWeight: '900', letterSpacing: 0.2 },
 });
 
 // Small "coins received this stream" badge rendered over the host + guest tiles.
@@ -1571,9 +1573,9 @@ const IVSLiveStreamViewer = ({
           }}
         >
           {guestTrayMode === 'hidden' ? (
-            <View style={styles.hiddenTrayHandle} pointerEvents="none">
+              <View style={styles.hiddenTrayHandle} pointerEvents="none">
               <View style={styles.hiddenTrayPill} />
-              <Text style={styles.hiddenTrayText}>Swipe up</Text>
+              <Text style={styles.hiddenTrayText}>SWIPE UP</Text>
             </View>
           ) : (
             <ScrollView
@@ -1709,12 +1711,12 @@ const IVSLiveStreamViewer = ({
                                         </View>
                                         <Text style={[styles.joinLabelText, isQueued && styles.joinLabelTextQueued]}>
                                           {isSending
-                                            ? 'Requesting…'
+                                            ? 'REQUESTING…'
                                             : isQueued
-                                              ? 'In queue'
+                                              ? 'IN QUEUE'
                                               : guestJoinError
-                                                ? 'Retry'
-                                                : 'Join'}
+                                                ? 'RETRY'
+                                                : 'JOIN'}
                                         </Text>
                                       </TouchableOpacity>
                                     );
@@ -2844,10 +2846,12 @@ const styles = StyleSheet.create({
     right: 6,
     width: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: 'rgba(251,113,133,0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
     zIndex: 30,
   },
   selfTileControls: {
@@ -2857,19 +2861,22 @@ const styles = StyleSheet.create({
     bottom: 6,
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     zIndex: 35,
   },
   selfTileBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(10,10,12,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.4)',
   },
   selfTileBtnOff: {
-    backgroundColor: 'rgba(251,113,133,0.75)',
+    backgroundColor: 'rgba(251,113,133,0.88)',
+    borderColor: 'rgba(255,255,255,0.4)',
   },
   guestErrorBanner: {
     position: 'absolute',
@@ -2911,16 +2918,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   hiddenTrayPill: {
-    width: 54,
+    width: 48,
     height: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(0,210,190,0.72)',
     marginBottom: 4,
   },
   hiddenTrayText: {
-    color: 'rgba(255, 255, 255, 0.75)',
-    fontSize: 12,
-    fontWeight: '700',
+    color: 'rgba(127,237,226,0.92)',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.2,
   },
   guestBottomStrip: {
     position: 'absolute',
@@ -2954,27 +2962,27 @@ const styles = StyleSheet.create({
   },
   guestTileSquare: {
     // Fluid 3-wide default; width overridden per visible count for 1→2→3 reflow.
-    width: '30.5%',
-    marginHorizontal: '1.25%',
+    width: '31%',
+    marginHorizontal: '1.1%',
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.88)',
+    backgroundColor: 'rgba(10,10,12,0.92)',
     marginBottom: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,210,190,0.45)',
   },
   guestTileSquareCollapsed: {
     // Fluid 3-wide row; width overridden when fewer guests for bigger tiles.
-    width: '30.5%',
-    marginHorizontal: '1.25%',
+    width: '31%',
+    marginHorizontal: '1.1%',
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.88)',
+    backgroundColor: 'rgba(10,10,12,0.92)',
     marginBottom: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,210,190,0.45)',
   },
   guestTileHidden: {
     opacity: 0,
@@ -3002,43 +3010,41 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.08)',
+    backgroundColor: 'rgba(0,210,190,0.10)',
   },
   joinPlusCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.92)',
+    backgroundColor: '#00D2BE',
     borderWidth: 0,
   },
   joinPlusText: {
     color: '#0A0A0C',
-    fontSize: 22,
-    lineHeight: 22,
-    fontWeight: '700',
+    fontSize: 24,
+    lineHeight: 24,
+    fontWeight: '900',
     marginTop: -1,
   },
   joinLabelText: {
     marginTop: 8,
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
+    color: '#7FEDE2',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.4,
   },
   // "In queue" state: teal-tinted tile so the viewer clearly sees they are
   // waiting for the host to accept (not just a greyed-out "Waiting…").
   joinTileQueued: {
-    backgroundColor: 'rgba(0,210,190,0.14)',
-    borderWidth: 1,
-    borderColor: '#00D2BE',
+    backgroundColor: 'rgba(0,210,190,0.18)',
   },
   joinPlusCircleQueued: {
-    backgroundColor: '#00D2BE',
-    borderColor: '#00D2BE',
+    backgroundColor: '#FDE68A',
   },
   joinLabelTextQueued: {
-    color: '#00D2BE',
+    color: '#FDE68A',
   },
   tilePlaceholder: {
     flex: 1,
@@ -3054,8 +3060,6 @@ const styles = StyleSheet.create({
   tileVideoSurface: {
     flex: 1,
     backgroundColor: COLORS.black,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
     overflow: 'hidden',
   },
   tileDebug: {

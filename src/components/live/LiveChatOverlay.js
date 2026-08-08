@@ -5,12 +5,10 @@ import { pickPublicLabel } from '../../utils/publicLabel';
 const TEAL = '#00D2BE';
 
 /**
- * Bottom-anchored live chat overlay (YouTube / TikTok Live style).
- *
- * Glass/teal Blyp chrome aligned with gift sheet + games picker.
- * Newest message sits at the bottom; older messages fade upward.
+ * Cinematic live chat overlay — soft ink bubbles, teal handles.
+ * Newest message at the bottom; older rows fade upward.
  */
-export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVisible = 7, onPressUser, onLayoutHeight }) {
+export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVisible = 6, onPressUser, onLayoutHeight }) {
   const { height: winHeight } = useWindowDimensions();
 
   const data = useMemo(() => {
@@ -42,8 +40,9 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
     const rowProps = onPressUser
       ? { onPress: () => onPressUser(item), android_ripple: { color: 'rgba(0,210,190,0.18)', borderless: false } }
       : {};
+    const fade = Math.max(0.28, 1 - index * 0.14);
     return (
-      <RowComponent style={[styles.row, { opacity: Math.max(0.32, 1 - index * 0.12) }]} {...rowProps}>
+      <RowComponent style={[styles.row, { opacity: fade }]} {...rowProps}>
         {item.avatar ? (
           <Image source={{ uri: item.avatar }} style={styles.avatar} />
         ) : (
@@ -64,7 +63,7 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
     );
   };
 
-  const maxHeight = Math.round(winHeight * 0.24);
+  const maxHeight = Math.round(winHeight * 0.22);
 
   return (
     <View
@@ -86,7 +85,7 @@ export default function LiveChatOverlay({ messages = [], bottomInset = 0, maxVis
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.listContent}
-          initialNumToRender={7}
+          initialNumToRender={6}
           windowSize={3}
         />
       </View>
@@ -98,47 +97,49 @@ const styles = StyleSheet.create({
   container: {
     position: 'absolute',
     left: 12,
-    right: 108,
+    right: 104,
     zIndex: 40,
     overflow: 'hidden',
     justifyContent: 'flex-end',
   },
   listContent: {
-    paddingTop: 4,
+    paddingTop: 6,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    marginTop: 5,
+    marginTop: 4,
   },
   avatar: {
     width: 22,
     height: 22,
     borderRadius: 11,
     marginRight: 7,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(10,10,12,0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
+    borderColor: 'rgba(0,210,190,0.4)',
   },
   avatarPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(0,210,190,0.18)',
   },
   avatarInitial: {
     color: '#fff',
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 10,
+    fontWeight: '900',
   },
   bubble: {
     flexShrink: 1,
     alignSelf: 'flex-start',
     maxWidth: '100%',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderRadius: 14,
-    backgroundColor: 'rgba(10,10,12,0.58)',
+    borderBottomLeftRadius: 5,
+    backgroundColor: 'rgba(10,10,12,0.62)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   line: {
     flexShrink: 1,
@@ -146,7 +147,8 @@ const styles = StyleSheet.create({
   username: {
     color: TEAL,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '900',
+    letterSpacing: 0.15,
   },
   sep: {
     fontSize: 12,
@@ -158,4 +160,3 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 });
-
