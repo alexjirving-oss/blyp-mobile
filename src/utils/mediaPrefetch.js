@@ -7,6 +7,7 @@
 import { Image, InteractionManager } from 'react-native';
 import { prefetchVideoToCache } from './videoCache';
 import { fixStorageUrl } from './urlUtils';
+import { resolveFeedVideoUri } from './forYouFeedList';
 
 const MAX_INFLIGHT = 2; // Flip/Fold memory: never stampede downloads
 const seenImages = new Set();
@@ -92,8 +93,7 @@ export function prefetchVideoUri(uri, { idle = false, priority = false } = {}) {
 
 function postVideoUri(post) {
   if (!post) return null;
-  const fromMedia = post.media?.find?.((m) => String(m?.type || '').includes('video'))?.url;
-  return normalizeUri(post.videoUrl || fromMedia);
+  return normalizeUri(resolveFeedVideoUri(post));
 }
 
 function postImageUris(post) {

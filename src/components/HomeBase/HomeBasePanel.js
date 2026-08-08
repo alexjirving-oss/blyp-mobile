@@ -92,6 +92,7 @@ import { followUser, unfollowUser, subscribeToFollowingList } from '../../utils/
 import { getActivity, countUnread } from '../../services/activityService';
 import { subscribeWatchHistory } from '../../services/watchHistoryService';
 import { fixStorageUrl } from '../../utils/urlUtils';
+import { resolveFeedVideoUri } from '../../utils/forYouFeedList';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
 import {
   prefetchPostWindow,
@@ -914,10 +915,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
             >
               {forYou.map((p, index) => {
                 const uri = postThumbnail(p);
-                const isVideo = p.type === 'video' || !!p.videoUrl;
-                const videoUri = isVideo
-                  ? fixStorageUrl(p.videoUrl || p.mediaUrl || p?.media?.[0]?.url)
-                  : '';
+                const isVideo = p.type === 'video' || !!p.videoUrl || !!resolveFeedVideoUri(p);
+                const videoUri = isVideo ? (resolveFeedVideoUri(p) || '') : '';
                 const isActive = index === activeForYou;
                 const mountVideo = (isActive || index === activeForYou + 1) && isVideo && !!videoUri;
                 return (

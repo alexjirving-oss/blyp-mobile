@@ -1,4 +1,4 @@
-import { fixStorageUrl } from './urlUtils';
+import { resolveFeedVideoUri } from './forYouFeedList';
 
 export function postLikeCount(post) {
   const fromLikedBy = Array.isArray(post?.likedBy) ? post.likedBy.length : 0;
@@ -14,17 +14,18 @@ export function postLikeCount(post) {
 export function isVideoWithSoundPost(post) {
   if (!post) return false;
   if (post.type === 'image' || post.type === 'photo' || post.type === 'audio') return false;
-  if (post.imageUrl && !post.videoUrl) return false;
+  if (post.imageUrl && !post.videoUrl && !resolveFeedVideoUri(post)) return false;
 
   const isVideo =
     post.type === 'video' ||
     (post.type && String(post.type).includes('video')) ||
     !!post.videoUrl ||
+    !!resolveFeedVideoUri(post) ||
     !!post?.media?.[0]?.type?.includes?.('video');
 
   if (!isVideo) return false;
 
-  const uri = fixStorageUrl(post.videoUrl || post.mediaUrl || post?.media?.[0]?.url);
+  const uri = resolveFeedVideoUri(post);
   if (typeof uri !== 'string' || !uri.trim()) return false;
 
   if (post.hasAudio === false || post.muted === true || post.isMuted === true || post.silent === true) {
