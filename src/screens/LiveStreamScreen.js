@@ -75,7 +75,6 @@ import { useHasAI } from '../hooks/useEntitlement';
 import {
   markJoined as markBattleJoined,
   getBattle as getBattleDoc,
-  addGiftScore as addBattleGiftScore,
   recordBattleGifterContribution,
   challengeGuestInLive,
 } from '../services/battleService';
@@ -1234,21 +1233,38 @@ const LiveStreamScreen = (props) => {
   // Cache the battle's two participant uids so we can attribute gifts to a side.
   // Scoring only applies once the match clock has started (liveStartedAt).
   const battlePartsRef = useRef(null);
+  const [battleLocalSide, setBattleLocalSide] = useState(null);
   useEffect(() => {
-    if (!activeBattleId) { battlePartsRef.current = null; return; }
+    if (!activeBattleId) {
+      battlePartsRef.current = null;
+      setBattleLocalSide(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const b = await getBattleDoc(activeBattleId);
       if (!cancelled && b) {
+        const sideAUid = b.sideA?.userId || b.creatorUid;
+        const sideBUid = b.sideB?.userId || b.opponentUid;
         battlePartsRef.current = {
-          creatorUid: b.creatorUid,
-          opponentUid: b.opponentUid,
+          creatorUid: sideAUid,
+          opponentUid: sideBUid,
+          creatorName: b.sideA?.displayName || b.creatorName || 'Side A',
+          opponentName: b.sideB?.displayName || b.opponentName || 'Side B',
           liveStartedAt: b.liveStartedAt || null,
+          state: b.state || b.serverState || null,
         };
+        setBattleLocalSide(
+          String(uid || '') === String(sideAUid || '')
+            ? 'A'
+            : String(uid || '') === String(sideBUid || '')
+              ? 'B'
+              : null,
+        );
       }
     })();
     return () => { cancelled = true; };
-  }, [activeBattleId]);
+  }, [activeBattleId, uid]);
 
   // Keep liveStartedAt fresh via battle overlay subscription path (poll lightly).
   useEffect(() => {
@@ -1259,6 +1275,7 @@ const LiveStreamScreen = (props) => {
         const b = await getBattleDoc(activeBattleId);
         if (!cancelled && b && battlePartsRef.current) {
           battlePartsRef.current.liveStartedAt = b.liveStartedAt || null;
+          battlePartsRef.current.state = b.state || b.serverState || null;
         }
       } catch { /* ignore */ }
     };
@@ -1277,7 +1294,6 @@ const LiveStreamScreen = (props) => {
     if (receiver === parts.creatorUid) side = 'creator';
     else if (receiver === parts.opponentUid) side = 'opponent';
     if (!side) return;
-    addBattleGiftScore(activeBattleId, side, coins);
     const senderUid = payload?.sender?.userId || payload?.senderUserId;
     if (senderUid) {
       recordBattleGifterContribution(activeBattleId, side, {
@@ -3072,6 +3088,45 @@ const LiveStreamScreen = (props) => {
   // and the host can gift their guests. If there is only one possible recipient
   // we skip the chooser; otherwise we present a quick picker.
   const promptGiftRecipient = () => {
+    if (activeBattleId) {
+      const parts = battlePartsRef.current;
+      if (!parts || parts.state !== 'LIVE' || !parts.liveStartedAt) {
+        Alert.alert('Battle gifts open at LIVE', 'Both sides must be on stage and the countdown must finish.');
+        return;
+      }
+      const sides = [
+        {
+          userId: parts.creatorUid,
+          name: parts.creatorName,
+          battleSide: 'A',
+          label: `SIDE A · ${normalizeHandle(parts.creatorName || 'Side A')}`,
+        },
+        {
+          userId: parts.opponentUid,
+          name: parts.opponentName,
+          battleSide: 'B',
+          label: `SIDE B · ${normalizeHandle(parts.opponentName || 'Side B')}`,
+        },
+      ].filter((target) => target.userId && String(target.userId) !== String(uid || ''));
+      if (!sides.length) {
+        Alert.alert('No battle side available', 'You cannot send a battle gift to yourself.');
+        return;
+      }
+      Alert.alert(
+        'Gift a Battle Arena side',
+        'Choose SIDE A or SIDE B. Your gift scores only for that side.',
+        [
+          ...sides.map((target) => ({
+            text: target.label,
+            onPress: () => openGift(target),
+          })),
+          { text: 'Cancel', style: 'cancel' },
+        ],
+        { cancelable: true },
+      );
+      return;
+    }
+
     const isSelfHost = !!(uid && hostUid && uid === hostUid);
     const guests = (liveGuests || []).filter((g) => g && g.userId && g.userId !== uid);
 
@@ -3778,6 +3833,8 @@ const LiveStreamScreen = (props) => {
           creatorName={giftRecipient?.name || resolvedHostName || 'Host'}
           navigation={navigation}
           incomingGiftEvent={incomingGiftEvent}
+          battleId={giftRecipient?.battleSide ? activeBattleId : undefined}
+          battleSide={giftRecipient?.battleSide}
         />
 
         {activeBattleId ? (
@@ -3914,6 +3971,7 @@ const LiveStreamScreen = (props) => {
                 style={[
                   styles.ivsHostStage,
                   activeBattleId ? styles.ivsBattleStage : null,
+                  activeBattleId && battleLocalSide === 'B' ? styles.ivsBattleStageReverse : null,
                   !activeBattleId && guestLayoutMode === LIVE_LAYOUT_MODES.SIDE_BY_SIDE
                     ? styles.ivsComposeSide
                     : null,
@@ -3933,7 +3991,12 @@ const LiveStreamScreen = (props) => {
                           : StyleSheet.absoluteFill
                   }
                 >
-                  {activeBattleId ? <View pointerEvents="none" style={styles.ivsBattleEdgeLeft} /> : null}
+                  {activeBattleId ? (
+                    <View
+                      pointerEvents="none"
+                      style={battleLocalSide === 'B' ? styles.ivsBattleEdgeRight : styles.ivsBattleEdgeLeft}
+                    />
+                  ) : null}
                   {isStreaming && NativeIVSBroadcastView ? (
                     <GestureHandlerRootView style={StyleSheet.absoluteFill}>
                       <PinchGestureHandler
@@ -3997,7 +4060,10 @@ const LiveStreamScreen = (props) => {
 
                 {activeBattleId ? (
                   <View style={styles.ivsBattlePane}>
-                    <View pointerEvents="none" style={styles.ivsBattleEdgeRight} />
+                    <View
+                      pointerEvents="none"
+                      style={battleLocalSide === 'B' ? styles.ivsBattleEdgeLeft : styles.ivsBattleEdgeRight}
+                    />
                     {isStreaming && battleOpponentParticipant && NativeIVSRealTimeView ? (
                       <NativeIVSRealTimeView
                         style={StyleSheet.absoluteFill}
@@ -4633,6 +4699,8 @@ const LiveStreamScreen = (props) => {
                   creatorName={giftRecipient?.name || resolvedHostName || 'Host'}
                   navigation={navigation}
                   incomingGiftEvent={incomingGiftEvent}
+                  battleId={giftRecipient?.battleSide ? activeBattleId : undefined}
+                  battleSide={giftRecipient?.battleSide}
                 />
 
                 {activeBattleId ? (
@@ -4951,6 +5019,9 @@ const styles = StyleSheet.create({
   },
   ivsBattleStage: {
     flexDirection: 'row',
+  },
+  ivsBattleStageReverse: {
+    flexDirection: 'row-reverse',
   },
   ivsBattlePane: {
     flex: 1,

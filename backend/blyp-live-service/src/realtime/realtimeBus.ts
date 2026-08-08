@@ -29,6 +29,13 @@ export function emitGiftEvent(streamId: string, payload: any) {
   ioRef.to(`stream:${streamId}`).emit('gift_event', payload);
 }
 
+// Canonical Battle Arena lifecycle/score snapshots. Firestore + REST remain the
+// reconnect-safe authority; this event keeps connected rooms visually instant.
+export function emitBattleEvent(streamId: string, payload: any) {
+  if (!ioRef) return;
+  ioRef.to(`stream:${streamId}`).emit('battle_event', payload);
+}
+
 export function emitLiveGameEvent(streamId: string, payload: any) {
   if (!ioRef) return;
   ioRef.to(`stream:${streamId}`).emit('live_game_event', payload);

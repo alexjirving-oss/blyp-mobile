@@ -12,12 +12,11 @@ import Icon from '../Icon';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import {
   subscribeBattle,
+  refreshBattleArena,
   voteBattle,
   endBattle,
-  startMatch,
   rematchBattle,
   battleSideFor,
-  BATTLE_STATUS,
   subscribeBattleContributors,
   topGiftersForSide,
 } from '../../services/battleService';
@@ -79,7 +78,6 @@ export default function BattleOverlay({
   const [now, setNow] = useState(Date.now());
   const [myVote, setMyVote] = useState(null);
   const [ending, setEnding] = useState(false);
-  const [starting, setStarting] = useState(false);
   const [rematching, setRematching] = useState(false);
   const [combo, setCombo] = useState(null);
   const endedHandledRef = useRef(false);
@@ -104,19 +102,31 @@ export default function BattleOverlay({
     return () => clearInterval(t);
   }, []);
 
+  // GET also advances scheduled lifecycle boundaries on the server. Firestore
+  // remains a presentation mirror and will receive the resulting snapshot.
+  useEffect(() => {
+    if (!battleId) return undefined;
+    const reconcile = () => refreshBattleArena(battleId).catch(() => {});
+    reconcile();
+    const t = setInterval(reconcile, 4000);
+    return () => clearInterval(t);
+  }, [battleId]);
+
   // Combo / multiplier pulse from rapid score bumps on one side.
   useEffect(() => {
     if (!battle) return;
     const score = battle.score || { creator: 0, opponent: 0 };
     const prev = scoreRef.current;
-    const dC = (Number(score.creator) || 0) - (Number(prev.creator) || 0);
-    const dO = (Number(score.opponent) || 0) - (Number(prev.opponent) || 0);
+    const left = Number(score.A ?? score.creator) || 0;
+    const right = Number(score.B ?? score.opponent) || 0;
+    const dC = left - (Number(prev.creator) || 0);
+    const dO = right - (Number(prev.opponent) || 0);
     scoreRef.current = {
-      creator: Number(score.creator) || 0,
-      opponent: Number(score.opponent) || 0,
+      creator: left,
+      opponent: right,
     };
     if (dC <= 0 && dO <= 0) return;
-    if (!battle.liveStartedAt || battle.status === BATTLE_STATUS.COMPLETED) return;
+    if (!battle.liveStartedAt || battle.state === 'ENDED') return;
 
     const side = dC >= dO ? 'left' : 'right';
     const t = Date.now();
@@ -135,7 +145,7 @@ export default function BattleOverlay({
       setCombo(null);
       comboSideRef.current = { side: null, streak: 0, at: 0 };
     }, COMBO_IDLE_MS);
-  }, [battle?.score?.creator, battle?.score?.opponent, battle?.liveStartedAt, battle?.status]);
+  }, [battle?.score?.A, battle?.score?.B, battle?.score?.creator, battle?.score?.opponent, battle?.liveStartedAt, battle?.state]);
 
   useEffect(() => () => {
     if (comboClearTimer.current) clearTimeout(comboClearTimer.current);
@@ -143,7 +153,11 @@ export default function BattleOverlay({
 
   const side = battle ? battleSideFor(battle, currentUid) : null;
   const isParticipant = !!side;
-  const score = battle?.score || { creator: 0, opponent: 0 };
+  const rawScore = battle?.score || {};
+  const score = {
+    creator: Number(rawScore.A ?? rawScore.creator) || 0,
+    opponent: Number(rawScore.B ?? rawScore.opponent) || 0,
+  };
 
   const leftGifters = useMemo(
     () => topGiftersForSide(contributors, 'creator', 3),
@@ -154,28 +168,13 @@ export default function BattleOverlay({
     [contributors]
   );
 
+  const arenaState = battle?.state || battle?.serverState || 'INVITED';
   const startedAt = battle?.liveStartedAt || battle?.scheduledStartAt || now;
   const durationMs = (battle?.durationSec || 300) * 1000;
   const remaining = startedAt + durationMs - now;
-  const completed = battle?.status === BATTLE_STATUS.COMPLETED;
-  const isLive = battle?.status === BATTLE_STATUS.LIVE;
+  const completed = arenaState === 'ENDED';
+  const isLive = arenaState === 'LIVE';
   const matchRunning = isLive && !!battle?.liveStartedAt;
-  const canStart = isParticipant && !completed && !matchRunning && (
-    battle?.status === BATTLE_STATUS.SCHEDULED || isLive
-  );
-
-  // A participant auto-ends when the match clock hits zero.
-  useEffect(() => {
-    if (!battle || completed || endedHandledRef.current) return;
-    if (isParticipant && matchRunning && remaining <= 0) {
-      endedHandledRef.current = true;
-      setEnding(true);
-      endBattle(battle).finally(() => {
-        setEnding(false);
-        onEnded && onEnded();
-      });
-    }
-  }, [battle, completed, isParticipant, matchRunning, remaining, onEnded]);
 
   const vote = useCallback(async (s) => {
     if (!currentUid || isParticipant || !matchRunning) return;
@@ -184,24 +183,14 @@ export default function BattleOverlay({
     if (!res.ok && res.reason === 'already_voted') setMyVote(s);
   }, [battleId, currentUid, isParticipant, matchRunning]);
 
-  const startNow = useCallback(async () => {
-    if (!battle || !currentUid) return;
-    setStarting(true);
-    try {
-      await startMatch(battle, currentUid);
-    } finally {
-      setStarting(false);
-    }
-  }, [battle, currentUid]);
-
   const endNow = useCallback(async () => {
     if (!battle) return;
     setEnding(true);
     endedHandledRef.current = true;
-    await endBattle(battle);
+    await endBattle(battle, currentUid);
     setEnding(false);
     onEnded && onEnded();
-  }, [battle, onEnded]);
+  }, [battle, currentUid, onEnded]);
 
   const rematchNow = useCallback(async () => {
     if (!battle || !currentUid) return;
@@ -223,32 +212,40 @@ export default function BattleOverlay({
 
   if (!battle) return null;
 
+  const creatorName = battle.sideA?.displayName || battle.creatorName || 'Side A';
+  const opponentName = battle.sideB?.displayName || battle.opponentName || 'Side B';
   const winnerSide = completed
-    ? (battle.winnerUid === battle.creatorUid
+    ? (battle.winnerSide === 'A' || battle.winnerUid === battle.creatorUid
       ? 'creator'
-      : battle.winnerUid === battle.opponentUid
+      : battle.winnerSide === 'B' || battle.winnerUid === battle.opponentUid
         ? 'opponent'
         : null)
     : null;
 
   const winnerTitle = winnerSide === 'creator'
-    ? `${battle.creatorName} wins!`
+    ? `${creatorName} wins!`
     : winnerSide === 'opponent'
-      ? `${battle.opponentName} wins!`
+      ? `${opponentName} wins!`
       : "It's a draw!";
 
   const clockLabel = completed
     ? 'ENDED'
     : matchRunning
       ? fmtClock(Math.max(0, remaining))
-      : 'READY';
+      : arenaState === 'COUNTDOWN'
+        ? fmtClock(Math.max(0, (battle.countdownEndsAt || now) - now))
+        : arenaState === 'FINALIZING'
+          ? 'SCORING'
+          : ['ACCEPTED', 'LOBBY_OPEN'].includes(arenaState)
+            ? `T-${fmtClock(Math.max(0, (battle.scheduledStartAt || now) - now))}`
+            : arenaState;
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
       <View style={styles.header} pointerEvents="box-none">
         <View style={styles.vsRow} pointerEvents="none">
           <SideChip
-            name={battle.creatorName}
+            name={`A · ${creatorName}`}
             photo={battle.creatorPhoto}
             accent={MATCH_BAR_LEFT}
             align="left"
@@ -261,7 +258,7 @@ export default function BattleOverlay({
             </View>
           </View>
           <SideChip
-            name={battle.opponentName}
+            name={`B · ${opponentName}`}
             photo={battle.opponentPhoto}
             accent={MATCH_BAR_RIGHT}
             align="right"
@@ -269,8 +266,8 @@ export default function BattleOverlay({
         </View>
 
         <MatchBar
-          leftScore={score.creator || 0}
-          rightScore={score.opponent || 0}
+          leftScore={score.creator}
+          rightScore={score.opponent}
           leftGifters={leftGifters}
           rightGifters={rightGifters}
           combo={matchRunning ? combo : null}
@@ -292,21 +289,9 @@ export default function BattleOverlay({
         <View style={styles.controls} pointerEvents="box-none">
           {isParticipant ? (
             <View style={styles.participantActions}>
-              {canStart ? (
-                <TouchableOpacity style={styles.startBtn} onPress={startNow} disabled={starting}>
-                  {starting ? (
-                    <ActivityIndicator color="#0A0A0C" />
-                  ) : (
-                    <>
-                      <Icon name="flash" size={responsiveFont(16)} color="#0A0A0C" />
-                      <Text style={styles.startBtnText}>Start match</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              ) : null}
-              {(isLive || canStart) ? (
+              {isLive ? (
                 <TouchableOpacity
-                  style={[styles.endBtn, canStart && styles.endBtnSecondary]}
+                  style={styles.endBtn}
                   onPress={endNow}
                   disabled={ending}
                 >
@@ -325,7 +310,7 @@ export default function BattleOverlay({
                 onPress={() => vote('creator')}
               >
                 <Text style={styles.voteBtnText} numberOfLines={1}>
-                  Support {battle.creatorName}
+                  Vote SIDE A · {creatorName}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -333,13 +318,19 @@ export default function BattleOverlay({
                 onPress={() => vote('opponent')}
               >
                 <Text style={styles.voteBtnText} numberOfLines={1}>
-                  Support {battle.opponentName}
+                  Vote SIDE B · {opponentName}
                 </Text>
               </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.waitPill} pointerEvents="none">
-              <Text style={styles.waitPillText}>Waiting for match to start</Text>
+              <Text style={styles.waitPillText}>
+                {arenaState === 'LOBBY_OPEN'
+                  ? `${battle.sideA?.joined ? 'A ready' : 'Waiting A'} · ${battle.sideB?.joined ? 'B ready' : 'Waiting B'}`
+                  : arenaState === 'COUNTDOWN'
+                    ? 'Both sides ready'
+                    : 'Waiting for Battle Arena'}
+              </Text>
             </View>
           )}
         </View>

@@ -32,7 +32,6 @@ import {
   rejectGuest as rejectGuestStore,
 } from './guestSlotStore';
 import { buildSafeStageName } from '../services/ivsStageName';
-import { markBattleAttendance, assertBattleParticipant, assertBattleCreator } from '../economy/battleEscrowService';
 import { emitRoomEvent } from '../realtime/realtimeBus';
 import { getStreamPlaybackForViewer, enqueueGuestInviteNotification } from '../admin/firestoreAdmin';
 import {
@@ -41,6 +40,12 @@ import {
   pickSlotIndex,
 } from './guestSlotAllocator';
 import { safeLiveDisplayName } from './liveDisplayName';
+import {
+  markBattleParticipantJoined,
+  requireBattlePublisher,
+} from '../battles/battleCoordinator';
+import { attachBattleStage } from '../battles/battleRegistryService';
+import { battleTokenAttributes } from '../battles/battleLifecycle';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -574,42 +579,87 @@ export async function startBattleStage(
   title: string,
   regionHint?: string
 ): Promise<{ session: LiveSession; hostToken: string; stageArn: string }> {
-  await assertBattleCreator(battleId, creatorUserId);
-  const sessionId = uuidv4();
-  const appPrefix = process.env.IVS_STAGE_PREFIX ?? 'blyp-dev';
-  const safeStageName = buildSafeStageName({ appPrefix, userId: creatorUserId, rawTitle: title || 'battle', sessionId });
+  const publisher = await requireBattlePublisher(battleId, creatorUserId);
+  if (publisher.side !== 'A') {
+    throw forbidden('Only side A can open the battle stage');
+  }
 
-  const region = resolveStageRegion(regionHint);
-  // The opponent joins this same shared stage, so the creator's region is used
-  // for the whole battle (with default-region fallback inside the helper).
-  const stageArn = await createStageInRegion(safeStageName, region);
-  const client = getIvsRealtimeClient(getRegionFromStageArn(stageArn));
+  let battle = publisher.battle;
+  let session: LiveSession | null = null;
 
-  const session: LiveSession = {
-    sessionId,
-    hostUserId: creatorUserId,
-    stageArn,
-    region: getRegionFromStageArn(stageArn),
-    title,
-    status: 'LIVE',
-    createdAt: nowIso(),
-  };
-  await createSession(session);
+  // Reconnects reuse the canonical stage instead of creating parallel rooms.
+  if (battle.sessionId && battle.stageArn) {
+    session = await getSessionById(battle.sessionId);
+    if (!session || session.status !== 'LIVE' || session.stageArn !== battle.stageArn) {
+      const err: any = new Error('Battle stage is no longer active');
+      err.code = 'BATTLE_STAGE_INACTIVE';
+      err.httpStatus = 409;
+      throw err;
+    }
+  } else {
+    const sessionId = uuidv4();
+    const appPrefix = process.env.IVS_STAGE_PREFIX ?? 'blyp-dev';
+    const safeStageName = buildSafeStageName({
+      appPrefix,
+      userId: creatorUserId,
+      rawTitle: title || battle.title || 'battle',
+      sessionId,
+    });
+    const region = resolveStageRegion(regionHint);
+    const stageArn = await createStageInRegion(safeStageName, region);
+    const createdSession: LiveSession = {
+      sessionId,
+      hostUserId: creatorUserId,
+      stageArn,
+      region: getRegionFromStageArn(stageArn),
+      title: title || battle.title,
+      status: 'LIVE',
+      createdAt: nowIso(),
+    };
+    await createSession(createdSession);
+    const attached = await attachBattleStage(battleId, creatorUserId, {
+      sessionId,
+      stageArn,
+    });
+    battle = attached.arena;
+    if (!attached.attached && battle.sessionId !== sessionId) {
+      // A concurrent retry won the registry race. Reap this orphan and use the
+      // already-attached canonical room.
+      try {
+        await getIvsRealtimeClient(getRegionFromStageArn(stageArn)).send(
+          new DeleteStageCommand({ arn: stageArn }),
+        );
+      } catch {
+        // Best effort; the orphan can be swept operationally.
+      }
+      session = battle.sessionId ? await getSessionById(battle.sessionId) : null;
+    } else {
+      session = createdSession;
+    }
+  }
 
+  if (!session || !battle.sessionId || !battle.stageArn) {
+    throw new Error('Failed to attach canonical battle stage');
+  }
+  const client = getIvsRealtimeClient(getRegionFromStageArn(battle.stageArn));
   const tokenRes = await client.send(new CreateParticipantTokenCommand({
-    stageArn,
+    stageArn: battle.stageArn,
     userId: creatorUserId,
     capabilities: ['PUBLISH', 'SUBSCRIBE'],
-    attributes: { role: 'battle', battleId, sessionId, title: title || '' },
+    attributes: battleTokenAttributes(
+      'A',
+      battleId,
+      battle.sessionId,
+      title || battle.title,
+    ),
     duration: 60,
   }));
   const hostToken = tokenRes.participantToken?.token;
   if (!hostToken) throw new Error('Failed to create battle participant token');
 
-  // Minting the creator's publish token == they turned up.
-  await markBattleAttendance(battleId, creatorUserId);
+  await markBattleParticipantJoined(battleId, creatorUserId);
 
-  return { session, hostToken, stageArn };
+  return { session, hostToken, stageArn: battle.stageArn };
 }
 
 export async function joinBattleStage(
@@ -617,8 +667,24 @@ export async function joinBattleStage(
   sessionId: string,
   battleId: string
 ): Promise<{ token: string; stageArn: string; sessionId: string; role: string }> {
-  await assertBattleParticipant(battleId, userId);
-  const session = await getSessionById(sessionId);
+  const publisher = await requireBattlePublisher(battleId, userId);
+  if (publisher.side !== 'B') {
+    throw forbidden('Side A opens the battle stage through the start route');
+  }
+  const battle = publisher.battle;
+  if (!battle.sessionId || !battle.stageArn) {
+    const err: any = new Error('Battle stage not ready');
+    err.code = 'BATTLE_STAGE_NOT_READY';
+    err.httpStatus = 409;
+    throw err;
+  }
+  if (sessionId && sessionId !== battle.sessionId) {
+    const err: any = new Error('Battle session does not match the registry');
+    err.code = 'BATTLE_SESSION_MISMATCH';
+    err.httpStatus = 409;
+    throw err;
+  }
+  const session = await getSessionById(battle.sessionId);
   if (!session || session.status !== 'LIVE') {
     throw new Error('Live session not found or not live');
   }
@@ -628,16 +694,20 @@ export async function joinBattleStage(
     stageArn: session.stageArn,
     userId,
     capabilities: ['PUBLISH', 'SUBSCRIBE'],
-    attributes: { role: 'battle', battleId, sessionId },
+    attributes: battleTokenAttributes('B', battleId, battle.sessionId),
     duration: 60,
   }));
   const token = tokenRes.participantToken?.token;
   if (!token) throw new Error('Failed to create battle participant token');
 
-  // Minting this participant's publish token == they turned up.
-  await markBattleAttendance(battleId, userId);
+  await markBattleParticipantJoined(battleId, userId);
 
-  return { token, stageArn: session.stageArn, sessionId, role: 'battle' };
+  return {
+    token,
+    stageArn: session.stageArn,
+    sessionId: battle.sessionId,
+    role: 'battle',
+  };
 }
 
 export async function endLiveSession(sessionId: string): Promise<void> {

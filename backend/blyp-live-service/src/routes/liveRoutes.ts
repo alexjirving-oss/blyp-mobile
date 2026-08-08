@@ -631,7 +631,8 @@ router.post('/live/battle/start', requireNotBanned, requireCanGoLive, async (req
     const result = await startBattleStage(userId, String(battleId), title || '', typeof region === 'string' ? region : undefined);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({
+    const status = Number(err?.httpStatus) || (err?.code === 'FORBIDDEN' ? 403 : 500);
+    res.status(status).json({
       error: 'Failed to start battle stage',
       code: err?.code ?? 'UNKNOWN_ERROR',
       detail: err?.originalMessage ?? err?.message,
@@ -649,7 +650,12 @@ router.post('/live/battle/join', requireNotBanned, async (req: AuthedRequest, re
     res.json(result);
   } catch (err: any) {
     const notFound = String(err?.message || '').includes('not found');
-    res.status(notFound ? 404 : 500).json({ error: 'Failed to join battle stage', detail: err?.message });
+    const status = Number(err?.httpStatus) || (err?.code === 'FORBIDDEN' ? 403 : notFound ? 404 : 500);
+    res.status(status).json({
+      error: 'Failed to join battle stage',
+      code: err?.code,
+      detail: err?.message,
+    });
   }
 });
 

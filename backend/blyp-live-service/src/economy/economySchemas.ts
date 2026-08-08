@@ -33,13 +33,25 @@ export const iapVerifySchema = z
     }
   });
 
-export const giftSendSchema = z.object({
-  idempotencyKey: z.string().min(1),
-  streamId: z.string().min(1),
-  receiverUserId: z.string().min(1),
-  giftId: z.string().min(1),
-  quantity: z.coerce.number().int().min(1).max(1000),
-});
+export const giftSendSchema = z
+  .object({
+    idempotencyKey: z.string().min(1),
+    streamId: z.string().min(1),
+    receiverUserId: z.string().min(1),
+    giftId: z.string().min(1),
+    quantity: z.coerce.number().int().min(1).max(1000),
+    battleId: z.string().min(1).max(120).optional(),
+    battleSide: z.enum(['A', 'B']).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!!value.battleId === !!value.battleSide) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'battleId and battleSide must be supplied together',
+      path: value.battleId ? ['battleSide'] : ['battleId'],
+    });
+  });
 
 export const liveGameStartSchema = z
   .object({

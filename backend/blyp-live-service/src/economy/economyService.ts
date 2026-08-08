@@ -15,6 +15,11 @@ import { listGuests } from '../live/guestSlotStore';
 import { logger } from '../config/logger';
 import type { AdminCreditCoinsInput, IapVerifyInput, PromoteBattleInput, PromoteMethodBookInput, PromoteSpotlightBookInput, PromoteTimeSlotBookInput } from './economySchemas';
 import {
+  getBattleArenaBySession,
+  mirrorBattleById,
+  scoreBattleGiftInTransaction,
+} from '../battles/battleRegistryService';
+import {
   isWithdrawLaunchTestUser,
   LAUNCH_TEST_GEM_CREDIT_CAP,
 } from './withdrawLaunchTest';
@@ -1584,6 +1589,15 @@ async function assertValidLiveRecipient(streamId: string, receiverUserId: string
   const allowViewerGifting = /^(1|true|yes|on)$/i.test(String(process.env.ALLOW_VIEWER_GIFTING || '').trim());
   if (allowViewerGifting) return;
   if (receiverUserId === session.hostUserId) return;
+  // Battle side B is an equal publisher, not a guest. Resolve both fixed sides
+  // from the canonical registry rather than relying on an unrelated game room.
+  const battle = await getBattleArenaBySession(streamId).catch(() => null);
+  if (
+    battle &&
+    (receiverUserId === battle.sideA.userId || receiverUserId === battle.sideB.userId)
+  ) {
+    return;
+  }
   const guests = await listGuests(streamId);
   const onStage = guests.some(
     (g) => g.userId === receiverUserId && (g.state === 'INVITED' || g.state === 'LIVE')
@@ -1605,11 +1619,27 @@ async function assertValidLiveRecipient(streamId: string, receiverUserId: string
   throw new EconomyError('RECEIVER_INVALID', 403, 'Recipient is not on this live stage');
 }
 
-export async function sendGift(senderUserId: string, input: { streamId: string; receiverUserId: string; giftId: string; quantity: number; idempotencyKey: string }) {
+export async function sendGift(senderUserId: string, input: {
+  streamId: string;
+  receiverUserId: string;
+  giftId: string;
+  quantity: number;
+  idempotencyKey: string;
+  battleId?: string;
+  battleSide?: 'A' | 'B';
+}) {
   const { db } = getEconomyInfra();
   const env = getEconomyEnv();
 
-  const { streamId, receiverUserId, giftId, quantity, idempotencyKey } = input;
+  const {
+    streamId,
+    receiverUserId,
+    giftId,
+    quantity,
+    idempotencyKey,
+    battleId,
+    battleSide,
+  } = input;
   if (receiverUserId === senderUserId) {
     throw new EconomyError('RECEIVER_INVALID', 404, 'receiverUserId invalid');
   }
@@ -1737,6 +1767,15 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
       sequence_no: nextSeq.toString(),
       idempotency_key: idempotencyKey,
       created_at: createdAt,
+    });
+
+    const battleScore = await scoreBattleGiftInTransaction(trx, {
+      streamId,
+      battleId,
+      side: battleSide,
+      receiverUserId,
+      giftEventId,
+      scoreCoins: totalCostCoins,
     });
 
     // 8) ledger entries (note: unique per user_id, so suffix the idempotency key)
@@ -1868,12 +1907,21 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
           giftId,
           quantity,
         },
+        battle: battleScore
+          ? {
+              battleId: battleScore.battleId,
+              side: battleScore.side,
+              score: battleScore.score,
+              applied: battleScore.applied,
+            }
+          : undefined,
         createdAt,
       },
     };
   });
 
   // 5.2 After commit: publish socket event
+  const battleResult = (result.response as any)?.battle;
   const payload = {
     streamId: result.response.streamId,
     sequenceNo: result.response.sequenceNo,
@@ -1885,8 +1933,18 @@ export async function sendGift(senderUserId: string, input: { streamId: string; 
     sender: { userId: senderUserId, handle: null, avatarUrl: null },
     receiver: { userId: receiverUserId, handle: null, avatarUrl: null },
     createdAt: result.response.createdAt,
+    ...(battleResult
+      ? {
+          battleId: battleResult.battleId,
+          battleSide: battleResult.side,
+          battleScore: battleResult.score,
+        }
+      : {}),
   };
   emitGiftEvent(streamId, payload);
+  if (battleResult?.battleId) {
+    await mirrorBattleById(String(battleResult.battleId));
+  }
 
   // Revive-gift hook: when the artillery battle-stage game is live and a viewer
   // sends the `revive` gift to a creator on stage, apply a revive to that

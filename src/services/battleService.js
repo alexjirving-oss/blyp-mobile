@@ -16,17 +16,22 @@
 // Everything degrades gracefully: no Firebase -> no-op; no live-service -> the
 // (free) social flow still works and staking simply reports the failure.
 
-import { db, firestore, firebaseEnabled } from '../config/firebase';
-import { increment, runTransaction, doc as fsDoc } from 'firebase/firestore';
+import { db, firebaseEnabled } from '../config/firebase';
+import { increment } from 'firebase/firestore';
 import { fixStorageUrl } from '../utils/urlUtils';
 import {
   battleDeposit as apiBattleDeposit,
-  battleCancelRefund as apiBattleCancelRefund,
-  battleSettle as apiBattleSettle,
-  applyBattleGiftPledges as apiApplyBattleGiftPledges,
-  refundBattleGiftPledges as apiRefundBattleGiftPledges,
   makeIdempotencyKey,
 } from '../api/economyLiveApi';
+import {
+  acceptBattleArena as apiAcceptBattleArena,
+  cancelBattleArena as apiCancelBattleArena,
+  declineBattleArena as apiDeclineBattleArena,
+  endBattleArena as apiEndBattleArena,
+  getBattleArena as apiGetBattleArena,
+  registerBattleArena as apiRegisterBattleArena,
+  voteBattleArena as apiVoteBattleArena,
+} from '../api/battleArenaApi';
 import { createReminder } from './reminderService';
 
 const BATTLES = 'battles';
@@ -49,7 +54,7 @@ export const BATTLE_STATUS = {
 export const STAKE_PRESETS = [0, 50, 100, 500];
 
 export const DEFAULT_DURATION_SEC = 300; // 5 minutes, like a TikTok battle
-export const JOIN_GRACE_MS = 5 * 60 * 1000; // must go live within 5 min of start
+export const JOIN_GRACE_MS = 2 * 60 * 1000; // server no-show grace after published start
 
 export function isStaked(battle) {
   return !!battle && battle.depositMode === 'staked' && Number(battle.stakeCoins) > 0;
@@ -164,15 +169,7 @@ export async function createBattle(creator, opponent, opts = {}) {
   const now = Date.now();
   const scheduledStartAt = Number(opts.scheduledStartAt) || now + 10 * 60 * 1000;
 
-  // Take the creator's deposit first for staked battles — if it fails we never
-  // create a half-funded battle.
   let creatorPaid = false;
-  if (depositMode === 'staked') {
-    const dep = await depositForBattle(id, 'creator', stakeCoins, creator.id, opponent.id);
-    if (!dep.ok) return { ok: false, reason: dep.reason || 'deposit_failed' };
-    creatorPaid = true;
-  }
-
   const battle = {
     creatorUid: creator.id,
     creatorName: creator.displayName || creator.username || 'User',
@@ -204,18 +201,47 @@ export async function createBattle(creator, opponent, opts = {}) {
   };
 
   try {
-    await battleRef(id).set(battle);
+    // Register every battle before any stage or escrow dependency. This is the
+    // authoritative event row that makes free battles fully startable.
+    const arena = await apiRegisterBattleArena({
+      battleId: id,
+      opponentUid: opponent.id,
+      creatorName: battle.creatorName,
+      creatorUsername: battle.creatorUsername,
+      opponentName: battle.opponentName,
+      opponentUsername: battle.opponentUsername,
+      title: battle.title,
+      scheduledStartAt,
+      durationSec: battle.durationSec,
+      depositMode,
+      stakeCoins,
+    });
+    battle.serverState = arena.state;
+    battle.serverVersion = arena.version;
+    battle.roomId = arena.roomId;
+
+    if (depositMode === 'staked') {
+      const dep = await depositForBattle(id, 'creator', stakeCoins, creator.id, opponent.id);
+      if (!dep.ok) {
+        await apiCancelBattleArena(id).catch(() => {});
+        return { ok: false, reason: dep.reason || 'deposit_failed' };
+      }
+      creatorPaid = true;
+      battle.creatorPaid = true;
+    }
+
+    await battleRef(id).set(battle, { merge: true });
     const created = { id, ...battle };
     // Local + server reminder so the scheduled fight isn't missed.
     await setBattleReminder(created, creator.id, 10).catch(() => {});
     return { ok: true, id, battle: created };
   } catch (e) {
     console.warn('[battleService] createBattle write failed', e?.code || e?.message || e);
-    // Roll back the creator's deposit so they're not charged for a phantom battle.
-    if (creatorPaid) {
-      await apiBattleCancelRefund({ battleId: id, idempotencyKey: makeIdempotencyKey('btlrefund') }).catch(() => {});
-    }
-    return { ok: false, reason: 'write_failed' };
+    // Closing the server event refunds any stake and held gifts idempotently.
+    await apiCancelBattleArena(id).catch(() => {});
+    const code = e?.code;
+    if (code === 'INSUFFICIENT_FUNDS') return { ok: false, reason: 'insufficient_funds' };
+    return { ok: false, reason: creatorPaid ? 'write_failed' : 'registry_failed' };
   }
 }
 
@@ -230,8 +256,11 @@ export async function acceptBattle(battle, uid) {
   }
 
   try {
+    const arena = await apiAcceptBattleArena(battle.id);
     await battleRef(battle.id).update({
       status: BATTLE_STATUS.SCHEDULED,
+      serverState: arena.state,
+      serverVersion: arena.version,
       opponentPaid: isStaked(battle) ? true : battle.opponentPaid,
       acceptedAt: Date.now(),
       updatedAt: Date.now(),
@@ -252,10 +281,14 @@ export async function acceptBattle(battle, uid) {
 export async function rejectBattle(battle, uid) {
   if (!battle?.id || battle.opponentUid !== uid) return { ok: false, reason: 'not_invitee' };
   if (battle.status !== BATTLE_STATUS.PENDING) return { ok: false, reason: 'not_pending' };
-  await refundIfStaked(battle);
-  await refundGiftPledgesIfAny(battle);
   try {
-    await battleRef(battle.id).update({ status: BATTLE_STATUS.REJECTED, updatedAt: Date.now() });
+    const arena = await apiDeclineBattleArena(battle.id);
+    await battleRef(battle.id).update({
+      status: BATTLE_STATUS.REJECTED,
+      serverState: arena.state,
+      serverVersion: arena.version,
+      updatedAt: Date.now(),
+    });
     return { ok: true };
   } catch {
     return { ok: false, reason: 'write_failed' };
@@ -268,170 +301,96 @@ export async function cancelBattle(battle, uid) {
   if (![BATTLE_STATUS.PENDING, BATTLE_STATUS.SCHEDULED].includes(battle.status)) {
     return { ok: false, reason: 'too_late' };
   }
-  await refundIfStaked(battle);
-  await refundGiftPledgesIfAny(battle);
   try {
-    await battleRef(battle.id).update({ status: BATTLE_STATUS.CANCELLED, updatedAt: Date.now() });
+    const arena = await apiCancelBattleArena(battle.id);
+    await battleRef(battle.id).update({
+      status: BATTLE_STATUS.CANCELLED,
+      serverState: arena.state,
+      serverVersion: arena.version,
+      updatedAt: Date.now(),
+    });
     return { ok: true };
   } catch {
     return { ok: false, reason: 'write_failed' };
   }
-}
-
-async function refundIfStaked(battle) {
-  if (!isStaked(battle)) return;
-  if (!battle.creatorPaid && !battle.opponentPaid) return;
-  await apiBattleCancelRefund({ battleId: battle.id, idempotencyKey: makeIdempotencyKey('btlrefund') }).catch(() => {});
-}
-
-/** Refund any viewer gift pledges held for this battle (cancel / reject). */
-async function refundGiftPledgesIfAny(battle) {
-  if (!battle?.id) return;
-  await apiRefundBattleGiftPledges({
-    battleId: battle.id,
-    idempotencyKey: makeIdempotencyKey('btlgiftrefund'),
-  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
 // Live lifecycle (mirrors the authoritative live-service attendance)
 // ---------------------------------------------------------------------------
 
-/**
- * Mark this participant as having gone live on the shared stage.
- * Does NOT start the match clock — call startMatch when both sides are ready
- * (or when the host taps Start match).
- */
+/** Confirm the attendance recorded by the battle stage endpoint. */
 export async function markJoined(battle, uid, { liveStreamId, stageArn } = {}) {
   const side = battleSideFor(battle, uid);
   if (!side) return { ok: false, reason: 'not_participant' };
-  const patch = { updatedAt: Date.now(), status: BATTLE_STATUS.LIVE };
-  patch[side === 'creator' ? 'creatorJoined' : 'opponentJoined'] = true;
-  if (liveStreamId) patch.liveStreamId = liveStreamId;
-  if (stageArn) patch.stageArn = stageArn;
   try {
-    await battleRef(battle.id).update(patch);
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: 'write_failed' };
+    const arena = await apiGetBattleArena(battle.id);
+    const joined = side === 'creator' ? arena.sideA.joined : arena.sideB.joined;
+    return { ok: joined, reason: joined ? undefined : 'attendance_pending', battle: arena };
+  } catch (e) {
+    return { ok: false, reason: e?.code || 'unavailable' };
   }
 }
 
-/**
- * Deliver any held pre-arranged gifts and bump the scoreboard.
- * Safe to call repeatedly — economy apply is idempotent per held pledge.
- */
+/** Held gifts are delivered server-side when the battle enters LIVE. */
 export async function deliverBattleGiftPledges(battle) {
   if (!battle?.id) return { ok: false, reason: 'missing' };
   try {
-    const res = await apiApplyBattleGiftPledges({
-      battleId: battle.id,
-      streamId: battle.liveStreamId || undefined,
-      idempotencyKey: `btlgiftapply:${battle.id}`,
-    });
-    const delta = res?.scoreDelta || { creator: 0, opponent: 0 };
-    if (delta.creator > 0) await addGiftScore(battle.id, 'creator', delta.creator);
-    if (delta.opponent > 0) await addGiftScore(battle.id, 'opponent', delta.opponent);
-    return { ok: true, appliedCount: Number(res?.appliedCount || 0), scoreDelta: delta };
+    const arena = await apiGetBattleArena(battle.id);
+    return { ok: true, battle: arena };
   } catch (e) {
-    return { ok: false, reason: String(e?.message || e || 'apply_failed') };
+    return { ok: false, reason: e?.code || 'unavailable' };
   }
 }
 
-/** Start the timed match clock (gift/vote scoring window). Participant-only. */
+/** The server starts countdown/live when both fixed-side publishers are present. */
 export async function startMatch(battle, uid) {
   const side = battleSideFor(battle, uid);
   if (!side || !battle?.id) return { ok: false, reason: 'not_participant' };
-  if (![BATTLE_STATUS.SCHEDULED, BATTLE_STATUS.LIVE].includes(battle.status)) {
-    return { ok: false, reason: 'bad_status' };
-  }
-  if (battle.liveStartedAt) {
-    await deliverBattleGiftPledges(battle);
-    return { ok: true, already: true };
-  }
   try {
-    await battleRef(battle.id).update({
-      status: BATTLE_STATUS.LIVE,
-      liveStartedAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    await deliverBattleGiftPledges(battle);
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: 'write_failed' };
+    const arena = await apiGetBattleArena(battle.id);
+    const started = ['COUNTDOWN', 'LIVE', 'FINALIZING', 'ENDED'].includes(arena.state);
+    return { ok: started, reason: started ? undefined : 'waiting_for_opponent', battle: arena };
+  } catch (e) {
+    return { ok: false, reason: e?.code || 'unavailable' };
   }
 }
 
-/**
- * End the battle: declare the scoreboard winner (glory) and settle the coin
- * deposit from attendance. Settlement is server-authoritative — the live-service
- * decides the coin payout from its own recorded attendance, not from the client.
- */
-export async function endBattle(battle) {
+/** Ask the server to finalize score and escrow. */
+export async function endBattle(battle, uid) {
   if (!battle?.id) return { ok: false, reason: 'missing' };
-  const score = battle.score || { creator: 0, opponent: 0 };
-  let winnerUid = null;
-  if (score.creator > score.opponent) winnerUid = battle.creatorUid;
-  else if (score.opponent > score.creator) winnerUid = battle.opponentUid;
-
-  let settlement = null;
-  if (isStaked(battle)) {
-    try {
-      const res = await apiBattleSettle({ battleId: battle.id, idempotencyKey: makeIdempotencyKey('btlsettle') });
-      settlement = res?.settlement || { outcome: res?.outcome || 'settled' };
-    } catch (e) {
-      settlement = { outcome: 'settle_failed', error: String(e?.message || e) };
-    }
-  }
-
   try {
-    await battleRef(battle.id).update({
-      status: BATTLE_STATUS.COMPLETED,
-      winnerUid,
-      settlement,
-      endedAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-  } catch {
-    /* ignore */
+    const arena = await apiEndBattleArena(battle.id);
+    const winnerUid = arena.winnerSide === 'A'
+      ? arena.sideA.userId
+      : arena.winnerSide === 'B'
+        ? arena.sideB.userId
+        : null;
+    return { ok: true, winnerUid, settlement: arena.settlement, battle: arena };
+  } catch (e) {
+    return { ok: false, reason: e?.code || 'end_failed' };
   }
-  return { ok: true, winnerUid, settlement };
 }
 
 // ---------------------------------------------------------------------------
 // Scoring (votes + gift weight)
 // ---------------------------------------------------------------------------
 
-/** A viewer votes for a side. One free vote per viewer, enforced atomically. */
+/** A viewer votes once; uniqueness and score update are server-enforced. */
 export async function voteBattle(battleId, voterUid, side) {
-  if (!firebaseEnabled || !battleId || !voterUid) return { ok: false, reason: 'unavailable' };
+  if (!battleId || !voterUid) return { ok: false, reason: 'unavailable' };
   if (side !== 'creator' && side !== 'opponent') return { ok: false, reason: 'bad_side' };
   try {
-    await runTransaction(firestore, async (tx) => {
-      const voteRef = fsDoc(firestore, `${BATTLES}/${battleId}/votes/${voterUid}`);
-      const existing = await tx.get(voteRef);
-      if (existing.exists()) throw new Error('already_voted');
-      const bRef = fsDoc(firestore, `${BATTLES}/${battleId}`);
-      tx.set(voteRef, { side, at: Date.now() });
-      tx.update(bRef, { [`score.${side}`]: increment(1), updatedAt: Date.now() });
-    });
-    return { ok: true };
+    const result = await apiVoteBattleArena(battleId, side === 'creator' ? 'A' : 'B');
+    return { ok: result.applied, reason: result.applied ? undefined : 'already_voted', battle: result.battle };
   } catch (e) {
-    if (String(e?.message) === 'already_voted') return { ok: false, reason: 'already_voted' };
-    return { ok: false, reason: 'failed' };
+    return { ok: false, reason: e?.code || 'failed' };
   }
 }
 
-/** Add gift-weighted score to a side (called after a successful gift in battle). */
+/** @deprecated Battle gift score is committed in the send-gift transaction. */
 export async function addGiftScore(battleId, side, coinValue) {
-  if (!firebaseEnabled || !battleId) return;
-  if (side !== 'creator' && side !== 'opponent') return;
-  const amount = Math.max(1, Math.round(Number(coinValue) || 0));
-  try {
-    await battleRef(battleId).update({ [`score.${side}`]: increment(amount), updatedAt: Date.now() });
-  } catch {
-    /* ignore */
-  }
+  return false;
 }
 
 /**
@@ -698,6 +657,17 @@ export function subscribeBattle(id, cb) {
     });
   } catch {
     return () => {};
+  }
+}
+
+/** Fetch and reconcile the authoritative server lifecycle. */
+export async function refreshBattleArena(id) {
+  if (!id) return { ok: false, reason: 'missing' };
+  try {
+    const battle = await apiGetBattleArena(id);
+    return { ok: true, battle };
+  } catch (e) {
+    return { ok: false, reason: e?.code || 'unavailable' };
   }
 }
 

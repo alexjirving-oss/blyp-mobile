@@ -243,6 +243,8 @@ export interface SendGiftInput {
   giftId: string;
   quantity: number;
   idempotencyKey: string;
+  battleId?: string;
+  battleSide?: 'A' | 'B';
 }
 
 export interface SendGiftResponse {
@@ -262,6 +264,12 @@ export interface SendGiftResponse {
   gift: {
     giftId: string;
     quantity: number;
+  };
+  battle?: {
+    battleId: string;
+    side: 'A' | 'B';
+    score: { A: number; B: number };
+    applied: boolean;
   };
   createdAt: string;
 }

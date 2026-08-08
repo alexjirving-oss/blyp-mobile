@@ -503,7 +503,7 @@ router.post('/economy/battle/gift-pledges/apply', async (req: AuthedRequest, res
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const parsed = battleGiftPledgesApplySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
-    const out = await applyBattleGiftPledges(parsed.data);
+    const out = await applyBattleGiftPledges(parsed.data, { actorUserId: userId });
     res.json(out.response);
   } catch (e: any) {
     const err = toEconomyError(e);
@@ -517,7 +517,7 @@ router.post('/economy/battle/gift-pledges/refund', async (req: AuthedRequest, re
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const parsed = battleGiftPledgesRefundSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
-    const out = await refundBattleGiftPledges(parsed.data);
+    const out = await refundBattleGiftPledges(parsed.data, { actorUserId: userId });
     res.json(out.response);
   } catch (e: any) {
     const err = toEconomyError(e);

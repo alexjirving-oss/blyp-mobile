@@ -52,6 +52,8 @@ const GiftSystem = ({
   incomingGiftEvent,
   giftCoins = 0,
   onGiftSent,
+  battleId,
+  battleSide,
 }) => {
   const { uid, authReady, isAuthenticated } = useAuth();
 
@@ -469,12 +471,16 @@ const GiftSystem = ({
           pendingGiftRef.current &&
           pendingGiftRef.current.giftId === String(gift.id) &&
           pendingGiftRef.current.creatorId === String(creatorId) &&
-          pendingGiftRef.current.streamId === String(postId);
+          pendingGiftRef.current.streamId === String(postId) &&
+          pendingGiftRef.current.battleId === String(battleId || '') &&
+          pendingGiftRef.current.battleSide === String(battleSide || '');
         if (!sameAsPending) {
           pendingGiftRef.current = {
             giftId: String(gift.id),
             creatorId: String(creatorId),
             streamId: String(postId),
+            battleId: String(battleId || ''),
+            battleSide: String(battleSide || ''),
             key: makeIdempotencyKey('gift'),
           };
         }
@@ -484,6 +490,7 @@ const GiftSystem = ({
           giftId: String(gift.id),
           quantity: 1,
           idempotencyKey: pendingGiftRef.current.key,
+          ...(battleId && battleSide ? { battleId: String(battleId), battleSide } : {}),
         });
         // Success: clear so the next gift uses a fresh key.
         pendingGiftRef.current = null;
@@ -1152,7 +1159,10 @@ const GiftSystem = ({
 
             {/* Creator Info */}
             <View style={styles.creatorInfo}>
-              <Text style={styles.creatorText}>Sending to: {getCreatorName()}</Text>
+              <Text style={styles.creatorText}>
+                {battleSide ? `Sending to SIDE ${battleSide}: ` : 'Sending to: '}
+                {getCreatorName()}
+              </Text>
             </View>
 
             {/* Horizontal gift carousel (swipe left/right) */}

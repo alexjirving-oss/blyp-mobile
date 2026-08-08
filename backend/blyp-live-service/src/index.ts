@@ -9,6 +9,7 @@ import gameRoutes from './routes/gameRoutes';
 import marbleRoutes from './routes/marbleRoutes';
 import frenemiesRoutes from './routes/frenemiesRoutes';
 import reactionDuelRoutes from './routes/reactionDuelRoutes';
+import battleRoutes from './routes/battleRoutes';
 import economyRoutes from './economy/economyRoutes';
 import internalRoutes from './internal/internalRoutes';
 import adminRoutes from './admin/adminRoutes';
@@ -155,6 +156,9 @@ app.use(internalRoutes);
 app.use(economyRoutes);
 
 app.use('/api', liveRoutes);
+
+// Canonical scheduled Battle Arena registry + server lifecycle.
+app.use('/api', battleRoutes);
 
 // Hostless, topic-based group video rooms (open-seat, symmetric multi-party).
 app.use('/api', roomsRoutes);

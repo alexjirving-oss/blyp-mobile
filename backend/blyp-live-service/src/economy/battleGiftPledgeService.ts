@@ -16,6 +16,10 @@ import { EconomyError } from './economyErrors';
 import { ensureEconomySchema } from './schema';
 import { getEconomyEnv } from '../config/economyEnv';
 import { emitGiftEvent } from '../realtime/realtimeBus';
+import {
+  mirrorBattleById,
+  scoreBattleGiftInTransaction,
+} from '../battles/battleRegistryService';
 import type {
   BattleGiftPledgeCreateInput,
   BattleGiftPledgeCancelInput,
@@ -46,6 +50,26 @@ type PledgeRow = {
   applied_at: string | Date | null;
   refunded_at: string | Date | null;
 };
+
+type BattleGateRow = {
+  battle_id: string;
+  creator_uid: string;
+  opponent_uid: string;
+  state: string;
+  session_id: string | null;
+};
+
+async function requireBattleGate(
+  trx: Knex | Knex.Transaction,
+  battleId: string,
+  lock = false,
+): Promise<BattleGateRow> {
+  let query = trx<BattleGateRow>('battle_registry').where({ battle_id: battleId });
+  if (lock) query = query.forUpdate();
+  const row = await query.first();
+  if (!row) throw new EconomyError('NOT_FOUND', 404, 'Battle not found');
+  return row;
+}
 
 async function balancesFor(trx: Knex.Transaction, userId: string) {
   const w = await trx('wallets').where({ user_id: userId }).first();
@@ -114,12 +138,20 @@ export async function createBattleGiftPledge(userId: string, input: BattleGiftPl
   if (creatorUid === opponentUid) {
     throw new EconomyError('INVALID_INPUT', 400, 'Battle sides must be distinct');
   }
-  const receiverUid = side === 'creator' ? creatorUid : opponentUid;
-  if (receiverUid === userId) {
-    throw new EconomyError('INVALID_INPUT', 400, 'Cannot pledge a gift to yourself');
-  }
 
   const result = await db.transaction(async (trx) => {
+    const battle = await requireBattleGate(trx, battleId, true);
+    if (battle.creator_uid !== creatorUid || battle.opponent_uid !== opponentUid) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Battle participants do not match the registry');
+    }
+    if (!['INVITED', 'ACCEPTED', 'LOBBY_OPEN'].includes(battle.state)) {
+      throw new EconomyError('INVALID_STATE', 409, 'This battle no longer accepts scheduled gifts');
+    }
+    const receiverUid = side === 'creator' ? battle.creator_uid : battle.opponent_uid;
+    if (receiverUid === userId) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Cannot pledge a gift to yourself');
+    }
+
     const existing = await trx('battle_gift_pledges')
       .where({ pledger_uid: userId, idempotency_key: idempotencyKey })
       .first();
@@ -239,6 +271,10 @@ export async function cancelBattleGiftPledge(userId: string, input: BattleGiftPl
       .first();
     if (!row) throw new EconomyError('NOT_FOUND', 404, 'Pledge not found');
     if (row.pledger_uid !== userId) throw new EconomyError('RESTRICTED', 403, 'Not your pledge');
+    const battle = await requireBattleGate(trx, row.battle_id, true);
+    if (['COUNTDOWN', 'LIVE', 'FINALIZING', 'ENDED'].includes(battle.state)) {
+      throw new EconomyError('INVALID_STATE', 409, 'The battle has started; this pledge can no longer be cancelled');
+    }
     if (row.status === 'REFUNDED' || row.status === 'CANCELLED') {
       return {
         kind: 'replay' as const,
@@ -280,12 +316,29 @@ export async function cancelBattleGiftPledge(userId: string, input: BattleGiftPl
  * Convert held pledges into real gifts when the battle match starts.
  * Coins were already taken at pledge time — this credits gems + gift feed only.
  */
-export async function applyBattleGiftPledges(input: BattleGiftPledgesApplyInput) {
+export async function applyBattleGiftPledges(
+  input: BattleGiftPledgesApplyInput,
+  opts: { actorUserId?: string; internal?: boolean } = {},
+) {
   const { db } = getEconomyInfra();
   const env = getEconomyEnv();
   await ensureEconomySchema(db);
   const { battleId, streamId, idempotencyKey } = input;
-  const effectiveStreamId = String(streamId || `battle:${battleId}`);
+  const battle = await requireBattleGate(db, battleId);
+  if (battle.state !== 'LIVE') {
+    throw new EconomyError('INVALID_STATE', 409, 'Scheduled gifts can only be applied once the battle is live');
+  }
+  if (
+    !opts.internal &&
+    (!opts.actorUserId ||
+      (opts.actorUserId !== battle.creator_uid && opts.actorUserId !== battle.opponent_uid))
+  ) {
+    throw new EconomyError('RESTRICTED', 403, 'Only battle participants can apply scheduled gifts');
+  }
+  if (streamId && battle.session_id && String(streamId) !== battle.session_id) {
+    throw new EconomyError('INVALID_INPUT', 400, 'Battle stream does not match the registry');
+  }
+  const effectiveStreamId = String(battle.session_id || streamId || `battle:${battleId}`);
 
   const pending = await db('battle_gift_pledges')
     .where({ battle_id: battleId, status: 'HELD' })
@@ -413,8 +466,21 @@ export async function applyBattleGiftPledges(input: BattleGiftPledgesApplyInput)
           });
       }
 
-      const appliedAt = nowIso();
+      if (!giftEventId) {
+        throw new EconomyError('INTERNAL', 500, 'Gift event missing during pledge apply');
+      }
+      const battleSide = row.side === 'creator' ? 'A' : 'B';
       const scoreCoins = Number(row.score_coins || row.coin_cost);
+      const battleScore = await scoreBattleGiftInTransaction(trx, {
+        streamId: effectiveStreamId,
+        battleId,
+        side: battleSide,
+        receiverUserId: row.receiver_uid,
+        giftEventId,
+        scoreCoins: BigInt(Math.max(1, scoreCoins)),
+      });
+
+      const appliedAt = nowIso();
       await trx('battle_gift_pledges').where({ pledge_id: pledgeId }).update({
         status: 'APPLIED',
         stream_id: effectiveStreamId,
@@ -444,10 +510,11 @@ export async function applyBattleGiftPledges(input: BattleGiftPledgesApplyInput)
           createdAt,
           prearranged: true,
           battleId,
-          side: row.side,
+          battleSide,
+          battleScore: battleScore?.score,
         },
         side: row.side as 'creator' | 'opponent',
-        scoreCoins,
+        scoreCoins: battleScore?.applied ? scoreCoins : 0,
       };
     });
 
@@ -466,6 +533,8 @@ export async function applyBattleGiftPledges(input: BattleGiftPledgesApplyInput)
     }
   }
 
+  await mirrorBattleById(battleId);
+
   return {
     kind: 'success' as const,
     response: {
@@ -479,10 +548,24 @@ export async function applyBattleGiftPledges(input: BattleGiftPledgesApplyInput)
 }
 
 /** Refund all held pledges for a cancelled/rejected battle. Idempotent. */
-export async function refundBattleGiftPledges(input: BattleGiftPledgesRefundInput) {
+export async function refundBattleGiftPledges(
+  input: BattleGiftPledgesRefundInput,
+  opts: { actorUserId?: string; internal?: boolean } = {},
+) {
   const { db } = getEconomyInfra();
   await ensureEconomySchema(db);
   const { battleId, idempotencyKey } = input;
+  const battle = await requireBattleGate(db, battleId);
+  if (!['DECLINED', 'CANCELLED', 'EXPIRED'].includes(battle.state)) {
+    throw new EconomyError('INVALID_STATE', 409, 'Battle pledges are not refundable in the current state');
+  }
+  if (
+    !opts.internal &&
+    (!opts.actorUserId ||
+      (opts.actorUserId !== battle.creator_uid && opts.actorUserId !== battle.opponent_uid))
+  ) {
+    throw new EconomyError('RESTRICTED', 403, 'Only battle participants can refund scheduled gifts');
+  }
 
   const held = await db('battle_gift_pledges')
     .where({ battle_id: battleId, status: 'HELD' })

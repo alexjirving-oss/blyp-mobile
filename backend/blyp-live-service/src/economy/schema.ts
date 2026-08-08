@@ -233,6 +233,66 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
 
+        // Canonical event registry. This is intentionally separate from
+        // battle_escrows: a free battle has no escrow row but must still be
+        // authorized for the shared IVS stage and server lifecycle.
+        `CREATE TABLE IF NOT EXISTS battle_registry (
+          battle_id text PRIMARY KEY,
+          room_id text NOT NULL UNIQUE,
+          creator_uid text NOT NULL,
+          opponent_uid text NOT NULL,
+          creator_name text NOT NULL DEFAULT '',
+          creator_username text NOT NULL DEFAULT '',
+          opponent_name text NOT NULL DEFAULT '',
+          opponent_username text NOT NULL DEFAULT '',
+          title text NOT NULL DEFAULT '',
+          state text NOT NULL DEFAULT 'INVITED',
+          scheduled_start_at timestamptz NOT NULL,
+          duration_sec integer NOT NULL DEFAULT 300,
+          deposit_mode text NOT NULL DEFAULT 'free',
+          stake_coins bigint NOT NULL DEFAULT 0,
+          session_id text,
+          stage_arn text,
+          side_a_joined_at timestamptz,
+          side_b_joined_at timestamptz,
+          countdown_ends_at timestamptz,
+          live_started_at timestamptz,
+          finalizing_at timestamptz,
+          ended_at timestamptz,
+          terminal_reason text,
+          winner_side text,
+          score_a bigint NOT NULL DEFAULT 0,
+          score_b bigint NOT NULL DEFAULT 0,
+          settlement_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+          version integer NOT NULL DEFAULT 1,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_battle_registry_state_start ON battle_registry (state, scheduled_start_at)`,
+        `CREATE INDEX IF NOT EXISTS idx_battle_registry_session ON battle_registry (session_id)`,
+
+        // A gift can affect a battle score once, enforced independently of
+        // client retries, socket redelivery, or Cloud Run instance races.
+        `CREATE TABLE IF NOT EXISTS battle_score_events (
+          gift_event_id text PRIMARY KEY,
+          battle_id text NOT NULL,
+          side text NOT NULL,
+          score_coins bigint NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_battle_score_events_battle ON battle_score_events (battle_id, created_at)`,
+
+        // One free audience vote per battle. Votes and gifts update the same
+        // authoritative A/B score; Firestore only mirrors the resulting totals.
+        `CREATE TABLE IF NOT EXISTS battle_vote_events (
+          battle_id text NOT NULL,
+          voter_uid text NOT NULL,
+          side text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (battle_id, voter_uid)
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_battle_vote_events_battle ON battle_vote_events (battle_id, created_at)`,
+
         `CREATE TABLE IF NOT EXISTS battle_escrows (
           battle_id text PRIMARY KEY,
           creator_uid text NOT NULL,
