@@ -1,4 +1,10 @@
-export { buildTourSteps, TOUR_VERSION } from './tourSteps';
+export {
+  buildTourSteps,
+  TOUR_VERSION,
+  TOUR_PRE_MS,
+  TOUR_TEXT_MS,
+  TOUR_POST_MS,
+} from './tourSteps';
 export {
   requestStartTour,
   requestReplayTour,
