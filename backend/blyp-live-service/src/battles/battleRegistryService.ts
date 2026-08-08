@@ -14,6 +14,7 @@ import {
   battleSideForUser,
   evaluateBattleLifecycle,
 } from './battleLifecycle';
+import { buildBattleFirestoreMirror } from './battleFirestoreMirror';
 
 export type BattleRegistryRow = {
   battle_id: string;
@@ -84,6 +85,7 @@ export type BattleArenaSnapshot = {
   };
   settlement: any;
   version: number;
+  createdAt: number;
   updatedAt: number;
 };
 
@@ -161,6 +163,7 @@ export function serializeBattleArena(row: BattleRegistryRow): BattleArenaSnapsho
     },
     settlement: row.settlement_json || {},
     version: numberValue(row.version),
+    createdAt: timestampMs(row.created_at) || Date.now(),
     updatedAt: timestampMs(row.updated_at) || Date.now(),
   };
 }
@@ -186,16 +189,6 @@ function requireParticipant(row: BattleRegistryRow, userId: string): BattleSide 
   return side;
 }
 
-function legacyStatus(state: BattleLifecycleState): string {
-  if (state === 'INVITED') return 'pending';
-  if (state === 'ACCEPTED' || state === 'LOBBY_OPEN' || state === 'COUNTDOWN') return 'scheduled';
-  if (state === 'LIVE' || state === 'FINALIZING') return 'live';
-  if (state === 'ENDED') return 'completed';
-  if (state === 'DECLINED') return 'rejected';
-  if (state === 'CANCELLED') return 'cancelled';
-  return 'expired';
-}
-
 /**
  * Firestore remains the mobile realtime presentation mirror. Postgres is the
  * authority; clients never increment battle score or move lifecycle state.
@@ -203,33 +196,9 @@ function legacyStatus(state: BattleLifecycleState): string {
 export async function mirrorBattleArena(arena: BattleArenaSnapshot): Promise<void> {
   const fs = getFirestore();
   if (!fs) return;
-  const winnerUid =
-    arena.winnerSide === 'A'
-      ? arena.sideA.userId
-      : arena.winnerSide === 'B'
-        ? arena.sideB.userId
-        : null;
   try {
     await fs.collection('battles').doc(arena.battleId).set(
-      {
-        status: legacyStatus(arena.state),
-        serverState: arena.state,
-        serverVersion: arena.version,
-        roomId: arena.roomId,
-        liveStreamId: arena.sessionId,
-        stageArn: arena.stageArn,
-        creatorJoined: arena.sideA.joined,
-        opponentJoined: arena.sideB.joined,
-        countdownEndsAt: arena.countdownEndsAt,
-        liveStartedAt: arena.liveStartedAt,
-        endedAt: arena.endedAt,
-        terminalReason: arena.terminalReason,
-        winnerSide: arena.winnerSide,
-        winnerUid,
-        score: { creator: arena.score.A, opponent: arena.score.B },
-        settlement: arena.settlement || null,
-        updatedAt: arena.updatedAt,
-      },
+      buildBattleFirestoreMirror(arena),
       { merge: true },
     );
   } catch {
