@@ -122,12 +122,12 @@ export async function requestImport({
   claimedOwnership,
   stagger,
 }) {
-  if (!fsReady()) throw new Error('Importing isn't available right now.');
+  if (!fsReady()) throw new Error("Importing isn't available right now.");
   if (!uid) throw new Error('Please sign in to import your content.');
 
   const normalized = normalizeHandleFor(platform, handle);
   if (!isValidHandleFor(platform, normalized)) {
-    throw new Error('That doesn't look like a valid username.');
+    throw new Error("That doesn't look like a valid username.");
   }
 
   try {
@@ -159,7 +159,7 @@ export async function requestImport({
     staggerPaused: false,
     message: staggerNorm.enabled
       ? `Queued — we'll import your videos, then publish about ${staggerNorm.postsPerDay}/day.`
-      : 'Queued — we'll start bringing your videos over shortly.',
+      : "Queued — we'll start bringing your videos over shortly.",
     createdAt: now,
     updatedAt: now,
   };
@@ -171,7 +171,7 @@ export async function requestImport({
     const code = e?.code || e?.message || '';
     if (String(code).includes('permission') || String(code).includes('PERMISSION')) {
       throw new Error(
-        'Import isn't allowed for this account yet. Update the app / wait for permissions to deploy, then try again.',
+        "Import isn't allowed for this account yet. Update the app / wait for permissions to deploy, then try again.",
       );
     }
     throw e instanceof Error ? e : new Error(String(e?.message || e));

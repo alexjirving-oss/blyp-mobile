@@ -103,7 +103,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
       await setPushEnabled(uid, next);
       if (next && !granted) await requestPermission();
     } catch (error) {
-      Alert.alert('Couldn't save', error?.message || 'Try again.');
+      Alert.alert("Couldn't save", error?.message || 'Try again.');
     } finally {
       setBusyKey(null);
     }
@@ -119,7 +119,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
       await setCategoryEnabled(uid, category, next);
       if (next && !granted) await requestPermission();
     } catch (error) {
-      Alert.alert('Couldn't save', error?.message || 'Try again.');
+      Alert.alert("Couldn't save", error?.message || 'Try again.');
     } finally {
       setBusyKey(null);
     }

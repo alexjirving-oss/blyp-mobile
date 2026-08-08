@@ -63,7 +63,7 @@ export const CATEGORY_META = {
   },
   presence: {
     title: 'Online alerts',
-    subtitle: '"Notify me when they're online" watches',
+    subtitle: "\"Notify me when they're online\" watches",
   },
   streak: {
     title: 'Streak reminders',

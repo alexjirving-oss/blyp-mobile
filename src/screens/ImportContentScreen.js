@@ -135,7 +135,7 @@ const ImportContentScreen = ({ navigation }) => {
       setHandle('');
       setOwns(false);
     } catch (e) {
-      setError(e?.message || 'Couldn't start the import. Please try again.');
+      setError(e?.message || "Couldn't start the import. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -149,10 +149,10 @@ const ImportContentScreen = ({ navigation }) => {
     try {
       const results = await Promise.allSettled(targets.map((r) => cancelImport(r.id)));
       if (results.some((x) => x.status === 'rejected')) {
-        setError('Couldn't cancel everything. Please try again.');
+        setError("Couldn't cancel everything. Please try again.");
       }
     } catch (e) {
-      setError(e?.message || 'Couldn't cancel. Please try again.');
+      setError(e?.message || "Couldn't cancel. Please try again.");
     } finally {
       setCanceling(false);
     }
@@ -169,7 +169,7 @@ const ImportContentScreen = ({ navigation }) => {
         stagger: { enabled: true, postsPerDay, startAt: Date.now() },
       });
     } catch (e) {
-      setError(e?.message || 'Couldn't update the publish queue.');
+      setError(e?.message || "Couldn't update the publish queue.");
     } finally {
       setQueueBusy(false);
     }
@@ -194,7 +194,7 @@ const ImportContentScreen = ({ navigation }) => {
           <Ionicons name="cloud-download-outline" size={26} color={COLORS.primary} />
           <Text style={styles.heroText}>
             {hasHistory
-              ? 'Got videos on more than one account? Add another and we'll bring those over too.'
+              ? "Got videos on more than one account? Add another and we'll bring those over too."
               : 'Already make videos elsewhere? Pull them in so your Blyp profile feels like home from day one.'}
           </Text>
         </View>

@@ -66,7 +66,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
         categories: nextMode === 'custom' ? categories : {},
       });
     } catch (error) {
-      Alert.alert('Couldn't save', error?.message || 'Try again.');
+      Alert.alert("Couldn't save", error?.message || 'Try again.');
     } finally {
       setBusy(null);
     }
@@ -87,7 +87,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
         categories: nextCategories,
       });
     } catch (error) {
-      Alert.alert('Couldn't save', error?.message || 'Try again.');
+      Alert.alert("Couldn't save", error?.message || 'Try again.');
     } finally {
       setBusy(null);
     }
@@ -107,7 +107,7 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
             try {
               await clearPersonOverride(uid, targetUid);
             } catch (error) {
-              Alert.alert('Couldn't reset', error?.message || 'Try again.');
+              Alert.alert("Couldn't reset", error?.message || 'Try again.');
             } finally {
               setBusy(null);
             }
