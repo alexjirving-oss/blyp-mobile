@@ -56,6 +56,14 @@
 -keep class org.webrtc.** { *; }
 -dontwarn org.webrtc.**
 
+# ---- Stripe React Native SDK ----
+-keep class com.stripe.android.** { *; }
+-keep class com.reactnativestripesdk.** { *; }
+
+# ---- Firebase / React Native Firebase ----
+-keep class com.google.firebase.** { *; }
+-keep class io.invertase.firebase.** { *; }
+
 # ---- ML Kit / CameraX (expo-camera barcode) ----
 -keep class com.google.mlkit.** { *; }
 -keep class com.google.android.gms.internal.mlkit_** { *; }
