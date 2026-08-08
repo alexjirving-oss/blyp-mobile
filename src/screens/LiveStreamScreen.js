@@ -3911,7 +3911,7 @@ const LiveStreamScreen = (props) => {
             onPressGift={promptGiftRecipient}
             onPressGames={openLiveGames}
             showGames={liveGamesAvailable}
-            gamesActive={!!(gameOpen || showArtillery)}
+            gamesActive={!!(gamesOpen || showArtillery)}
             likeCount={heartCount}
             likeScale={scale}
           />

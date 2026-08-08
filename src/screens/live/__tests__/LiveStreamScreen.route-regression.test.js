@@ -8,6 +8,7 @@ import {
 
 const { parse } = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
+const { transformSync } = require('@babel/core');
 
 const liveStreamScreenPath = path.resolve(
   __dirname,
@@ -30,6 +31,30 @@ describe('LiveStreamScreen route regression', () => {
         if (
           referencePath.node.name === 'rawParams' &&
           !referencePath.scope.hasBinding('rawParams')
+        ) {
+          unboundLines.push(referencePath.node.loc.start.line);
+        }
+      },
+    });
+
+    expect(unboundLines).toEqual([]);
+  });
+
+  it('has no unbound gameOpen reference after the production transform', () => {
+    const source = fs.readFileSync(liveStreamScreenPath, 'utf8');
+    const transformed = transformSync(source, {
+      filename: liveStreamScreenPath,
+      envName: 'production',
+      ast: true,
+      code: false,
+    });
+    const unboundLines = [];
+
+    traverse(transformed.ast, {
+      ReferencedIdentifier(referencePath) {
+        if (
+          referencePath.node.name === 'gameOpen' &&
+          !referencePath.scope.hasBinding('gameOpen')
         ) {
           unboundLines.push(referencePath.node.loc.start.line);
         }
