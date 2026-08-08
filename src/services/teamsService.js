@@ -19,7 +19,6 @@ import {
   getDocs,
   setDoc,
   updateDoc,
-  deleteDoc,
   addDoc,
   onSnapshot,
   query,
@@ -27,11 +26,12 @@ import {
   orderBy,
   limit,
   runTransaction,
+  writeBatch,
   serverTimestamp,
   increment,
-  arrayRemove,
 } from 'firebase/firestore';
 import { snapExists, snapData } from '../utils/firestoreSnap';
+import { resolveTeamIdentity, resolveTeamName } from '../utils/teamIdentity';
 
 export const TEAM_ROLE = { LEADER: 'leader', MEMBER: 'member' };
 export const JOIN_STATUS = { PENDING: 'pending', ACCEPTED: 'accepted', REJECTED: 'rejected' };
@@ -39,28 +39,127 @@ export const JOIN_STATUS = { PENDING: 'pending', ACCEPTED: 'accepted', REJECTED:
 const normPhoto = (u) =>
   (u && (u.photoURL || u.avatar || u.userPhotoURL || u.photo)) || null;
 
+const PROFILE_CACHE_MS = 5 * 60 * 1000;
+const profileCache = new Map();
+
+async function getPublicProfileSources(uid) {
+  const id = String(uid || '').trim();
+  if (!id) return [];
+
+  const cached = profileCache.get(id);
+  if (cached && Date.now() - cached.at < PROFILE_CACHE_MS) return cached.promise;
+
+  const promise = Promise.all([
+    getDoc(doc(db, 'users', id)).catch(() => null),
+    getDoc(doc(db, 'userProfiles', id)).catch(() => null),
+  ]).then((snaps) =>
+    snaps
+      .filter((snap) => snap && snapExists(snap))
+      .map((snap) => snapData(snap) || {})
+  );
+  profileCache.set(id, { at: Date.now(), promise });
+  return promise;
+}
+
+async function resolvePublicPerson(record, fallback = 'Member') {
+  const row = record && typeof record === 'object' ? record : {};
+  const uid = String(row.uid || row.id || '').trim();
+  const profileSources = await getPublicProfileSources(uid);
+  const identity = resolveTeamIdentity([...profileSources, row], uid, fallback);
+  const profilePhoto = profileSources.map(normPhoto).find(Boolean);
+  return {
+    ...row,
+    id: row.id || uid,
+    uid,
+    displayName: identity.displayName,
+    username: identity.username,
+    photoURL: row.photoURL || row.photo || profilePhoto || null,
+  };
+}
+
+async function resolvePublicTeam(record) {
+  const row = record && typeof record === 'object' ? record : {};
+  const leaderId = String(row.leaderId || '').trim();
+  const profileSources = await getPublicProfileSources(leaderId);
+  const identity = resolveTeamIdentity(
+    [
+      ...profileSources,
+      {
+        displayName: row.leaderDisplayName || row.leaderName,
+        username: row.leaderUsername,
+      },
+    ],
+    leaderId,
+    'Team owner'
+  );
+  const profilePhoto = profileSources.map(normPhoto).find(Boolean);
+  return {
+    ...row,
+    name: resolveTeamName(row.name, identity.displayName, leaderId),
+    leaderName: identity.displayName,
+    leaderDisplayName: identity.displayName,
+    leaderUsername: identity.username,
+    leaderPhoto: row.leaderPhoto || profilePhoto || null,
+  };
+}
+
+function asyncSnapshotEmitter(callback, mapper, fallback) {
+  let active = true;
+  let version = 0;
+  return {
+    emit(value) {
+      const current = ++version;
+      Promise.resolve(mapper(value))
+        .then((resolved) => {
+          if (active && current === version) callback(resolved);
+        })
+        .catch((err) => {
+          console.warn('[teamsService] identity resolution failed', err?.message || err);
+          if (active && current === version) callback(fallback);
+        });
+    },
+    stop() {
+      active = false;
+      version += 1;
+    },
+  };
+}
+
 /** Live list of all teams, ordered by member count then name. */
 export function subscribeTeams(callback) {
+  const emitter = asyncSnapshotEmitter(
+    callback,
+    async (docs) => {
+      const teams = await Promise.all(
+        docs.map((d) => resolvePublicTeam({ id: d.id, ...d.data() }))
+      );
+      return teams.filter((team) => String(team.status || 'active') !== 'closed');
+    },
+    []
+  );
+  let fallbackUnsub = null;
   try {
     const q = query(collection(db, 'teams'), orderBy('memberCount', 'desc'));
-    return onSnapshot(
+    const unsub = onSnapshot(
       q,
-      (snap) => {
-        const teams = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        callback(teams);
-      },
+      (snap) => emitter.emit(snap.docs),
       (err) => {
         console.warn('[teamsService] subscribeTeams error', err?.message || err);
         // Fallback without orderBy if the index/field is missing.
         try {
-          return onSnapshot(collection(db, 'teams'), (snap) => {
-            callback(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          fallbackUnsub = onSnapshot(collection(db, 'teams'), (snap) => {
+            emitter.emit(snap.docs);
           });
         } catch {
           callback([]);
         }
       }
     );
+    return () => {
+      emitter.stop();
+      try { unsub && unsub(); } catch {}
+      try { fallbackUnsub && fallbackUnsub(); } catch {}
+    };
   } catch (e) {
     console.warn('[teamsService] subscribeTeams setup failed', e?.message || e);
     callback([]);
@@ -74,14 +173,27 @@ export function subscribeTeam(teamId, callback) {
     callback(null);
     return () => {};
   }
-  return onSnapshot(
+  const emitter = asyncSnapshotEmitter(
+    callback,
+    async (snap) => {
+      if (!snapExists(snap)) return null;
+      const team = await resolvePublicTeam({ id: snap.id, ...snapData(snap) });
+      return String(team.status || 'active') === 'closed' ? null : team;
+    },
+    null
+  );
+  const unsub = onSnapshot(
     doc(db, 'teams', teamId),
-    (snap) => callback(snapExists(snap) ? { id: snap.id, ...snapData(snap) } : null),
+    (snap) => emitter.emit(snap),
     (err) => {
       console.warn('[teamsService] subscribeTeam error', err?.message || err);
       callback(null);
     }
   );
+  return () => {
+    emitter.stop();
+    try { unsub && unsub(); } catch {}
+  };
 }
 
 /** Live member list for a team. */
@@ -90,14 +202,26 @@ export function subscribeTeamMembers(teamId, callback) {
     callback([]);
     return () => {};
   }
-  return onSnapshot(
+  const emitter = asyncSnapshotEmitter(
+    callback,
+    (docs) =>
+      Promise.all(
+        docs.map((d) => resolvePublicPerson({ id: d.id, ...d.data() }, 'Member'))
+      ),
+    []
+  );
+  const unsub = onSnapshot(
     collection(db, 'teams', teamId, 'members'),
-    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    (snap) => emitter.emit(snap.docs),
     (err) => {
       console.warn('[teamsService] subscribeTeamMembers error', err?.message || err);
       callback([]);
     }
   );
+  return () => {
+    emitter.stop();
+    try { unsub && unsub(); } catch {}
+  };
 }
 
 /** Live join requests for a team (leader view). */
@@ -106,19 +230,28 @@ export function subscribeJoinRequests(teamId, callback) {
     callback([]);
     return () => {};
   }
-  return onSnapshot(
-    collection(db, 'teams', teamId, 'joinRequests'),
-    (snap) => {
-      const reqs = snap.docs
+  const emitter = asyncSnapshotEmitter(
+    callback,
+    async (docs) => {
+      const pending = docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((r) => r.status === JOIN_STATUS.PENDING);
-      callback(reqs);
+        .filter((request) => request.status === JOIN_STATUS.PENDING);
+      return Promise.all(pending.map((request) => resolvePublicPerson(request, 'Applicant')));
     },
+    []
+  );
+  const unsub = onSnapshot(
+    collection(db, 'teams', teamId, 'joinRequests'),
+    (snap) => emitter.emit(snap.docs),
     (err) => {
       console.warn('[teamsService] subscribeJoinRequests error', err?.message || err);
       callback([]);
     }
   );
+  return () => {
+    emitter.stop();
+    try { unsub && unsub(); } catch {}
+  };
 }
 
 /** Get the membership doc for a user across all teams (single-team assumption). */
@@ -129,12 +262,21 @@ export async function getMyMembership(uid) {
       query(collection(db, 'teams'), where('memberIds', 'array-contains', uid))
     );
     if (snap.empty) return null;
-    const teamDoc = snap.docs[0];
+    const teamDoc =
+      snap.docs.find((candidate) => String(candidate.data()?.status || 'active') !== 'closed') ||
+      null;
+    if (!teamDoc) return null;
     const memberSnap = await getDoc(doc(db, 'teams', teamDoc.id, 'members', uid));
+    const [team, member] = await Promise.all([
+      resolvePublicTeam({ id: teamDoc.id, ...teamDoc.data() }),
+      snapExists(memberSnap)
+        ? resolvePublicPerson({ id: memberSnap.id, ...snapData(memberSnap) }, 'Member')
+        : null,
+    ]);
     return {
       teamId: teamDoc.id,
-      team: { id: teamDoc.id, ...teamDoc.data() },
-      member: snapExists(memberSnap) ? { id: memberSnap.id, ...snapData(memberSnap) } : null,
+      team,
+      member,
     };
   } catch (e) {
     console.warn('[teamsService] getMyMembership failed', e?.message || e);
@@ -147,7 +289,9 @@ export async function getMyJoinRequest(teamId, uid) {
   if (!teamId || !uid) return null;
   try {
     const snap = await getDoc(doc(db, 'teams', teamId, 'joinRequests', uid));
-    return snapExists(snap) ? { id: snap.id, ...snapData(snap) } : null;
+    return snapExists(snap)
+      ? resolvePublicPerson({ id: snap.id, ...snapData(snap) }, 'Applicant')
+      : null;
   } catch {
     return null;
   }
@@ -163,18 +307,29 @@ export async function requestToJoinTeam(teamId, user, message = '') {
     user?.sub ||
     null;
   if (!uid) throw new Error('Please sign in to join a team.');
-  const ref = doc(db, 'teams', teamId, 'joinRequests', uid);
-  await setDoc(
-    ref,
+  const person = await resolvePublicPerson(
     {
       uid,
       displayName:
         user?.displayName ||
         user?.attributes?.name ||
-        user?.attributes?.preferred_username ||
+        user?.attributes?.preferred_username,
+      username:
         user?.username ||
-        'Member',
+        user?.attributes?.preferred_username ||
+        (typeof user?.getUsername === 'function' ? user.getUsername() : null),
       photoURL: normPhoto(user) || user?.attributes?.picture || user?.photoURL || null,
+    },
+    'Member'
+  );
+  const ref = doc(db, 'teams', teamId, 'joinRequests', uid);
+  await setDoc(
+    ref,
+    {
+      uid,
+      displayName: person.displayName,
+      username: person.username,
+      photoURL: person.photoURL,
       message: String(message || '').slice(0, 280),
       status: JOIN_STATUS.PENDING,
       createdAt: serverTimestamp(),
@@ -187,33 +342,50 @@ export async function requestToJoinTeam(teamId, user, message = '') {
 /** Leader accepts a join request → adds the member and marks the request accepted. */
 export async function acceptJoinRequest(teamId, request) {
   if (!teamId || !request?.uid) throw new Error('Missing team or request');
+  const person = await resolvePublicPerson(request, 'Member');
+  const teamRef = doc(db, 'teams', teamId);
   const memberRef = doc(db, 'teams', teamId, 'members', request.uid);
-  await setDoc(
-    memberRef,
-    {
+  const requestRef = doc(db, 'teams', teamId, 'joinRequests', request.uid);
+  await runTransaction(db, async (tx) => {
+    const [teamSnap, memberSnap, requestSnap] = await Promise.all([
+      tx.get(teamRef),
+      tx.get(memberRef),
+      tx.get(requestRef),
+    ]);
+    if (!teamSnap.exists()) throw new Error('Team not found');
+    if (String(teamSnap.data()?.status || 'active') === 'closed') {
+      throw new Error('This team is closed.');
+    }
+    if (!requestSnap.exists() || requestSnap.data()?.status !== JOIN_STATUS.PENDING) {
+      throw new Error('This join request is no longer pending.');
+    }
+
+    tx.set(memberRef, {
       uid: request.uid,
-      displayName: request.displayName || 'Member',
-      photoURL: request.photoURL || null,
+      displayName: person.displayName,
+      username: person.username,
+      photoURL: person.photoURL,
       role: TEAM_ROLE.MEMBER,
       hoursLive: 0,
-      joinedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
-  await updateDoc(doc(db, 'teams', teamId), {
-    memberCount: increment(1),
-    memberIds: arrayUnionSafe(request.uid),
-    updatedAt: serverTimestamp(),
-  }).catch(async () => {
-    // memberIds may not exist yet; set it explicitly.
-    await updateDoc(doc(db, 'teams', teamId), {
-      memberCount: increment(1),
-      updatedAt: serverTimestamp(),
+      joinedAt: memberSnap.exists() ? memberSnap.data()?.joinedAt || serverTimestamp() : serverTimestamp(),
+    }, { merge: true });
+
+    if (!memberSnap.exists()) {
+      const currentIds = Array.isArray(teamSnap.data()?.memberIds)
+        ? teamSnap.data().memberIds.map(String)
+        : [];
+      const memberIds = [...new Set([...currentIds, String(request.uid)])];
+      tx.update(teamRef, {
+        memberCount: memberIds.length,
+        memberIds,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    tx.update(requestRef, {
+      status: JOIN_STATUS.ACCEPTED,
+      decidedAt: serverTimestamp(),
     });
-  });
-  await updateDoc(doc(db, 'teams', teamId, 'joinRequests', request.uid), {
-    status: JOIN_STATUS.ACCEPTED,
-    decidedAt: serverTimestamp(),
   });
   return true;
 }
@@ -228,22 +400,137 @@ export async function declineJoinRequest(teamId, request) {
   return true;
 }
 
-/** Member leaves a team (leaders must transfer leadership via admin first). */
+function nextMemberIds(team, uid) {
+  const current = Array.isArray(team?.memberIds) ? team.memberIds.map(String) : [];
+  return current.filter((memberId) => memberId !== String(uid));
+}
+
+/** Member leaves a team atomically (leaders close the team instead). */
 export async function leaveTeam(teamId, uid) {
   if (!teamId || !uid) throw new Error('Missing team or user');
   const teamRef = doc(db, 'teams', teamId);
-  const teamSnap = await getDoc(teamRef);
-  if (!snapExists(teamSnap)) throw new Error('Team not found');
-  const team = snapData(teamSnap);
-  if (team?.leaderId === uid) {
-    throw new Error('Team leaders cannot leave. Contact support to transfer leadership.');
+  const memberRef = doc(db, 'teams', teamId, 'members', uid);
+  await runTransaction(db, async (tx) => {
+    const [teamSnap, memberSnap] = await Promise.all([
+      tx.get(teamRef),
+      tx.get(memberRef),
+    ]);
+    if (!teamSnap.exists()) throw new Error('Team not found');
+    const team = teamSnap.data() || {};
+    if (team.leaderId === uid) {
+      throw new Error('Team owners close the team instead of leaving it.');
+    }
+    if (!memberSnap.exists()) return;
+
+    const memberIds = nextMemberIds(team, uid);
+    tx.delete(memberRef);
+    tx.update(teamRef, {
+      memberCount: memberIds.length,
+      memberIds,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  return true;
+}
+
+/** Owner removes a non-owner member and repairs the denormalized roster atomically. */
+export async function removeTeamMember(teamId, memberUid) {
+  if (!teamId || !memberUid) throw new Error('Missing team or member');
+  const teamRef = doc(db, 'teams', teamId);
+  const memberRef = doc(db, 'teams', teamId, 'members', memberUid);
+  await runTransaction(db, async (tx) => {
+    const [teamSnap, memberSnap] = await Promise.all([
+      tx.get(teamRef),
+      tx.get(memberRef),
+    ]);
+    if (!teamSnap.exists()) throw new Error('Team not found');
+    const team = teamSnap.data() || {};
+    if (String(team.leaderId) === String(memberUid)) {
+      throw new Error('The team owner cannot be removed.');
+    }
+    if (!memberSnap.exists()) return;
+
+    const memberIds = nextMemberIds(team, memberUid);
+    tx.delete(memberRef);
+    tx.update(teamRef, {
+      memberCount: memberIds.length,
+      memberIds,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  return true;
+}
+
+/** Owner closes a team without destroying its audit history. */
+export async function closeTeam(teamId, ownerUid) {
+  if (!teamId || !ownerUid) throw new Error('Missing team or owner');
+  const teamRef = doc(db, 'teams', teamId);
+  await runTransaction(db, async (tx) => {
+    const teamSnap = await tx.get(teamRef);
+    if (!teamSnap.exists()) throw new Error('Team not found');
+    const team = teamSnap.data() || {};
+    if (String(team.leaderId) !== String(ownerUid)) {
+      throw new Error('Only the team owner can close this team.');
+    }
+    tx.update(teamRef, {
+      status: 'closed',
+      closedAt: serverTimestamp(),
+      closedBy: ownerUid,
+      memberCount: 0,
+      memberIds: [],
+      updatedAt: serverTimestamp(),
+    });
+  });
+  return true;
+}
+
+/** Owner toggles whether a member may post in team chat. */
+export async function setTeamMemberRestricted(teamId, ownerUid, memberUid, restricted) {
+  if (!teamId || !ownerUid || !memberUid) throw new Error('Missing team or member');
+  if (String(ownerUid) === String(memberUid)) {
+    throw new Error('The team owner cannot be restricted.');
   }
-  await deleteDoc(doc(db, 'teams', teamId, 'members', uid));
-  await updateDoc(teamRef, {
-    memberCount: increment(-1),
-    memberIds: arrayRemove(uid),
+  await updateDoc(doc(db, 'teams', teamId, 'members', memberUid), {
+    restricted: !!restricted,
+    restrictedAt: restricted ? serverTimestamp() : null,
+    restrictedBy: restricted ? ownerUid : null,
     updatedAt: serverTimestamp(),
   });
+  return true;
+}
+
+/** Owner records a warning and posts it into the team channel. */
+export async function warnTeamMember(teamId, owner, member, text) {
+  const ownerUid = owner?.uid || owner?.attributes?.sub || owner?.sub || null;
+  const memberUid = member?.uid || member?.id || null;
+  const body = String(text || '').trim().slice(0, 280);
+  if (!teamId || !ownerUid || !memberUid) throw new Error('Missing team or member');
+  if (!body) throw new Error('Write a warning first.');
+
+  const [sender, target] = await Promise.all([
+    resolvePublicPerson({ ...owner, uid: ownerUid }, 'Team owner'),
+    resolvePublicPerson({ ...member, uid: memberUid }, 'Member'),
+  ]);
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'teams', teamId, 'members', memberUid), {
+    warningCount: increment(1),
+    lastWarning: body,
+    lastWarnedAt: serverTimestamp(),
+    lastWarnedBy: ownerUid,
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(doc(collection(db, 'teams', teamId, 'messages')), {
+    uid: ownerUid,
+    senderId: ownerUid,
+    senderName: sender.displayName,
+    senderUsername: sender.username,
+    targetUid: memberUid,
+    targetName: target.displayName,
+    kind: 'warning',
+    text: body,
+    createdAt: serverTimestamp(),
+  });
+  await batch.commit();
   return true;
 }
 
@@ -516,19 +803,25 @@ export async function applyToRunTeam(user, pitch) {
     // Still attempt the write — bridge may already be ready.
     console.warn('[teams] ensureFirebaseAuthReady:', e?.message || e);
   }
-  const displayName =
-    user?.displayName ||
-    user?.attributes?.name ||
-    user?.attributes?.preferred_username ||
-    user?.username ||
-    (typeof user?.getUsername === 'function' ? user.getUsername() : null) ||
-    'Creator';
+  const person = await resolvePublicPerson(
+    {
+      uid,
+      displayName: user?.displayName || user?.attributes?.name,
+      username:
+        user?.username ||
+        user?.attributes?.preferred_username ||
+        (typeof user?.getUsername === 'function' ? user.getUsername() : null),
+      photoURL: normPhoto(user) || user?.attributes?.picture || user?.photoURL || null,
+    },
+    'Creator'
+  );
   await setDoc(
     doc(db, 'teamApplications', uid),
     {
       uid,
-      displayName: String(displayName),
-      photoURL: normPhoto(user) || user?.attributes?.picture || user?.photoURL || null,
+      displayName: person.displayName,
+      username: person.username,
+      photoURL: person.photoURL,
       pitch: String(pitch || '').slice(0, 1000),
       status: JOIN_STATUS.PENDING,
       createdAt: serverTimestamp(),
@@ -588,16 +881,81 @@ export function subscribeTeamBattles(teamId, callback) {
   }
 }
 
+/** Live team channel, oldest message first. */
+export function subscribeTeamMessages(teamId, callback) {
+  if (!teamId) {
+    callback([]);
+    return () => {};
+  }
+  const emitter = asyncSnapshotEmitter(
+    callback,
+    async (docs) => {
+      const rows = await Promise.all(
+        docs.map(async (d) => {
+          const message = { id: d.id, ...d.data() };
+          const sender = await resolvePublicPerson(
+            {
+              uid: message.senderId || message.uid,
+              displayName: message.senderName,
+              username: message.senderUsername,
+            },
+            'Team member'
+          );
+          let targetName = message.targetName || '';
+          if (message.targetUid) {
+            const target = await resolvePublicPerson(
+              { uid: message.targetUid, displayName: message.targetName },
+              'Member'
+            );
+            targetName = target.displayName;
+          }
+          return {
+            ...message,
+            senderName: sender.displayName,
+            senderUsername: sender.username,
+            targetName,
+          };
+        })
+      );
+      return rows.reverse();
+    },
+    []
+  );
+  const messagesQuery = query(
+    collection(db, 'teams', teamId, 'messages'),
+    orderBy('createdAt', 'desc'),
+    limit(50)
+  );
+  const unsub = onSnapshot(
+    messagesQuery,
+    (snap) => emitter.emit(snap.docs),
+    (err) => {
+      console.warn('[teamsService] subscribeTeamMessages error', err?.message || err);
+      callback([]);
+    }
+  );
+  return () => {
+    emitter.stop();
+    try { unsub && unsub(); } catch {}
+  };
+}
+
 /**
- * Leader sends a group message to all members. Writes one teamMessage doc; a
- * Cloud Function fans it out as notifications to every member.
+ * Posts in the member channel. The owner may restrict a member from posting;
+ * the Firestore rule remains authoritative and all members may still read.
  */
 export async function sendTeamGroupMessage(teamId, sender, text) {
-  if (!teamId || !String(text || '').trim()) throw new Error('Message required');
+  const senderId = sender?.uid || sender?.attributes?.sub || sender?.sub || null;
+  const body = String(text || '').trim().slice(0, 1000);
+  if (!teamId || !senderId || !body) throw new Error('Message required');
+  const person = await resolvePublicPerson({ ...sender, uid: senderId }, 'Team member');
   await addDoc(collection(db, 'teams', teamId, 'messages'), {
-    senderId: sender?.uid || null,
-    senderName: sender?.displayName || 'Team leader',
-    text: String(text).slice(0, 1000),
+    uid: senderId,
+    senderId,
+    senderName: person.displayName,
+    senderUsername: person.username,
+    kind: 'message',
+    text: body,
     createdAt: serverTimestamp(),
   });
   return true;
@@ -709,12 +1067,4 @@ export function subscribeMembersPresence(uids, callback) {
       }
     });
   };
-}
-
-// arrayUnion without importing it at top-level repeatedly (kept local + lazy so
-// a missing export can't break module load).
-function arrayUnionSafe(value) {
-  // eslint-disable-next-line global-require
-  const { arrayUnion } = require('firebase/firestore');
-  return arrayUnion(value);
 }

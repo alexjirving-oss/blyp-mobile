@@ -361,10 +361,62 @@ service cloud.firestore {
           == request.auth.uid;
     }
 
+    function isActiveTeam(teamId) {
+      return get(/databases/$(database)/documents/teams/$(teamId))
+        .data.get('status', 'active') != 'closed';
+    }
+
+    function isTeamMember(teamId) {
+      return isSignedIn()
+        && exists(
+          /databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)
+        );
+    }
+
+    function canPostToTeam(teamId) {
+      return isTeamLeader(teamId)
+        || (
+          isTeamMember(teamId)
+          && get(
+            /databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)
+          ).data.get('restricted', false) == false
+        );
+    }
+
+    // A member may only change the parent roster as part of the same atomic
+    // write that deletes their own membership document.
+    function isSelfLeavingTeam(teamId) {
+      return isSignedIn()
+        && resource.data.leaderId != request.auth.uid
+        && request.auth.uid in resource.data.get('memberIds', [])
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['memberIds', 'memberCount', 'updatedAt'])
+        && request.resource.data.get('memberIds', [])
+          == resource.data.get('memberIds', []).removeAll([request.auth.uid])
+        && request.resource.data.get('memberCount', 0)
+          == resource.data.get('memberIds', []).removeAll([request.auth.uid]).size()
+        && !existsAfter(
+          /databases/$(database)/documents/teams/$(teamId)/members/$(request.auth.uid)
+        );
+    }
+
     match /teams/{teamId} {
       allow read: if isSignedIn();
       allow create, delete: if false;
-      allow update: if isTeamLeader(teamId);
+      allow update: if (
+        isTeamLeader(teamId)
+        && resource.data.get('status', 'active') != 'closed'
+        && request.resource.data.leaderId == resource.data.leaderId
+        && request.resource.data.get('status', 'active') in ['active', 'closed']
+        && (
+          request.resource.data.get('status', 'active') != 'closed'
+          || (
+            request.resource.data.get('memberIds', []) == []
+            && request.resource.data.get('memberCount', 0) == 0
+            && request.resource.data.get('closedBy', '') == request.auth.uid
+          )
+        )
+      ) || isSelfLeavingTeam(teamId);
 
       match /members/{memberId} {
         allow read: if isSignedIn();
@@ -385,9 +437,30 @@ service cloud.firestore {
       }
 
       match /messages/{messageId} {
-        allow read: if isSignedIn();
+        allow read: if isSignedIn()
+          && isActiveTeam(teamId)
+          && (isTeamLeader(teamId) || isTeamMember(teamId));
         allow create: if isSignedIn()
-          && request.resource.data.uid == request.auth.uid;
+          && isActiveTeam(teamId)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && (
+            (
+              request.resource.data.get('kind', 'message') == 'message'
+              && canPostToTeam(teamId)
+            )
+            || (
+              request.resource.data.get('kind', '') == 'warning'
+              && isTeamLeader(teamId)
+              && request.resource.data.targetUid is string
+              && exists(
+                /databases/$(database)/documents/teams/$(teamId)/members/$(request.resource.data.targetUid)
+              )
+            )
+          );
         allow update, delete: if false;
       }
     }

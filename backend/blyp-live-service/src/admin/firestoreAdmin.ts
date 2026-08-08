@@ -1,6 +1,7 @@
 import { getApps, getApp, initializeApp, type App } from 'firebase-admin/app';
 import { getFirestore as getAdminFirestore, FieldValue, type Firestore, type Query } from 'firebase-admin/firestore';
 import { logger } from '../config/logger';
+import { safeLiveDisplayName } from '../live/liveDisplayName';
 
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'blyp-master';
 
@@ -680,12 +681,25 @@ export type FsTeamApplication = {
 };
 
 function mapTeam(id: string, data: Record<string, any>): FsTeam {
+  const leaderId = str(data.leaderId);
+  const leaderName =
+    safeLiveDisplayName(data.leaderDisplayName, leaderId, '') ||
+    safeLiveDisplayName(data.leaderName, leaderId, '') ||
+    safeLiveDisplayName(data.leaderUsername, leaderId, '') ||
+    'Team owner';
+  const storedName = str(data.name);
+  const nameContainsInternalId =
+    !storedName ||
+    (!!leaderId && storedName.includes(leaderId)) ||
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+      .test(storedName) ||
+    /^blyp[_-]\d+/i.test(storedName);
   return {
     teamId: id,
-    name: str(data.name) || 'Team',
+    name: nameContainsInternalId ? `${leaderName}'s Team` : storedName,
     description: str(data.description),
-    leaderId: str(data.leaderId),
-    leaderName: str(data.leaderName),
+    leaderId,
+    leaderName,
     memberCount: num(data.memberCount),
     createdAt: tsToIso(data.createdAt),
   };
@@ -745,14 +759,58 @@ export async function approveTeamApplication(
     if (!appSnap.exists) return null;
     const appData = appSnap.data() || {};
 
-    const userSnap = await fs.collection('users').doc(uid).get();
+    const [userSnap, legacyProfileSnap] = await Promise.all([
+      fs.collection('users').doc(uid).get(),
+      fs.collection('userProfiles').doc(uid).get(),
+    ]);
     const userData = userSnap.exists ? userSnap.data() || {} : {};
-    const leaderName = str(appData.displayName) || str(userData.displayName) || str(userData.username) || 'Leader';
-    const leaderPhoto = str(userData.photoURL || userData.avatar || appData.photoURL) || null;
+    const legacyProfile = legacyProfileSnap.exists ? legacyProfileSnap.data() || {} : {};
+    const firstPublicLabel = (values: unknown[], fallback = ''): string => {
+      for (const value of values) {
+        const label = safeLiveDisplayName(value, uid, '');
+        if (label) return label;
+      }
+      return fallback;
+    };
+    const leaderDisplayName = firstPublicLabel([
+      userData.displayName,
+      legacyProfile.displayName,
+      userData.name,
+      legacyProfile.name,
+      appData.displayName,
+    ]);
+    const leaderUsername = firstPublicLabel([
+      appData.username,
+      userData.username,
+      userData.handle,
+      legacyProfile.username,
+      legacyProfile.handle,
+    ]);
+    const leaderName = leaderDisplayName || leaderUsername || 'Leader';
+    const leaderPhoto =
+      str(
+        userData.photoURL ||
+        userData.avatar ||
+        legacyProfile.photoURL ||
+        legacyProfile.avatar ||
+        appData.photoURL
+      ) || null;
     const teamId = `team_${uid}`;
     const teamRef = fs.collection('teams').doc(teamId);
     const now = FieldValue.serverTimestamp();
-    const teamName = str(opts.teamName) || `${leaderName}'s Team`;
+    const requestedTeamName = str(opts.teamName);
+    const requestedNameContainsInternalId =
+      !!requestedTeamName &&
+      (
+        requestedTeamName.includes(uid) ||
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+          .test(requestedTeamName) ||
+        /^blyp[_-]\d+/i.test(requestedTeamName)
+      );
+    const teamName =
+      requestedTeamName && !requestedNameContainsInternalId
+        ? requestedTeamName
+        : `${leaderName}'s Team`;
     const teamDesc = str(opts.teamDesc) || str(appData.pitch) || 'Official Blyp creator team.';
 
     await teamRef.set(
@@ -761,6 +819,8 @@ export async function approveTeamApplication(
         description: teamDesc,
         leaderId: uid,
         leaderName,
+        leaderDisplayName: leaderName,
+        leaderUsername,
         leaderPhoto,
         memberCount: 1,
         memberIds: FieldValue.arrayUnion(uid),
@@ -774,6 +834,7 @@ export async function approveTeamApplication(
       {
         uid,
         displayName: leaderName,
+        username: leaderUsername,
         photoURL: leaderPhoto,
         role: 'leader',
         hoursLive: 0,

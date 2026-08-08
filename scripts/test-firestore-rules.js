@@ -22,6 +22,7 @@ const {
   updateDoc,
   collection,
   addDoc,
+  writeBatch,
 } = require('firebase/firestore');
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'demo-blyp-rules';
@@ -204,6 +205,138 @@ const RULES_PATH = path.join(__dirname, '..', 'firestore.wave0-live.rules');
   await expectAllow(
     setDoc(doc(ownerDb, 'users', ownerId), { bio: 'still me' }, { merge: true }),
     'owner can edit bio while admin fields stay frozen'
+  );
+
+  // Teams: owner controls, member leave, and restricted member chat.
+  const teamId = 'team_rules';
+  const outsiderId = 'user_outsider';
+  const outsiderDb = env.authenticatedContext(outsiderId).firestore();
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const adminDb = ctx.firestore();
+    await setDoc(doc(adminDb, 'teams', teamId), {
+      name: 'Rules Team',
+      leaderId: ownerId,
+      leaderName: 'Owner',
+      status: 'active',
+      memberIds: [ownerId, otherId],
+      memberCount: 2,
+    });
+    await setDoc(doc(adminDb, 'teams', teamId, 'members', ownerId), {
+      uid: ownerId,
+      displayName: 'Owner',
+      role: 'leader',
+    });
+    await setDoc(doc(adminDb, 'teams', teamId, 'members', otherId), {
+      uid: otherId,
+      displayName: 'Other',
+      role: 'member',
+      restricted: false,
+    });
+  });
+
+  await expectDeny(
+    updateDoc(doc(otherDb, 'teams', teamId), {
+      status: 'closed',
+      closedBy: otherId,
+      memberIds: [],
+      memberCount: 0,
+    }),
+    'member cannot close team'
+  );
+  await expectAllow(
+    updateDoc(doc(ownerDb, 'teams', teamId, 'members', otherId), {
+      restricted: true,
+      restrictedBy: ownerId,
+    }),
+    'owner restricts member'
+  );
+  await expectDeny(
+    setDoc(doc(otherDb, 'teams', teamId, 'messages', 'restricted-message'), {
+      uid: otherId,
+      senderId: otherId,
+      senderName: 'Other',
+      kind: 'message',
+      text: 'blocked',
+    }),
+    'restricted member cannot post to team'
+  );
+  await expectAllow(
+    setDoc(doc(ownerDb, 'teams', teamId, 'messages', 'owner-message'), {
+      uid: ownerId,
+      senderId: ownerId,
+      senderName: 'Owner',
+      kind: 'message',
+      text: 'Owner update',
+    }),
+    'owner posts to team'
+  );
+  await expectAllow(
+    setDoc(doc(ownerDb, 'teams', teamId, 'messages', 'warning-message'), {
+      uid: ownerId,
+      senderId: ownerId,
+      senderName: 'Owner',
+      targetUid: otherId,
+      kind: 'warning',
+      text: 'Please follow the team rules.',
+    }),
+    'owner warns member in team'
+  );
+  await expectDeny(
+    getDoc(doc(outsiderDb, 'teams', teamId, 'messages', 'owner-message')),
+    'non-member cannot read team chat'
+  );
+  await expectAllow(
+    updateDoc(doc(ownerDb, 'teams', teamId, 'members', otherId), {
+      restricted: false,
+      restrictedBy: null,
+    }),
+    'owner lifts member restriction'
+  );
+  await expectAllow(
+    setDoc(doc(otherDb, 'teams', teamId, 'messages', 'member-message'), {
+      uid: otherId,
+      senderId: otherId,
+      senderName: 'Other',
+      kind: 'message',
+      text: 'Thanks',
+    }),
+    'unrestricted member posts to team'
+  );
+  await expectDeny(
+    updateDoc(doc(otherDb, 'teams', teamId), {
+      memberIds: [ownerId],
+      memberCount: 1,
+    }),
+    'member cannot alter roster without deleting membership'
+  );
+
+  const leaveBatch = writeBatch(otherDb);
+  leaveBatch.delete(doc(otherDb, 'teams', teamId, 'members', otherId));
+  leaveBatch.update(doc(otherDb, 'teams', teamId), {
+    memberIds: [ownerId],
+    memberCount: 1,
+    updatedAt: Date.now(),
+  });
+  await expectAllow(leaveBatch.commit(), 'member leaves team atomically');
+
+  await expectAllow(
+    updateDoc(doc(ownerDb, 'teams', teamId), {
+      status: 'closed',
+      closedBy: ownerId,
+      memberIds: [],
+      memberCount: 0,
+    }),
+    'owner closes team'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'teams', teamId, 'messages', 'closed-message'), {
+      uid: ownerId,
+      senderId: ownerId,
+      senderName: 'Owner',
+      kind: 'message',
+      text: 'No longer active',
+    }),
+    'closed team rejects new chat'
   );
 
   // Catch-all denies unknown collections (closes AUD-C002 regression).

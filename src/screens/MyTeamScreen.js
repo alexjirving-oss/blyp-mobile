@@ -32,6 +32,7 @@ import {
   subscribeTeamBattles,
   subscribeAuditions,
   subscribeMembersPresence,
+  subscribeTeamMessages,
   computeTeamDashboardStats,
   acceptJoinRequest,
   declineJoinRequest,
@@ -39,6 +40,10 @@ import {
   sendTeamGroupMessage,
   createTeamBattle,
   leaveTeam,
+  removeTeamMember,
+  closeTeam,
+  setTeamMemberRestricted,
+  warnTeamMember,
   TEAM_ROLE,
   AUDITION_STATUS,
 } from '../services/teamsService';
@@ -115,10 +120,14 @@ const MyTeamScreen = ({ navigation }) => {
   const [battles, setBattles] = useState([]);
   const [auditions, setAuditions] = useState([]);
   const [presence, setPresence] = useState({});
+  const [messages, setMessages] = useState([]);
 
   const [msgOpen, setMsgOpen] = useState(false);
   const [msgText, setMsgText] = useState('');
   const [sending, setSending] = useState(false);
+  const [warningMember, setWarningMember] = useState(null);
+  const [warningText, setWarningText] = useState('');
+  const [memberActionBusy, setMemberActionBusy] = useState(false);
 
   const [battleOpen, setBattleOpen] = useState(false);
   const [pickA, setPickA] = useState(null);
@@ -160,12 +169,14 @@ const MyTeamScreen = ({ navigation }) => {
     const unsubT = subscribeTeam(teamId, setLiveTeam);
     const unsubM = subscribeTeamMembers(teamId, setMembers);
     const unsubB = subscribeTeamBattles(teamId, setBattles);
+    const unsubMessages = subscribeTeamMessages(teamId, setMessages);
     const unsubR = isLeader ? subscribeJoinRequests(teamId, setRequests) : null;
     const unsubA = isLeader ? subscribeAuditions(teamId, setAuditions) : null;
     return () => {
       try { unsubT && unsubT(); } catch {}
       try { unsubM && unsubM(); } catch {}
       try { unsubB && unsubB(); } catch {}
+      try { unsubMessages && unsubMessages(); } catch {}
       try { unsubR && unsubR(); } catch {}
       try { unsubA && unsubA(); } catch {}
     };
@@ -180,6 +191,9 @@ const MyTeamScreen = ({ navigation }) => {
     }
     return subscribeMembersPresence(memberUids, setPresence);
   }, [memberUids.join('|')]);
+
+  const myMember = members.find((member) => member.uid === uid) || membership?.member || null;
+  const myPostingRestricted = !isLeader && !!myMember?.restricted;
 
   const onAuditionDecision = async (auditionId, candidateUid, decision) => {
     try {
@@ -198,17 +212,120 @@ const MyTeamScreen = ({ navigation }) => {
 
   const sendGroupMessage = async () => {
     if (!msgText.trim()) return;
+    if (myPostingRestricted) {
+      Alert.alert(
+        'Posting restricted',
+        'The team owner has restricted you from posting. You can still read team messages.'
+      );
+      return;
+    }
     setSending(true);
     try {
-      await sendTeamGroupMessage(teamId, user || { uid }, msgText.trim());
-      setMsgOpen(false);
+      await sendTeamGroupMessage(teamId, { ...(user || {}), uid }, msgText.trim());
       setMsgText('');
-      Alert.alert('Sent', 'Your message was sent to every team member.');
     } catch (e) {
       Alert.alert('Could not send', e?.message || 'Please try again.');
     } finally {
       setSending(false);
     }
+  };
+
+  const onRemoveMember = (member) => {
+    const label = member?.displayName || 'this member';
+    Alert.alert(
+      `Remove ${label}?`,
+      'They will immediately lose team membership and team-chat access.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setMemberActionBusy(true);
+            try {
+              await removeTeamMember(teamId, member.uid);
+            } catch (e) {
+              Alert.alert('Could not remove member', e?.message || 'Please try again.');
+            } finally {
+              setMemberActionBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const onToggleRestriction = (member) => {
+    const nextRestricted = !member?.restricted;
+    const label = member?.displayName || 'this member';
+    Alert.alert(
+      nextRestricted ? `Restrict ${label}?` : `Lift restriction for ${label}?`,
+      nextRestricted
+        ? 'They can still read team messages, but cannot post until you lift the restriction.'
+        : 'They will be able to post in team chat again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: nextRestricted ? 'Restrict' : 'Lift restriction',
+          onPress: async () => {
+            setMemberActionBusy(true);
+            try {
+              await setTeamMemberRestricted(teamId, uid, member.uid, nextRestricted);
+            } catch (e) {
+              Alert.alert('Could not update restriction', e?.message || 'Please try again.');
+            } finally {
+              setMemberActionBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const submitWarning = async () => {
+    if (!warningMember || !warningText.trim()) return;
+    setMemberActionBusy(true);
+    try {
+      await warnTeamMember(
+        teamId,
+        { ...(user || {}), uid },
+        warningMember,
+        warningText.trim()
+      );
+      setWarningMember(null);
+      setWarningText('');
+    } catch (e) {
+      Alert.alert('Could not send warning', e?.message || 'Please try again.');
+    } finally {
+      setMemberActionBusy(false);
+    }
+  };
+
+  const onCloseTeam = () => {
+    const teamName = liveTeam?.name || membership?.team?.name || 'this team';
+    Alert.alert(
+      `Close ${teamName}?`,
+      'This removes the team from discovery and ends every membership. Message history is kept for audit purposes.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close team',
+          style: 'destructive',
+          onPress: async () => {
+            setMemberActionBusy(true);
+            try {
+              await closeTeam(teamId, uid);
+              setMembership(null);
+              navigation?.goBack?.();
+            } catch (e) {
+              Alert.alert('Could not close team', e?.message || 'Please try again.');
+            } finally {
+              setMemberActionBusy(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const arrangeBattle = async () => {
@@ -592,29 +709,90 @@ const MyTeamScreen = ({ navigation }) => {
               members.map((m) => {
                 const online = !!presence[m.uid];
                 return (
-                  <TouchableOpacity key={m.uid} style={styles.memberRow} onPress={() => openMember(m)} activeOpacity={0.85}>
-                    <View>
-                      <BlypAvatar uri={m.photoURL} name={m.displayName} size={44} showBadge={false} />
-                      {online && <View style={styles.onlineDot} />}
-                    </View>
-                    <View style={styles.memberBody}>
-                      <Text style={styles.memberName}>
-                        {m.displayName || 'Member'}{m.uid === uid ? ' (you)' : ''}
-                      </Text>
-                      <Text style={styles.memberRole}>
-                        {roleLabel(m.role, team.leaderId === m.uid, m.uid)}
-                        {online ? ' · Online' : ''}
-                      </Text>
-                    </View>
-                    <View style={styles.statPill}>
-                      <Ionicons name="videocam-outline" size={14} color={COLORS.primary} />
-                      <Text style={styles.statText}>{fmtHours(m.hoursLive)}</Text>
-                    </View>
-                  </TouchableOpacity>
+                  <View key={m.uid} style={styles.memberRow}>
+                    <TouchableOpacity
+                      style={styles.memberMain}
+                      onPress={() => openMember(m)}
+                      activeOpacity={0.85}
+                    >
+                      <View>
+                        <BlypAvatar uri={m.photoURL} name={m.displayName} size={44} showBadge={false} />
+                        {online && <View style={styles.onlineDot} />}
+                      </View>
+                      <View style={styles.memberBody}>
+                        <Text style={styles.memberName}>
+                          {m.displayName || 'Member'}{m.uid === uid ? ' (you)' : ''}
+                        </Text>
+                        <Text style={styles.memberRole}>
+                          {roleLabel(m.role, team.leaderId === m.uid, m.uid)}
+                          {online ? ' · Online' : ''}
+                          {m.restricted ? ' · Restricted' : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.statPill}>
+                        <Ionicons name="videocam-outline" size={14} color={COLORS.primary} />
+                        <Text style={styles.statText}>{fmtHours(m.hoursLive)}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    {isLeader && m.uid !== uid && m.uid !== team.leaderId && (
+                      <View style={styles.memberControls}>
+                        <TouchableOpacity
+                          style={styles.memberControl}
+                          onPress={() => {
+                            setWarningMember(m);
+                            setWarningText('');
+                          }}
+                          disabled={memberActionBusy}
+                          accessibilityLabel={`Warn ${m.displayName || 'member'}`}
+                        >
+                          <Ionicons name="warning-outline" size={16} color="#fbbf24" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.memberControl}
+                          onPress={() => onToggleRestriction(m)}
+                          disabled={memberActionBusy}
+                          accessibilityLabel={
+                            m.restricted
+                              ? `Lift restriction for ${m.displayName || 'member'}`
+                              : `Restrict ${m.displayName || 'member'}`
+                          }
+                        >
+                          <Ionicons
+                            name={m.restricted ? 'lock-open-outline' : 'lock-closed-outline'}
+                            size={16}
+                            color={COLORS.primary}
+                          />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.memberControl, styles.memberControlDanger]}
+                          onPress={() => onRemoveMember(m)}
+                          disabled={memberActionBusy}
+                          accessibilityLabel={`Remove ${m.displayName || 'member'}`}
+                        >
+                          <Ionicons name="person-remove-outline" size={16} color="#f87171" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
                 );
               })
             )}
           </View>
+
+          {isLeader && (
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Owner controls</Text>
+              <Text style={styles.sectionEmpty}>
+                Warnings appear in team chat. Restricted members can read chat but cannot post.
+              </Text>
+              <ActionChip
+                icon="trash-outline"
+                label="Close team"
+                danger
+                onPress={onCloseTeam}
+              />
+            </View>
+          )}
 
           <View style={styles.section}>
             <View style={styles.sectionHead}>
@@ -640,28 +818,121 @@ const MyTeamScreen = ({ navigation }) => {
 
       <Modal visible={msgOpen} transparent animationType="fade" onRequestClose={() => setMsgOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Message the team</Text>
+          <View style={[styles.modalCard, styles.chatModalCard]}>
+            <Text style={styles.modalTitle}>Team chat</Text>
             <Text style={styles.modalSub}>
-              {members.length <= 1
-                ? 'Send a team broadcast. Members will get it as a notification when they join.'
-                : 'Every member gets this as a notification.'}
+              Messages stay with the team and notify the rest of the roster.
             </Text>
+            <ScrollView
+              style={styles.messageList}
+              contentContainerStyle={styles.messageListContent}
+              nestedScrollEnabled
+            >
+              {messages.length === 0 ? (
+                <Text style={styles.sectionEmpty}>No messages yet. Start the team conversation.</Text>
+              ) : (
+                messages.map((message) => {
+                  const mine = message.senderId === uid || message.uid === uid;
+                  const warning = message.kind === 'warning';
+                  return (
+                    <View
+                      key={message.id}
+                      style={[
+                        styles.messageBubble,
+                        mine && styles.messageBubbleMine,
+                        warning && styles.messageBubbleWarning,
+                      ]}
+                    >
+                      <Text style={styles.messageAuthor} numberOfLines={1}>
+                        {warning
+                          ? `Warning for ${message.targetName || 'member'}`
+                          : message.senderName || 'Team member'}
+                      </Text>
+                      <Text style={styles.messageText}>{message.text}</Text>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+            {myPostingRestricted && (
+              <View style={styles.restrictedNotice}>
+                <Ionicons name="lock-closed-outline" size={15} color="#fbbf24" />
+                <Text style={styles.restrictedNoticeText}>
+                  The owner has restricted you from posting. You can still read messages.
+                </Text>
+              </View>
+            )}
             <TextInput
               style={styles.modalInput}
               value={msgText}
               onChangeText={setMsgText}
-              placeholder="Write a message…"
+              placeholder={myPostingRestricted ? 'Posting restricted' : 'Write a message…'}
               placeholderTextColor={COLORS.textMuted}
               multiline
               maxLength={1000}
+              editable={!myPostingRestricted}
             />
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalCancel} onPress={() => setMsgOpen(false)} disabled={sending}>
+                <Text style={styles.modalCancelText}>Done</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirm}
+                onPress={sendGroupMessage}
+                disabled={sending || myPostingRestricted || !msgText.trim()}
+              >
+                {sending ? <ActivityIndicator color="#001b18" /> : <Text style={styles.modalConfirmText}>Send</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!warningMember}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setWarningMember(null);
+          setWarningText('');
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              Warn {warningMember?.displayName || 'member'}
+            </Text>
+            <Text style={styles.modalSub}>
+              This warning is recorded on their membership and posted in team chat.
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              value={warningText}
+              onChangeText={setWarningText}
+              placeholder="Explain what needs to change…"
+              placeholderTextColor={COLORS.textMuted}
+              multiline
+              maxLength={280}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => {
+                  setWarningMember(null);
+                  setWarningText('');
+                }}
+                disabled={memberActionBusy}
+              >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalConfirm} onPress={sendGroupMessage} disabled={sending}>
-                {sending ? <ActivityIndicator color="#001b18" /> : <Text style={styles.modalConfirmText}>Send</Text>}
+              <TouchableOpacity
+                style={styles.modalConfirm}
+                onPress={submitWarning}
+                disabled={memberActionBusy || !warningText.trim()}
+              >
+                {memberActionBusy
+                  ? <ActivityIndicator color="#001b18" />
+                  : <Text style={styles.modalConfirmText}>Send warning</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -805,7 +1076,23 @@ const styles = StyleSheet.create({
   lbRank: { width: 22, textAlign: 'center', color: COLORS.textMuted, fontSize: 14, fontWeight: '800' },
   lbRankTop: { color: COLORS.primary },
   lbGemText: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '800' },
-  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 },
+  memberMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  memberControls: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  memberControl: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.28)',
+    backgroundColor: 'rgba(0,210,190,0.06)',
+  },
+  memberControlDanger: {
+    borderColor: 'rgba(248,113,113,0.3)',
+    backgroundColor: 'rgba(248,113,113,0.06)',
+  },
   requestRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   memberBody: { flex: 1 },
   memberName: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' },
@@ -880,8 +1167,49 @@ const styles = StyleSheet.create({
   audDeclined: { color: COLORS.error },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
   modalCard: { backgroundColor: COLORS.surface, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: COLORS.border },
+  chatModalCard: { maxHeight: '82%' },
   modalTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '800' },
   modalSub: { color: COLORS.textSecondary, fontSize: 13, marginTop: 6, lineHeight: 19 },
+  messageList: {
+    maxHeight: 270,
+    marginTop: 14,
+    borderRadius: 12,
+    backgroundColor: COLORS.backgroundCard,
+  },
+  messageListContent: { padding: 10, gap: 8 },
+  messageBubble: {
+    alignSelf: 'flex-start',
+    maxWidth: '88%',
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  messageBubbleMine: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(0,210,190,0.12)',
+    borderColor: 'rgba(0,210,190,0.3)',
+  },
+  messageBubbleWarning: {
+    alignSelf: 'stretch',
+    maxWidth: '100%',
+    backgroundColor: 'rgba(251,191,36,0.08)',
+    borderColor: 'rgba(251,191,36,0.35)',
+  },
+  messageAuthor: { color: COLORS.primary, fontSize: 11, fontWeight: '800', marginBottom: 3 },
+  messageText: { color: COLORS.textPrimary, fontSize: 14, lineHeight: 19 },
+  restrictedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(251,191,36,0.08)',
+  },
+  restrictedNoticeText: { flex: 1, color: '#fbbf24', fontSize: 12, lineHeight: 17 },
   modalInput: {
     marginTop: 14,
     minHeight: 96,

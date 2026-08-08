@@ -5,7 +5,7 @@
  *  - onTeamJoinRequestCreate: a user asks to join → notify the team leader.
  *  - onTeamJoinRequestDecision: leader accepts/declines → notify the requester.
  *  - onTeamBattleCreate: leader pairs two members → notify both.
- *  - onTeamGroupMessageCreate: leader messages the team → notify every member.
+ *  - onTeamGroupMessageCreate: team message → notify the roster; warning → target only.
  *
  * Every enqueue is idempotent via a deterministic dedupeKey so a retried trigger
  * can't double-notify.
@@ -15,10 +15,74 @@ import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { enqueueNotification } from '../notifications/outbox';
 
+function safePublicLabel(value: unknown, uid = '', fallback = ''): string {
+  const label = typeof value === 'string' ? value.trim().replace(/^@/, '') : '';
+  if (!label || label === uid) return fallback;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(label)) {
+    return fallback;
+  }
+  if (/^\d{10,}$/.test(label)) return fallback;
+  if (label.length > 20 && /^[A-Za-z0-9_-]+$/.test(label)) return fallback;
+  if (/^user_/i.test(label)) return fallback;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(label)) return fallback;
+  return label.slice(0, 80);
+}
+
+async function publicUserName(
+  db: FirebaseFirestore.Firestore,
+  uid: string,
+  candidates: unknown[] = [],
+  fallback = 'Someone'
+): Promise<string> {
+  if (!uid) {
+    for (const value of candidates) {
+      const label = safePublicLabel(value);
+      if (label) return label;
+    }
+    return fallback;
+  }
+  const [userSnap, profileSnap] = await Promise.all([
+    db.collection('users').doc(uid).get().catch(() => null),
+    db.collection('userProfiles').doc(uid).get().catch(() => null),
+  ]);
+  const user = userSnap?.exists ? userSnap.data() as any : {};
+  const profile = profileSnap?.exists ? profileSnap.data() as any : {};
+  const values = [
+    user?.displayName,
+    profile?.displayName,
+    ...candidates,
+    user?.username,
+    user?.handle,
+    profile?.username,
+    profile?.handle,
+  ];
+  for (const value of values) {
+    const label = safePublicLabel(value, uid);
+    if (label) return label;
+  }
+  return fallback;
+}
+
 async function teamName(db: FirebaseFirestore.Firestore, teamId: string): Promise<string> {
   try {
     const snap = await db.collection('teams').doc(teamId).get();
-    return (snap.exists && (snap.data() as any)?.name) || 'your team';
+    if (!snap.exists) return 'your team';
+    const team = (snap.data() || {}) as any;
+    const leaderId = String(team.leaderId || '');
+    const storedName = String(team.name || '').trim();
+    const generatedFromInternalId =
+      !storedName ||
+      (!!leaderId && storedName.includes(leaderId)) ||
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(storedName) ||
+      /^blyp[_-]\d+/i.test(storedName);
+    if (!generatedFromInternalId) return storedName.slice(0, 80);
+    const ownerName = await publicUserName(
+      db,
+      leaderId,
+      [team.leaderDisplayName, team.leaderName, team.leaderUsername],
+      'Team owner'
+    );
+    return `${ownerName}'s Team`;
   } catch {
     return 'your team';
   }
@@ -48,12 +112,18 @@ export const onTeamJoinRequestCreate = functions.firestore
     const leaderId = await teamLeaderId(db, teamId);
     if (!leaderId || leaderId === requesterId) return null;
     const name = await teamName(db, teamId);
+    const requesterName = await publicUserName(
+      db,
+      requesterId,
+      [req.displayName, req.username],
+      'Someone'
+    );
 
     await enqueueNotification({
       userId: leaderId,
       type: 'team',
       title: 'New team request',
-      body: `${req.displayName || 'Someone'} wants to join ${name}.`,
+      body: `${requesterName} wants to join ${name}.`,
       dedupeKey: `team:join:${teamId}:${requesterId}`,
       collapseKey: `team:${teamId}`,
       data: { type: 'team', teamId, requesterId, kind: 'join_request' },
@@ -132,20 +202,36 @@ export const onTeamGroupMessageCreate = functions.firestore
     const name = await teamName(db, teamId);
     const membersSnap = await db.collection('teams').doc(teamId).collection('members').get();
     const text = String(msg.text || '').slice(0, 180);
+    const senderId = String(msg.senderId || msg.uid || '');
+    const senderName = await publicUserName(
+      db,
+      senderId,
+      [msg.senderName, msg.senderUsername],
+      'Team member'
+    );
+    const isWarning = msg.kind === 'warning' && !!msg.targetUid;
+    const recipientIds = isWarning
+      ? [String(msg.targetUid)]
+      : membersSnap.docs
+          .map((d) => d.id)
+          .filter((uid) => uid && uid !== senderId);
 
     await Promise.all(
-      membersSnap.docs
-        .map((d) => d.id)
-        .filter((uid) => uid && uid !== msg.senderId)
+      recipientIds
+        .filter(Boolean)
         .map((uid) =>
           enqueueNotification({
             userId: uid,
             type: 'team',
-            title: `${name} · ${msg.senderName || 'Team leader'}`,
+            title: isWarning ? `Team warning · ${name}` : `${name} · ${senderName}`,
             body: text || 'New team message',
             dedupeKey: `team:msg:${teamId}:${messageId}:${uid}`,
             collapseKey: `team:msg:${teamId}`,
-            data: { type: 'team', teamId, kind: 'group_message' },
+            data: {
+              type: 'team',
+              teamId,
+              kind: isWarning ? 'team_warning' : 'group_message',
+            },
           })
         )
     );
