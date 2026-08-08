@@ -306,11 +306,11 @@ const ChatRoomScreen = ({ route, navigation }) => {
         {/* Message Input */}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled={Platform.OS === 'ios'}
           style={[
             styles.inputContainer,
-            Platform.OS === 'android' && keyboardOpen
-              ? { paddingBottom: bottomInset }
-              : { paddingBottom: Math.max(12, bottomInset || 12) },
+            // Single pad owner: IME lift or home-indicator — never both.
+            { paddingBottom: Math.max(12, bottomInset || 12) },
           ]}
         >
           <View ref={composerRef} style={styles.inputRow}>

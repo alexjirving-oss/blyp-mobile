@@ -48,6 +48,7 @@ import { loadBlockedUsers, getBlockedSet } from '../services/BlockService';
 import { messengerExtrasService } from '../services/messaging/messengerExtrasService';
 import { messengerUsersService } from '../services/messaging/messengerUsersService';
 import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messaging/resolveMessengerUser';
+import { formatLastSeenLabel, isPresenceOnline } from '../services/presenceService';
 import {
   subscribeNotifications,
   markNotificationRead,
@@ -358,6 +359,13 @@ const MessengerScreen = ({ navigation }) => {
           setChats(visible);
           setLoading(false);
           Logger.firebase('Loaded conversations', { count: visible.length });
+          // Unread inbound threads: device has synced them → delivered (double grey for sender).
+          (visible || []).forEach((t) => {
+            if (!t?.id) return;
+            if ((t.unreadCount?.[uid] || 0) > 0) {
+              conversationsMessagingService.markThreadDelivered(db, t.id, uid).catch(() => {});
+            }
+          });
           // Warm chat avatars after first paint so Inbox scroll stays fluent.
           runWhenIdle(() => {
             const avatars = (visible || []).flatMap((t) => {
@@ -669,9 +677,11 @@ const MessengerScreen = ({ navigation }) => {
           try {
             const userDoc = await getDoc(doc(db, 'users', userId));
             if (userDoc.exists()) {
+              const data = userDoc.data() || {};
               return {
                 id: userDoc.id,
-                ...userDoc.data()
+                ...data,
+                isOnline: isPresenceOnline(data.presence),
               };
             }
           } catch (error) {
@@ -1189,7 +1199,11 @@ const MessengerScreen = ({ navigation }) => {
       <View style={styles.userInfo}>
         <Text style={styles.userName}>{item.username || 'Unknown User'}</Text>
         <Text style={styles.userStatus}>
-          {item.isOnline ? 'Online' : 'Last seen recently'}
+          {item.isOnline
+            ? 'Online'
+            : (formatLastSeenLabel(item?.presence?.lastSeenAt)
+              ? `Last seen ${formatLastSeenLabel(item.presence.lastSeenAt)}`
+              : 'Offline')}
         </Text>
       </View>
 

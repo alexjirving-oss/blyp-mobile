@@ -324,6 +324,9 @@ export const conversationsMessagingService = {
   },
 
   async markMessagesRead(db, conversationId, readerId, messageIds) {
+    // Per-message status updates are blocked by Firestore rules
+    // (`allow update, delete: if false` on conversations/.../messages).
+    // Prefer markThreadRead / markThreadDelivered + conversation-level stamps.
     if (!Array.isArray(messageIds) || messageIds.length === 0) return;
     const updates = messageIds.map((id) => {
       const ref = doc(db, 'conversations', conversationId, 'messages', id);
@@ -332,15 +335,90 @@ export const conversationsMessagingService = {
     await Promise.all(updates);
   },
 
+  /**
+   * Live conversation doc (lastReadAt / lastDeliveredAt / unreadCount).
+   * Used for WhatsApp-style outbound ticks without per-message writes.
+   */
+  subscribeToConversation(db, conversationId, onConversation, onError) {
+    if (!conversationId) return () => {};
+    try {
+      const ref = doc(db, 'conversations', conversationId);
+      return onSnapshot(
+        ref,
+        (snap) => {
+          if (!snap.exists()) {
+            onConversation?.(null);
+            return;
+          }
+          onConversation?.({ id: snap.id, ...snap.data() });
+        },
+        (err) => onError?.(err),
+      );
+    } catch (error) {
+      onError?.(error);
+      return () => {};
+    }
+  },
+
+  /** Recipient device has the latest messages (double grey ticks for sender). */
+  async markThreadDelivered(db, conversationId, recipientId) {
+    if (!conversationId || !recipientId) return;
+    const conversationRef = doc(db, 'conversations', conversationId);
+    await updateDoc(conversationRef, {
+      [`lastDeliveredAt.${recipientId}`]: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  },
+
   async markThreadRead(db, conversationId, readerId) {
     const conversationRef = doc(db, 'conversations', conversationId);
     await updateDoc(conversationRef, {
       [`unreadCount.${readerId}`]: 0,
       [`lastReadAt.${readerId}`]: serverTimestamp(),
+      // Opening the thread also counts as delivered.
+      [`lastDeliveredAt.${readerId}`]: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   },
 };
+
+/** Epoch ms from Firestore Timestamp / Date / number. */
+export function firestoreTimeMs(value) {
+  if (!value) return 0;
+  if (typeof value?.toMillis === 'function') {
+    const n = value.toMillis();
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof value?.toDate === 'function') {
+    const d = value.toDate();
+    const n = d?.getTime?.();
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value instanceof Date) {
+    const n = value.getTime();
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+/**
+ * WhatsApp-style outbound receipt from conversation-level peer stamps.
+ * @returns {'sent'|'delivered'|'read'}
+ */
+export function outboundReceiptStatus(message, peerLastDeliveredAt, peerLastReadAt) {
+  const msgTs = firestoreTimeMs(message?.timestamp || message?.createdAt);
+  const readAt = firestoreTimeMs(peerLastReadAt);
+  const deliveredAt = firestoreTimeMs(peerLastDeliveredAt);
+
+  if (msgTs > 0 && readAt > 0 && msgTs <= readAt) return 'read';
+  if (msgTs > 0 && deliveredAt > 0 && msgTs <= deliveredAt) return 'delivered';
+
+  const raw = String(message?.status || 'sent').toLowerCase();
+  if (raw === 'read') return 'read';
+  if (raw === 'delivered') return 'delivered';
+  return 'sent';
+}
 
 async function upsertConversationIndex({ threadId, participantIds, lastMessageText, lastSenderUid }){
   const { doc, setDoc, serverTimestamp } = require("firebase/firestore");

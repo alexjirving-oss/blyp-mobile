@@ -11,11 +11,22 @@ import { firestore as db, db as compatDb } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
 import { useAuth } from '../hooks/useCommon';
 import useKeyboardBottomInset from '../hooks/useKeyboardBottomInset';
-import { conversationsMessagingService } from '../services/messaging';
+import {
+  conversationsMessagingService,
+  outboundReceiptStatus,
+} from '../services/messaging';
+import {
+  formatLastSeenLabel,
+  isPresenceOnline,
+} from '../services/presenceService';
 import { theme as blypTheme } from '../styles/blypTheme';
 import ReportModal from '../components/ReportModal';
 import GiftSystem from '../components/GiftSystem';
 import { inspectText } from '../utils/contentFilter';
+
+/** WhatsApp-style read blue on outbound teal bubbles. */
+const TICK_READ = '#1A73E8';
+const TICK_PENDING = 'rgba(0,0,0,0.55)';
 
 const withAlpha = (hex, alpha) => {
   const s = String(hex || '').replace('#', '');
@@ -28,10 +39,9 @@ const withAlpha = (hex, alpha) => {
 
 const T = blypTheme.colors;
 
-// A user is considered genuinely "online" only if presence says so AND the
-// heartbeat is fresh (presence is written on AppState changes, and a hard kill
-// can leave a stale 'online'); 2 minutes is a safe freshness window.
-const ONLINE_FRESHNESS_MS = 2 * 60 * 1000;
+// Online only if presence.state is online AND heartbeat is fresh (hard kills
+// leave stale 'online'; sweep + 3m window cover that).
+const ONLINE_FRESHNESS_MS = 3 * 60 * 1000;
 const MESSAGE_PAGE_SIZE = 50;
 const DATING_ACCENT = '#E83E5A';
 
@@ -46,8 +56,11 @@ const formatTime = (timestamp) => {
   });
 };
 
-const MessageRow = memo(({ item, isMe, datingContext }) => {
+const MessageRow = memo(({ item, isMe, datingContext, receiptStatus }) => {
   const isGift = item.type === 'gift';
+  const status = receiptStatus || 'sent';
+  const tickName = status === 'sent' ? 'checkmark' : 'checkmark-done';
+  const tickColor = status === 'read' ? TICK_READ : TICK_PENDING;
   return (
     <View style={[styles.messageContainer, isMe ? styles.myMessage : styles.otherMessage]}>
       <View
@@ -81,12 +94,8 @@ const MessageRow = memo(({ item, isMe, datingContext }) => {
             {formatTime(item.timestamp)}
           </Text>
           {isMe ? (
-            <View style={styles.messageStatus}>
-              <Icon
-                name={item.status === 'sent' ? 'checkmark' : 'checkmark-done'}
-                size={16}
-                color={item.status === 'read' ? '#003B30' : 'rgba(0,0,0,0.55)'}
-              />
+            <View style={styles.messageStatus} accessibilityLabel={`Message ${status}`}>
+              <Icon name={tickName} size={16} color={tickColor} />
             </View>
           ) : null}
         </View>
@@ -94,25 +103,6 @@ const MessageRow = memo(({ item, isMe, datingContext }) => {
     </View>
   );
 });
-
-const formatLastSeen = (ms) => {
-  const ts = Number(ms);
-  if (!Number.isFinite(ts) || ts <= 0) return '';
-  const diff = Date.now() - ts;
-  if (diff < 0) return 'just now';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  try {
-    return new Date(ts).toLocaleDateString();
-  } catch {
-    return `${days}d ago`;
-  }
-};
 
 const ChatScreen = ({ route, navigation }) => {
   const { participant, otherUser, chatId } = route.params || {};
@@ -143,6 +133,7 @@ const ChatScreen = ({ route, navigation }) => {
     return candidate ? String(candidate) : '';
   }, [user, participant, otherUser]);
   const [presence, setPresence] = useState(null);
+  const [threadMeta, setThreadMeta] = useState(null);
   const [reportVisible, setReportVisible] = useState(false);
 
   useEffect(() => {
@@ -171,6 +162,20 @@ const ChatScreen = ({ route, navigation }) => {
       try { unsub(); } catch { /* ignore */ }
     };
   }, [participantUid]);
+
+  // Peer lastReadAt / lastDeliveredAt drive outbound ticks (rules block per-message status).
+  useEffect(() => {
+    if (!conversationId) {
+      setThreadMeta(null);
+      return undefined;
+    }
+    return conversationsMessagingService.subscribeToConversation(
+      db,
+      conversationId,
+      (conv) => setThreadMeta(conv),
+      () => {},
+    );
+  }, [conversationId]);
 
   const flatListRef = useRef(null);
   const composerRef = useRef(null);
@@ -364,6 +369,16 @@ const ChatScreen = ({ route, navigation }) => {
         if (shouldAlert) {
           playMessageAlert();
         }
+
+        // Inbound live messages: stamp delivered so the sender gets double grey ticks.
+        if (uid) {
+          const hasInbound = list.some((m) => m?.senderId && m.senderId !== uid);
+          if (hasInbound) {
+            conversationsMessagingService
+              .markThreadDelivered(db, conversationId, uid)
+              .catch(() => {});
+          }
+        }
       },
       (e) => {
         console.error('Error subscribing to messages:', e);
@@ -441,9 +456,9 @@ const ChatScreen = ({ route, navigation }) => {
     }
   }, [conversationId, hasOlder]);
 
-  // Clear Phone-tab badge as soon as the chat is opened/read — not only after a reply.
-  // Per-message status updates are blocked by Firestore rules; conversation.unreadCount
-  // is what drives the badge and is writable by participants.
+  // Clear Phone-tab badge + stamp read/delivered when the chat is opened.
+  // Per-message status updates are blocked by Firestore rules; conversation
+  // lastReadAt / lastDeliveredAt drive outbound ticks for the peer.
   useEffect(() => {
     if (!conversationId || !uid) return undefined;
 
@@ -465,6 +480,16 @@ const ChatScreen = ({ route, navigation }) => {
     const timeoutId = setTimeout(markRead, 300);
     return () => clearTimeout(timeoutId);
   }, [conversationId, uid]);
+
+  const peerReceipt = useMemo(() => {
+    if (!participantUid || !threadMeta) {
+      return { deliveredAt: null, readAt: null };
+    }
+    return {
+      deliveredAt: threadMeta?.lastDeliveredAt?.[participantUid] || null,
+      readAt: threadMeta?.lastReadAt?.[participantUid] || null,
+    };
+  }, [participantUid, threadMeta]);
 
   const sendMessage = useCallback(async () => {
     if (!message.trim() || !conversationId || sendingMessage) {
@@ -499,10 +524,21 @@ const ChatScreen = ({ route, navigation }) => {
   }, [authUser, chatId, conversationId, message, scrollToLatest, sendingMessage, uid]);
 
   const renderMessage = useCallback(
-    ({ item }) => (
-      <MessageRow item={item} isMe={item.senderId === uid} datingContext={datingContext} />
-    ),
-    [datingContext, uid],
+    ({ item }) => {
+      const isMe = item.senderId === uid;
+      const receiptStatus = isMe
+        ? outboundReceiptStatus(item, peerReceipt.deliveredAt, peerReceipt.readAt)
+        : undefined;
+      return (
+        <MessageRow
+          item={item}
+          isMe={isMe}
+          datingContext={datingContext}
+          receiptStatus={receiptStatus}
+        />
+      );
+    },
+    [datingContext, peerReceipt.deliveredAt, peerReceipt.readAt, uid],
   );
 
   const handleGiftSent = useCallback(async (gift) => {
@@ -567,14 +603,11 @@ const ChatScreen = ({ route, navigation }) => {
             ) : null}
           </View>
           {(() => {
-            const isOnline =
-              presence?.state === 'online' &&
-              Number(presence?.lastSeenAt) > 0 &&
-              Date.now() - Number(presence.lastSeenAt) < ONLINE_FRESHNESS_MS;
+            const isOnline = isPresenceOnline(presence, ONLINE_FRESHNESS_MS);
             if (isOnline) {
               return <Text style={[styles.participantStatus, styles.statusOnline]}>Online</Text>;
             }
-            const seen = formatLastSeen(presence?.lastSeenAt);
+            const seen = formatLastSeenLabel(presence?.lastSeenAt);
             if (seen) {
               return <Text style={styles.participantStatus}>{`Last seen ${seen}`}</Text>;
             }
@@ -600,10 +633,12 @@ const ChatScreen = ({ route, navigation }) => {
           <KeyboardAvoidingView
             style={[
               styles.keyboardContainer,
-              Platform.OS === 'android' && keyboardOpen ? { paddingBottom: bottomInset } : null,
+              // Android: single IME/safe pad on the container (hook owns the value).
+              Platform.OS === 'android' ? { paddingBottom: bottomInset } : null,
             ]}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={0}
+            enabled={Platform.OS === 'ios'}
           >
             <FlashList
               ref={flatListRef}
@@ -647,7 +682,12 @@ const ChatScreen = ({ route, navigation }) => {
               ref={composerRef}
               style={[
                 styles.inputContainer,
-                { paddingBottom: Math.max(10, keyboardOpen ? 10 : bottomInset || 10) },
+                // Android IME/safe pad is on the parent; iOS needs closed-keyboard safe area here.
+                {
+                  paddingBottom: Platform.OS === 'ios'
+                    ? Math.max(10, keyboardOpen ? 10 : bottomInset || 10)
+                    : 10,
+                },
               ]}
             >
               <View style={styles.inputWrapper}>
