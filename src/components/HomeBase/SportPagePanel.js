@@ -229,10 +229,10 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
       (async () => {
         try {
           const [next, last, detail, squad] = await Promise.all([
-            getNextMatches(t.id),
-            getLastMatches(t.id),
-            getFootballTeam(t.id),
-            getTeamSquad(t.id),
+            getNextMatches(t.id).catch(() => []),
+            getLastMatches(t.id).catch(() => []),
+            getFootballTeam(t.id).catch(() => null),
+            getTeamSquad(t.id).catch(() => []),
           ]);
           setMatches((prev) => ({
             ...prev,
