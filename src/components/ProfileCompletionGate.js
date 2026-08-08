@@ -3,9 +3,11 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { db } from '../config/firebase';
 import ProfileCompletionScreen from '../screens/ProfileCompletionScreen';
 import {
+  claimUsername,
   clearPendingProfile,
   hasValidPublicUsername,
   readPendingProfile,
+  usernameKey,
 } from '../services/usernameProfileService';
 import { snapData } from '../utils/firestoreSnap';
 import { COLORS } from '../styles/theme';
@@ -30,7 +32,37 @@ export default function ProfileCompletionGate({ uid, user, children }) {
         try {
           const snap = await db.collection('users').doc(uid).get();
           if (!active) return;
-          setState({ loading: false, profile: snapData(snap) || {}, pending });
+          let profile = snapData(snap) || {};
+          const currentUsername = profile.username || profile.handle || '';
+          if (
+            hasValidPublicUsername(profile, uid)
+            && profile.usernameKey !== usernameKey(currentUsername)
+          ) {
+            try {
+              const claimed = await claimUsername({
+                uid,
+                username: currentUsername,
+                email: profile.email,
+                photoURL: profile.photoURL,
+              });
+              profile = { ...profile, ...claimed, handle: claimed.username };
+            } catch (claimError) {
+              if (claimError?.code === 'USERNAME_TAKEN') {
+                profile = {
+                  ...profile,
+                  username: null,
+                  handle: null,
+                  suggestedUsername: currentUsername,
+                };
+              } else {
+                console.warn(
+                  '[AUTH][PROFILE_GATE] legacy username migration deferred',
+                  claimError?.message || claimError,
+                );
+              }
+            }
+          }
+          setState({ loading: false, profile, pending });
           return;
         } catch (error) {
           lastError = error;
@@ -74,7 +106,7 @@ export default function ProfileCompletionGate({ uid, user, children }) {
   return (
     <ProfileCompletionScreen
       uid={uid}
-      initialUsername={state.pending?.username || ''}
+      initialUsername={state.pending?.username || state.profile?.suggestedUsername || ''}
       email={identity.email}
       photoURL={identity.photoURL}
       canSkip={!state.pending}
