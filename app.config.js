@@ -53,7 +53,7 @@ module.exports = () => {
   const extra = {
     ...(fromJson.extra || {}),
     eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
-    // P7.4: Gemini key intentionally NOT injected â€” client uses the server proxy.
+    // P7.4: Gemini key intentionally NOT injected Ã¢â‚¬â€ client uses the server proxy.
     EXPO_PUBLIC_GEMINI_API_KEY: '',
     // Release-safe default: streaming is ON unless explicitly disabled.
     EXPO_PUBLIC_ENABLE_STREAMING: enableStreaming,
@@ -89,7 +89,7 @@ module.exports = () => {
       return isProductionProfile ? '1' : '0';
     })(),
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
-    // Live overlay games â€” bake into extra so production Hermes can read them
+    // Live overlay games Ã¢â‚¬â€ bake into extra so production Hermes can read them
     // (process.env.EXPO_PUBLIC_* is often empty at runtime; see LiveGamesFlags.js).
     // Marble Race: ON unless explicitly disabled (backend LIVE_MARBLE_RACE_ENABLED=1).
     EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED: (() => {
@@ -109,7 +109,7 @@ module.exports = () => {
       if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
       return '0';
     })(),
-    // Frenemies party game â€” ON unless explicitly disabled.
+    // Frenemies party game Ã¢â‚¬â€ ON unless explicitly disabled.
     EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED: (() => {
       const raw = String(process.env.EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED || '')
         .trim()
@@ -118,7 +118,7 @@ module.exports = () => {
       if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
       return isProductionProfile ? '1' : '1';
     })(),
-    // Reaction Duel paid skill game — ON unless explicitly disabled.
+    // Reaction Duel paid skill game â€” ON unless explicitly disabled.
     EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED: (() => {
       const raw = String(process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED || '')
         .trim()
@@ -137,7 +137,7 @@ module.exports = () => {
     name: 'Blyp',
     slug: 'blyp-mobile',
     scheme: 'blyp',
-    version: '1.0.26',
+    version: '1.0.31',
     // default = unspecified MainActivity orientation so Fold unfold works;
     // camera/live screens lock portrait in JS (lockPortraitWhileFocused).
     orientation: 'default',
@@ -185,14 +185,14 @@ module.exports = () => {
         // Incoming voice/video calls: full-screen ringing UI when the phone is locked.
         'android.permission.USE_FULL_SCREEN_INTENT',
         'android.permission.FOREGROUND_SERVICE',
-        // Incoming-call ringtone FGS (IncomingCallForegroundService) â€” mediaPlayback only.
+        // Incoming-call ringtone FGS (IncomingCallForegroundService) Ã¢â‚¬â€ mediaPlayback only.
         // Do NOT declare FOREGROUND_SERVICE_MICROPHONE: no service uses type=microphone;
         // mic-typed FGS is also killed on API 34+ when the mic is not actively captured.
         'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
         // Do NOT declare RECEIVE_BOOT_COMPLETED: Android 15 forbids launching
         // mediaPlayback (and other restricted) FGS from BOOT_COMPLETED. Incoming-call
         // FGS starts from FCM only. Local reminders re-arm on app open.
-        // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM â€”
+        // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM Ã¢â‚¬â€
         // Play only allows that for calendar/alarm-clock core apps (Blyp is neither).
         'android.permission.SCHEDULE_EXACT_ALARM',
         'android.permission.VIBRATE',
@@ -254,7 +254,7 @@ module.exports = () => {
       '@config-plugins/react-native-webrtc',
     ],
     extra,
-    // Style only â€” backgroundColor/translucent map to deprecated window APIs on Android 15+.
+    // Style only Ã¢â‚¬â€ backgroundColor/translucent map to deprecated window APIs on Android 15+.
     androidStatusBar: {
       barStyle: 'light-content',
     },
