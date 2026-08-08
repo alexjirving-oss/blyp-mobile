@@ -404,8 +404,84 @@ export function shufflePostsByFeedPriority(posts, opts = {}) {
 }
 
 /**
+ * Resolve ranking signals. Prefer `getContext()` after awaits so follows /
+ * interests that hydrate during enrichment are not frozen at call start.
+ * @param {{
+ *   getContext?: () => ({ terms?: string[], following?: Set<string>|string[], seenIds?: Set<string>|string[], now?: number }),
+ *   terms?: string[],
+ *   following?: Set<string>|string[],
+ *   seenIds?: Set<string>|string[],
+ *   now?: number,
+ * }} opts
+ */
+export function resolveRankContext(opts = {}) {
+  const live = typeof opts.getContext === 'function' ? (opts.getContext() || {}) : {};
+  return {
+    terms: live.terms ?? opts.terms ?? [],
+    following: live.following ?? opts.following ?? new Set(),
+    seenIds: live.seenIds ?? opts.seenIds,
+    now: live.now ?? opts.now,
+  };
+}
+
+/** Dedupe by id, preserving first-seen order (organic page before extras). */
+export function mergeCandidatePosts(primary = [], extra = []) {
+  const byId = new Map();
+  for (const post of [...(primary || []), ...(extra || [])]) {
+    if (post?.id == null || byId.has(post.id)) continue;
+    byId.set(post.id, post);
+  }
+  return [...byId.values()];
+}
+
+export function countFollowedPosts(posts, following) {
+  const set = following instanceof Set ? following : new Set(following || []);
+  if (!set.size) return 0;
+  return (posts || []).reduce((n, post) => (set.has(postOwner(post)) ? n + 1 : n), 0);
+}
+
+/**
+ * When the newest organic page has too few followed creators, pull recent
+ * followed posts from a wider date scan so scoring/diversity can mix them in.
+ * Fail-open: returns organic unchanged on empty follows, Firebase off, or errors.
+ */
+export async function ensureFollowMixCandidates(posts, following, opts = {}) {
+  const organic = Array.isArray(posts) ? posts : [];
+  const set = following instanceof Set ? following : new Set(following || []);
+  const minFollowed = Number.isFinite(opts.minFollowed) ? opts.minFollowed : 3;
+  const maxInject = Number.isFinite(opts.maxInject) ? opts.maxInject : 6;
+  const scanLimit = Number.isFinite(opts.scanLimit) ? opts.scanLimit : 120;
+  const isEligible = typeof opts.isEligible === 'function' ? opts.isEligible : () => true;
+
+  if (!set.size || countFollowedPosts(organic, set) >= minFollowed) return organic;
+  if (!firebaseEnabled || !db?.collection) return organic;
+
+  try {
+    const snap = await db.collection('posts').orderBy('date', 'desc').limit(scanLimit).get();
+    const scanned = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
+    const have = new Set(organic.map((p) => p?.id).filter(Boolean));
+    const injected = [];
+    for (const post of scanned) {
+      if (injected.length >= maxInject) break;
+      if (!post?.id || have.has(post.id)) continue;
+      if (!set.has(postOwner(post))) continue;
+      if (!isEligible(post)) continue;
+      injected.push(post);
+      have.add(post.id);
+    }
+    return injected.length ? mergeCandidatePosts(organic, injected) : organic;
+  } catch (error) {
+    console.warn('[FEED_RANK] follow mix hydrate failed', error?.message || String(error));
+    return organic;
+  }
+}
+
+/**
  * Hydrate admin account tiers + active promote boosts, drop suppress, then
- * bucket-shuffle with fair promote caps. Shared by Home For You + discovery.
+ * score (mode:'rank') or bucket-shuffle. Shared by Home For You + discovery.
+ *
+ * For rank mode, personalization signals are resolved AFTER enrichment via
+ * `getContext` so a slow promote/account hydrate cannot freeze empty follows.
  */
 export async function prepareRankedFeed(posts, opts = {}) {
   const fallback = filterSuppressedAccounts(posts || []);
@@ -414,20 +490,22 @@ export async function prepareRankedFeed(posts, opts = {}) {
     const withPromote = await attachPromoteBoost(withAccount);
     const visible = filterSuppressedAccounts(withPromote);
     if (opts.mode === 'rank') {
-      return rankPosts(visible, opts.terms || [], opts.following || new Set(), {
+      const ctx = resolveRankContext(opts);
+      return rankPosts(visible, ctx.terms, ctx.following, {
         fairCap: opts.fairCap !== false,
-        seenIds: opts.seenIds,
-        now: opts.now,
+        seenIds: ctx.seenIds,
+        now: ctx.now,
       });
     }
     return shufflePostsByFeedPriority(visible, { fairCap: opts.fairCap !== false });
   } catch (error) {
     console.warn('[FEED_RANK] enrichment failed; using organic candidates', error?.message || String(error));
     if (opts.mode === 'rank') {
-      return rankPosts(fallback, opts.terms || [], opts.following || new Set(), {
+      const ctx = resolveRankContext(opts);
+      return rankPosts(fallback, ctx.terms, ctx.following, {
         fairCap: false,
-        seenIds: opts.seenIds,
-        now: opts.now,
+        seenIds: ctx.seenIds,
+        now: ctx.now,
       });
     }
     return fallback;
@@ -445,6 +523,10 @@ export default {
   filterSuppressedAccounts,
   shufflePostsByFeedPriority,
   prepareRankedFeed,
+  resolveRankContext,
+  mergeCandidatePosts,
+  countFollowedPosts,
+  ensureFollowMixCandidates,
   normalizeFeedPriorityTier,
   effectiveFeedBucket,
   effectiveOrderBucket,

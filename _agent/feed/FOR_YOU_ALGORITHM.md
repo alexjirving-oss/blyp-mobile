@@ -115,6 +115,16 @@ The snapshot is painted before enrichment. If account-tier or promote enrichment
 an empty feed. If Firebase itself cannot return candidates, there is nothing local to rank and
 the existing empty/error state remains.
 
+Personalization context must be read **after** enrichment awaits via `getContext`, not frozen at
+call start. Follows/interests hydrate after Firebase auth and can arrive while promote/account
+hydrate is still in flight; a frozen empty context caused a regression where a good soft re-rank
+was overwritten by a slower empty-signal rank (looked personalized, then snapped back to
+recency). Soft re-ranks also use a generation token so stale completions are ignored.
+
+When the newest-15 organic page contains fewer than three followed creators, Home injects up to
+six recent eligible followed posts from a wider date scan before scoring, so follow affinity can
+still produce a visible mix.
+
 ## Known limitations and audit findings
 
 - **Page-local ranking:** Firestore chooses a newest-15 window before ranking. An excellent older

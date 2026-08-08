@@ -67,6 +67,7 @@ import { useAuth, hardLogout } from '../hooks/useCommon';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import {
   attachAccountFeedPriority,
+  ensureFollowMixCandidates,
   filterSuppressedAccounts,
   isAccountFeedSuppressed,
   prepareRankedFeed,
@@ -219,7 +220,10 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /** Deterministic organic score + diversity pass for already-enriched candidates. */
-function rankForYouPosts(posts, context = {}) {
+function rankForYouPosts(posts, contextOrGetter = {}) {
+  const context = typeof contextOrGetter === 'function'
+    ? (contextOrGetter() || {})
+    : (contextOrGetter || {});
   return rankPosts(
     posts || [],
     context.terms || [],
@@ -228,13 +232,27 @@ function rankForYouPosts(posts, context = {}) {
   );
 }
 
-/** Hydrate author tiers + promote boosts, then score and diversify. */
-async function prepareForYouOrder(posts, context = {}) {
-  return prepareRankedFeed(posts || [], {
+/**
+ * Hydrate follow mix + author tiers + promote boosts, then score and diversify.
+ * Pass a context *getter* (not a snapshot) so follows/interests that arrive while
+ * enrichment is in flight are used when scoring — not the empty set from first paint.
+ */
+async function prepareForYouOrder(posts, contextOrGetter = {}) {
+  const getContext = typeof contextOrGetter === 'function'
+    ? contextOrGetter
+    : () => contextOrGetter || {};
+  let candidates = posts || [];
+  try {
+    const ctx = getContext();
+    candidates = await ensureFollowMixCandidates(candidates, ctx.following || new Set(), {
+      isEligible: isValidFeedPost,
+    });
+  } catch (_) {
+    candidates = posts || [];
+  }
+  return prepareRankedFeed(candidates, {
     mode: 'rank',
-    terms: context.terms || [],
-    following: context.following || new Set(),
-    seenIds: context.seenIds || new Set(),
+    getContext,
   });
 }
 
@@ -329,12 +347,20 @@ const HomeScreen = ({ navigation, route }) => {
   const followingRef = useRef(new Set());
   const forYouRecentlySeenIdsRef = useRef(new Set());
   const forYouRecentlySeenOrderRef = useRef([]);
+  // Bumped whenever a soft re-rank starts so a slower, older ranking cannot
+  // overwrite a fresher one (the "looked good then snapped back" race).
+  const forYouRankGenRef = useRef(0);
 
   const getForYouRankingContext = useCallback(() => ({
     terms: interestTermsRef.current || [],
     following: followingRef.current || new Set(),
     seenIds: new Set(forYouRecentlySeenIdsRef.current || []),
   }), []);
+
+  const beginForYouRank = useCallback(() => {
+    forYouRankGenRef.current += 1;
+    return forYouRankGenRef.current;
+  }, []);
 
   useEffect(() => {
     const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i.label]));
@@ -377,9 +403,16 @@ const HomeScreen = ({ navigation, route }) => {
       return undefined;
     }
     let cancelled = false;
-    prepareForYouOrder(current, getForYouRankingContext())
+    const gen = beginForYouRank();
+    prepareForYouOrder(current, getForYouRankingContext)
       .then((ordered) => {
-        if (cancelled || currentDiscoverIndexRef.current !== 0) return;
+        if (
+          cancelled
+          || gen !== forYouRankGenRef.current
+          || currentDiscoverIndexRef.current !== 0
+        ) {
+          return;
+        }
         const next = stampFeedKeys(ordered, forYouCycleRef.current);
         randomPostsRef.current = next;
         setRandomPosts(next);
@@ -388,7 +421,7 @@ const HomeScreen = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [prefs?.interests, following, getForYouRankingContext]);
+  }, [prefs?.interests, following, getForYouRankingContext, beginForYouRank]);
 
   // Tie the earn-your-reach session to this user (hashed server-side) and make sure
   // any queued post signals are flushed when the feed unmounts.
@@ -779,17 +812,21 @@ const HomeScreen = ({ navigation, route }) => {
                       setIsEmptyFeed(false);
                       setLoading(false);
 
+                      const rankGen = beginForYouRank();
                       const ordered = await prepareForYouOrder(
                         validPosts,
-                        getForYouRankingContext(),
+                        getForYouRankingContext,
                       );
                       if (!mounted) return;
-                      // Soft re-rank only if the user is still on the first clip
-                      // (avoid jumping mid-swipe).
-                      if (currentDiscoverIndexRef.current === 0) {
-                        const shuffled = stampFeedKeys(ordered, cycle);
-                        setRandomPosts(shuffled);
-                        randomPostsRef.current = shuffled;
+                      // Soft re-rank only if this is still the latest ranking
+                      // attempt and the user is still on the first clip.
+                      if (
+                        rankGen === forYouRankGenRef.current
+                        && currentDiscoverIndexRef.current === 0
+                      ) {
+                        const ranked = stampFeedKeys(ordered, cycle);
+                        setRandomPosts(ranked);
+                        randomPostsRef.current = ranked;
                       }
                     } else {
                       // Fast path: likes/views/gifts on the live page must not
@@ -848,7 +885,7 @@ const HomeScreen = ({ navigation, route }) => {
                         setRandomPosts((prevList) => {
                           if (!Array.isArray(prevList) || prevList.length === 0) {
                             const stamped = stampFeedKeys(
-                              rankForYouPosts(visible, getForYouRankingContext()),
+                              rankForYouPosts(visible, getForYouRankingContext),
                               cycle,
                             );
                             randomPostsRef.current = stamped;
@@ -878,7 +915,7 @@ const HomeScreen = ({ navigation, route }) => {
 
                           const brandNew = rankForYouPosts(
                             visible.filter((p) => byId.has(p.id)),
-                            getForYouRankingContext(),
+                            getForYouRankingContext,
                           );
                           brandNew.forEach((p) => {
                             next.push({ ...p, feedKey: `${p.id}__${cycle}` });
@@ -965,6 +1002,7 @@ const HomeScreen = ({ navigation, route }) => {
     isScreenFocused,
     selectedTab,
     getForYouRankingContext,
+    beginForYouRank,
   ]);
 
   // Pull-to-refresh: actually re-fetch the freshest page from Firestore (not just
@@ -975,7 +1013,7 @@ const HomeScreen = ({ navigation, route }) => {
       // Fall back to a local reshuffle if Firestore isn't available.
       setRandomPosts((prev) => {
         const next = stampFeedKeys(
-          rankForYouPosts(prev, getForYouRankingContext()),
+          rankForYouPosts(prev, getForYouRankingContext),
           forYouCycleRef.current,
         );
         randomPostsRef.current = next;
@@ -1011,10 +1049,10 @@ const HomeScreen = ({ navigation, route }) => {
         randomPostsRef.current = [];
         setIsEmptyFeed(true);
       } else {
-        const ordered = await prepareForYouOrder(fresh, getForYouRankingContext());
-        const shuffled = stampFeedKeys(ordered, forYouCycleRef.current);
-        setRandomPosts(shuffled);
-        randomPostsRef.current = shuffled;
+        const ordered = await prepareForYouOrder(fresh, getForYouRankingContext);
+        const ranked = stampFeedKeys(ordered, forYouCycleRef.current);
+        setRandomPosts(ranked);
+        randomPostsRef.current = ranked;
         setIsEmptyFeed(false);
         setCurrentDiscoverIndex(0);
         currentDiscoverIndexRef.current = 0;
@@ -1031,7 +1069,7 @@ const HomeScreen = ({ navigation, route }) => {
   const appendFeedPosts = useCallback(async (newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    const ordered = await prepareForYouOrder(newPosts, getForYouRankingContext());
+    const ordered = await prepareForYouOrder(newPosts, getForYouRankingContext);
     const stamped = stampFeedKeys(ordered, forYouCycleRef.current);
     setRandomPosts((prev) => {
       const haveKeys = new Set((Array.isArray(prev) ? prev : []).map((p) => p.feedKey || p.id));
@@ -1159,7 +1197,7 @@ const HomeScreen = ({ navigation, route }) => {
         });
         const ordered = await prepareForYouOrder(
           [...uniqueById.values()],
-          getForYouRankingContext(),
+          getForYouRankingContext,
         );
         const reshuffled = stampFeedKeys(
           ordered,

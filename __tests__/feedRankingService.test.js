@@ -11,13 +11,18 @@ jest.mock('../src/services/promoteBoostService', () => ({
 }));
 
 import {
+  countFollowedPosts,
+  ensureFollowMixCandidates,
+  mergeCandidatePosts,
   prepareRankedFeed,
   rankPosts,
+  resolveRankContext,
   scorePost,
 } from '../src/services/feedRankingService';
 import { attachPromoteBoost } from '../src/services/promoteBoostService';
 
 const NOW = Date.UTC(2026, 7, 8, 12);
+const HOUR = 60 * 60 * 1000;
 const post = (id, overrides = {}) => ({
   id,
   userId: `creator-${id}`,
@@ -109,5 +114,79 @@ describe('For You v1 ranking', () => {
       mode: 'rank',
       now: NOW,
     })).resolves.toEqual([candidates[1], candidates[0]]);
+  });
+
+  it('re-reads follow context after enrichment so stale empty signals cannot win', async () => {
+    const following = new Set();
+    let releasePromote;
+    const promoteGate = new Promise((resolve) => {
+      releasePromote = resolve;
+    });
+    attachPromoteBoost.mockImplementationOnce(() => promoteGate);
+
+    const olderFollowed = post('followed-older', {
+      userId: 'f1',
+      date: NOW - 2 * HOUR,
+    });
+    const newerDiscovery = post('discover-newer', {
+      userId: 'd1',
+      date: NOW - 1 * HOUR,
+    });
+
+    const pending = prepareRankedFeed([newerDiscovery, olderFollowed], {
+      mode: 'rank',
+      now: NOW,
+      getContext: () => ({
+        following: new Set(following),
+        terms: [],
+        now: NOW,
+      }),
+    });
+
+    // Let account hydrate finish and hit the promote gate.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Simulate follows hydrating while account/promote enrichment is still in flight.
+    following.add('f1');
+    releasePromote([newerDiscovery, olderFollowed]);
+
+    const ranked = await pending;
+    expect(ranked.map((item) => item.id)).toEqual(['followed-older', 'discover-newer']);
+  });
+
+  it('resolveRankContext prefers live getContext over frozen opts', () => {
+    const ctx = resolveRankContext({
+      terms: ['stale'],
+      following: new Set(),
+      getContext: () => ({
+        terms: ['live'],
+        following: new Set(['f1']),
+        now: NOW,
+      }),
+    });
+    expect(ctx.terms).toEqual(['live']);
+    expect([...ctx.following]).toEqual(['f1']);
+  });
+
+  it('merges follow candidates and counts followed posts for sparse pages', async () => {
+    const organic = [
+      post('d1', { userId: 'discovery-1' }),
+      post('d2', { userId: 'discovery-2' }),
+    ];
+    const following = new Set(['f1']);
+    expect(countFollowedPosts(organic, following)).toBe(0);
+
+    const merged = mergeCandidatePosts(organic, [
+      post('f-post', { userId: 'f1' }),
+      post('d1', { userId: 'discovery-1' }),
+    ]);
+    expect(merged.map((item) => item.id)).toEqual(['d1', 'd2', 'f-post']);
+    expect(countFollowedPosts(merged, following)).toBe(1);
+
+    // Firebase disabled in this suite — ensureFollowMixCandidates must fail open.
+    await expect(
+      ensureFollowMixCandidates(organic, following),
+    ).resolves.toEqual(organic);
   });
 });
