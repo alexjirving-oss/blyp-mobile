@@ -512,7 +512,6 @@ const LiveStreamScreen = (props) => {
   });
 
   console.log('[LIVE][RECEIVED_ROUTE_PARAMS]', {
-    rawParams,
     normalizedParams,
     routeMode,
     routeHostUid,
