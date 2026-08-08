@@ -68,9 +68,9 @@ import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import {
   attachAccountFeedPriority,
   filterSuppressedAccounts,
-  shufflePostsByFeedPriority,
   isAccountFeedSuppressed,
   prepareRankedFeed,
+  rankPosts,
 } from '../services/feedRankingService';
 import { attachPromoteBoost } from '../services/promoteBoostService';
 
@@ -218,16 +218,24 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
-/** Temporary For You order until the ranking algorithm is configured.
- *  Honour admin account + post feed priority (boost → … → suppress) and
- *  active coin-promote boosts (fair-capped) within shuffle. */
-function shufflePosts(posts) {
-  return shufflePostsByFeedPriority(posts);
+/** Deterministic organic score + diversity pass for already-enriched candidates. */
+function rankForYouPosts(posts, context = {}) {
+  return rankPosts(
+    posts || [],
+    context.terms || [],
+    context.following || new Set(),
+    { seenIds: context.seenIds || new Set() },
+  );
 }
 
-/** Hydrate author tiers + active promote boosts, drop suppress, fair-cap shuffle. */
-async function prepareForYouOrder(posts) {
-  return prepareRankedFeed(posts || [], { mode: 'shuffle' });
+/** Hydrate author tiers + promote boosts, then score and diversify. */
+async function prepareForYouOrder(posts, context = {}) {
+  return prepareRankedFeed(posts || [], {
+    mode: 'rank',
+    terms: context.terms || [],
+    following: context.following || new Set(),
+    seenIds: context.seenIds || new Set(),
+  });
 }
 
 function stampFeedKeys(posts, cycle) {
@@ -319,13 +327,27 @@ const HomeScreen = ({ navigation, route }) => {
   // Firestore feed listener can read the latest values without re-subscribing.
   const interestTermsRef = useRef([]);
   const followingRef = useRef(new Set());
+  const forYouRecentlySeenIdsRef = useRef(new Set());
+  const forYouRecentlySeenOrderRef = useRef([]);
+
+  const getForYouRankingContext = useCallback(() => ({
+    terms: interestTermsRef.current || [],
+    following: followingRef.current || new Set(),
+    seenIds: new Set(forYouRecentlySeenIdsRef.current || []),
+  }), []);
 
   useEffect(() => {
     const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i.label]));
-    interestTermsRef.current = (prefs?.interests || [])
-      .map((id) => byId.get(id))
-      .filter(Boolean)
-      .flatMap((label) => String(label).toLowerCase().split(/\s+/));
+    interestTermsRef.current = [
+      ...new Set(
+        (prefs?.interests || []).flatMap((id) => {
+          const label = byId.get(id);
+          return [id, label, ...(label ? String(label).split(/\s+/) : [])]
+            .filter(Boolean)
+            .map((term) => String(term).toLowerCase());
+        }),
+      ),
+    ];
   }, [prefs]);
 
   useEffect(() => {
@@ -345,6 +367,28 @@ const HomeScreen = ({ navigation, route }) => {
     const unsub = subscribePreferences(uid, setPrefs);
     return unsub;
   }, [uid]);
+
+  // Preferences and the follow graph hydrate independently of the first Firestore
+  // page. If either arrives just after first paint, apply it while the viewer is
+  // still on item zero; never jump the list once they have started swiping.
+  useEffect(() => {
+    const current = randomPostsRef.current || [];
+    if (selectedTabRef.current !== 'A' || currentDiscoverIndexRef.current !== 0 || !current.length) {
+      return undefined;
+    }
+    let cancelled = false;
+    prepareForYouOrder(current, getForYouRankingContext())
+      .then((ordered) => {
+        if (cancelled || currentDiscoverIndexRef.current !== 0) return;
+        const next = stampFeedKeys(ordered, forYouCycleRef.current);
+        randomPostsRef.current = next;
+        setRandomPosts(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [prefs?.interests, following, getForYouRankingContext]);
 
   // Tie the earn-your-reach session to this user (hashed server-side) and make sure
   // any queued post signals are flushed when the feed unmounts.
@@ -735,7 +779,10 @@ const HomeScreen = ({ navigation, route }) => {
                       setIsEmptyFeed(false);
                       setLoading(false);
 
-                      const ordered = await prepareForYouOrder(validPosts);
+                      const ordered = await prepareForYouOrder(
+                        validPosts,
+                        getForYouRankingContext(),
+                      );
                       if (!mounted) return;
                       // Soft re-rank only if the user is still on the first clip
                       // (avoid jumping mid-swipe).
@@ -800,7 +847,10 @@ const HomeScreen = ({ navigation, route }) => {
                         const visible = filterSuppressedAccounts(withPromote);
                         setRandomPosts((prevList) => {
                           if (!Array.isArray(prevList) || prevList.length === 0) {
-                            const stamped = stampFeedKeys(shufflePosts(visible), cycle);
+                            const stamped = stampFeedKeys(
+                              rankForYouPosts(visible, getForYouRankingContext()),
+                              cycle,
+                            );
                             randomPostsRef.current = stamped;
                             return stamped;
                           }
@@ -826,7 +876,10 @@ const HomeScreen = ({ navigation, route }) => {
                             }
                           });
 
-                          const brandNew = shufflePosts(visible.filter((p) => byId.has(p.id)));
+                          const brandNew = rankForYouPosts(
+                            visible.filter((p) => byId.has(p.id)),
+                            getForYouRankingContext(),
+                          );
                           brandNew.forEach((p) => {
                             next.push({ ...p, feedKey: `${p.id}__${cycle}` });
                           });
@@ -904,7 +957,15 @@ const HomeScreen = ({ navigation, route }) => {
       mounted = false;
       try { unsubscribe && unsubscribe(); } catch { }
     };
-  }, [firebaseEnabled, uid, authReady, isAuthenticated, isScreenFocused, selectedTab]);
+  }, [
+    firebaseEnabled,
+    uid,
+    authReady,
+    isAuthenticated,
+    isScreenFocused,
+    selectedTab,
+    getForYouRankingContext,
+  ]);
 
   // Pull-to-refresh: actually re-fetch the freshest page from Firestore (not just
   // a local reshuffle), re-rank it, and reset the pagination cursor so "load more"
@@ -913,7 +974,10 @@ const HomeScreen = ({ navigation, route }) => {
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
       // Fall back to a local reshuffle if Firestore isn't available.
       setRandomPosts((prev) => {
-        const next = stampFeedKeys(shufflePosts(prev), forYouCycleRef.current);
+        const next = stampFeedKeys(
+          rankForYouPosts(prev, getForYouRankingContext()),
+          forYouCycleRef.current,
+        );
         randomPostsRef.current = next;
         return next;
       });
@@ -947,7 +1011,7 @@ const HomeScreen = ({ navigation, route }) => {
         randomPostsRef.current = [];
         setIsEmptyFeed(true);
       } else {
-        const ordered = await prepareForYouOrder(fresh);
+        const ordered = await prepareForYouOrder(fresh, getForYouRankingContext());
         const shuffled = stampFeedKeys(ordered, forYouCycleRef.current);
         setRandomPosts(shuffled);
         randomPostsRef.current = shuffled;
@@ -960,14 +1024,14 @@ const HomeScreen = ({ navigation, route }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getForYouRankingContext]);
 
   // Load the next (older) page of the For You feed and append it. Called as the
   // viewer nears the end of the list, which makes the feed effectively endless.
   const appendFeedPosts = useCallback(async (newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    const ordered = await prepareForYouOrder(newPosts);
+    const ordered = await prepareForYouOrder(newPosts, getForYouRankingContext());
     const stamped = stampFeedKeys(ordered, forYouCycleRef.current);
     setRandomPosts((prev) => {
       const haveKeys = new Set((Array.isArray(prev) ? prev : []).map((p) => p.feedKey || p.id));
@@ -1001,7 +1065,7 @@ const HomeScreen = ({ navigation, route }) => {
         return next;
       });
     }
-  }, [uid]);
+  }, [uid, getForYouRankingContext]);
 
   const resetForYouCycle = useCallback(() => {
     forYouCycleRef.current += 1;
@@ -1093,7 +1157,10 @@ const HomeScreen = ({ navigation, route }) => {
             uniqueById.set(p.id, rest);
           }
         });
-        const ordered = await prepareForYouOrder([...uniqueById.values()]);
+        const ordered = await prepareForYouOrder(
+          [...uniqueById.values()],
+          getForYouRankingContext(),
+        );
         const reshuffled = stampFeedKeys(
           ordered,
           forYouCycleRef.current,
@@ -1111,7 +1178,12 @@ const HomeScreen = ({ navigation, route }) => {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [firebaseEnabled, appendFeedPosts, resetForYouCycle]);
+  }, [
+    firebaseEnabled,
+    appendFeedPosts,
+    resetForYouCycle,
+    getForYouRankingContext,
+  ]);
 
   // Keep the first screen full even when the opening Firestore page is mostly images.
   useEffect(() => {
@@ -1292,6 +1364,14 @@ const HomeScreen = ({ navigation, route }) => {
     viewableItems.forEach((vi) => {
       const p = vi?.item;
       if (!p?.id) return;
+      if (!forYouRecentlySeenIdsRef.current.has(p.id)) {
+        forYouRecentlySeenIdsRef.current.add(p.id);
+        forYouRecentlySeenOrderRef.current.push(p.id);
+        if (forYouRecentlySeenOrderRef.current.length > 200) {
+          const expired = forYouRecentlySeenOrderRef.current.shift();
+          if (expired) forYouRecentlySeenIdsRef.current.delete(expired);
+        }
+      }
       const authorId = p.userId || p.uid || p.authorId;
       reportImpression(p.id, authorId);
       // What counts as a view: the post must have dwelled on screen (enforced by

@@ -1,8 +1,9 @@
 // feedRankingService.js
 //
-// Pure ranking for the "For You" feed. Orders posts by a blend of: who you
-// follow, your interests, light engagement, earn-your-reach, admin
-// feed priority (account-wide + per-post), and active coin-promote boosts.
+// Pure ranking for the "For You" feed. Orders posts by freshness, follows,
+// interests, engagement/gifts, aggregate watch quality, recent-seen state,
+// earn-your-reach, admin priority, and active coin-promote boosts; a final
+// diversity pass mixes creators and followed/discovery sources.
 //
 // Admin priority rule (documented):
 //   effectiveAdjust = accountAdjust(feedPriorityAccount) + postAdjust(feedPriority)
@@ -22,11 +23,88 @@ import {
   isPromotedPost,
 } from './promoteBoostService';
 
-function engagement(post) {
-  return (
-    Number(post.likeCount || post.likes || post.likedBy?.length || 0) +
-    Number(post.commentCount || post.comments || 0) * 2
+const HOUR_MS = 60 * 60 * 1000;
+const FRESHNESS_HALF_LIFE_HOURS = 24;
+const MAX_SOURCE_STREAK = 2;
+
+function finiteCount(...values) {
+  return Math.max(
+    0,
+    ...values.map((value) => {
+      const n = Array.isArray(value) ? value.length : Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }),
   );
+}
+
+function postOwner(post) {
+  return String(post?.userId || post?.uid || post?.authorId || '').trim();
+}
+
+function postTimeMs(post) {
+  const raw = post?.date ?? post?.createdAt ?? post?.publishedAt ?? post?.timestamp;
+  if (raw?.toMillis) return raw.toMillis();
+  if (raw?.seconds != null) return Number(raw.seconds) * 1000;
+  if (raw instanceof Date) return raw.getTime();
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n < 10_000_000_000 ? n * 1000 : n;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function engagementAdjust(post) {
+  const likes = finiteCount(post?.likeCount, post?.likes, post?.likedBy);
+  const comments = finiteCount(
+    post?.commentCount,
+    post?.commentsCount,
+    post?.comments,
+  );
+  const shares = finiteCount(post?.shareCount, post?.sharesCount, post?.shares);
+  const gifts = finiteCount(post?.giftCoins, post?.coinsReceived, post?.giftTotalCoins);
+  const weighted = likes + comments * 2 + shares * 4;
+  return Math.min(24, Math.log1p(weighted) * 4) + Math.min(10, Math.log1p(gifts) * 1.5);
+}
+
+function watchAdjust(post) {
+  const reach = post?.reach || {};
+  const e = reach.engagements || {};
+  const impressions = finiteCount(reach.impressions);
+  if (impressions < 1) return 0;
+  const completionRate = Math.min(1, finiteCount(e.completions) / impressions);
+  const averageDwellSeconds = Math.min(
+    20,
+    finiteCount(e.dwellMsTotal) / 1000 / impressions,
+  );
+  return completionRate * 14 + averageDwellSeconds * 0.35;
+}
+
+function freshnessAdjust(post, now) {
+  const timestamp = postTimeMs(post);
+  if (!timestamp) return 0;
+  const ageHours = Math.max(0, (now - timestamp) / HOUR_MS);
+  return 32 * Math.pow(0.5, ageHours / FRESHNESS_HALF_LIFE_HOURS);
+}
+
+function interestAdjust(post, terms) {
+  if (!terms?.length) return 0;
+  const hay = [
+    post?.title,
+    post?.caption,
+    post?.description,
+    post?.category,
+    post?.topic,
+    post?.topicId,
+    Array.isArray(post?.hashtags) ? post.hashtags.join(' ') : post?.hashtags,
+    Array.isArray(post?.sportTags) ? post.sportTags.join(' ') : post?.sportTags,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  let matches = 0;
+  for (const term of terms) {
+    if (term && hay.includes(String(term).toLowerCase())) matches += 1;
+  }
+  return Math.min(24, matches * 8);
 }
 
 const AUDITION_BOOST = 18; // guaranteed early sampling for fresh posts
@@ -202,57 +280,74 @@ export function filterSuppressedAccounts(posts) {
   return posts.filter((p) => !isAccountFeedSuppressed(p));
 }
 
-function scorePost(post, terms, following) {
-  let s = 0;
-  const owner = post.userId || post.uid || post.authorId;
-  if (owner && following.has(owner)) s += 50; // strong: people you follow
-  if (terms.length) {
-    const hay = [
-      post.title,
-      post.caption,
-      post.description,
-      post.category,
-      Array.isArray(post.hashtags) ? post.hashtags.join(' ') : post.hashtags,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    for (const t of terms) if (hay.includes(t)) s += 8; // interest match
+export function scorePost(post, context = {}) {
+  const terms = context.terms || [];
+  const following = context.following || new Set();
+  const seenIds = context.seenIds || new Set();
+  const now = Number.isFinite(context.now) ? context.now : Date.now();
+  const owner = postOwner(post);
+  let score = 0;
+  if (owner && following.has(owner)) score += 26;
+  score += interestAdjust(post, terms);
+  score += freshnessAdjust(post, now);
+  score += engagementAdjust(post);
+  score += watchAdjust(post);
+  score += reachAdjust(post);
+  score += feedPriorityAdjust(post);
+  score += promoteBoostAdjust(post);
+  score += seenIds.has(post?.id) ? -24 : 10;
+  return score;
+}
+
+function diversifyRanked(scored, following) {
+  const remaining = [...scored];
+  const result = [];
+  let lastOwner = '';
+  let lastSource = '';
+  let sourceStreak = 0;
+
+  while (remaining.length > 0) {
+    let pick = remaining.findIndex(({ p }) => {
+      const owner = postOwner(p);
+      const source = owner && following.has(owner) ? 'followed' : 'discovery';
+      return owner !== lastOwner && !(source === lastSource && sourceStreak >= MAX_SOURCE_STREAK);
+    });
+    if (pick < 0) {
+      pick = remaining.findIndex(({ p }) => postOwner(p) !== lastOwner);
+    }
+    if (pick < 0) pick = 0;
+
+    const [{ p }] = remaining.splice(pick, 1);
+    const owner = postOwner(p);
+    const source = owner && following.has(owner) ? 'followed' : 'discovery';
+    sourceStreak = source === lastSource ? sourceStreak + 1 : 1;
+    lastSource = source;
+    lastOwner = owner;
+    result.push(p);
   }
-  s += Math.min(engagement(post), 24) * 0.5; // mild popularity nudge
-  s += reachAdjust(post); // earn-your-reach: audition lift / earned score / resting
-  s += feedPriorityAdjust(post); // account + post admin tiers
-  s += promoteBoostAdjust(post); // paid promote (battle / slot / spotlight)
-  s += Math.random() * 6; // freshness jitter
-  return s;
+  return result;
 }
 
 /**
  * @param {any[]} posts
  * @param {string[]} terms  lowercased interest terms
  * @param {Set<string>} following  ids the user follows
- * @param {{ fairCap?: boolean }} [opts]
+ * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number }} [opts]
  */
 export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
   const visible = filterSuppressedAccounts(posts);
-  const noSignal = (!terms || terms.length === 0) && (!following || following.size === 0);
-  let ranked;
-  if (noSignal) {
-    // Still honour earn-your-reach + admin priority + promote when we have no personalization.
-    ranked = [...visible]
-      .map((p) => ({
-        p,
-        s: reachAdjust(p) + feedPriorityAdjust(p) + promoteBoostAdjust(p) + Math.random() * 12,
-      }))
-      .sort((a, b) => b.s - a.s)
-      .map((x) => x.p);
-  } else {
-    ranked = [...visible]
-      .map((p) => ({ p, s: scorePost(p, terms, following) }))
-      .sort((a, b) => b.s - a.s)
-      .map((x) => x.p);
-  }
+  const safeFollowing = following instanceof Set ? following : new Set(following || []);
+  const context = {
+    terms: (terms || []).map((term) => String(term).trim().toLowerCase()).filter(Boolean),
+    following: safeFollowing,
+    seenIds: opts.seenIds instanceof Set ? opts.seenIds : new Set(opts.seenIds || []),
+    now: Number.isFinite(opts.now) ? opts.now : Date.now(),
+  };
+  const scored = visible
+    .map((p, index) => ({ p, index, s: scorePost(p, context) }))
+    .sort((a, b) => b.s - a.s || a.index - b.index);
+  const ranked = diversifyRanked(scored, safeFollowing);
   if (opts.fairCap === false) return ranked;
   return applyPromoteFairCap(ranked);
 }
@@ -313,19 +408,35 @@ export function shufflePostsByFeedPriority(posts, opts = {}) {
  * bucket-shuffle with fair promote caps. Shared by Home For You + discovery.
  */
 export async function prepareRankedFeed(posts, opts = {}) {
-  const withAccount = await attachAccountFeedPriority(posts || []);
-  const withPromote = await attachPromoteBoost(withAccount);
-  const visible = filterSuppressedAccounts(withPromote);
-  if (opts.mode === 'rank') {
-    return rankPosts(visible, opts.terms || [], opts.following || new Set(), {
-      fairCap: opts.fairCap !== false,
-    });
+  const fallback = filterSuppressedAccounts(posts || []);
+  try {
+    const withAccount = await attachAccountFeedPriority(posts || []);
+    const withPromote = await attachPromoteBoost(withAccount);
+    const visible = filterSuppressedAccounts(withPromote);
+    if (opts.mode === 'rank') {
+      return rankPosts(visible, opts.terms || [], opts.following || new Set(), {
+        fairCap: opts.fairCap !== false,
+        seenIds: opts.seenIds,
+        now: opts.now,
+      });
+    }
+    return shufflePostsByFeedPriority(visible, { fairCap: opts.fairCap !== false });
+  } catch (error) {
+    console.warn('[FEED_RANK] enrichment failed; using organic candidates', error?.message || String(error));
+    if (opts.mode === 'rank') {
+      return rankPosts(fallback, opts.terms || [], opts.following || new Set(), {
+        fairCap: false,
+        seenIds: opts.seenIds,
+        now: opts.now,
+      });
+    }
+    return fallback;
   }
-  return shufflePostsByFeedPriority(visible, { fairCap: opts.fairCap !== false });
 }
 
 export default {
   rankPosts,
+  scorePost,
   reachAdjust,
   feedPriorityAdjust,
   postFeedPriorityAdjust,
