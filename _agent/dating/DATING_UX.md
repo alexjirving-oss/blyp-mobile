@@ -6,12 +6,20 @@
 - Likes received were not surfaced, even though `datingLikes` already allowed the recipient to read them.
 - Matches were a plain list and mutual likes ended in a system alert.
 - Empty states and profile setup were functional but did not guide the next useful action.
-- The surface inherited generic cards and the main teal accent without a distinct Dating identity.
+- The surface inherited generic cards and a teal/coral pairing that did not feel like Blyp Dating.
+
+## Love-red palette
+
+- **Crimson `#E83E5A`** is the primary Dating action and heart colour.
+- **Rose `#FF758A`** carries highlights, active navigation, and editorial emphasis.
+- **Petal `#FFC0CB`** is the restrained secondary signal for trust, status, and mutual connection.
+- **Oxblood `#9D1D37`**, **ink `#090608`**, and wine panels (`#151013` / `#1D1519`) create depth without neon pink, purple, green, or orange.
+- Transparent crimson, rose, and petal tokens keep borders, glows, fields, and empty-state motion in one tonal system.
 
 ## Shipped
 
 - Rebuilt Dating around four clear loops: **Discover, Likes, Matches, Profile**.
-- Added a dark editorial Blyp identity with teal signal color and a warm coral Dating accent; no purple clone treatment.
+- Added a dark editorial Blyp identity with a refined crimson/rose Dating system; no purple, green, or orange clone treatment.
 - Made discovery photo-led, including existing multi-photo refs, distance context, profile prompts, tap-through photos, swipe/pass/like motion, haptics, and visible safety actions.
 - Surfaced pending incoming likes from the existing `datingLikes` collection. Likes already answered, passed, blocked, or matched are removed from the pending view.
 - Added a real mutual-match moment with direct Messenger entry, plus richer match rows and first-message guidance.

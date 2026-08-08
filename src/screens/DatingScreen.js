@@ -64,17 +64,18 @@ import { getCurrentGeo } from '../services/locationService';
 import { blockUser, loadBlockedUsers } from '../services/BlockService';
 
 const DATING = {
-  accent: '#FF7868',
-  accentBright: '#FF9A84',
-  accentSoft: 'rgba(255,120,104,0.14)',
-  accentBorder: 'rgba(255,120,104,0.34)',
-  gold: '#F3C677',
-  teal: COLORS.primary,
-  tealSoft: 'rgba(0,210,190,0.12)',
-  ink: '#090A0B',
-  panel: '#111315',
-  panelRaised: '#171A1C',
-  line: 'rgba(255,255,255,0.10)',
+  accent: '#E83E5A',
+  accentBright: '#FF758A',
+  accentDeep: '#9D1D37',
+  accentSoft: 'rgba(232,62,90,0.15)',
+  accentBorder: 'rgba(255,117,138,0.34)',
+  petal: '#FFC0CB',
+  petalSoft: 'rgba(255,192,203,0.10)',
+  petalBorder: 'rgba(255,192,203,0.24)',
+  ink: '#090608',
+  panel: '#151013',
+  panelRaised: '#1D1519',
+  line: 'rgba(255,238,242,0.10)',
 };
 
 const DISPLAY_FONT = Platform.select({
@@ -165,7 +166,7 @@ const ProfileImage = ({
   if (!gradient) return content;
   return (
     <LinearGradient
-      colors={['#16302D', '#172326', '#2B1919']}
+      colors={['#461522', '#211014', '#6A1C32']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={style}
@@ -179,12 +180,12 @@ const BrandLockup = () => (
   <View style={styles.brandLockup}>
     <View style={styles.brandNameRow}>
       <Text style={styles.brandName} allowFontScaling={false}>
-        blyp
+        Blyp
       </Text>
       <View style={styles.brandDot} />
     </View>
     <View style={styles.brandDivider} />
-    <Text style={styles.brandDating}>DATING</Text>
+    <Text style={styles.brandDating}>Dating</Text>
   </View>
 );
 
@@ -194,7 +195,6 @@ const GradientButton = ({
   icon,
   disabled = false,
   compact = false,
-  teal = false,
   style,
 }) => (
   <TouchableOpacity
@@ -206,11 +206,7 @@ const GradientButton = ({
     accessibilityLabel={label}
   >
     <LinearGradient
-      colors={
-        teal
-          ? [COLORS.primaryLight, COLORS.primary]
-          : [DATING.accentBright, DATING.accent]
-      }
+      colors={[DATING.accentBright, DATING.accent]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={[
@@ -232,32 +228,63 @@ const GradientButton = ({
 );
 
 const OrbitArtwork = ({ icon = 'heart', accent = DATING.accent }) => {
-  const orbit = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const loop = Animated.loop(
-      Animated.timing(orbit, {
-        toValue: 1,
-        duration: 9000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1500,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
     );
     loop.start();
     return () => loop.stop();
-  }, [orbit]);
+  }, [pulse]);
 
-  const rotate = orbit.interpolate({
+  const ringScale = pulse.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+    outputRange: [0.94, 1.08],
+  });
+  const ringOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.32, 0.78],
+  });
+  const auraOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.06, 0.16],
   });
 
   return (
     <View style={styles.orbitArtwork}>
+      <Animated.View
+        style={[
+          styles.orbitAura,
+          {
+            backgroundColor: accent,
+            opacity: auraOpacity,
+            transform: [{ scale: ringScale }],
+          },
+        ]}
+      />
       <View style={styles.orbitCore}>
         <Icon name={icon} size={28} color={accent} />
       </View>
-      <Animated.View style={[styles.orbitRing, { transform: [{ rotate }] }]}>
+      <Animated.View
+        style={[
+          styles.orbitRing,
+          { opacity: ringOpacity, transform: [{ scale: ringScale }] },
+        ]}
+      >
         <View style={[styles.orbitSatellite, { backgroundColor: accent }]} />
       </Animated.View>
       <View style={styles.orbitRingOuter} />
@@ -277,7 +304,7 @@ const EmptyState = ({
 }) => (
   <View style={styles.emptyState}>
     <OrbitArtwork icon={icon} accent={accent} />
-    <Text style={styles.emptyEyebrow}>YOUR ORBIT</Text>
+    <Text style={styles.emptyEyebrow}>BLYP DATING</Text>
     <Text style={styles.emptyTitle}>{title}</Text>
     <Text style={styles.emptyBody}>{body}</Text>
     {primaryLabel ? (
@@ -321,15 +348,19 @@ const MatchMoment = ({
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
     <View style={styles.matchModalBackdrop}>
       <LinearGradient
-        colors={['rgba(0,210,190,0.20)', 'rgba(9,10,11,0.97)', 'rgba(255,120,104,0.18)']}
+        colors={[
+          'rgba(157,29,55,0.52)',
+          'rgba(9,6,8,0.98)',
+          'rgba(232,62,90,0.24)',
+        ]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.matchModalCard}
       >
         <View style={styles.matchBurstOne} />
         <View style={styles.matchBurstTwo} />
-        <Text style={styles.matchEyebrow}>MUTUAL INTEREST</Text>
-        <Text style={styles.matchTitle}>You found each other.</Text>
+        <Text style={styles.matchEyebrow}>IT’S MUTUAL</Text>
+        <Text style={styles.matchTitle}>You felt the same spark.</Text>
         <Text style={styles.matchBody}>
           You and {person?.displayName || 'this person'} both chose yes. Start with something
           from their profile, not just “hey”.
@@ -1117,7 +1148,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
       )}
       <BrandLockup />
       <TouchableOpacity
-        style={styles.headerStatus}
+        style={[styles.headerStatus, isDiscoverable && styles.headerStatusLive]}
         onPress={() => selectTab('profile')}
         accessibilityLabel={
           isDiscoverable ? 'Dating profile is visible' : 'Dating profile is hidden'
@@ -1129,7 +1160,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
             isDiscoverable ? styles.statusDotLive : styles.statusDotHidden,
           ]}
         />
-        <Text style={styles.statusText}>
+        <Text style={[styles.statusText, isDiscoverable && styles.statusTextLive]}>
           {isDiscoverable ? 'VISIBLE' : 'HIDDEN'}
         </Text>
       </TouchableOpacity>
@@ -1175,6 +1206,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
               <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>
                 {item.label}
               </Text>
+              {active ? <View style={styles.tabActiveMark} /> : null}
             </TouchableOpacity>
           );
         })}
@@ -1185,12 +1217,12 @@ const DatingScreen = ({ navigation, embedded = false }) => {
   const frame = (content, { withTabs = false } = {}) => (
     <Shell {...shellProps}>
       <LinearGradient
-        colors={['#0B1110', DATING.ink, '#110D0D']}
+        colors={['#1A080F', DATING.ink, '#12080D']}
         locations={[0, 0.52, 1]}
         style={styles.atmosphere}
       >
-        <View pointerEvents="none" style={styles.glowTeal} />
-        <View pointerEvents="none" style={styles.glowWarm} />
+        <View pointerEvents="none" style={styles.glowRose} />
+        <View pointerEvents="none" style={styles.glowCrimson} />
         <View style={styles.frame}>
           {renderHeader()}
           {withTabs ? renderTabs() : null}
@@ -1285,7 +1317,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           you finish setup and explicitly turn discovery on.
         </Text>
         <View style={styles.assuranceCard}>
-          <Icon name="shield-checkmark-outline" size={22} color={DATING.teal} />
+          <Icon name="shield-checkmark-outline" size={22} color={DATING.petal} />
           <Text style={styles.assuranceText}>
             Report and block are always available. You control your visibility
             from Profile at any time.
@@ -1339,7 +1371,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
             />
           ) : (
             <LinearGradient
-              colors={['#16302D', '#172326', '#321B1A']}
+              colors={['#461522', '#211014', '#6A1C32']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={StyleSheet.absoluteFill}
@@ -1362,6 +1394,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
             locations={[0, 0.45, 1]}
             style={StyleSheet.absoluteFill}
           />
+          <View pointerEvents="none" style={styles.cardInnerStroke} />
 
           {currentPhotos.length > 1 ? (
             <>
@@ -1525,8 +1558,8 @@ const DatingScreen = ({ navigation, embedded = false }) => {
                 key={prompt.id}
                 colors={
                   index % 2 === 0
-                    ? ['rgba(255,120,104,0.12)', 'rgba(255,255,255,0.03)']
-                    : ['rgba(0,210,190,0.10)', 'rgba(255,255,255,0.03)']
+                    ? ['rgba(232,62,90,0.15)', 'rgba(255,255,255,0.03)']
+                    : ['rgba(157,29,55,0.20)', 'rgba(255,255,255,0.03)']
                 }
                 style={styles.promptCard}
               >
@@ -1553,7 +1586,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           </Text>
           <Text style={styles.discoverTitle}>Meet beyond the feed.</Text>
           <Text style={styles.discoverSubtitle}>
-            Mutual interest, real profiles, and no cold messages.
+            Real profiles. Mutual interest. A better first hello.
           </Text>
         </View>
         <TouchableOpacity
@@ -1583,7 +1616,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
         />
       ) : discoveryLoading ? (
         <View style={styles.inlineLoading}>
-          <OrbitArtwork icon="compass" accent={DATING.teal} />
+          <OrbitArtwork icon="compass" accent={DATING.petal} />
           <Text style={styles.inlineLoadingTitle}>Refreshing your orbit</Text>
         </View>
       ) : discoveryError ? (
@@ -1609,7 +1642,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
       ) : (
         <EmptyState
           icon="checkmark-circle"
-          accent={DATING.teal}
+          accent={DATING.petal}
           title="You have met everyone here."
           body="New people will appear as they join your orbit. Your past choices and block list remain respected."
           primaryLabel="Check again"
@@ -1666,14 +1699,21 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           activeOpacity={0.82}
           accessibilityLabel={`Connect with ${item.displayName}`}
         >
-          {itemBusy ? (
-            <ActivityIndicator size="small" color={DATING.ink} />
-          ) : (
-            <>
-              <Icon name="heart" size={16} color={DATING.ink} fill={DATING.ink} />
-              <Text style={styles.connectButtonText}>Connect</Text>
-            </>
-          )}
+          <LinearGradient
+            colors={[DATING.accentBright, DATING.accent]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.connectButtonGradient}
+          >
+            {itemBusy ? (
+              <ActivityIndicator size="small" color={DATING.ink} />
+            ) : (
+              <>
+                <Icon name="heart" size={16} color={DATING.ink} fill={DATING.ink} />
+                <Text style={styles.connectButtonText}>Connect</Text>
+              </>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     );
@@ -1703,7 +1743,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           style={styles.visibilityNotice}
           onPress={() => selectTab('profile')}
         >
-          <Icon name="eye-off" size={19} color={DATING.gold} />
+          <Icon name="eye-off" size={19} color={DATING.petal} />
           <Text style={styles.visibilityNoticeText}>
             Your profile is hidden. Turn discovery on before responding.
           </Text>
@@ -1757,7 +1797,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
       >
         <AvatarRing
           size={64}
-          variant={index === 0 && !unavailable ? 'brand' : 'none'}
+          variant={index === 0 && !unavailable ? 'live' : 'none'}
           animated={false}
         >
           <ProfileImage
@@ -1810,7 +1850,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
       showsVerticalScrollIndicator={false}
     >
       <LinearGradient
-        colors={['rgba(0,210,190,0.18)', 'rgba(255,255,255,0.035)']}
+        colors={['rgba(157,29,55,0.28)', 'rgba(232,62,90,0.08)']}
         style={styles.matchesHero}
       >
         <View style={styles.matchesFaces}>
@@ -1832,13 +1872,13 @@ const DatingScreen = ({ navigation, embedded = false }) => {
 
       {matchesLoading ? (
         <View style={styles.inlineLoading}>
-          <ActivityIndicator color={DATING.teal} />
+          <ActivityIndicator color={DATING.petal} />
           <Text style={styles.inlineLoadingTitle}>Loading your matches</Text>
         </View>
       ) : matches.length === 0 ? (
         <EmptyState
           icon="message"
-          accent={DATING.teal}
+          accent={DATING.petal}
           title="No mutual matches yet."
           body="When someone you choose also chooses you, the conversation opens here."
           primaryLabel="Go to discovery"
@@ -1885,7 +1925,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
       showsVerticalScrollIndicator={false}
     >
       <LinearGradient
-        colors={['rgba(255,120,104,0.17)', 'rgba(0,210,190,0.08)', '#151718']}
+        colors={['rgba(232,62,90,0.22)', 'rgba(157,29,55,0.12)', '#191115']}
         style={styles.readinessCard}
       >
         <View style={styles.readinessTop}>
@@ -1902,7 +1942,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
         </View>
         <View style={styles.readinessTrack}>
           <LinearGradient
-            colors={[DATING.accent, DATING.teal]}
+            colors={[DATING.accentDeep, DATING.accentBright]}
             style={[styles.readinessFill, { width: `${readinessPercent}%` }]}
           />
         </View>
@@ -1912,7 +1952,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
               <Icon
                 name={item.done ? 'check-circle' : 'ellipse-outline'}
                 size={15}
-                color={item.done ? DATING.teal : COLORS.textMuted}
+                color={item.done ? DATING.petal : COLORS.textMuted}
               />
               <Text
                 style={[
@@ -1932,7 +1972,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           <Icon
             name={prefs.optedIn ? 'eye' : 'eye-off'}
             size={22}
-            color={prefs.optedIn ? DATING.teal : COLORS.textMuted}
+            color={prefs.optedIn ? DATING.accentBright : COLORS.textMuted}
           />
         </View>
         <View style={styles.visibilityCopy}>
@@ -1949,8 +1989,8 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           value={!!prefs.optedIn}
           onValueChange={onToggleOptIn}
           disabled={busy}
-          trackColor={{ false: '#323438', true: 'rgba(0,210,190,0.48)' }}
-          thumbColor={prefs.optedIn ? DATING.teal : COLORS.textMuted}
+          trackColor={{ false: '#322A2E', true: 'rgba(232,62,90,0.48)' }}
+          thumbColor={prefs.optedIn ? DATING.accentBright : COLORS.textMuted}
         />
       </View>
 
@@ -2019,7 +2059,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
             value={prefs.useProfilePhoto !== false}
             onValueChange={onToggleUseProfilePhoto}
             disabled={busy}
-            trackColor={{ false: '#323438', true: 'rgba(255,120,104,0.48)' }}
+            trackColor={{ false: '#322A2E', true: 'rgba(232,62,90,0.48)' }}
             thumbColor={
               prefs.useProfilePhoto !== false ? DATING.accent : COLORS.textMuted
             }
@@ -2184,7 +2224,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
             onPress={onUpdateLocation}
             disabled={busy}
           >
-            <Icon name="location-outline" size={18} color={DATING.teal} />
+            <Icon name="location-outline" size={18} color={DATING.petal} />
             <Text style={styles.locationUpdateText}>Update my current location</Text>
           </TouchableOpacity>
         ) : null}
@@ -2192,7 +2232,7 @@ const DatingScreen = ({ navigation, embedded = false }) => {
 
       <View style={styles.safetyCard}>
         <View style={styles.safetyCardIcon}>
-          <Icon name="shield-checkmark" size={23} color={DATING.teal} />
+          <Icon name="shield-checkmark" size={23} color={DATING.petal} />
         </View>
         <View style={styles.safetyCardCopy}>
           <Text style={styles.safetyCardTitle}>Your pace. Your boundaries.</Text>
@@ -2267,23 +2307,23 @@ const styles = StyleSheet.create({
     flex: 1,
     overflow: 'hidden',
   },
-  glowTeal: {
+  glowRose: {
+    position: 'absolute',
+    width: 380,
+    height: 380,
+    borderRadius: 190,
+    backgroundColor: 'rgba(232,62,90,0.085)',
+    top: -245,
+    right: -165,
+  },
+  glowCrimson: {
     position: 'absolute',
     width: 340,
     height: 340,
     borderRadius: 170,
-    backgroundColor: 'rgba(0,210,190,0.065)',
-    top: -220,
-    right: -150,
-  },
-  glowWarm: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    backgroundColor: 'rgba(255,120,104,0.055)',
-    bottom: -210,
-    left: -170,
+    backgroundColor: 'rgba(157,29,55,0.10)',
+    bottom: -225,
+    left: -185,
   },
   frame: {
     flex: 1,
@@ -2325,14 +2365,14 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontSize: responsiveFont(22),
     fontWeight: '900',
-    letterSpacing: -0.9,
+    letterSpacing: -0.7,
     lineHeight: 24,
   },
   brandDot: {
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: DATING.teal,
+    backgroundColor: DATING.accent,
     marginLeft: 3,
     marginBottom: 4,
   },
@@ -2344,17 +2384,25 @@ const styles = StyleSheet.create({
   },
   brandDating: {
     color: DATING.accentBright,
-    fontSize: responsiveFont(9),
-    fontWeight: '900',
-    letterSpacing: 2.1,
+    fontFamily: DISPLAY_FONT,
+    fontSize: responsiveFont(12),
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   headerStatus: {
-    width: 70,
-    height: 42,
+    minWidth: 70,
+    height: 30,
+    paddingHorizontal: 9,
+    borderRadius: 15,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: 5,
+  },
+  headerStatusLive: {
+    backgroundColor: DATING.accentSoft,
+    borderWidth: 1,
+    borderColor: DATING.accentBorder,
   },
   statusDot: {
     width: 6,
@@ -2362,7 +2410,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusDotLive: {
-    backgroundColor: DATING.teal,
+    backgroundColor: DATING.accentBright,
   },
   statusDotHidden: {
     backgroundColor: COLORS.textMuted,
@@ -2372,6 +2420,9 @@ const styles = StyleSheet.create({
     fontSize: responsiveFont(8),
     fontWeight: '800',
     letterSpacing: 0.8,
+  },
+  statusTextLive: {
+    color: DATING.petal,
   },
   tabsOuter: {
     paddingHorizontal: 12,
@@ -2394,9 +2445,9 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   tabActive: {
-    backgroundColor: 'rgba(255,120,104,0.11)',
+    backgroundColor: DATING.accentSoft,
     borderWidth: 1,
-    borderColor: 'rgba(255,120,104,0.22)',
+    borderColor: DATING.accentBorder,
   },
   tabIconWrap: {
     position: 'relative',
@@ -2411,7 +2462,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: DATING.teal,
+    backgroundColor: DATING.accent,
     borderWidth: 2,
     borderColor: '#151515',
   },
@@ -2427,6 +2478,13 @@ const styles = StyleSheet.create({
   },
   tabLabelActive: {
     color: COLORS.textPrimary,
+  },
+  tabActiveMark: {
+    width: 18,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: DATING.accentBright,
+    marginTop: 1,
   },
   gateScroll: {
     flexGrow: 1,
@@ -2448,7 +2506,7 @@ const styles = StyleSheet.create({
     height: 142,
     borderRadius: 71,
     borderWidth: 1,
-    borderColor: 'rgba(255,120,104,0.22)',
+    borderColor: DATING.accentBorder,
   },
   gateHaloTwo: {
     position: 'absolute',
@@ -2537,13 +2595,13 @@ const styles = StyleSheet.create({
     borderRadius: 60,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: DATING.tealSoft,
+    backgroundColor: DATING.petalSoft,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.34)',
+    borderColor: DATING.petalBorder,
     marginBottom: 24,
   },
   ageSealNumber: {
-    color: DATING.teal,
+    color: DATING.petal,
     fontFamily: DISPLAY_FONT,
     fontSize: responsiveFont(34),
     fontWeight: '700',
@@ -2564,9 +2622,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: DATING.tealSoft,
+    backgroundColor: DATING.petalSoft,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.18)',
+    borderColor: DATING.petalBorder,
   },
   assuranceText: {
     flex: 1,
@@ -2640,15 +2698,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  orbitAura: {
+    position: 'absolute',
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+  },
   orbitCore: {
     width: 62,
     height: 62,
     borderRadius: 31,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#17191B',
+    backgroundColor: '#1C1116',
     borderWidth: 1,
-    borderColor: DATING.line,
+    borderColor: DATING.accentBorder,
     zIndex: 2,
   },
   orbitRing: {
@@ -2657,7 +2721,7 @@ const styles = StyleSheet.create({
     height: 94,
     borderRadius: 47,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: DATING.accentBorder,
   },
   orbitRingOuter: {
     position: 'absolute',
@@ -2665,7 +2729,7 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.045)',
+    borderColor: DATING.petalBorder,
   },
   orbitSatellite: {
     position: 'absolute',
@@ -2724,7 +2788,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   discoverEyebrow: {
-    color: DATING.teal,
+    color: DATING.accentBright,
     fontSize: responsiveFont(9),
     fontWeight: '900',
     letterSpacing: 1.7,
@@ -2774,8 +2838,18 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: DATING.panel,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.13)',
+    borderColor: DATING.petalBorder,
     ...SHADOWS.large,
+    shadowColor: DATING.accentDeep,
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+  },
+  cardInnerStroke: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 29,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    zIndex: 5,
   },
   discoveryFallback: {
     flex: 1,
@@ -2851,7 +2925,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: DATING.teal,
+    backgroundColor: DATING.accentBright,
   },
   curatedPillText: {
     color: COLORS.textPrimary,
@@ -2941,22 +3015,22 @@ const styles = StyleSheet.create({
   },
   swipeStampLike: {
     left: 22,
-    borderColor: DATING.teal,
+    borderColor: DATING.accentBright,
     transform: [{ rotate: '-9deg' }],
   },
   swipeStampPass: {
     right: 22,
-    borderColor: DATING.accent,
+    borderColor: 'rgba(255,255,255,0.72)',
     transform: [{ rotate: '9deg' }],
   },
   swipeStampLikeText: {
-    color: DATING.teal,
+    color: DATING.accentBright,
     fontSize: responsiveFont(19),
     fontWeight: '900',
     letterSpacing: 2,
   },
   swipeStampPassText: {
-    color: DATING.accent,
+    color: 'rgba(255,255,255,0.78)',
     fontSize: responsiveFont(19),
     fontWeight: '900',
     letterSpacing: 2,
@@ -3062,7 +3136,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sectionActionText: {
-    color: DATING.teal,
+    color: DATING.accentBright,
     fontSize: responsiveFont(11),
     fontWeight: '800',
   },
@@ -3154,9 +3228,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(243,198,119,0.08)',
+    backgroundColor: DATING.petalSoft,
     borderWidth: 1,
-    borderColor: 'rgba(243,198,119,0.20)',
+    borderColor: DATING.petalBorder,
     marginBottom: 18,
   },
   visibilityNoticeText: {
@@ -3190,7 +3264,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   likePhotoFallback: {
-    backgroundColor: '#1A2928',
+    backgroundColor: '#35121C',
   },
   likePhotoLetter: {
     fontSize: responsiveFont(48),
@@ -3245,11 +3319,15 @@ const styles = StyleSheet.create({
   },
   connectButton: {
     height: 44,
+    overflow: 'hidden',
+  },
+  connectButtonGradient: {
+    flex: 1,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: DATING.accent,
   },
   connectButtonText: {
     color: DATING.ink,
@@ -3260,7 +3338,7 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.18)',
+    borderColor: DATING.accentBorder,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
@@ -3288,7 +3366,7 @@ const styles = StyleSheet.create({
   miniFaceFront: {
     right: 0,
     bottom: 0,
-    backgroundColor: '#17302E',
+    backgroundColor: '#4A1524',
   },
   matchesHeroCopy: {
     flex: 1,
@@ -3316,7 +3394,7 @@ const styles = StyleSheet.create({
     borderRadius: 32,
   },
   matchAvatarFallback: {
-    backgroundColor: '#1C2D2B',
+    backgroundColor: '#3A121E',
   },
   matchAvatarLetter: {
     fontSize: responsiveFont(23),
@@ -3340,10 +3418,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: DATING.tealSoft,
+    backgroundColor: DATING.accentSoft,
   },
   newMatchPillText: {
-    color: DATING.teal,
+    color: DATING.accentBright,
     fontSize: responsiveFont(7),
     fontWeight: '900',
     letterSpacing: 0.6,
@@ -3365,7 +3443,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: DATING.teal,
+    backgroundColor: DATING.accent,
   },
   profileContent: {
     paddingHorizontal: 14,
@@ -3498,7 +3576,7 @@ const styles = StyleSheet.create({
     borderRadius: 23,
   },
   profilePreviewFallback: {
-    backgroundColor: '#20302E',
+    backgroundColor: '#3C1320',
   },
   profilePreviewLetter: {
     fontSize: responsiveFont(27),
@@ -3507,7 +3585,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profilePreviewEyebrow: {
-    color: DATING.teal,
+    color: DATING.accentBright,
     fontSize: responsiveFont(8),
     fontWeight: '900',
     letterSpacing: 1.4,
@@ -3570,7 +3648,7 @@ const styles = StyleSheet.create({
     minHeight: 105,
     padding: 14,
     borderRadius: 15,
-    backgroundColor: '#0C0E0F',
+    backgroundColor: '#0D090B',
     borderWidth: 1,
     borderColor: DATING.line,
     color: COLORS.textPrimary,
@@ -3581,7 +3659,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: 13,
     borderRadius: 14,
-    backgroundColor: '#0C0E0F',
+    backgroundColor: '#0D090B',
     borderWidth: 1,
     borderColor: DATING.line,
     color: COLORS.textPrimary,
@@ -3618,7 +3696,7 @@ const styles = StyleSheet.create({
     minHeight: 38,
     paddingHorizontal: 12,
     borderRadius: 19,
-    backgroundColor: '#0D0F10',
+    backgroundColor: '#0E090C',
     borderWidth: 1,
     borderColor: DATING.line,
     flexDirection: 'row',
@@ -3702,7 +3780,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0C0E0F',
+    backgroundColor: '#0D090B',
     borderWidth: 1,
     borderColor: DATING.line,
   },
@@ -3722,14 +3800,14 @@ const styles = StyleSheet.create({
     marginTop: 14,
     paddingHorizontal: 12,
     borderRadius: 14,
-    backgroundColor: DATING.tealSoft,
+    backgroundColor: DATING.petalSoft,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   locationUpdateText: {
-    color: DATING.teal,
+    color: DATING.petal,
     fontSize: responsiveFont(11),
     fontWeight: '800',
   },
@@ -3739,9 +3817,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    backgroundColor: DATING.tealSoft,
+    backgroundColor: DATING.petalSoft,
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.17)',
+    borderColor: DATING.petalBorder,
   },
   safetyCardIcon: {
     width: 42,
@@ -3749,7 +3827,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,210,190,0.11)',
+    backgroundColor: 'rgba(255,192,203,0.12)',
   },
   safetyCardCopy: {
     flex: 1,
@@ -3782,7 +3860,7 @@ const styles = StyleSheet.create({
     width: '72%',
     aspectRatio: 1,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,120,104,0.10)',
+    backgroundColor: 'rgba(232,62,90,0.12)',
   },
   matchModalBackdrop: {
     flex: 1,
@@ -3810,7 +3888,7 @@ const styles = StyleSheet.create({
     borderRadius: 110,
     top: -150,
     right: -100,
-    backgroundColor: 'rgba(0,210,190,0.10)',
+    backgroundColor: 'rgba(157,29,55,0.22)',
   },
   matchBurstTwo: {
     position: 'absolute',
@@ -3819,10 +3897,10 @@ const styles = StyleSheet.create({
     borderRadius: 105,
     bottom: -150,
     left: -110,
-    backgroundColor: 'rgba(255,120,104,0.10)',
+    backgroundColor: 'rgba(232,62,90,0.15)',
   },
   matchEyebrow: {
-    color: DATING.teal,
+    color: DATING.petal,
     fontSize: responsiveFont(9),
     fontWeight: '900',
     letterSpacing: 2,
@@ -3863,7 +3941,7 @@ const styles = StyleSheet.create({
   },
   matchFaceLeft: {
     left: 16,
-    borderColor: DATING.teal,
+    borderColor: DATING.petal,
     transform: [{ rotate: '-5deg' }],
   },
   matchFaceRight: {
@@ -3877,7 +3955,7 @@ const styles = StyleSheet.create({
     borderRadius: 52,
   },
   matchFaceFallback: {
-    backgroundColor: '#1B2B29',
+    backgroundColor: '#3B1320',
   },
   matchFaceLetter: {
     fontSize: responsiveFont(38),
