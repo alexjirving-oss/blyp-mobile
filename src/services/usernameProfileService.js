@@ -115,7 +115,7 @@ export async function clearUsernameDeferred(uid) {
 
 /**
  * After email signup (or when pending carries a username), claim the handle once
- * so the post-login username overlay is not needed for new accounts.
+ * during AuthScreen success. There is no post-login username overlay.
  */
 export async function claimPendingUsernameIfNeeded({ uid, email, photoURL, username } = {}) {
   if (!uid) return null;

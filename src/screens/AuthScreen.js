@@ -31,6 +31,7 @@ import { ensureUserProfile } from '../services/LiveService';
 import { enterGuestMode } from '../services/guestSessionService';
 import {
   claimPendingUsernameIfNeeded,
+  clearPendingProfile,
   rememberPendingProfile,
   validateUsername,
 } from '../services/usernameProfileService';
@@ -233,8 +234,8 @@ const AuthScreen = () => {
             birthdate: dobParsedForProfile.valid ? dobParsedForProfile.iso : undefined,
             ageVerified: dobParsedForProfile.valid ? true : undefined,
           });
-          // Claim the @handle chosen at signup here so ProfileCompletionGate
-          // does not re-prompt new email accounts on every launch.
+          // Claim the @handle chosen at signup here — the only username collection
+          // step. Never leave a post-login overlay to re-prompt on later launches.
           // Never use the signup form field on a plain password login (toggle residue).
           try {
             const formUsernameForClaim =
@@ -246,11 +247,17 @@ const AuthScreen = () => {
               username: formUsernameForClaim || undefined,
             });
           } catch (claimError) {
-            // Leave pending profile so the one-time gate can recover (e.g. taken).
+            // Do not hand off to a post-login overlay. Clear pending so cold starts
+            // never re-open a username UI; user can set a handle in Edit Profile.
             console.warn(
-              '[AUTH][SUCCESS] username claim deferred to gate',
+              '[AUTH][SUCCESS] username claim failed; clearing pending (no overlay)',
               claimError?.code || claimError?.message || claimError,
             );
+            try {
+              await clearPendingProfile();
+            } catch {
+              /* ignore */
+            }
           }
         }
       } catch {
