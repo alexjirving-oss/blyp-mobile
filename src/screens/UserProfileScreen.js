@@ -11,6 +11,8 @@ import {
   ActivityIndicator,
   StatusBar,
   Alert,
+  Modal,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
 import ReportModal from '../components/ReportModal';
@@ -50,9 +52,12 @@ const UserProfileScreen = ({ route, navigation }) => {
   // which would otherwise throw on destructure and crash the screen.
   const { userId, username } = route?.params || {};
   const { uid: cognitoUid, user: authUser, getDisplayName } = useAuth();
-  const { isAdmin } = useIsAdmin();
+  const { hasPermission } = useIsAdmin();
   const { width: winWidth } = useWindowDimensions();
   const contentWidth = Math.min(winWidth, PROFILE_CONTENT_MAX);
+  const canAdjustAdminPriority = hasPermission('growth.feed_priority');
+  const canBanAsAdmin = hasPermission('users.ban');
+  const hasProfileAdminControls = canAdjustAdminPriority || canBanAsAdmin;
   const gridPad = 18;
   const gridGap = 2;
   const postCellWidth = (contentWidth - gridPad * 2 - gridGap * 2) / 3;
@@ -65,6 +70,7 @@ const UserProfileScreen = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [adminControlsVisible, setAdminControlsVisible] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [messagingBusy, setMessagingBusy] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState('all');
@@ -92,6 +98,10 @@ const UserProfileScreen = ({ route, navigation }) => {
 
   const handleOpenProfileMenu = useCallback(() => {
     if (!userId || currentUserId === userId) return;
+    if (hasProfileAdminControls) {
+      setAdminControlsVisible(true);
+      return;
+    }
     const actions = [
       { text: 'Report user', onPress: () => setReportVisible(true) },
       blocked
@@ -124,59 +134,94 @@ const UserProfileScreen = ({ route, navigation }) => {
             },
           },
     ];
-    if (isAdmin) {
-      actions.push({
-        text: 'Admin · account feed priority',
-        onPress: () => {
-          Alert.alert(
-            'Account feed priority',
-            'Set this users For You / discovery weight (all their posts). Combines additively with per-post priority.',
-            [
-              ...FEED_PRIORITY_TIERS.map((tier) => ({
-                text: `${tier.label} (${tier.hint})`,
-                onPress: async () => {
-                  try {
-                    await adminSetAccountFeedPriority(userId, tier.value);
-                    Toast.show({ type: 'success', text1: 'Account priority updated', text2: tier.label, position: 'bottom', visibilityTime: 1500 });
-                  } catch (e) {
-                    const code = String(e?.code || '');
-                    const msg = code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
-                      ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS.'
-                      : e?.message || 'Could not update account priority.';
-                    Alert.alert('Admin action failed', msg);
-                  }
-                },
-              })),
-              { text: 'Cancel', style: 'cancel' },
-            ],
-          );
-        },
-      });
-      actions.push({
-        text: 'Admin · ban user',
-        style: 'destructive',
-        onPress: () => {
-          Alert.alert('Ban user (admin)', 'Ban this user platform-wide?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Ban',
-              style: 'destructive',
-              onPress: async () => {
-                try {
-                  await adminBanUser(userId, { reason: 'Banned from mobile profile admin' });
-                  Toast.show({ type: 'success', text1: 'User banned', position: 'bottom' });
-                } catch (e) {
-                  Alert.alert('Admin action failed', e?.message || 'Could not ban user.');
-                }
-              },
-            },
-          ]);
-        },
-      });
-    }
     actions.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert(userProfile?.displayName || 'Options', '', actions);
-  }, [userId, currentUserId, blocked, userProfile?.displayName, isAdmin]);
+  }, [userId, currentUserId, blocked, userProfile?.displayName, hasProfileAdminControls]);
+
+  const confirmAdminAccountPriority = (tier) => {
+    setAdminControlsVisible(false);
+    Alert.alert(
+      'Account feed priority',
+      `Set this account to ${tier.label}?\n${tier.hint}\nApplies to all of this creator's posts.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Set ${tier.label}`,
+          onPress: async () => {
+            try {
+              await adminSetAccountFeedPriority(userId, tier.value);
+              Toast.show({
+                type: 'success',
+                text1: 'Account priority updated',
+                text2: tier.label,
+                position: 'bottom',
+                visibilityTime: 1500,
+              });
+            } catch (e) {
+              const code = String(e?.code || '');
+              const msg = code === 'ADMIN_NOT_ALLOWLISTED' || code === 'ADMIN_ALLOWLIST_REQUIRED'
+                ? 'Your Cognito sub must also be on ADMIN_ALLOWLIST_SUBS.'
+                : e?.message || 'Could not update account priority.';
+              Alert.alert('Admin action failed', msg);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const confirmAdminBan = () => {
+    setAdminControlsVisible(false);
+    Alert.alert('Ban user (admin)', 'Ban this user platform-wide?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Ban',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await adminBanUser(userId, { reason: 'Banned from mobile profile admin' });
+            Toast.show({ type: 'success', text1: 'User banned', position: 'bottom' });
+          } catch (e) {
+            Alert.alert('Admin action failed', e?.message || 'Could not ban user.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleAdminBlockToggle = async () => {
+    setAdminControlsVisible(false);
+    if (blocked) {
+      try {
+        await unblockUser(userId);
+        setBlocked(false);
+        Toast.show({ type: 'success', text1: 'Unblocked', position: 'bottom' });
+      } catch (e) {
+        Alert.alert('Could not unblock', e?.message || 'Please try again.');
+      }
+      return;
+    }
+    Alert.alert(
+      'Block user',
+      'You will not see their posts, comments or messages, and they will not be able to message you.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(userId);
+              setBlocked(true);
+              Toast.show({ type: 'success', text1: 'Blocked', position: 'bottom' });
+            } catch (e) {
+              Alert.alert('Could not block', e?.message || 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const fetchUserProfile = async () => {
     try {
@@ -561,6 +606,96 @@ const UserProfileScreen = ({ route, navigation }) => {
         targetLabel={userProfile?.displayName ? `@${userProfile.displayName}` : 'this user'}
         reportedUserId={userId}
       />
+      <Modal
+        visible={adminControlsVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAdminControlsVisible(false)}
+      >
+        <View style={styles.adminModalRoot}>
+          <TouchableOpacity
+            style={styles.adminModalBackdrop}
+            activeOpacity={1}
+            onPress={() => setAdminControlsVisible(false)}
+          />
+          <View style={styles.adminSheet}>
+            <View style={styles.adminSheetHeader}>
+              <View>
+                <Text style={styles.adminSheetTitle}>Admin controls</Text>
+                <Text style={styles.adminSheetSubtitle} numberOfLines={1}>
+                  {userProfile?.displayName || userId}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setAdminControlsVisible(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <Icon name="close" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              style={styles.adminSheetScroll}
+              contentContainerStyle={styles.adminSheetContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {canAdjustAdminPriority ? (
+                <>
+                  <Text style={styles.adminSectionLabel}>Account reach</Text>
+                  {FEED_PRIORITY_TIERS.map((tier) => (
+                    <TouchableOpacity
+                      key={tier.value}
+                      style={styles.adminRow}
+                      onPress={() => confirmAdminAccountPriority(tier)}
+                    >
+                      <Icon
+                        name={tier.value === 'boost' || tier.value === 'high' ? 'arrow-up' : tier.value === 'suppress' || tier.value === 'low' ? 'arrow-down' : 'remove'}
+                        size={20}
+                        color={tier.value === 'boost' || tier.value === 'high' ? '#5EEAD4' : tier.value === 'suppress' ? '#FB7185' : tier.value === 'low' ? '#FCD34D' : '#fff'}
+                      />
+                      <View style={styles.adminRowCopy}>
+                        <Text style={styles.adminRowText}>{tier.label}</Text>
+                        <Text style={styles.adminRowHint}>{tier.hint}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              ) : null}
+              {canBanAsAdmin ? (
+                <>
+                  <Text style={styles.adminSectionLabel}>Moderation</Text>
+                  <TouchableOpacity style={styles.adminRow} onPress={confirmAdminBan}>
+                    <Icon name="ban" size={20} color="#FB7185" />
+                    <Text style={[styles.adminRowText, { color: '#FB7185' }]}>Ban user platform-wide</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+              <Text style={styles.adminSectionLabel}>User options</Text>
+              <TouchableOpacity
+                style={styles.adminRow}
+                onPress={() => {
+                  setAdminControlsVisible(false);
+                  setReportVisible(true);
+                }}
+              >
+                <Icon name="flag" size={20} color="#fff" />
+                <Text style={styles.adminRowText}>Report user</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.adminRow} onPress={handleAdminBlockToggle}>
+                <Icon name={blocked ? 'checkmark-circle' : 'ban'} size={20} color="#FB7185" />
+                <Text style={[styles.adminRowText, { color: '#FB7185' }]}>
+                  {blocked ? 'Unblock user' : 'Block user'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.adminRow, styles.adminCancelRow]}
+                onPress={() => setAdminControlsVisible(false)}
+              >
+                <Text style={styles.adminCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       {blocked ? (
         <View style={styles.blockedBanner}>
           <Icon name="ban" size={16} color="#FF6B60" />
@@ -738,6 +873,92 @@ const styles = StyleSheet.create({
   },
   moreButton: {
     padding: 8,
+  },
+  adminModalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  adminModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+  },
+  adminSheet: {
+    maxHeight: '88%',
+    backgroundColor: '#141418',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 24,
+  },
+  adminSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingBottom: 10,
+  },
+  adminSheetTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  adminSheetSubtitle: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    marginTop: 2,
+    maxWidth: 260,
+  },
+  adminSheetScroll: {
+    flexGrow: 0,
+  },
+  adminSheetContent: {
+    paddingBottom: 4,
+  },
+  adminSectionLabel: {
+    color: 'rgba(255,255,255,0.48)',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    paddingHorizontal: 4,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  adminRow: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 4,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  adminRowCopy: {
+    flex: 1,
+  },
+  adminRowText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  adminRowHint: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  adminCancelRow: {
+    justifyContent: 'center',
+    borderBottomWidth: 0,
+    marginTop: 6,
+  },
+  adminCancelText: {
+    color: COLORS.primary,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    width: '100%',
   },
   blockedBanner: {
     flexDirection: 'row',

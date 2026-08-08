@@ -1,9 +1,8 @@
 /**
  * Mobile client for blyp-live-service /admin/* ops.
  *
- * Auth: Cognito Bearer + server ADMIN_ALLOWLIST_SUBS (same as dashboard).
- * UI gating (useIsAdmin / Firestore isAdmin) is separate — both are required
- * for in-app admin actions to succeed.
+ * Auth and UI entitlement: Cognito Bearer + server ADMIN_ALLOWLIST_SUBS/RBAC
+ * (the same authority used by the dashboard and every mutating admin route).
  */
 
 import { getCognitoJwtForApi } from './getCognitoJwtForApi';
@@ -26,6 +25,16 @@ export const FEED_PRIORITY_TIERS: Array<{
   { value: 'high', label: 'High', hint: 'Increased' },
   { value: 'boost', label: 'Boost', hint: 'Maximum priority' },
 ];
+
+export type AdminAccess = {
+  ok: boolean;
+  actorUserId: string;
+  role: string;
+  roleDisplay?: string;
+  permissions: string[];
+  staffSource?: 'db' | 'bootstrap';
+  displayName?: string | null;
+};
 
 async function callAdminBackend<T>(
   path: string,
@@ -64,6 +73,17 @@ async function callAdminBackend<T>(
   }
 
   return json as T;
+}
+
+/**
+ * Server-authoritative mobile entitlement check.
+ *
+ * Keeping visibility on the same endpoint that guards mutations prevents
+ * Cognito/Firebase hydration races and stale Firestore role mirrors from hiding
+ * valid controls (or showing them to a normal user).
+ */
+export async function getAdminAccess(): Promise<AdminAccess> {
+  return callAdminBackend<AdminAccess>('/admin/auth/me', 'GET');
 }
 
 export async function adminBanUser(

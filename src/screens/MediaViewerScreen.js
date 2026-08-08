@@ -12,6 +12,7 @@ import {
   FlatList,
   ActivityIndicator,
   Modal,
+  ScrollView,
   useWindowDimensions,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -114,9 +115,12 @@ const MediaViewerItem = ({
 }) => {
   // useAuth().uid is the app's primary identity id (Cognito user id)
   const { uid, authReady, isAuthenticated } = useAuth();
-  const { isAdmin } = useIsAdmin();
+  const { isAdmin, hasPermission } = useIsAdmin();
   const { width: liveWidth } = useWindowDimensions();
   const frameWidth = pageWidth > 0 ? pageWidth : liveWidth;
+  const canAdjustAdminPriority = isAdmin && hasPermission('growth.feed_priority');
+  const canRemoveAsAdmin = isAdmin && hasPermission('content.moderate');
+  const canBanAsAdmin = isAdmin && hasPermission('users.ban');
 
   // Alias kept so the (large) body below continues to reference `post`.
   const post = actualPost;
@@ -283,6 +287,9 @@ const MediaViewerItem = ({
     if (!owner) return false;
     return effectiveOwnerIds.includes(owner);
   })();
+  const adminRemovalLabel = isVideoPost(actualPost)
+    ? 'Delete video (admin)'
+    : 'Delete post (admin)';
 
   const videoDownloadUrl = (() => {
     if (actualPost?.videoUrl) return fixStorageUrl(actualPost.videoUrl);
@@ -372,12 +379,12 @@ const MediaViewerItem = ({
   const runAdminRemovePost = () => {
     closeOptions();
     Alert.alert(
-      'Remove post (admin)',
-      'Hide this post from feeds for everyone? (soft remove + moderation.hidden)',
+      adminRemovalLabel,
+      'Remove this content from Blyp for everyone? This is an audited, reversible moderation removal.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Remove',
+          text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -388,8 +395,8 @@ const MediaViewerItem = ({
               });
               Toast.show({
                 type: 'success',
-                text1: 'Removed',
-                text2: 'Post hidden from feeds',
+                text1: 'Deleted from Blyp',
+                text2: 'Content hidden from everyone',
                 position: 'bottom',
                 visibilityTime: 1500,
               });
@@ -994,6 +1001,12 @@ const MediaViewerItem = ({
               </TouchableOpacity>
             </View>
 
+            <ScrollView
+              style={styles.optionsScroll}
+              contentContainerStyle={styles.optionsScrollContent}
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+            >
             {videoDownloadUrl ? (
               <TouchableOpacity
                 style={styles.optionsRow}
@@ -1187,38 +1200,38 @@ const MediaViewerItem = ({
               </>
             )}
 
-            {isAdmin ? (
+            {canAdjustAdminPriority || canRemoveAsAdmin || canBanAsAdmin ? (
               <>
                 <View style={styles.optionsAdminDivider} />
                 <Text style={styles.optionsAdminLabel}>Admin · this post</Text>
-                {FEED_PRIORITY_TIERS.map((tier) => (
-                  <TouchableOpacity
-                    key={`post-${tier.value}`}
-                    style={styles.optionsRow}
-                    onPress={() => runAdminSetPriority(tier.value)}
-                  >
-                    <Icon
-                      name={tier.value === 'boost' || tier.value === 'high' ? 'arrow-up' : tier.value === 'suppress' || tier.value === 'low' ? 'arrow-down' : 'remove'}
-                      size={20}
-                      color={tier.value === 'boost' || tier.value === 'high' ? '#5EEAD4' : tier.value === 'suppress' ? '#FB7185' : tier.value === 'low' ? '#FCD34D' : '#fff'}
-                    />
-                    <Text
-                      style={[
-                        styles.optionsRowText,
-                        tier.value === 'boost' || tier.value === 'high'
-                          ? { color: '#5EEAD4' }
-                          : tier.value === 'suppress'
-                            ? { color: '#FB7185' }
-                            : tier.value === 'low'
-                              ? { color: '#FCD34D' }
-                              : null,
-                      ]}
+                {canAdjustAdminPriority ? FEED_PRIORITY_TIERS.map((tier) => (
+                    <TouchableOpacity
+                      key={`post-${tier.value}`}
+                      style={styles.optionsRow}
+                      onPress={() => runAdminSetPriority(tier.value)}
                     >
-                      Post: {tier.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                {String(actualPost?.userId || '').trim() ? (
+                      <Icon
+                        name={tier.value === 'boost' || tier.value === 'high' ? 'arrow-up' : tier.value === 'suppress' || tier.value === 'low' ? 'arrow-down' : 'remove'}
+                        size={20}
+                        color={tier.value === 'boost' || tier.value === 'high' ? '#5EEAD4' : tier.value === 'suppress' ? '#FB7185' : tier.value === 'low' ? '#FCD34D' : '#fff'}
+                      />
+                      <Text
+                        style={[
+                          styles.optionsRowText,
+                          tier.value === 'boost' || tier.value === 'high'
+                            ? { color: '#5EEAD4' }
+                            : tier.value === 'suppress'
+                              ? { color: '#FB7185' }
+                              : tier.value === 'low'
+                                ? { color: '#FCD34D' }
+                                : null,
+                        ]}
+                      >
+                        Post: {tier.label}
+                      </Text>
+                    </TouchableOpacity>
+                  )) : null}
+                {canAdjustAdminPriority && String(actualPost?.userId || '').trim() ? (
                   <>
                     <View style={styles.optionsAdminDivider} />
                     <Text style={styles.optionsAdminLabel}>Admin · author account</Text>
@@ -1236,13 +1249,13 @@ const MediaViewerItem = ({
                     ))}
                   </>
                 ) : null}
-                {!canDeletePost ? (
+                {canRemoveAsAdmin ? (
                   <TouchableOpacity style={styles.optionsRow} onPress={runAdminRemovePost}>
                     <Icon name="trash" size={20} color="#FB7185" />
-                    <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>Remove post (admin)</Text>
+                    <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>{adminRemovalLabel}</Text>
                   </TouchableOpacity>
                 ) : null}
-                {!isOwnPost && String(actualPost?.userId || '').trim() ? (
+                {canBanAsAdmin && !isOwnPost && String(actualPost?.userId || '').trim() ? (
                   <TouchableOpacity style={styles.optionsRow} onPress={runAdminBanAuthor}>
                     <Icon name="ban" size={20} color="#FB7185" />
                     <Text style={[styles.optionsRowText, { color: '#FB7185' }]}>Ban author</Text>
@@ -1254,6 +1267,7 @@ const MediaViewerItem = ({
             <TouchableOpacity style={[styles.optionsRow, styles.optionsCancel]} onPress={closeOptions}>
               <Text style={styles.optionsCancelText}>Cancel</Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1375,9 +1389,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#141418',
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
+    maxHeight: '90%',
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 28,
+  },
+  optionsScroll: {
+    flexGrow: 0,
+  },
+  optionsScrollContent: {
+    paddingBottom: 4,
   },
   optionsHeader: {
     flexDirection: 'row',
