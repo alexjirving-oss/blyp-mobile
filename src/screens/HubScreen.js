@@ -96,6 +96,21 @@ const HubScreen = ({ navigation }) => {
           </Text>
         </View>
 
+        <TouchableOpacity
+          style={styles.spotifyCard}
+          activeOpacity={0.85}
+          onPress={() => navigation?.navigate?.('SpotifyConnect')}
+        >
+          <Ionicons name="musical-notes" size={22} color={COLORS.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.spotifyTitle}>Spotify Connect</Text>
+            <Text style={styles.spotifySub}>
+              Link Premium and keep listening while you use Blyp
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.textSecondary} />
+        </TouchableOpacity>
+
         {/* MODULE C — Your socials launcher */}
         <View style={styles.sectionHead}>
           <Text style={styles.sectionTitle}>Your socials</Text>
@@ -355,6 +370,20 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   promiseText: { flex: 1, color: COLORS.textPrimary, fontSize: responsiveFont(12.5), lineHeight: responsiveFont(18), fontWeight: '600' },
+  spotifyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 18,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  spotifyTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '700' },
+  spotifySub: { color: COLORS.textSecondary, fontSize: responsiveFont(12), marginTop: 2 },
 
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   sectionTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(16), fontWeight: '800' },

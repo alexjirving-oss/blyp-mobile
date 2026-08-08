@@ -6,6 +6,11 @@ import Icon from '../components/Icon';
 import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
 import { mapAuthError } from '../lib/auth/errors';
 import {
+  getPasswordRequirementChecks,
+  isPasswordPolicySatisfied,
+  PASSWORD_REQUIREMENTS_SUMMARY,
+} from '../lib/auth/passwordPolicy';
+import {
   generateOpaqueCognitoUsername,
   isEmailAliasUsernameError,
   isSignupAttributeRejection,
@@ -293,6 +298,11 @@ const AuthScreen = () => {
     try {
       // Forgot password flow (change password after code)
       if (resetMode && resetCode.trim() && newPassword.trim()) {
+        if (!isPasswordPolicySatisfied(newPassword.trim())) {
+          Alert.alert('Choose a stronger password', PASSWORD_REQUIREMENTS_SUMMARY);
+          setLoading(false);
+          return;
+        }
         setLoading(true);
         const emailToReset = emailNorm;
         const cognitoUser = new CognitoUser({ Username: emailToReset, Pool: userPool });
@@ -468,9 +478,8 @@ const AuthScreen = () => {
           return;
         }
         const pw = String(password || '');
-        const pwStrong = pw.length >= 8 && /[a-z]/.test(pw) && /[A-Z]/.test(pw) && /[0-9]/.test(pw);
-        if (!pwStrong) {
-          const msg = 'Password must be at least 8 characters and include an uppercase letter, a lowercase letter and a number.';
+        if (!isPasswordPolicySatisfied(pw)) {
+          const msg = PASSWORD_REQUIREMENTS_SUMMARY;
           setLastError(msg);
           Alert.alert('Choose a stronger password', msg);
           setLoading(false);
@@ -610,7 +619,7 @@ const AuthScreen = () => {
     if (!isSocialProviderEnabled(provider)) {
       const message = getSocialProviderSetupMessage(provider);
       console.warn(`[AUTH][SOCIAL] ${provider} not ready`, message);
-      Alert.alert(`${provider} coming soon`, message);
+      Alert.alert(`${provider} sign-in`, message);
       return;
     }
 
@@ -778,15 +787,30 @@ const AuthScreen = () => {
             />
 
             {!resetMode && (
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="#9ca3af"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                autoCapitalize="none"
-              />
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  placeholderTextColor="#9ca3af"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+                {!isLogin && !needsConfirm ? (
+                  <View style={styles.passwordRules} accessibilityRole="summary">
+                    <Text style={styles.passwordRulesTitle}>Password must include:</Text>
+                    {getPasswordRequirementChecks(password).map((rule) => (
+                      <Text
+                        key={rule.id}
+                        style={rule.ok ? styles.passwordRuleOk : styles.passwordRulePending}
+                      >
+                        {rule.ok ? '✓' : '○'} {rule.label}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+              </>
             )}
             {resetMode && (
               <>
@@ -809,6 +833,17 @@ const AuthScreen = () => {
                   secureTextEntry
                   autoCapitalize="none"
                 />
+                <View style={styles.passwordRules} accessibilityRole="summary">
+                  <Text style={styles.passwordRulesTitle}>New password must include:</Text>
+                  {getPasswordRequirementChecks(newPassword).map((rule) => (
+                    <Text
+                      key={rule.id}
+                      style={rule.ok ? styles.passwordRuleOk : styles.passwordRulePending}
+                    >
+                      {rule.ok ? '✓' : '○'} {rule.label}
+                    </Text>
+                  ))}
+                </View>
               </>
             )}
 
@@ -1479,6 +1514,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginBottom: 16,
+  },
+  passwordRules: {
+    marginTop: -4,
+    marginBottom: 14,
+    paddingHorizontal: 4,
+  },
+  passwordRulesTitle: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  passwordRulePending: {
+    color: '#71717A',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  passwordRuleOk: {
+    color: COLORS.primary || '#00D2BE',
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
 });
 

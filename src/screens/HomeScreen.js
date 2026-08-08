@@ -385,6 +385,16 @@ const HomeScreen = ({ navigation, route }) => {
     feedAudioMutedRef.current = feedAudioMuted;
   }, [feedAudioMuted]);
 
+  // Avoid fighting Spotify when For You is unmuted and focused.
+  useEffect(() => {
+    if (feedAudioMuted || selectedTab !== 'A' || !isScreenFocused) return undefined;
+    try {
+      const { pauseSpotifyForBlypAudio } = require('../services/spotifyAudioCoordinator');
+      pauseSpotifyForBlypAudio('for_you_unmuted').catch(() => {});
+    } catch { /* optional */ }
+    return undefined;
+  }, [feedAudioMuted, selectedTab, isScreenFocused, currentDiscoverIndex]);
+
   // One audible owner for For You: claim media loudspeaker mode when the active
   // clip should play sound; release on leave / mute / pause / blur.
   useEffect(() => {
@@ -502,6 +512,37 @@ const HomeScreen = ({ navigation, route }) => {
           return;
         }
         const next = stampFeedKeys(ordered, forYouCycleRef.current);
+        // Soft re-rank hitch guard: if the visible prefix is unchanged, skip
+        // setState so FlatList does not rebuild cells under the finger.
+        const prev = randomPostsRef.current || [];
+        const pinId = forYouFocusPinIdRef.current;
+        const samePrefix = (() => {
+          const n = Math.min(prev.length, next.length, 6);
+          if (n === 0) return false;
+          for (let i = 0; i < n; i += 1) {
+            if (String(prev[i]?.id || '') !== String(next[i]?.id || '')) return false;
+          }
+          return true;
+        })();
+        if (samePrefix && !pinId) {
+          // Still refresh the tail without touching the playing head.
+          const headIds = new Set(prev.slice(0, 3).map((p) => String(p?.id || '')));
+          const tail = next.filter((p) => p?.id && !headIds.has(String(p.id)));
+          if (!tail.length) return;
+          const merged = [...prev.slice(0, Math.max(3, currentDiscoverIndexRef.current + 2)), ...tail];
+          // Dedupe by id preserving order
+          const seen = new Set();
+          const deduped = [];
+          for (const p of merged) {
+            const id = String(p?.id || '');
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            deduped.push(p);
+          }
+          randomPostsRef.current = deduped;
+          setRandomPosts(deduped);
+          return;
+        }
         randomPostsRef.current = next;
         setRandomPosts(next);
       })
@@ -1037,8 +1078,25 @@ const HomeScreen = ({ navigation, route }) => {
                         && currentDiscoverIndexRef.current === 0
                       ) {
                         const ranked = stampFeedKeys(ordered, cycle);
-                        setRandomPosts(ranked);
-                        randomPostsRef.current = ranked;
+                        const prev = randomPostsRef.current || [];
+                        const pinId = forYouFocusPinIdRef.current;
+                        const sameHead =
+                          !pinId &&
+                          prev.length > 0 &&
+                          String(prev[0]?.id || '') === String(ranked[0]?.id || '') &&
+                          String(prev[1]?.id || '') === String(ranked[1]?.id || '');
+                        if (sameHead) {
+                          // Keep playing head stable; splice ranked tail only.
+                          const head = prev.slice(0, Math.max(2, currentDiscoverIndexRef.current + 1));
+                          const headIds = new Set(head.map((p) => String(p?.id || '')));
+                          const tail = ranked.filter((p) => p?.id && !headIds.has(String(p.id)));
+                          const merged = [...head, ...tail];
+                          randomPostsRef.current = merged;
+                          setRandomPosts(merged);
+                        } else {
+                          setRandomPosts(ranked);
+                          randomPostsRef.current = ranked;
+                        }
                       }
                     } else {
                       // Fast path: likes/views/gifts on the live page must not
@@ -1677,17 +1735,17 @@ const HomeScreen = ({ navigation, route }) => {
     return index === currentDiscoverIndex;
   };
 
-  // Disk-warm current ±2 videos + avatars/thumbs. Idle for farther neighbors.
-  // No setState — avoids FlatList thrash that fought the audio flicker fix.
+  // Disk-warm current ±3 videos + avatars/thumbs. Decode mounts stay tighter
+  // (±1) so Flip/Fold memory stays sane; disk prefetch is cheaper than ExoPlayer.
   useEffect(() => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
     if (!list?.length) return;
-    prefetchPostWindow(list, current, { radius: 2, images: true });
-    // Also warm +3/+4 ahead while idle so paging never waits on first byte.
-    if (list[current + 3] || list[current + 4]) {
-      prefetchPostWindow(list, current + 3, { radius: 1, images: true });
+    prefetchPostWindow(list, current, { radius: 3, images: true });
+    // Also warm +4/+5 ahead while idle so fast paging never waits on first byte.
+    if (list[current + 4] || list[current + 5]) {
+      prefetchPostWindow(list, current + 4, { radius: 1, images: true });
     }
   }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts]);
 
@@ -1808,7 +1866,8 @@ const HomeScreen = ({ navigation, route }) => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 2;
+            // Decode only current ±1 (memory). Disk prefetch covers ±3 separately.
+            const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 1;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
@@ -2162,10 +2221,10 @@ const HomeScreen = ({ navigation, route }) => {
               snapToAlignment="start"
               decelerationRate="fast"
               removeClippedSubviews={false}
-              maxToRenderPerBatch={2}
-              windowSize={5}
-              initialNumToRender={2}
-              updateCellsBatchingPeriod={50}
+              maxToRenderPerBatch={1}
+              windowSize={7}
+              initialNumToRender={1}
+              updateCellsBatchingPeriod={32}
               getItemLayout={(data, index) => ({
                 length: feedHeight,
                 offset: feedHeight * index,

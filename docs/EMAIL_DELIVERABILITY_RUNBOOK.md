@@ -12,15 +12,15 @@ two switches.
 
 ---
 
-## Current state (re-verified 2026-06-12, region `eu-west-2`, account `030569357413`)
+## Current state (re-verified 2026-08-08, region `eu-west-2`, account `030569357413`)
 
 | Thing | State | Meaning |
 |---|---|---|
-| SES account | **Sandbox**, production-access request **SUBMITTED 2026-06-12** | Sandbox only emails *verified* addresses. Request is in AWS review (~24h); no further action needed here. |
-| SES domain identity `blyp.world` | **FAILED** (`HOST_NOT_FOUND`) | DKIM/verification DNS records still not present in GoDaddy. **This is the one remaining blocker.** |
-| SES MAIL FROM `mail.blyp.world` | **FAILED** | MX + SPF records missing. |
-| Cognito pool `eu-west-2_ITX07Zvnt` | `EmailSendingAccount: COGNITO_DEFAULT` | Using the generic Cognito sender → spam. |
-| DNS provider | GoDaddy (`ns77.domaincontrol.com`) | Records below are added in GoDaddy DNS for `blyp.world`. |
+| SES account | **Sandbox** (`ProductionAccessEnabled=false`) | Can only email *verified* recipients until AWS approves production access (request already filed). |
+| SES domain identity `blyp.world` | **SUCCESS** (DKIM + verified for sending) | Recreated 2026-08-08 to clear a stuck June `HOST_NOT_FOUND` failure; GoDaddy DKIM CNAMEs were already correct. |
+| SES MAIL FROM `mail.blyp.world` | **SUCCESS** | Custom return-path aligned. |
+| Cognito pool `eu-west-2_ITX07Zvnt` | `EmailSendingAccount: DEVELOPER` From `Blyp <no-reply@blyp.world>` | Wired via `tools/email/wire_cognito_ses.ps1 -Apply`. |
+| DNS provider | GoDaddy (`ns77.domaincontrol.com`) | One-pager: `docs/GODADDY_BLYP_EMAIL_DNS.md`. |
 
 > **What is automated already:** the SES production-access request has been
 > submitted via CLI, and a safe one-command Cognito cutover script is staged at

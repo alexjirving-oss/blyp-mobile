@@ -54,7 +54,11 @@ function EnhancedVideo(props) {
     paintedRef.current = false;
 
     if (!shouldLoad) {
+      // Cancel off-screen players: drop source so expo-av releases decoder memory.
+      paintedRef.current = false;
+      setPlayableUri(null);
       setVideoLoaded(false);
+      setHasError(false);
       return () => {};
     }
 
@@ -98,7 +102,8 @@ function EnhancedVideo(props) {
         if (cancelled || gen !== resolveGen.current) return;
         if (!local || !(local.startsWith('file:') || local.startsWith('content:'))) return;
 
-        // Switch to local if stream never painted, or always upgrade when idle.
+        // Switch to local if stream never painted (moov-at-end / black frame), or
+        // when idle. Do NOT remount a focused painted stream — key flip hitch.
         if (!paintedRef.current || !isFocused) {
           setPlayableUri(local);
           setHasError(false);

@@ -1,8 +1,12 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-const VIDEO_COMPRESS_THRESHOLD_BYTES = 6 * 1024 * 1024; // skip tiny clips
+// Compress earlier: phone camera MP4s are often 15–80MB; waiting until 6MB left
+// most clips uncompressed and made For You cold-start / swipe hitchy.
+const VIDEO_COMPRESS_THRESHOLD_BYTES = 2 * 1024 * 1024;
 const TARGET_MAX_EDGE = 720;
-const TARGET_BITRATE = 2_000_000;
+// ~1.5 Mbps @ 720p keeps TikTok-like quality with smaller files / faster first byte.
+const TARGET_BITRATE = 1_500_000;
+
 
 /**
  * TikTok-ish client prep: shrink large videos before Firebase Storage upload.

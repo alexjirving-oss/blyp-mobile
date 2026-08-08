@@ -1080,88 +1080,9 @@ const GiftSystem = ({
         )
       ) : null}
 
-      {/* Gift Animation Overlay */}
-      {selectedGift && (
-        <Animated.View
-          style={[
-            styles.giftAnimationOverlay,
-            {
-              opacity: giftAnimation,
-              transform: [
-                {
-                  scale: giftAnimation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.5, 2]
-                  })
-                }
-              ]
-            }
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.animatedGiftEmoji}>{selectedGift.emoji}</Text>
-        </Animated.View>
-      )}
-
-      {/* Disney Pixar Heart Animation Overlay - Pure Magic! ✨ */}
-      {showHeartAnimation && (
-        <View style={styles.heartAnimationContainer} pointerEvents="none">
-          {/* Main Heart with all the Disney magic */}
-          <Animated.View
-            style={[
-              styles.animatedHeart,
-              {
-                opacity: heartOpacity,
-                transform: [
-                  { scale: heartScale },
-                  { 
-                    rotate: heartRotation.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0deg', '360deg']
-                    })
-                  },
-                  { translateY: heartY }
-                ]
-              }
-            ]}
-          >
-            <LinearGradient
-              colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
-              style={styles.heartGradient}
-            >
-              <Text style={styles.magicalHeart}>❤️</Text>
-            </LinearGradient>
-          </Animated.View>
-
-          {/* Sparkle Particle System */}
-          {sparkles.map((sparkle, index) => (
-            <Animated.View
-              key={index}
-              style={[
-                styles.sparkle,
-                {
-                  opacity: sparkle.opacity,
-                  transform: [
-                    { translateX: sparkle.x },
-                    { translateY: sparkle.y },
-                    { scale: sparkle.scale },
-                    {
-                      rotate: sparkle.rotation.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0deg', '720deg']
-                      })
-                    }
-                  ]
-                }
-              ]}
-            >
-              <Text style={styles.sparkleText}>✨</Text>
-            </Animated.View>
-          ))}
-        </View>
-      )}
-
-      {/* Gift Selection Modal */}
+      {/* Gift Selection Modal
+          Cinema MUST live inside this Modal — RN Modal is a separate window
+          layer, so sibling overlays render behind the sheet (invisible gifts). */}
       <Modal
         visible={showGiftModal}
         animationType="slide"
@@ -1169,6 +1090,86 @@ const GiftSystem = ({
         onRequestClose={() => setShowGiftModal(false)}
       >
         <View style={styles.modalOverlay}>
+          {/* Top-half cinema: above dimmed feed; stacked over sheet upper edge. */}
+          <View style={styles.giftCinemaStage} pointerEvents="none">
+            {selectedGift ? (
+              <Animated.View
+                style={[
+                  styles.giftAnimationOverlay,
+                  {
+                    opacity: giftAnimation,
+                    transform: [
+                      {
+                        scale: giftAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.5, 2],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+                pointerEvents="none"
+              >
+                <Text style={styles.animatedGiftEmoji}>{selectedGift.emoji}</Text>
+              </Animated.View>
+            ) : null}
+
+            {showHeartAnimation ? (
+              <View style={styles.heartAnimationContainer} pointerEvents="none">
+                <Animated.View
+                  style={[
+                    styles.animatedHeart,
+                    {
+                      opacity: heartOpacity,
+                      transform: [
+                        { scale: heartScale },
+                        {
+                          rotate: heartRotation.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['0deg', '360deg'],
+                          }),
+                        },
+                        { translateY: heartY },
+                      ],
+                    },
+                  ]}
+                >
+                  <LinearGradient
+                    colors={[COLORS.gradientStart, COLORS.gradientMiddle, COLORS.gradientEnd]}
+                    style={styles.heartGradient}
+                  >
+                    <Text style={styles.magicalHeart}>❤️</Text>
+                  </LinearGradient>
+                </Animated.View>
+
+                {sparkles.map((sparkle, index) => (
+                  <Animated.View
+                    key={index}
+                    style={[
+                      styles.sparkle,
+                      {
+                        opacity: sparkle.opacity,
+                        transform: [
+                          { translateX: sparkle.x },
+                          { translateY: sparkle.y },
+                          { scale: sparkle.scale },
+                          {
+                            rotate: sparkle.rotation.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ['0deg', '720deg'],
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <Text style={styles.sparkleText}>✨</Text>
+                  </Animated.View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+
           <TouchableOpacity
             style={styles.modalBackdrop}
             activeOpacity={1}
@@ -1387,21 +1388,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     includeFontPadding: false,
   },
-  giftAnimationOverlay: {
+  giftCinemaStage: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginLeft: -30,
-    marginTop: -30,
-    width: 60,
-    height: 60,
+    top: 0,
+    left: 0,
+    right: 0,
+    // Own the top half so the bottom gift sheet never covers the cinema.
+    height: '48%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 40,
+    elevation: 40,
+    pointerEvents: 'none',
+  },
+  giftAnimationOverlay: {
+    width: 72,
+    height: 72,
     alignItems: 'center',
     justifyContent: 'center',
     pointerEvents: 'none',
-    zIndex: 1000,
   },
   animatedGiftEmoji: {
-    fontSize: 40,
+    fontSize: 48,
   },
   modalOverlay: {
     flex: 1,
@@ -1412,7 +1420,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.40)',
   },
   modalContainer: {
-    maxHeight: '82%',
+    // Keep sheet in the bottom half so cinema has a clear stage above it.
+    maxHeight: '52%',
+    zIndex: 20,
+    elevation: 20,
     backgroundColor: '#0A0A0C',
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
@@ -1880,14 +1891,10 @@ const styles = StyleSheet.create({
   
   // Disney Pixar Heart Animation Styles - Pure Magic! 🎬✨
   heartAnimationContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 9999,
+    zIndex: 41,
     pointerEvents: 'none',
   },
   animatedHeart: {

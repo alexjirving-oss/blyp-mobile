@@ -52,13 +52,13 @@ const KNOWN = {
   InvalidPasswordException: {
     code: 'invalid_password',
     message:
-      'Password doesn’t meet the requirements: at least 8 characters, with an uppercase letter, a lowercase letter and a number.',
+      'Password doesn’t meet the requirements: at least 8 characters, with an uppercase letter, a lowercase letter, a number, and a special character (e.g. !@#$%).',
     retryable: true,
   },
   InvalidParameterException: {
     code: 'invalid_parameter',
     message:
-      'Some details look invalid. Check your email and password (at least 8 characters, with an uppercase letter, a lowercase letter and a number) and try again.',
+      'Some details look invalid. Check your email and password (at least 8 characters, uppercase, lowercase, number, and a special character) and try again.',
     retryable: true,
   },
   CodeDeliveryFailureException: {
@@ -76,7 +76,7 @@ const KNOWN = {
 };
 
 const PASSWORD_REQUIREMENTS_MSG =
-  'Password must be at least 8 characters and include an uppercase letter, a lowercase letter and a number.';
+  'Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a special character (e.g. !@#$%).';
 
 function refineInvalidParameterMessage(rawMessage) {
   const msg = String(rawMessage || '');

@@ -112,30 +112,38 @@ export const isSocialProviderVisible = (provider) =>
     .map((item) => item.toLowerCase())
     .includes(String(provider || '').toLowerCase());
 
-/** Provider is wired for Hosted UI in this build (domain + allow-list). */
+/** Provider is ready when Hosted UI domain is set AND Cognito IdP exists for it. */
 export const isSocialProviderEnabled = (provider) => {
   if (!isSocialAuthEnabled()) return false;
-  return configuredReadyProviders().has(String(provider || '').toLowerCase());
+  const name = String(provider || '').toLowerCase();
+  if (!configuredReadyProviders().has(name)) return false;
+  // EXPO_PUBLIC_COGNITO_IDP_PROVIDERS lists IdPs actually created in Cognito.
+  // Empty / unset = none linked yet (Hosted UI would 400). Don't fake-enable.
+  const idpRaw = readEnv('EXPO_PUBLIC_COGNITO_IDP_PROVIDERS');
+  if (idpRaw == null || String(idpRaw).trim() === '') return false;
+  if (falsy(idpRaw) || String(idpRaw).trim().toLowerCase() === 'none') return false;
+  const idps = parseProviderList(idpRaw, []).map((p) => p.toLowerCase());
+  return idps.includes(name);
 };
 
 export const getSocialProviderSetupMessage = (provider) => {
   const name = String(provider || 'Social');
   if (!isCognitoFederationConfigured()) {
     return (
-      `${name} sign-in needs Cognito Hosted UI. Set EXPO_PUBLIC_COGNITO_DOMAIN ` +
-      `(and EXPO_PUBLIC_ENABLE_AMPLIFY=true) then configure the ${name} identity ` +
-      `provider in Cognito Console. See _agent/auth/SOCIAL_SIGNIN.md.`
+      `${name} sign-in is almost ready — Cognito Hosted UI domain is missing from this build. ` +
+      `Rebuild after EXPO_PUBLIC_COGNITO_DOMAIN is set, then add the ${name} identity provider in Cognito Console.`
     );
   }
   if (!configuredReadyProviders().has(name.toLowerCase())) {
     return (
-      `${name} is not listed in EXPO_PUBLIC_SOCIAL_PROVIDERS for this build. ` +
-      `Add it after the Cognito provider is configured. See _agent/auth/SOCIAL_SIGNIN.md.`
+      `${name} is not listed for this build. Add it to EXPO_PUBLIC_SOCIAL_PROVIDERS after the Cognito provider exists.`
     );
   }
   return (
-    `${name} sign-in is not ready yet. Finish Cognito / IdP Console setup ` +
-    `(see _agent/auth/SOCIAL_SIGNIN.md) and rebuild with the Hosted UI domain set.`
+    `${name} needs the Cognito identity provider on pool eu-west-2_ITX07Zvnt ` +
+    `(Google/Facebook client id+secret from their consoles), enable it on app client ` +
+    `4a7r115hllaedriqsjlsa00snj, then set EXPO_PUBLIC_COGNITO_IDP_PROVIDERS and rebuild. ` +
+    `See docs/COGNITO_HOSTED_UI_CHECKLIST.md.`
   );
 };
 

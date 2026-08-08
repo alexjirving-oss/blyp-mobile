@@ -171,6 +171,7 @@ const EditProfileScreen = React.lazy(() => import('./src/screens/EditProfileScre
 const PrivacySettingsScreen = React.lazy(() => import('./src/screens/PrivacySettingsScreen'));
 const NotificationSettingsScreen = React.lazy(() => import('./src/screens/NotificationSettingsScreen'));
 const PersonNotificationSettingsScreen = React.lazy(() => import('./src/screens/PersonNotificationSettingsScreen'));
+const SpotifyConnectScreen = React.lazy(() => import('./src/screens/SpotifyConnectScreen'));
 const HelpSupportScreen = React.lazy(() => import('./src/screens/HelpSupportScreen'));
 const ChatRoomsScreen = React.lazy(() => import('./src/screens/ChatRoomsScreen'));
 const ChatRoomScreen = React.lazy(() => import('./src/screens/ChatRoomScreen'));
@@ -637,6 +638,11 @@ function AppStack() {
       <Stack.Screen name="PersonNotificationSettings" children={(navProps) => (
         <Suspense fallback={null}>
           <PersonNotificationSettingsScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="SpotifyConnect" children={(navProps) => (
+        <Suspense fallback={null}>
+          <SpotifyConnectScreen {...navProps} />
         </Suspense>
       )} />
       <Stack.Screen name="HelpSupport" children={(navProps) => (

@@ -8,7 +8,7 @@ import { Image, InteractionManager } from 'react-native';
 import { prefetchVideoToCache } from './videoCache';
 import { fixStorageUrl } from './urlUtils';
 
-const MAX_INFLIGHT = 3;
+const MAX_INFLIGHT = 2; // Flip/Fold memory: never stampede downloads
 const seenImages = new Set();
 const seenVideos = new Set();
 let inflight = 0;
@@ -28,8 +28,10 @@ function pump() {
   }
 }
 
-function enqueue(job) {
-  queue.push(job);
+/** Prefer next-ahead warm over behind; higher priority jobs jump the queue. */
+function enqueue(job, { priority = false } = {}) {
+  if (priority) queue.unshift(job);
+  else queue.push(job);
   pump();
 }
 
@@ -65,7 +67,7 @@ export function prefetchImageUri(uri, { idle = false } = {}) {
 }
 
 /** Warm video disk cache. Deduped. Prefer idle for neighbors beyond ±1. */
-export function prefetchVideoUri(uri, { idle = false } = {}) {
+export function prefetchVideoUri(uri, { idle = false, priority = false } = {}) {
   const key = normalizeUri(uri);
   if (!key || seenVideos.has(key)) return;
   if (!(key.startsWith('http://') || key.startsWith('https://') || key.startsWith('file:') || key.startsWith('content:'))) {
@@ -78,7 +80,7 @@ export function prefetchVideoUri(uri, { idle = false } = {}) {
   seenVideos.add(key);
 
   const run = () => {
-    enqueue(() => prefetchVideoToCache(key).catch(() => {}));
+    enqueue(() => prefetchVideoToCache(key).catch(() => {}), { priority: !!priority && !idle });
   };
 
   if (idle) {
@@ -121,25 +123,34 @@ function postImageUris(post) {
 
 /**
  * Prefetch a window of feed/profile posts around `centerIndex`.
- * near = current ±1 (immediate), far = rest of window (idle).
+ * near = current + next (immediate, priority), then previous, then far (idle).
  * Does not mutate React state — disk warm only (avoids list re-render thrash).
  */
-export function prefetchPostWindow(list, centerIndex, { radius = 2, images = true } = {}) {
+export function prefetchPostWindow(list, centerIndex, { radius = 3, images = true } = {}) {
   if (!Array.isArray(list) || !list.length) return;
   const center = Math.min(Math.max(0, centerIndex | 0), list.length - 1);
 
+  const order = [];
+  // Current + ahead first (swipe direction), then behind.
   for (let d = 0; d <= radius; d += 1) {
-    const indices = d === 0 ? [center] : [center + d, center - d];
-    for (const i of indices) {
-      if (i < 0 || i >= list.length) continue;
-      const post = list[i];
-      const idle = Math.abs(i - center) > 1;
-      const video = postVideoUri(post);
-      if (video) prefetchVideoUri(video, { idle });
-      if (images) {
-        for (const img of postImageUris(post)) {
-          prefetchImageUri(img, { idle });
-        }
+    if (d === 0) order.push(center);
+    else {
+      order.push(center + d);
+      order.push(center - d);
+    }
+  }
+
+  for (const i of order) {
+    if (i < 0 || i >= list.length) continue;
+    const post = list[i];
+    const dist = Math.abs(i - center);
+    const idle = dist > 1;
+    const priority = i === center + 1; // next clip wins the download queue
+    const video = postVideoUri(post);
+    if (video) prefetchVideoUri(video, { idle, priority });
+    if (images) {
+      for (const img of postImageUris(post)) {
+        prefetchImageUri(img, { idle });
       }
     }
   }

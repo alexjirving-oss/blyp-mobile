@@ -228,6 +228,10 @@ const LiveStreamScreen = (props) => {
   // Real mount-only log
   useEffect(() => {
     console.log('[LIVE][COMPONENT_MOUNT] LiveStreamScreen mounted');
+    try {
+      const { pauseSpotifyForBlypAudio } = require('../services/spotifyAudioCoordinator');
+      pauseSpotifyForBlypAudio('live_join').catch(() => {});
+    } catch { /* optional */ }
   }, []);
   const trackAsync = useTrackAsync();
   const { uid, isAuthenticated, authReady, loading: authLoading, getDisplayName } = useAuth();

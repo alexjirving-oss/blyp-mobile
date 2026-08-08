@@ -101,7 +101,14 @@ $p = ($poolJson | ConvertFrom-Json).UserPool
 # default. Copy through every mutable field that is currently set.
 $update = [ordered]@{ UserPoolId = $UserPoolId }
 if ($p.Name)                       { $update.PoolName                  = $p.Name }
-if ($p.Policies)                   { $update.Policies                  = $p.Policies }
+if ($p.Policies) {
+  # update-user-pool rejects newer SignInPolicy nested under Policies on some API versions.
+  $policies = $p.Policies | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+  if ($policies.PSObject.Properties.Name -contains 'SignInPolicy') {
+    $policies.PSObject.Properties.Remove('SignInPolicy')
+  }
+  $update.Policies = $policies
+}
 if ($p.DeletionProtection)         { $update.DeletionProtection        = $p.DeletionProtection }
 if ($p.LambdaConfig)               { $update.LambdaConfig              = $p.LambdaConfig }
 if ($p.AutoVerifiedAttributes)     { $update.AutoVerifiedAttributes    = $p.AutoVerifiedAttributes }
@@ -158,8 +165,30 @@ $sesPolicy = @{
 } | ConvertTo-Json -Depth 20 -Compress
 
 Info "Attaching SES sending-authorization policy for Cognito ..."
-aws sesv2 delete-email-identity-policy --email-identity $Domain --policy-name CognitoSend --region $Region 2>$null | Out-Null
-$polRes = aws sesv2 create-email-identity-policy --email-identity $Domain --policy-name CognitoSend --policy $sesPolicy --region $Region 2>&1
+$polTmp = Join-Path $env:TEMP "ses_cognito_send_policy.json"
+# AWS rejects PS-compressed JSON with odd escaping; write UTF-8 (no BOM) file.
+$sesPolicyObj = @{
+  Version   = '2008-10-17'
+  Statement = @(
+    @{
+      Sid       = 'AllowCognitoToSend'
+      Effect    = 'Allow'
+      Principal = @{ Service = 'cognito-idp.amazonaws.com' }
+      Action    = @('ses:SendEmail', 'ses:SendRawEmail')
+      Resource  = $identityArn
+      Condition = @{
+        StringEquals = @{ 'aws:SourceAccount' = $AccountId }
+        ArnLike      = @{ 'aws:SourceArn' = $poolArn }
+      }
+    }
+  )
+}
+[System.IO.File]::WriteAllText($polTmp, ($sesPolicyObj | ConvertTo-Json -Depth 20), [System.Text.UTF8Encoding]::new($false))
+try {
+  aws sesv2 delete-email-identity-policy --email-identity $Domain --policy-name CognitoSend --region $Region 2>&1 | Out-Null
+} catch { }
+$polRes = aws sesv2 create-email-identity-policy --email-identity $Domain --policy-name CognitoSend --policy "file://$polTmp" --region $Region 2>&1
+Remove-Item $polTmp -Force -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) { Warn "Could not attach SES identity policy (same-account sending may still work): $polRes" }
 else { Ok "SES identity policy attached." }
 
@@ -167,7 +196,7 @@ else { Ok "SES identity policy attached." }
 # 4. Apply the Cognito update.
 # ---------------------------------------------------------------------------
 $tmp = Join-Path $env:TEMP "cognito_update_payload.json"
-$payload | Set-Content -Path $tmp -Encoding utf8
+[System.IO.File]::WriteAllText($tmp, $payload, [System.Text.UTF8Encoding]::new($false))
 
 Info "Applying update-user-pool ..."
 $res = aws cognito-idp update-user-pool --region $Region --cli-input-json "file://$tmp" 2>&1
