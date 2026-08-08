@@ -53,6 +53,7 @@ export const ADMIN_PERMISSIONS = [
   'appeals.resolve',
   'strikes.write',
   'users.message',
+  'agents.oversight',
 ] as const;
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];

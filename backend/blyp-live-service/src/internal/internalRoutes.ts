@@ -10,6 +10,7 @@ import { deleteCognitoUserBySub } from '../admin/adminCognitoDirectory';
 import { logger } from '../config/logger';
 import { createConnectOnboardLink } from '../economy/withdrawalService';
 import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
+import { runAgentProposalSweep } from '../admin/agentProposalWorker';
 
 /**
  * Internal service-to-service routes.
@@ -27,6 +28,11 @@ import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
  * Rankings P1.5 cron (Cloud Scheduler HTTP):
  *   POST /internal/cron/rankings-materialize
  *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
+ *
+ * Agent proposal worker cron:
+ *   POST /internal/cron/agent-proposals
+ *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
+ *   Body (optional): { "dryRun": false, "maxUsers": 80, "maxProposals": 25 }
  *
  * Example gcloud (replace SECRET; prefer Secret Manager / headers-file):
  *   gcloud scheduler jobs create http rankings-materialize \
@@ -206,6 +212,52 @@ router.post('/internal/cron/rankings-materialize', requireInternalSecret, async 
     const err = toEconomyError(e);
     if (err.code === 'INTERNAL') {
       logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/rankings-materialize');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+const agentProposalsSchema = z
+  .object({
+    dryRun: z.coerce.boolean().optional(),
+    maxUsers: z.coerce.number().int().min(1).max(200).optional(),
+    maxProposals: z.coerce.number().int().min(1).max(100).optional(),
+  })
+  .strict()
+  .optional();
+
+/**
+ * Generate comment proposals for enabled suggest_only agents when followed
+ * creators have recent live posts. Queues pending rows for Boss /agents —
+ * never posts, never gifts/wallet.
+ */
+router.post('/internal/cron/agent-proposals', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = agentProposalsSchema.safeParse(
+      req.body && Object.keys(req.body).length ? req.body : undefined,
+    );
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await runAgentProposalSweep({
+      dryRun: parsed.data?.dryRun,
+      maxUsers: parsed.data?.maxUsers,
+      maxProposals: parsed.data?.maxProposals,
+    });
+    logger.info(
+      {
+        proposed: out.proposed,
+        usersScanned: out.usersScanned,
+        paused: out.paused,
+        durationMs: out.durationMs,
+      },
+      '[internal] agent proposal sweep complete',
+    );
+    return res.status(out.ok || out.paused ? 200 : 207).json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/agent-proposals');
     }
     return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }

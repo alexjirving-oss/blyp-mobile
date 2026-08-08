@@ -167,6 +167,69 @@ export async function ensureAdminSchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_admin_dsar_status ON admin_dsar_requests (status, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_dsar_user ON admin_dsar_requests (user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_admin_game_disputes_status ON admin_game_disputes (status, created_at DESC)`,
+
+        // Busy-person agent MVP — suggest_only / approve queue (no auto-post).
+        `CREATE TABLE IF NOT EXISTS user_agent_settings (
+          user_id text PRIMARY KEY,
+          enabled boolean NOT NULL DEFAULT false,
+          mode text NOT NULL DEFAULT 'suggest_only',
+          allow_comment boolean NOT NULL DEFAULT true,
+          allow_reply boolean NOT NULL DEFAULT false,
+          allow_react boolean NOT NULL DEFAULT false,
+          allow_post boolean NOT NULL DEFAULT false,
+          style_notes text,
+          topics_avoid text,
+          max_actions_per_day integer NOT NULL DEFAULT 5,
+          quiet_hours_start integer,
+          quiet_hours_end integer,
+          updated_by text,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS user_agent_phrases (
+          phrase_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          kind text NOT NULL DEFAULT 'allow',
+          text text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS agent_action_proposals (
+          proposal_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          action_type text NOT NULL,
+          status text NOT NULL DEFAULT 'pending',
+          target_type text,
+          target_id text,
+          proposed_text text,
+          context_summary text,
+          content_hash text,
+          reviewed_by text,
+          reviewed_at timestamptz,
+          review_note text,
+          executed_at timestamptz,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS agent_action_log (
+          log_id text PRIMARY KEY,
+          user_id text NOT NULL,
+          proposal_id text,
+          action_type text NOT NULL,
+          outcome text NOT NULL,
+          detail text,
+          actor_user_id text,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE INDEX IF NOT EXISTS idx_user_agent_settings_enabled ON user_agent_settings (enabled, updated_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_user_agent_phrases_user ON user_agent_phrases (user_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_agent_proposals_status ON agent_action_proposals (status, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_agent_proposals_user ON agent_action_proposals (user_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_agent_action_log_user ON agent_action_log (user_id, created_at DESC)`,
       ];
 
       for (const stmt of ddl) {

@@ -1,5 +1,5 @@
 import { getApps, getApp, initializeApp, type App } from 'firebase-admin/app';
-import { getFirestore as getAdminFirestore, FieldValue, type Firestore, type Query } from 'firebase-admin/firestore';
+import { getFirestore as getAdminFirestore, FieldValue, type Firestore, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { logger } from '../config/logger';
 import { safeLiveDisplayName } from '../live/liveDisplayName';
 import {
@@ -1407,4 +1407,203 @@ export async function enqueueAdminInboxNotifications(
     }
   }
   return { written, failed, deliveredMessageIds };
+}
+
+/** List posts waiting on staggered publish (import / schedule queue). */
+export async function listScheduledPostsFs(opts?: {
+  limit?: number;
+  status?: 'scheduled' | 'paused' | 'all';
+  userId?: string | null;
+}): Promise<{
+  items: Array<{
+    postId: string;
+    userId: string;
+    title: string;
+    publishStatus: string;
+    publishAt: number | null;
+    importId: string | null;
+    sourcePlatform: string | null;
+    sourceAccount: string | null;
+    thumbnailUrl: string | null;
+  }>;
+  total: number;
+} | null> {
+  const fs = getFirestore();
+  if (!fs) return null;
+  const limitN = Math.max(1, Math.min(200, Number(opts?.limit) || 80));
+  const want = opts?.status || 'all';
+  const filterUid = String(opts?.userId || '').trim() || null;
+  try {
+    let snap;
+    if (want === 'scheduled' || want === 'paused') {
+      snap = await fs.collection('posts').where('publishStatus', '==', want).limit(250).get();
+    } else {
+      // Two queries; merge. Avoids 'in' limits on older SDKs.
+      const [a, b] = await Promise.all([
+        fs.collection('posts').where('publishStatus', '==', 'scheduled').limit(200).get(),
+        fs.collection('posts').where('publishStatus', '==', 'paused').limit(100).get(),
+      ]);
+      const map = new Map<string, QueryDocumentSnapshot>();
+      a.docs.forEach((d) => map.set(d.id, d));
+      b.docs.forEach((d) => map.set(d.id, d));
+      snap = { docs: Array.from(map.values()) };
+    }
+    let docs = snap.docs;
+    if (filterUid) docs = docs.filter((d) => String((d.data() as any)?.userId || '') === filterUid);
+    docs = docs.sort(
+      (x, y) => Number((x.data() as any)?.publishAt || 0) - Number((y.data() as any)?.publishAt || 0),
+    );
+    const total = docs.length;
+    const items = docs.slice(0, limitN).map((d) => {
+      const p = d.data() as any;
+      return {
+        postId: d.id,
+        userId: String(p.userId || ''),
+        title: String(p.title || p.caption || '').slice(0, 120),
+        publishStatus: String(p.publishStatus || ''),
+        publishAt: Number(p.publishAt) > 0 ? Number(p.publishAt) : null,
+        importId: p.importId ? String(p.importId) : null,
+        sourcePlatform: p.sourcePlatform ? String(p.sourcePlatform) : null,
+        sourceAccount: p.sourceAccount ? String(p.sourceAccount) : null,
+        thumbnailUrl: p.thumbnail || p.thumbnailUrl || null,
+      };
+    });
+    return { items, total };
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[firestore-admin] listScheduledPostsFs failed');
+    return null;
+  }
+}
+
+export async function setScheduledPostStatusFs(
+  postId: string,
+  action: 'publish_now' | 'pause' | 'cancel' | 'reschedule',
+  opts?: { publishAt?: number | null; actorUserId?: string | null },
+): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(postId || '').trim();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!id) return { ok: false, detail: 'missing_post_id' };
+  const now = Date.now();
+  try {
+    const ref = fs.collection('posts').doc(id);
+    const patch: Record<string, unknown> = { updatedAt: now };
+    if (action === 'publish_now') {
+      patch.publishStatus = 'live';
+      patch.publishedAt = now;
+      patch.publishAt = now;
+    } else if (action === 'pause') {
+      patch.publishStatus = 'paused';
+    } else if (action === 'cancel') {
+      patch.publishStatus = 'canceled';
+      patch.canceledAt = now;
+    } else if (action === 'reschedule') {
+      const at = Number(opts?.publishAt);
+      if (!Number.isFinite(at) || at <= 0) return { ok: false, detail: 'invalid_publish_at' };
+      patch.publishStatus = 'scheduled';
+      patch.publishAt = at;
+    } else {
+      return { ok: false, detail: 'invalid_action' };
+    }
+    if (opts?.actorUserId) patch.scheduleUpdatedBy = String(opts.actorUserId);
+    await ref.set(patch, { merge: true });
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
+/** Staff-create a social import job for a user (Admin SDK; higher stagger caps). */
+export async function createSocialImportFs(input: {
+  uid: string;
+  platform: string;
+  handle: string;
+  stagger?: Record<string, unknown> | null;
+  actorUserId?: string | null;
+}): Promise<{ ok: boolean; id?: string; detail?: string }> {
+  const fs = getFirestore();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  const uid = String(input.uid || '').trim();
+  const platform = String(input.platform || 'tiktok').toLowerCase();
+  let handle = String(input.handle || '').trim().replace(/^@+/, '');
+  if (!uid || !handle) return { ok: false, detail: 'missing_uid_or_handle' };
+  if (platform === 'tiktok') handle = handle.toLowerCase();
+
+  const sourceUrl =
+    platform === 'youtube'
+      ? (handle.includes('youtube.com') || handle.includes('youtu.be')
+        ? handle
+        : `https://www.youtube.com/@${handle}/videos`)
+      : `https://www.tiktok.com/@${handle}`;
+
+  const now = Date.now();
+  const staggerRaw = { ...(input.stagger || {}), isAdmin: true, enabled: input.stagger?.enabled !== false };
+  const data = {
+    uid,
+    platform,
+    handle,
+    sourceUrl,
+    status: 'pending',
+    total: 0,
+    done: 0,
+    skipped: 0,
+    failed: 0,
+    scheduled: 0,
+    claimedOwnership: true,
+    stagger: staggerRaw,
+    staggerPaused: false,
+    createdByAdmin: input.actorUserId || null,
+    message: 'Queued by admin — staggered import.',
+    createdAt: now,
+    updatedAt: now,
+  };
+  try {
+    const ref = await fs.collection('socialImports').add(data);
+    return { ok: true, id: ref.id };
+  } catch (e: any) {
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
+export async function listSocialImportsFs(limitN = 40): Promise<
+  Array<{
+    id: string;
+    uid: string;
+    platform: string;
+    handle: string;
+    status: string;
+    done: number;
+    scheduled: number;
+    total: number;
+    stagger: unknown;
+    message: string;
+    createdAt: number | null;
+    updatedAt: number | null;
+  }>
+> {
+  const fs = getFirestore();
+  if (!fs) return [];
+  try {
+    const snap = await fs.collection('socialImports').orderBy('createdAt', 'desc').limit(Math.min(100, limitN)).get();
+    return snap.docs.map((d) => {
+      const x = d.data() as any;
+      return {
+        id: d.id,
+        uid: String(x.uid || ''),
+        platform: String(x.platform || ''),
+        handle: String(x.handle || ''),
+        status: String(x.status || ''),
+        done: Number(x.done || 0),
+        scheduled: Number(x.scheduled || 0),
+        total: Number(x.total || 0),
+        stagger: x.stagger || null,
+        message: String(x.message || ''),
+        createdAt: Number(x.createdAt) || null,
+        updatedAt: Number(x.updatedAt) || null,
+      };
+    });
+  } catch (e: any) {
+    logger.warn({ err: e?.message || String(e) }, '[firestore-admin] listSocialImportsFs failed');
+    return [];
+  }
 }

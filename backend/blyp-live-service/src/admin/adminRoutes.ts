@@ -61,6 +61,9 @@ import {
     adminFeedPrioritySchema,
     adminAccountFeedPrioritySchema,
     unbanUserSchema,
+    adminListScheduledPostsSchema,
+    adminScheduledPostActionSchema,
+    adminCreateSocialImportSchema,
 } from './adminSchemas';
 import {
     banUserByAdmin,
@@ -118,6 +121,10 @@ import {
     approveTeamApplication,
     rejectTeamApplication,
     setStreamingConfig,
+    listScheduledPostsFs,
+    setScheduledPostStatusFs,
+    createSocialImportFs,
+    listSocialImportsFs,
 } from './firestoreAdmin';
 import { endLiveSession } from '../live/liveService';
 import { getSessionById } from '../live/liveSessionStore';
@@ -154,6 +161,22 @@ import {
     upsertStaffRole,
     type AdminRole,
 } from './adminRbac';
+import {
+    addPhrase,
+    deletePhrase,
+    getAgentSettings,
+    getGlobalAgentControl,
+    listAgentDirectory,
+    listAgentLog,
+    listPhrases,
+    listProposals,
+    proposeAgentAction,
+    reviewProposal,
+    setGlobalAgentControl,
+    upsertAgentSettings,
+    AGENT_MODES,
+    AGENT_ACTION_TYPES,
+} from './agentAutomationService';
 
 const router = Router();
 
@@ -2371,6 +2394,324 @@ router.get('/api/live/me/admin-controls', cognitoJwtMiddleware, async (req: Auth
             degraded: true,
             detail: e?.message || String(e),
         });
+    }
+});
+
+// --- Busy-person agent MVP (Boss oversight + approve queue) ---
+router.get('/admin/agents', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const enabledOnly = String(req.query.enabledOnly || '') === '1' || String(req.query.enabledOnly || '') === 'true';
+        const limit = req.query.limit ? Number(req.query.limit) : 100;
+        const out = await listAgentDirectory({ enabledOnly, limit });
+        return res.json({
+            ...out,
+            defaults: {
+                mode: 'suggest_only',
+                allowPost: false,
+                note: 'MVP: proposal worker queues comments for human approve; auto-post disabled.',
+            },
+        });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/agents GET failed');
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.get('/admin/agents/global', requireAdmin, async (_req: AuthedRequest, res: Response) => {
+    try {
+        return res.json(await getGlobalAgentControl());
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.post('/admin/agents/global', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '');
+        const out = await setGlobalAgentControl({
+            paused: req.body?.paused,
+            forceSuggestOnly: req.body?.forceSuggestOnly,
+            actorUserId,
+        });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'agents.global_control',
+            targetType: 'agent_automation',
+            targetId: 'global',
+            metadata: out as any,
+        });
+        return res.json(out);
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.get('/admin/agents/proposals', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const status = (req.query.status as any) || 'pending';
+        const userId = req.query.userId ? String(req.query.userId) : undefined;
+        const limit = req.query.limit ? Number(req.query.limit) : 50;
+        const out = await listProposals({ userId, status, limit });
+        return res.json(out);
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.post('/admin/agents/proposals', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '');
+        const actionType = String(req.body?.actionType || 'comment') as any;
+        if (!AGENT_ACTION_TYPES.includes(actionType)) {
+            return res.status(400).json({ error: 'BAD_REQUEST', detail: 'Invalid actionType' });
+        }
+        const out = await proposeAgentAction({
+            userId: String(req.body?.userId || '').trim(),
+            actionType,
+            targetType: req.body?.targetType ?? null,
+            targetId: req.body?.targetId ?? null,
+            proposedText: req.body?.proposedText ?? null,
+            contextSummary: req.body?.contextSummary ?? null,
+            metadata: req.body?.metadata && typeof req.body.metadata === 'object' ? req.body.metadata : {},
+            actorUserId,
+        });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'agents.propose',
+            targetType: 'agent_proposal',
+            targetId: out.proposalId,
+            metadata: { userId: out.userId, actionType: out.actionType },
+        });
+        return res.json(out);
+    } catch (e: any) {
+        const msg = e?.message || String(e);
+        const codeMap: Record<string, number> = {
+            CONTEXT_REQUIRED: 400,
+            AUTO_POST_DISABLED: 400,
+            AGENTS_GLOBALLY_PAUSED: 409,
+            AGENT_DISABLED: 409,
+            INVALID_ACTION_TYPE: 400,
+        };
+        const status = codeMap[msg] || 500;
+        return res.status(status).json({ error: msg, code: msg });
+    }
+});
+
+router.post('/admin/agents/proposals/:proposalId/approve', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '');
+        const out = await reviewProposal({
+            proposalId: String(req.params.proposalId),
+            decision: 'approved',
+            actorUserId,
+            reviewNote: req.body?.note ?? null,
+        });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'agents.approve',
+            targetType: 'agent_proposal',
+            targetId: out.proposalId,
+            metadata: { userId: out.userId },
+        });
+        return res.json({ ...out, note: 'Approved for queue; executor worker not shipped yet (no auto-post).' });
+    } catch (e: any) {
+        const msg = e?.message || String(e);
+        const status = msg === 'NOT_FOUND' ? 404 : msg === 'NOT_PENDING' ? 409 : 500;
+        return res.status(status).json({ error: msg, code: msg });
+    }
+});
+
+router.post('/admin/agents/proposals/:proposalId/reject', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '');
+        const out = await reviewProposal({
+            proposalId: String(req.params.proposalId),
+            decision: 'rejected',
+            actorUserId,
+            reviewNote: req.body?.note ?? null,
+        });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'agents.reject',
+            targetType: 'agent_proposal',
+            targetId: out.proposalId,
+            metadata: { userId: out.userId },
+        });
+        return res.json(out);
+    } catch (e: any) {
+        const msg = e?.message || String(e);
+        const status = msg === 'NOT_FOUND' ? 404 : msg === 'NOT_PENDING' ? 409 : 500;
+        return res.status(status).json({ error: msg, code: msg });
+    }
+});
+
+router.get('/admin/agents/:userId', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const userId = String(req.params.userId || '').trim();
+        const [settings, phrases, proposals, log, global] = await Promise.all([
+            getAgentSettings(userId),
+            listPhrases(userId),
+            listProposals({ userId, status: 'all', limit: 30 }),
+            listAgentLog({ userId, limit: 30 }),
+            getGlobalAgentControl(),
+        ]);
+        return res.json({ settings, phrases, proposals: proposals.items, pendingCount: proposals.pendingCount, log, global });
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.post('/admin/agents/:userId/settings', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '');
+        const mode = req.body?.mode;
+        if (mode != null && !AGENT_MODES.includes(mode)) {
+            return res.status(400).json({ error: 'BAD_REQUEST', detail: 'Invalid mode' });
+        }
+        // Force suggest_only unless owner explicitly sets auto_with_limits later; still never auto-executes without worker.
+        const out = await upsertAgentSettings({
+            userId: String(req.params.userId),
+            actorUserId,
+            enabled: req.body?.enabled,
+            mode: mode ?? 'suggest_only',
+            allowComment: req.body?.allowComment,
+            allowReply: req.body?.allowReply,
+            allowReact: req.body?.allowReact,
+            allowPost: false,
+            styleNotes: req.body?.styleNotes,
+            topicsAvoid: req.body?.topicsAvoid,
+            maxActionsPerDay: req.body?.maxActionsPerDay,
+            quietHoursStart: req.body?.quietHoursStart,
+            quietHoursEnd: req.body?.quietHoursEnd,
+        });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'agents.settings_upsert',
+            targetType: 'user_agent_settings',
+            targetId: out.userId,
+            metadata: { mode: out.mode, enabled: out.enabled },
+        });
+        return res.json(out);
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.post('/admin/agents/:userId/phrases', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const out = await addPhrase({
+            userId: String(req.params.userId),
+            kind: req.body?.kind === 'deny' ? 'deny' : 'allow',
+            text: String(req.body?.text || ''),
+        });
+        return res.json(out);
+    } catch (e: any) {
+        const status = e?.message === 'EMPTY_PHRASE' ? 400 : 500;
+        return res.status(status).json({ error: e?.message || String(e) });
+    }
+});
+
+router.post('/admin/agents/phrases/:phraseId/delete', requireAdmin, requirePermission('agents.oversight'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const ok = await deletePhrase(String(req.params.phraseId));
+        return res.json({ ok });
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.get('/admin/agents/:userId/log', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const items = await listAgentLog({ userId: String(req.params.userId), limit: req.query.limit ? Number(req.query.limit) : 50 });
+        return res.json({ items });
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+// --- Staggered import / scheduled publish (content.moderate; no new RBAC perms) ---
+
+router.get('/admin/scheduled-posts', requireAdmin, requirePermission('content.moderate'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminListScheduledPostsSchema.safeParse(req.query || {});
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const out = await listScheduledPostsFs(parsed.data);
+        if (!out) return res.status(503).json({ error: 'FIRESTORE_UNAVAILABLE' });
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/scheduled-posts failed');
+        return res.status(500).json({ error: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/scheduled-posts/:postId/action', requireAdmin, requirePermission('content.moderate'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const postId = String(req.params?.postId || '').trim();
+        if (!postId) return res.status(400).json({ error: 'INVALID_INPUT' });
+        const parsed = adminScheduledPostActionSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const result = await setScheduledPostStatusFs(postId, parsed.data.action, {
+            publishAt: parsed.data.publishAt,
+            actorUserId,
+        });
+        if (!result.ok) return res.status(400).json({ error: 'ACTION_FAILED', detail: result.detail });
+        await writeAdminAudit({
+            actorUserId,
+            action: `scheduled_post_${parsed.data.action}`,
+            targetType: 'post',
+            targetId: postId,
+            metadata: { publishAt: parsed.data.publishAt || null },
+        });
+        return res.json({ ok: true, postId, action: parsed.data.action });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] scheduled-post action failed');
+        return res.status(500).json({ error: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/social-imports', requireAdmin, requirePermission('content.moderate'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const limit = Math.min(100, Math.max(1, Number(req.query?.limit) || 40));
+        const items = await listSocialImportsFs(limit);
+        return res.json({ items });
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+router.post('/admin/social-imports', requireAdmin, requirePermission('content.moderate'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const parsed = adminCreateSocialImportSchema.safeParse(req.body || {});
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const result = await createSocialImportFs({
+            ...parsed.data,
+            actorUserId,
+        });
+        if (!result.ok) return res.status(400).json({ error: 'CREATE_FAILED', detail: result.detail });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'social_import_create',
+            targetType: 'user',
+            targetId: parsed.data.uid,
+            metadata: {
+                importId: result.id,
+                platform: parsed.data.platform,
+                handle: parsed.data.handle,
+                stagger: parsed.data.stagger || null,
+            },
+        });
+        return res.json({ ok: true, id: result.id });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] create social-import failed');
+        return res.status(500).json({ error: 'INTERNAL' });
     }
 });
 

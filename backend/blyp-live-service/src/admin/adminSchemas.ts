@@ -280,3 +280,29 @@ export const adminGameDisputeStatusSchema = z.object({
     status: z.enum(['open', 'investigating', 'noted_freeze', 'resolved', 'closed']),
     notes: z.string().trim().max(2000).nullable().optional(),
 });
+
+export const adminListScheduledPostsSchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(80),
+    status: z.enum(['scheduled', 'paused', 'all']).default('all'),
+    userId: z.string().trim().min(1).max(128).optional(),
+});
+
+export const adminScheduledPostActionSchema = z.object({
+    action: z.enum(['publish_now', 'pause', 'cancel', 'reschedule']),
+    publishAt: z.coerce.number().int().positive().optional(),
+});
+
+export const adminCreateSocialImportSchema = z.object({
+    uid: z.string().trim().min(8).max(128),
+    platform: z.enum(['tiktok', 'youtube']).default('tiktok'),
+    handle: z.string().trim().min(2).max(120),
+    stagger: z
+        .object({
+            enabled: z.boolean().optional(),
+            postsPerDay: z.coerce.number().int().min(1).max(48).optional(),
+            intervalMs: z.coerce.number().int().min(60_000).max(7 * 24 * 60 * 60 * 1000).optional(),
+            startAt: z.coerce.number().int().positive().optional(),
+            jitterMs: z.coerce.number().int().min(0).max(2 * 60 * 60 * 1000).optional(),
+        })
+        .optional(),
+});

@@ -15,6 +15,7 @@ const PersonDetail = lazy(() => import("./pages/PersonDetail"));
 const Economy = lazy(() => import("./pages/Economy"));
 const Ops = lazy(() => import("./pages/Ops"));
 const Content = lazy(() => import("./pages/Content"));
+const ImportSchedule = lazy(() => import("./pages/ImportSchedule"));
 const Live = lazy(() => import("./pages/Live"));
 const Safety = lazy(() => import("./pages/Safety"));
 const Access = lazy(() => import("./pages/Access"));
@@ -23,6 +24,7 @@ const Comms = lazy(() => import("./pages/Comms"));
 const Config = lazy(() => import("./pages/Config"));
 const Teams = lazy(() => import("./pages/Teams"));
 const Workbook = lazy(() => import("./pages/Workbook"));
+const Agents = lazy(() => import("./pages/Agents"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth();
@@ -51,7 +53,9 @@ export default function App() {
             <Route path="/" element={<PageSuspense><CommandCenter /></PageSuspense>} />
             <Route path="/people" element={<PageSuspense><People /></PageSuspense>} />
             <Route path="/people/:userId" element={<PageSuspense><PersonDetail /></PageSuspense>} />
+            <Route path="/agents" element={<PageSuspense><Agents /></PageSuspense>} />
             <Route path="/content" element={<PageSuspense><Content /></PageSuspense>} />
+            <Route path="/import-schedule" element={<PageSuspense><ImportSchedule /></PageSuspense>} />
             <Route path="/live" element={<PageSuspense><Live /></PageSuspense>} />
             <Route path="/teams" element={<PageSuspense><Teams /></PageSuspense>} />
             <Route path="/safety" element={<PageSuspense><Safety /></PageSuspense>} />
