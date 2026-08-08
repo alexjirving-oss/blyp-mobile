@@ -4,7 +4,7 @@
 // retune their interests. Everything persists via userPreferencesService and
 // HomeScreen updates live through its subscription.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
@@ -26,9 +26,13 @@ const PagesEditorScreen = ({ navigation }) => {
   const { uid } = useAuth();
   const [pages, setPagesState] = useState([]);
   const [interests, setInterestsState] = useState([]);
+  const saveQueueRef = useRef(Promise.resolve());
+  const pageSaveRevisionRef = useRef(0);
+  const interestSaveRevisionRef = useRef(0);
 
   useEffect(() => {
     let active = true;
+    saveQueueRef.current = Promise.resolve();
     getPreferences(uid).then((p) => {
       if (!active) return;
       setPagesState(p.pages);
@@ -39,9 +43,22 @@ const PagesEditorScreen = ({ navigation }) => {
     };
   }, [uid]);
 
+  const enqueuePreferenceSave = (write) => {
+    const task = saveQueueRef.current.then(write, write);
+    saveQueueRef.current = task.catch(() => {});
+    return task;
+  };
+
   const persistPages = (next) => {
     setPagesState(next);
-    savePages(uid, next);
+    const revision = ++pageSaveRevisionRef.current;
+    enqueuePreferenceSave(() => savePages(uid, next))
+      .then((saved) => {
+        if (revision === pageSaveRevisionRef.current && saved?.pages) {
+          setPagesState(saved.pages);
+        }
+      })
+      .catch(() => {});
   };
 
   const move = (index, dir) => {
@@ -64,23 +81,32 @@ const PagesEditorScreen = ({ navigation }) => {
       ? interests.filter((x) => x !== id)
       : [...interests, id];
     setInterestsState(next);
-    saveInterests(uid, next);
+    const revision = ++interestSaveRevisionRef.current;
+    enqueuePreferenceSave(() => saveInterests(uid, next))
+      .then((saved) => {
+        if (revision === interestSaveRevisionRef.current && saved?.interests) {
+          setInterestsState(saved.interests);
+          if (saved.pages) setPagesState(saved.pages);
+        }
+      })
+      .catch(() => {});
   };
 
   const addTopic = async (interest) => {
     const page = topicPageForInterest(interest);
-    const saved = await addPagePref(uid, page);
+    const saved = await enqueuePreferenceSave(() => addPagePref(uid, page));
     if (saved?.pages) setPagesState(saved.pages);
   };
 
   const removeTopic = async (key) => {
-    const saved = await removePagePref(uid, key);
+    const saved = await enqueuePreferenceSave(() => removePagePref(uid, key));
     if (saved?.pages) setPagesState(saved.pages);
   };
 
   const addablePages = INTEREST_CATALOG.filter(
     (i) => !pages.some((p) => p.key === `topic:${i.id}`)
   );
+  const landingIndex = pages.findIndex((page) => page.enabled !== false);
 
   return (
     <ScreenContainer>
@@ -95,13 +121,16 @@ const PagesEditorScreen = ({ navigation }) => {
 
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <Text style={styles.sectionTitle}>Your pages</Text>
-          <Text style={styles.sectionSub}>Reorder them, or hide the ones you don't use. The top page is what you land on.</Text>
+          <Text style={styles.sectionSub}>
+            Reorder them, or hide the ones you don't use. The first shown page opens by default and
+            when you double-tap the bottom Home button.
+          </Text>
 
           <View style={styles.list}>
             {pages.map((p, i) => {
               const enabled = p.enabled !== false;
               return (
-                <View key={p.key} style={[styles.pageRow, i === 0 && styles.pageRowFirst]}>
+                <View key={p.key} style={[styles.pageRow, i === landingIndex && styles.pageRowFirst]}>
                   <View style={styles.reorder}>
                     <TouchableOpacity onPress={() => move(i, -1)} disabled={i === 0} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
                       <Icon name="chevron-up" size={20} color={i === 0 ? COLORS.textDisabled : COLORS.textSecondary} />
@@ -113,8 +142,8 @@ const PagesEditorScreen = ({ navigation }) => {
 
                   <View style={styles.pageInfo}>
                     <Text style={[styles.pageLabel, !enabled && styles.pageLabelOff]}>{p.label}</Text>
-                    {i === 0 && <Text style={styles.homeTag}>Landing page</Text>}
-                    {p.fixed && i !== 0 && <Text style={styles.fixedTag}>Always on</Text>}
+                    {i === landingIndex && <Text style={styles.homeTag}>Landing page</Text>}
+                    {p.fixed && <Text style={styles.fixedTag}>Always on</Text>}
                     {isTopicPageKey(p.key) && <Text style={styles.topicTag}>Topic</Text>}
                   </View>
 

@@ -17,6 +17,9 @@ const KEY = (uid) => `@blyp/prefs/${uid || 'anon'}`;
 export const TOPIC_PREFIX = 'topic:';
 export const isTopicPageKey = (key) => typeof key === 'string' && key.startsWith(TOPIC_PREFIX);
 export const topicIdFromKey = (key) => (isTopicPageKey(key) ? key.slice(TOPIC_PREFIX.length) : null);
+export const PAGE_LAYOUT_VERSION = 2;
+export const HOME_PAGE_KEY = 'home';
+export const FOR_YOU_PAGE_KEY = 'A';
 
 // Topics offered at onboarding. Wide on purpose — "the app for everything".
 export const INTEREST_CATALOG = [
@@ -46,16 +49,18 @@ export const INTEREST_CATALOG = [
 
 // The core Home surfaces. `key` 'A'..'D' map to the existing HomeScreen feed
 // tabs so the feed engine keeps working untouched. `home` is the new base.
-// `fixed` pages can be reordered but not hidden.
+// `fixed` pages can be reordered but not hidden. Home is the only fixed page:
+// For You and every category/topic page may be switched off.
 export const DEFAULT_PAGES = [
-  { key: 'A', label: 'For You', fixed: true, enabled: true },
-  { key: 'home', label: 'Home', fixed: true, enabled: true },
+  { key: HOME_PAGE_KEY, label: 'Home', fixed: true, enabled: true },
+  { key: FOR_YOU_PAGE_KEY, label: 'For You', enabled: true },
   { key: 'following', label: 'Following', enabled: true },
   { key: 'B', label: "What's Hot", enabled: true },
   { key: 'C', label: 'Categories', enabled: true },
   { key: 'D', label: 'Hashtags', enabled: true },
 ];
 
+const LEGACY_DEFAULT_PAGE_KEYS = [FOR_YOU_PAGE_KEY, HOME_PAGE_KEY, 'following', 'B', 'C', 'D'];
 const MAX_RECENT_SEARCHES = 12;
 
 /** Interests that render SportPagePanel (fixtures + team follow) instead of TopicFeedPanel. */
@@ -64,8 +69,9 @@ export const SPORT_PAGE_IDS = ['football', 'f1'];
 const DEFAULT_PREFS = {
   interests: [],
   pages: DEFAULT_PAGES,
+  pageLayoutVersion: PAGE_LAYOUT_VERSION,
   onboarded: false,
-  /** One-shot Home tab to open after onboarding (e.g. topic:football). Cleared on consume. */
+  /** Legacy one-shot field retained for stored-prefs compatibility; v2 keeps it null. */
   landingPageKey: null,
   recentSearches: [],
   lastSeenActivityAt: 0,
@@ -91,7 +97,7 @@ export function topicPageForInterest(interest) {
   return { key: `${TOPIC_PREFIX}${interest.id}`, label: interest.label, enabled: true, removable: true };
 }
 
-/** Prefer football/F1, else first selected interest, as the post-onboarding landing tab. */
+/** Legacy helper retained for callers on old bundles; v2 landing uses page order. */
 export function preferredLandingPageKey(interestIds) {
   const ids = Array.isArray(interestIds) ? interestIds : [];
   const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i]));
@@ -109,27 +115,38 @@ export function preferredLandingPageKey(interestIds) {
 /** Ensure every selected interest has a Home topic page tab. */
 export function pagesWithInterestTopics(pages, interestIds) {
   const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i]));
-  let next = Array.isArray(pages) ? [...pages] : [];
+  let next = reconcilePages(pages);
+  const missing = [];
   for (const id of interestIds || []) {
     const interest = byId.get(id);
     if (!interest) continue;
     const page = topicPageForInterest(interest);
     if (!page || next.some((p) => p.key === page.key)) continue;
-    next.push(page);
+    missing.push(page);
+  }
+  if (missing.length > 0) {
+    const lastTopicIndex = next.reduce(
+      (last, page, index) => (isTopicPageKey(page.key) ? index : last),
+      -1
+    );
+    const forYouIndex = next.findIndex((page) => page.key === FOR_YOU_PAGE_KEY);
+    const insertAt = lastTopicIndex >= 0 ? lastTopicIndex + 1 : Math.max(0, forYouIndex + 1);
+    next = [...next.slice(0, insertAt), ...missing, ...next.slice(insertAt)];
   }
   return reconcilePages(next);
 }
 
 const cache = new Map(); // uid -> prefs
 const listeners = new Map(); // uid -> Set<fn>
+const remoteSyncQueues = new Map(); // uid -> serialized Firestore writes
 
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
 
 // Merge stored pages with the latest DEFAULT_PAGES so newly shipped pages
-// appear for existing users, and removed pages drop out.
-function reconcilePages(storedPages) {
+// appear for existing users. Stored order and visibility are authoritative.
+export function reconcilePages(storedPages) {
   if (!Array.isArray(storedPages) || storedPages.length === 0) return clone(DEFAULT_PAGES);
   const byKey = new Map(DEFAULT_PAGES.map((p) => [p.key, p]));
   const seen = new Set();
@@ -143,7 +160,7 @@ function reconcilePages(storedPages) {
         key: def.key,
         label: def.label,
         fixed: !!def.fixed,
-        enabled: def.fixed ? true : sp.enabled !== false,
+        enabled: def.key === HOME_PAGE_KEY ? true : sp.enabled !== false,
       });
     } else if (isTopicPageKey(sp.key) && sp.label) {
       // User-added topic page — preserve it.
@@ -160,23 +177,53 @@ function reconcilePages(storedPages) {
   for (const def of DEFAULT_PAGES) {
     if (!seen.has(def.key)) result.push({ ...def });
   }
-  // Keep fixed core tabs in DEFAULT_PAGES order so For You stays first for everyone.
-  const defOrder = DEFAULT_PAGES.map((p) => p.key);
-  const fixedKeys = new Set(DEFAULT_PAGES.filter((p) => p.fixed).map((p) => p.key));
-  const fixed = [];
-  const rest = [];
-  for (const p of result) {
-    if (fixedKeys.has(p.key)) fixed.push(p);
-    else rest.push(p);
-  }
-  fixed.sort((a, b) => defOrder.indexOf(a.key) - defOrder.indexOf(b.key));
-  return [...fixed, ...rest];
+  return result;
 }
 
-function normalize(raw) {
+/**
+ * Version-one normalization always forced `A, home` to the front, so those two
+ * positions cannot represent a real user choice. Move Home first once, retain
+ * every other saved ordering/visibility choice, and group untouched onboarding
+ * topics behind For You when the whole legacy default prefix is still present.
+ */
+export function migrateLegacyPageLayout(storedPages) {
+  const pages = reconcilePages(storedPages);
+  const keys = pages.map((page) => page.key);
+  const hasUntouchedLegacyPrefix = LEGACY_DEFAULT_PAGE_KEYS.every(
+    (key, index) => keys[index] === key
+  );
+
+  if (hasUntouchedLegacyPrefix) {
+    const byKey = new Map(pages.map((page) => [page.key, page]));
+    const topics = pages.slice(LEGACY_DEFAULT_PAGE_KEYS.length).filter((page) =>
+      isTopicPageKey(page.key)
+    );
+    return reconcilePages([
+      byKey.get(HOME_PAGE_KEY),
+      byKey.get(FOR_YOU_PAGE_KEY),
+      ...topics,
+      byKey.get('following'),
+      byKey.get('B'),
+      byKey.get('C'),
+      byKey.get('D'),
+    ]);
+  }
+
+  if (keys[0] === FOR_YOU_PAGE_KEY && keys[1] === HOME_PAGE_KEY) {
+    return reconcilePages([pages[1], pages[0], ...pages.slice(2)]);
+  }
+  return pages;
+}
+
+export function normalizePreferences(raw) {
   const base = clone(DEFAULT_PREFS);
   if (!raw || typeof raw !== 'object') return base;
   const interests = Array.isArray(raw.interests) ? raw.interests : [];
+  const storedPageLayoutVersion = Number(raw.pageLayoutVersion) || 1;
+  const reconciledPages =
+    storedPageLayoutVersion >= PAGE_LAYOUT_VERSION
+      ? reconcilePages(raw.pages)
+      : migrateLegacyPageLayout(raw.pages);
   const tourStartedAt =
     typeof raw.tourStartedAt === 'number' && Number.isFinite(raw.tourStartedAt)
       ? raw.tourStartedAt
@@ -185,10 +232,10 @@ function normalize(raw) {
         : null;
   return {
     interests,
-    // Heal: interests picked at onboarding historically did not create pages.
-    pages: pagesWithInterestTopics(reconcilePages(raw.pages), interests),
+    pages: pagesWithInterestTopics(reconciledPages, interests),
+    pageLayoutVersion: PAGE_LAYOUT_VERSION,
     onboarded: !!raw.onboarded,
-    landingPageKey: typeof raw.landingPageKey === 'string' ? raw.landingPageKey : null,
+    landingPageKey: null,
     recentSearches: Array.isArray(raw.recentSearches)
       ? raw.recentSearches.filter((s) => typeof s === 'string').slice(0, MAX_RECENT_SEARCHES)
       : [],
@@ -241,6 +288,19 @@ async function syncToRemote(uid, prefs) {
   }
 }
 
+function queueRemoteSync(uid, prefs) {
+  if (!canSync(uid)) return Promise.resolve();
+  const previous = remoteSyncQueues.get(uid) || Promise.resolve();
+  const next = previous
+    .catch(() => {})
+    .then(() => syncToRemote(uid, prefs));
+  remoteSyncQueues.set(uid, next);
+  next.finally(() => {
+    if (remoteSyncQueues.get(uid) === next) remoteSyncQueues.delete(uid);
+  });
+  return next;
+}
+
 // Pull remote prefs once and, if newer than local (or remote already completed
 // onboarding), adopt + emit to subscribers.
 async function hydrateFromRemote(uid) {
@@ -252,7 +312,7 @@ async function hydrateFromRemote(uid) {
     const remote = data?.blyp?.prefs;
     if (!remote) return;
     const local = cache.get(uid) || clone(DEFAULT_PREFS);
-    const remoteNorm = normalize(remote);
+    const remoteNorm = normalizePreferences(remote);
     // Never demote a completed account: remote onboarded / tourCompleted wins even if clocks disagree.
     const shouldAdopt =
       (remoteNorm.updatedAt || 0) > (local.updatedAt || 0) ||
@@ -272,7 +332,7 @@ async function hydrateFromRemote(uid) {
   }
 }
 
-async function persist(uid, prefs) {
+async function persist(uid, prefs, { waitForRemote = false } = {}) {
   const stamped = { ...prefs, updatedAt: Date.now() };
   cache.set(uid, stamped);
   emit(uid, stamped);
@@ -281,7 +341,8 @@ async function persist(uid, prefs) {
   } catch (e) {
     console.warn('[PREFS] save failed', e?.message || String(e));
   }
-  syncToRemote(uid, stamped);
+  const remoteWrite = queueRemoteSync(uid, stamped);
+  if (waitForRemote) await remoteWrite;
   return stamped;
 }
 
@@ -289,7 +350,7 @@ export async function getPreferences(uid) {
   if (cache.has(uid)) return cache.get(uid);
   try {
     const raw = await AsyncStorage.getItem(KEY(uid));
-    const prefs = normalize(raw ? JSON.parse(raw) : null);
+    const prefs = normalizePreferences(raw ? JSON.parse(raw) : null);
     cache.set(uid, prefs);
     hydrateFromRemote(uid); // fire-and-forget; subscribers get any newer remote
     return prefs;
@@ -326,13 +387,18 @@ export async function setInterests(uid, interests) {
     ...prev,
     interests: ids,
     pages: pagesWithInterestTopics(prev.pages, ids),
+    pageLayoutVersion: PAGE_LAYOUT_VERSION,
   };
   return persist(uid, next);
 }
 
 export async function setPages(uid, pages) {
   const prev = await getPreferences(uid);
-  const next = { ...prev, pages: reconcilePages(pages) };
+  const next = {
+    ...prev,
+    pages: reconcilePages(pages),
+    pageLayoutVersion: PAGE_LAYOUT_VERSION,
+  };
   return persist(uid, next);
 }
 
@@ -360,19 +426,16 @@ export async function completeOnboarding(uid, interests) {
     ...prev,
     interests: ids,
     pages,
-    landingPageKey: preferredLandingPageKey(ids),
+    pageLayoutVersion: PAGE_LAYOUT_VERSION,
+    // Landing is always derived from the first enabled header page.
+    landingPageKey: null,
     onboarded: true,
     updatedAt: Date.now(),
   };
   // Auth must be ready before the Firestore mirror, otherwise reinstall/new
   // device can't see onboarded=true and will restart the whole flow + trial.
   await ensureAuthForPrefs(uid);
-  const stamped = await persist(uid, next);
-  try {
-    await syncToRemote(uid, stamped);
-  } catch {
-    /* already logged inside syncToRemote */
-  }
+  const stamped = await persist(uid, next, { waitForRemote: true });
   try {
     const { ensureLocalWelcomeTourItem } = await import('../tour/welcomeTourInbox');
     await ensureLocalWelcomeTourItem(uid, { force: true });
@@ -486,10 +549,12 @@ export async function isOnboarded(uid) {
 }
 
 export function getEnabledPages(prefs) {
-  const pages = (prefs && Array.isArray(prefs.pages) ? prefs.pages : DEFAULT_PAGES).filter(
-    (p) => p.enabled !== false
-  );
+  const pages = reconcilePages(prefs?.pages).filter((p) => p.enabled !== false);
   return pages.length ? pages : DEFAULT_PAGES;
+}
+
+export function getFirstEnabledPageKey(prefs) {
+  return getEnabledPages(prefs)[0]?.key || HOME_PAGE_KEY;
 }
 
 export function interestLabels(ids) {
@@ -500,6 +565,9 @@ export function interestLabels(ids) {
 export default {
   INTEREST_CATALOG,
   DEFAULT_PAGES,
+  PAGE_LAYOUT_VERSION,
+  HOME_PAGE_KEY,
+  FOR_YOU_PAGE_KEY,
   SPORT_PAGE_IDS,
   TOPIC_PREFIX,
   isTopicPageKey,
@@ -507,6 +575,9 @@ export default {
   topicPageForInterest,
   preferredLandingPageKey,
   pagesWithInterestTopics,
+  reconcilePages,
+  migrateLegacyPageLayout,
+  normalizePreferences,
   getPreferences,
   subscribePreferences,
   setInterests,
@@ -525,5 +596,6 @@ export default {
   setLiveDashboard,
   isOnboarded,
   getEnabledPages,
+  getFirstEnabledPageKey,
   interestLabels,
 };

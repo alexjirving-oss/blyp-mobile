@@ -20,8 +20,8 @@ type Props = {
   align?: 'left' | 'center';
   /**
    * Keys that stay pinned (always visible) on the left. Remaining tabs scroll.
-   * Used on Home so "Home" stays reachable after For You-first landing when
-   * interest topic pages overflow the strip.
+   * Pinning intentionally renders a separate fixed strip, so ordered preference
+   * surfaces should normally leave this unset.
    */
   pinnedKeys?: string[];
 };

@@ -37,7 +37,14 @@ import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
 import FollowingFeedPanel from '../components/HomeBase/FollowingFeedPanel';
 import ScreenErrorBoundary from '../components/ScreenErrorBoundary';
-import { subscribePreferences, getEnabledPages, isTopicPageKey, topicIdFromKey, INTEREST_CATALOG, consumeLandingPageKey } from '../services/userPreferencesService';
+import {
+  subscribePreferences,
+  getEnabledPages,
+  getFirstEnabledPageKey,
+  isTopicPageKey,
+  topicIdFromKey,
+  INTEREST_CATALOG,
+} from '../services/userPreferencesService';
 import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
 import { subscribeTourSelect } from '../tour/tourBus';
@@ -243,8 +250,8 @@ const HomeScreen = ({ navigation, route }) => {
   const [commentCounts, setCommentCounts] = useState({});
   const [following, setFollowing] = useState({}); // keyed by creator userId
   const followingBusyRef = useRef(new Set());
-  const [selectedTab, setSelectedTab] = useState('A');
-  const selectedTabRef = useRef('A');
+  const [selectedTab, setSelectedTab] = useState('home');
+  const selectedTabRef = useRef('home');
   const uidRef = useRef(null);
   const [prefs, setPrefs] = useState(null);
   const [randomPosts, setRandomPosts] = useState([]);
@@ -304,6 +311,9 @@ const HomeScreen = ({ navigation, route }) => {
       : null;
 
   const enabledPages = useMemo(() => getEnabledPages(prefs), [prefs]);
+  const firstEnabledPageKey = useMemo(() => getFirstEnabledPageKey(prefs), [prefs]);
+  const enabledPagesRef = useRef(enabledPages);
+  useEffect(() => { enabledPagesRef.current = enabledPages; }, [enabledPages]);
 
   // Personalization signals for the For You ranking, kept in refs so the live
   // Firestore feed listener can read the latest values without re-subscribing.
@@ -335,19 +345,6 @@ const HomeScreen = ({ navigation, route }) => {
     const unsub = subscribePreferences(uid, setPrefs);
     return unsub;
   }, [uid]);
-
-  // After onboarding, open the seeded interest/sport page once (football/F1 preferred).
-  const landingConsumedRef = useRef(false);
-  useEffect(() => {
-    if (!uid || landingConsumedRef.current) return;
-    if (!prefs?.landingPageKey) return;
-    const key = prefs.landingPageKey;
-    const keys = enabledPages.map((p) => p.key);
-    if (!keys.includes(key)) return;
-    landingConsumedRef.current = true;
-    setSelectedTab(key);
-    consumeLandingPageKey(uid).catch(() => {});
-  }, [uid, prefs?.landingPageKey, enabledPages]);
 
   // Tie the earn-your-reach session to this user (hashed server-side) and make sure
   // any queued post signals are flushed when the feed unmounts.
@@ -386,17 +383,34 @@ const HomeScreen = ({ navigation, route }) => {
     };
   }, [uid, authReady, navigation]);
 
-  // Keep the active tab valid if pages get reordered/hidden in the editor.
+  // The first shown header page is the landing page. Follow a newer local/remote
+  // preference only while the user is still on the previous landing page, so a
+  // late Firestore hydrate cannot yank them away after they start browsing.
+  const previousFirstPageRef = useRef(null);
+  const landingUidRef = useRef(null);
   useEffect(() => {
-    const keys = enabledPages.map((p) => p.key);
-    if (!keys.includes(selectedTab)) {
-      setSelectedTab(keys[0] || 'A');
-    }
-  }, [enabledPages, selectedTab]);
+    if (!prefs) return;
+    const userKey = uid || 'anon';
+    const userChanged = landingUidRef.current !== userKey;
+    const previousFirst = userChanged ? null : previousFirstPageRef.current;
+    const selectedStillEnabled = enabledPages.some((page) => page.key === selectedTab);
 
-  // Double-tap the Home tab → jump back to For You and scroll to the top.
+    landingUidRef.current = userKey;
+    previousFirstPageRef.current = firstEnabledPageKey;
+    if (
+      userChanged ||
+      previousFirst === null ||
+      selectedTab === previousFirst ||
+      !selectedStillEnabled
+    ) {
+      setSelectedTab(firstEnabledPageKey);
+    }
+  }, [uid, prefs, enabledPages, firstEnabledPageKey, selectedTab]);
+
+  // Double-tap the bottom Home button → first shown header page (never hard-coded).
   useTabReset('Home', () => {
-    setSelectedTab('A');
+    const targetKey = enabledPagesRef.current?.[0]?.key || 'home';
+    setSelectedTab(targetKey);
     setCurrentIndex(0);
     setCurrentDiscoverIndex(0);
     try { flatListRef.current?.scrollToOffset?.({ offset: 0, animated: true }); } catch { }
@@ -416,9 +430,6 @@ const HomeScreen = ({ navigation, route }) => {
   // horizontal carousel (the Home rails) claims the touch first and keeps
   // scrolling, while a decisive horizontal swipe over empty/vertical areas
   // flips to the adjacent header tab. Vertical feed scrolling is never claimed.
-  const enabledPagesRef = useRef(enabledPages);
-  useEffect(() => { enabledPagesRef.current = enabledPages; }, [enabledPages]);
-
   const goToAdjacentTab = useCallback((dir) => {
     const keys = (enabledPagesRef.current || []).map((p) => p.key);
     const i = keys.indexOf(selectedTabRef.current);
@@ -1583,10 +1594,6 @@ const HomeScreen = ({ navigation, route }) => {
       matchHomePadding={true}
       activeKey={selectedTab}
       onTabChange={setSelectedTab}
-      // Keep For You + Home always visible — after For You-first, HomeBase was
-      // easy to miss when interest pages overflowed the chip strip, and the
-      // vertical feed blocks swipe-to-Home.
-      pinnedKeys={['A', 'home']}
       onMenuPress={() => setMenuVisible(true)}
       searchLabel="blyp it"
       onSearchPress={() => navigation.navigate('Blyp')}

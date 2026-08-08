@@ -269,8 +269,8 @@ function maskEmail(raw) {
 let __lastE2ENonce = null;
 
 // Tracks the last tab-press time per tab so we can detect a double tap and
-// reset that tab to its first sub-page (Home→For You, Chat/Games→Live,
-// Inbox→Chats, Profile→My Profile). The screens subscribe via useTabReset.
+// reset that tab to its configured start surface (Home→first shown header page,
+// Chat/Games→Live, Inbox→Chats, Profile→My Profile). Screens subscribe via useTabReset.
 const __lastTabTap = {};
 const DOUBLE_TAP_MS = 450;
 
