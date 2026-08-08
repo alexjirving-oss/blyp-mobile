@@ -12,7 +12,7 @@ import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
 import {
   subscribeBattle, acceptBattle, rejectBattle, cancelBattle, setBattleReminder,
-  rematchBattle, isStaked, battleSideFor, BATTLE_STATUS, JOIN_GRACE_MS,
+  rematchBattle, leaveBattle, isStaked, battleSideFor, BATTLE_STATUS, JOIN_GRACE_MS,
 } from '../services/battleService';
 import ScheduleBattleGiftModal from '../components/Battles/ScheduleBattleGiftModal';
 import { listBattleGiftPledges } from '../api/economyLiveApi';
@@ -161,6 +161,31 @@ const BattleDetailScreen = ({ navigation, route }) => {
     }
   }, [battle, uid, navigation]);
 
+  const onLeaveBattle = useCallback(() => {
+    if (!battle || !uid) return;
+    Alert.alert(
+      'Exit battle?',
+      'This ends your battle arena, but it does not close the app.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        {
+          text: 'Exit battle',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            const result = await leaveBattle(battle, uid);
+            setBusy(false);
+            if (!result.ok) {
+              Alert.alert('Could not exit battle', 'Check your connection and try again.');
+              return;
+            }
+            navigation.goBack();
+          },
+        },
+      ]
+    );
+  }, [battle, uid, navigation]);
+
   if (loading) {
     return (
       <ScreenContainer>
@@ -189,7 +214,7 @@ const BattleDetailScreen = ({ navigation, route }) => {
   const withinJoinWindow = Date.now() < battle.scheduledStartAt + JOIN_GRACE_MS;
   const creatorWon = completed && battle.winnerUid === battle.creatorUid;
   const opponentWon = completed && battle.winnerUid === battle.opponentUid;
-  const canCancel = isParticipant && (pending || scheduled);
+  const canCancel = isParticipant && !isInvitee && (pending || scheduled);
   const canRemind = (scheduled || pending) && !!uid;
   const canScheduleGift = !!uid && (pending || scheduled) && !live && !completed;
 
@@ -204,6 +229,26 @@ const BattleDetailScreen = ({ navigation, route }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {pending && (
+          <View style={[styles.requestBanner, isInvitee && styles.requestBannerIncoming]}>
+            <View style={styles.requestBannerTitleRow}>
+              <Icon
+                name={isInvitee ? 'mail-unread-outline' : 'paper-plane-outline'}
+                size={responsiveFont(18)}
+                color={isInvitee ? '#FDE68A' : COLORS.primary}
+              />
+              <Text style={styles.requestBannerTitle}>
+                {isInvitee ? 'BATTLE REQUEST' : 'REQUEST SENT'}
+              </Text>
+            </View>
+            <Text style={styles.requestBannerCopy}>
+              {isInvitee
+                ? `${battle.creatorName} challenged you. Accept or decline below — it cannot start until you respond.`
+                : `Waiting for ${battle.opponentName} to accept. This battle cannot start until they respond.`}
+            </Text>
+          </View>
+        )}
+
         {live && (
           <View style={styles.liveBadge}><View style={styles.liveDot} /><Text style={styles.liveText}>LIVE NOW</Text></View>
         )}
@@ -291,10 +336,22 @@ const BattleDetailScreen = ({ navigation, route }) => {
         )}
 
         {isParticipant && live && (
-          <TouchableOpacity style={styles.primaryBtn} onPress={goLive}>
-            <Icon name="videocam" size={responsiveFont(18)} color="#0A0A0C" />
-            <Text style={styles.primaryText}>Return to your battle</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity style={styles.primaryBtn} onPress={goLive}>
+              <Icon name="videocam" size={responsiveFont(18)} color="#0A0A0C" />
+              <Text style={styles.primaryText}>Return to your battle</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.exitBattleBtn} onPress={onLeaveBattle} disabled={busy}>
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Icon name="exit-outline" size={responsiveFont(18)} color="#fff" />
+                  <Text style={styles.exitBattleText}>Exit battle</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </>
         )}
 
         {!isInvitee && live && !isParticipant && (
@@ -388,6 +445,21 @@ const styles = StyleSheet.create({
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   title: { color: COLORS.textPrimary, fontSize: responsiveFont(18), fontWeight: '800' },
   content: { padding: responsiveSize(16), paddingBottom: responsiveSize(50) },
+  requestBanner: {
+    backgroundColor: 'rgba(0,210,190,0.12)',
+    borderRadius: responsiveSize(14),
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.5)',
+    padding: responsiveSize(14),
+    marginBottom: responsiveSize(16),
+  },
+  requestBannerIncoming: {
+    backgroundColor: 'rgba(253,230,138,0.10)',
+    borderColor: 'rgba(253,230,138,0.55)',
+  },
+  requestBannerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: responsiveSize(8) },
+  requestBannerTitle: { color: COLORS.textPrimary, fontWeight: '900', fontSize: responsiveFont(13), letterSpacing: 0.8 },
+  requestBannerCopy: { color: COLORS.textPrimary, fontSize: responsiveFont(13), lineHeight: responsiveFont(19), marginTop: responsiveSize(8) },
   liveBadge: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: responsiveSize(6), backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: responsiveSize(20), paddingVertical: responsiveSize(5), paddingHorizontal: responsiveSize(12), marginBottom: responsiveSize(14) },
   liveDot: { width: responsiveSize(8), height: responsiveSize(8), borderRadius: responsiveSize(4), backgroundColor: '#ef4444' },
   liveText: { color: '#ef4444', fontSize: responsiveFont(12), fontWeight: '800' },
@@ -413,6 +485,17 @@ const styles = StyleSheet.create({
   rejectText: { color: COLORS.textSecondary, fontWeight: '700', fontSize: responsiveFont(15) },
   primaryBtn: { flexDirection: 'row', gap: responsiveSize(8), backgroundColor: COLORS.primary, borderRadius: responsiveSize(14), paddingVertical: responsiveSize(15), alignItems: 'center', justifyContent: 'center', marginTop: responsiveSize(22) },
   giftBtn: { flexDirection: 'row', gap: responsiveSize(8), backgroundColor: COLORS.primary, borderRadius: responsiveSize(14), paddingVertical: responsiveSize(15), alignItems: 'center', justifyContent: 'center', marginTop: responsiveSize(14) },
+  exitBattleBtn: {
+    flexDirection: 'row',
+    gap: responsiveSize(8),
+    backgroundColor: 'rgba(239,68,68,0.92)',
+    borderRadius: responsiveSize(14),
+    paddingVertical: responsiveSize(14),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: responsiveSize(12),
+  },
+  exitBattleText: { color: '#fff', fontWeight: '800', fontSize: responsiveFont(15) },
   primaryBtnDone: { backgroundColor: '#9ca3af' },
   primaryText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(15) },
   waitCard: { backgroundColor: COLORS.backgroundCard, borderRadius: responsiveSize(12), padding: responsiveSize(16), marginTop: responsiveSize(22), alignItems: 'center' },

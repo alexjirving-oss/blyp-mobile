@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image,
+  View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image, Alert,
 } from 'react-native';
 import Icon from '../Icon';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
@@ -14,7 +14,7 @@ import {
   subscribeBattle,
   refreshBattleArena,
   voteBattle,
-  endBattle,
+  leaveBattle,
   rematchBattle,
   battleSideFor,
   subscribeBattleContributors,
@@ -63,6 +63,7 @@ function SideChip({ name, photo, accent, align = 'left' }) {
  * @param {string} props.battleId
  * @param {string} [props.currentUid]
  * @param {() => void} [props.onEnded] — match ended (does not end the live)
+ * @param {(info: { battleId: string, result?: object }) => void} [props.onExit]
  * @param {(info: { battleId: string }) => void} [props.onRematchStarted]
  * @param {string} [props.liveStreamId]
  */
@@ -70,6 +71,7 @@ export default function BattleOverlay({
   battleId,
   currentUid,
   onEnded,
+  onExit,
   onRematchStarted,
   liveStreamId,
 }) {
@@ -183,14 +185,40 @@ export default function BattleOverlay({
     if (!res.ok && res.reason === 'already_voted') setMyVote(s);
   }, [battleId, currentUid, isParticipant, matchRunning]);
 
-  const endNow = useCallback(async () => {
-    if (!battle) return;
-    setEnding(true);
-    endedHandledRef.current = true;
-    await endBattle(battle, currentUid);
-    setEnding(false);
-    onEnded && onEnded();
-  }, [battle, currentUid, onEnded]);
+  const exitNow = useCallback(() => {
+    if (!battle || ending) return;
+    const state = String(battle.state || battle.serverState || '').toUpperCase();
+    const running = state === 'LIVE' || battle.status === 'live';
+    Alert.alert(
+      'Exit battle?',
+      running
+        ? 'This ends the battle, but your live stays open.'
+        : 'Leave the battle arena and return without ending the whole app.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        {
+          text: 'Exit battle',
+          style: 'destructive',
+          onPress: async () => {
+            setEnding(true);
+            endedHandledRef.current = true;
+            const result = await leaveBattle(battle, currentUid);
+            setEnding(false);
+            if (result.ok) onEnded?.();
+            onExit?.({ battleId, result });
+            if (!result.ok) {
+              setTimeout(() => {
+                Alert.alert(
+                  'Left battle view',
+                  'The arena could not be closed on the server. Check your connection before starting another battle.'
+                );
+              }, 200);
+            }
+          },
+        },
+      ]
+    );
+  }, [battle, battleId, currentUid, ending, onEnded, onExit]);
 
   const rematchNow = useCallback(async () => {
     if (!battle || !currentUid) return;
@@ -276,32 +304,44 @@ export default function BattleOverlay({
       </View>
 
       {completed && (
-        <MatchWinBanner
-          title={winnerTitle}
-          winnerSide={winnerSide}
-          canRematch={isParticipant}
-          rematching={rematching}
-          onRematch={rematchNow}
-        />
+        <>
+          <MatchWinBanner
+            title={winnerTitle}
+            winnerSide={winnerSide}
+            canRematch={isParticipant}
+            rematching={rematching}
+            onRematch={rematchNow}
+          />
+          {isParticipant && onExit ? (
+            <View style={styles.completedExit}>
+              <TouchableOpacity style={styles.exitBtn} onPress={exitNow}>
+                <Icon name="exit-outline" size={responsiveFont(17)} color="#fff" />
+                <Text style={styles.endBtnText}>Exit battle</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </>
       )}
 
       {!completed && (
         <View style={styles.controls} pointerEvents="box-none">
           {isParticipant ? (
             <View style={styles.participantActions}>
-              {isLive ? (
-                <TouchableOpacity
-                  style={styles.endBtn}
-                  onPress={endNow}
-                  disabled={ending}
-                >
-                  {ending ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.endBtnText}>End match</Text>
-                  )}
-                </TouchableOpacity>
-              ) : null}
+              <TouchableOpacity
+                style={styles.exitBtn}
+                onPress={exitNow}
+                disabled={ending}
+                accessibilityLabel="Exit battle and keep live open"
+              >
+                {ending ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Icon name="exit-outline" size={responsiveFont(17)} color="#fff" />
+                    <Text style={styles.endBtnText}>Exit battle</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </View>
           ) : matchRunning ? (
             <View style={styles.voteRow}>
@@ -449,17 +489,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: responsiveFont(15),
   },
-  endBtn: {
+  exitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(7),
     backgroundColor: 'rgba(239,68,68,0.92)',
     borderRadius: responsiveSize(24),
     paddingVertical: responsiveSize(12),
     paddingHorizontal: responsiveSize(32),
   },
-  endBtnSecondary: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
+  completedExit: { alignItems: 'center', marginTop: responsiveSize(12) },
   endBtnText: {
     color: '#fff',
     fontWeight: '800',

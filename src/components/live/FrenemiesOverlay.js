@@ -327,7 +327,7 @@ export default function FrenemiesOverlay({
 
   return (
     <View style={styles.root} pointerEvents="box-none">
-      {isAdmin && controlsVisible && !active ? (
+      {(isHost || isAdmin) && controlsVisible && !active ? (
         <View style={styles.startCard} pointerEvents="box-none">
           <LinearGradient
             colors={['rgba(14,61,56,0.95)', 'rgba(10,10,12,0.96)']}

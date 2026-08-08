@@ -372,7 +372,7 @@ export default function BattlesContent({ navigation }) {
 
       {invites.length > 0 && filter !== 'past' && filter !== 'team' && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Challenges for you</Text>
+          <Text style={styles.sectionTitle}>Battle requests for you · {invites.length}</Text>
           {invites.map((b) => (
             <TouchableOpacity key={b.id} style={styles.inviteRow} activeOpacity={0.85} onPress={() => openDetail(b.id)}>
               <Avatar uri={b.creatorPhoto} name={b.creatorName} />
@@ -382,7 +382,9 @@ export default function BattlesContent({ navigation }) {
                   {startLabel(b.scheduledStartAt)}{isStaked(b) ? ` · ${b.stakeCoins} coins` : ''}
                 </Text>
               </View>
-              <Icon name="chevron-forward" size={responsiveFont(18)} color={COLORS.textSecondary} />
+              <View style={styles.requestAction}>
+                <Text style={styles.requestActionText}>Review</Text>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
@@ -390,7 +392,7 @@ export default function BattlesContent({ navigation }) {
 
       {outgoing.length > 0 && filter === 'all' && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Waiting on reply</Text>
+          <Text style={styles.sectionTitle}>Requests sent · waiting on reply</Text>
           {outgoing.map((b) => (
             <TouchableOpacity key={b.id} style={styles.inviteRow} activeOpacity={0.85} onPress={() => openDetail(b.id)}>
               <Avatar uri={b.opponentPhoto} name={b.opponentName} />
@@ -400,7 +402,9 @@ export default function BattlesContent({ navigation }) {
                   {startLabel(b.scheduledStartAt)}{isStaked(b) ? ` · ${b.stakeCoins} coins` : ''} · pending
                 </Text>
               </View>
-              <Icon name="chevron-forward" size={responsiveFont(18)} color={COLORS.textSecondary} />
+              <View style={[styles.requestAction, styles.requestActionPending]}>
+                <Text style={[styles.requestActionText, styles.requestActionTextPending]}>Pending</Text>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
@@ -595,6 +599,15 @@ const styles = StyleSheet.create({
   inviteBody: { flex: 1 },
   inviteName: { color: COLORS.textPrimary, fontWeight: '700', fontSize: responsiveFont(14) },
   inviteMeta: { color: COLORS.textSecondary, fontSize: responsiveFont(12), marginTop: 2 },
+  requestAction: {
+    backgroundColor: COLORS.primary,
+    borderRadius: responsiveSize(999),
+    paddingHorizontal: responsiveSize(11),
+    paddingVertical: responsiveSize(7),
+  },
+  requestActionPending: { backgroundColor: 'rgba(255,255,255,0.08)' },
+  requestActionText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(11) },
+  requestActionTextPending: { color: COLORS.textSecondary },
   card: {
     backgroundColor: COLORS.backgroundCard,
     borderRadius: responsiveSize(16),

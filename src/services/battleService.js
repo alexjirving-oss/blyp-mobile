@@ -372,6 +372,60 @@ export async function endBattle(battle, uid) {
   }
 }
 
+/**
+ * Leave the battle arena without ending the surrounding live.
+ *
+ * Registered battles are cancelled before LIVE and finalized once LIVE. Older
+ * instant guest challenges predate the server registry, so their Firestore row
+ * is closed locally by the same participant who created it.
+ */
+export async function leaveBattle(battle, uid) {
+  if (!battle?.id) return { ok: false, reason: 'missing' };
+  if (!battleSideFor(battle, uid)) return { ok: false, reason: 'not_participant' };
+
+  const arenaState = String(battle.state || battle.serverState || '').toUpperCase();
+  const instantWithoutRegistry = !!battle.instantChallenge && !arenaState;
+
+  const closeInstantChallenge = async () => {
+    try {
+      const endedAt = Date.now();
+      await battleRef(battle.id).update({
+        status: BATTLE_STATUS.COMPLETED,
+        serverState: 'ENDED',
+        terminalReason: 'LEFT_ARENA',
+        winnerUid: null,
+        winnerSide: null,
+        completedAt: endedAt,
+        endedAt,
+        updatedAt: endedAt,
+      });
+      return { ok: true, localOnly: true };
+    } catch {
+      return { ok: false, reason: 'write_failed' };
+    }
+  };
+
+  if (instantWithoutRegistry) {
+    return closeInstantChallenge();
+  }
+
+  try {
+    const shouldFinalize =
+      ['LIVE', 'FINALIZING', 'ENDED'].includes(arenaState) ||
+      battle.status === BATTLE_STATUS.LIVE;
+    const arena = shouldFinalize
+      ? await apiEndBattleArena(battle.id)
+      : await apiCancelBattleArena(battle.id);
+    return { ok: true, battle: arena };
+  } catch (e) {
+    // Instant challenges deliberately have no Postgres arena in older builds.
+    if (battle.instantChallenge && e?.code === 'NOT_FOUND') {
+      return closeInstantChallenge();
+    }
+    return { ok: false, reason: e?.code || 'leave_failed' };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Scoring (votes + gift weight)
 // ---------------------------------------------------------------------------
@@ -803,6 +857,7 @@ export default {
   startMatch,
   deliverBattleGiftPledges,
   endBattle,
+  leaveBattle,
   voteBattle,
   addGiftScore,
   recordBattleGifterContribution,

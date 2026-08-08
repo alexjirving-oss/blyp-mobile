@@ -675,9 +675,9 @@ function AppStack() {
           <SearchResultsScreen {...navProps} />
         </Suspense>
       )} />
-      <Stack.Screen name="Games" children={() => (
+      <Stack.Screen name="Games" children={(navProps) => (
         <Suspense fallback={null}>
-          <GamesScreen />
+          <GamesScreen {...navProps} />
         </Suspense>
       )} />
       <Stack.Screen name="GameRoom" children={() => (

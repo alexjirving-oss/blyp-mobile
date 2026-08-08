@@ -283,9 +283,12 @@ const LiveStreamScreen = (props) => {
     return null;
   };
 
+  const hostGamesRoute =
+    routeMode === 'host' || (!routeHostUid && !routeStreamId);
   const liveGamesAvailable =
     (!!activeBattleId && ARTILLERY_ENABLED) ||
-    ((MARBLE_ENABLED || FRENEMIES_ENABLED || REACTION_DUEL_ENABLED) && !activeBattleId);
+    ((hostGamesRoute || !!isAdmin) &&
+      (MARBLE_ENABLED || FRENEMIES_ENABLED || REACTION_DUEL_ENABLED));
 
   const closeLiveGames = useCallback(() => {
     setGamesOpen(false);
@@ -293,13 +296,12 @@ const LiveStreamScreen = (props) => {
   }, []);
 
   const openLiveGames = useCallback(() => {
-    if (activeBattleId && ARTILLERY_ENABLED) {
-      setShowArtillery(true);
-      setGamesOpen(false);
-      setSelectedLiveGame(null);
-      return;
-    }
-    if ((MARBLE_ENABLED || FRENEMIES_ENABLED || REACTION_DUEL_ENABLED) && !activeBattleId) {
+    if (
+      (activeBattleId && ARTILLERY_ENABLED) ||
+      MARBLE_ENABLED ||
+      FRENEMIES_ENABLED ||
+      REACTION_DUEL_ENABLED
+    ) {
       setGamesOpen((v) => {
         if (v) {
           setSelectedLiveGame(null);
@@ -362,7 +364,11 @@ const LiveStreamScreen = (props) => {
         isAdmin={!!isAdmin}
         isHost={isHost}
         liveGuests={liveGuests || []}
-        controlsVisible={gamesOpen && selectedLiveGame === 'frenemies' && !!isAdmin}
+        controlsVisible={
+          gamesOpen &&
+          selectedLiveGame === 'frenemies' &&
+          (isHost || !!isAdmin)
+        }
         onClose={closeLiveGames}
         onBackToPicker={() => setSelectedLiveGame(null)}
       />
@@ -386,7 +392,7 @@ const LiveStreamScreen = (props) => {
         controlsVisible={
           gamesOpen &&
           selectedLiveGame === 'reaction-duel' &&
-          !!isAdmin
+          (isHost || !!isAdmin)
         }
         onClose={closeLiveGames}
         onBackToPicker={() => setSelectedLiveGame(null)}
@@ -395,21 +401,47 @@ const LiveStreamScreen = (props) => {
   };
 
   const renderLiveGamesPicker = () => {
-    if (!gamesOpen || selectedLiveGame || activeBattleId) return null;
+    if (!gamesOpen || selectedLiveGame) return null;
     if (isHost && !isStreaming) return null;
     const showMarble = !!MARBLE_ENABLED && !!isHost;
-    const showFrenemies = !!FRENEMIES_ENABLED && !!isAdmin;
-    const showReactionDuel = !!REACTION_DUEL_ENABLED && !!isAdmin;
-    if (!showMarble && !showFrenemies && !showReactionDuel) return null;
+    const showFrenemies = !!FRENEMIES_ENABLED && (isHost || !!isAdmin);
+    const showReactionDuel =
+      !!REACTION_DUEL_ENABLED && (isHost || !!isAdmin);
+    const showBattle =
+      !!activeBattleId || (!!isHost && !!isStreaming);
+    if (!showMarble && !showFrenemies && !showReactionDuel && !showBattle) {
+      return null;
+    }
     return (
       <LiveGamesPicker
         visible
         showMarble={showMarble}
         showFrenemies={showFrenemies}
         showReactionDuel={showReactionDuel}
+        showBattle={showBattle}
+        battleActive={!!activeBattleId}
+        battleGameEnabled={!!activeBattleId && !!ARTILLERY_ENABLED}
+        standaloneGamesDisabled={!!activeBattleId}
         onPickMarble={() => setSelectedLiveGame('marble')}
         onPickFrenemies={() => setSelectedLiveGame('frenemies')}
         onPickReactionDuel={() => setSelectedLiveGame('reaction-duel')}
+        onPickBattle={() => {
+          if (activeBattleId && ARTILLERY_ENABLED) {
+            setShowArtillery(true);
+            closeLiveGames();
+            return;
+          }
+          closeLiveGames();
+          const firstGuest = (liveGuests || []).find(
+            (guest) => guest?.userId && guest.userId !== uid
+          );
+          if (firstGuest) {
+            setSelectedGuestControlId(String(firstGuest.userId));
+            setGuestControlVisible(true);
+          } else {
+            setInviteGuestsOpen(true);
+          }
+        }}
         onClose={closeLiveGames}
       />
     );
@@ -3502,48 +3534,107 @@ const LiveStreamScreen = (props) => {
     }
   }, [navigation, streamId, ivsHostSession?.sessionId, ivsHostSession?.streamId]);
 
-  const handleGuestChallenge = useCallback(async (guest) => {
+  const exitBattleView = useCallback(async () => {
+    const sid =
+      routeStreamId ||
+      streamId ||
+      ivsHostSession?.sessionId ||
+      ivsHostSession?.streamId;
+
+    setShowArtillery(false);
+    setGamesOpen(false);
+    setSelectedLiveGame(null);
+    setLocalBattleId(null);
+    setMirroredBattleId(null);
+
+    try {
+      navigation?.setParams?.({
+        battleId: undefined,
+        battleRole: undefined,
+        battleSessionId: undefined,
+      });
+    } catch {
+      // The local state still guarantees an exit from battle chrome.
+    }
+
+    if (sid && routeBattleRole !== 'opponent') {
+      await mirrorActiveBattleId(sid, null);
+    }
+
+    // Side B joined somebody else's arena; returning to Battle Detail also
+    // tears down their publisher session. Side A remains in their normal live.
+    if (routeBattleRole === 'opponent' && navigation?.canGoBack?.()) {
+      navigation.goBack();
+    }
+  }, [
+    navigation,
+    routeBattleRole,
+    routeStreamId,
+    streamId,
+    ivsHostSession?.sessionId,
+    ivsHostSession?.streamId,
+  ]);
+
+  const handleGuestChallenge = useCallback((guest) => {
     if (!guest?.userId || !uid || challengeBusy) return;
     if (activeBattleId) {
       Alert.alert('Match already active', 'End the current match before challenging another guest.');
       return;
     }
-    setChallengeBusy(true);
-    try {
-      const hostName = resolvedHostName || 'Host';
-      const res = await challengeGuestInLive(
+    const guestName = guest.name || 'this guest';
+    Alert.alert(
+      'Start battle now?',
+      `Battle ${guestName} immediately? This is a live challenge, not a pending request.`,
+      [
+        { text: 'Not yet', style: 'cancel' },
         {
-          id: uid,
-          displayName: hostName,
-          username: hostName,
-          photoURL: '',
+          text: 'Start battle',
+          onPress: async () => {
+            setChallengeBusy(true);
+            try {
+              const hostName = resolvedHostName || 'Host';
+              const res = await challengeGuestInLive(
+                {
+                  id: uid,
+                  displayName: hostName,
+                  username: hostName,
+                  photoURL: '',
+                },
+                {
+                  id: String(guest.userId),
+                  displayName: guestName,
+                  username: guest.name || '',
+                  photoURL: guest.photoUrl || guest.photoURL || '',
+                },
+                {
+                  liveStreamId:
+                    streamId ||
+                    ivsHostSession?.sessionId ||
+                    ivsHostSession?.streamId ||
+                    null,
+                  durationSec: 300,
+                }
+              );
+              if (!res.ok) {
+                Alert.alert('Couldn’t start challenge', 'Please try again.');
+                return;
+              }
+              setGuestControlVisible(false);
+              await adoptBattleOnLive(res.id, 'creator');
+            } catch (e) {
+              console.warn('[LIVE][CHALLENGE_GUEST_FAILED]', e?.message || e);
+              Alert.alert('Couldn’t start challenge', 'Please try again.');
+            } finally {
+              setChallengeBusy(false);
+            }
+          },
         },
-        {
-          id: String(guest.userId),
-          displayName: guest.name || 'Guest',
-          username: guest.name || '',
-          photoURL: guest.photoUrl || guest.photoURL || '',
-        },
-        {
-          liveStreamId: streamId || ivsHostSession?.sessionId || ivsHostSession?.streamId || null,
-          durationSec: 300,
-        }
-      );
-      if (!res.ok) {
-        Alert.alert('Couldn’t start challenge', 'Please try again.');
-        return;
-      }
-      setGuestControlVisible(false);
-      await adoptBattleOnLive(res.id, 'creator');
-    } catch (e) {
-      console.warn('[LIVE][CHALLENGE_GUEST_FAILED]', e?.message || e);
-      Alert.alert('Couldn’t start challenge', 'Please try again.');
-    } finally {
-      setChallengeBusy(false);
-    }
+      ]
+    );
   }, [
     uid, challengeBusy, activeBattleId, streamId,
     ivsHostSession?.sessionId, ivsHostSession?.streamId, adoptBattleOnLive,
+    resolvedHostName,
   ]);
 
   // Host moderation: remove a guest from the stage.
@@ -3843,6 +3934,7 @@ const LiveStreamScreen = (props) => {
             battleId={activeBattleId}
             currentUid={uid}
             liveStreamId={routeStreamId || streamId || null}
+            onExit={exitBattleView}
             onRematchStarted={({ battleId: nextId }) => adoptBattleOnLive(nextId, 'opponent')}
           />
         ) : null}
@@ -4709,6 +4801,7 @@ const LiveStreamScreen = (props) => {
                     battleId={activeBattleId}
                     currentUid={uid}
                     liveStreamId={streamId || ivsHostSession?.sessionId || null}
+                    onExit={exitBattleView}
                     onRematchStarted={({ battleId: nextId }) => adoptBattleOnLive(nextId, 'creator')}
                   />
                 ) : null}

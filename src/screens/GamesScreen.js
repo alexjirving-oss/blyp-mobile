@@ -25,7 +25,10 @@ const GamesScreen = ({ navigation }) => (
         navigation={navigation}
         onSelectChatTab={(tab) => {
           try {
-            navigation.navigate('Chat');
+            navigation.navigate('MainTabs', {
+              screen: 'Chat',
+              params: { initialTab: tab || 'battles' },
+            });
           } catch {
             /* ignore */
           }

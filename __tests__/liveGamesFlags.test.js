@@ -10,6 +10,7 @@ describe('LiveGamesFlags', () => {
   let Constants;
   let isMarbleRaceEnabled;
   let isArtilleryEnabled;
+  let isFrenemiesEnabled;
   let isReactionDuelEnabled;
 
   beforeEach(() => {
@@ -19,9 +20,11 @@ describe('LiveGamesFlags', () => {
     Constants.manifest = { extra: {} };
     delete process.env.EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED;
     delete process.env.EXPO_PUBLIC_LIVE_ARTILLERY_ENABLED;
+    delete process.env.EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED;
     delete process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED;
     ({
       isArtilleryEnabled,
+      isFrenemiesEnabled,
       isMarbleRaceEnabled,
       isReactionDuelEnabled,
     } = require('../src/config/LiveGamesFlags'));
@@ -51,5 +54,11 @@ describe('LiveGamesFlags', () => {
     expect(isReactionDuelEnabled()).toBe(true);
     process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED = 'off';
     expect(isReactionDuelEnabled()).toBe(false);
+  });
+
+  test('Frenemies defaults ON and respects an explicit off switch', () => {
+    expect(isFrenemiesEnabled()).toBe(true);
+    Constants.expoConfig.extra.EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED = 'false';
+    expect(isFrenemiesEnabled()).toBe(false);
   });
 });

@@ -97,16 +97,16 @@ router.post('/live-game/frenemies/start', requireNotBanned, async (req: AuthedRe
   try {
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
-    if (!isFrenemiesAdmin(userId)) {
-      return res.status(403).json({ error: 'NOT_ADMIN', code: 'NOT_ADMIN' });
-    }
     const parsed = sessionSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
     }
     const session = await getSessionById(parsed.data.sessionId);
     if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND', code: 'SESSION_NOT_FOUND' });
-    // Must start from inside a live — host session exists; starter is app admin (often also host).
+    // The live host owns game start. Staff admins retain the ability to run demos.
+    if (session.hostUserId !== userId && !isFrenemiesAdmin(userId)) {
+      return res.status(403).json({ error: 'HOST_ONLY', code: 'HOST_ONLY' });
+    }
     if (session.status !== 'LIVE') {
       return res.status(409).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
     }

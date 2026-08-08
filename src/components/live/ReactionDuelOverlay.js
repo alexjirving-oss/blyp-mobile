@@ -301,7 +301,7 @@ export default function ReactionDuelOverlay({
 
   return (
     <View style={styles.root} pointerEvents="box-none">
-      {isAdmin && controlsVisible && (!active || terminal) ? (
+      {(isHost || isAdmin) && controlsVisible && (!active || terminal) ? (
         <View style={styles.startCard}>
           <LinearGradient
             colors={['rgba(8,47,73,0.97)', 'rgba(9,9,11,0.98)']}
@@ -618,7 +618,7 @@ export default function ReactionDuelOverlay({
               </View>
             ) : null}
 
-            {err && !(isAdmin && controlsVisible && (!active || terminal)) ? (
+            {err && !((isHost || isAdmin) && controlsVisible && (!active || terminal)) ? (
               <Text style={styles.errorText}>{err}</Text>
             ) : null}
           </LinearGradient>

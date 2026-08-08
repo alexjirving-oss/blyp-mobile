@@ -338,7 +338,7 @@ export default function GuestControlSheet({
                 <>
                   <Icon name="flash" size={18} color="#0A0A0C" />
                   <Text style={styles.challengeBtnText} allowFontScaling={false}>
-                    Challenge this guest
+                    Start battle with this guest
                   </Text>
                 </>
               )}

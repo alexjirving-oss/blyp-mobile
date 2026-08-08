@@ -2,7 +2,7 @@
  * Branded Games picker for server-authoritative live overlays.
  */
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const TEAL = '#00D2BE';
@@ -14,13 +14,18 @@ export default function LiveGamesPicker({
   showMarble = true,
   showFrenemies = true,
   showReactionDuel = true,
+  showBattle = false,
+  battleActive = false,
+  battleGameEnabled = false,
+  standaloneGamesDisabled = false,
   onPickMarble,
   onPickFrenemies,
   onPickReactionDuel,
+  onPickBattle,
   onClose,
 }) {
   if (!visible) return null;
-  if (!showMarble && !showFrenemies && !showReactionDuel) return null;
+  if (!showMarble && !showFrenemies && !showReactionDuel && !showBattle) return null;
 
   return (
     <View style={styles.root} pointerEvents="box-none">
@@ -39,13 +44,19 @@ export default function LiveGamesPicker({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.row}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.row}
+          showsVerticalScrollIndicator={false}
+        >
           {showFrenemies ? (
             <TouchableOpacity
-              style={styles.cardWrap}
+              style={[styles.cardWrap, standaloneGamesDisabled && styles.cardDisabled]}
               onPress={onPickFrenemies}
+              disabled={standaloneGamesDisabled}
               activeOpacity={0.9}
               accessibilityLabel="Play Frenemies"
+              accessibilityState={{ disabled: standaloneGamesDisabled }}
             >
               <LinearGradient
                 colors={['#0E3D38', '#0A0A0C']}
@@ -55,7 +66,7 @@ export default function LiveGamesPicker({
               >
                 <View style={[styles.badge, { backgroundColor: TEAL }]}>
                   <Text style={styles.badgeText} allowFontScaling={false}>
-                    ADMIN
+                    HOST
                   </Text>
                 </View>
                 <Text style={styles.cardIcon} allowFontScaling={false}>
@@ -69,7 +80,7 @@ export default function LiveGamesPicker({
                 </Text>
                 <View style={[styles.cta, { backgroundColor: TEAL }]}>
                   <Text style={styles.ctaText} allowFontScaling={false}>
-                    Open
+                    {standaloneGamesDisabled ? 'Exit battle to switch' : 'Open'}
                   </Text>
                 </View>
               </LinearGradient>
@@ -78,10 +89,12 @@ export default function LiveGamesPicker({
 
           {showReactionDuel ? (
             <TouchableOpacity
-              style={styles.cardWrap}
+              style={[styles.cardWrap, standaloneGamesDisabled && styles.cardDisabled]}
               onPress={onPickReactionDuel}
+              disabled={standaloneGamesDisabled}
               activeOpacity={0.9}
               accessibilityLabel="Play Reaction Duel"
+              accessibilityState={{ disabled: standaloneGamesDisabled }}
             >
               <LinearGradient
                 colors={['#082F49', '#0A0A0C']}
@@ -91,7 +104,7 @@ export default function LiveGamesPicker({
               >
                 <View style={[styles.badge, { backgroundColor: '#22D3EE' }]}>
                   <Text style={styles.badgeText} allowFontScaling={false}>
-                    ADMIN
+                    HOST
                   </Text>
                 </View>
                 <Text style={styles.cardIcon} allowFontScaling={false}>
@@ -101,11 +114,11 @@ export default function LiveGamesPicker({
                   Reaction Duel
                 </Text>
                 <Text style={styles.cardSub} allowFontScaling={false}>
-                  100 in each · 300 coin prize
+                  Entry: 100 coins each · Prize: 300 coins
                 </Text>
                 <View style={[styles.cta, { backgroundColor: '#22D3EE' }]}>
                   <Text style={styles.ctaText} allowFontScaling={false}>
-                    Open
+                    {standaloneGamesDisabled ? 'Exit battle to switch' : 'Open'}
                   </Text>
                 </View>
               </LinearGradient>
@@ -114,10 +127,12 @@ export default function LiveGamesPicker({
 
           {showMarble ? (
             <TouchableOpacity
-              style={styles.cardWrap}
+              style={[styles.cardWrap, standaloneGamesDisabled && styles.cardDisabled]}
               onPress={onPickMarble}
+              disabled={standaloneGamesDisabled}
               activeOpacity={0.9}
               accessibilityLabel="Play Marble Race"
+              accessibilityState={{ disabled: standaloneGamesDisabled }}
             >
               <LinearGradient
                 colors={['#3A2A0A', '#0A0A0C']}
@@ -141,13 +156,59 @@ export default function LiveGamesPicker({
                 </Text>
                 <View style={[styles.cta, { backgroundColor: GOLD }]}>
                   <Text style={[styles.ctaText, { color: INK }]} allowFontScaling={false}>
-                    Open
+                    {standaloneGamesDisabled ? 'Exit battle to switch' : 'Open'}
                   </Text>
                 </View>
               </LinearGradient>
             </TouchableOpacity>
           ) : null}
-        </View>
+
+          {showBattle ? (
+            <TouchableOpacity
+              style={[styles.cardWrap, battleActive && !battleGameEnabled && styles.cardDisabled]}
+              onPress={onPickBattle}
+              disabled={battleActive && !battleGameEnabled}
+              activeOpacity={0.9}
+              accessibilityLabel={battleActive ? 'Open battle game' : 'Battle an on-stage guest'}
+              accessibilityState={{ disabled: battleActive && !battleGameEnabled }}
+            >
+              <LinearGradient
+                colors={['#4A1D18', '#0A0A0C']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.card}
+              >
+                <View style={[styles.badge, { backgroundColor: '#FF7A66' }]}>
+                  <Text style={styles.badgeText} allowFontScaling={false}>
+                    {battleActive ? 'ACTIVE' : 'HOST'}
+                  </Text>
+                </View>
+                <Text style={styles.cardIcon} allowFontScaling={false}>
+                  ⚔️
+                </Text>
+                <Text style={styles.cardTitle} allowFontScaling={false}>
+                  {battleActive ? 'Battle game' : 'Battle a guest'}
+                </Text>
+                <Text style={styles.cardSub} allowFontScaling={false}>
+                  {battleActive
+                    ? battleGameEnabled
+                      ? 'Open Artillery inside this live battle'
+                      : 'Battle arena active · use Exit battle to leave'
+                    : 'Challenge an on-stage guest · manage the arena'}
+                </Text>
+                <View style={[styles.cta, { backgroundColor: '#FF7A66' }]}>
+                  <Text style={styles.ctaText} allowFontScaling={false}>
+                    {battleActive
+                      ? battleGameEnabled
+                        ? 'Open game'
+                        : 'Battle active'
+                      : 'Choose guest'}
+                  </Text>
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : null}
+        </ScrollView>
       </View>
     </View>
   );
@@ -167,6 +228,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(0,210,190,0.35)',
+    maxHeight: '82%',
   },
   header: { marginBottom: 12, paddingRight: 56 },
   kicker: {
@@ -184,8 +246,10 @@ const styles = StyleSheet.create({
   },
   closeBtn: { position: 'absolute', right: 0, top: 0, padding: 4 },
   closeText: { color: 'rgba(255,255,255,0.55)', fontWeight: '700', fontSize: 13 },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  scroll: { flexGrow: 0 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: 2 },
   cardWrap: { flexGrow: 1, flexBasis: '45%' },
+  cardDisabled: { opacity: 0.52 },
   card: {
     borderRadius: 16,
     padding: 12,

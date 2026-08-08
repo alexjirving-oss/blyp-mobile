@@ -109,11 +109,6 @@ router.post(
       if (!userId) {
         return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
       }
-      if (!isFrenemiesAdmin(userId)) {
-        return res
-          .status(403)
-          .json({ error: 'NOT_ADMIN', code: 'NOT_ADMIN' });
-      }
       const parsed = startSchema.safeParse(req.body);
       if (!parsed.success) {
         return res
@@ -126,6 +121,12 @@ router.post(
           error: 'SESSION_NOT_FOUND',
           code: 'SESSION_NOT_FOUND',
         });
+      }
+      // The live host owns game start. Staff admins retain the ability to run demos.
+      if (session.hostUserId !== userId && !isFrenemiesAdmin(userId)) {
+        return res
+          .status(403)
+          .json({ error: 'HOST_ONLY', code: 'HOST_ONLY' });
       }
       if (session.status !== 'LIVE') {
         return res.status(409).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });

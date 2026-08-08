@@ -1,16 +1,22 @@
 // GamesContent — Chat/Games "Games" header tab.
-// Surfaces live-overlay games (Marble Race, Artillery) without reviving the
-// old create-sheet / matchmaking lobby.
+// Mirrors the live Games picker without reviving the old create-sheet lobby.
 
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
-import { isArtilleryEnabled, isMarbleRaceEnabled } from '../../config/LiveGamesFlags';
+import {
+  isArtilleryEnabled,
+  isFrenemiesEnabled,
+  isMarbleRaceEnabled,
+  isReactionDuelEnabled,
+} from '../../config/LiveGamesFlags';
 
 const MARBLE_ENABLED = isMarbleRaceEnabled();
 const ARTILLERY_ENABLED = isArtilleryEnabled();
+const FRENEMIES_ENABLED = isFrenemiesEnabled();
+const REACTION_DUEL_ENABLED = isReactionDuelEnabled();
 
 function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
   return (
@@ -46,11 +52,11 @@ function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
 }
 
 export default function GamesContent({ navigation, onSelectChatTab }) {
-  const startFromLive = () => {
+  const startFromLive = (source) => {
     try {
       navigation?.navigate?.('LiveStreamScreen', {
         mode: 'host',
-        source: 'GamesMarbleRace',
+        source,
       });
     } catch {
       try {
@@ -69,8 +75,71 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.lead}>
-        Play during live streams. These games ride on top of Live and Battles — no separate lobby create sheet.
+        Everything playable lives here. Live-only games start from the Games button
+        after you go live; battles open in Battle HQ.
       </Text>
+
+      <GameCard
+        icon="people"
+        title="Frenemies"
+        badge={FRENEMIES_ENABLED ? 'Live only' : 'Coming soon'}
+        body={
+          FRENEMIES_ENABLED
+            ? 'Prize wheel, guest throws, challenges, and HOUSE coins. Frenemies runs inside a host live with an on-stage guest.'
+            : 'Frenemies will return to the live Games picker when enabled.'
+        }
+        steps={
+          FRENEMIES_ENABLED
+            ? [
+                'Start your live and bring a guest on stage.',
+                'Tap Games in the live bottom bar.',
+                'Choose Frenemies, then Start Frenemies.',
+              ]
+            : null
+        }
+        ctaLabel={FRENEMIES_ENABLED ? 'Start from Live' : null}
+        onCta={
+          FRENEMIES_ENABLED
+            ? () => startFromLive('GamesFrenemies')
+            : null
+        }
+        muted={!FRENEMIES_ENABLED}
+      />
+
+      <GameCard
+        icon="flash"
+        title="Reaction Duel"
+        badge={REACTION_DUEL_ENABLED ? 'Live now' : 'Coming soon'}
+        body={
+          REACTION_DUEL_ENABLED
+            ? 'Fastest tap wins a best-of-five duel. Entry: 100 coins each. Prize: 300 coins to the winner.'
+            : 'Reaction Duel will return to the live Games picker when enabled.'
+        }
+        steps={
+          REACTION_DUEL_ENABLED
+            ? [
+                'Start your live and bring the opponent on stage.',
+                'Tap Games → Reaction Duel.',
+                'Choose the guest, start the duel, and both players lock 100 coins.',
+              ]
+            : null
+        }
+        ctaLabel={REACTION_DUEL_ENABLED ? 'Start from Live' : null}
+        onCta={
+          REACTION_DUEL_ENABLED
+            ? () => startFromLive('GamesReactionDuel')
+            : null
+        }
+        muted={!REACTION_DUEL_ENABLED}
+      />
+
+      <GameCard
+        icon="podium-outline"
+        title="Reaction Duel Ranked"
+        badge="Later"
+        body="Ranked matchmaking is planned, but it is not a live product yet. Use Reaction Duel in a host live now."
+        muted
+      />
 
       <GameCard
         icon="flash"
@@ -91,31 +160,30 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
             : ['Open Live when Marble Race ships in your build.', 'Host a stream and tap Race on the overlay.']
         }
         ctaLabel={MARBLE_ENABLED ? 'Start from Live' : null}
-        onCta={MARBLE_ENABLED ? startFromLive : null}
+        onCta={
+          MARBLE_ENABLED
+            ? () => startFromLive('GamesMarbleRace')
+            : null
+        }
         muted={!MARBLE_ENABLED}
       />
 
       <GameCard
         icon="game-controller"
-        title="Battle game (Artillery)"
-        badge={ARTILLERY_ENABLED ? 'In live battles' : 'Coming soon'}
+        title="Battles"
+        badge={ARTILLERY_ENABLED ? 'Battle HQ + Artillery' : 'Battle HQ'}
         body={
           ARTILLERY_ENABLED
-            ? 'Server-authoritative artillery stage during head-to-head battles. Open a battle stream and tap Battle game.'
-            : 'Artillery opens from battle streams when enabled for this build.'
+            ? 'Arrange or review battle requests in Battle HQ. During a live battle, tap Games → Battle game to open Artillery.'
+            : 'Arrange battles, review requests, and enter live arenas from Battle HQ. Artillery appears here when enabled.'
         }
-        steps={
-          ARTILLERY_ENABLED
-            ? [
-                'Open Chat → Battles and join or start a live battle.',
-                'In the battle stream, tap Battle game.',
-                'Play the stage — host and opponent roles are wired from the battle.',
-              ]
-            : ['Find a live battle under Battles when Artillery is on.']
-        }
-        ctaLabel={ARTILLERY_ENABLED ? 'Open Battles' : null}
-        onCta={ARTILLERY_ENABLED ? openBattles : null}
-        muted={!ARTILLERY_ENABLED}
+        steps={[
+          'Open Battle HQ to create, accept, decline, or withdraw a request.',
+          'Enter the live arena when the battle is ready.',
+          'Use Exit battle to leave the arena without ending the whole app.',
+        ]}
+        ctaLabel="Open Battle HQ"
+        onCta={openBattles}
       />
 
       <View style={styles.lobbyCard}>

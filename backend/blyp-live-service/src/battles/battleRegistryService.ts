@@ -201,6 +201,23 @@ export async function mirrorBattleArena(arena: BattleArenaSnapshot): Promise<voi
       buildBattleFirestoreMirror(arena),
       { merge: true },
     );
+
+    if (
+      arena.sessionId &&
+      ['ENDED', 'DECLINED', 'CANCELLED', 'EXPIRED'].includes(arena.state)
+    ) {
+      const streamRef = fs.collection('liveStreams').doc(arena.sessionId);
+      const stream = await streamRef.get();
+      if (stream.data()?.activeBattleId === arena.battleId) {
+        await streamRef.set(
+          {
+            activeBattleId: null,
+            activeBattleIdUpdatedAt: Date.now(),
+          },
+          { merge: true },
+        );
+      }
+    }
   } catch {
     // REST polling is authoritative if the presentation mirror is unavailable.
   }
@@ -329,7 +346,7 @@ async function closeBattleRecord(
       }
     } else {
       requireParticipant(row, userId);
-      if (!['INVITED', 'ACCEPTED', 'LOBBY_OPEN'].includes(row.state)) {
+      if (!['INVITED', 'ACCEPTED', 'LOBBY_OPEN', 'COUNTDOWN'].includes(row.state)) {
         throw new EconomyError('INVALID_STATE', 409, 'Battle can no longer be cancelled');
       }
     }

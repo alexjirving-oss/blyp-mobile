@@ -460,9 +460,9 @@ export async function startGame(args: {
   starterUserId: string;
 }): Promise<FrenemiesRoom> {
   const { sessionId, hostUserId, starterUserId } = args;
-  if (!isFrenemiesAdmin(starterUserId)) {
-    const err: any = new Error('NOT_ADMIN');
-    err.code = 'NOT_ADMIN';
+  if (starterUserId !== hostUserId && !isFrenemiesAdmin(starterUserId)) {
+    const err: any = new Error('NOT_HOST');
+    err.code = 'NOT_HOST';
     throw err;
   }
 
