@@ -1,4 +1,4 @@
-// socialImportService.js
+﻿// socialImportService.js
 //
 // "Bring your content over" — lets a signed-in user import their own videos
 // from an external platform (TikTok first) onto their Blyp profile.
@@ -17,6 +17,7 @@
 // attestation; abuse/mismatch handling is layered on later (ID + phone).
 
 import { db, firebaseEnabled } from '../config/firebase';
+import { STAGGER_DEFAULTS, normalizeStagger } from '../utils/publishSchedule';
 
 export const IMPORT_STATUS = {
   PENDING: 'pending',
@@ -65,8 +66,8 @@ export function normalizeHandleFor(platform, input) {
 
 /**
  * Platform-aware handle validation.
- *  - tiktok: letters, numbers, underscore and dot, 2–24 chars.
- *  - youtube: a YouTube URL, or a bare handle (3–30 chars, letters/digits/._-).
+ *  - tiktok: letters, numbers, underscore and dot, 2ÔÇô24 chars.
+ *  - youtube: a YouTube URL, or a bare handle (3ÔÇô30 chars, letters/digits/._-).
  */
 export function isValidHandleFor(platform, value) {
   const v = String(value || '');
@@ -99,7 +100,7 @@ export function normalizeHandle(input) {
   return normalizeHandleFor('tiktok', input);
 }
 
-/** TikTok handles: letters, numbers, underscore and dot, 2–24 chars. (Legacy.) */
+/** TikTok handles: letters, numbers, underscore and dot, 2ÔÇô24 chars. (Legacy.) */
 export function isValidHandle(handle) {
   return isValidHandleFor('tiktok', handle);
 }
@@ -110,15 +111,23 @@ function fsReady() {
 
 /**
  * Create a fresh import request for the current user.
+ * @param {object} opts
+ * @param {object} [opts.stagger] Pace options — see normalizeStagger. Default ON (3/day).
  * @returns {Promise<{ id: string }>} the new request id
  */
-export async function requestImport({ uid, platform = 'tiktok', handle, claimedOwnership }) {
-  if (!fsReady()) throw new Error('Importing isn’t available right now.');
+export async function requestImport({
+  uid,
+  platform = 'tiktok',
+  handle,
+  claimedOwnership,
+  stagger,
+}) {
+  if (!fsReady()) throw new Error('Importing isnÔÇÖt available right now.');
   if (!uid) throw new Error('Please sign in to import your content.');
 
   const normalized = normalizeHandleFor(platform, handle);
   if (!isValidHandleFor(platform, normalized)) {
-    throw new Error('That doesn’t look like a valid username.');
+    throw new Error('That doesnÔÇÖt look like a valid username.');
   }
 
   try {
@@ -129,6 +138,11 @@ export async function requestImport({ uid, platform = 'tiktok', handle, claimedO
   }
 
   const now = Date.now();
+  // Clients cannot self-elevate to admin caps; staff uses the admin API.
+  const staggerNorm = normalizeStagger(
+    stagger != null ? stagger : { enabled: true, postsPerDay: STAGGER_DEFAULTS.postsPerDay, startAt: now },
+    { isAdmin: false },
+  );
   const data = {
     uid,
     platform,
@@ -139,8 +153,13 @@ export async function requestImport({ uid, platform = 'tiktok', handle, claimedO
     done: 0,
     skipped: 0,
     failed: 0,
+    scheduled: 0,
     claimedOwnership: !!claimedOwnership,
-    message: 'Queued — we’ll start bringing your videos over shortly.',
+    stagger: staggerNorm,
+    staggerPaused: false,
+    message: staggerNorm.enabled
+      ? `Queued — weÔÇÖll import your videos, then publish about ${staggerNorm.postsPerDay}/day.`
+      : 'Queued — weÔÇÖll start bringing your videos over shortly.',
     createdAt: now,
     updatedAt: now,
   };
@@ -152,7 +171,7 @@ export async function requestImport({ uid, platform = 'tiktok', handle, claimedO
     const code = e?.code || e?.message || '';
     if (String(code).includes('permission') || String(code).includes('PERMISSION')) {
       throw new Error(
-        'Import isn’t allowed for this account yet. Update the app / wait for permissions to deploy, then try again.',
+        'Import isnÔÇÖt allowed for this account yet. Update the app / wait for permissions to deploy, then try again.',
       );
     }
     throw e instanceof Error ? e : new Error(String(e?.message || e));

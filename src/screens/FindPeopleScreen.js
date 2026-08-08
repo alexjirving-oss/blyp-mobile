@@ -172,7 +172,7 @@ const FindPeopleScreen = ({ navigation, route }) => {
         })
         .catch((e) => {
           console.error('[FIND_PEOPLE][AUTH] ensureFirebaseAuthReady failed:', e?.code || e?.message);
-          // Still try to subscribe â€” useCommon.js may have already established Firebase auth.
+          // Still try to subscribe — useCommon.js may have already established Firebase auth.
           // Worst case the snapshot will fail with permission-denied (same as not trying).
           console.warn('[FIND_PEOPLE][AUTH] Falling back to doSubscribe despite auth error');
           if (!cancelled) doSubscribe();

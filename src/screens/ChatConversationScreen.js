@@ -135,6 +135,9 @@ const ChatScreen = ({ route, navigation }) => {
   const [presence, setPresence] = useState(null);
   const [threadMeta, setThreadMeta] = useState(null);
   const [reportVisible, setReportVisible] = useState(false);
+  // Re-evaluate freshness so hard-killed peers flip off "Online" without a new snapshot.
+  const [presenceNow, setPresenceNow] = useState(() => Date.now());
+  const chatFocusedRef = useRef(false);
 
   useEffect(() => {
     if (!participantUid || !compatDb?.collection) {
@@ -162,6 +165,11 @@ const ChatScreen = ({ route, navigation }) => {
       try { unsub(); } catch { /* ignore */ }
     };
   }, [participantUid]);
+
+  useEffect(() => {
+    const id = setInterval(() => setPresenceNow(Date.now()), 30 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Peer lastReadAt / lastDeliveredAt drive outbound ticks (rules block per-message status).
   useEffect(() => {
@@ -370,13 +378,15 @@ const ChatScreen = ({ route, navigation }) => {
           playMessageAlert();
         }
 
-        // Inbound live messages: stamp delivered so the sender gets double grey ticks.
+        // Inbound: delivered while blurred; read (also stamps delivered) while focused
+        // so blue ticks advance for messages that arrive with the thread open.
         if (uid) {
           const hasInbound = list.some((m) => m?.senderId && m.senderId !== uid);
           if (hasInbound) {
-            conversationsMessagingService
-              .markThreadDelivered(db, conversationId, uid)
-              .catch(() => {});
+            const stamp = chatFocusedRef.current
+              ? conversationsMessagingService.markThreadRead(db, conversationId, uid)
+              : conversationsMessagingService.markThreadDelivered(db, conversationId, uid);
+            stamp.catch(() => {});
           }
         }
       },
@@ -396,10 +406,12 @@ const ChatScreen = ({ route, navigation }) => {
     };
   }, [navigation, user.username, conversationId, uid]);
 
-  // Focus-aware: suppress tray sound while this chat is visible; clear tray on open.
+  // Focus-aware: suppress tray sound, stamp read/delivered, clear tray on open/re-focus.
+  // Stack screens often stay mounted — mount-only markRead never re-ran on return.
   useFocusEffect(
     React.useCallback(() => {
       if (!conversationId) return undefined;
+      chatFocusedRef.current = true;
       try {
         // eslint-disable-next-line global-require
         const { setActiveConversationId, clearActiveConversationId } = require('../services/activeConversation');
@@ -414,7 +426,21 @@ const ChatScreen = ({ route, navigation }) => {
       } catch {
         // ignore
       }
+
+      let cancelled = false;
+      const markReadTimer = uid
+        ? setTimeout(() => {
+            if (cancelled) return;
+            conversationsMessagingService
+              .markThreadRead(db, conversationId, uid)
+              .catch((error) => console.error('Error marking thread read:', error));
+          }, 300)
+        : null;
+
       return () => {
+        cancelled = true;
+        chatFocusedRef.current = false;
+        if (markReadTimer) clearTimeout(markReadTimer);
         try {
           // eslint-disable-next-line global-require
           const { clearActiveConversationId } = require('../services/activeConversation');
@@ -423,7 +449,7 @@ const ChatScreen = ({ route, navigation }) => {
           // ignore
         }
       };
-    }, [conversationId]),
+    }, [conversationId, uid]),
   );
 
   const loadOlderMessages = useCallback(async () => {
@@ -455,31 +481,6 @@ const ChatScreen = ({ route, navigation }) => {
       setLoadingOlder(false);
     }
   }, [conversationId, hasOlder]);
-
-  // Clear Phone-tab badge + stamp read/delivered when the chat is opened.
-  // Per-message status updates are blocked by Firestore rules; conversation
-  // lastReadAt / lastDeliveredAt drive outbound ticks for the peer.
-  useEffect(() => {
-    if (!conversationId || !uid) return undefined;
-
-    const markRead = async () => {
-      try {
-        await conversationsMessagingService.markThreadRead(db, conversationId, uid);
-      } catch (error) {
-        console.error('Error marking thread read:', error);
-      }
-      try {
-        // eslint-disable-next-line global-require
-        const { clearConversationNotifications } = require('../services/messagePushNative');
-        await clearConversationNotifications(conversationId);
-      } catch {
-        // ignore
-      }
-    };
-
-    const timeoutId = setTimeout(markRead, 300);
-    return () => clearTimeout(timeoutId);
-  }, [conversationId, uid]);
 
   const peerReceipt = useMemo(() => {
     if (!participantUid || !threadMeta) {
@@ -603,6 +604,7 @@ const ChatScreen = ({ route, navigation }) => {
             ) : null}
           </View>
           {(() => {
+            void presenceNow; // clock tick forces freshness re-check
             const isOnline = isPresenceOnline(presence, ONLINE_FRESHNESS_MS);
             if (isOnline) {
               return <Text style={[styles.participantStatus, styles.statusOnline]}>Online</Text>;

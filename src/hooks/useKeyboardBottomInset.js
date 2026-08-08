@@ -1,125 +1,81 @@
-import { useEffect, useRef, useState } from 'react';
-import { Dimensions, Keyboard, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Keyboard, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAnimatedKeyboard, useAnimatedReaction, runOnJS } from 'react-native-reanimated';
 
 /**
  * Bottom inset for chat composers.
  *
- * Edge-to-edge Android often does not shrink the RN window for the IME even with
- * `adjustResize`. 1.0.36 measured composer vs `endCoordinates.screenY` and padded
- * only the shortfall — that mixed window vs screen coordinates and under-counted
- * tall Gboard chrome (toolbar + number row) on Flip / foldables, so the composer
- * stayed clipped.
+ * 1.0.36-38 inferred the Android keyboard height from `Dimensions`/window
+ * resize deltas plus a `measureInWindow` shortfall guess, sampled on a
+ * setTimeout race (64/180/320/400ms). That mixed window vs screen coordinate
+ * spaces and under/over-counted tall Gboard chrome, and the races settled at
+ * different times than on slab phones — on Z Flip the composer would clip or
+ * float with a visible gap depending on which timeout won, and re-folding
+ * mid-type (cover -> main) was never re-measured correctly.
  *
- * Android lift = IME height minus any window shrink already applied by the system,
- * raised by a same-space measure (composer bottom vs window bottom). Lift only
- * ratchets up while the keyboard is open.
+ * Fix: read the real IME inset straight from the OS via Reanimated's
+ * `useAnimatedKeyboard`, which drives a native WindowInsetsCompat /
+ * WindowInsetsAnimationCallback listener (reanimated is already a native
+ * dependency here — no new library, no rebuild). This is authoritative for
+ * any screen shape or fold state and tracks live height changes, so it also
+ * self-corrects if the keyboard height changes while still open (e.g.
+ * unfolding a Flip mid-conversation). `isStatusBarTranslucentAndroid` /
+ * `isNavigationBarTranslucentAndroid` match this app's real edge-to-edge
+ * config (transparent status + nav bars everywhere via
+ * `edgeToEdgeEnabled`/`styles.xml`), so Reanimated's own decor-margin
+ * bookkeeping stays a no-op and the only effect is the height value.
  *
- * iOS: KeyboardAvoidingView owns IME lift; this hook reports `keyboardOpen` and
- * safe-area bottom when the keyboard is closed.
+ * iOS: KeyboardAvoidingView owns IME lift; this hook reports `keyboardOpen`
+ * and safe-area bottom when the keyboard is closed (unchanged behavior).
  *
- * @param {React.RefObject} [composerRef] Composer view measured against the window.
+ * @param {React.RefObject} [_composerRef] Unused — kept so existing call
+ *   sites (`useKeyboardBottomInset(composerRef)`) don't need to change.
  */
-export default function useKeyboardBottomInset(composerRef) {
+export default function useKeyboardBottomInset(_composerRef) {
   const insets = useSafeAreaInsets();
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [androidLift, setAndroidLift] = useState(0);
-  const baselineWindowHRef = useRef(Dimensions.get('window').height);
-  const keyboardOpenRef = useRef(false);
+  const keyboard = useAnimatedKeyboard({
+    isStatusBarTranslucentAndroid: true,
+    isNavigationBarTranslucentAndroid: true,
+  });
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+  const [iosKeyboardOpen, setIosKeyboardOpen] = useState(false);
+
+  // Mirror the UI-thread keyboard height to JS state. Rounding to 2px avoids
+  // a JS render on every sub-pixel animation tick while still tracking the
+  // open/close animation and any live resize (fold-state change) smoothly.
+  useAnimatedReaction(
+    () => Math.round(keyboard.height.value / 2) * 2,
+    (rounded, prevRounded) => {
+      if (rounded === prevRounded) return;
+      runOnJS(setAndroidKeyboardHeight)(rounded);
+    },
+    [],
+  );
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const applyLift = (candidate) => {
-      const next = Math.max(0, Math.round(candidate || 0));
-      if (next <= 0) return;
-      setAndroidLift((prev) => Math.max(prev, next));
-    };
-
-    const computeAndroidLift = (kbH) => {
-      if (Platform.OS !== 'android') return;
-      const winH = Dimensions.get('window').height;
-      const baseline = baselineWindowHRef.current || winH;
-      // Portion of the IME already absorbed by adjustResize (when it actually runs).
-      const alreadyResized = Math.max(0, Math.round(baseline - winH));
-      const heightBased = Math.max(0, kbH - alreadyResized);
-
-      const node = composerRef?.current;
-      if (!node || typeof node.measureInWindow !== 'function') {
-        applyLift(heightBased);
-        return;
-      }
-
-      try {
-        node.measureInWindow((_x, y, _w, h) => {
-          if (!Number.isFinite(y) || !Number.isFinite(h) || !Number.isFinite(winH)) {
-            applyLift(heightBased);
-            return;
-          }
-          // Same coordinate space (window): how much of the IME still covers us.
-          const composerBottom = y + h;
-          const gapBelow = Math.max(0, winH - composerBottom);
-          const measuredShortfall = Math.max(0, Math.ceil(kbH - gapBelow + 8));
-          applyLift(Math.max(heightBased, measuredShortfall));
-        });
-      } catch {
-        applyLift(heightBased);
-      }
-    };
-
-    const onShow = (event) => {
-      const next = Math.max(0, Math.round(event?.endCoordinates?.height || 0));
-      keyboardOpenRef.current = next > 0;
-      setKeyboardHeight(next);
-      if (Platform.OS !== 'android') return;
-
-      const run = () => computeAndroidLift(next);
-      requestAnimationFrame(() => requestAnimationFrame(run));
-      setTimeout(run, 64);
-      setTimeout(run, 180);
-      setTimeout(run, 320);
-      // Layout race / missing ref: never leave the composer at 0 under a tall IME.
-      setTimeout(() => {
-        setAndroidLift((prev) => (prev > 0 ? prev : next));
-      }, 400);
-    };
-
-    const onHide = () => {
-      keyboardOpenRef.current = false;
-      setKeyboardHeight(0);
-      setAndroidLift(0);
-      baselineWindowHRef.current = Dimensions.get('window').height;
-    };
-
-    const onDimChange = ({ window: win }) => {
-      if (!keyboardOpenRef.current && win?.height) {
-        baselineWindowHRef.current = win.height;
-      }
-    };
-
-    const showSub = Keyboard.addListener(showEvent, onShow);
-    const hideSub = Keyboard.addListener(hideEvent, onHide);
-    const dimSub = Dimensions.addEventListener?.('change', onDimChange);
-
+    if (Platform.OS === 'android') return undefined;
+    const onShow = () => setIosKeyboardOpen(true);
+    const onHide = () => setIosKeyboardOpen(false);
+    const showSub = Keyboard.addListener('keyboardWillShow', onShow);
+    const hideSub = Keyboard.addListener('keyboardWillHide', onHide);
     return () => {
       try { showSub.remove(); } catch { /* ignore */ }
       try { hideSub.remove(); } catch { /* ignore */ }
-      try { dimSub?.remove?.(); } catch { /* ignore */ }
     };
-  }, [composerRef]);
+  }, []);
 
-  const keyboardOpen = keyboardHeight > 0;
+  const keyboardOpen = Platform.OS === 'android' ? androidKeyboardHeight > 0 : iosKeyboardOpen;
   const safeBottom = Math.max(0, insets.bottom || 0);
 
-  // Single padding owner: IME lift while open, safe-area only while closed.
-  // Never add safe-area on top of IME lift (nav bar is under the keyboard).
+  // Single padding owner: IME inset while open, safe-area only while closed.
+  // Never add safe-area on top of the IME inset (nav bar is under the keyboard).
   const bottomInset = Platform.OS === 'android'
-    ? (keyboardOpen ? androidLift : safeBottom)
+    ? (keyboardOpen ? androidKeyboardHeight : safeBottom)
     : (keyboardOpen ? 0 : safeBottom);
 
   return {
-    keyboardHeight: Platform.OS === 'android' ? keyboardHeight : 0,
+    keyboardHeight: Platform.OS === 'android' ? androidKeyboardHeight : 0,
     keyboardOpen,
     bottomInset,
     safeBottom,

@@ -1,4 +1,4 @@
-# Topic notifications
+﻿# Topic notifications
 
 ## Product behavior
 
@@ -13,6 +13,9 @@
   push gate. Legacy/current global profile flags set explicitly to `false`
   (`notificationsEnabled`, `pushNotificationsEnabled`, and equivalent nested
   notification settings) suppress topic delivery too.
+- Category-level and per-person prefs are documented in
+  `docs/NOTIFICATION_PREFERENCES.md`. The Topics master category must be on,
+  and the dispatcher re-checks preferences immediately before FCM.
 
 ## Trusted event queue
 

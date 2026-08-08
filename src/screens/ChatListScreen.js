@@ -907,7 +907,7 @@ const ChatListScreen = ({ navigation, route }) => {
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
 
-        {/* Header â€“ FLOW layout (no overlay) */}
+        {/* Header – FLOW layout (no overlay) */}
         <BlypHeaderFlow
           tabs={[
             { key: 'notifications', label: 'Live' },

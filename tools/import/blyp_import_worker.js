@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Blyp social-import worker.
  *
  * Fulfils the in-app "Bring your content" feature. The app writes a `pending`
@@ -13,9 +13,9 @@
  * containerise it for Cloud Run later. It loops forever, one job at a time.
  *
  * Prerequisites:
- *   • yt-dlp on PATH                (https://github.com/yt-dlp/yt-dlp)
- *   • ffmpeg on PATH (yt-dlp merges)
- *   • Admin credentials, either:
+ *   ÔÇó yt-dlp on PATH                (https://github.com/yt-dlp/yt-dlp)
+ *   ÔÇó ffmpeg on PATH (yt-dlp merges)
+ *   ÔÇó Admin credentials, either:
  *       - GOOGLE_APPLICATION_CREDENTIALS=<path to service-account.json>, or
  *       - `gcloud auth application-default login` (uses your ADC)
  *
@@ -24,8 +24,13 @@
  *   STORAGE_BUCKET  (default blyp-master.firebasestorage.app)
  *   IMPORT_TMP      (default <os tmp>/blyp_imports)
  *   POLL_MS         (default 5000)
- *   MAX_VIDEOS      (default 0 = no cap)
+ *   MAX_VIDEOS      (default 1000)
  *   ONCE=1          (process a single job then exit — handy for testing)
+ *   STAGGER_FORCE_OFF=1  (ignore job.stagger and publish live immediately)
+ *
+ * Staggered publish: by default imports write posts as publishStatus=scheduled
+ * with publishAt spaced over time. Run tools/import/blyp_publish_sweeper.js
+ * (or the blypScheduledPublishSweep Cloud Function) to flip them live when due.
  *
  * Run: node tools/import/blyp_import_worker.js
  */
@@ -38,6 +43,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const admin = require('firebase-admin');
+const { normalizeStagger, publishAtForIndex, PUBLISH_STATUS } = require('./publishSchedule');
 
 const PROJECT_ID = process.env.PROJECT_ID || 'blyp-master';
 const STORAGE_BUCKET = process.env.STORAGE_BUCKET || 'blyp-master.firebasestorage.app';
@@ -54,6 +60,7 @@ const STALE_RUNNING_MS = Number(process.env.STALE_RUNNING_MS || 5 * 60 * 1000);
 const ITEM_TIMEOUT_MS = Number(process.env.ITEM_TIMEOUT_MS || 5 * 60 * 1000);
 const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS || 2 * 60 * 1000);
 const ONCE = process.env.ONCE === '1';
+const STAGGER_FORCE_OFF = process.env.STAGGER_FORCE_OFF === '1';
 
 admin.initializeApp({ projectId: PROJECT_ID, storageBucket: STORAGE_BUCKET });
 const db = admin.firestore();
@@ -180,6 +187,11 @@ async function processJob(ref) {
   const authorHandle = prof.username || prof.handle || handle;
   const authorPhoto = prof.photoURL || null;
 
+  // Pace publishes over time (default ON). Admin jobs may set stagger.isAdmin for higher caps.
+  const stagger = STAGGER_FORCE_OFF
+    ? { enabled: false }
+    : normalizeStagger(job.stagger || { enabled: true }, { isAdmin: !!(job.stagger && job.stagger.isAdmin) });
+
   // Idempotency: skip a video only if THIS user already imported the SAME
   // source video from the SAME source account. The dedupe key is scoped by
   // platform + account + sourceId — deliberately NOT a bare sourceId and NOT a
@@ -187,18 +199,28 @@ async function processJob(ref) {
   // different accounts without their videos being mistaken for duplicates of an
   // earlier import.
   const existing = new Set();
+  let scheduledIndex = 0;
   try {
     const posts = await db.collection('posts').where('userId', '==', uid).get();
     posts.forEach((p) => {
       const d = p.data() || {};
       if (d.sourceId) existing.add(dedupeKey(d.sourcePlatform, d.sourceAccount, d.sourceId));
+      if (d.importId === ref.id && typeof d.staggerIndex === 'number' && d.staggerIndex >= scheduledIndex) {
+        scheduledIndex = d.staggerIndex + 1;
+      }
     });
   } catch (e) { log('read existing failed:', e.message); }
 
   // Download into a fresh per-job temp dir.
   const dir = path.join(TMP_ROOT, `${ref.id}`);
   fs.mkdirSync(dir, { recursive: true });
-  await ref.update({ message: `Connecting to ${platformLabel}…`, updatedAt: Date.now() });
+  await ref.update({
+    stagger,
+    updatedAt: Date.now(),
+    message: stagger.enabled
+      ? `Connecting to ${platformLabel}… (will publish ~${stagger.postsPerDay}/day)`
+      : `Connecting to ${platformLabel}…`,
+  });
 
   // 1) Enumerate the source's videos (read-only, fast) so we know the real
   //    total up-front and can stream progress as each clip is brought over,
@@ -241,7 +263,7 @@ async function processJob(ref) {
   // 2) Download + upload one clip at a time. Progress (and a heartbeat) is
   //    written after every video, so the app shows live movement and partial
   //    results appear immediately. A single failing clip never blocks the rest.
-  let done = 0, skipped = 0, failed = 0, n = 0;
+  let done = 0, skipped = 0, failed = 0, scheduled = 0, n = 0;
 
   // Cancel awareness: the client can flip status -> 'canceled' at any moment.
   // We re-check at the loop head AND right after each (potentially minutes-long)
@@ -288,7 +310,7 @@ async function processJob(ref) {
       skipped += 1;
       if (!(await safeJobUpdate({
         done, skipped, failed,
-        message: `Skipping ${skipped} already imported · ${done + skipped} of ${total}…`,
+        message: `Skipping ${skipped} already imported ┬À ${done + skipped} of ${total}…`,
       }))) {
         await finishCanceled(n - 1);
         return;
@@ -365,6 +387,14 @@ async function processJob(ref) {
       } catch (e) { log('  thumb skipped:', e.message); }
 
       const title = (caption || '').split('\n')[0].slice(0, 80) || authorName;
+      const nowMs = Date.now();
+      const staggerSlot = scheduledIndex;
+      const publishAt = stagger.enabled
+        ? publishAtForIndex(stagger, staggerSlot, nowMs)
+        : nowMs;
+      const publishStatus = stagger.enabled ? PUBLISH_STATUS.SCHEDULED : PUBLISH_STATUS.LIVE;
+      if (stagger.enabled) scheduledIndex += 1;
+
       await db.collection('posts').add({
         userId: uid,
         username: authorName,
@@ -373,7 +403,7 @@ async function processJob(ref) {
         user: { username: authorHandle, avatar: authorPhoto },
         title, caption, description: caption, transcript: caption,
         tags, hashtags: tags, category,
-        emoji: '🎬', type: 'video',
+        emoji: '­ƒÄ¼', type: 'video',
         videoUrl, mediaUrl: videoUrl, imageUrl: null, audioUrl: null,
         thumbnail: thumbnailUrl,
         media: [{ url: videoUrl, type: 'video', thumbnail: thumbnailUrl }],
@@ -383,10 +413,15 @@ async function processJob(ref) {
         sourceUrl: info.webpage_url || videoUrlSrc || null,
         sourceId: srcId,
         importedVia: 'social-import',
+        importId: ref.id,
+        publishStatus,
+        publishAt,
+        staggerIndex: stagger.enabled ? staggerSlot : null,
         likes: 0, likeCount: 0, comments: 0, commentCount: 0, shares: 0,
         date: postDate, createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       done += 1;
+      if (publishStatus === PUBLISH_STATUS.SCHEDULED) scheduled += 1;
 
       // Free disk as we go so big imports don't fill the box.
       try {
@@ -403,9 +438,11 @@ async function processJob(ref) {
     // Heartbeat + progress after every clip so the UI never looks frozen.
     // Count skipped toward the processed total so re-imports don't look stuck.
     await ref.update({
-      done, skipped, failed,
+      done, skipped, failed, scheduled,
       updatedAt: Date.now(),
-      message: `${done + skipped} of ${total} processed (${done} new${skipped ? `, ${skipped} already there` : ''})…`,
+      message: stagger.enabled
+        ? `${done + skipped} of ${total} processed (${done} queued to publish${skipped ? `, ${skipped} already there` : ''})…`
+        : `${done + skipped} of ${total} processed (${done} new${skipped ? `, ${skipped} already there` : ''})…`,
     }).catch(() => {});
   }
 
@@ -418,12 +455,14 @@ async function processJob(ref) {
 
   await ref.update({
     status: 'done',
-    done, skipped, failed, total,
+    done, skipped, failed, scheduled, total,
     finishedAt: Date.now(),
     updatedAt: Date.now(),
-    message: `Imported ${done} video${done === 1 ? '' : 's'} from @${handle}.`,
+    message: stagger.enabled
+      ? `Imported ${done} video${done === 1 ? '' : 's'} from @${handle} — publishing ~${stagger.postsPerDay}/day.`
+      : `Imported ${done} video${done === 1 ? '' : 's'} from @${handle}.`,
   });
-  log(`job ${ref.id} done: posted=${done} skipped=${skipped} failed=${failed}`);
+  log(`job ${ref.id} done: posted=${done} scheduled=${scheduled} skipped=${skipped} failed=${failed}`);
 
   // Best-effort cleanup of the temp dir.
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }

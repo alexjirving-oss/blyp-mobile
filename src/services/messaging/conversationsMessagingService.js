@@ -382,7 +382,7 @@ export const conversationsMessagingService = {
   },
 };
 
-/** Epoch ms from Firestore Timestamp / Date / number. */
+/** Epoch ms from Firestore Timestamp / Date / number / {seconds}. */
 export function firestoreTimeMs(value) {
   if (!value) return 0;
   if (typeof value?.toMillis === 'function') {
@@ -394,10 +394,17 @@ export function firestoreTimeMs(value) {
     const n = d?.getTime?.();
     return Number.isFinite(n) ? n : 0;
   }
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Seconds vs ms — conversation stamps are ms-scale server times.
+    return value < 1e12 ? value * 1000 : value;
+  }
   if (value instanceof Date) {
     const n = value.getTime();
     return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof value?.seconds === 'number') {
+    const nano = typeof value.nanoseconds === 'number' ? value.nanoseconds : 0;
+    return value.seconds * 1000 + Math.floor(nano / 1e6);
   }
   return 0;
 }

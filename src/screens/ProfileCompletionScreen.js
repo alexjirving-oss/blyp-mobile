@@ -64,7 +64,7 @@ export default function ProfileCompletionScreen({
         <View style={styles.card}>
           <Text style={styles.title}>Choose your Blyp username</Text>
           <Text style={styles.body}>
-            This is your public @handle in profiles, live rooms, comments, and notifications.
+            One-time setup for your public @handle in profiles, live rooms, comments, and notifications.
           </Text>
           <TextInput
             value={username}
@@ -94,7 +94,7 @@ export default function ProfileCompletionScreen({
             >
               {saving
                 ? <ActivityIndicator color="#0A0A0C" />
-                : <Text style={styles.buttonText}>Complete profile</Text>}
+                : <Text style={styles.buttonText}>Continue</Text>}
             </LinearGradient>
           </TouchableOpacity>
           {canSkip && (

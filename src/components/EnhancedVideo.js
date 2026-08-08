@@ -3,6 +3,8 @@ import { AppState, View, StyleSheet, ActivityIndicator, Image } from 'react-nati
 import UnifiedVideo from './UnifiedVideo';
 import { getPlayableVideoUri, invalidateCachedVideo, prefetchVideoToCache } from '../utils/videoCache';
 import { COLORS } from '../styles/theme';
+import { claimFeedAudio, releaseFeedAudio } from '../services/feedAudioSession';
+import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
 
 /**
  * Snappy + reliable playback:
@@ -123,6 +125,10 @@ function EnhancedVideo(props) {
     let cancelled = false;
     const timers = [];
     const wantMuted = props.isMuted ?? true;
+    const ownerId =
+      props.audioOwnerId != null && String(props.audioOwnerId).trim()
+        ? String(props.audioOwnerId)
+        : null;
 
     // Imperative mute/play must be idempotent. Neighbor preload cells (±2) finish
     // loading and used to spam setIsMutedAsync(true)+pauseAsync, which steals
@@ -134,7 +140,24 @@ function EnhancedVideo(props) {
         if (cancelled) return false;
 
         if (isFocused) {
+          // Re-assert loudspeaker media mode before unmuting — Live / STT / notify
+          // can leave the process in earpiece / communication mode.
+          if (!wantMuted && ownerId) {
+            const owned = await claimFeedAudio(ownerId);
+            if (cancelled || !owned) return false;
+          } else if (!wantMuted) {
+            await ensureMediaPlaybackAudioMode({ background: false }).catch(() => {});
+          }
+
           if (status?.isLoaded) {
+            const targetVolume = wantMuted ? 0 : 1;
+            if (typeof status.volume === 'number' && status.volume !== targetVolume) {
+              try {
+                await v.setVolumeAsync?.(targetVolume);
+              } catch {
+                /* best-effort */
+              }
+            }
             if (status.isMuted !== wantMuted) {
               try {
                 await v.setIsMutedAsync?.(wantMuted);
@@ -153,6 +176,11 @@ function EnhancedVideo(props) {
             return true; // already playing at intended mute
           }
           try {
+            await v.setVolumeAsync?.(wantMuted ? 0 : 1);
+          } catch {
+            /* best-effort */
+          }
+          try {
             await v.setIsMutedAsync?.(wantMuted);
           } catch {
             /* best-effort */
@@ -163,7 +191,13 @@ function EnhancedVideo(props) {
 
         // Inactive / blurred: only touch native audio if something is still
         // audible or playing. Silent no-ops avoid focus thrash with the active cell.
-        if (status?.isLoaded && (status.isPlaying || status.isMuted === false)) {
+        if (ownerId) releaseFeedAudio(ownerId);
+        if (status?.isLoaded && (status.isPlaying || status.isMuted === false || status.volume > 0)) {
+          try {
+            await v.setVolumeAsync?.(0);
+          } catch {
+            /* best-effort */
+          }
           try {
             await v.setIsMutedAsync?.(true);
           } catch {
@@ -198,8 +232,9 @@ function EnhancedVideo(props) {
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
+      if (ownerId && !isFocused) releaseFeedAudio(ownerId);
     };
-  }, [isFocused, videoLoaded, hasError, props.isMuted]);
+  }, [isFocused, videoLoaded, hasError, props.isMuted, props.audioOwnerId]);
 
   const emitNaturalSize = (raw) => {
     if (!props.onNaturalSize || !raw || !(raw.width > 0) || !(raw.height > 0)) return;

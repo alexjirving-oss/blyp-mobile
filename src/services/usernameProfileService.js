@@ -13,8 +13,13 @@ import { firebaseNative, firestore } from '../config/firebase';
 import { hydrateOwnProfile } from './ownProfileCache';
 
 const PENDING_PROFILE_KEY = '@blyp/auth/pending-profile-v1';
+const USERNAME_DEFERRED_PREFIX = '@blyp/auth/username-deferred-v1:';
 const USERNAME_PATTERN = /^[A-Za-z0-9_.]{3,20}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function deferredKey(uid) {
+  return `${USERNAME_DEFERRED_PREFIX}${String(uid || '').trim()}`;
+}
 
 export function normalizeUsername(value) {
   return String(value || '').trim().replace(/^@/, '');
@@ -47,9 +52,11 @@ export function hasValidPublicUsername(profile, uid = '') {
 }
 
 export async function rememberPendingProfile(data = {}) {
+  const email = String(data.email || '').trim().toLowerCase();
   const payload = {
     source: data.source === 'social' ? 'social' : 'signup',
     username: normalizeUsername(data.username),
+    ...(email ? { email } : {}),
     createdAt: Date.now(),
   };
   await AsyncStorage.setItem(PENDING_PROFILE_KEY, JSON.stringify(payload));
@@ -70,8 +77,52 @@ export async function readPendingProfile() {
   }
 }
 
+/** Pending signup/social payload only when it belongs to this signed-in identity. */
+export async function readPendingProfileForUser({ email } = {}) {
+  const pending = await readPendingProfile();
+  if (!pending) return null;
+  const pendingEmail = String(pending.email || '').trim().toLowerCase();
+  const userEmail = String(email || '').trim().toLowerCase();
+  // Shared-device safety: never apply another account's pending username.
+  if (pendingEmail && userEmail && pendingEmail !== userEmail) return null;
+  return pending;
+}
+
 export async function clearPendingProfile() {
   await AsyncStorage.removeItem(PENDING_PROFILE_KEY);
+}
+
+/** One-time "not now" for legacy accounts missing a public username — durable across launches. */
+export async function markUsernameDeferred(uid) {
+  if (!uid) return;
+  await AsyncStorage.setItem(deferredKey(uid), JSON.stringify({ deferredAt: Date.now() }));
+}
+
+export async function isUsernameDeferred(uid) {
+  if (!uid) return false;
+  try {
+    const raw = await AsyncStorage.getItem(deferredKey(uid));
+    return !!raw;
+  } catch {
+    return false;
+  }
+}
+
+export async function clearUsernameDeferred(uid) {
+  if (!uid) return;
+  await AsyncStorage.removeItem(deferredKey(uid));
+}
+
+/**
+ * After email signup (or when pending carries a username), claim the handle once
+ * so the post-login username overlay is not needed for new accounts.
+ */
+export async function claimPendingUsernameIfNeeded({ uid, email, photoURL, username } = {}) {
+  if (!uid) return null;
+  const pending = await readPendingProfileForUser({ email });
+  const candidate = normalizeUsername(username) || normalizeUsername(pending?.username);
+  if (!candidate) return null;
+  return claimUsername({ uid, username: candidate, email, photoURL });
 }
 
 async function findLegacyCollision(uid, username, key) {
@@ -167,6 +218,7 @@ export async function claimUsername({ uid, username, email, photoURL } = {}) {
   }
 
   await clearPendingProfile();
+  await clearUsernameDeferred(uid);
   await hydrateOwnProfile(uid).catch(() => {});
   return { username: publicUsername, usernameKey: key };
 }

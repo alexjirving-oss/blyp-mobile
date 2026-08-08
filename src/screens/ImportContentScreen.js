@@ -1,4 +1,4 @@
-// ImportContentScreen.js
+﻿// ImportContentScreen.js
 //
 // "Bring your content over" — a signed-in user types their TikTok username,
 // confirms it's theirs, and we import their videos onto their Blyp profile.
@@ -6,6 +6,7 @@
 // This screen only *requests* the import (writes a pending doc via
 // socialImportService). A backend worker fulfils it and streams progress back,
 // which we render live here. See tools/import/blyp_import_worker.js.
+// Staggered publish: upload all media now, go live over time (queue below).
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -33,11 +34,25 @@ import {
   requestImport,
   subscribeImports,
 } from '../services/socialImportService';
+import {
+  bulkUpdateScheduled,
+  cancelScheduledPost,
+  formatPublishAt,
+  publishScheduledNow,
+  subscribeScheduledPosts,
+} from '../services/scheduledPublishService';
+import { STAGGER_DEFAULTS } from '../utils/publishSchedule';
 
-// If a queued/running job hasn't been touched by the worker in this long, we
-// treat it as stalled (worker offline) and let the user cancel + retry instead
-// of spinning forever.
 const STALL_MS = 3 * 60 * 1000;
+
+const PACE_OPTIONS = [
+  { postsPerDay: 1, label: '1/day' },
+  { postsPerDay: 2, label: '2/day' },
+  { postsPerDay: 3, label: '3/day' },
+  { postsPerDay: 5, label: '5/day' },
+  { postsPerDay: 8, label: '8/day' },
+  { postsPerDay: 12, label: '12/day' },
+];
 
 const ImportContentScreen = ({ navigation }) => {
   const { uid } = useAuth();
@@ -50,31 +65,31 @@ const ImportContentScreen = ({ navigation }) => {
   const [imports, setImports] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [canceling, setCanceling] = useState(false);
+  const [staggerEnabled, setStaggerEnabled] = useState(true);
+  const [postsPerDay, setPostsPerDay] = useState(STAGGER_DEFAULTS.postsPerDay);
+  const [startMode, setStartMode] = useState('now');
+  const [scheduledPosts, setScheduledPosts] = useState([]);
+  const [queueBusy, setQueueBusy] = useState(false);
 
-  // Tick while a job is active so the stall check re-evaluates without an event.
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 20000);
     return () => clearInterval(t);
   }, []);
 
-  // Live list of the user's imports (newest first). One Blyp user can bring
-  // over several different accounts over time, so we track the whole history,
-  // not just a single request.
   useEffect(() => {
     if (!uid) return undefined;
     const unsub = subscribeImports(uid, setImports);
     return () => { try { unsub && unsub(); } catch { /* ignore */ } };
   }, [uid]);
 
-  // The most recent import drives the live progress card; history shows the rest.
+  useEffect(() => {
+    if (!uid) return undefined;
+    const unsub = subscribeScheduledPosts(uid, setScheduledPosts);
+    return () => { try { unsub && unsub(); } catch { /* ignore */ } };
+  }, [uid]);
+
   const request = imports[0] || null;
-  // A job is "active" only while it's queued/running. Once every job has
-  // finished (done/error/canceled) the form re-enables so the user can add
-  // another account. We allow just one heavy job at a time (a reasonable
-  // safety limit) but it is never a permanent block.
   const active = useMemo(() => imports.some((r) => isImportActive(r)), [imports]);
-  // A job is "stalled" if it's still queued/running but the worker hasn't updated
-  // it for a while — almost always because the import worker isn't running.
   const stalledReq = useMemo(
     () => imports.find((r) => isImportActive(r) && now - (r.updatedAt || r.createdAt || 0) > STALL_MS) || null,
     [imports, now],
@@ -92,26 +107,40 @@ const ImportContentScreen = ({ navigation }) => {
       return;
     }
     if (!isValidHandleFor(platform, normalized)) {
-      setError(`That doesn’t look like a valid ${platformLabel} username.`);
+      setError(`That doesnÔÇÖt look like a valid ${platformLabel} username.`);
       return;
     }
     setBusy(true);
     try {
-      await requestImport({ uid, platform, handle: normalized, claimedOwnership: owns });
-      // Reset for the next account: each import is its own request + a fresh
-      // ownership attestation.
+      const startAt = startMode === 'tomorrow'
+        ? (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + 1);
+          d.setHours(9, 0, 0, 0);
+          return d.getTime();
+        })()
+        : Date.now();
+      await requestImport({
+        uid,
+        platform,
+        handle: normalized,
+        claimedOwnership: owns,
+        stagger: {
+          enabled: staggerEnabled,
+          postsPerDay: staggerEnabled ? postsPerDay : undefined,
+          startAt,
+          jitterMs: staggerEnabled ? STAGGER_DEFAULTS.jitterMs : 0,
+        },
+      });
       setHandle('');
       setOwns(false);
     } catch (e) {
-      setError(e?.message || 'Couldn’t start the import. Please try again.');
+      setError(e?.message || 'CouldnÔÇÖt start the import. Please try again.');
     } finally {
       setBusy(false);
     }
-  }, [uid, platform, platformLabel, normalized, owns]);
+  }, [uid, platform, platformLabel, normalized, owns, staggerEnabled, postsPerDay, startMode]);
 
-  // Cancel EVERY active (queued/running) import for this user, not just the one
-  // on screen. A single account can have several stuck jobs, so cancelling one
-  // would just reveal the next and look like it "went back to importing".
   const onCancel = useCallback(async () => {
     const targets = imports.filter((r) => isImportActive(r));
     if (targets.length === 0) return;
@@ -120,14 +149,31 @@ const ImportContentScreen = ({ navigation }) => {
     try {
       const results = await Promise.allSettled(targets.map((r) => cancelImport(r.id)));
       if (results.some((x) => x.status === 'rejected')) {
-        setError('Couldn’t cancel everything. Please try again.');
+        setError('CouldnÔÇÖt cancel everything. Please try again.');
       }
     } catch (e) {
-      setError(e?.message || 'Couldn’t cancel. Please try again.');
+      setError(e?.message || 'CouldnÔÇÖt cancel. Please try again.');
     } finally {
       setCanceling(false);
     }
   }, [imports]);
+
+  const onQueueAction = useCallback(async (action) => {
+    if (!uid || queueBusy) return;
+    setQueueBusy(true);
+    setError('');
+    try {
+      await bulkUpdateScheduled({
+        uid,
+        action,
+        stagger: { enabled: true, postsPerDay, startAt: Date.now() },
+      });
+    } catch (e) {
+      setError(e?.message || 'CouldnÔÇÖt update the publish queue.');
+    } finally {
+      setQueueBusy(false);
+    }
+  }, [uid, queueBusy, postsPerDay]);
 
   return (
     <ScreenContainer>
@@ -148,7 +194,7 @@ const ImportContentScreen = ({ navigation }) => {
           <Ionicons name="cloud-download-outline" size={26} color={COLORS.primary} />
           <Text style={styles.heroText}>
             {hasHistory
-              ? 'Got videos on more than one account? Add another and we’ll bring those over too.'
+              ? 'Got videos on more than one account? Add another and weÔÇÖll bring those over too.'
               : 'Already make videos elsewhere? Pull them in so your Blyp profile feels like home from day one.'}
           </Text>
         </View>
@@ -208,6 +254,60 @@ const ImportContentScreen = ({ navigation }) => {
           </Text>
         </TouchableOpacity>
 
+        <Text style={styles.sectionLabel}>Publish pace</Text>
+        <TouchableOpacity
+          style={styles.ownRow}
+          activeOpacity={0.8}
+          disabled={active}
+          onPress={() => setStaggerEnabled((v) => !v)}
+        >
+          <View style={[styles.checkbox, staggerEnabled && styles.checkboxOn]}>
+            {staggerEnabled && <Ionicons name="checkmark" size={15} color="#001b18" />}
+          </View>
+          <Text style={styles.ownText}>
+            Space posts out over time (recommended). We upload everything now, then go live in stages — not all at once.
+          </Text>
+        </TouchableOpacity>
+
+        {staggerEnabled && (
+          <>
+            <View style={styles.platformRow}>
+              {PACE_OPTIONS.map((o) => {
+                const selected = postsPerDay === o.postsPerDay;
+                return (
+                  <TouchableOpacity
+                    key={o.postsPerDay}
+                    activeOpacity={0.85}
+                    disabled={active}
+                    onPress={() => setPostsPerDay(o.postsPerDay)}
+                    style={[styles.platformChip, selected && styles.platformChipSelected]}
+                  >
+                    <Text style={[styles.platformText, selected && styles.platformTextSelected]}>{o.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.platformRow}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                disabled={active}
+                onPress={() => setStartMode('now')}
+                style={[styles.platformChip, startMode === 'now' && styles.platformChipSelected]}
+              >
+                <Text style={[styles.platformText, startMode === 'now' && styles.platformTextSelected]}>Start now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                disabled={active}
+                onPress={() => setStartMode('tomorrow')}
+                style={[styles.platformChip, startMode === 'tomorrow' && styles.platformChipSelected]}
+              >
+                <Text style={[styles.platformText, startMode === 'tomorrow' && styles.platformTextSelected]}>Start tomorrow 9am</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
         {!!error && <Text style={styles.errorText}>{error}</Text>}
 
         <TouchableOpacity
@@ -232,14 +332,21 @@ const ImportContentScreen = ({ navigation }) => {
             <Ionicons name="cloud-done-outline" size={18} color={COLORS.primary} />
             <Text style={styles.howText}>
               Importing happens on our servers — you can close the app or lose signal and it keeps
-              going. Come back any time to see how it’s getting on.
+              going. Come back any time to see how itÔÇÖs getting on.
+            </Text>
+          </View>
+          <View style={styles.howRow}>
+            <Ionicons name="timer-outline" size={18} color={COLORS.primary} />
+            <Text style={styles.howText}>
+              With paced publish, clips stay as drafts until their scheduled time. Pause, cancel, or
+              publish early from the queue below.
             </Text>
           </View>
           <View style={styles.howRow}>
             <Ionicons name="copy-outline" size={18} color={COLORS.primary} />
             <Text style={styles.howText}>
               We never import the same video twice. If an import stops early, just start it again for
-              the same account — we’ll skip everything that’s already here and only bring over what’s new.
+              the same account — weÔÇÖll skip everything thatÔÇÖs already here and only bring over whatÔÇÖs new.
             </Text>
           </View>
         </View>
@@ -251,7 +358,7 @@ const ImportContentScreen = ({ navigation }) => {
               <Text style={[styles.progressTitle, { color: '#FBBF24' }]}>This import is taking too long</Text>
             </View>
             <Text style={styles.progressMsg}>
-              We couldn’t make progress on @{stalledReq.handle}. This usually means the import service is
+              We couldnÔÇÖt make progress on @{stalledReq.handle}. This usually means the import service is
               temporarily offline. You can cancel and try again later.
             </Text>
             <TouchableOpacity
@@ -267,6 +374,26 @@ const ImportContentScreen = ({ navigation }) => {
 
         {!!request && <ImportProgress request={request} />}
 
+        {scheduledPosts.length > 0 && (
+          <ScheduleQueue
+            posts={scheduledPosts}
+            busy={queueBusy}
+            onPauseAll={() => onQueueAction('pause')}
+            onResumeAll={() => onQueueAction('resume')}
+            onCancelAll={() => onQueueAction('cancel')}
+            onPublishOne={async (id) => {
+              setQueueBusy(true);
+              try { await publishScheduledNow(id); } catch (e) { setError(e?.message || 'Publish failed'); }
+              finally { setQueueBusy(false); }
+            }}
+            onCancelOne={async (id) => {
+              setQueueBusy(true);
+              try { await cancelScheduledPost(id); } catch (e) { setError(e?.message || 'Cancel failed'); }
+              finally { setQueueBusy(false); }
+            }}
+          />
+        )}
+
         {imports.length > 1 && <ImportHistory imports={imports.slice(1)} />}
 
         <Text style={styles.footNote}>
@@ -278,10 +405,68 @@ const ImportContentScreen = ({ navigation }) => {
   );
 };
 
+const ScheduleQueue = ({
+  posts,
+  busy,
+  onPauseAll,
+  onResumeAll,
+  onCancelAll,
+  onPublishOne,
+  onCancelOne,
+}) => {
+  const paused = posts.filter((p) => p.publishStatus === 'paused').length;
+  const upcoming = posts.filter((p) => p.publishStatus === 'scheduled').length;
+  return (
+    <View style={styles.historyWrap}>
+      <Text style={styles.sectionLabel}>Publish queue ┬À {posts.length}</Text>
+      <Text style={styles.progressMeta}>
+        {upcoming} scheduled{paused ? ` ┬À ${paused} paused` : ''}
+      </Text>
+      <View style={[styles.platformRow, { marginTop: 10 }]}>
+        <TouchableOpacity style={styles.queueBtn} disabled={busy} onPress={onPauseAll}>
+          <Text style={styles.queueBtnText}>Pause all</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.queueBtn} disabled={busy} onPress={onResumeAll}>
+          <Text style={styles.queueBtnText}>Resume</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.queueBtn, styles.queueBtnDanger]} disabled={busy} onPress={onCancelAll}>
+          <Text style={[styles.queueBtnText, { color: '#ff6b6b' }]}>Cancel remaining</Text>
+        </TouchableOpacity>
+      </View>
+      {posts.slice(0, 12).map((p) => (
+        <View key={p.id} style={styles.historyRow}>
+          <Ionicons
+            name={p.publishStatus === 'paused' ? 'pause-circle' : 'time'}
+            size={16}
+            color={COLORS.primary}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.historyHandle} numberOfLines={1}>
+              {(p.title || p.caption || 'Video').toString().slice(0, 42)}
+            </Text>
+            <Text style={styles.historyPlatform}>
+              {p.publishStatus === 'paused' ? 'Paused' : `Goes live ${formatPublishAt(p.publishAt)}`}
+            </Text>
+          </View>
+          <TouchableOpacity disabled={busy} onPress={() => onPublishOne(p.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={[styles.historyStatus, { color: COLORS.primary }]}>Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity disabled={busy} onPress={() => onCancelOne(p.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={[styles.historyStatus, { color: '#ff6b6b' }]}>Ô£ò</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+      {posts.length > 12 && (
+        <Text style={styles.progressMeta}>+{posts.length - 12} more in the queue</Text>
+      )}
+    </View>
+  );
+};
+
 const ImportProgress = ({ request }) => {
-  const { status, total = 0, done = 0, skipped = 0, failed = 0, handle, message } = request || {};
-  // Count already-imported (skipped) videos as processed so a re-import of a
-  // mostly-imported account doesn't look stuck near 0%.
+  const {
+    status, total = 0, done = 0, skipped = 0, failed = 0, scheduled = 0, handle, message, stagger,
+  } = request || {};
   const processed = Math.min(total, done + skipped);
   const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 
@@ -293,7 +478,10 @@ const ImportProgress = ({ request }) => {
   const headline =
     status === IMPORT_STATUS.PENDING ? 'Queued'
       : status === IMPORT_STATUS.RUNNING ? `Importing @${handle}…`
-        : status === IMPORT_STATUS.DONE ? `Imported ${done} video${done === 1 ? '' : 's'} from @${handle}`
+        : status === IMPORT_STATUS.DONE
+          ? (stagger?.enabled
+            ? `Imported ${done} ┬À publishing ~${stagger.postsPerDay || 3}/day`
+            : `Imported ${done} video${done === 1 ? '' : 's'} from @${handle}`)
           : status === IMPORT_STATUS.ERROR ? 'Import hit a snag'
             : status === IMPORT_STATUS.CANCELED ? 'Import canceled'
               : 'Import';
@@ -325,7 +513,8 @@ const ImportProgress = ({ request }) => {
 
       {status === IMPORT_STATUS.RUNNING && total > 0 && (
         <Text style={styles.progressMeta}>
-          {processed} of {total} • {pct}%{skipped ? ` • ${skipped} already imported (skipped)` : ''}
+          {processed} of {total} ÔÇó {pct}%{skipped ? ` ÔÇó ${skipped} already imported (skipped)` : ''}
+          {scheduled ? ` ÔÇó ${scheduled} queued to publish` : ''}
         </Text>
       )}
 
@@ -345,7 +534,9 @@ const ImportProgress = ({ request }) => {
 
       {status === IMPORT_STATUS.DONE && (
         <Text style={styles.progressMeta}>
-          They’re live on your profile now{skipped ? ` • ${skipped} already there` : ''}{failed ? ` • ${failed} couldn’t import` : ''}.
+          {stagger?.enabled
+            ? `Uploaded and queued — theyÔÇÖll go live on your pace${skipped ? ` ÔÇó ${skipped} already there` : ''}${failed ? ` ÔÇó ${failed} couldnÔÇÖt import` : ''}.`
+            : `TheyÔÇÖre live on your profile now${skipped ? ` ÔÇó ${skipped} already there` : ''}${failed ? ` ÔÇó ${failed} couldnÔÇÖt import` : ''}.`}
         </Text>
       )}
 
@@ -379,7 +570,7 @@ const ImportHistory = ({ imports }) => {
             <Ionicons name={meta.icon} size={16} color={meta.color} />
             <Text style={styles.historyHandle} numberOfLines={1}>
               @{r?.handle}
-              <Text style={styles.historyPlatform}>  ·  {labelFor(r?.platform)}</Text>
+              <Text style={styles.historyPlatform}>  ┬À  {labelFor(r?.platform)}</Text>
             </Text>
             <Text style={[styles.historyStatus, { color: meta.color }]}>{meta.text}</Text>
           </View>
@@ -535,6 +726,17 @@ const styles = StyleSheet.create({
   historyHandle: { flex: 1, color: COLORS.textPrimary, fontSize: responsiveFont(13), fontWeight: '700' },
   historyPlatform: { color: COLORS.textMuted, fontSize: responsiveFont(12), fontWeight: '600' },
   historyStatus: { fontSize: responsiveFont(12), fontWeight: '700' },
+
+  queueBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.backgroundCard,
+  },
+  queueBtnDanger: { borderColor: 'rgba(255,107,107,0.5)' },
+  queueBtnText: { color: COLORS.textSecondary, fontSize: responsiveFont(12), fontWeight: '700' },
 
   footNote: { color: COLORS.textMuted, fontSize: responsiveFont(12), lineHeight: responsiveFont(18), marginTop: 18 },
 });

@@ -1,5 +1,5 @@
 ﻿/**
- * Blyp Design System â€” Color Schemes (light + dark)
+ * Blyp Design System — Color Schemes (light + dark)
  *
  * SINGLE SOURCE OF TRUTH for every colour in the app.
  *
@@ -20,7 +20,7 @@
 export interface ColorScheme {
   /** background base (solid) */
   background: string;
-  /** full-page gradient stops (top â†’ mid â†’ bottom) */
+  /** full-page gradient stops (top → mid → bottom) */
   bgGradient: [string, string, string];
   /** header / nav chrome (semi-translucent) */
   chrome: string;
@@ -82,12 +82,12 @@ export interface ColorScheme {
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// "Pulse" â€” editorial near-black chrome + one electric signal accent.
+// "Pulse" — editorial near-black chrome + one electric signal accent.
 // Philosophy: quiet, neutral surfaces; content brings the colour; the accent
 // is a sparing "signal", never a wash. Designed dark-first for a young audience.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// Brand signal accent â€” Mercedes-AMG PETRONAS teal. Black text sits on top.
+// Brand signal accent — Mercedes-AMG PETRONAS teal. Black text sits on top.
 const BRAND = '#00D2BE';
 const BRAND_DIM = '#00A89E';
 const BRAND_LIGHT = '#7FEDE2';

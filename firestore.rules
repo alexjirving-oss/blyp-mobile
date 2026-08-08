@@ -191,6 +191,42 @@ service cloud.firestore {
           && request.resource.data.updatedAt is int;
         allow delete: if isOwner(userId);
       }
+
+      // Global push category prefs. Missing doc → server defaults.
+      match /notificationSettings/{settingsId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && settingsId == 'global'
+          && request.resource.data.userId == userId
+          && request.resource.data.updatedAt is int
+          && request.resource.data.keys().hasAll(['userId', 'updatedAt'])
+          && request.resource.data.keys().hasOnly([
+            'userId', 'updatedAt', 'pushEnabled', 'categories'
+          ])
+          && (!('pushEnabled' in request.resource.data)
+            || request.resource.data.pushEnabled is bool)
+          && (!('categories' in request.resource.data)
+            || request.resource.data.categories is map);
+        allow delete: if isOwner(userId) && settingsId == 'global';
+      }
+
+      // Per-person overrides. Doc id must equal targetUid.
+      match /notificationOverrides/{targetUid} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.userId == userId
+          && request.resource.data.targetUid == targetUid
+          && request.resource.data.updatedAt is int
+          && request.resource.data.keys().hasAll(['userId', 'targetUid', 'updatedAt'])
+          && request.resource.data.keys().hasOnly([
+            'userId', 'targetUid', 'updatedAt', 'mode', 'categories'
+          ])
+          && (!('mode' in request.resource.data)
+            || request.resource.data.mode in ['custom', 'everything', 'nothing'])
+          && (!('categories' in request.resource.data)
+            || request.resource.data.categories is map);
+        allow delete: if isOwner(userId);
+      }
     }
 
     match /userProfiles/{userId} {

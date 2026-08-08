@@ -103,6 +103,20 @@ const UserProfileScreen = ({ route, navigation }) => {
       return;
     }
     const actions = [
+      {
+        text: 'Notifications from this person',
+        onPress: () => {
+          try {
+            navigation.navigate('PersonNotificationSettings', {
+              targetUid: userId,
+              username: userProfile?.username,
+              displayName: userProfile?.displayName,
+            });
+          } catch {
+            /* ignore */
+          }
+        },
+      },
       { text: 'Report user', onPress: () => setReportVisible(true) },
       blocked
         ? {
@@ -136,7 +150,7 @@ const UserProfileScreen = ({ route, navigation }) => {
     ];
     actions.push({ text: 'Cancel', style: 'cancel' });
     Alert.alert(userProfile?.displayName || 'Options', '', actions);
-  }, [userId, currentUserId, blocked, userProfile?.displayName, hasProfileAdminControls]);
+  }, [userId, currentUserId, blocked, userProfile?.displayName, userProfile?.username, hasProfileAdminControls, navigation]);
 
   const confirmAdminAccountPriority = (tier) => {
     setAdminControlsVisible(false);
@@ -674,6 +688,24 @@ const UserProfileScreen = ({ route, navigation }) => {
                 style={styles.adminRow}
                 onPress={() => {
                   setAdminControlsVisible(false);
+                  try {
+                    navigation.navigate('PersonNotificationSettings', {
+                      targetUid: userId,
+                      username: userProfile?.username,
+                      displayName: userProfile?.displayName,
+                    });
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              >
+                <Icon name="notifications-outline" size={20} color="#fff" />
+                <Text style={styles.adminRowText}>Notifications from this person</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.adminRow}
+                onPress={() => {
+                  setAdminControlsVisible(false);
                   setReportVisible(true);
                 }}
               >
@@ -800,6 +832,25 @@ const UserProfileScreen = ({ route, navigation }) => {
                     ) : (
                       <Icon name="chatbubble-outline" size={20} color="#fff" />
                     )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.messageButton}
+                    onPress={() => {
+                      try {
+                        navigation.navigate('PersonNotificationSettings', {
+                          targetUid: userId,
+                          username: userProfile?.username,
+                          displayName: userProfile?.displayName,
+                        });
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    accessibilityLabel="Notifications from this person"
+                    accessibilityRole="button"
+                  >
+                    <Icon name="notifications-outline" size={20} color="#fff" />
                   </TouchableOpacity>
                 </View>
               )}

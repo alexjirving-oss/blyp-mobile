@@ -11,10 +11,8 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { enqueueNotification, EnqueueInput } from './outbox';
-import {
-  getTopicNotificationDecision,
-  TOPIC_NOTIFICATION_SUBCOLLECTION,
-} from './topicPreferences';
+import { TOPIC_NOTIFICATION_SUBCOLLECTION } from './topicPreferences';
+import { getPushNotificationDecision } from './userNotificationPreferences';
 
 const SUBSCRIPTION_PAGE_SIZE = 500;
 const FANOUT_CONCURRENCY = 25;
@@ -216,15 +214,14 @@ export async function fanOutTopicEvent(
     // eslint-disable-next-line no-await-in-loop
     const results = await Promise.all(
       chunk.map(async (userId) => {
-        const decision = await getTopicNotificationDecision(
-          db,
+        const payload = buildTopicNotification(topicEventId, userId, event);
+        const decision = await getPushNotificationDecision(db, {
           userId,
-          event.topicId
-        );
+          type: payload.type,
+          data: payload.data,
+        });
         if (!decision.allowed) return 'muted' as const;
-        const created = await enqueueNotification(
-          buildTopicNotification(topicEventId, userId, event)
-        );
+        const created = await enqueueNotification(payload);
         return created ? ('enqueued' as const) : ('duplicate' as const);
       })
     );

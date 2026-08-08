@@ -1269,7 +1269,7 @@ const LiveStreamScreen = (props) => {
 
   useEffect(() => {
     if (backend === 'ivs' && goLiveStartedRef.current) {
-      console.log('[ASSERT][HOST] Go Live pressed â€” waiting for native IVS start');
+      console.log('[ASSERT][HOST] Go Live pressed — waiting for native IVS start');
     }
   }, [backend]);
 
@@ -3864,7 +3864,7 @@ const LiveStreamScreen = (props) => {
 
         <LiveReactionsHearts
           burst={reactionBurst}
-          bottomOffset={(viewerCommentsOverlayHeight || 0) + 72}
+          bottomOffset={(viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 68}
           rightOffset={16}
         />
 
@@ -3878,10 +3878,12 @@ const LiveStreamScreen = (props) => {
           ]}
         />
 
+        {/* Sits ABOVE the guest tray (not just the comment bar) so the emoji
+            rail never overlaps the bottom row of guest tiles. */}
         <LiveReactionTray
           style={[
             styles.viewerReactionTray,
-            { bottom: (viewerCommentsOverlayHeight || 0) + 10 },
+            { bottom: (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 14 },
           ]}
           onReact={(emoji) => triggerReaction(emoji)}
         />

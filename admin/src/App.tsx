@@ -15,6 +15,7 @@ const PersonDetail = lazy(() => import("./pages/PersonDetail"));
 const Economy = lazy(() => import("./pages/Economy"));
 const Ops = lazy(() => import("./pages/Ops"));
 const Content = lazy(() => import("./pages/Content"));
+const ImportSchedule = lazy(() => import("./pages/ImportSchedule"));
 const Live = lazy(() => import("./pages/Live"));
 const Safety = lazy(() => import("./pages/Safety"));
 const Access = lazy(() => import("./pages/Access"));
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/people/:userId" element={<PageSuspense><PersonDetail /></PageSuspense>} />
             <Route path="/agents" element={<PageSuspense><Agents /></PageSuspense>} />
             <Route path="/content" element={<PageSuspense><Content /></PageSuspense>} />
+            <Route path="/import-schedule" element={<PageSuspense><ImportSchedule /></PageSuspense>} />
             <Route path="/live" element={<PageSuspense><Live /></PageSuspense>} />
             <Route path="/teams" element={<PageSuspense><Teams /></PageSuspense>} />
             <Route path="/safety" element={<PageSuspense><Safety /></PageSuspense>} />

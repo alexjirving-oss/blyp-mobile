@@ -154,7 +154,7 @@ function greeting() {
   return 'Good evening';
 }
 
-const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage, onEditPages }) => {
+const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage, onOpenForYouPost, onEditPages }) => {
   // Gate the For-You rail's autoplaying (unmuted) preview on navigation focus.
   // Without this, the active tile keeps playing audio after the user navigates
   // away (e.g. taps "Go live"), bleeding sound behind the live broadcast.
@@ -629,6 +629,15 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const openPost = (post, list) =>
     navigation.navigate('MediaViewer', mediaViewerParams(post, list));
 
+  const openForYouRailPost = (post) => {
+    if (typeof onOpenForYouPost === 'function') {
+      onOpenForYouPost(post);
+      return;
+    }
+    // Fallback: at least land on the For You tab.
+    if (typeof onOpenPage === 'function') onOpenPage('A');
+  };
+
   const openLive = (stream) => {
     const streamId = stream.streamId || stream.id || stream.liveId;
     navigation.navigate('LiveStreamScreen', {
@@ -912,7 +921,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                 const isActive = index === activeForYou;
                 const mountVideo = (isActive || index === activeForYou + 1) && isVideo && !!videoUri;
                 return (
-                  <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openPost(p, forYou)}>
+                  <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openForYouRailPost(p)}>
                     <View>
                       {uri ? (
                         <Image source={{ uri }} style={styles.forYouThumb} resizeMode="cover" />
@@ -930,7 +939,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                           shouldLoad
                           shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
                           isLooping
-                          isMuted={!isActive || !isScreenFocused || listening || transcribing}
+                          // Home hub preview is always silent — only the For You
+                          // feed tab owns audible playback (sticky mute there).
+                          isMuted={true}
                         />
                       )}
                       {isVideo && !isActive && (

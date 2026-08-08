@@ -29,6 +29,7 @@ export default function PremiumFeedVideo({
   paused = false,
   showChrome = true,
   mediaDisplay = null,
+  audioOwnerId = null,
   onNaturalSize,
   onError,
   onReady,
@@ -138,6 +139,7 @@ export default function PremiumFeedVideo({
           shouldLoad={shouldLoad}
           isLooping={isLooping}
           isMuted={isMuted}
+          audioOwnerId={audioOwnerId}
           onNaturalSize={handleNaturalSize}
           onError={onError}
           onReady={onReady}

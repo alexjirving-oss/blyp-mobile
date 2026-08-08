@@ -20,7 +20,7 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { sendToUser } from './sender';
-import { getTopicNotificationDecision } from './topicPreferences';
+import { getPushNotificationDecision } from './userNotificationPreferences';
 import {
   backoffMs,
   DISPATCH_HEARTBEAT_DOC,
@@ -65,22 +65,20 @@ export async function claimAndSend(
   if (!claimed) return 'skipped';
 
   try {
-    // Re-check topic/global preferences immediately before FCM. The event fan-out
-    // checks too, but this closes the opt-out race for delayed/retried sends.
-    if (claimed.type === 'topic' || claimed.data?.type === 'topic_event') {
-      const decision = await getTopicNotificationDecision(
-        db,
-        claimed.userId,
-        String(claimed.data?.topicId || '')
-      );
-      if (!decision.allowed) {
-        await ref.update({
-          status: 'suppressed',
-          lastError: `notification_preference_${decision.reason}`,
-          sendingSince: admin.firestore.FieldValue.delete(),
-        });
-        return 'suppressed';
-      }
+    // Re-check global + per-person preferences immediately before FCM. Producers
+    // may also gate at enqueue time; this closes the opt-out race for retries.
+    const decision = await getPushNotificationDecision(db, {
+      userId: claimed.userId,
+      type: claimed.type,
+      data: claimed.data,
+    });
+    if (!decision.allowed) {
+      await ref.update({
+        status: 'suppressed',
+        lastError: `notification_preference_${decision.reason}`,
+        sendingSince: admin.firestore.FieldValue.delete(),
+      });
+      return 'suppressed';
     }
 
     const result = await sendToUser(claimed.userId, {

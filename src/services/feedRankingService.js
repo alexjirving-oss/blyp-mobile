@@ -1,10 +1,10 @@
 // feedRankingService.js
 //
-// Pure ranking for the "For You" feed. Orders posts by freshness, follows,
-// interests/hashtags, engagement/gifts, aggregate watch quality, recent-seen
-// state, earn-your-reach, admin priority, and active coin-promote boosts; a
-// final diversity pass mixes creators (hard no-stack + preferred gap) and
-// followed/discovery sources.
+// Pure ranking for the "For You" feed. Orders posts by score (follows,
+// interests/hashtags, engagement/gifts, watch quality, mild freshness,
+// recent-seen, earn-your-reach, admin priority, coin-promote) then a
+// diversity pass (hard no creator stack + preferred gap, hashtag spacing,
+// followed/discovery alternation). Display order is never pure date-desc.
 //
 // Admin priority rule (documented):
 //   effectiveAdjust = accountAdjust(feedPriorityAccount) + postAdjust(feedPriority)
@@ -26,10 +26,17 @@ import {
 
 const HOUR_MS = 60 * 60 * 1000;
 const FRESHNESS_HALF_LIFE_HOURS = 24;
-const MAX_SOURCE_STREAK = 2;
+/** Alternate followed vs discovery sooner so the mix does not read as one rail. */
+const MAX_SOURCE_STREAK = 1;
 /** Prefer at least this many other creators between repeats from the same author. */
-const MIN_CREATOR_GAP = 2;
-const FRESHNESS_SCALE = 26;
+const MIN_CREATOR_GAP = 3;
+/**
+ * Freshness is a mild signal — keep well below follow (+26) and multi-tag affinity
+ * (up to HASHTAG_MATCH_CAP) so the feed does not feel newest-first.
+ */
+const FRESHNESS_SCALE = 14;
+/** Soft: prefer not to re-use a tag within this many prior posts. */
+const MIN_HASHTAG_GAP = 2;
 const HASHTAG_MATCH_WEIGHT = 14;
 const HASHTAG_MATCH_CAP = 36;
 const TOPIC_MATCH_WEIGHT = 8;
@@ -378,10 +385,25 @@ export function scorePost(post, context = {}) {
   return score;
 }
 
+function postTagSet(post) {
+  return new Set(extractPostHashtags(post));
+}
+
+function tagsOverlapRecent(tags, recentTagWindows) {
+  if (!tags?.size || !recentTagWindows?.length) return false;
+  for (const prior of recentTagWindows) {
+    for (const tag of tags) {
+      if (prior.has(tag)) return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Greedy creator / source diversity.
+ * Greedy creator / source / hashtag diversity.
  * Hard rule: never place the same creator back-to-back when another creator exists.
- * Soft rule: prefer a gap of MIN_CREATOR_GAP other creators between repeats.
+ * Soft rules: prefer MIN_CREATOR_GAP between same author; alternate followed/discovery;
+ * prefer not stacking the same hashtag within MIN_HASHTAG_GAP prior posts.
  * `recentOwners` seeds the lookback so appended pages do not restack the feed tail.
  */
 export function diversifyRanked(scored, following, opts = {}) {
@@ -390,20 +412,56 @@ export function diversifyRanked(scored, following, opts = {}) {
   const recentOwners = (Array.isArray(opts.recentOwners) ? opts.recentOwners : [])
     .map((id) => String(id || '').trim())
     .filter(Boolean);
+  const recentTagWindows = Array.isArray(opts.recentTagWindows)
+    ? opts.recentTagWindows.map((set) => (set instanceof Set ? set : new Set(set || [])))
+    : [];
   let lastSource = '';
   let sourceStreak = 0;
   const minGap = Number.isFinite(opts.minCreatorGap) ? opts.minCreatorGap : MIN_CREATOR_GAP;
+  const minTagGap = Number.isFinite(opts.minHashtagGap) ? opts.minHashtagGap : MIN_HASHTAG_GAP;
+  const maxSourceStreak = Number.isFinite(opts.maxSourceStreak)
+    ? opts.maxSourceStreak
+    : MAX_SOURCE_STREAK;
+
+  const sourceOk = (source) => !(source === lastSource && sourceStreak >= maxSourceStreak);
 
   while (remaining.length > 0) {
     const lastOwner = recentOwners.length ? recentOwners[recentOwners.length - 1] : '';
     const gapWindow = recentOwners.slice(-Math.max(1, minGap));
+    const tagWindow = recentTagWindows.slice(-Math.max(1, minTagGap));
 
     let pick = remaining.findIndex(({ p }) => {
       const owner = postOwner(p);
       const source = owner && following.has(owner) ? 'followed' : 'discovery';
       if (owner && gapWindow.includes(owner)) return false;
-      return !(source === lastSource && sourceStreak >= MAX_SOURCE_STREAK);
+      if (!sourceOk(source)) return false;
+      if (tagsOverlapRecent(postTagSet(p), tagWindow)) return false;
+      return true;
     });
+    // Prefer hashtag spacing over source alternation when both cannot be met.
+    if (pick < 0) {
+      pick = remaining.findIndex(({ p }) => {
+        const owner = postOwner(p);
+        if (owner && gapWindow.includes(owner)) return false;
+        return !tagsOverlapRecent(postTagSet(p), tagWindow);
+      });
+    }
+    // Soft fallback: keep creator gap + source mix; allow tag repeats.
+    if (pick < 0) {
+      pick = remaining.findIndex(({ p }) => {
+        const owner = postOwner(p);
+        const source = owner && following.has(owner) ? 'followed' : 'discovery';
+        if (owner && gapWindow.includes(owner)) return false;
+        return sourceOk(source);
+      });
+    }
+    // Soft fallback: keep creator gap even if source streak must continue.
+    if (pick < 0) {
+      pick = remaining.findIndex(({ p }) => {
+        const owner = postOwner(p);
+        return !(owner && gapWindow.includes(owner));
+      });
+    }
     // Hard anti-stack: different creator than the immediate predecessor.
     if (pick < 0) {
       pick = remaining.findIndex(({ p }) => {
@@ -419,6 +477,7 @@ export function diversifyRanked(scored, following, opts = {}) {
     sourceStreak = source === lastSource ? sourceStreak + 1 : 1;
     lastSource = source;
     if (owner) recentOwners.push(owner);
+    recentTagWindows.push(postTagSet(p));
     result.push(p);
   }
   return result;
@@ -428,7 +487,7 @@ export function diversifyRanked(scored, following, opts = {}) {
  * @param {any[]} posts
  * @param {string[]} terms  lowercased interest terms
  * @param {Set<string>} following  ids the user follows
- * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number, recentOwners?: string[], minCreatorGap?: number }} [opts]
+ * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number, recentOwners?: string[], minCreatorGap?: number, minHashtagGap?: number, maxSourceStreak?: number }} [opts]
  */
 export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
@@ -446,6 +505,8 @@ export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   const diversityOpts = {
     recentOwners: opts.recentOwners,
     minCreatorGap: opts.minCreatorGap,
+    minHashtagGap: opts.minHashtagGap,
+    maxSourceStreak: opts.maxSourceStreak,
   };
   const ranked = diversifyRanked(scored, safeFollowing, diversityOpts);
   if (opts.fairCap === false) return ranked;
@@ -522,6 +583,8 @@ export function shufflePostsByFeedPriority(posts, opts = {}) {
  *   now?: number,
  *   recentOwners?: string[],
  *   minCreatorGap?: number,
+ *   minHashtagGap?: number,
+ *   maxSourceStreak?: number,
  * }} opts
  */
 export function resolveRankContext(opts = {}) {
@@ -533,6 +596,8 @@ export function resolveRankContext(opts = {}) {
     now: live.now ?? opts.now,
     recentOwners: live.recentOwners ?? opts.recentOwners,
     minCreatorGap: live.minCreatorGap ?? opts.minCreatorGap,
+    minHashtagGap: live.minHashtagGap ?? opts.minHashtagGap,
+    maxSourceStreak: live.maxSourceStreak ?? opts.maxSourceStreak,
   };
 }
 
@@ -609,6 +674,8 @@ export async function prepareRankedFeed(posts, opts = {}) {
         now: ctx.now,
         recentOwners: ctx.recentOwners,
         minCreatorGap: ctx.minCreatorGap,
+        minHashtagGap: ctx.minHashtagGap,
+        maxSourceStreak: ctx.maxSourceStreak,
       });
     }
     return shufflePostsByFeedPriority(visible, { fairCap: opts.fairCap !== false });
@@ -622,6 +689,8 @@ export async function prepareRankedFeed(posts, opts = {}) {
         now: ctx.now,
         recentOwners: ctx.recentOwners,
         minCreatorGap: ctx.minCreatorGap,
+        minHashtagGap: ctx.minHashtagGap,
+        maxSourceStreak: ctx.maxSourceStreak,
       });
     }
     return fallback;

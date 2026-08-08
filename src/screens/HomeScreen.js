@@ -51,6 +51,8 @@ import { subscribeTourSelect } from '../tour/tourBus';
 import { requireAccount } from '../services/guestSessionService';
 import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
 import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
+import { claimFeedAudio, releaseFeedAudio } from '../services/feedAudioSession';
+import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
 import {
   getPendingOptimisticPosts,
   subscribePostUploads,
@@ -100,7 +102,7 @@ const randomCommentsData = [
 ];
 
 // === MediaCarousel (fixed) ===
-const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
+const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive, isMuted = true }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   // Use the live window width so horizontal paging stays aligned after a fold/
   // unfold (Z Fold tablet mode) instead of a width frozen at module load.
@@ -129,6 +131,9 @@ const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
 
     // Disk warm via mediaPrefetch; EnhancedVideo resolves cache without list setState.
     const mediaUri = fixStorageUrl(item.url || item.uri || item.videoUrl || item.imageUrl);
+    const cellActive = isDiscoverItemActive
+      ? isDiscoverItemActive(feedIndex) && index === currentIndex
+      : index === currentIndex;
 
     if (isVideo) {
       return (
@@ -137,11 +142,13 @@ const MediaCarousel = ({ media, style, feedIndex, isDiscoverItemActive }) => {
             uri={mediaUri}
             poster={item.thumbnail}
             style={StyleSheet.absoluteFill}
-            shouldPlay={isDiscoverItemActive ? isDiscoverItemActive(feedIndex) && index === currentIndex : index === currentIndex}
+            shouldPlay={cellActive}
             shouldLoad={Math.abs(currentIndex - index) <= 2}
             isLooping={true}
-            isMuted={true}
+            // Sticky feed mute from parent; inactive slides always silent.
+            isMuted={!!isMuted || !cellActive}
             showChrome={false}
+            audioOwnerId={cellActive ? `carousel:${feedIndex}:${index}` : null}
           />
         </View>
       );
@@ -295,6 +302,10 @@ const HomeScreen = ({ navigation, route }) => {
   const [giftCoinCounts, setGiftCoinCounts] = useState({});
   // Which feed video is manually paused (tap-to-pause).
   const [pausedFeedId, setPausedFeedId] = useState(null);
+  // Sticky For You mute preference — survives swipe / soft re-rank / app blur.
+  // Default unmuted (TikTok-style); neighbors stay silent via cellActive gate.
+  const [feedAudioMuted, setFeedAudioMuted] = useState(false);
+  const feedAudioMutedRef = useRef(false);
   const [commentCounts, setCommentCounts] = useState({});
   const [following, setFollowing] = useState({}); // keyed by creator userId
   const followingBusyRef = useRef(new Set());
@@ -306,6 +317,13 @@ const HomeScreen = ({ navigation, route }) => {
   // Start true so first paint / fresh install shows the teal spinner instead of
   // a dead frame or a premature "feed is quiet" empty state while we fetch.
   const [loading, setLoading] = useState(true);
+  // Mirrors `loading` for synchronous reads inside callbacks (e.g. deciding
+  // whether a Home-rail focus request should wait for the real feed page
+  // instead of injecting into a still-empty/stale list).
+  const loadingRef = useRef(true);
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
   const [currentDiscoverIndex, setCurrentDiscoverIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [isTitleBarMinimized, setIsTitleBarMinimized] = useState(false);
@@ -346,6 +364,11 @@ const HomeScreen = ({ navigation, route }) => {
   // can loop forever with a fresh random order (feedKey keeps FlatList keys unique).
   const forYouCycleRef = useRef(0);
   const randomPostsRef = useRef([]);
+  // Home For You rail (and deep-links) ask to land on a specific post in the
+  // ranked feed. Kept until FlatList can scroll there; pin suppresses soft
+  // re-ranks that would yank the focused clip while still on index 0.
+  const pendingForYouFocusRef = useRef(null); // { postId, post? }
+  const forYouFocusPinIdRef = useRef(null);
   const [loadingMore, setLoadingMore] = useState(false);
 
   const { uid, authReady, isAuthenticated } = useAuth();
@@ -357,6 +380,44 @@ const HomeScreen = ({ navigation, route }) => {
     selectedTab === 'A' && randomPosts?.length
       ? randomPosts[Math.min(Math.max(0, currentDiscoverIndex), randomPosts.length - 1)]
       : null;
+
+  useEffect(() => {
+    feedAudioMutedRef.current = feedAudioMuted;
+  }, [feedAudioMuted]);
+
+  // One audible owner for For You: claim media loudspeaker mode when the active
+  // clip should play sound; release on leave / mute / pause / blur.
+  useEffect(() => {
+    const postId = activeForYouPost?.id != null ? String(activeForYouPost.id) : '';
+    const shouldOwn =
+      !!postId
+      && selectedTab === 'A'
+      && isScreenFocused
+      && !feedAudioMuted
+      && pausedFeedId !== postId;
+
+    if (!shouldOwn) {
+      if (postId) releaseFeedAudio(postId);
+      return undefined;
+    }
+
+    let cancelled = false;
+    claimFeedAudio(postId).then((ok) => {
+      if (cancelled || !ok) return;
+      ensureMediaPlaybackAudioMode({ background: false }).catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+      releaseFeedAudio(postId);
+    };
+  }, [
+    activeForYouPost?.id,
+    selectedTab,
+    isScreenFocused,
+    feedAudioMuted,
+    pausedFeedId,
+  ]);
+
 
   const enabledPages = useMemo(() => getEnabledPages(prefs), [prefs]);
   const firstEnabledPageKey = useMemo(() => getFirstEnabledPageKey(prefs), [prefs]);
@@ -419,9 +480,13 @@ const HomeScreen = ({ navigation, route }) => {
   // Preferences and the follow graph hydrate independently of the first Firestore
   // page. If either arrives just after first paint, apply it while the viewer is
   // still on item zero; never jump the list once they have started swiping.
+  // Soft re-rank also skips while a Home-rail focus pin is holding index 0.
   useEffect(() => {
     const current = randomPostsRef.current || [];
     if (selectedTabRef.current !== 'A' || currentDiscoverIndexRef.current !== 0 || !current.length) {
+      return undefined;
+    }
+    if (forYouFocusPinIdRef.current) {
       return undefined;
     }
     let cancelled = false;
@@ -432,6 +497,7 @@ const HomeScreen = ({ navigation, route }) => {
           cancelled
           || gen !== forYouRankGenRef.current
           || currentDiscoverIndexRef.current !== 0
+          || forYouFocusPinIdRef.current
         ) {
           return;
         }
@@ -444,6 +510,87 @@ const HomeScreen = ({ navigation, route }) => {
       cancelled = true;
     };
   }, [prefs?.interests, following, getForYouRankingContext, beginForYouRank]);
+
+  // Position the For You FlatList on a deep-linked / Home-rail post. Prefer the
+  // post's place in the ranked continuum; if it isn't in the loaded window yet,
+  // inject it at the front and keep the rest of the ranked feed after it.
+  const applyPendingForYouFocus = useCallback(() => {
+    const pending = pendingForYouFocusRef.current;
+    if (!pending?.postId) return false;
+    if (selectedTabRef.current !== 'A') return false;
+
+    const postId = String(pending.postId);
+    let list = randomPostsRef.current || [];
+    let idx = list.findIndex((p) => p && String(p.id) === postId);
+
+    if (idx < 0) {
+      const candidate = pending.post;
+      if (!candidate || !isValidFeedPost(candidate)) {
+        // No injectable post yet — keep waiting only while the feed is empty.
+        if ((randomPostsRef.current || []).length === 0) return false;
+        pendingForYouFocusRef.current = null;
+        forYouFocusPinIdRef.current = null;
+        return false;
+      }
+      const cycle = forYouCycleRef.current;
+      const { feedKey: _fk, ...rest } = candidate;
+      const injected = stampFeedKeys(
+        [rest, ...list.filter((p) => p && String(p.id) !== postId)],
+        cycle,
+      );
+      randomPostsRef.current = injected;
+      setRandomPosts(injected);
+      list = injected;
+      idx = 0;
+    }
+
+    pendingForYouFocusRef.current = null;
+    forYouFocusPinIdRef.current = postId;
+    currentDiscoverIndexRef.current = idx;
+    setCurrentDiscoverIndex(idx);
+    setPausedFeedId(null);
+
+    const scroll = () => {
+      try {
+        if (feedHeight > 0) {
+          flatListRef.current?.scrollToIndex?.({ index: idx, animated: false });
+        } else {
+          flatListRef.current?.scrollToOffset?.({
+            offset: 0,
+            animated: false,
+          });
+        }
+      } catch {
+        try {
+          flatListRef.current?.scrollToOffset?.({
+            offset: Math.max(0, idx) * (feedHeight || 0),
+            animated: false,
+          });
+        } catch { /* no-op */ }
+      }
+    };
+    // FlatList may not be mounted on the same tick we switch to tab A.
+    requestAnimationFrame(() => {
+      scroll();
+      setTimeout(scroll, 50);
+    });
+    return true;
+  }, [feedHeight]);
+
+  const openForYouAtPost = useCallback((post) => {
+    const postId = post?.id != null ? String(post.id) : '';
+    if (!postId) {
+      setSelectedTab('A');
+      return;
+    }
+    pendingForYouFocusRef.current = { postId, post };
+    forYouFocusPinIdRef.current = postId;
+    setSelectedTab('A');
+    // If For You is already showing with data, seek immediately.
+    requestAnimationFrame(() => {
+      applyPendingForYouFocus();
+    });
+  }, [applyPendingForYouFocus]);
 
   // Tie the earn-your-reach session to this user (hashed server-side) and make sure
   // any queued post signals are flushed when the feed unmounts.
@@ -554,20 +701,63 @@ const HomeScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     selectedTabRef.current = selectedTab;
-  }, [selectedTab]);
+    if (selectedTab !== 'A') {
+      // Leaving For You — drop soft-rerank pin and any unconsumed focus request
+      // from a prior visit. openForYouAtPost sets pending while still on Home,
+      // then switches to A in the same event; this effect then runs with A and
+      // does not clear that fresh pending.
+      forYouFocusPinIdRef.current = null;
+      pendingForYouFocusRef.current = null;
+    } else {
+      applyPendingForYouFocus();
+    }
+  }, [selectedTab, applyPendingForYouFocus]);
 
   // After publishing a post, ReviewScreen routes here with `focusFeed` so the
   // user lands on the For You feed (key 'A') instead of the HomeBase hub — they
   // were previously dropped on the hub with no way to see what they just posted
   // (P7.7). Clear the param so a later tab switch doesn't get yanked back.
+  // Also honor initialPostId / focusPostId / focusPost for Home-rail deep links.
   useEffect(() => {
-    if (route?.params?.focusFeed) {
+    const params = route?.params || {};
+    const focusId =
+      params.initialPostId ||
+      params.focusPostId ||
+      params.focusPost?.id ||
+      null;
+    const focusPost = params.focusPost || null;
+    if (params.focusFeed || focusId) {
+      if (focusId) {
+        pendingForYouFocusRef.current = {
+          postId: String(focusId),
+          post: focusPost,
+        };
+        forYouFocusPinIdRef.current = String(focusId);
+      }
       setSelectedTab('A');
       try {
-        navigation?.setParams?.({ focusFeed: undefined });
+        navigation?.setParams?.({
+          focusFeed: undefined,
+          initialPostId: undefined,
+          focusPostId: undefined,
+          focusPost: undefined,
+        });
       } catch { /* no-op */ }
     }
-  }, [route?.params?.focusFeed]);
+  }, [
+    route?.params?.focusFeed,
+    route?.params?.initialPostId,
+    route?.params?.focusPostId,
+    route?.params?.focusPost,
+    navigation,
+  ]);
+
+  // When the feed finishes loading after a Home-rail tap, seek to the pending post.
+  useEffect(() => {
+    if (selectedTab !== 'A') return;
+    if (!randomPosts.length) return;
+    applyPendingForYouFocus();
+  }, [selectedTab, randomPosts.length, applyPendingForYouFocus]);
 
   // Notification taps can deep-link straight back to the opted-in topic page.
   // Wait until cross-device preferences have hydrated so the page key exists.
@@ -1461,6 +1651,14 @@ const HomeScreen = ({ navigation, route }) => {
         setCurrentDiscoverIndex(nextIndex);
         setPausedFeedId(null);
       }
+      // Drop Home-rail soft-rerank pin once the viewer leaves the focused clip.
+      const pinId = forYouFocusPinIdRef.current;
+      if (pinId) {
+        const focused = randomPostsRef.current?.[nextIndex];
+        if (!focused || String(focused.id) !== String(pinId)) {
+          forYouFocusPinIdRef.current = null;
+        }
+      }
       // Paging FlatLists often miss onEndReached — prefetch while a few clips remain.
       if (maxIndex - nextIndex <= FEED_PREFETCH_REMAINING) {
         loadMoreForYou();
@@ -1499,6 +1697,8 @@ const HomeScreen = ({ navigation, route }) => {
     const mediaItems = item.media || [{ url: fixStorageUrl(item.imageUrl || item.videoUrl), type: item.type }];
     const hasMultipleMedia = mediaItems.length > 1;
     const isActive = isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex;
+    const cellActive = isDiscoverItemActive(index);
+    const cellMuted = feedAudioMuted || !cellActive;
     const showFullDescription = isActive && descriptionVisibleIndex === index;
     const giftTotal = getPostGiftCoins(item);
     const viewTotal = getPostViewCount(item);
@@ -1596,7 +1796,13 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
 
         {hasMultipleMedia ? (
-          <MediaCarousel media={mediaItems} style={StyleSheet.absoluteFill} feedIndex={index} isDiscoverItemActive={isDiscoverItemActive} />
+          <MediaCarousel
+            media={mediaItems}
+            style={StyleSheet.absoluteFill}
+            feedIndex={index}
+            isDiscoverItemActive={isDiscoverItemActive}
+            isMuted={cellMuted}
+          />
         ) : (
           (() => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
@@ -1604,7 +1810,6 @@ const HomeScreen = ({ navigation, route }) => {
             const videoUri = fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
             const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 2;
 
-            const cellActive = isDiscoverItemActive(index);
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
                 <PremiumFeedVideo
@@ -1617,7 +1822,8 @@ const HomeScreen = ({ navigation, route }) => {
                   isLooping
                   // Explicit mute on inactive/preload cells — never rely only on
                   // shouldPlay→isFocused inside EnhancedVideo (preload thrash).
-                  isMuted={!cellActive}
+                  isMuted={cellMuted}
+                  audioOwnerId={cellActive ? String(item.id) : null}
                   mediaDisplay={item.mediaDisplay || null}
                   onError={(e) => {
                     console.log('[FEED] Video error', { id: item.id, uri: videoUri, error: e });
@@ -1629,7 +1835,7 @@ const HomeScreen = ({ navigation, route }) => {
                 uri={fixStorageUrl(item.audioUrl || mediaItems[0]?.url)}
                 user={item.user}
                 title={item.title}
-                autoPlay={isDiscoverItemActive(index)}
+                autoPlay={cellActive && !feedAudioMuted}
                 shouldLoad={Math.abs(currentDiscoverIndex - index) <= 2}
                 style={StyleSheet.absoluteFill}
               />
@@ -1722,6 +1928,7 @@ const HomeScreen = ({ navigation, route }) => {
     userPillLayout,
     feedHeight,
     pausedFeedId,
+    feedAudioMuted,
     following,
     uid,
     forYouOverlayInset,
@@ -1923,6 +2130,7 @@ const HomeScreen = ({ navigation, route }) => {
               interests={prefs?.interests || []}
               pages={enabledPages}
               onOpenPage={(key) => setSelectedTab(key)}
+              onOpenForYouPost={openForYouAtPost}
               onEditPages={() => navigation.navigate('PagesEditor')}
             />
           </ScreenErrorBoundary>
@@ -1953,7 +2161,7 @@ const HomeScreen = ({ navigation, route }) => {
               snapToInterval={feedHeight}
               snapToAlignment="start"
               decelerationRate="fast"
-              removeClippedSubviews
+              removeClippedSubviews={false}
               maxToRenderPerBatch={2}
               windowSize={5}
               initialNumToRender={2}
@@ -2009,6 +2217,17 @@ const HomeScreen = ({ navigation, route }) => {
                   count={getPostCommentCount(activeForYouPost)}
                 >
                   <Icon name="chatbubble" size={22} color={COLORS.white} />
+                </FeedActionButton>
+
+                <FeedActionButton
+                  onPress={() => setFeedAudioMuted((m) => !m)}
+                  accessibilityLabel={feedAudioMuted ? 'Unmute For You audio' : 'Mute For You audio'}
+                >
+                  <Icon
+                    name={feedAudioMuted ? 'volume-mute' : 'volume-high'}
+                    size={22}
+                    color={COLORS.white}
+                  />
                 </FeedActionButton>
 
                 <FeedActionButton

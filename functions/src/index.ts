@@ -28,6 +28,7 @@ export { buildBlypIndex, blypRetentionSweep } from './search/scheduled';
 // Export Blyp distribution (earn-your-reach) endpoints + scheduled scorer
 export { blypPostEvent } from './distribution/handlers';
 export { blypReachSweep } from './distribution/scheduled';
+export { blypScheduledPublishSweep } from './distribution/scheduledPublish';
 // Export subscription activation (verified Play purchase -> paid entitlement + coin grant)
 export { blypSubscriptionActivate, blypEnsureTrial } from './subscriptions/handlers';
 // Real-time Developer Notifications: keep entitlement in sync with the subscription

@@ -170,6 +170,7 @@ const MyTeamScreen = React.lazy(() => import('./src/screens/MyTeamScreen'));
 const EditProfileScreen = React.lazy(() => import('./src/screens/EditProfileScreen'));
 const PrivacySettingsScreen = React.lazy(() => import('./src/screens/PrivacySettingsScreen'));
 const NotificationSettingsScreen = React.lazy(() => import('./src/screens/NotificationSettingsScreen'));
+const PersonNotificationSettingsScreen = React.lazy(() => import('./src/screens/PersonNotificationSettingsScreen'));
 const HelpSupportScreen = React.lazy(() => import('./src/screens/HelpSupportScreen'));
 const ChatRoomsScreen = React.lazy(() => import('./src/screens/ChatRoomsScreen'));
 const ChatRoomScreen = React.lazy(() => import('./src/screens/ChatRoomScreen'));
@@ -633,11 +634,17 @@ function AppStack() {
           <NotificationSettingsScreen {...navProps} />
         </Suspense>
       )} />
+      <Stack.Screen name="PersonNotificationSettings" children={(navProps) => (
+        <Suspense fallback={null}>
+          <PersonNotificationSettingsScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="HelpSupport" children={(navProps) => (
         <Suspense fallback={null}>
           <HelpSupportScreen {...navProps} />
         </Suspense>
       )} />
+
       <Stack.Screen name="WalletStub" component={WalletStub} />
       <Stack.Screen name="SettingsStub" component={SettingsStub} />
       <Stack.Screen name="MyVideosStub" component={MyVideosStub} />

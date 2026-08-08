@@ -1,11 +1,11 @@
 ﻿import { StyleSheet } from 'react-native';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
-// Common color palette â€” unified with the design system's DARK scheme
+// Common color palette — unified with the design system's DARK scheme
 // (see src/styles/designSystem/palettes.ts). Keep these keys in sync with the
 // dark scheme so legacy screens importing COLORS match the new look.
 export const COLORS = {
-  // Brand signal accent â€” Mercedes-AMG PETRONAS teal (used sparingly)
+  // Brand signal accent — Mercedes-AMG PETRONAS teal (used sparingly)
   primary: '#00D2BE',
   primaryDark: '#00A89E',
   primaryLight: '#7FEDE2',
@@ -51,7 +51,7 @@ export const COLORS = {
   gradientMiddle: '#00D2BE',
   gradientEnd: '#00A89E',
 
-  // Screen background â€” flat near-black (no colour wash).
+  // Screen background — flat near-black (no colour wash).
   screenGradientTop: '#0A0A0C',
   screenGradientMid: '#0A0A0C',
   screenGradientBot: '#0A0A0C',
@@ -214,7 +214,7 @@ export const COMMON_STYLES = StyleSheet.create({
     borderColor: COLORS.primary,
   },
 
-  // Common cards â€” soft elevation + light edge highlight
+  // Common cards — soft elevation + light edge highlight
   card: {
     backgroundColor: COLORS.backgroundCard,
     borderRadius: BORDER_RADIUS.md,
@@ -249,7 +249,7 @@ export const COMMON_STYLES = StyleSheet.create({
   },
 });
 
-// Canonical screen background â€” flat near-black (editorial, no colour wash).
+// Canonical screen background — flat near-black (editorial, no colour wash).
 // Import this wherever a full-page background is needed.
 export const SCREEN_GRADIENT_COLORS = ['#0A0A0C', '#0A0A0C', '#0A0A0C'];
 

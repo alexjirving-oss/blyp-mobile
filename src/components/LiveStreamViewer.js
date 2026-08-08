@@ -1432,9 +1432,6 @@ const IVSLiveStreamViewer = ({
                   <View style={styles.emptyTileInner} />
                 </View>
               )}
-              <View pointerEvents="none" style={styles.slotNumberBadge}>
-                <Text style={styles.slotNumberText}>{globalSlotId}</Text>
-              </View>
             </View>
           );
         })}
@@ -1763,12 +1760,6 @@ const IVSLiveStreamViewer = ({
                                   </TouchableOpacity>
                                 </View>
                               ) : null}
-
-                              {globalSlotId >= 1 && (
-                                <View pointerEvents="none" style={styles.slotNumberBadge}>
-                                  <Text style={styles.slotNumberText}>{globalSlotId}</Text>
-                                </View>
-                              )}
                             </View>
                           );
                         })}
@@ -2931,22 +2922,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  slotNumberBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-  },
-  slotNumberText: {
-    color: 'rgba(255, 255, 255, 0.92)',
-    fontSize: 12,
-    fontWeight: '800',
-  },
   guestBottomStrip: {
     position: 'absolute',
     left: 0,
@@ -2982,24 +2957,24 @@ const styles = StyleSheet.create({
     width: '30.5%',
     marginHorizontal: '1.25%',
     aspectRatio: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.78)',
-    marginBottom: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(0, 210, 190, 0.42)',
+    backgroundColor: 'rgba(10,10,12,0.88)',
+    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
   },
   guestTileSquareCollapsed: {
     // Fluid 3-wide row; width overridden when fewer guests for bigger tiles.
     width: '30.5%',
     marginHorizontal: '1.25%',
     aspectRatio: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.78)',
+    backgroundColor: 'rgba(10,10,12,0.88)',
     marginBottom: 4,
-    borderWidth: 1.5,
-    borderColor: 'rgba(0, 210, 190, 0.42)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
   },
   guestTileHidden: {
     opacity: 0,
@@ -3009,15 +2984,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.45,
+    opacity: 0.4,
   },
   emptyTileInner: {
-    width: '70%',
-    height: '70%',
-    borderRadius: 10,
-    backgroundColor: COLORS.backgroundLight,
-    borderWidth: 1,
-    borderColor: COLORS.backgroundLight,
+    width: '62%',
+    height: '62%',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   joiningOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -3027,20 +3002,19 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.background,
+    backgroundColor: 'rgba(0,210,190,0.08)',
   },
   joinPlusCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.backgroundLight,
-    borderWidth: 1,
-    borderColor: COLORS.backgroundLight,
+    backgroundColor: 'rgba(0,210,190,0.92)',
+    borderWidth: 0,
   },
   joinPlusText: {
-    color: COLORS.textPrimary,
+    color: '#0A0A0C',
     fontSize: 22,
     lineHeight: 22,
     fontWeight: '700',

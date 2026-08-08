@@ -83,7 +83,11 @@ export function startPresence(uid) {
  * Uses the device locale for clock strings — no hardcoded timezone offset.
  */
 export function formatLastSeenLabel(ms) {
-  const ts = Number(ms);
+  const ts = Number(
+    typeof ms?.toMillis === 'function'
+      ? ms.toMillis()
+      : (typeof ms?.seconds === 'number' ? ms.seconds * 1000 : ms),
+  );
   if (!Number.isFinite(ts) || ts <= 0) return '';
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return '';
@@ -133,7 +137,12 @@ export function formatLastSeenLabel(ms) {
 /** True when presence is online and the heartbeat is still fresh. */
 export function isPresenceOnline(presence, freshnessMs = 3 * 60 * 1000) {
   if (!presence || presence.state !== 'online') return false;
-  const last = Number(presence.lastSeenAt);
+  const raw = presence.lastSeenAt;
+  const last = Number(
+    typeof raw?.toMillis === 'function'
+      ? raw.toMillis()
+      : (typeof raw?.seconds === 'number' ? raw.seconds * 1000 : raw),
+  );
   if (!Number.isFinite(last) || last <= 0) return false;
   return Date.now() - last < freshnessMs;
 }

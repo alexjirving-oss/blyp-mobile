@@ -235,6 +235,12 @@ const MessengerScreen = ({ navigation }) => {
 
   const tabBarHeight = useBottomTabBarHeight();
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [presenceNow, setPresenceNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setPresenceNow(Date.now()), 30 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Debug authentication state
   useEffect(() => {
@@ -1184,7 +1190,11 @@ const MessengerScreen = ({ navigation }) => {
     return <SwipeableChatBar item={item} otherParticipant={otherParticipant} />;
   };
 
-  const renderNewChatItem = ({ item }) => (
+  const renderNewChatItem = ({ item }) => {
+    void presenceNow;
+    const online = isPresenceOnline(item?.presence);
+    const seen = formatLastSeenLabel(item?.presence?.lastSeenAt);
+    return (
     <View style={styles.newChatItem}>
       <View style={styles.avatarContainer}>
         <BlypAvatar
@@ -1193,16 +1203,16 @@ const MessengerScreen = ({ navigation }) => {
           profile={item}
           size={48}
         />
-        {item.isOnline && <View style={styles.onlineIndicator} />}
+        {online && <View style={styles.onlineIndicator} />}
       </View>
 
       <View style={styles.userInfo}>
         <Text style={styles.userName}>{item.username || 'Unknown User'}</Text>
         <Text style={styles.userStatus}>
-          {item.isOnline
+          {online
             ? 'Online'
-            : (formatLastSeenLabel(item?.presence?.lastSeenAt)
-              ? `Last seen ${formatLastSeenLabel(item.presence.lastSeenAt)}`
+            : (seen
+              ? `Last seen ${seen}`
               : 'Offline')}
         </Text>
       </View>
@@ -1223,7 +1233,8 @@ const MessengerScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
     </View>
-  );
+    );
+  };
 
   const handleFollowUser = async (user) => {
     try {
@@ -1613,6 +1624,9 @@ const MessengerScreen = ({ navigation }) => {
   };
 
   const renderSimpleChatItem = ({ item: user }) => {
+    void presenceNow;
+    const online = isPresenceOnline(user?.presence);
+    const seen = formatLastSeenLabel(user?.presence?.lastSeenAt);
     return (
       <TouchableOpacity
         style={styles.whatsappChatItem}
@@ -1629,13 +1643,15 @@ const MessengerScreen = ({ navigation }) => {
               </Text>
             </View>
           )}
-          {user.isOnline && <View style={styles.onlineIndicator} />}
+          {online && <View style={styles.onlineIndicator} />}
         </View>
 
         <View style={styles.chatContent}>
           <View style={styles.chatHeader}>
             <Text style={styles.chatName}>{user.username || 'Unknown User'}</Text>
-            <Text style={styles.chatTime}>Online</Text>
+            <Text style={styles.chatTime}>
+              {online ? 'Online' : (seen || '')}
+            </Text>
           </View>
 
           <View style={styles.messagePreview}>

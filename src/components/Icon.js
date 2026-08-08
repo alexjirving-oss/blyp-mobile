@@ -18,6 +18,8 @@ const map = {
   'close-circle': 'XCircle',
   check: 'Check',
   checkmark: 'Check',
+  'checkmark-done': 'CheckCheck',
+  'check-done': 'CheckCheck',
   'check-circle': 'CheckCircle',
   'checkmark-circle': 'CheckCircle',
   settings: 'Settings',
@@ -56,6 +58,10 @@ const map = {
   pause: 'Pause',
   upload: 'Upload',
   download: 'Download',
+  'volume-high': 'Volume2',
+  'volume-mute': 'VolumeX',
+  'volume-off': 'VolumeX',
+  volume: 'Volume2',
 
   // comms
   message: 'MessageCircle',

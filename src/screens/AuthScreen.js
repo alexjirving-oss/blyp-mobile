@@ -30,7 +30,7 @@ import {
 import { ensureUserProfile } from '../services/LiveService';
 import { enterGuestMode } from '../services/guestSessionService';
 import {
-  clearPendingProfile,
+  claimPendingUsernameIfNeeded,
   rememberPendingProfile,
   validateUsername,
 } from '../services/usernameProfileService';
@@ -121,7 +121,7 @@ const AuthScreen = () => {
 
   // TODO[BLYP][UX]: Future onboarding polish:
   //  - Consider one-line tagline under logo
-  //  - Optional â€œBy continuing you agree to â€¦â€ legal line at bottom of screen
+  //  - Optional "By continuing you agree to …" legal line at bottom of screen
   //  - A/B test sign-in vs sign-up default focus
 
   const loginStartRef = useRef(null);
@@ -184,7 +184,7 @@ const AuthScreen = () => {
       }
 
       // Ensure Cognito tokens/session have actually been persisted to AsyncStorage.
-      // This reduces â€œlogged-in then suddenly logged-outâ€ behavior after dev-client reloads.
+      // This reduces "logged-in then suddenly logged-out" behavior after dev-client reloads.
       // Important: don't delay refreshAuthNow behind this flush.
       try {
         await flushCognitoStorageWrites({ timeoutMs: 5000 });
@@ -233,6 +233,25 @@ const AuthScreen = () => {
             birthdate: dobParsedForProfile.valid ? dobParsedForProfile.iso : undefined,
             ageVerified: dobParsedForProfile.valid ? true : undefined,
           });
+          // Claim the @handle chosen at signup here so ProfileCompletionGate
+          // does not re-prompt new email accounts on every launch.
+          // Never use the signup form field on a plain password login (toggle residue).
+          try {
+            const formUsernameForClaim =
+              source === 'confirm_auto_login' ? usernameToStore : '';
+            await claimPendingUsernameIfNeeded({
+              uid: userId,
+              email: emailFromToken || String(email || '').trim().toLowerCase() || undefined,
+              photoURL: pictureFromToken || undefined,
+              username: formUsernameForClaim || undefined,
+            });
+          } catch (claimError) {
+            // Leave pending profile so the one-time gate can recover (e.g. taken).
+            console.warn(
+              '[AUTH][SUCCESS] username claim deferred to gate',
+              claimError?.code || claimError?.message || claimError,
+            );
+          }
         }
       } catch {
         // Non-fatal: auth should still succeed even if profile write fails.
@@ -550,7 +569,11 @@ const AuthScreen = () => {
             // username is opaque and the email alias is not active until AFTER confirmation,
             // so confirmRegistration must target this username, not the email.
             const actualUsername = (result && result.user && typeof result.user.getUsername === 'function' && result.user.getUsername()) || cognitoUsername;
-            rememberPendingProfile({ source: 'signup', username: usernameNorm }).catch((pendingError) => {
+            rememberPendingProfile({
+              source: 'signup',
+              username: usernameNorm,
+              email: emailNorm,
+            }).catch((pendingError) => {
               console.warn('[AUTH][SIGNUP] Could not persist pending profile', pendingError?.message || pendingError);
             });
             setConfirmUsername(actualUsername);
@@ -588,12 +611,10 @@ const AuthScreen = () => {
     console.log(`[AUTH][SOCIAL] Starting ${provider} Cognito sign-in at`, new Date().toISOString());
 
     try {
-      await rememberPendingProfile({ source: 'social' });
       await signIn();
       const { cognitoUser } = await finalizeSocialSession();
       await handleAuthSuccess(`social:${provider}`, { cognitoUser });
     } catch (err) {
-      await clearPendingProfile().catch(() => {});
       const canceled =
         /cancel|dismiss|closed|user.?cancel/i.test(String(err?.message || err?.name || ''));
       console.log(`[AUTH][SOCIAL] ${provider} sign-in error`, { message: err?.message, code: err?.code });
@@ -800,7 +821,7 @@ const AuthScreen = () => {
                     {isLogin
                       ? (isSigningIn
                         ? 'Loading...'
-                        : (Date.now() < cooldownUntil ? 'Temporarily limitedâ€¦' : 'Log In'))
+                        : (Date.now() < cooldownUntil ? 'Temporarily limited…' : 'Log In'))
                       : (loading ? 'Please wait...' : 'Sign Up')}
                   </Text>
                 </LinearGradient>

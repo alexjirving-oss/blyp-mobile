@@ -1,4 +1,4 @@
-# Blyp social-import worker
+﻿# Blyp social-import worker
 
 Fulfils the in-app **"Bring your content"** feature. The app (Profile → *Bring your
 content (TikTok)*, or the sign-up step) writes a `pending` doc to the
@@ -7,13 +7,24 @@ posts on the requester's profile.
 
 ## What it does
 1. Claims the oldest `pending` request (transaction → `running`).
-2. Downloads the requester's public TikTok videos with `yt-dlp`.
+2. Downloads the requester's public TikTok/YouTube videos with `yt-dlp`.
 3. Uploads each video + thumbnail to Firebase Storage.
-4. Creates a `posts` doc per video on the requester's profile (same schema the
-   seed scripts use), with caption, hashtags, inferred category and the original
-   TikTok date. Idempotent — already-imported `sourceId`s are skipped.
-5. Streams `total` / `done` / `status` back onto the request doc so the app shows
-   live progress, then marks it `done`.
+4. Creates a `posts` doc per video. **By default** posts are
+   `publishStatus=scheduled` with a staggered `publishAt` (N/day + jitter) so
+   a large import does not dump everything live at once. Set
+   `STAGGER_FORCE_OFF=1` or `stagger.enabled=false` on the job for instant live.
+5. Streams `total` / `done` / `scheduled` / `status` back onto the request doc.
+6. A separate **publish sweeper** flips due posts to `live`:
+   - `node tools/import/blyp_publish_sweeper.js`, or
+   - Cloud Function `blypScheduledPublishSweep` (every 5 minutes).
+
+## Stagger defaults (everyone)
+| Setting | Default | Cap (user) | Cap (admin job) |
+| --- | --- | --- | --- |
+| enabled | on | — | — |
+| postsPerDay | 3 | 12 | 48 |
+| jitter | ~15m | 30m | 2h |
+| min interval | derived | 30m | 5m |
 
 ## Prerequisites
 - [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) and `ffmpeg` on your `PATH`.
@@ -24,8 +35,11 @@ posts on the requester's profile.
 
 ## Run
 ```bash
-# from repo root
+# from repo root — import ingest
 node tools/import/blyp_import_worker.js
+
+# publish due scheduled posts (run alongside ingest if CF not deployed)
+node tools/import/blyp_publish_sweeper.js
 ```
 
 Useful env vars:
@@ -35,8 +49,9 @@ Useful env vars:
 | `PROJECT_ID` | `blyp-master` | Firebase project |
 | `STORAGE_BUCKET` | `blyp-master.firebasestorage.app` | Storage bucket |
 | `POLL_MS` | `5000` | How often to poll for new jobs |
-| `MAX_VIDEOS` | `0` (no cap) | Limit videos per import (testing) |
+| `MAX_VIDEOS` | `1000` | Limit videos per import |
 | `ONCE` | unset | Set `ONCE=1` to process one job then exit |
+| `STAGGER_FORCE_OFF` | unset | Publish live immediately (ignore job.stagger) |
 
 ## Run hands-free (container)
 
