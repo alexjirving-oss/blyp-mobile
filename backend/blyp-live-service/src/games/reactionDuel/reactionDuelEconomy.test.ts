@@ -2,12 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildReactionDuelPrizeCredit,
+  planReactionDuelGemSettlement,
   planReactionEntryDebit,
   planReactionEntryRefund,
 } from './reactionDuelEconomy';
 
 describe('reaction duel economy', () => {
-  it('debits the fixed 100-coin entry bonus-first', () => {
+  it('debits an agreed stake bonus-first', () => {
     const debit = planReactionEntryDebit(
       { coinBalance: 125n, bonusCoinBalance: 40n },
       100n,
@@ -29,17 +30,31 @@ describe('reaction duel economy', () => {
     );
   });
 
-  it('credits the winner with the fixed 300-coin HOUSE prize', () => {
+  it('records a 3x live-only coin prize for live-end conversion', () => {
     const credit = buildReactionDuelPrizeCredit({
       duelId: 'duel-1',
+      sessionId: 'live-1',
       winnerUserId: 'winner',
+      stakeCoins: 250,
       reason: 'Reaction Duel skill win',
     });
 
-    assert.equal(credit.actorUserId, 'system:reaction-duel');
-    assert.equal(credit.input.targetUserId, 'winner');
-    assert.equal(credit.input.coins, 300);
-    assert.equal(credit.input.idempotencyKey, 'reaction-duel:duel-1:prize');
+    assert.equal(credit.userId, 'winner');
+    assert.equal(credit.currency, 'COIN');
+    assert.equal(credit.amount, 750);
+    assert.equal(credit.status, 'PENDING');
+    assert.equal(credit.idempotencyKey, 'reaction-duel:duel-1:prize');
+    assert.equal(credit.metadata.sessionId, 'live-1');
+    assert.equal(credit.metadata.convertsAtLiveEnd, true);
+  });
+
+  it('converts live coins to equal-count gems with half-value metadata', () => {
+    assert.deepEqual(planReactionDuelGemSettlement(750n), {
+      coinsConverted: 750n,
+      gemsCredited: 750n,
+      coinToGemCountRatio: '1:1',
+      gemCashoutValueRelativeToLiveCoin: 0.5,
+    });
   });
 
   it('refunds the paid and bonus portions exactly', () => {

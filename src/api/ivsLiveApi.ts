@@ -1526,6 +1526,10 @@ export interface ReactionDuelGameEvent {
   rules: {
     entryCoins: number;
     prizeCoins: number;
+    minStakeCoins: number;
+    maxStakeCoins: number;
+    stakePresets: number[];
+    prizeMultiplier: number;
     maxRounds: number;
     winScore: number;
     promptWindowMs: number;
@@ -1537,13 +1541,20 @@ export interface ReactionDuelGameEvent {
 export async function reactionDuelStart(
   sessionId: string,
   opponentUserId: string,
-  names?: { hostDisplayName?: string; opponentDisplayName?: string }
+  options?: {
+    stakeCoins?: number;
+    hostDisplayName?: string;
+    opponentDisplayName?: string;
+  }
 ): Promise<ReactionDuelGameEvent> {
   return callLiveBackend<ReactionDuelGameEvent>('/api/live-game/reaction-duel/start', 'POST', {
     sessionId,
     opponentUserId,
-    ...(names?.hostDisplayName ? { hostDisplayName: names.hostDisplayName } : {}),
-    ...(names?.opponentDisplayName ? { opponentDisplayName: names.opponentDisplayName } : {}),
+    ...(options?.stakeCoins != null ? { stakeCoins: options.stakeCoins } : {}),
+    ...(options?.hostDisplayName ? { hostDisplayName: options.hostDisplayName } : {}),
+    ...(options?.opponentDisplayName
+      ? { opponentDisplayName: options.opponentDisplayName }
+      : {}),
   });
 }
 

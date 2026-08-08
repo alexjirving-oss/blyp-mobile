@@ -5,14 +5,19 @@ import { listGuests } from '../../live/guestSlotStore';
 import { safeLiveDisplayName } from '../../live/liveDisplayName';
 import { emitReactionDuelEvent } from '../../realtime/realtimeBus';
 import {
-  REACTION_DUEL_ENTRY_COINS,
+  REACTION_DUEL_DEFAULT_STAKE_COINS,
   REACTION_DUEL_MAX_ROUNDS,
-  REACTION_DUEL_PRIZE_COINS,
+  REACTION_DUEL_MAX_STAKE_COINS,
+  REACTION_DUEL_MIN_STAKE_COINS,
+  REACTION_DUEL_PRIZE_MULTIPLIER,
+  REACTION_DUEL_STAKE_PRESETS,
   REACTION_DUEL_WIN_SCORE,
   type ReactionPrompt,
   createReactionPrompt,
   decideReactionDuelMatch,
   evaluateReactionTap,
+  isValidReactionDuelStake,
+  reactionDuelPrizeCoins,
 } from './reactionDuelEngine';
 import {
   awardReactionDuelPrize,
@@ -70,6 +75,8 @@ export interface ReactionDuelState {
   duelId: string;
   phase: ReactionDuelPhase;
   active: boolean;
+  stakeCoins: number;
+  prizeCoins: number;
   players: [ReactionDuelPlayer, ReactionDuelPlayer];
   roundNumber: number;
   prompt: ReactionPrompt | null;
@@ -109,6 +116,20 @@ function redis() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function roomStakeCoins(room: ReactionDuelRoom): number {
+  const stake = Number(room.state.stakeCoins);
+  return isValidReactionDuelStake(stake)
+    ? stake
+    : REACTION_DUEL_DEFAULT_STAKE_COINS;
+}
+
+function roomPrizeCoins(room: ReactionDuelRoom): number {
+  const prize = Number(room.state.prizeCoins);
+  return Number.isInteger(prize) && prize > 0
+    ? prize
+    : reactionDuelPrizeCoins(roomStakeCoins(room));
 }
 
 function gameError(code: string, message = code): Error & { code: string } {
@@ -182,6 +203,7 @@ function publicPrompt(prompt: ReactionPrompt | null, revealed: boolean) {
   return {
     promptId: prompt.promptId,
     roundNumber: prompt.roundNumber,
+    kind: prompt.kind,
     cue: prompt.cue,
     targets: prompt.targets,
     visibleAt: prompt.visibleAt,
@@ -213,14 +235,18 @@ export function publicEvent(
       prompt: publicPrompt(room.state.prompt, room.state.promptRevealed),
     },
     rules: {
-      entryCoins: REACTION_DUEL_ENTRY_COINS,
-      prizeCoins: REACTION_DUEL_PRIZE_COINS,
+      entryCoins: roomStakeCoins(room),
+      prizeCoins: roomPrizeCoins(room),
+      minStakeCoins: REACTION_DUEL_MIN_STAKE_COINS,
+      maxStakeCoins: REACTION_DUEL_MAX_STAKE_COINS,
+      stakePresets: REACTION_DUEL_STAKE_PRESETS,
+      prizeMultiplier: REACTION_DUEL_PRIZE_MULTIPLIER,
       maxRounds: REACTION_DUEL_MAX_ROUNDS,
       winScore: REACTION_DUEL_WIN_SCORE,
       promptWindowMs: PROMPT_WINDOW_MS,
       disconnectTimeoutMs: DISCONNECT_TIMEOUT_MS,
       summary:
-        'Best of five. First correct server-received tap wins each round; first to three clinches.',
+        'Best of five. First correct server-received answer wins each round; first to three clinches.',
     },
   };
 }
@@ -318,6 +344,7 @@ async function settleWinner(
     duelId: room.state.duelId,
     sessionId: room.sessionId,
     winnerUserId,
+    stakeCoins: roomStakeCoins(room),
     reason: `Reaction Duel ${reason}`,
   });
   room.state.phase = 'ended';
@@ -368,7 +395,7 @@ async function finishRound(
     await settleRefund(
       room,
       'draw',
-      'Match drawn after five rounds — both 100-coin entries refunded.',
+      `Match drawn after five rounds — both ${roomStakeCoins(room)}-coin entries refunded.`,
     );
     return;
   }
@@ -414,7 +441,7 @@ async function handlePresenceTimeout(
         winnerUserId: remaining.userId,
         winnerDisplayName: remaining.displayName,
         reactionMs: null,
-        text: `${remaining.displayName} wins 300 coins by disconnect forfeit.`,
+        text: `${remaining.displayName} wins ${roomPrizeCoins(room)} coins in this live by disconnect forfeit.`,
       };
       return true;
     }
@@ -423,7 +450,7 @@ async function handlePresenceTimeout(
   await settleRefund(
     room,
     'both_disconnected',
-    'Both players disconnected — both 100-coin entries refunded.',
+    `Both players disconnected — both ${roomStakeCoins(room)}-coin entries refunded.`,
   );
   return true;
 }
@@ -483,9 +510,19 @@ export async function startDuel(args: {
   hostUserId: string;
   starterUserId: string;
   opponentUserId: string;
+  stakeCoins?: number;
   hostDisplayName?: string;
   opponentDisplayName?: string;
 }): Promise<ReactionDuelRoom> {
+  const stakeCoins = Number(
+    args.stakeCoins ?? REACTION_DUEL_DEFAULT_STAKE_COINS,
+  );
+  if (!isValidReactionDuelStake(stakeCoins)) {
+    throw gameError(
+      'INVALID_STAKE',
+      `Stake must be a whole number from ${REACTION_DUEL_MIN_STAKE_COINS} to ${REACTION_DUEL_MAX_STAKE_COINS}`,
+    );
+  }
   if (args.hostUserId === args.opponentUserId) {
     throw gameError('BAD_OPPONENT');
   }
@@ -513,6 +550,8 @@ export async function startDuel(args: {
         duelId,
         phase: 'lobby',
         active: true,
+        stakeCoins,
+        prizeCoins: reactionDuelPrizeCoins(stakeCoins),
         players: [
           {
             userId: args.hostUserId,
@@ -578,6 +617,7 @@ export async function lockPlayer(args: {
         duelId: room.state.duelId,
         sessionId: room.sessionId,
         userId: player.userId,
+        stakeCoins: roomStakeCoins(room),
       });
       player.locked = true;
     }
@@ -692,7 +732,7 @@ export async function endDuel(args: {
     await settleRefund(
       room,
       'ended_by_host',
-      'Duel ended — both 100-coin entries refunded.',
+      `Duel ended — both ${roomStakeCoins(room)}-coin entries refunded.`,
     );
     room.version += 1;
     await saveRoom(room);

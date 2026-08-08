@@ -1,20 +1,50 @@
 import { randomBytes, randomUUID } from 'crypto';
 
-export const REACTION_DUEL_ENTRY_COINS = 100;
-export const REACTION_DUEL_PRIZE_COINS = 300;
+export const REACTION_DUEL_DEFAULT_STAKE_COINS = 100;
+export const REACTION_DUEL_MIN_STAKE_COINS = 25;
+export const REACTION_DUEL_MAX_STAKE_COINS = 5_000;
+export const REACTION_DUEL_STAKE_PRESETS = [50, 100, 250, 500] as const;
+export const REACTION_DUEL_PRIZE_MULTIPLIER = 3;
+// Backward-compatible defaults for callers/tests that only need the standard stake.
+export const REACTION_DUEL_ENTRY_COINS = REACTION_DUEL_DEFAULT_STAKE_COINS;
+export const REACTION_DUEL_PRIZE_COINS =
+  REACTION_DUEL_DEFAULT_STAKE_COINS * REACTION_DUEL_PRIZE_MULTIPLIER;
 export const REACTION_DUEL_MAX_ROUNDS = 5;
 export const REACTION_DUEL_WIN_SCORE = 3;
 export const MIN_REACTION_MS = 120;
 
 export type ReactionShape = 'circle' | 'square' | 'triangle' | 'star';
 export type ReactionColorId = 'cyan' | 'rose' | 'gold' | 'violet';
+export type ReactionPromptKind =
+  | 'shape_color'
+  | 'number_position'
+  | 'letter_position'
+  | 'number_sequence';
+
+export function isValidReactionDuelStake(value: number): boolean {
+  return (
+    Number.isInteger(value) &&
+    value >= REACTION_DUEL_MIN_STAKE_COINS &&
+    value <= REACTION_DUEL_MAX_STAKE_COINS
+  );
+}
+
+export function reactionDuelPrizeCoins(stakeCoins: number): number {
+  if (!isValidReactionDuelStake(stakeCoins)) {
+    throw new RangeError(
+      `Reaction Duel stake must be a whole number from ${REACTION_DUEL_MIN_STAKE_COINS} to ${REACTION_DUEL_MAX_STAKE_COINS}`,
+    );
+  }
+  return stakeCoins * REACTION_DUEL_PRIZE_MULTIPLIER;
+}
 
 export interface ReactionTarget {
   id: string;
-  colorId: ReactionColorId;
-  colorLabel: string;
-  colorHex: string;
-  shape: ReactionShape;
+  label: string;
+  colorId?: ReactionColorId;
+  colorLabel?: string;
+  colorHex?: string;
+  shape?: ReactionShape;
 }
 
 export interface ReactionTap {
@@ -27,11 +57,13 @@ export interface ReactionTap {
 export interface ReactionPrompt {
   promptId: string;
   roundNumber: number;
+  kind: ReactionPromptKind;
   cue: {
-    colorId: ReactionColorId;
-    colorLabel: string;
-    colorHex: string;
-    shape: ReactionShape;
+    instruction: string;
+    colorId?: ReactionColorId;
+    colorLabel?: string;
+    colorHex?: string;
+    shape?: ReactionShape;
   };
   targets: ReactionTarget[];
   correctTargetId: string;
@@ -71,23 +103,56 @@ function shuffled<T>(values: T[], entropy: Uint8Array, offset: number): T[] {
   return copy;
 }
 
-/**
- * Builds one shared prompt for both players. Entropy chooses the prompt only;
- * it never chooses a winner. Tap order is decided solely by server receipt time.
- */
-export function createReactionPrompt(args: {
+type TargetDraft = Omit<ReactionTarget, 'id'> & { correct: boolean };
+
+function finishPrompt(args: {
+  promptId: string;
+  roundNumber: number;
+  kind: ReactionPromptKind;
+  cue: ReactionPrompt['cue'];
+  targetDrafts: TargetDraft[];
+  visibleAtMs: number;
+  windowMs: number;
+}): ReactionPrompt {
+  const targets = args.targetDrafts.map(({ correct: _correct, ...target }, index) => ({
+    ...target,
+    id: `${args.promptId}:${index}`,
+  }));
+  const correctIndex = args.targetDrafts.findIndex((target) => target.correct);
+  const visibleAt = Math.floor(args.visibleAtMs);
+  const windowMs = Math.max(500, Math.floor(args.windowMs));
+
+  return {
+    promptId: args.promptId,
+    roundNumber: args.roundNumber,
+    kind: args.kind,
+    cue: args.cue,
+    targets,
+    correctTargetId: targets[correctIndex].id,
+    visibleAt: new Date(visibleAt).toISOString(),
+    endsAt: new Date(visibleAt + windowMs).toISOString(),
+    responses: {},
+  };
+}
+
+function ordinal(position: number): string {
+  if (position === 1) return '1st';
+  if (position === 2) return '2nd';
+  if (position === 3) return '3rd';
+  return `${position}th`;
+}
+
+function createShapeColorPrompt(args: {
+  promptId: string;
   roundNumber: number;
   visibleAtMs: number;
   windowMs: number;
-  entropy?: Uint8Array;
+  entropy: Uint8Array;
 }): ReactionPrompt {
-  const entropy = args.entropy ?? randomBytes(16);
-  const colorIndex = byteAt(entropy, 0) % COLORS.length;
-  const shapeIndex = byteAt(entropy, 1) % SHAPES.length;
+  const colorIndex = byteAt(args.entropy, 1) % COLORS.length;
+  const shapeIndex = byteAt(args.entropy, 2) % SHAPES.length;
   const cueColor = COLORS[colorIndex];
   const cueShape = SHAPES[shapeIndex];
-  const promptId = randomUUID();
-
   const combinations = [
     { color: cueColor, shape: cueShape, correct: true },
     {
@@ -106,34 +171,146 @@ export function createReactionPrompt(args: {
       correct: false,
     },
   ];
+  const positioned = shuffled(combinations, args.entropy, 3);
 
-  const positioned = shuffled(combinations, entropy, 2);
-  const targets = positioned.map((item, index) => ({
-    id: `${promptId}:${index}`,
-    colorId: item.color.id,
-    colorLabel: item.color.label,
-    colorHex: item.color.hex,
-    shape: item.shape,
-  }));
-  const correctIndex = positioned.findIndex((item) => item.correct);
-  const visibleAt = Math.floor(args.visibleAtMs);
-  const windowMs = Math.max(500, Math.floor(args.windowMs));
-
-  return {
-    promptId,
-    roundNumber: args.roundNumber,
+  return finishPrompt({
+    ...args,
+    kind: 'shape_color',
     cue: {
+      instruction: `Tap the ${cueColor.label} ${cueShape}`,
       colorId: cueColor.id,
       colorLabel: cueColor.label,
       colorHex: cueColor.hex,
       shape: cueShape,
     },
-    targets,
-    correctTargetId: targets[correctIndex].id,
-    visibleAt: new Date(visibleAt).toISOString(),
-    endsAt: new Date(visibleAt + windowMs).toISOString(),
-    responses: {},
+    targetDrafts: positioned.map((item) => ({
+      label: `${item.color.label} ${item.shape}`,
+      colorId: item.color.id,
+      colorLabel: item.color.label,
+      colorHex: item.color.hex,
+      shape: item.shape,
+      correct: item.correct,
+    })),
+  });
+}
+
+function createNumberPositionPrompt(args: {
+  promptId: string;
+  roundNumber: number;
+  visibleAtMs: number;
+  windowMs: number;
+  entropy: Uint8Array;
+}): ReactionPrompt {
+  const sequence = shuffled([1, 2, 3, 4, 5, 6, 7, 8, 9], args.entropy, 1).slice(0, 5);
+  const position = byteAt(args.entropy, 10) % sequence.length;
+  const correct = sequence[position];
+  const options = shuffled(
+    [correct, ...sequence.filter((value) => value !== correct).slice(0, 3)],
+    args.entropy,
+    11,
+  );
+
+  return finishPrompt({
+    ...args,
+    kind: 'number_position',
+    cue: {
+      instruction: `What’s the ${ordinal(position + 1)} number in: ${sequence.join(' ')}?`,
+    },
+    targetDrafts: options.map((value) => ({
+      label: String(value),
+      correct: value === correct,
+    })),
+  });
+}
+
+function createLetterPositionPrompt(args: {
+  promptId: string;
+  roundNumber: number;
+  visibleAtMs: number;
+  windowMs: number;
+  entropy: Uint8Array;
+}): ReactionPrompt {
+  const sequence = shuffled(
+    ['A', 'C', 'E', 'H', 'K', 'M', 'Q', 'R', 'T', 'Y'],
+    args.entropy,
+    1,
+  ).slice(0, 5);
+  const position = byteAt(args.entropy, 12) % sequence.length;
+  const correct = sequence[position];
+  const options = shuffled(
+    [correct, ...sequence.filter((value) => value !== correct).slice(0, 3)],
+    args.entropy,
+    13,
+  );
+
+  return finishPrompt({
+    ...args,
+    kind: 'letter_position',
+    cue: {
+      instruction: `What’s the ${ordinal(position + 1)} letter in: ${sequence.join(' ')}?`,
+    },
+    targetDrafts: options.map((value) => ({
+      label: value,
+      correct: value === correct,
+    })),
+  });
+}
+
+function createNumberSequencePrompt(args: {
+  promptId: string;
+  roundNumber: number;
+  visibleAtMs: number;
+  windowMs: number;
+  entropy: Uint8Array;
+}): ReactionPrompt {
+  const start = (byteAt(args.entropy, 1) % 5) + 1;
+  const step = (byteAt(args.entropy, 2) % 4) + 1;
+  const sequence = Array.from({ length: 4 }, (_, index) => start + index * step);
+  const correct = start + sequence.length * step;
+  const options = shuffled(
+    [correct, correct - step, correct + step, correct + step * 2],
+    args.entropy,
+    3,
+  );
+
+  return finishPrompt({
+    ...args,
+    kind: 'number_sequence',
+    cue: {
+      instruction: `What comes next in: ${sequence.join(' ')}?`,
+    },
+    targetDrafts: options.map((value) => ({
+      label: String(value),
+      correct: value === correct,
+    })),
+  });
+}
+
+/**
+ * Builds one shared prompt for both players. Six of every ten entropy buckets
+ * are shape/colour rounds; the rest are short number/letter skill questions.
+ * Entropy chooses the prompt only — never the winner. Server receipt order does.
+ */
+export function createReactionPrompt(args: {
+  roundNumber: number;
+  visibleAtMs: number;
+  windowMs: number;
+  entropy?: Uint8Array;
+}): ReactionPrompt {
+  const entropy = args.entropy ?? randomBytes(16);
+  const promptId = randomUUID();
+  const promptArgs = {
+    promptId,
+    roundNumber: args.roundNumber,
+    visibleAtMs: args.visibleAtMs,
+    windowMs: args.windowMs,
+    entropy,
   };
+  const kindBucket = byteAt(entropy, 0) % 10;
+  if (kindBucket < 6) return createShapeColorPrompt(promptArgs);
+  if (kindBucket < 8) return createNumberPositionPrompt(promptArgs);
+  if (kindBucket === 8) return createLetterPositionPrompt(promptArgs);
+  return createNumberSequencePrompt(promptArgs);
 }
 
 export type TapEvaluation =

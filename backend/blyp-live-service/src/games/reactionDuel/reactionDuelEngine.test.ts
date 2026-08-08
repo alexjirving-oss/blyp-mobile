@@ -5,6 +5,8 @@ import {
   createReactionPrompt,
   decideReactionDuelMatch,
   evaluateReactionTap,
+  isValidReactionDuelStake,
+  reactionDuelPrizeCoins,
 } from './reactionDuelEngine';
 
 describe('reaction duel engine', () => {
@@ -14,9 +16,10 @@ describe('reaction duel engine', () => {
       roundNumber: 1,
       visibleAtMs,
       windowMs: 2_500,
-      entropy: Uint8Array.from([7, 11, 13, 17, 19, 23]),
+      entropy: Uint8Array.from([0, 11, 13, 17, 19, 23]),
     });
 
+    assert.equal(prompt.kind, 'shape_color');
     assert.equal(prompt.targets.length, 4);
     assert.equal(
       prompt.targets.filter(
@@ -35,6 +38,37 @@ describe('reaction duel engine', () => {
       evaluateReactionTap(prompt, prompt.correctTargetId, visibleAtMs + 243),
       { accepted: true, correct: true, reactionMs: 243 },
     );
+  });
+
+  it('keeps shape rounds frequent while adding shared number and letter questions', () => {
+    const kinds = Array.from({ length: 10 }, (_, bucket) =>
+      createReactionPrompt({
+        roundNumber: bucket + 1,
+        visibleAtMs: 1_900_000_000_000,
+        windowMs: 2_500,
+        entropy: Uint8Array.from([bucket, 5, 9, 13, 17, 21, 25, 29]),
+      }),
+    );
+
+    assert.equal(kinds.filter((prompt) => prompt.kind === 'shape_color').length, 6);
+    assert.equal(kinds.filter((prompt) => prompt.kind === 'number_position').length, 2);
+    assert.equal(kinds.filter((prompt) => prompt.kind === 'letter_position').length, 1);
+    assert.equal(kinds.filter((prompt) => prompt.kind === 'number_sequence').length, 1);
+    for (const prompt of kinds) {
+      assert.equal(prompt.targets.length, 4);
+      assert.ok(prompt.cue.instruction.length > 0);
+      assert.ok(prompt.targets.some((target) => target.id === prompt.correctTargetId));
+    }
+  });
+
+  it('validates flexible stakes and preserves the 3x prize ratio', () => {
+    assert.equal(isValidReactionDuelStake(25), true);
+    assert.equal(isValidReactionDuelStake(500), true);
+    assert.equal(isValidReactionDuelStake(24), false);
+    assert.equal(isValidReactionDuelStake(25.5), false);
+    assert.equal(reactionDuelPrizeCoins(50), 150);
+    assert.equal(reactionDuelPrizeCoins(100), 300);
+    assert.equal(reactionDuelPrizeCoins(317), 951);
   });
 
   it('uses a best-of-five rule with first-to-three clinching', () => {

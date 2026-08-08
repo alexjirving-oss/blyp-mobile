@@ -4,9 +4,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -26,6 +28,9 @@ const CYAN = '#22D3EE';
 const ROSE = '#FB7185';
 const GOLD = '#FACC15';
 const INK = '#09090B';
+const DEFAULT_STAKE_PRESETS = [50, 100, 250, 500];
+const DEFAULT_MIN_STAKE = 25;
+const DEFAULT_MAX_STAKE = 5000;
 const SHAPE_GLYPH = {
   circle: '●',
   square: '■',
@@ -49,8 +54,14 @@ function guestName(guest) {
 
 function friendlyError(error) {
   const message = String(error?.code || error?.message || error || '');
-  if (/INSUFFICIENT_FUNDS|need 100 coins|requires 100 coins/i.test(message)) {
-    return 'You need 100 coins to lock your entry.';
+  if (/INSUFFICIENT_FUNDS|requires \d+ coins|not enough coins/i.test(message)) {
+    const required = String(error?.message || '').match(/requires (\d+) coins/i)?.[1];
+    return required
+      ? `You need ${required} coins to lock your entry.`
+      : 'You do not have enough coins to lock this stake.';
+  }
+  if (/INVALID_STAKE|stake must/i.test(message)) {
+    return 'Choose a whole-coin stake within the allowed range.';
   }
   if (/IMPOSSIBLE_TAP/i.test(message)) {
     return 'That tap arrived impossibly fast. Wait for the prompt to appear.';
@@ -83,6 +94,9 @@ export default function ReactionDuelOverlay({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [selectedOpponent, setSelectedOpponent] = useState(null);
+  const [stakeText, setStakeText] = useState('100');
+  const [customStakeActive, setCustomStakeActive] = useState(false);
+  const [dismissedDuelId, setDismissedDuelId] = useState(null);
   const [submittedPromptId, setSubmittedPromptId] = useState(null);
   const [tick, setTick] = useState(0);
   const subRef = useRef(null);
@@ -175,12 +189,23 @@ export default function ReactionDuelOverlay({
   const state = event?.state;
   const phase = state?.phase;
   const terminal = phase === 'ended' || phase === 'refunded';
+  const terminalDismissed =
+    !!terminal && !!state?.duelId && dismissedDuelId === state.duelId;
   const active = !!state?.active && !terminal;
   const players = state?.players || [];
   const me = players.find((player) => player.userId === currentUid);
   const prompt = state?.prompt;
-  const entryCoins = event?.rules?.entryCoins || 100;
-  const prizeCoins = event?.rules?.prizeCoins || 300;
+  const entryCoins = event?.rules?.entryCoins || state?.stakeCoins || 100;
+  const prizeCoins = event?.rules?.prizeCoins || state?.prizeCoins || entryCoins * 3;
+  const stakePresets = event?.rules?.stakePresets || DEFAULT_STAKE_PRESETS;
+  const minStakeCoins = event?.rules?.minStakeCoins || DEFAULT_MIN_STAKE;
+  const maxStakeCoins = event?.rules?.maxStakeCoins || DEFAULT_MAX_STAKE;
+  const selectedStake = Number(stakeText);
+  const stakeValid =
+    Number.isInteger(selectedStake) &&
+    selectedStake >= minStakeCoins &&
+    selectedStake <= maxStakeCoins;
+  const selectedPrize = stakeValid ? selectedStake * 3 : 0;
 
   useEffect(() => {
     if (!active || !me || !sessionId) return undefined;
@@ -210,6 +235,12 @@ export default function ReactionDuelOverlay({
       setErr('Choose a live guest before starting.');
       return;
     }
+    if (!stakeValid) {
+      setErr(
+        `Stake must be a whole number from ${minStakeCoins} to ${maxStakeCoins} coins.`
+      );
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -217,6 +248,7 @@ export default function ReactionDuelOverlay({
         sessionId,
         opponent.userId,
         {
+          stakeCoins: selectedStake,
           hostDisplayName: publicName(
             hostDisplayName || (isHost ? currentDisplayName : ''),
             event?.hostUserId,
@@ -293,15 +325,34 @@ export default function ReactionDuelOverlay({
     promptReady &&
     submittedPromptId !== prompt?.promptId &&
     !busy;
+  const isShapePrompt =
+    prompt?.kind === 'shape_color' || (!prompt?.kind && !!prompt?.cue?.shape);
   const selectedGuest = eligibleGuests.find(
     (guest) => guest.userId === selectedOpponent
   );
+  const dismissTerminal = useCallback(() => {
+    if (state?.duelId) setDismissedDuelId(state.duelId);
+    setErr(null);
+    (onClose || onBackToPicker)?.();
+  }, [state?.duelId, onBackToPicker, onClose]);
 
   void tick;
 
   return (
     <View style={styles.root} pointerEvents="box-none">
-      {(isHost || isAdmin) && controlsVisible && (!active || terminal) ? (
+      {terminal && !terminalDismissed ? (
+        <Pressable
+          style={styles.terminalBackdrop}
+          onPress={dismissTerminal}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss Reaction Duel result"
+        />
+      ) : null}
+
+      {(isHost || isAdmin) &&
+      controlsVisible &&
+      !active &&
+      (!terminal || terminalDismissed) ? (
         <View style={styles.startCard}>
           <LinearGradient
             colors={['rgba(8,47,73,0.97)', 'rgba(9,9,11,0.98)']}
@@ -311,10 +362,68 @@ export default function ReactionDuelOverlay({
               REACTION DUEL
             </Text>
             <Text style={styles.startTitle} allowFontScaling={false}>
-              Fast hands. Same prompt.
+              Quick thinking. Same prompt.
             </Text>
             <Text style={styles.startCopy} allowFontScaling={false}>
-              {entryCoins} coins each · {prizeCoins} coins to the winner · best of five
+              Pick one shared stake. Winner prize is always 3× · best of five.
+            </Text>
+
+            <Text style={styles.chooseLabel} allowFontScaling={false}>
+              Choose stake
+            </Text>
+            <View style={styles.stakeRow}>
+              {stakePresets.map((stake) => {
+                const selected = !customStakeActive && selectedStake === stake;
+                return (
+                  <TouchableOpacity
+                    key={stake}
+                    style={[styles.stakeChip, selected && styles.stakeChipSelected]}
+                    onPress={() => {
+                      setStakeText(String(stake));
+                      setCustomStakeActive(false);
+                    }}
+                    activeOpacity={0.82}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${stake} coin stake`}
+                  >
+                    <Text
+                      style={[
+                        styles.stakeChipText,
+                        selected && styles.stakeChipTextSelected,
+                      ]}
+                      allowFontScaling={false}
+                    >
+                      {stake}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TextInput
+              value={customStakeActive ? stakeText : ''}
+              onFocus={() => {
+                setCustomStakeActive(true);
+                if (!customStakeActive) setStakeText('');
+              }}
+              onChangeText={(value) => {
+                setCustomStakeActive(true);
+                setStakeText(value.replace(/[^0-9]/g, ''));
+              }}
+              placeholder={`Custom (${minStakeCoins}–${maxStakeCoins})`}
+              placeholderTextColor="rgba(255,255,255,0.42)"
+              keyboardType="number-pad"
+              maxLength={5}
+              style={[
+                styles.customStakeInput,
+                customStakeActive && styles.customStakeInputActive,
+                customStakeActive && !stakeValid && styles.customStakeInputInvalid,
+              ]}
+              accessibilityLabel="Custom Reaction Duel coin stake"
+            />
+            <Text style={styles.stakePreview} allowFontScaling={false}>
+              {stakeValid
+                ? `${selectedPrize} coins in this live → ${selectedPrize} gems when live ends`
+                : `Enter a whole amount from ${minStakeCoins} to ${maxStakeCoins}`}
             </Text>
 
             {eligibleGuests.length ? (
@@ -355,9 +464,12 @@ export default function ReactionDuelOverlay({
             )}
 
             <TouchableOpacity
-              style={[styles.primaryButton, !selectedGuest && styles.disabled]}
+              style={[
+                styles.primaryButton,
+                (!selectedGuest || !stakeValid) && styles.disabled,
+              ]}
               onPress={start}
-              disabled={busy || !selectedGuest}
+              disabled={busy || !selectedGuest || !stakeValid}
               activeOpacity={0.85}
               accessibilityLabel="Start Reaction Duel"
             >
@@ -365,7 +477,8 @@ export default function ReactionDuelOverlay({
                 <ActivityIndicator color={INK} />
               ) : (
                 <Text style={styles.primaryButtonText} allowFontScaling={false}>
-                  Challenge {selectedGuest ? guestName(selectedGuest) : 'a guest'}
+                  Challenge {selectedGuest ? guestName(selectedGuest) : 'a guest'} ·{' '}
+                  {stakeValid ? selectedStake : '—'} coins
                 </Text>
               )}
             </TouchableOpacity>
@@ -382,7 +495,7 @@ export default function ReactionDuelOverlay({
         </View>
       ) : null}
 
-      {state ? (
+      {state && !terminalDismissed ? (
         <View style={styles.gameCard} pointerEvents="box-none">
           <LinearGradient
             colors={['rgba(9,9,11,0.95)', 'rgba(8,47,73,0.88)']}
@@ -394,7 +507,7 @@ export default function ReactionDuelOverlay({
                   REACTION DUEL
                 </Text>
                 <Text style={styles.ruleLine} allowFontScaling={false}>
-                  {entryCoins} in · {prizeCoins} prize · best of 5
+                  {entryCoins} stake · {prizeCoins} live-coin prize · best of 5
                 </Text>
               </View>
               {(isAdmin || isHost) && active ? (
@@ -447,7 +560,7 @@ export default function ReactionDuelOverlay({
                     ]}
                     allowFontScaling={false}
                   >
-                    {player.locked ? '100 LOCKED' : 'WAITING'}
+                    {player.locked ? `${entryCoins} LOCKED` : 'WAITING'}
                   </Text>
                 </View>
               ))}
@@ -459,7 +572,8 @@ export default function ReactionDuelOverlay({
                   Lock both entries
                 </Text>
                 <Text style={styles.phaseCopy} allowFontScaling={false}>
-                  Each player pays {entryCoins} coins. Once both lock, round one starts.
+                  Host set {entryCoins} coins. Each player locks that exact stake to
+                  confirm; then round one starts.
                 </Text>
                 {me && !me.locked ? (
                   <TouchableOpacity
@@ -485,7 +599,9 @@ export default function ReactionDuelOverlay({
                   </Text>
                 )}
                 <Text style={styles.safetyCopy} allowFontScaling={false}>
-                  Before both lock: full refund. After lock: disconnect forfeits to the player who remains.
+                  Winner gets {prizeCoins} coins in this live → {prizeCoins} gems when
+                  live ends. Before both lock: full refund. After lock: disconnect
+                  forfeits.
                 </Text>
               </View>
             ) : null}
@@ -515,23 +631,35 @@ export default function ReactionDuelOverlay({
                 ) : (
                   <>
                     <Text style={styles.tapInstruction} allowFontScaling={false}>
-                      TAP THE
+                      {isShapePrompt ? 'TAP THE' : 'ANSWER FAST'}
                     </Text>
-                    <View style={styles.cueRow}>
-                      <Text
-                        style={[styles.cueShape, { color: prompt.cue.colorHex }]}
-                        allowFontScaling={false}
-                      >
-                        {SHAPE_GLYPH[prompt.cue.shape] || '●'}
+                    {isShapePrompt ? (
+                      <View style={styles.cueRow}>
+                        <Text
+                          style={[
+                            styles.cueShape,
+                            { color: prompt.cue.colorHex || CYAN },
+                          ]}
+                          allowFontScaling={false}
+                        >
+                          {SHAPE_GLYPH[prompt.cue.shape] || '●'}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.cueText,
+                            { color: prompt.cue.colorHex || CYAN },
+                          ]}
+                          allowFontScaling={false}
+                        >
+                          {String(prompt.cue.colorLabel || '').toUpperCase()}{' '}
+                          {String(prompt.cue.shape || '').toUpperCase()}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.questionText} allowFontScaling={false}>
+                        {prompt.cue.instruction}
                       </Text>
-                      <Text
-                        style={[styles.cueText, { color: prompt.cue.colorHex }]}
-                        allowFontScaling={false}
-                      >
-                        {String(prompt.cue.colorLabel || '').toUpperCase()}{' '}
-                        {String(prompt.cue.shape || '').toUpperCase()}
-                      </Text>
-                    </View>
+                    )}
                     <View style={styles.targetGrid}>
                       {(prompt.targets || []).map((target) => (
                         <TouchableOpacity
@@ -539,21 +667,32 @@ export default function ReactionDuelOverlay({
                           style={[
                             styles.targetButton,
                             {
-                              borderColor: target.colorHex,
-                              backgroundColor: `${target.colorHex}1F`,
+                              borderColor: target.colorHex || 'rgba(34,211,238,0.6)',
+                              backgroundColor: target.colorHex
+                                ? `${target.colorHex}1F`
+                                : 'rgba(34,211,238,0.1)',
                             },
+                            !isShapePrompt && styles.choiceButton,
                             !canTap && styles.targetDisabled,
                           ]}
                           onPress={() => tapTarget(target.id)}
                           disabled={!canTap}
                           activeOpacity={0.72}
-                          accessibilityLabel={`${target.colorLabel} ${target.shape}`}
+                          accessibilityLabel={
+                            target.label ||
+                            `${target.colorLabel || ''} ${target.shape || ''}`.trim()
+                          }
                         >
                           <Text
-                            style={[styles.targetGlyph, { color: target.colorHex }]}
+                            style={[
+                              isShapePrompt ? styles.targetGlyph : styles.choiceText,
+                              { color: target.colorHex || '#FFFFFF' },
+                            ]}
                             allowFontScaling={false}
                           >
-                            {SHAPE_GLYPH[target.shape] || '●'}
+                            {isShapePrompt
+                              ? SHAPE_GLYPH[target.shape] || '●'
+                              : target.label}
                           </Text>
                         </TouchableOpacity>
                       ))}
@@ -586,7 +725,24 @@ export default function ReactionDuelOverlay({
             ) : null}
 
             {terminal ? (
-              <View style={styles.resultPanel}>
+              <View style={[styles.resultPanel, styles.terminalResultPanel]}>
+                <TouchableOpacity
+                  style={styles.resultCloseButton}
+                  onPress={dismissTerminal}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close Reaction Duel result"
+                >
+                  <Text style={styles.resultCloseText} allowFontScaling={false}>
+                    ×
+                  </Text>
+                </TouchableOpacity>
+                <Text style={styles.resultTrophy} allowFontScaling={false}>
+                  {phase === 'ended'
+                    ? state.winnerUserId === currentUid
+                      ? '🏆'
+                      : '⚡'
+                    : '↩'}
+                </Text>
                 <Text style={styles.resultKicker} allowFontScaling={false}>
                   {phase === 'ended' ? 'DUEL WON' : 'ENTRIES REFUNDED'}
                 </Text>
@@ -601,6 +757,13 @@ export default function ReactionDuelOverlay({
                       ? 'Five-round draw'
                       : 'Duel closed safely'}
                 </Text>
+                {phase === 'ended' ? (
+                  <View style={styles.prizePill}>
+                    <Text style={styles.prizePillText} allowFontScaling={false}>
+                      {prizeCoins} coins in this live → {prizeCoins} gems at live end
+                    </Text>
+                  </View>
+                ) : null}
                 <Text style={styles.resultCopy} allowFontScaling={false}>
                   {state.lastRound?.text ||
                     (phase === 'refunded'
@@ -608,13 +771,18 @@ export default function ReactionDuelOverlay({
                       : 'Prize credited by the server.')}
                 </Text>
                 <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={onBackToPicker || onClose}
+                  style={styles.doneButton}
+                  onPress={dismissTerminal}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done with Reaction Duel result"
                 >
-                  <Text style={styles.backButtonText} allowFontScaling={false}>
-                    Back to games
+                  <Text style={styles.doneButtonText} allowFontScaling={false}>
+                    Done
                   </Text>
                 </TouchableOpacity>
+                <Text style={styles.dismissHint} allowFontScaling={false}>
+                  You can also tap outside this card to close it.
+                </Text>
               </View>
             ) : null}
 
@@ -633,6 +801,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 56,
   },
+  terminalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+  },
   startCard: {
     position: 'absolute',
     left: 12,
@@ -642,6 +815,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(34,211,238,0.45)',
+    zIndex: 2,
   },
   startGradient: {
     padding: 16,
@@ -669,6 +843,59 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 12,
     marginTop: 14,
+  },
+  stakeRow: {
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 8,
+  },
+  stakeChip: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  stakeChipSelected: {
+    borderColor: GOLD,
+    backgroundColor: 'rgba(250,204,21,0.16)',
+  },
+  stakeChipText: {
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  stakeChipTextSelected: {
+    color: GOLD,
+  },
+  customStakeInput: {
+    minHeight: 42,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    color: '#FFFFFF',
+    backgroundColor: 'rgba(0,0,0,0.22)',
+    paddingHorizontal: 12,
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  customStakeInputActive: {
+    borderColor: CYAN,
+  },
+  customStakeInputInvalid: {
+    borderColor: ROSE,
+  },
+  stakePreview: {
+    color: CYAN,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginTop: 6,
   },
   guestRow: {
     gap: 8,
@@ -744,6 +971,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(34,211,238,0.42)',
+    zIndex: 3,
   },
   gameGradient: {
     padding: 13,
@@ -907,6 +1135,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 18,
   },
+  questionText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    fontSize: 19,
+    lineHeight: 27,
+    textAlign: 'center',
+    marginTop: 5,
+    marginBottom: 12,
+    paddingHorizontal: 5,
+  },
   targetGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -920,12 +1158,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  choiceButton: {
+    minHeight: 70,
+  },
   targetDisabled: {
     opacity: 0.55,
   },
   targetGlyph: {
     fontSize: 50,
     lineHeight: 58,
+  },
+  choiceText: {
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '900',
   },
   resultPanel: {
     marginTop: 10,
@@ -935,6 +1181,70 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(250,204,21,0.08)',
     padding: 14,
     alignItems: 'center',
+  },
+  terminalResultPanel: {
+    position: 'relative',
+    borderColor: 'rgba(250,204,21,0.68)',
+    backgroundColor: 'rgba(250,204,21,0.12)',
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  resultCloseButton: {
+    position: 'absolute',
+    right: 8,
+    top: 7,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    zIndex: 2,
+  },
+  resultCloseText: {
+    color: '#FFFFFF',
+    fontSize: 25,
+    lineHeight: 28,
+    fontWeight: '500',
+  },
+  resultTrophy: {
+    fontSize: 42,
+    lineHeight: 49,
+    marginBottom: 2,
+  },
+  prizePill: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(34,211,238,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,211,238,0.42)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginTop: 10,
+  },
+  prizePillText: {
+    color: CYAN,
+    fontSize: 11,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  doneButton: {
+    alignSelf: 'stretch',
+    minHeight: 46,
+    borderRadius: 13,
+    backgroundColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  doneButtonText: {
+    color: INK,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  dismissHint: {
+    color: 'rgba(255,255,255,0.46)',
+    fontSize: 10,
+    marginTop: 7,
   },
   resultKicker: {
     color: GOLD,

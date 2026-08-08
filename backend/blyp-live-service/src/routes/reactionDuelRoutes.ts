@@ -13,6 +13,11 @@ import { getSessionById } from '../live/liveSessionStore';
 import { logger } from '../config/logger';
 import { isFrenemiesAdmin } from '../games/frenemies/frenemiesRoomService';
 import {
+  REACTION_DUEL_DEFAULT_STAKE_COINS,
+  REACTION_DUEL_MAX_STAKE_COINS,
+  REACTION_DUEL_MIN_STAKE_COINS,
+} from '../games/reactionDuel/reactionDuelEngine';
+import {
   endDuel,
   getRoom,
   heartbeatPlayer,
@@ -46,6 +51,12 @@ router.use((req, res, next) => {
 const startSchema = z.object({
   sessionId: z.string().min(1),
   opponentUserId: z.string().min(1),
+  stakeCoins: z
+    .number()
+    .int()
+    .min(REACTION_DUEL_MIN_STAKE_COINS)
+    .max(REACTION_DUEL_MAX_STAKE_COINS)
+    .default(REACTION_DUEL_DEFAULT_STAKE_COINS),
   hostDisplayName: z.string().min(1).max(80).optional(),
   opponentDisplayName: z.string().min(1).max(80).optional(),
 });
@@ -67,7 +78,7 @@ function mapError(res: any, error: any) {
   const code = String(error?.code || '');
   if (code === 'INSUFFICIENT_FUNDS') {
     return res.status(409).json({
-      error: 'You need 100 coins to lock your Reaction Duel entry.',
+      error: String(error?.message || 'Not enough coins to lock this Reaction Duel stake.'),
       code,
     });
   }
@@ -77,6 +88,7 @@ function mapError(res: any, error: any) {
     NOT_PLAYER: 403,
     BAD_OPPONENT: 400,
     BAD_TARGET: 400,
+    INVALID_STAKE: 400,
     OPPONENT_NOT_ON_STAGE: 409,
     GAME_NOT_FOUND: 404,
     GAME_BUSY: 409,
@@ -136,6 +148,7 @@ router.post(
         hostUserId: session.hostUserId,
         starterUserId: userId,
         opponentUserId: parsed.data.opponentUserId,
+        stakeCoins: parsed.data.stakeCoins,
         hostDisplayName: parsed.data.hostDisplayName,
         opponentDisplayName: parsed.data.opponentDisplayName,
       });

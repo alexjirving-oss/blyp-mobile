@@ -46,6 +46,8 @@ import {
 } from '../battles/battleCoordinator';
 import { attachBattleStage } from '../battles/battleRegistryService';
 import { battleTokenAttributes } from '../battles/battleLifecycle';
+import { endDuel } from '../games/reactionDuel/reactionDuelRoomService';
+import { settleReactionDuelLiveCoins } from '../games/reactionDuel/reactionDuelEconomy';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -717,6 +719,26 @@ export async function endLiveSession(sessionId: string): Promise<void> {
   // status flips. The session record itself is retained (status -> ENDED) for
   // history/analytics; only the IVS stage resource is deleted.
   const session = await getSessionById(sessionId);
+
+  // Close/refund any in-progress duel first, then atomically convert every
+  // completed duel prize from live-only coins into 1:1 earned gems. Both calls
+  // are idempotent, so a retried live-end request cannot duplicate value.
+  await endDuel({
+    sessionId,
+    userId: session?.hostUserId || 'system:live-end',
+    isAdmin: true,
+  });
+  const duelSettlement = await settleReactionDuelLiveCoins({ sessionId });
+  if (duelSettlement.prizesConverted > 0) {
+    console.log('[REACTION_DUEL][LIVE_END_SETTLED]', {
+      sessionId,
+      prizesConverted: duelSettlement.prizesConverted,
+      coinsConverted: duelSettlement.coinsConverted,
+      gemsCredited: duelSettlement.gemsCredited,
+      gemStatus: duelSettlement.gemStatus,
+    });
+  }
+
   await updateSessionStatus(sessionId, 'ENDED', endedAt);
   emitRoomEvent(sessionId, { type: 'room.ended' });
 

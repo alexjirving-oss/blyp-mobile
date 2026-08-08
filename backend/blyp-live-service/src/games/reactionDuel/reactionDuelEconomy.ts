@@ -3,9 +3,10 @@ import type { Knex } from 'knex';
 import { getEconomyInfra } from '../../economy/infra';
 import { EconomyError } from '../../economy/economyErrors';
 import { ensureEconomySchema } from '../../economy/schema';
+import { getEconomyEnv } from '../../config/economyEnv';
 import {
-  REACTION_DUEL_ENTRY_COINS,
-  REACTION_DUEL_PRIZE_COINS,
+  isValidReactionDuelStake,
+  reactionDuelPrizeCoins,
 } from './reactionDuelEngine';
 
 export interface ReactionWalletAmounts {
@@ -29,7 +30,7 @@ export function planReactionEntryDebit(
     throw new EconomyError(
       'INSUFFICIENT_FUNDS',
       409,
-      `Reaction Duel requires ${REACTION_DUEL_ENTRY_COINS} coins`,
+      `Reaction Duel requires ${amount.toString()} coins`,
     );
   }
   return {
@@ -79,6 +80,7 @@ async function writeLedger(args: {
   currency: 'COIN' | 'BONUS_COIN';
   amount: bigint;
   idempotencyKey: string;
+  stakeCoins: number;
 }): Promise<void> {
   if (args.amount === 0n) return;
   await args.trx('ledger_entries').insert({
@@ -94,20 +96,24 @@ async function writeLedger(args: {
     metadata: {
       duelId: args.duelId,
       sessionId: args.sessionId,
-      entryCoins: REACTION_DUEL_ENTRY_COINS,
+      stakeCoins: args.stakeCoins,
     },
   });
 }
 
 /**
- * Locks one player's fixed 100-coin entry. The row is inserted first so
+ * Locks one player's server-selected stake. The row is inserted first so
  * concurrent retries serialize on the same (duel, user) primary key.
  */
 export async function lockReactionDuelEntry(args: {
   duelId: string;
   sessionId: string;
   userId: string;
+  stakeCoins: number;
 }) {
+  if (!isValidReactionDuelStake(args.stakeCoins)) {
+    throw new EconomyError('INVALID_INPUT', 400, 'Invalid Reaction Duel stake');
+  }
   const { db } = getEconomyInfra();
   await ensureEconomySchema(db);
 
@@ -135,10 +141,14 @@ export async function lockReactionDuelEntry(args: {
       throw new EconomyError('CONFLICT', 409, 'Reaction Duel session mismatch');
     }
     if (entry.status === 'LOCKED') {
+      const lockedCoins = Number(BigInt(entry.coin_cost) + BigInt(entry.bonus_coin_cost));
+      if (lockedCoins !== args.stakeCoins) {
+        throw new EconomyError('CONFLICT', 409, 'Reaction Duel stake mismatch');
+      }
       const wallet = await trx('wallets').where({ user_id: args.userId }).first();
       return {
         replay: true,
-        entryCoins: Number(BigInt(entry.coin_cost) + BigInt(entry.bonus_coin_cost)),
+        entryCoins: lockedCoins,
         newBalances: balances(wallet),
       };
     }
@@ -161,7 +171,7 @@ export async function lockReactionDuelEntry(args: {
         coinBalance: BigInt(wallet.coin_balance),
         bonusCoinBalance: BigInt(wallet.bonus_coin_balance),
       },
-      BigInt(REACTION_DUEL_ENTRY_COINS),
+      BigInt(args.stakeCoins),
     );
 
     await writeLedger({
@@ -173,6 +183,7 @@ export async function lockReactionDuelEntry(args: {
       currency: 'COIN',
       amount: -debit.paidCoinCost,
       idempotencyKey: entryKey(args.duelId, args.userId, 'entry:coin'),
+      stakeCoins: args.stakeCoins,
     });
     await writeLedger({
       trx,
@@ -183,6 +194,7 @@ export async function lockReactionDuelEntry(args: {
       currency: 'BONUS_COIN',
       amount: -debit.bonusCoinCost,
       idempotencyKey: entryKey(args.duelId, args.userId, 'entry:bonus'),
+      stakeCoins: args.stakeCoins,
     });
 
     await trx('wallets')
@@ -192,7 +204,7 @@ export async function lockReactionDuelEntry(args: {
         bonus_coin_balance: debit.bonusCoinBalance.toString(),
         lifetime_spend_coins: (
           BigInt(wallet.lifetime_spend_coins || 0) +
-          BigInt(REACTION_DUEL_ENTRY_COINS)
+          BigInt(args.stakeCoins)
         ).toString(),
         updated_at: trx.fn.now(),
       });
@@ -208,7 +220,7 @@ export async function lockReactionDuelEntry(args: {
 
     return {
       replay: false,
-      entryCoins: REACTION_DUEL_ENTRY_COINS,
+      entryCoins: args.stakeCoins,
       newBalances: {
         coinBalance: Number(debit.coinBalance),
         bonusCoinBalance: Number(debit.bonusCoinBalance),
@@ -268,6 +280,7 @@ export async function refundReactionDuelEntries(args: {
         currency: 'COIN',
         amount: paidCoinCost,
         idempotencyKey: entryKey(args.duelId, entry.user_id, 'refund:coin'),
+        stakeCoins: Number(paidCoinCost + bonusCoinCost),
       });
       await writeLedger({
         trx,
@@ -278,6 +291,7 @@ export async function refundReactionDuelEntries(args: {
         currency: 'BONUS_COIN',
         amount: bonusCoinCost,
         idempotencyKey: entryKey(args.duelId, entry.user_id, 'refund:bonus'),
+        stakeCoins: Number(paidCoinCost + bonusCoinCost),
       });
 
       await trx('wallets')
@@ -301,78 +315,264 @@ export async function refundReactionDuelEntries(args: {
   });
 }
 
-export type ReactionPrizeCredit = (
-  actorUserId: string,
-  input: {
-    targetUserId: string;
-    coins: number;
-    idempotencyKey: string;
-    reason?: string;
-  },
-) => Promise<unknown>;
-
 export function buildReactionDuelPrizeCredit(args: {
   duelId: string;
+  sessionId: string;
   winnerUserId: string;
+  stakeCoins: number;
   reason: string;
 }) {
+  const prizeCoins = reactionDuelPrizeCoins(args.stakeCoins);
   return {
-    actorUserId: 'system:reaction-duel',
-    input: {
-      targetUserId: args.winnerUserId,
-      coins: REACTION_DUEL_PRIZE_COINS,
-      idempotencyKey: `reaction-duel:${args.duelId}:prize`,
+    userId: args.winnerUserId,
+    entryType: 'REACTION_DUEL_PRIZE' as const,
+    currency: 'COIN' as const,
+    amount: prizeCoins,
+    status: 'PENDING' as const,
+    referenceType: 'REACTION_DUEL' as const,
+    referenceId: args.duelId,
+    idempotencyKey: `reaction-duel:${args.duelId}:prize`,
+    metadata: {
+      duelId: args.duelId,
+      sessionId: args.sessionId,
+      stakeCoins: args.stakeCoins,
+      prizeCoins,
       reason: args.reason,
+      liveOnly: true,
+      convertsAtLiveEnd: true,
+      coinToGemCountRatio: '1:1',
+      gemCashoutValueRelativeToLiveCoin: 0.5,
     },
   };
 }
 
 /**
- * The pool removes 200 coins and the existing HOUSE/admin credit path mints the
- * fixed 300-coin prize, so the house contribution is exactly 100 coins.
+ * Records the winner's 3× prize as live-scoped COIN, not GEM. It intentionally
+ * does not enter the spendable wallet: the live-end hook converts this exact
+ * ledger amount 1:1 into earned gems, preventing spend-then-convert duplication.
  */
-export async function awardReactionDuelPrize(
-  args: {
-    duelId: string;
-    sessionId: string;
-    winnerUserId: string;
-    reason: string;
-  },
-  credit?: ReactionPrizeCredit,
-) {
+export async function awardReactionDuelPrize(args: {
+  duelId: string;
+  sessionId: string;
+  winnerUserId: string;
+  stakeCoins: number;
+  reason: string;
+}) {
+  if (!isValidReactionDuelStake(args.stakeCoins)) {
+    throw new EconomyError('INVALID_INPUT', 400, 'Invalid Reaction Duel stake');
+  }
   const { db } = getEconomyInfra();
   await ensureEconomySchema(db);
-  const entries = (await db('reaction_duel_entries').where({
-    duel_id: args.duelId,
-    session_id: args.sessionId,
-  })) as EntryRow[];
-  const winnerEntry = entries.find((entry) => entry.user_id === args.winnerUserId);
-  if (
-    entries.filter((entry) => entry.status === 'LOCKED' || entry.status === 'SETTLED')
-      .length !== 2 ||
-    !winnerEntry ||
-    (winnerEntry.status !== 'LOCKED' && winnerEntry.status !== 'SETTLED')
-  ) {
-    throw new EconomyError('CONFLICT', 409, 'Both Reaction Duel entries must be locked');
-  }
-
   const prizeCredit = buildReactionDuelPrizeCredit({
-    duelId: args.duelId,
-    winnerUserId: args.winnerUserId,
-    reason: args.reason,
+    ...args,
   });
-  const creditPrize =
-    credit ??
-    (await import('../../economy/economyService')).creditCoinsAdmin;
-  const prize = await creditPrize(prizeCredit.actorUserId, prizeCredit.input);
 
-  await db('reaction_duel_entries')
-    .where({ duel_id: args.duelId, session_id: args.sessionId })
-    .whereIn('status', ['LOCKED', 'SETTLED'])
-    .update({
-      status: 'SETTLED',
-      settled_at: db.fn.now(),
-      updated_at: db.fn.now(),
+  return db.transaction(async (trx) => {
+    const entries = (await trx('reaction_duel_entries')
+      .where({
+        duel_id: args.duelId,
+        session_id: args.sessionId,
+      })
+      .orderBy('user_id', 'asc')
+      .forUpdate()) as EntryRow[];
+    const eligible = entries.filter(
+      (entry) => entry.status === 'LOCKED' || entry.status === 'SETTLED',
+    );
+    const winnerEntry = eligible.find((entry) => entry.user_id === args.winnerUserId);
+    const stakeMatches = eligible.every(
+      (entry) =>
+        BigInt(entry.coin_cost) + BigInt(entry.bonus_coin_cost) ===
+        BigInt(args.stakeCoins),
+    );
+    if (eligible.length !== 2 || !winnerEntry || !stakeMatches) {
+      throw new EconomyError(
+        'CONFLICT',
+        409,
+        'Both Reaction Duel entries must lock the agreed stake',
+      );
+    }
+
+    const existing = await trx('ledger_entries')
+      .where({ idempotency_key: prizeCredit.idempotencyKey })
+      .first();
+    if (existing) {
+      return {
+        replay: true,
+        coinsCredited: Number(existing.amount),
+        currency: String(existing.currency),
+        liveOnly: true,
+      };
+    }
+
+    await trx('ledger_entries').insert({
+      ledger_id: randomUUID(),
+      user_id: prizeCredit.userId,
+      entry_type: prizeCredit.entryType,
+      currency: prizeCredit.currency,
+      amount: prizeCredit.amount.toString(),
+      status: prizeCredit.status,
+      reference_type: prizeCredit.referenceType,
+      reference_id: prizeCredit.referenceId,
+      idempotency_key: prizeCredit.idempotencyKey,
+      metadata: prizeCredit.metadata,
     });
-  return prize;
+
+    await trx('reaction_duel_entries')
+      .where({ duel_id: args.duelId, session_id: args.sessionId })
+      .whereIn('status', ['LOCKED', 'SETTLED'])
+      .update({
+        status: 'SETTLED',
+        settled_at: trx.fn.now(),
+        updated_at: trx.fn.now(),
+      });
+
+    return {
+      replay: false,
+      coinsCredited: prizeCredit.amount,
+      currency: prizeCredit.currency,
+      liveOnly: true,
+    };
+  });
+}
+
+type ReactionPrizeLedgerRow = {
+  ledger_id: string;
+  user_id: string;
+  amount: string;
+  reference_id: string;
+  metadata: Record<string, unknown> | string | null;
+};
+
+function ledgerMetadata(value: ReactionPrizeLedgerRow['metadata']): Record<string, unknown> {
+  if (value && typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+export function planReactionDuelGemSettlement(coins: bigint) {
+  if (coins < 0n) throw new RangeError('Reaction Duel settlement coins cannot be negative');
+  return {
+    coinsConverted: coins,
+    gemsCredited: coins,
+    coinToGemCountRatio: '1:1' as const,
+    gemCashoutValueRelativeToLiveCoin: 0.5 as const,
+  };
+}
+
+/**
+ * Converts every unsettled prize from one live session into earned GEM at 1:1
+ * count. Production's normal pending-gem hold is retained. The transaction is
+ * idempotent: each source coin row is marked CONVERTED with one unique GEM row.
+ */
+export async function settleReactionDuelLiveCoins(args: { sessionId: string }) {
+  const { db } = getEconomyInfra();
+  await ensureEconomySchema(db);
+  const env = getEconomyEnv();
+  const gemStatus = env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED';
+
+  return db.transaction(async (trx) => {
+    const prizes = (await trx('ledger_entries')
+      .where({
+        entry_type: 'REACTION_DUEL_PRIZE',
+        currency: 'COIN',
+        status: 'PENDING',
+      })
+      .whereRaw("metadata->>'sessionId' = ?", [args.sessionId])
+      .orderBy('user_id', 'asc')
+      .orderBy('created_at', 'asc')
+      .forUpdate()) as ReactionPrizeLedgerRow[];
+
+    if (prizes.length === 0) {
+      return {
+        prizesConverted: 0,
+        coinsConverted: 0,
+        gemsCredited: 0,
+        gemStatus,
+      };
+    }
+
+    const byUser = new Map<string, ReactionPrizeLedgerRow[]>();
+    for (const prize of prizes) {
+      const list = byUser.get(prize.user_id) || [];
+      list.push(prize);
+      byUser.set(prize.user_id, list);
+    }
+
+    let coinsConverted = 0n;
+    const convertedAt = new Date().toISOString();
+    for (const userId of Array.from(byUser.keys()).sort()) {
+      const userPrizes = byUser.get(userId) || [];
+      const totalCoins = userPrizes.reduce((sum, prize) => sum + BigInt(prize.amount), 0n);
+      const plan = planReactionDuelGemSettlement(totalCoins);
+
+      await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+      const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+      if (!wallet) throw new EconomyError('INTERNAL', 500, 'Reaction Duel winner wallet missing');
+
+      for (const prize of userPrizes) {
+        const metadata = ledgerMetadata(prize.metadata);
+        const duelId = String(metadata.duelId || prize.reference_id);
+        const prizePlan = planReactionDuelGemSettlement(BigInt(prize.amount));
+        await trx('ledger_entries').insert({
+          ledger_id: randomUUID(),
+          user_id: userId,
+          entry_type: 'REACTION_DUEL_GEM_SETTLEMENT',
+          currency: 'GEM',
+          amount: prizePlan.gemsCredited.toString(),
+          status: gemStatus,
+          reference_type: 'REACTION_DUEL',
+          reference_id: duelId,
+          idempotency_key: `reaction-duel:${duelId}:live-end-gems`,
+          metadata: {
+            ...metadata,
+            sessionId: args.sessionId,
+            sourceCoinLedgerId: prize.ledger_id,
+            convertedAt,
+            coinToGemCountRatio: prizePlan.coinToGemCountRatio,
+            gemCashoutValueRelativeToLiveCoin:
+              prizePlan.gemCashoutValueRelativeToLiveCoin,
+            pendingHoldSeconds: env.PENDING_GEMS_HOLD_SECONDS,
+          },
+        });
+        await trx('ledger_entries')
+          .where({ ledger_id: prize.ledger_id, status: 'PENDING' })
+          .update({
+            status: 'CONVERTED',
+            metadata: trx.raw('metadata || ?::jsonb', [
+              JSON.stringify({
+                convertedAt,
+                convertedToGems: prizePlan.gemsCredited.toString(),
+              }),
+            ]),
+          });
+      }
+
+      const gemColumn =
+        env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'gem_pending' : 'gem_available';
+      await trx('wallets')
+        .where({ user_id: userId })
+        .update({
+          [gemColumn]: (BigInt(wallet[gemColumn] || 0) + plan.gemsCredited).toString(),
+          lifetime_earned_gems: (
+            BigInt(wallet.lifetime_earned_gems || 0) + plan.gemsCredited
+          ).toString(),
+          updated_at: trx.fn.now(),
+        });
+      coinsConverted += plan.coinsConverted;
+    }
+
+    return {
+      prizesConverted: prizes.length,
+      coinsConverted: Number(coinsConverted),
+      gemsCredited: Number(coinsConverted),
+      gemStatus,
+    };
+  });
 }
