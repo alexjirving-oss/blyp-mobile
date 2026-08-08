@@ -33,6 +33,7 @@ export type NotificationType =
   | 'message'
   | 'team'
   | 'call'
+  | 'topic'
   | 'system';
 
 export type NotificationStatus =
@@ -41,7 +42,8 @@ export type NotificationStatus =
   | 'sent' // delivered to at least one device
   | 'failed' // retriable failure; will be retried after nextAttemptAt
   | 'dead' // exhausted retries; kept for visibility, never silently dropped
-  | 'no_device'; // user has no registered device yet (kept for inbox/catch-up)
+  | 'no_device' // user has no registered device yet (kept for inbox/catch-up)
+  | 'suppressed'; // preference turned off before delivery; hidden from inbox
 
 export interface NotificationDoc {
   userId: string; // recipient uid (== Cognito sub == Firebase uid)

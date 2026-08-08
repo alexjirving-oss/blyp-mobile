@@ -965,6 +965,10 @@ function AppInner() {
               routeWhenReady('UserProfile', { userId: data.targetId, username: data.targetName || '@user' });
             } else if ((data.type === 'battle_invite' || data.type === 'battle' || data.type === 'battle_scheduled' || data.type === 'battle_start') && data.battleId) {
               routeWhenReady('BattleDetail', { battleId: data.battleId });
+            } else if (data.type === 'topic_event' && data.topicId) {
+              routeWhenReady('Home', {
+                topicPageKey: data.pageKey || `topic:${data.topicId}`,
+              });
             } else if (data.type === 'streak') {
               routeWhenReady('Home');
             } else if ((data.type === 'message' || data.type === 'conversation') && data.conversationId) {

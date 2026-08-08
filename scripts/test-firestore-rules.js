@@ -163,6 +163,54 @@ const RULES_PATH = path.join(__dirname, '..', 'firestore.wave0-live.rules');
     'cannot write another user doc'
   );
 
+  // Per-topic notifications: explicit owner-only preference; topic event input is server-only.
+  const footballPreference = doc(
+    ownerDb,
+    'users',
+    ownerId,
+    'topicNotifications',
+    'football'
+  );
+  await expectAllow(
+    setDoc(footballPreference, {
+      userId: ownerId,
+      topicId: 'football',
+      enabled: true,
+      updatedAt: Date.now(),
+    }),
+    'owner opts into football notifications'
+  );
+  await expectAllow(getDoc(footballPreference), 'owner reads own topic notification preference');
+  await expectDeny(
+    getDoc(doc(otherDb, 'users', ownerId, 'topicNotifications', 'football')),
+    'other user cannot read topic notification preference'
+  );
+  await expectDeny(
+    setDoc(doc(otherDb, 'users', ownerId, 'topicNotifications', 'f1'), {
+      userId: otherId,
+      topicId: 'f1',
+      enabled: true,
+      updatedAt: Date.now(),
+    }),
+    'other user cannot change topic notification preference'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'users', ownerId, 'topicNotifications', 'f1'), {
+      userId: ownerId,
+      topicId: 'football',
+      enabled: true,
+      updatedAt: Date.now(),
+    }),
+    'topic preference payload must match its document id'
+  );
+  await expectDeny(
+    setDoc(doc(ownerDb, 'topicEvents', 'client_fake_event'), {
+      topicId: 'football',
+      eventType: 'goal',
+    }),
+    'client cannot create topic events'
+  );
+
   // P0: owners cannot self-grant admin / roles (create or update).
   await expectDeny(
     setDoc(doc(otherDb, 'users', 'user_self_admin'), {

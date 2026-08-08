@@ -21,8 +21,9 @@ import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import { getTopicPosts } from '../../services/discoveryService';
 import { postThumbnail } from '../../services/blypAiService';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
+import TopicNotificationToggle from '../TopicNotificationToggle';
 
-const TopicFeedPanel = ({ navigation, label }) => {
+const TopicFeedPanel = ({ navigation, uid, topicId, label }) => {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -103,11 +104,20 @@ const TopicFeedPanel = ({ navigation, label }) => {
         />
       }
       ListHeaderComponent={
-        <TouchableOpacity style={styles.askRow} activeOpacity={0.85} onPress={openBlyp}>
-          <Icon name="sparkles" size={15} color={COLORS.primary} />
-          <Text style={styles.askText}>Ask Blyp about {label}</Text>
-          <Icon name="arrow-forward" size={15} color={COLORS.primary} />
-        </TouchableOpacity>
+        <View>
+          <TopicNotificationToggle
+            uid={uid}
+            topicId={topicId}
+            label={label || 'Topic'}
+            description="Key updates when a verified topic feed publishes them"
+            style={styles.notificationToggle}
+          />
+          <TouchableOpacity style={styles.askRow} activeOpacity={0.85} onPress={openBlyp}>
+            <Icon name="sparkles" size={15} color={COLORS.primary} />
+            <Text style={styles.askText}>Ask Blyp about {label}</Text>
+            <Icon name="arrow-forward" size={15} color={COLORS.primary} />
+          </TouchableOpacity>
+        </View>
       }
       ListEmptyComponent={
         <View style={styles.center}>
@@ -126,6 +136,7 @@ const styles = StyleSheet.create({
   grid: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 120 },
   row: { justifyContent: 'space-between' },
 
+  notificationToggle: { marginBottom: 12 },
   askRow: {
     flexDirection: 'row',
     alignItems: 'center',

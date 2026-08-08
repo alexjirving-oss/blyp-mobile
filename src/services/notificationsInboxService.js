@@ -146,6 +146,7 @@ export function subscribeNotifications(uid, callback, max = 100) {
       (snap) => {
         const items = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((notification) => notification.status !== 'suppressed')
           .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt))
           .slice(0, max);
         // Immediate paint, then resolve opaque actor ids for the UI.

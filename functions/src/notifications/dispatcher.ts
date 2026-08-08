@@ -20,6 +20,7 @@
 import * as functions from 'firebase-functions';
 import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { sendToUser } from './sender';
+import { getTopicNotificationDecision } from './topicPreferences';
 import {
   backoffMs,
   DISPATCH_HEARTBEAT_DOC,
@@ -32,7 +33,7 @@ const OVERDUE_MS = 120_000; // a queued doc this far past its sendAfter is "owed
 const STALE_SENDING_MS = 120_000; // a doc stuck in `sending` this long is presumed abandoned
 const DISPATCH_CONCURRENCY = 15; // bounded parallelism per scheduled run
 
-type Outcome = 'sent' | 'no_device' | 'retried' | 'dead' | 'skipped';
+type Outcome = 'sent' | 'no_device' | 'suppressed' | 'retried' | 'dead' | 'skipped';
 
 /**
  * Claim a single notification and attempt delivery. Safe to call from both the
@@ -64,6 +65,24 @@ export async function claimAndSend(
   if (!claimed) return 'skipped';
 
   try {
+    // Re-check topic/global preferences immediately before FCM. The event fan-out
+    // checks too, but this closes the opt-out race for delayed/retried sends.
+    if (claimed.type === 'topic' || claimed.data?.type === 'topic_event') {
+      const decision = await getTopicNotificationDecision(
+        db,
+        claimed.userId,
+        String(claimed.data?.topicId || '')
+      );
+      if (!decision.allowed) {
+        await ref.update({
+          status: 'suppressed',
+          lastError: `notification_preference_${decision.reason}`,
+          sendingSince: admin.firestore.FieldValue.delete(),
+        });
+        return 'suppressed';
+      }
+    }
+
     const result = await sendToUser(claimed.userId, {
       title: claimed.title,
       body: claimed.body,
@@ -147,6 +166,7 @@ export const notificationDispatch = functions
     const tally: Record<Outcome, number> = {
       sent: 0,
       no_device: 0,
+      suppressed: 0,
       retried: 0,
       dead: 0,
       skipped: 0,
@@ -161,7 +181,8 @@ export const notificationDispatch = functions
       for (const o of outcomes) tally[o] += 1;
     }
 
-    const processed = tally.sent + tally.no_device + tally.retried + tally.dead;
+    const processed =
+      tally.sent + tally.no_device + tally.suppressed + tally.retried + tally.dead;
 
     // 4) Heartbeat + "owed and unmet" awareness.
     let overdue = 0;
@@ -187,6 +208,7 @@ export const notificationDispatch = functions
           retried: tally.retried,
           dead: tally.dead,
           noDevice: tally.no_device,
+          suppressed: tally.suppressed,
           recovered,
           overdue,
           candidates: dueSnap.size,
@@ -195,7 +217,7 @@ export const notificationDispatch = functions
       );
 
     console.log(
-      `[notificationDispatch] processed=${processed} sent=${tally.sent} retried=${tally.retried} dead=${tally.dead} noDevice=${tally.no_device} recovered=${recovered} overdue=${overdue}`
+      `[notificationDispatch] processed=${processed} sent=${tally.sent} retried=${tally.retried} dead=${tally.dead} noDevice=${tally.no_device} suppressed=${tally.suppressed} recovered=${recovered} overdue=${overdue}`
     );
     return null;
   });

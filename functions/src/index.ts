@@ -36,6 +36,7 @@ export { blypPlayRtdn } from './subscriptions/rtdn';
 // Notification spine: scheduled dispatcher + live-alert fan-out triggers
 export { notificationDispatch, notificationOnCreate } from './notifications/dispatcher';
 export { onLiveStreamCreate, onLiveStreamGoLive } from './notifications/liveAlerts';
+export { onTopicEventCreate } from './notifications/topicEvents';
 // Direct-message push: new inbox message -> push to recipients (WhatsApp-style)
 export { onDirectMessageCreate } from './notifications/messageNotify';
 // Welcome product tour inbox item when onboarding completes

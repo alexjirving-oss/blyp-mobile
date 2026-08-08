@@ -45,6 +45,7 @@ import {
   resolveSportsDbTeamsFromClubs,
 } from '../../services/profileIdentityCatalog';
 import { getMyProfileClubs } from '../../services/clubDiscoveryService';
+import TopicNotificationToggle from '../TopicNotificationToggle';
 
 const SPORTS = {
   football: {
@@ -56,6 +57,7 @@ const SPORTS = {
     chips: ['Premier League', 'Champions League', 'Transfers', 'Goals', 'Highlights', 'Matchday'],
     addLabel: 'Add your club',
     kind: 'football',
+    notificationCopy: 'Match starts, goals and results from verified feeds',
   },
   f1: {
     title: 'Formula 1',
@@ -66,6 +68,7 @@ const SPORTS = {
     chips: ['Race', 'Qualifying', 'Standings', 'Teams', 'Highlights', 'Paddock'],
     addLabel: 'Add your team',
     kind: 'f1',
+    notificationCopy: 'Race starts, qualifying, results and DNFs from verified feeds',
   },
 };
 
@@ -78,6 +81,7 @@ const fallbackConfig = (label) => ({
   chips: [],
   addLabel: 'Add',
   kind: 'generic',
+  notificationCopy: 'Key updates from verified topic feeds',
 });
 
 // ---- date / result formatters -------------------------------------------
@@ -613,6 +617,14 @@ const SportPagePanel = ({ navigation, uid, sportId, label }) => {
         </View>
         <Text style={styles.heroTitle}>{cfg.title}</Text>
         <Text style={styles.heroTagline}>{cfg.tagline}</Text>
+        <TopicNotificationToggle
+          uid={uid}
+          topicId={sportId}
+          label={cfg.title}
+          description={cfg.notificationCopy}
+          accent={cfg.accent}
+          style={styles.notificationToggle}
+        />
         <TouchableOpacity style={[styles.askBtn, { borderColor: cfg.accent }]} activeOpacity={0.85} onPress={() => askBlyp()}>
           <Icon name="sparkles" size={14} color={cfg.accent} />
           <Text style={[styles.askText, { color: cfg.accent }]}>Ask Blyp about {cfg.title}</Text>
@@ -894,6 +906,7 @@ const styles = StyleSheet.create({
   heroBadge: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   heroTitle: { color: COLORS.white, fontSize: responsiveFont(28), fontWeight: '900', letterSpacing: -0.5 },
   heroTagline: { color: 'rgba(255,255,255,0.85)', fontSize: responsiveFont(14), marginTop: 4 },
+  notificationToggle: { marginTop: 14 },
   askBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start', marginTop: 14,
     paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, backgroundColor: 'rgba(0,0,0,0.25)',
