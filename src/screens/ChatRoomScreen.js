@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import ChatRoomService from '../services/ChatRoomService';
 import { auth } from '../config/firebase';
 import { COLORS } from '../styles/theme';
+import useKeyboardBottomInset from '../hooks/useKeyboardBottomInset';
 
 const MESSAGE_TYPES = {
   TEXT: 'text',
@@ -24,7 +25,9 @@ const ChatRoomScreen = ({ route, navigation }) => {
   const [sending, setSending] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const flatListRef = useRef(null);
+  const composerRef = useRef(null);
   const currentUser = auth.currentUser;
+  const { keyboardOpen, bottomInset } = useKeyboardBottomInset(composerRef);
 
   useEffect(() => {
     if (roomId && currentUser) {
@@ -302,10 +305,15 @@ const ChatRoomScreen = ({ route, navigation }) => {
 
         {/* Message Input */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.inputContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[
+            styles.inputContainer,
+            Platform.OS === 'android' && keyboardOpen
+              ? { paddingBottom: bottomInset }
+              : { paddingBottom: Math.max(12, bottomInset || 12) },
+          ]}
         >
-          <View style={styles.inputRow}>
+          <View ref={composerRef} style={styles.inputRow}>
             <TouchableOpacity style={styles.attachButton}>
               <Icon name="add" size={24} color="#6b7280" />
             </TouchableOpacity>
@@ -319,6 +327,8 @@ const ChatRoomScreen = ({ route, navigation }) => {
               multiline
               maxLength={1000}
               editable={!sending}
+              textAlignVertical="center"
+              includeFontPadding={false}
             />
 
             <TouchableOpacity
@@ -492,7 +502,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
     gap: 12,
   },
   attachButton: {

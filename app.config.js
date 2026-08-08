@@ -168,7 +168,10 @@ module.exports = () => {
         backgroundColor: '#0A0A0C',
       },
       package: 'com.blyp.mobile',
-      softwareKeyboardLayoutMode: 'pan',
+      // resize (not pan): with edge-to-edge, the window often won't shrink, but
+      // pan under-compensates tall IME (Gboard number row + toolbar) on Flip /
+      // foldables and clips DM composers. Chat screens pad from Keyboard events.
+      softwareKeyboardLayoutMode: 'resize',
       permissions: [
         'android.permission.CAMERA',
         'android.permission.RECORD_AUDIO',

@@ -8,9 +8,9 @@
 // store purchase — the Firestore rules make `entitlements/{uid}` create trial-only
 // and update server-only, so a user cannot quietly promote themselves to Plus.
 //
-// Fail-open: if entitlement can't be read, we assume full access rather than wrongly
-// locking someone out. Reach is never affected by any of this — plans buy features
-// and coins, never distribution.
+// Fail-closed on read failure: assume Free rather than unlocking Plus by accident.
+// Reach is never affected — plans buy features and coins, never distribution.
+// (UI may still fail-open briefly while the first entitlement load is in flight.)
 
 import { db, firebaseEnabled } from '../config/firebase';
 import { snapExists, snapData } from '../utils/firestoreSnap';

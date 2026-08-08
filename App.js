@@ -124,6 +124,7 @@ import { WalletStub, SettingsStub, MyVideosStub, PastLivesStub, LiveUnavailableS
 import AuthScreen from './src/screens/AuthScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import { isOnboarded, subscribePreferences } from './src/services/userPreferencesService';
+import { loadEntitlement } from './src/services/entitlementService';
 import LiveErrorBoundary from './src/components/LiveErrorBoundary';
 import ScreenErrorBoundary from './src/components/ScreenErrorBoundary';
 import GlobalImportProgress from './src/components/GlobalImportProgress';
@@ -765,6 +766,23 @@ function AppInner() {
   // First-run onboarding gate. null = still checking (don't block returning users).
   const [onboarded, setOnboarded] = useState(null);
   const canShowApp = devForceNoAuth || !!effectiveUser || isGuest;
+
+  // Once-per-account 30-day trial: bootstrap as soon as we have a real uid
+  // (email or social). Guests have no account — no trial. Never renews an
+  // existing entitlements/{uid} doc (paid/expired stay put).
+  useEffect(() => {
+    if (!uid || isGuest) return undefined;
+    let cancelled = false;
+    loadEntitlement(uid).catch((e) => {
+      if (!cancelled) {
+        console.warn('[entitlement] early load failed', e?.message || String(e));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, isGuest]);
+
   useEffect(() => {
     let active = true;
     let unsub = () => {};

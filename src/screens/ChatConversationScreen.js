@@ -10,6 +10,7 @@ import { responsiveFont, responsiveSize, scaleIcon, scalePadding } from '../util
 import { firestore as db, db as compatDb } from '../config/firebase';
 import BlypLogo from '../components/BlypLogo';
 import { useAuth } from '../hooks/useCommon';
+import useKeyboardBottomInset from '../hooks/useKeyboardBottomInset';
 import { conversationsMessagingService } from '../services/messaging';
 import { theme as blypTheme } from '../styles/blypTheme';
 import ReportModal from '../components/ReportModal';
@@ -172,6 +173,7 @@ const ChatScreen = ({ route, navigation }) => {
   }, [participantUid]);
 
   const flatListRef = useRef(null);
+  const composerRef = useRef(null);
   const oldestCursorRef = useRef(null);
   const loadingOlderRef = useRef(false);
   const initialLoadRef = useRef(true);
@@ -179,6 +181,35 @@ const ChatScreen = ({ route, navigation }) => {
   /** Message ids we have already alerted for — prevents re-sting on every snapshot. */
   const alertedMessageIdsRef = useRef(new Set());
   const playingAlertRef = useRef(false);
+  const { keyboardOpen, bottomInset } = useKeyboardBottomInset(composerRef);
+
+  const scrollToLatest = useCallback((animated = true) => {
+    const list = flatListRef.current;
+    if (!list) return;
+    try {
+      // FlashList (inverted-from-bottom) — scrollToEnd keeps newest bubbles above composer.
+      if (typeof list.scrollToEnd === 'function') {
+        list.scrollToEnd({ animated });
+        return;
+      }
+      if (typeof list.scrollToOffset === 'function') {
+        list.scrollToOffset({ offset: 0, animated });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Keep the latest messages clear of the composer when the IME opens / grows (number row).
+  useEffect(() => {
+    if (!keyboardOpen) return undefined;
+    const t1 = setTimeout(() => scrollToLatest(true), 40);
+    const t2 = setTimeout(() => scrollToLatest(true), 220);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [keyboardOpen, bottomInset, scrollToLatest]);
 
   // Media / loudspeaker routing for message stings (not voice-call / earpiece).
   useEffect(() => {
@@ -458,13 +489,14 @@ const ChatScreen = ({ route, navigation }) => {
       const senderName = authUser?.displayName || authUser?.username || authUser?.email || 'Unknown';
       await conversationsMessagingService.sendMessage(db, conversationId, uid, senderName, clean);
       setMessage('');
+      requestAnimationFrame(() => scrollToLatest(true));
     } catch (error) {
       console.error('âŒ Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
     } finally {
       setSendingMessage(false);
     }
-  }, [authUser, chatId, conversationId, message, sendingMessage, uid]);
+  }, [authUser, chatId, conversationId, message, scrollToLatest, sendingMessage, uid]);
 
   const renderMessage = useCallback(
     ({ item }) => (
@@ -566,9 +598,12 @@ const ChatScreen = ({ route, navigation }) => {
         <View style={styles.gradient}>
           {renderBlypHeader()}
           <KeyboardAvoidingView
-            style={styles.keyboardContainer}
+            style={[
+              styles.keyboardContainer,
+              Platform.OS === 'android' && keyboardOpen ? { paddingBottom: bottomInset } : null,
+            ]}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+            keyboardVerticalOffset={0}
           >
             <FlashList
               ref={flatListRef}
@@ -577,6 +612,8 @@ const ChatScreen = ({ route, navigation }) => {
               keyExtractor={(item) => item.id}
               style={styles.messagesList}
               contentContainerStyle={styles.messagesContainer}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
               showsVerticalScrollIndicator={false}
               onStartReached={loadOlderMessages}
               onStartReachedThreshold={0.35}
@@ -606,9 +643,15 @@ const ChatScreen = ({ route, navigation }) => {
               }
             />
 
-            <View style={styles.inputContainer}>
+            <View
+              ref={composerRef}
+              style={[
+                styles.inputContainer,
+                { paddingBottom: Math.max(10, keyboardOpen ? 10 : bottomInset || 10) },
+              ]}
+            >
               <View style={styles.inputWrapper}>
-                <TouchableOpacity style={styles.attachButton}>
+                <TouchableOpacity style={styles.attachButton} hitSlop={8} accessibilityLabel="Attach">
                   <Icon name="add" size={24} color={T.textMuted} />
                 </TouchableOpacity>
 
@@ -620,14 +663,19 @@ const ChatScreen = ({ route, navigation }) => {
                   placeholderTextColor={T.textMuted}
                   multiline
                   maxLength={1000}
-                  maxFontSizeMultiplier={1.5} // Control scaling globally
+                  maxFontSizeMultiplier={1.5}
+                  textAlignVertical="center"
+                  blurOnSubmit={false}
+                  onFocus={() => {
+                    requestAnimationFrame(() => scrollToLatest(true));
+                  }}
                 />
 
-                <TouchableOpacity style={styles.emojiButton}>
+                <TouchableOpacity style={styles.emojiButton} hitSlop={8} accessibilityLabel="Emoji">
                   <Icon name="happy-outline" size={24} color={T.textMuted} />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.cameraButton}>
+                <TouchableOpacity style={styles.cameraButton} hitSlop={8} accessibilityLabel="Camera">
                   <Icon name="camera" size={24} color={T.textMuted} />
                 </TouchableOpacity>
               </View>
@@ -636,6 +684,8 @@ const ChatScreen = ({ route, navigation }) => {
                 style={[styles.sendButton, message.trim() ? styles.sendButtonActive : null]}
                 onPress={sendMessage}
                 disabled={!message.trim() || sendingMessage}
+                accessibilityLabel={message.trim() ? 'Send message' : 'Voice message'}
+                hitSlop={6}
               >
                 <LinearGradient
                   colors={message.trim() ? [T.gradientStart, T.gradientMiddle, T.gradientEnd] : [T.textDisabled, T.textMuted]}
@@ -916,7 +966,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
     backgroundColor: T.headerBackground,
     borderTopWidth: 1,
     borderTopColor: withAlpha(T.textPrimary, 0.06),
@@ -926,39 +977,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     backgroundColor: withAlpha(T.surface, 0.5),
-    borderRadius: 25,
+    borderRadius: 24,
     marginRight: 10,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    minHeight: 45,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minHeight: 48,
     borderWidth: 1,
     borderColor: withAlpha(T.textPrimary, 0.1),
   },
   attachButton: {
-    marginRight: 10,
-    marginBottom: 2,
+    marginRight: 8,
+    marginBottom: 4,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   textInput: {
     flex: 1,
     color: T.textPrimary,
     fontSize: 16,
-    maxHeight: 100,
-    paddingVertical: 5,
-    maxFontSizeMultiplier: 1.5, // Control scaling globally
+    lineHeight: 22,
+    maxHeight: 120,
+    minHeight: 36,
+    paddingTop: Platform.OS === 'android' ? 8 : 7,
+    paddingBottom: Platform.OS === 'android' ? 8 : 7,
+    includeFontPadding: false,
+    maxFontSizeMultiplier: 1.5,
   },
   emojiButton: {
-    marginLeft: 10,
-    marginBottom: 2,
+    marginLeft: 6,
+    marginBottom: 4,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cameraButton: {
-    marginLeft: 10,
-    marginBottom: 2,
+    marginLeft: 2,
+    marginBottom: 4,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sendButton: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     overflow: 'hidden',
+    marginBottom: 0,
   },
   sendButtonGradient: {
     width: '100%',
