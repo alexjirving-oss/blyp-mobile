@@ -1564,6 +1564,10 @@ const HomeScreen = ({ navigation, route }) => {
       // revert explicitly
       setLiked((prev) => ({ ...prev, [postId]: wasLiked }));
       setLikeCounts((prev) => ({ ...prev, [postId]: prevLikeCount }));
+      const reason = error?.code || error?.message || String(error || 'LIKE_FAILED');
+      if (/permission|PERMISSION|insufficient/i.test(reason)) {
+        Alert.alert('Couldn’t like', 'Please sign in again, then try liking once more.');
+      }
     } finally {
       likePendingRef.current.delete(postId);
     }

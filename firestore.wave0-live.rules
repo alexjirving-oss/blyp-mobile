@@ -108,6 +108,52 @@ service cloud.firestore {
           == resource.data.get('feedPriorityUpdatedBy', null);
     }
 
+    function safeLikedBy(data) {
+      return ('likedBy' in data && data.likedBy is list) ? data.likedBy : [];
+    }
+
+    function safeLikeInt(data, field) {
+      return (field in data && data[field] is int) ? data[field] : 0;
+    }
+
+    // Non-owners may only add/remove themselves on likedBy and bump likes/likeCount by ±1.
+    function canTogglePostLike() {
+      let beforeLikedBy = safeLikedBy(resource.data);
+      let afterLikedBy = safeLikedBy(request.resource.data);
+      let beforeLikes = safeLikeInt(resource.data, 'likes');
+      let beforeLikeCount = (('likeCount' in resource.data) && resource.data.likeCount is int)
+        ? resource.data.likeCount
+        : beforeLikes;
+      let baseline = beforeLikes >= beforeLikeCount ? beforeLikes : beforeLikeCount;
+      let beforeLiked = request.auth.uid in beforeLikedBy;
+      let delta = beforeLiked ? -1 : 1;
+
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['likedBy', 'likes', 'likeCount'])
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.likes is int
+        && request.resource.data.likeCount is int
+        && request.resource.data.likes == request.resource.data.likeCount
+        && request.resource.data.likes == baseline + delta
+        && request.resource.data.likeCount == baseline + delta
+        && request.resource.data.likes >= 0
+        && request.resource.data.likeCount >= 0
+        && (
+          (
+            beforeLiked
+            && !(request.auth.uid in afterLikedBy)
+            && afterLikedBy.size() == beforeLikedBy.size() - 1
+            && beforeLikedBy.hasAll(afterLikedBy)
+          )
+          || (
+            !beforeLiked
+            && (request.auth.uid in afterLikedBy)
+            && afterLikedBy.size() == beforeLikedBy.size() + 1
+            && afterLikedBy.hasAll(beforeLikedBy)
+          )
+        );
+    }
+
     // Wave 0: economy is server-only (blocks client mint/spend).
     match /wallets/{userId} {
       allow read: if isOwner(userId);
@@ -230,10 +276,15 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && postModerationFrozenOnCreate();
-      allow update: if isSignedIn()
-        && resource.data.userId == request.auth.uid
-        && request.resource.data.userId == resource.data.userId
-        && postModerationFrozenOnUpdate();
+      // Owner edits; any signed-in user may toggle their own like (likedBy ± self).
+      allow update: if isSignedIn() && (
+        (
+          resource.data.userId == request.auth.uid
+          && request.resource.data.userId == resource.data.userId
+          && postModerationFrozenOnUpdate()
+        )
+        || canTogglePostLike()
+      );
       allow delete: if isSignedIn()
         && resource.data.userId == request.auth.uid;
 
