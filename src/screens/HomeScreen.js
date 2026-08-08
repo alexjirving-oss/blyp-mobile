@@ -228,7 +228,11 @@ function rankForYouPosts(posts, contextOrGetter = {}) {
     posts || [],
     context.terms || [],
     context.following || new Set(),
-    { seenIds: context.seenIds || new Set() },
+    {
+      seenIds: context.seenIds || new Set(),
+      recentOwners: context.recentOwners || [],
+      minCreatorGap: context.minCreatorGap,
+    },
   );
 }
 
@@ -237,7 +241,7 @@ function rankForYouPosts(posts, contextOrGetter = {}) {
  * Pass a context *getter* (not a snapshot) so follows/interests that arrive while
  * enrichment is in flight are used when scoring — not the empty set from first paint.
  */
-async function prepareForYouOrder(posts, contextOrGetter = {}) {
+async function prepareForYouOrder(posts, contextOrGetter = {}, rankOpts = {}) {
   const getContext = typeof contextOrGetter === 'function'
     ? contextOrGetter
     : () => contextOrGetter || {};
@@ -250,10 +254,28 @@ async function prepareForYouOrder(posts, contextOrGetter = {}) {
   } catch (_) {
     candidates = posts || [];
   }
+  const recentOwners = Array.isArray(rankOpts.recentOwners)
+    ? rankOpts.recentOwners
+    : undefined;
   return prepareRankedFeed(candidates, {
     mode: 'rank',
-    getContext,
+    getContext: () => {
+      const live = getContext() || {};
+      return {
+        ...live,
+        recentOwners: recentOwners ?? live.recentOwners,
+        minCreatorGap: rankOpts.minCreatorGap ?? live.minCreatorGap,
+      };
+    },
   });
+}
+
+function feedTailOwners(posts, count = 3) {
+  const list = Array.isArray(posts) ? posts : [];
+  return list
+    .slice(-Math.max(1, count))
+    .map((p) => String(p?.userId || p?.uid || p?.authorId || '').trim())
+    .filter(Boolean);
 }
 
 function stampFeedKeys(posts, cycle) {
@@ -1069,7 +1091,10 @@ const HomeScreen = ({ navigation, route }) => {
   const appendFeedPosts = useCallback(async (newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    const ordered = await prepareForYouOrder(newPosts, getForYouRankingContext);
+    const recentOwners = feedTailOwners(randomPostsRef.current || [], 3);
+    const ordered = await prepareForYouOrder(newPosts, getForYouRankingContext, {
+      recentOwners,
+    });
     const stamped = stampFeedKeys(ordered, forYouCycleRef.current);
     setRandomPosts((prev) => {
       const haveKeys = new Set((Array.isArray(prev) ? prev : []).map((p) => p.feedKey || p.id));
@@ -1198,6 +1223,7 @@ const HomeScreen = ({ navigation, route }) => {
         const ordered = await prepareForYouOrder(
           [...uniqueById.values()],
           getForYouRankingContext,
+          { recentOwners: feedTailOwners(randomPostsRef.current || [], 3) },
         );
         const reshuffled = stampFeedKeys(
           ordered,

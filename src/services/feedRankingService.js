@@ -1,9 +1,10 @@
 // feedRankingService.js
 //
 // Pure ranking for the "For You" feed. Orders posts by freshness, follows,
-// interests, engagement/gifts, aggregate watch quality, recent-seen state,
-// earn-your-reach, admin priority, and active coin-promote boosts; a final
-// diversity pass mixes creators and followed/discovery sources.
+// interests/hashtags, engagement/gifts, aggregate watch quality, recent-seen
+// state, earn-your-reach, admin priority, and active coin-promote boosts; a
+// final diversity pass mixes creators (hard no-stack + preferred gap) and
+// followed/discovery sources.
 //
 // Admin priority rule (documented):
 //   effectiveAdjust = accountAdjust(feedPriorityAccount) + postAdjust(feedPriority)
@@ -26,6 +27,13 @@ import {
 const HOUR_MS = 60 * 60 * 1000;
 const FRESHNESS_HALF_LIFE_HOURS = 24;
 const MAX_SOURCE_STREAK = 2;
+/** Prefer at least this many other creators between repeats from the same author. */
+const MIN_CREATOR_GAP = 2;
+const FRESHNESS_SCALE = 26;
+const HASHTAG_MATCH_WEIGHT = 14;
+const HASHTAG_MATCH_CAP = 36;
+const TOPIC_MATCH_WEIGHT = 8;
+const TOPIC_MATCH_CAP = 24;
 
 function finiteCount(...values) {
   return Math.max(
@@ -39,6 +47,41 @@ function finiteCount(...values) {
 
 function postOwner(post) {
   return String(post?.userId || post?.uid || post?.authorId || '').trim();
+}
+
+/** Normalize a hashtag / interest token for matching. */
+export function normalizeTagToken(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/^#+/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '');
+}
+
+/**
+ * Collect post hashtags from dedicated fields plus `#tokens` in title/caption.
+ * @param {any} post
+ * @returns {string[]}
+ */
+export function extractPostHashtags(post) {
+  const out = new Set();
+  const add = (value) => {
+    const token = normalizeTagToken(value);
+    if (token.length >= 2) out.add(token);
+  };
+  for (const list of [post?.hashtags, post?.tags, post?.sportTags]) {
+    if (Array.isArray(list)) {
+      list.forEach(add);
+    } else if (list != null && list !== '') {
+      String(list).split(/[\s,]+/).forEach(add);
+    }
+  }
+  const text = [post?.title, post?.caption, post?.description]
+    .filter(Boolean)
+    .join(' ');
+  const matches = text.match(/#[a-zA-Z0-9_]+/g) || [];
+  matches.forEach(add);
+  return [...out];
 }
 
 function postTimeMs(post) {
@@ -82,11 +125,12 @@ function freshnessAdjust(post, now) {
   const timestamp = postTimeMs(post);
   if (!timestamp) return 0;
   const ageHours = Math.max(0, (now - timestamp) / HOUR_MS);
-  return 32 * Math.pow(0.5, ageHours / FRESHNESS_HALF_LIFE_HOURS);
+  return FRESHNESS_SCALE * Math.pow(0.5, ageHours / FRESHNESS_HALF_LIFE_HOURS);
 }
 
 function interestAdjust(post, terms) {
   if (!terms?.length) return 0;
+  const tags = extractPostHashtags(post);
   const hay = [
     post?.title,
     post?.caption,
@@ -95,16 +139,50 @@ function interestAdjust(post, terms) {
     post?.topic,
     post?.topicId,
     Array.isArray(post?.hashtags) ? post.hashtags.join(' ') : post?.hashtags,
+    Array.isArray(post?.tags) ? post.tags.join(' ') : post?.tags,
     Array.isArray(post?.sportTags) ? post.sportTags.join(' ') : post?.sportTags,
+    tags.join(' '),
   ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
   let matches = 0;
   for (const term of terms) {
-    if (term && hay.includes(String(term).toLowerCase())) matches += 1;
+    const needle = String(term || '').trim().toLowerCase();
+    if (needle && hay.includes(needle)) matches += 1;
   }
-  return Math.min(24, matches * 8);
+  return Math.min(TOPIC_MATCH_CAP, matches * TOPIC_MATCH_WEIGHT);
+}
+
+/**
+ * Dedicated hashtag / tag affinity — stronger than lexical topic substring hits
+ * so For You mixes toward interest-tagged content instead of pure recency.
+ */
+export function hashtagAffinityAdjust(post, terms) {
+  if (!terms?.length) return 0;
+  const tags = extractPostHashtags(post);
+  if (!tags.length) return 0;
+  const termTokens = [
+    ...new Set(
+      (terms || [])
+        .map((term) => normalizeTagToken(term))
+        .filter((term) => term.length >= 2),
+    ),
+  ];
+  if (!termTokens.length) return 0;
+
+  let matches = 0;
+  for (const tag of tags) {
+    let hit = false;
+    for (const term of termTokens) {
+      if (tag === term || tag.includes(term) || term.includes(tag)) {
+        hit = true;
+        break;
+      }
+    }
+    if (hit) matches += 1;
+  }
+  return Math.min(HASHTAG_MATCH_CAP, matches * HASHTAG_MATCH_WEIGHT);
 }
 
 const AUDITION_BOOST = 18; // guaranteed early sampling for fresh posts
@@ -289,6 +367,7 @@ export function scorePost(post, context = {}) {
   let score = 0;
   if (owner && following.has(owner)) score += 26;
   score += interestAdjust(post, terms);
+  score += hashtagAffinityAdjust(post, terms);
   score += freshnessAdjust(post, now);
   score += engagementAdjust(post);
   score += watchAdjust(post);
@@ -299,21 +378,38 @@ export function scorePost(post, context = {}) {
   return score;
 }
 
-function diversifyRanked(scored, following) {
+/**
+ * Greedy creator / source diversity.
+ * Hard rule: never place the same creator back-to-back when another creator exists.
+ * Soft rule: prefer a gap of MIN_CREATOR_GAP other creators between repeats.
+ * `recentOwners` seeds the lookback so appended pages do not restack the feed tail.
+ */
+export function diversifyRanked(scored, following, opts = {}) {
   const remaining = [...scored];
   const result = [];
-  let lastOwner = '';
+  const recentOwners = (Array.isArray(opts.recentOwners) ? opts.recentOwners : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
   let lastSource = '';
   let sourceStreak = 0;
+  const minGap = Number.isFinite(opts.minCreatorGap) ? opts.minCreatorGap : MIN_CREATOR_GAP;
 
   while (remaining.length > 0) {
+    const lastOwner = recentOwners.length ? recentOwners[recentOwners.length - 1] : '';
+    const gapWindow = recentOwners.slice(-Math.max(1, minGap));
+
     let pick = remaining.findIndex(({ p }) => {
       const owner = postOwner(p);
       const source = owner && following.has(owner) ? 'followed' : 'discovery';
-      return owner !== lastOwner && !(source === lastSource && sourceStreak >= MAX_SOURCE_STREAK);
+      if (owner && gapWindow.includes(owner)) return false;
+      return !(source === lastSource && sourceStreak >= MAX_SOURCE_STREAK);
     });
+    // Hard anti-stack: different creator than the immediate predecessor.
     if (pick < 0) {
-      pick = remaining.findIndex(({ p }) => postOwner(p) !== lastOwner);
+      pick = remaining.findIndex(({ p }) => {
+        const owner = postOwner(p);
+        return !owner || owner !== lastOwner;
+      });
     }
     if (pick < 0) pick = 0;
 
@@ -322,7 +418,7 @@ function diversifyRanked(scored, following) {
     const source = owner && following.has(owner) ? 'followed' : 'discovery';
     sourceStreak = source === lastSource ? sourceStreak + 1 : 1;
     lastSource = source;
-    lastOwner = owner;
+    if (owner) recentOwners.push(owner);
     result.push(p);
   }
   return result;
@@ -332,7 +428,7 @@ function diversifyRanked(scored, following) {
  * @param {any[]} posts
  * @param {string[]} terms  lowercased interest terms
  * @param {Set<string>} following  ids the user follows
- * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number }} [opts]
+ * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number, recentOwners?: string[], minCreatorGap?: number }} [opts]
  */
 export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
@@ -347,9 +443,21 @@ export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   const scored = visible
     .map((p, index) => ({ p, index, s: scorePost(p, context) }))
     .sort((a, b) => b.s - a.s || a.index - b.index);
-  const ranked = diversifyRanked(scored, safeFollowing);
+  const diversityOpts = {
+    recentOwners: opts.recentOwners,
+    minCreatorGap: opts.minCreatorGap,
+  };
+  const ranked = diversifyRanked(scored, safeFollowing, diversityOpts);
   if (opts.fairCap === false) return ranked;
-  return applyPromoteFairCap(ranked);
+  // Fair-cap can re-adjacent same authors; re-apply hard creator destack while
+  // preserving the capped preference order as the score signal.
+  const capped = applyPromoteFairCap(ranked);
+  const reseored = capped.map((p, index) => ({
+    p,
+    index,
+    s: capped.length - index,
+  }));
+  return diversifyRanked(reseored, safeFollowing, diversityOpts);
 }
 
 /**
@@ -407,11 +515,13 @@ export function shufflePostsByFeedPriority(posts, opts = {}) {
  * Resolve ranking signals. Prefer `getContext()` after awaits so follows /
  * interests that hydrate during enrichment are not frozen at call start.
  * @param {{
- *   getContext?: () => ({ terms?: string[], following?: Set<string>|string[], seenIds?: Set<string>|string[], now?: number }),
+ *   getContext?: () => ({ terms?: string[], following?: Set<string>|string[], seenIds?: Set<string>|string[], now?: number, recentOwners?: string[] }),
  *   terms?: string[],
  *   following?: Set<string>|string[],
  *   seenIds?: Set<string>|string[],
  *   now?: number,
+ *   recentOwners?: string[],
+ *   minCreatorGap?: number,
  * }} opts
  */
 export function resolveRankContext(opts = {}) {
@@ -421,6 +531,8 @@ export function resolveRankContext(opts = {}) {
     following: live.following ?? opts.following ?? new Set(),
     seenIds: live.seenIds ?? opts.seenIds,
     now: live.now ?? opts.now,
+    recentOwners: live.recentOwners ?? opts.recentOwners,
+    minCreatorGap: live.minCreatorGap ?? opts.minCreatorGap,
   };
 }
 
@@ -495,6 +607,8 @@ export async function prepareRankedFeed(posts, opts = {}) {
         fairCap: opts.fairCap !== false,
         seenIds: ctx.seenIds,
         now: ctx.now,
+        recentOwners: ctx.recentOwners,
+        minCreatorGap: ctx.minCreatorGap,
       });
     }
     return shufflePostsByFeedPriority(visible, { fairCap: opts.fairCap !== false });
@@ -506,6 +620,8 @@ export async function prepareRankedFeed(posts, opts = {}) {
         fairCap: false,
         seenIds: ctx.seenIds,
         now: ctx.now,
+        recentOwners: ctx.recentOwners,
+        minCreatorGap: ctx.minCreatorGap,
       });
     }
     return fallback;
@@ -516,6 +632,10 @@ export default {
   rankPosts,
   scorePost,
   reachAdjust,
+  hashtagAffinityAdjust,
+  extractPostHashtags,
+  normalizeTagToken,
+  diversifyRanked,
   feedPriorityAdjust,
   postFeedPriorityAdjust,
   accountFeedPriorityAdjust,

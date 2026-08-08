@@ -13,6 +13,8 @@ jest.mock('../src/services/promoteBoostService', () => ({
 import {
   countFollowedPosts,
   ensureFollowMixCandidates,
+  extractPostHashtags,
+  hashtagAffinityAdjust,
   mergeCandidatePosts,
   prepareRankedFeed,
   rankPosts,
@@ -69,6 +71,26 @@ describe('For You v1 ranking', () => {
     expect(scorePost(signalled, context)).toBeGreaterThan(scorePost(baseline, context));
   });
 
+  it('boosts posts whose hashtags match viewer interests', () => {
+    const untagged = post('plain', { date: NOW - 30 * 60 * 1000 });
+    const tagged = post('tagged', {
+      date: NOW - 10 * 60 * 60 * 1000,
+      hashtags: ['#Gaming', 'comedy'],
+      caption: 'clip #tech night',
+    });
+    const terms = ['gaming', 'tech', 'music'];
+
+    expect(extractPostHashtags(tagged).sort()).toEqual(['comedy', 'gaming', 'tech']);
+    expect(hashtagAffinityAdjust(tagged, terms)).toBeGreaterThan(0);
+    expect(hashtagAffinityAdjust(untagged, terms)).toBe(0);
+    expect(scorePost(tagged, { now: NOW, terms }))
+      .toBeGreaterThan(scorePost(untagged, { now: NOW, terms }));
+    expect(rankPosts([untagged, tagged], terms, new Set(), {
+      now: NOW,
+      fairCap: false,
+    })[0].id).toBe('tagged');
+  });
+
   it('demotes posts seen recently', () => {
     const seen = post('seen');
     const unseen = post('unseen');
@@ -92,6 +114,31 @@ describe('For You v1 ranking', () => {
       'creator-b',
       'creator-a',
     ]);
+  });
+
+  it('prefers a creator gap and respects feed-tail recentOwners across pages', () => {
+    const ranked = rankPosts([
+      post('a1', { userId: 'creator-a', likeCount: 100 }),
+      post('a2', { userId: 'creator-a', likeCount: 90 }),
+      post('b1', { userId: 'creator-b', likeCount: 80 }),
+      post('c1', { userId: 'creator-c', likeCount: 70 }),
+      post('d1', { userId: 'creator-d', likeCount: 60 }),
+    ], [], new Set(), {
+      now: NOW,
+      fairCap: false,
+      recentOwners: ['creator-a', 'creator-x'],
+      minCreatorGap: 2,
+    });
+
+    expect(ranked[0].userId).not.toBe('creator-a');
+    for (let i = 1; i < ranked.length; i += 1) {
+      expect(ranked[i].userId).not.toBe(ranked[i - 1].userId);
+    }
+    const firstA = ranked.findIndex((item) => item.userId === 'creator-a');
+    const secondA = ranked.findIndex((item, idx) => idx > firstA && item.userId === 'creator-a');
+    if (firstA >= 0 && secondA >= 0) {
+      expect(secondA - firstA).toBeGreaterThanOrEqual(2);
+    }
   });
 
   it('mixes discovery into a follow-heavy candidate page', () => {

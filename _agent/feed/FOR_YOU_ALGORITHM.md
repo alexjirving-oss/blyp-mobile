@@ -58,6 +58,7 @@ For each eligible candidate:
 score =
   follow affinity
   + topic interest
+  + hashtag / tag affinity
   + freshness
   + public engagement
   + aggregate watch quality
@@ -71,10 +72,13 @@ Concrete terms:
 
 - **Follow affinity:** `+26` when the creator is in the live following set.
 - **Topic interest:** `+8` per matched onboarding interest ID, label, or label token, capped at
-  `+24`. Matching uses title, caption, description, category, topic/topicId, hashtags, and sport
-  tags. It is substring matching, not semantic understanding.
-- **Freshness:** `32 * 0.5^(ageHours / 24)`. A new post gets about `+32`, at 24 hours `+16`, at
-  48 hours `+8`. Missing dates receive no freshness points.
+  `+24`. Matching uses title, caption, description, category, topic/topicId, hashtags, tags, and
+  sport tags. It is substring matching, not semantic understanding.
+- **Hashtag / tag affinity:** `+14` per matched extracted hashtag/tag (from `hashtags`, `tags`,
+  `sportTags`, and `#tokens` in title/caption/description), capped at `+36`. This is the primary
+  interest-mix signal so For You is not dominated by raw recency.
+- **Freshness:** `26 * 0.5^(ageHours / 24)`. A new post gets about `+26`, at 24 hours `+13`, at
+  48 hours `+6.5`. Missing dates receive no freshness points.
 - **Public engagement:** likes + 2×comments + 4×shares enter a `log1p` curve capped at `+24`.
   Gift coins use a separate `log1p` curve capped at `+10`. Alias fields use the maximum rather
   than being summed, avoiding double-counting denormalized counters.
@@ -87,7 +91,8 @@ Concrete terms:
   `suppress -500`, `low -60`, `standard 0`, `high +80`, `boost +150`. Account suppression is
   filtered. These values can overwhelm all organic signals and should be understood as editorial
   controls, not organic ranking.
-- **Paid promote:** existing promote weights and the existing promote fair-cap remain.
+- **Paid promote:** existing promote weights and the existing promote fair-cap remain. After fair
+  cap, creator diversity is re-applied so paid placement cannot restack the same author.
 - **Not seen recently:** `+10` if not in the in-memory recent-view set; `-24` if seen. The set is
   bounded to 200 posts and resets when the app process restarts.
 
@@ -98,7 +103,11 @@ testable, and less jumpy.
 
 After score sorting, a greedy pass:
 
-- avoids consecutive posts from the same creator whenever another creator is available;
+- **hard:** never places two consecutive posts from the same creator when another creator is
+  available;
+- **soft:** prefers at least two other creators between repeats from the same author;
+- seeds lookback with the previous feed tail's owners when a new page is appended, so pagination
+  cannot restack the same creator across page boundaries;
 - allows at most two consecutive followed-source or discovery-source posts when the other source
   exists;
 - falls back to the highest-ranked remaining item if a constraint cannot be satisfied.
@@ -128,7 +137,13 @@ still produce a visible mix.
 ## Known limitations and audit findings
 
 - **Page-local ranking:** Firestore chooses a newest-15 window before ranking. An excellent older
-  post cannot outrank a mediocre post until its older page is fetched.
+  post cannot outrank a mediocre post until its older page is fetched. Appended pages now seed
+  creator diversity from the previous feed tail so same-author stacking across page boundaries is
+  blocked when alternatives exist.
+- **Resolved (2026-08-08 tip):** hashtag affinity was only a weak substring inside topic interest,
+  and diversity only blocked immediate neighbors — so After 1.0.33 For You still often looked like
+  newest-first with stacked creators. Dedicated hashtag scoring + min creator gap + append seeding
+  address that without regressing the getContext / soft-swap race fix.
 - **Expensive legacy waterfall:** the missing-`date` recovery phase scans document-ID pages and
   can issue up to 24 page queries in one gather attempt. Normalize post timestamps and retire this
   phase.
