@@ -19,7 +19,6 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { to: "/people", label: "People", icon: "◇" },
       { to: "/agents", label: "Agent oversight", icon: "✦" },
       { to: "/content", label: "Content & Media", icon: "▦" },
-      { to: "/import-schedule", label: "Import & schedule", icon: "◷" },
       { to: "/live", label: "Live", icon: "◉" },
       { to: "/teams", label: "Teams", icon: "⚑" },
       { to: "/safety", label: "Trust & Safety", icon: "⬡" },
