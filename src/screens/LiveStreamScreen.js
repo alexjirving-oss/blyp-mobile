@@ -3833,31 +3833,37 @@ const LiveStreamScreen = (props) => {
             </View>
           </View>
 
-          <View style={styles.liveHeaderSpacer} />
+                    <View style={styles.liveHeaderSpacer} />
 
-          <View style={styles.liveHeaderStat}>
-            <Icon name="eye" size={15} color="#fff" />
-            <Text style={styles.liveHeaderStatText} allowFontScaling={false}>{viewCount}</Text>
-          </View>
-          <View style={styles.liveHeaderStat}>
-            <Icon name="heart" size={15} color="#FB7185" />
-            <Text style={styles.liveHeaderStatText} allowFontScaling={false}>{heartCount}</Text>
+          <View style={styles.liveHeaderStatCluster}>
+            <View style={styles.liveHeaderStat}>
+              <Icon name="eye" size={14} color="#fff" />
+              <Text style={styles.liveHeaderStatText} allowFontScaling={false}>{viewCount}</Text>
+            </View>
+            <View style={styles.liveHeaderStat}>
+              <Icon name="heart" size={14} color="#FB7185" />
+              <Text style={styles.liveHeaderStatText} allowFontScaling={false}>{heartCount}</Text>
+            </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.liveHeaderClose}
-            onPress={openLiveSafetyMenu}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="ellipsis-horizontal" size={20} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.liveHeaderClose}
-            onPress={goToSummary}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Icon name="close" size={22} color="#fff" />
-          </TouchableOpacity>
+          <View style={styles.liveHeaderActionCluster}>
+            <TouchableOpacity
+              style={styles.liveHeaderClose}
+              onPress={openLiveSafetyMenu}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="More options"
+            >
+              <Icon name="ellipsis-horizontal" size={18} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.liveHeaderClose}
+              onPress={goToSummary}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Leave live"
+            >
+              <Icon name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ReportModal
@@ -3871,12 +3877,25 @@ const LiveStreamScreen = (props) => {
 
         <LiveReactionsHearts
           burst={reactionBurst}
-          bottomOffset={(viewerCommentsOverlayHeight || 0) + 18}
-          rightOffset={18}
+          bottomOffset={(viewerCommentsOverlayHeight || 0) + 72}
+          rightOffset={16}
+        />
+
+        <LinearGradient
+          colors={['transparent', 'rgba(10,10,12,0.35)', 'rgba(10,10,12,0.78)']}
+          locations={[0, 0.45, 1]}
+          pointerEvents="none"
+          style={[
+            styles.viewerBottomVignette,
+            { height: Math.max(160, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 88) },
+          ]}
         />
 
         <LiveReactionTray
-          style={[styles.viewerReactionTray, { bottom: (viewerCommentsOverlayHeight || 0) + 18 }]}
+          style={[
+            styles.viewerReactionTray,
+            { bottom: (viewerCommentsOverlayHeight || 0) + 10 },
+          ]}
           onReact={(emoji) => triggerReaction(emoji)}
         />
 
@@ -3887,7 +3906,7 @@ const LiveStreamScreen = (props) => {
           </View>
         )}
 
-        {/* Viewer bottom bar overlay (TikTok-style) */}
+        {/* Viewer bottom bar overlay */}
         <View
           style={styles.commentsContainer}
           pointerEvents="box-none"
@@ -3900,7 +3919,7 @@ const LiveStreamScreen = (props) => {
             onPressGift={promptGiftRecipient}
             onPressGames={openLiveGames}
             showGames={liveGamesAvailable}
-            gamesActive={gamesOpen || showArtillery}
+            gamesActive={!!(gameOpen || showArtillery)}
             likeCount={heartCount}
             likeScale={scale}
           />
@@ -4297,7 +4316,7 @@ const LiveStreamScreen = (props) => {
             )}
 
             {/* Host identity (top-left, over video) — hidden in battles (MatchBar owns names). */}
-            {!activeBattleId ? (
+            {!activeBattleId && !isStreaming ? (
               <View
                 style={[
                   styles.hostIdentityOverlay,
@@ -5187,22 +5206,22 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: COLORS.background,
+    backgroundColor: 'rgba(10,10,12,0.72)',
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.35)',
+    borderColor: 'rgba(0, 210, 190, 0.28)',
   },
   ivsGuestTileCollapsed: {
     // 4 columns (1 row) => 4 guest slots visible
-    width: '23%',
-    marginHorizontal: '1%',
+    width: '22.5%',
+    marginHorizontal: '1.25%',
     aspectRatio: 1,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: COLORS.background,
+    backgroundColor: 'rgba(10,10,12,0.72)',
     marginBottom: 0,
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.35)',
+    borderColor: 'rgba(0, 210, 190, 0.28)',
   },
   ivsGuestTileHidden: {
     opacity: 0,
@@ -5282,10 +5301,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.18)',
   },
+  viewerBottomVignette: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 25,
+  },
   viewerReactionTray: {
     position: 'absolute',
-    left: 14,
-    zIndex: 50,
+    left: 12,
+    zIndex: 55,
+    elevation: 55,
+    maxWidth: '70%',
+    overflow: 'hidden',
   },
   viewerSafetyButton: {
     position: 'absolute',
@@ -5438,14 +5467,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginHorizontal: 14,
-    marginBottom: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 30,
-    backgroundColor: 'rgba(18,18,22,0.72)',
+    marginHorizontal: 12,
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 28,
+    backgroundColor: 'rgba(10,10,12,0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   hostControl: {
     alignItems: 'center',
@@ -5755,6 +5784,8 @@ const styles = StyleSheet.create({
     // background here painted a full-width dark band over the stream that read
     // as "chat covers the whole screen".
     backgroundColor: 'transparent',
+    zIndex: 60,
+    elevation: 60,
   },
   commentsList: {
     flex: 1,
@@ -5914,13 +5945,16 @@ const styles = StyleSheet.create({
   liveHeaderIdentity: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(10, 10, 12, 0.55)',
+    backgroundColor: 'rgba(10, 10, 12, 0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
     borderRadius: 999,
     paddingLeft: 4,
     paddingRight: 10,
     paddingVertical: 4,
     flexShrink: 1,
     minWidth: 0,
+    maxWidth: '58%',
   },
   liveHeaderAvatar: {
     width: 30,
@@ -6002,8 +6036,19 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 12,
   },
-  liveHeaderClose: {
+  liveHeaderActionCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginLeft: 8,
+    backgroundColor: 'rgba(10, 10, 12, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+  },
+  liveHeaderClose: {
+    marginLeft: 0,
     width: 30,
     height: 30,
     alignItems: 'center',

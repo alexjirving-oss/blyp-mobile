@@ -243,7 +243,7 @@ export default function LiveUsersTab() {
                   {displayName}
                 </Text>
                 <View style={styles.statusRow}>
-                  <Text style={styles.liveIndicator}>ðŸ”´</Text>
+                  <View style={styles.liveDot} />
                   <Text style={styles.status}>Broadcasting now</Text>
                 </View>
                 {item.title && (
@@ -253,14 +253,14 @@ export default function LiveUsersTab() {
                 )}
               </View>
               <View style={styles.chevron}>
-                <Text style={styles.chevronText}>â€º</Text>
+                <Icon name="chevron-forward" size={22} color={COLORS.gradientEnd} />
               </View>
             </TouchableOpacity>
           );
         }}
       />
 
-      {/* Profile preview overlay â€” shown on tap, before entering the room. */}
+      {/* Profile preview overlay — shown on tap, before entering the room. */}
       <Modal
         visible={!!previewItem}
         transparent
@@ -288,11 +288,12 @@ export default function LiveUsersTab() {
                 ) : null}
                 <View style={styles.previewStatsRow}>
                   <View style={styles.previewStat}>
-                    <Text style={styles.previewStatValue}>{rel.loading ? 'â€¦' : rel.followers}</Text>
+                    <Text style={styles.previewStatValue}>{rel.loading ? '...' : rel.followers}</Text>
                     <Text style={styles.previewStatLabel}>Followers</Text>
                   </View>
                   <View style={styles.previewLivePill}>
-                    <Text style={styles.previewLivePillText}>â— LIVE</Text>
+                    <View style={styles.previewLiveDot} />
+                    <Text style={styles.previewLivePillText}>LIVE</Text>
                   </View>
                 </View>
 
@@ -477,9 +478,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  liveIndicator: {
-    fontSize: 12,
-    marginRight: 4,
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FF2D55',
+    marginRight: 6,
   },
   status: {
     fontSize: 14,
@@ -494,11 +498,8 @@ const styles = StyleSheet.create({
   },
   chevron: {
     marginLeft: 8,
-  },
-  chevronText: {
-    fontSize: 32,
-    color: COLORS.gradientEnd,
-    fontWeight: '300',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   previewBackdrop: {
     flex: 1,
@@ -557,10 +558,19 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   previewLivePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FF0000',
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    gap: 5,
+  },
+  previewLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#fff',
   },
   previewLivePillText: {
     color: '#fff',

@@ -87,7 +87,7 @@ const TileCoinBadge = ({ coins, style }) => {
   if (!coins || coins <= 0) return null;
   return (
     <View style={[tileCoinStyles.badge, style]} pointerEvents="none">
-      <Text style={tileCoinStyles.text} allowFontScaling={false}>{`🪙 ${coins}`}</Text>
+      <Text style={tileCoinStyles.text} allowFontScaling={false}>{String(coins)}</Text>
     </View>
   );
 };
@@ -2924,22 +2924,22 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: COLORS.background,
+    backgroundColor: 'rgba(10,10,12,0.72)',
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.35)',
+    borderColor: 'rgba(0, 210, 190, 0.28)',
   },
   guestTileSquareCollapsed: {
     // 4 columns (1 row) => 4 guest slots visible
-    width: '23%',
-    marginHorizontal: '1%',
+    width: '22.5%',
+    marginHorizontal: '1.25%',
     aspectRatio: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: COLORS.background,
-    marginBottom: 0,
+    backgroundColor: 'rgba(10,10,12,0.72)',
+    marginBottom: 4,
     borderWidth: 1,
-    borderColor: COLORS.backgroundLight,
+    borderColor: 'rgba(0, 210, 190, 0.28)',
   },
   guestTileHidden: {
     opacity: 0,

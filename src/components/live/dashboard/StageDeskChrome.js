@@ -90,10 +90,11 @@ export default function StageDeskChrome({
           );
         }
 
+        // giftAlerts / comboTicker are driven by LiveGiftOverlay cinema — do not
+        // paint placeholder accent dots on the chrome rail (they read as stray
+        // cyan dashes on the left of the host live stage).
         if (widget.type === 'giftAlerts' || widget.type === 'comboTicker') {
-          return (
-            <View key={widget.id} style={[styles.dot, { backgroundColor: accent }]} />
-          );
+          return null;
         }
 
         return null;

@@ -33,6 +33,40 @@ const GIFT_TILE_WIDTH = Math.min(148, Math.max(128, Math.round(width * 0.36)));
 
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
 
+/** Gold coin mark — avoids emoji font clipping artifacts on Android edges. */
+function CoinMark({ size = 12, style }) {
+  return (
+    <View
+      style={[
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#F5C542',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 1,
+          borderColor: 'rgba(253,230,138,0.9)',
+        },
+        style,
+      ]}
+    >
+      <Text
+        style={{
+          color: '#0A0A0C',
+          fontSize: Math.max(7, Math.round(size * 0.62)),
+          fontWeight: '900',
+          lineHeight: Math.max(8, Math.round(size * 0.7)),
+        }}
+        allowFontScaling={false}
+      >
+        B
+      </Text>
+    </View>
+  );
+}
+
+
 function formatGiftCoins(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return '0';
@@ -974,7 +1008,7 @@ const GiftSystem = ({
                   {gift.name}
                 </Text>
                 <View style={[styles.giftPriceRow, isSelected && styles.giftPriceRowSelected]}>
-                  <Text style={styles.coinIcon}>🪙</Text>
+                  <CoinMark size={13} />
                   <Text style={styles.costText}>{formatGiftCoins(cost)}</Text>
                   <Text style={styles.costUnit}>coins</Text>
                 </View>
@@ -1169,14 +1203,16 @@ const GiftSystem = ({
                 }`}
               >
                 <Text style={styles.balanceLabel}>BALANCE</Text>
-                <Text style={styles.balanceText}>
-                  🪙{' '}
-                  {walletState?.status === 'ok' || walletState?.lastUpdatedAt
-                    ? Number(userBalance || 0).toLocaleString()
-                    : walletState?.status === 'loading'
-                      ? '…'
-                      : '—'}
-                </Text>
+                <View style={styles.balanceTextRow}>
+                  <CoinMark size={14} />
+                  <Text style={styles.balanceText}>
+                    {walletState?.status === 'ok' || walletState?.lastUpdatedAt
+                      ? Number(userBalance || 0).toLocaleString()
+                      : walletState?.status === 'loading'
+                        ? '...'
+                        : '-'}
+                  </Text>
+                </View>
               </TouchableOpacity>
             </View>
 
@@ -1215,18 +1251,27 @@ const GiftSystem = ({
                     <Text style={styles.selectedGiftName} numberOfLines={1}>
                       {selectedGift.emoji} {selectedGift.name}
                     </Text>
-                    <Text
+                    <View
                       style={
                         selectedGiftAffordable
-                          ? styles.selectedGiftCost
-                          : styles.selectedGiftCostInsufficient
+                          ? styles.selectedGiftCostRow
+                          : styles.selectedGiftCostRowInsufficient
                       }
                     >
-                      🪙 {formatGiftCoins(selectedGiftCost)} coins
-                      {!selectedGiftAffordable
-                        ? ` · need ${formatGiftCoins(selectedGiftCost - userBalance)} more`
-                        : ''}
-                    </Text>
+                      <CoinMark size={12} />
+                      <Text
+                        style={
+                          selectedGiftAffordable
+                            ? styles.selectedGiftCost
+                            : styles.selectedGiftCostInsufficient
+                        }
+                      >
+                        {formatGiftCoins(selectedGiftCost)} coins
+                        {!selectedGiftAffordable
+                          ? ` · need ${formatGiftCoins(selectedGiftCost - userBalance)} more`
+                          : ''}
+                      </Text>
+                    </View>
                   </>
                 ) : (
                   <>
@@ -1267,9 +1312,12 @@ const GiftSystem = ({
                     {sending ? 'Sending…' : selectedGift ? 'Send gift' : 'Choose gift'}
                   </Text>
                   {selectedGift ? (
-                    <Text style={styles.giftActionButtonCost}>
-                      🪙 {formatGiftCoins(selectedGiftCost)} coins
-                    </Text>
+                    <View style={styles.giftActionButtonCostRow}>
+                      <CoinMark size={11} />
+                      <Text style={styles.giftActionButtonCost}>
+                        {formatGiftCoins(selectedGiftCost)} coins
+                      </Text>
+                    </View>
                   ) : null}
                 </LinearGradient>
               </TouchableOpacity>
@@ -1383,9 +1431,11 @@ const styles = StyleSheet.create({
   },
   giftCarousel: {
     paddingVertical: 10,
+    overflow: 'hidden',
   },
   giftCarouselContent: {
     paddingHorizontal: 14,
+    paddingRight: 20,
     gap: 12,
     alignItems: 'center',
   },
@@ -1439,6 +1489,12 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.8,
+  },
+  balanceTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
   },
   balanceText: {
     color: '#fff',
@@ -1657,12 +1713,15 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
     backgroundColor: 'rgba(15,23,42,0.25)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
   },
   giftEmoji: {
     fontSize: 31,
+    lineHeight: 36,
+    textAlign: 'center',
   },
   giftTileMeta: {
     flex: 1,
@@ -1747,6 +1806,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
   },
+  selectedGiftCostRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
+  selectedGiftCostRowInsufficient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 4,
+  },
   selectedGiftCost: {
     marginTop: 3,
     color: '#FDE68A',
@@ -1783,6 +1854,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '900',
+  },
+  giftActionButtonCostRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
   },
   giftActionButtonCost: {
     marginTop: 2,
