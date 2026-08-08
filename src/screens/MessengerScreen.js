@@ -48,7 +48,11 @@ import { loadBlockedUsers, getBlockedSet } from '../services/BlockService';
 import { messengerExtrasService } from '../services/messaging/messengerExtrasService';
 import { messengerUsersService } from '../services/messaging/messengerUsersService';
 import { fetchMessengerUserProfile, resolveUserPhoto } from '../services/messaging/resolveMessengerUser';
-import { subscribeNotifications, markNotificationRead } from '../services/notificationsInboxService';
+import {
+  subscribeNotifications,
+  markNotificationRead,
+  markNotificationsRead,
+} from '../services/notificationsInboxService';
 import { getLocalWelcomeTourItem, consumeLocalWelcomeTourItem, LOCAL_WELCOME_TOUR_ID } from '../tour/welcomeTourInbox';
 import { requestStartTour, isTourPayload } from '../tour/tourBus';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
@@ -83,10 +87,18 @@ const ChatRow = React.memo(({
     onMoveShouldSetPanResponder: (_event, gesture) =>
       Math.abs(gesture.dx) > 20 && Math.abs(gesture.dy) < 40,
     onPanResponderMove: (_event, gesture) => {
-      if (gesture.dx < 0) panX.setValue(Math.max(-110, gesture.dx));
+      panX.setValue(Math.max(-110, Math.min(0, gesture.dx)));
     },
     onPanResponderRelease: (_event, gesture) => {
       if (gesture.dx < -90) onDelete(item, otherParticipant);
+      Animated.spring(panX, {
+        toValue: 0,
+        useNativeDriver: true,
+        speed: 24,
+        bounciness: 4,
+      }).start();
+    },
+    onPanResponderTerminate: () => {
       Animated.spring(panX, {
         toValue: 0,
         useNativeDriver: true,
@@ -113,7 +125,7 @@ const ChatRow = React.memo(({
         {...panResponder.panHandlers}
       >
         <TouchableOpacity
-          style={[styles.whatsappChatItem, hasUnread && { backgroundColor: withAlpha(accent, 0.09) }]}
+          style={styles.whatsappChatItem}
           onPress={handleOpen}
           activeOpacity={0.72}
         >
@@ -211,6 +223,7 @@ const MessengerScreen = ({ navigation }) => {
   const [followerUserIds, setFollowerUserIds] = useState(new Set());
   const [notifications, setNotifications] = useState([]);
   const [notifLoading, setNotifLoading] = useState(true);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [coinBalance, setCoinBalance] = useState(0);
@@ -245,6 +258,11 @@ const MessengerScreen = ({ navigation }) => {
     const notifUnread = (notifications || []).filter((n) => n && n.status !== 'read').length;
     return chatUnread + notifUnread;
   }, [chats, notifications, uid]);
+
+  const unreadNotifications = React.useMemo(
+    () => (notifications || []).filter((notification) => notification?.status !== 'read'),
+    [notifications],
+  );
 
   // Define callback functions BEFORE the useEffect that uses them
   const loadBalances = React.useCallback(async () => {
@@ -941,6 +959,32 @@ const MessengerScreen = ({ navigation }) => {
     }
   };
 
+  const handleMarkAllNotificationsRead = React.useCallback(async () => {
+    if (markingAllRead || unreadNotifications.length === 0) return;
+    setMarkingAllRead(true);
+    const serverIds = unreadNotifications
+      .filter((notification) => notification.id !== LOCAL_WELCOME_TOUR_ID)
+      .map((notification) => notification.id);
+    try {
+      await Promise.all([
+        markNotificationsRead(serverIds),
+        unreadNotifications.some((notification) => notification.id === LOCAL_WELCOME_TOUR_ID)
+          ? consumeLocalWelcomeTourItem(uid)
+          : Promise.resolve(),
+      ]);
+      setNotifications((items) =>
+        (items || [])
+          .filter((notification) => notification.id !== LOCAL_WELCOME_TOUR_ID)
+          .map((notification) => ({ ...notification, status: 'read' })),
+      );
+    } catch (error) {
+      console.warn('[MESSENGER] mark all notifications read failed', error?.message || error);
+      Alert.alert('Notifications', 'Could not mark every notification as read. Please try again.');
+    } finally {
+      setMarkingAllRead(false);
+    }
+  }, [markingAllRead, uid, unreadNotifications]);
+
   const notifIconFor = (type) => {
     switch (type) {
       case 'battle': return 'flash';
@@ -1379,16 +1423,40 @@ const MessengerScreen = ({ navigation }) => {
                 </Text>
               </View>
             ) : (
-              <FlatList
-                data={notifications}
-                renderItem={renderNotificationItem}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                style={styles.chatList}
-                removeClippedSubviews={Platform.OS === 'android'}
-                initialNumToRender={12}
-                windowSize={7}
-              />
+              <>
+                <View style={styles.notificationActions}>
+                  <Text style={styles.notificationCount}>
+                    {unreadNotifications.length
+                      ? `${unreadNotifications.length} unread`
+                      : 'All caught up'}
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.readAllButton,
+                      unreadNotifications.length === 0 && styles.readAllButtonDisabled,
+                    ]}
+                    onPress={handleMarkAllNotificationsRead}
+                    disabled={markingAllRead || unreadNotifications.length === 0}
+                    accessibilityRole="button"
+                    accessibilityLabel="Mark all notifications read"
+                  >
+                    <Icon name="checkmark-done" size={17} color={T.primary} />
+                    <Text style={styles.readAllButtonText}>
+                      {markingAllRead ? 'Marking…' : 'Read all'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={notifications}
+                  renderItem={renderNotificationItem}
+                  keyExtractor={(item) => item.id}
+                  showsVerticalScrollIndicator={false}
+                  style={styles.chatList}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                  initialNumToRender={12}
+                  windowSize={7}
+                />
+              </>
             )}
           </View>
         );
@@ -1504,7 +1572,7 @@ const MessengerScreen = ({ navigation }) => {
       default:
         return null;
     }
-  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, tabBarHeight, navigation, currentUser, renderChatItem]);
+  }, [selectedTab, chats, calls, callsLoading, callsError, statuses, statusLoading, statusError, uid, loading, allUsers, followingUsers, followingUserIds, followerUserIds, notifications, notifLoading, unreadNotifications, markingAllRead, handleMarkAllNotificationsRead, tabBarHeight, navigation, currentUser, renderChatItem]);
 
   // Simple user list for messaging
   const renderSimpleChatList = () => {
@@ -1846,6 +1914,41 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
   },
+  notificationActions: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: T.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: T.border,
+  },
+  notificationCount: {
+    color: T.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  readAllButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 18,
+    backgroundColor: withAlpha(T.primary, 0.12),
+    borderWidth: 1,
+    borderColor: withAlpha(T.primary, 0.32),
+  },
+  readAllButtonDisabled: {
+    opacity: 0.45,
+  },
+  readAllButtonText: {
+    color: T.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   chatSectionHeader: {
     paddingHorizontal: 16,
     paddingTop: 14,
@@ -1897,7 +2000,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 0.5,
     borderBottomColor: withAlpha(T.textPrimary, 0.1),
-    backgroundColor: 'transparent',
+    backgroundColor: T.background,
   },
   avatarContainer: {
     position: 'relative',
@@ -2250,13 +2353,12 @@ const styles = StyleSheet.create({
   // Swipe to delete styles
   chatItemWrapper: {
     position: 'relative',
-    backgroundColor: 'transparent',
+    backgroundColor: T.background,
+    overflow: 'hidden',
   },
   swipeableItem: {
-    backgroundColor: withAlpha(T.background, 0.8),
-    borderRadius: 8,
-    marginHorizontal: 8,
-    marginVertical: 2,
+    width: '100%',
+    backgroundColor: T.background,
   },
   deleteBackground: {
     position: 'absolute',

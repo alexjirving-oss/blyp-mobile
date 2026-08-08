@@ -19,6 +19,7 @@ import {
   doc,
   getDoc,
   updateDoc,
+  writeBatch,
   serverTimestamp,
 } from 'firebase/firestore';
 import {
@@ -205,4 +206,24 @@ export async function markNotificationRead(id) {
     // Non-fatal; the rules only permit status->read on your own docs.
     console.warn('[notificationsInbox] markRead failed', e?.message || e);
   }
+}
+
+/** Mark the currently loaded notification inbox read in one atomic write. */
+export async function markNotificationsRead(ids) {
+  const uniqueIds = [...new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) return 0;
+
+  // Firestore batches support up to 500 writes. The inbox subscription is
+  // currently bounded to 100, but chunking keeps this helper safe if that grows.
+  for (let offset = 0; offset < uniqueIds.length; offset += 500) {
+    const batch = writeBatch(db);
+    uniqueIds.slice(offset, offset + 500).forEach((id) => {
+      batch.update(doc(db, 'notifications', id), {
+        status: 'read',
+        readAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+  return uniqueIds.length;
 }
