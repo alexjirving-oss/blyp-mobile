@@ -847,6 +847,21 @@ const ProfileScreenV3: React.FC = () => {
     try { console.log('📈 profile_dating_tap', { userId: uid, source: 'profile_self' }); } catch { }
   }, [nav, uid]);
 
+  const onNotifications = useCallback(() => {
+    if (!uid) return;
+    try { nav.navigate('NotificationSettings' as never); } catch { }
+  }, [nav, uid]);
+
+  const onPrivacy = useCallback(() => {
+    if (!uid) return;
+    try { nav.navigate('PrivacySettings' as never); } catch { }
+  }, [nav, uid]);
+
+  const onHelp = useCallback(() => {
+    if (!uid) return;
+    try { nav.navigate('HelpSupport' as never); } catch { }
+  }, [nav, uid]);
+
   const onReplayTour = useCallback(() => {
     if (!uid) return;
     requestReplayTour({ source: 'profile' });
@@ -1454,6 +1469,10 @@ const ProfileScreenV3: React.FC = () => {
 
                   <ProfileBioLinks
                     bio={profile?.bio}
+                    pronouns={profile?.pronouns}
+                    location={profile?.location || profile?.city}
+                    country={profile?.country}
+                    website={profile?.website}
                     onEditProfile={onEditProfile}
                     styles={styles}
                   />
@@ -1629,6 +1648,9 @@ const ProfileScreenV3: React.FC = () => {
                 onImport={onImport}
                 onHub={onHub}
                 onDating={onDating}
+                onNotifications={onNotifications}
+                onPrivacy={onPrivacy}
+                onHelp={onHelp}
                 onReplayTour={onReplayTour}
                 onLogout={onLogout}
                 styles={styles}
@@ -2569,21 +2591,54 @@ const ProfileIdentity: React.FC<{
   );
 };
 
-const ProfileBioLinks: React.FC<{ bio?: string; onEditProfile: () => void; styles: any }> = ({ bio, onEditProfile, styles }) => {
+const ProfileBioLinks: React.FC<{
+  bio?: string;
+  pronouns?: string;
+  location?: string;
+  country?: string;
+  website?: string;
+  onEditProfile: () => void;
+  styles: any;
+}> = ({ bio, pronouns, location, country, website, onEditProfile, styles }) => {
   const hasBio = typeof bio === 'string' && bio.trim().length > 0;
-  if (hasBio) {
+  const metaBits = [
+    typeof pronouns === 'string' && pronouns.trim() ? pronouns.trim() : null,
+    typeof location === 'string' && location.trim()
+      ? [location.trim(), typeof country === 'string' && country.trim() ? country.trim() : null]
+          .filter(Boolean)
+          .join(', ')
+      : typeof country === 'string' && country.trim()
+        ? country.trim()
+        : null,
+  ].filter(Boolean);
+  const site = typeof website === 'string' ? website.trim() : '';
+
+  if (!hasBio && !metaBits.length && !site) {
     return (
-      <View style={styles.bioContainer}>
+      <TouchableOpacity onPress={onEditProfile} style={styles.bioContainer} activeOpacity={0.7}>
+        <Text style={styles.bioPlaceholder}>Tap to add bio</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={styles.bioContainer}>
+      {metaBits.length ? (
+        <Text style={[styles.handle, { marginBottom: hasBio || site ? 6 : 0 }]} numberOfLines={2}>
+          {metaBits.join(' · ')}
+        </Text>
+      ) : null}
+      {hasBio ? (
         <Text style={styles.bioText} numberOfLines={3}>
           {bio}
         </Text>
-      </View>
-    );
-  }
-  return (
-    <TouchableOpacity onPress={onEditProfile} style={styles.bioContainer} activeOpacity={0.7}>
-      <Text style={styles.bioPlaceholder}>Tap to add bio</Text>
-    </TouchableOpacity>
+      ) : null}
+      {site ? (
+        <Text style={[styles.handle, { marginTop: hasBio ? 6 : 0 }]} numberOfLines={1}>
+          {site.replace(/^https?:\/\//i, '')}
+        </Text>
+      ) : null}
+    </View>
   );
 };
 
@@ -2858,7 +2913,33 @@ const ProfileLogout: React.FC<{ onLogout: () => void; styles: any }> = ({ onLogo
   );
 };
 
-const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void; onTransparency?: () => void; onImport?: () => void; onHub?: () => void; onDating?: () => void; onReplayTour?: () => void; onLogout: () => void; styles: any }> = ({ onEditProfile, onPlans, onTransparency, onImport, onHub, onDating, onReplayTour, onLogout, styles }) => {
+const ProfileMenuTab: React.FC<{
+  onEditProfile: () => void;
+  onPlans?: () => void;
+  onTransparency?: () => void;
+  onImport?: () => void;
+  onHub?: () => void;
+  onDating?: () => void;
+  onNotifications?: () => void;
+  onPrivacy?: () => void;
+  onHelp?: () => void;
+  onReplayTour?: () => void;
+  onLogout: () => void;
+  styles: any;
+}> = ({
+  onEditProfile,
+  onPlans,
+  onTransparency,
+  onImport,
+  onHub,
+  onDating,
+  onNotifications,
+  onPrivacy,
+  onHelp,
+  onReplayTour,
+  onLogout,
+  styles,
+}) => {
   const ent = useEntitlement();
   const planLabel = (() => {
     if (!ent) return 'Manage your plan';
@@ -2908,6 +2989,31 @@ const ProfileMenuTab: React.FC<{ onEditProfile: () => void; onPlans?: () => void
 
         <TouchableOpacity style={styles.tabMenuItem} onPress={onImport} activeOpacity={0.85}>
           <Text style={styles.tabMenuItemText}>Bring your content (TikTok)</Text>
+          <Text style={styles.tabMenuChevron}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.tabMenuItem} onPress={onNotifications} activeOpacity={0.85}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tabMenuItemText}>Notification settings</Text>
+            <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 2 }}>
+              Alerts, topics, and push preferences
+            </Text>
+          </View>
+          <Text style={styles.tabMenuChevron}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.tabMenuItem} onPress={onPrivacy} activeOpacity={0.85}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tabMenuItemText}>Privacy &amp; security</Text>
+            <Text style={{ color: '#9CA3AF', fontSize: 12, marginTop: 2 }}>
+              Data export, deletion, and account safety
+            </Text>
+          </View>
+          <Text style={styles.tabMenuChevron}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.tabMenuItem} onPress={onHelp} activeOpacity={0.85}>
+          <Text style={styles.tabMenuItemText}>Help &amp; support</Text>
           <Text style={styles.tabMenuChevron}>›</Text>
         </TouchableOpacity>
 

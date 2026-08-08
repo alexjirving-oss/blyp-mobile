@@ -18,10 +18,22 @@ const shouldEnableAmplify = (() => {
 	try {
 		const enabled = (value) =>
 			['1', 'true', 'yes', 'on'].includes(String(value ?? '').toLowerCase());
-		return enabled(process.env?.EXPO_PUBLIC_ENABLE_AMPLIFY)
-			|| enabled(process.env?.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH);
+		const disabled = (value) =>
+			['0', 'false', 'no', 'off'].includes(String(value ?? '').toLowerCase());
+		const amplifyFlag = process.env?.EXPO_PUBLIC_ENABLE_AMPLIFY;
+		if (disabled(amplifyFlag)) return false;
+		if (enabled(amplifyFlag)) return true;
+		if (enabled(process.env?.EXPO_PUBLIC_ENABLE_SOCIAL_AUTH)) return true;
+		const hostedUiDomain = String(process.env?.EXPO_PUBLIC_COGNITO_DOMAIN || '')
+			.trim()
+			.replace(/^https?:\/\//, '')
+			.replace(/\/+$/, '');
+		if (hostedUiDomain) return true;
+		// Default ON so Cognito Hosted UI social can configure at boot once a
+		// domain is supplied, without requiring a second flag flip.
+		return amplifyFlag == null || String(amplifyFlag).trim() === '';
 	} catch {
-		return false;
+		return true;
 	}
 })();
 
@@ -60,13 +72,17 @@ if (!shouldEnableAmplify || !Amplify) {
 
 	// Hosted UI settings are public identifiers. Merge them at runtime as well
 	// as build time so local dev and EAS use the same Cognito federation path.
-	const hostedUiDomain = String(process.env?.EXPO_PUBLIC_COGNITO_DOMAIN || '')
+	const hostedUiDomain = String(
+		process.env?.EXPO_PUBLIC_COGNITO_DOMAIN
+			|| awsconfig?.oauth?.domain
+			|| ''
+	)
 		.trim()
 		.replace(/^https?:\/\//, '')
 		.replace(/\/+$/, '');
 	if (hostedUiDomain) {
 		const socialProviders = String(
-			process.env?.EXPO_PUBLIC_SOCIAL_PROVIDERS || 'Google,Facebook'
+			process.env?.EXPO_PUBLIC_SOCIAL_PROVIDERS || 'Google,Facebook,TikTok'
 		).split(',').map((provider) => provider.trim()).filter(Boolean);
 		awsconfig = {
 			...awsconfig,

@@ -5,7 +5,7 @@
  * blypDatingPass  POST { toUid }  → rate-limited pass write
  *
  * Both require: Bearer Firebase ID token, active Plus/trial entitlement,
- * caller opted-in + adultConfirmed + birthYear (self-report age ≥ 18),
+ * caller profile verified, opted-in + adultConfirmed + birthYear (self-report age ≥ 18),
  * and target similarly discoverable. Rate limits fail closed.
  */
 
@@ -77,6 +77,26 @@ function gatePrefs(snap: admin.firestore.DocumentSnapshot, role: 'caller' | 'tar
   return { ok: true, prefs };
 }
 
+async function requireVerifiedCaller(
+  db: admin.firestore.Firestore,
+  uid: string
+): Promise<{ ok: true } | { ok: false; reason: string; status: number }> {
+  try {
+    const snap = await db.collection(COLLECTIONS.users).doc(uid).get();
+    const data = snap.exists ? snap.data() || {} : {};
+    const verified =
+      data.verified === true ||
+      data.isVerified === true ||
+      data.verificationStatus === 'verified';
+    if (!verified) {
+      return { ok: false, reason: 'verification_required', status: 403 };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'verification_required', status: 403 };
+  }
+}
+
 async function requireAuth(req: functions.https.Request): Promise<string | null> {
   const authHeader = String(req.headers.authorization || '');
   const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
@@ -134,6 +154,12 @@ export const blypDatingLike = functions
     }
 
     const db = admin.firestore();
+
+    const verifiedGate = await requireVerifiedCaller(db, fromUid);
+    if (!verifiedGate.ok) {
+      res.status(verifiedGate.status).json({ ok: false, reason: verifiedGate.reason });
+      return;
+    }
 
     try {
       const [myPrefsSnap, theirPrefsSnap] = await Promise.all([
@@ -253,6 +279,12 @@ export const blypDatingPass = functions
     }
 
     const db = admin.firestore();
+
+    const verifiedGate = await requireVerifiedCaller(db, fromUid);
+    if (!verifiedGate.ok) {
+      res.status(verifiedGate.status).json({ ok: false, reason: verifiedGate.reason });
+      return;
+    }
 
     try {
       const myPrefsSnap = await db.collection(COLLECTIONS.prefs).doc(fromUid).get();

@@ -19,7 +19,15 @@ service cloud.firestore {
         && !('feedPriorityAccountUpdatedBy' in request.resource.data)
         && !('creatorFeedWeight' in request.resource.data)
         && !('earnedBadgeIds' in request.resource.data)
-        && !('earnedBadgeIdsUpdatedAt' in request.resource.data);
+        && !('earnedBadgeIdsUpdatedAt' in request.resource.data)
+        && request.resource.data.get('verified', false) == false
+        && request.resource.data.get('isVerified', false) == false
+        && !('verificationStatus' in request.resource.data)
+        && !('verificationMethod' in request.resource.data)
+        && !('verifiedAt' in request.resource.data)
+        && !('verificationSubmittedAt' in request.resource.data)
+        && !('verificationLinkedProvider' in request.resource.data)
+        && !('verificationRejectionReason' in request.resource.data);
     }
 
     function userPrivFieldsFrozenOnUpdate() {
@@ -38,7 +46,23 @@ service cloud.firestore {
         && request.resource.data.get('earnedBadgeIds', [])
           == resource.data.get('earnedBadgeIds', [])
         && request.resource.data.get('earnedBadgeIdsUpdatedAt', null)
-          == resource.data.get('earnedBadgeIdsUpdatedAt', null);
+          == resource.data.get('earnedBadgeIdsUpdatedAt', null)
+        && request.resource.data.get('verified', false)
+          == resource.data.get('verified', false)
+        && request.resource.data.get('isVerified', false)
+          == resource.data.get('isVerified', false)
+        && request.resource.data.get('verificationStatus', null)
+          == resource.data.get('verificationStatus', null)
+        && request.resource.data.get('verificationMethod', null)
+          == resource.data.get('verificationMethod', null)
+        && request.resource.data.get('verifiedAt', null)
+          == resource.data.get('verifiedAt', null)
+        && request.resource.data.get('verificationSubmittedAt', null)
+          == resource.data.get('verificationSubmittedAt', null)
+        && request.resource.data.get('verificationLinkedProvider', null)
+          == resource.data.get('verificationLinkedProvider', null)
+        && request.resource.data.get('verificationRejectionReason', null)
+          == resource.data.get('verificationRejectionReason', null);
     }
 
     function validUsernameClaim(userId) {
@@ -642,6 +666,12 @@ service cloud.firestore {
     // Earnable badges (Phase 3). Server Admin SDK mints only; clients equip subset.
     match /badgeAwards/{userId}/items/{badgeId} {
       allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // Profile verification audit — Admin SDK only.
+    match /verificationRequests/{userId} {
+      allow read: if isOwner(userId);
       allow write: if false;
     }
 

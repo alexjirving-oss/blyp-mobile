@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import BlueScreen from '../ui/BlueScreen';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../components/Icon';
 import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
@@ -16,8 +16,12 @@ import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
 import { flushCognitoStorageWrites } from '../lib/auth/cognitoStorage';
 import {
-  isSocialAuthEnabled,
+  finalizeSocialSession,
+  getSocialProviderSetupMessage,
+  isSocialAuthUiEnabled,
   isSocialProviderEnabled,
+  isSocialProviderVisible,
+  listSocialProvidersForUi,
   signInWithApple,
   signInWithFacebook,
   signInWithGoogle,
@@ -32,6 +36,45 @@ import {
 } from '../services/usernameProfileService';
 
 const MIN_SIGNUP_AGE = 13;
+
+const SOCIAL_PROVIDER_META = {
+  Google: {
+    label: 'Continue with Google',
+    icon: 'logo-google',
+    iconColor: '#EA4335',
+    buttonStyleKey: 'socialButtonGoogle',
+    textStyleKey: 'socialButtonTextDark',
+  },
+  Facebook: {
+    label: 'Continue with Facebook',
+    icon: 'logo-facebook',
+    iconColor: '#1877F2',
+    buttonStyleKey: 'socialButtonFacebook',
+    textStyleKey: 'socialButtonText',
+  },
+  TikTok: {
+    label: 'Continue with TikTok',
+    icon: 'logo-tiktok',
+    iconColor: '#FE2C55',
+    buttonStyleKey: 'socialButtonTikTok',
+    textStyleKey: 'socialButtonText',
+    fallbackGlyph: '♪',
+  },
+  Apple: {
+    label: 'Continue with Apple',
+    icon: 'logo-apple',
+    iconColor: '#FFFFFF',
+    buttonStyleKey: 'socialButtonApple',
+    textStyleKey: 'socialButtonText',
+  },
+};
+
+const SOCIAL_SIGN_IN_HANDLERS = {
+  Google: signInWithGoogle,
+  Facebook: signInWithFacebook,
+  TikTok: signInWithTikTok,
+  Apple: signInWithApple,
+};
 
 // Parse a DD/MM/YYYY string and return { valid, age, iso } where age is whole years.
 function parseDob(input) {
@@ -534,25 +577,83 @@ const AuthScreen = () => {
       return;
     }
 
+    if (!isSocialProviderEnabled(provider)) {
+      const message = getSocialProviderSetupMessage(provider);
+      console.warn(`[AUTH][SOCIAL] ${provider} not ready`, message);
+      Alert.alert(`${provider} coming soon`, message);
+      return;
+    }
+
     setIsSocialAuthInProgress(true);
     console.log(`[AUTH][SOCIAL] Starting ${provider} Cognito sign-in at`, new Date().toISOString());
 
     try {
       await rememberPendingProfile({ source: 'social' });
       await signIn();
+      const { cognitoUser } = await finalizeSocialSession();
+      await handleAuthSuccess(`social:${provider}`, { cognitoUser });
     } catch (err) {
       await clearPendingProfile().catch(() => {});
+      const canceled =
+        /cancel|dismiss|closed|user.?cancel/i.test(String(err?.message || err?.name || ''));
       console.log(`[AUTH][SOCIAL] ${provider} sign-in error`, { message: err?.message, code: err?.code });
-      Alert.alert(`${provider} sign-in failed`, err?.message || 'Please try again or use email.');
+      if (!canceled) {
+        Alert.alert(
+          `${provider} sign-in failed`,
+          err?.message || 'Please try again or use email.',
+        );
+      }
     } finally {
       setIsSocialAuthInProgress(false);
     }
   };
 
-  const handleGoogleSignInPress = () => handleSocialSignInPress('Google', signInWithGoogle);
-  const handleFacebookSignInPress = () => handleSocialSignInPress('Facebook', signInWithFacebook);
-  const handleAppleSignInPress = () => handleSocialSignInPress('Apple', signInWithApple);
-  const handleTikTokSignInPress = () => handleSocialSignInPress('TikTok', signInWithTikTok);
+  const socialProviders = isSocialAuthUiEnabled() ? listSocialProvidersForUi() : [];
+
+  const renderSocialButton = (provider) => {
+    if (!isSocialProviderVisible(provider)) return null;
+    const meta = SOCIAL_PROVIDER_META[provider] || {
+      label: `Continue with ${provider}`,
+      icon: 'person',
+      iconColor: '#e5e7eb',
+      buttonStyleKey: 'socialButton',
+      textStyleKey: 'socialButtonText',
+    };
+    const signIn = SOCIAL_SIGN_IN_HANDLERS[provider];
+    if (!signIn) return null;
+    const busy = isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil;
+    return (
+      <TouchableOpacity
+        key={provider}
+        style={[
+          styles.socialButton,
+          styles[meta.buttonStyleKey],
+          busy && styles.socialButtonDisabled,
+        ]}
+        onPress={() => handleSocialSignInPress(provider, signIn)}
+        disabled={busy}
+        activeOpacity={busy ? 1 : 0.85}
+        accessibilityRole="button"
+        accessibilityLabel={meta.label}
+      >
+        <View style={styles.socialButtonInner}>
+          {provider === 'TikTok' ? (
+            <Text style={[styles.socialGlyph, { color: meta.iconColor }]} allowFontScaling={false}>
+              {meta.fallbackGlyph || '♪'}
+            </Text>
+          ) : (
+            <Icon name={meta.icon} size={20} color={meta.iconColor} />
+          )}
+          <Text
+            style={[styles.socialButtonText, styles[meta.textStyleKey]]}
+            allowFontScaling={false}
+          >
+            {meta.label}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const handleReset = async () => {
     setLoading(true);
@@ -575,6 +676,11 @@ const AuthScreen = () => {
           behavior="padding"
           style={styles.content}
         >
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
           <View style={styles.logoContainer}>
             <Text style={styles.welcomeText}>Welcome to</Text>
             <View style={styles.logoWrapper}>
@@ -586,6 +692,21 @@ const AuthScreen = () => {
             <Text style={styles.formTitle}>
               {isLogin ? 'Log In' : 'Create Account'}
             </Text>
+
+            {socialProviders.length > 0 && !needsConfirm && !resetMode && (
+              <>
+                <View style={styles.socialButtonsRow}>
+                  {socialProviders.map((provider) => renderSocialButton(provider))}
+                </View>
+                <View style={styles.socialDivider}>
+                  <View style={styles.socialDividerLine} />
+                  <Text style={styles.socialDividerText} allowFontScaling={false}>
+                    or use email
+                  </Text>
+                  <View style={styles.socialDividerLine} />
+                </View>
+              </>
+            )}
 
             {!isLogin && !needsConfirm && (
               <>
@@ -684,82 +805,6 @@ const AuthScreen = () => {
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
-            )}
-
-            {isSocialAuthEnabled() && !needsConfirm && !resetMode && (
-              <>
-                <View style={styles.socialDivider}>
-                  <View style={styles.socialDividerLine} />
-                  <Text style={styles.socialDividerText} allowFontScaling={false}>
-                    Or continue with
-                  </Text>
-                  <View style={styles.socialDividerLine} />
-                </View>
-
-                <View style={styles.socialButtonsRow}>
-                  {/* TODO[BLYP][UX]: Design final copy/layout for Google/Facebook sign-in row
-                    - Confirm brand guidelines (Google / Meta)
-                    - Decide button ordering and spacing relative to email/password form
-                    - Add tracking for tap events (provider, success/failure, latency) */}
-                  {isSocialProviderEnabled('Google') && <TouchableOpacity
-                    style={[
-                      styles.socialButton,
-                      isSocialAuthInProgress && styles.socialButtonDisabled,
-                    ]}
-                    onPress={handleGoogleSignInPress}
-                    disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
-                    activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
-                  >
-                    <Text style={styles.socialButtonText} allowFontScaling={false}>
-                      Continue with Google
-                    </Text>
-                  </TouchableOpacity>}
-
-                  {isSocialProviderEnabled('Facebook') && <TouchableOpacity
-                    style={[
-                      styles.socialButton,
-                      isSocialAuthInProgress && styles.socialButtonDisabled,
-                    ]}
-                    onPress={handleFacebookSignInPress}
-                    disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
-                    activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
-                  >
-                    <Text style={styles.socialButtonText} allowFontScaling={false}>
-                      Continue with Facebook
-                    </Text>
-                  </TouchableOpacity>}
-
-                  {isSocialProviderEnabled('TikTok') && <TouchableOpacity
-                    style={[
-                      styles.socialButton,
-                      isSocialAuthInProgress && styles.socialButtonDisabled,
-                    ]}
-                    onPress={handleTikTokSignInPress}
-                    disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
-                    activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
-                  >
-                    <Text style={styles.socialButtonText} allowFontScaling={false}>
-                      Continue with TikTok
-                    </Text>
-                  </TouchableOpacity>}
-
-                  {Platform.OS === 'ios' && isSocialProviderEnabled('Apple') && (
-                    <TouchableOpacity
-                      style={[
-                        styles.socialButton,
-                        isSocialAuthInProgress && styles.socialButtonDisabled,
-                      ]}
-                      onPress={handleAppleSignInPress}
-                      disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
-                      activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
-                    >
-                      <Text style={styles.socialButtonText} allowFontScaling={false}>
-                        Continue with Apple
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </>
             )}
 
             {resetMode && (
@@ -987,6 +1032,7 @@ const AuthScreen = () => {
               </Text>
             )}
           </View>
+          </ScrollView>
         </KeyboardAvoidingView>
         {/* Debug footer (dev only) */}
         {__DEV__ && (
@@ -1112,12 +1158,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
+    paddingVertical: 28,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 56,
+    marginBottom: 36,
   },
   logoText: {
     fontSize: 48,
@@ -1146,7 +1196,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#ffffff',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   input: {
     backgroundColor: '#1C1C22',
@@ -1329,8 +1379,8 @@ const styles = StyleSheet.create({
   socialDivider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 16,
+    marginTop: 4,
+    marginBottom: 18,
   },
   socialDividerLine: {
     flex: 1,
@@ -1343,25 +1393,55 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   socialButtonsRow: {
-    gap: 12,
+    gap: 10,
+    marginBottom: 4,
   },
   socialButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 999,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: '#1C1C22',
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+  },
+  socialButtonGoogle: {
+    backgroundColor: '#F5F5F7',
+    borderColor: 'rgba(255,255,255,0.9)',
+  },
+  socialButtonFacebook: {
+    backgroundColor: '#121216',
+    borderColor: 'rgba(24,119,242,0.45)',
+  },
+  socialButtonTikTok: {
+    backgroundColor: '#121216',
+    borderColor: 'rgba(254,44,85,0.4)',
+  },
+  socialButtonApple: {
+    backgroundColor: '#000000',
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  socialButtonInner: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
+    gap: 10,
+  },
+  socialGlyph: {
+    fontSize: 18,
+    fontWeight: '800',
+    width: 20,
+    textAlign: 'center',
   },
   socialButtonDisabled: {
     opacity: 0.6,
   },
   socialButtonText: {
     color: '#e5e7eb',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  socialButtonTextDark: {
+    color: '#0A0A0C',
   },
   usernameInput: {
     marginBottom: 6,

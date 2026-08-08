@@ -23,6 +23,7 @@ import PressableLift from '../motion/PressableLift';
 import { COLORS } from '../../styles/theme';
 import { useAuth } from '../../hooks/useCommon';
 import { subscribeTeams, applyToRunTeam, getMyMembership } from '../../services/teamsService';
+import { fetchVerificationState, isProfileVerified } from '../../services/verificationService';
 
 const TeamsContent = ({ navigation }) => {
   const { user, uid } = useAuth();
@@ -33,6 +34,7 @@ const TeamsContent = ({ navigation }) => {
   const [pitch, setPitch] = useState('');
   const [applying, setApplying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [verified, setVerified] = useState(false);
 
   useEffect(() => {
     const unsub = subscribeTeams((list) => {
@@ -48,6 +50,12 @@ const TeamsContent = ({ navigation }) => {
     if (!uid) return;
     const m = await getMyMembership(uid);
     setMyTeamId(m?.teamId || null);
+    try {
+      const state = await fetchVerificationState(uid);
+      setVerified(!!state.verified || isProfileVerified(state));
+    } catch {
+      setVerified(false);
+    }
   }, [uid]);
 
   useEffect(() => { refreshMembership(); }, [refreshMembership]);
@@ -58,6 +66,25 @@ const TeamsContent = ({ navigation }) => {
     setRefreshing(false);
   }, [refreshMembership]);
 
+  const openApply = () => {
+    if (!uid) {
+      Alert.alert('Sign in required', 'Please sign in to apply to run a team.');
+      return;
+    }
+    if (!verified) {
+      Alert.alert(
+        'Verification required',
+        'Verify your profile before applying to run a team. You can submit identity info or link an authenticator in Edit Profile.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Edit Profile', onPress: () => navigation?.navigate?.('EditProfile') },
+        ],
+      );
+      return;
+    }
+    setApplyOpen(true);
+  };
+
   const submitApplication = async () => {
     if (!pitch.trim()) {
       Alert.alert('Tell us about your team', 'Add a short pitch so we know what your team is about.');
@@ -65,6 +92,17 @@ const TeamsContent = ({ navigation }) => {
     }
     if (!uid) {
       Alert.alert('Sign in required', 'Please sign in to apply to run a team.');
+      return;
+    }
+    if (!verified) {
+      Alert.alert(
+        'Verification required',
+        'Verify your profile before applying to run a team.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Edit Profile', onPress: () => navigation?.navigate?.('EditProfile') },
+        ],
+      );
       return;
     }
     setApplying(true);
@@ -88,7 +126,15 @@ const TeamsContent = ({ navigation }) => {
       setPitch('');
       Alert.alert('Application sent', "Thanks! We'll review your team and be in touch in your notifications.");
     } catch (e) {
-      Alert.alert('Something went wrong', e?.message || 'Please try again.');
+      const msg = e?.message || 'Please try again.';
+      if (String(msg).toLowerCase().includes('verify')) {
+        Alert.alert('Verification required', msg, [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Edit Profile', onPress: () => navigation?.navigate?.('EditProfile') },
+        ]);
+      } else {
+        Alert.alert('Something went wrong', msg);
+      }
     } finally {
       setApplying(false);
     }
@@ -149,10 +195,12 @@ const TeamsContent = ({ navigation }) => {
               <PressableLift
                 style={[styles.actionBtn, styles.actionGhost]}
                 contentStyle={styles.actionBtnInner}
-                onPress={() => setApplyOpen(true)}
+                onPress={openApply}
               >
                 <Icon name="add-circle-outline" size={18} color={COLORS.primary} />
-                <Text style={styles.actionGhostText}>Apply to run a team</Text>
+                <Text style={styles.actionGhostText}>
+                  {verified ? 'Apply to run a team' : 'Verify to run a team'}
+                </Text>
               </PressableLift>
             </View>
             <Text style={styles.sectionLabel}>All teams</Text>
@@ -175,7 +223,8 @@ const TeamsContent = ({ navigation }) => {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Apply to run a team</Text>
             <Text style={styles.modalSub}>
-              Tell us about your team — who it's for, your experience, and your goals.
+              Tell us about your team — who it's for, your experience, and your goals. Running a team
+              requires a verified Blyp profile.
             </Text>
             <TextInput
               style={styles.modalInput}

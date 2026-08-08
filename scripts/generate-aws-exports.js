@@ -26,7 +26,7 @@ const LOCKED_USER_POOL_ID = 'eu-west-2_ITX07Zvnt';
 const cognitoDomain = pickEnv('EXPO_PUBLIC_COGNITO_DOMAIN');
 const redirectSignIn = pickEnv('EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN') || 'blyp://auth/';
 const redirectSignOut = pickEnv('EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT') || 'blyp://auth/signout/';
-const socialProviders = (pickEnv('EXPO_PUBLIC_SOCIAL_PROVIDERS') || 'Google,Facebook')
+const socialProviders = (pickEnv('EXPO_PUBLIC_SOCIAL_PROVIDERS') || 'Google,Facebook,TikTok')
   .split(',')
   .map((provider) => provider.trim())
   .filter(Boolean);

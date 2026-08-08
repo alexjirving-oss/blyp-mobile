@@ -1,8 +1,25 @@
-# Blyp social sign-in setup
+﻿# Blyp social sign-in setup
 
 The mobile code uses Cognito Hosted UI federation. Google, Facebook, optional
 Apple, and TikTok accounts therefore finish as normal Blyp Cognito user-pool
 sessions; no second identity system is created.
+
+## Login UI (client)
+
+`AuthScreen` always shows **Continue with Google / Facebook / TikTok** (plus
+**Apple on iOS**) above the email form, matching Blyp's dark/teal login card.
+Set `EXPO_PUBLIC_ENABLE_SOCIAL_AUTH=false` only if you need to hide the entire
+row.
+
+Tapping a provider:
+- **works** when `EXPO_PUBLIC_COGNITO_DOMAIN` is set, Amplify is configured, the
+  provider is listed in `EXPO_PUBLIC_SOCIAL_PROVIDERS`, and that IdP is enabled
+  on the Cognito app client;
+- otherwise shows a clear "coming soon / setup needed" alert pointing here —
+  buttons stay visible so the product promise is honest.
+
+Native dependency required for Hosted UI on device: `@aws-amplify/rtn-web-browser`
+(and `expo-web-browser`). Rebuild the native binary after installing those.
 
 TikTok Login Kit is OAuth 2.0, not OpenID Connect: TikTok does not issue the ID
 token or publish the JWKS that a Cognito custom OIDC provider requires. Do not
@@ -31,11 +48,14 @@ EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT=blyp://auth/signout/
 EXPO_PUBLIC_SOCIAL_PROVIDERS=Google,Facebook,TikTok
 ```
 
-Only add `TikTok` (and optional `Apple`) to `EXPO_PUBLIC_SOCIAL_PROVIDERS` after
-the corresponding Cognito provider is configured. The Cognito custom provider
-name is case-sensitive and must be exactly `TikTok`. `scripts/generate-aws-exports.js`
-writes these public values into the EAS artifact. Enter the Cognito domain
-without `https://`.
+`EXPO_PUBLIC_COGNITO_DOMAIN` is the missing switch that actually starts Hosted
+UI. Until it is set (and IdPs are configured in Console), the buttons appear but
+cannot complete OAuth.
+
+Only add `Apple` to `EXPO_PUBLIC_SOCIAL_PROVIDERS` after the Apple provider is
+configured. The Cognito custom provider name for TikTok is case-sensitive and
+must be exactly `TikTok`. `scripts/generate-aws-exports.js` writes these public
+values into the EAS artifact. Enter the Cognito domain without `https://`.
 
 ## Cognito user pool
 

@@ -9,6 +9,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, auth, firebaseEnabled } from '../config/firebase';
 import { getBlockedSet, loadBlockedUsers } from './BlockService';
+import { isProfileVerified } from './verificationService';
 
 const KEY = (uid) => '@blyp/datingPrefs/' + (uid || 'anon');
 
@@ -323,7 +324,7 @@ export async function confirmAdult(uid) {
   });
 }
 
-/** Toggle discovery opt-in. Refuses if adult not confirmed or birth year missing. */
+/** Toggle discovery opt-in. Refuses if adult not confirmed, birth year missing, or unverified. */
 export async function setDatingOptIn(uid, optedIn) {
   const current = await getDatingPrefs(uid);
   if (optedIn && !current.adultConfirmed) {
@@ -331,6 +332,26 @@ export async function setDatingOptIn(uid, optedIn) {
   }
   if (optedIn && ageFromBirthYear(current.birthYear) == null) {
     throw new Error('Add your birth year in Prefs before joining Discover.');
+  }
+  if (optedIn && firebaseEnabled && db && uid) {
+    try {
+      const userSnap = await db.collection('users').doc(uid).get();
+      const userData =
+        (userSnap && (typeof userSnap.data === 'function' ? userSnap.data() : userSnap.data)) || {};
+      if (!isProfileVerified(userData)) {
+        const err = new Error('Verify your profile before joining Dating.');
+        err.code = 'VERIFICATION_REQUIRED';
+        throw err;
+      }
+    } catch (e) {
+      if (e?.code === 'VERIFICATION_REQUIRED' || String(e?.message || '').includes('Verify your profile')) {
+        throw e;
+      }
+      console.warn('[dating] verification check failed', e?.message || String(e));
+      const err = new Error('Verify your profile before joining Dating.');
+      err.code = 'VERIFICATION_REQUIRED';
+      throw err;
+    }
   }
   return setDatingPrefs(uid, { optedIn: !!optedIn });
 }

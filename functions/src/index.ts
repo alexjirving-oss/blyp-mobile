@@ -65,6 +65,7 @@ export { onBattleComplete } from './battles/battleStats';
 export { blypAssistantCompose } from './assistant/compose';
 // Dating — like/pass writes (server-owned matches; Phase 5 rate limits + age gate)
 export { blypDatingLike, blypDatingPass } from './dating/handlers';
+export { blypVerificationSubmit } from './verification/handlers';
 // Clubs Phase 3 — server-minted earnable badges (live host / marble podium / early)
 export { blypSyncBadgeAwards, onLiveSessionBadgeAward } from './badges/handlers';
 // Gemini proxy (P7.4): keep the API key server-side; client calls authenticated relay

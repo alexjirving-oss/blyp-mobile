@@ -37,6 +37,7 @@ import AvatarRing from '../components/motion/AvatarRing';
 import { COLORS, SHADOWS } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useHasAI } from '../hooks/useEntitlement';
+import { fetchVerificationState } from '../services/verificationService';
 import { useAuth } from '../hooks/useCommon';
 import { db } from '../config/firebase';
 import { conversationsMessagingService } from '../services/messaging';
@@ -430,6 +431,8 @@ const DatingScreen = ({ navigation, embedded = false }) => {
   const [connectionBusyId, setConnectionBusyId] = useState(null);
   const [chatBusyId, setChatBusyId] = useState(null);
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [profileVerified, setProfileVerified] = useState(false);
+  const [verificationChecked, setVerificationChecked] = useState(false);
 
   const [bioDraft, setBioDraft] = useState('');
   const [birthYearDraft, setBirthYearDraft] = useState('');
@@ -550,6 +553,8 @@ const DatingScreen = ({ navigation, embedded = false }) => {
       setCards([]);
       setMatches([]);
       setIncomingLikes([]);
+      setProfileVerified(false);
+      setVerificationChecked(true);
       setLoading(false);
       return;
     }
@@ -557,8 +562,13 @@ const DatingScreen = ({ navigation, embedded = false }) => {
     setLoading(true);
     try {
       await loadBlockedUsers().catch(() => {});
-      const nextPrefs = await getDatingPrefs(uid);
+      const [nextPrefs, verification] = await Promise.all([
+        getDatingPrefs(uid),
+        fetchVerificationState(uid).catch(() => ({ verified: false })),
+      ]);
       setPrefs(nextPrefs);
+      setProfileVerified(!!verification?.verified);
+      setVerificationChecked(true);
 
       const [nextCards, nextMatches, nextLikes] = await Promise.all([
         canParticipateInDiscover(nextPrefs)
@@ -631,6 +641,17 @@ const DatingScreen = ({ navigation, embedded = false }) => {
         Alert.alert('18+ required', 'Confirm you are 18 or older before joining Dating.');
         return;
       }
+      if (value && !profileVerified) {
+        Alert.alert(
+          'Verification required',
+          'Verify your Blyp profile before joining Dating. Submit identity info or link an authenticator in Edit Profile.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Edit Profile', onPress: () => navigation.navigate('EditProfile') },
+          ],
+        );
+        return;
+      }
       if (value && !(prefs?.birthYear != null && Number(prefs.birthYear) > 0)) {
         Alert.alert(
           'Finish one detail',
@@ -652,12 +673,20 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           setCardIndex(0);
         }
       } catch (error) {
-        Alert.alert("Couldn't update", error?.message || 'Please try again.');
+        const msg = error?.message || 'Please try again.';
+        if (String(msg).toLowerCase().includes('verify')) {
+          Alert.alert('Verification required', msg, [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Edit Profile', onPress: () => navigation.navigate('EditProfile') },
+          ]);
+        } else {
+          Alert.alert("Couldn't update", msg);
+        }
       } finally {
         setBusy(false);
       }
     },
-    [uid, busy, prefs?.adultConfirmed, prefs?.birthYear, refreshDiscovery],
+    [uid, busy, prefs?.adultConfirmed, prefs?.birthYear, profileVerified, refreshDiscovery, navigation],
   );
 
   const onSaveBio = useCallback(async () => {
@@ -1334,6 +1363,46 @@ const DatingScreen = ({ navigation, embedded = false }) => {
           icon="checkmark"
           onPress={onConfirmAdult}
           disabled={busy}
+          style={styles.gateCta}
+        />
+        {!embedded ? (
+          <TouchableOpacity style={styles.textButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.textButtonLabel}>Not now</Text>
+          </TouchableOpacity>
+        ) : null}
+      </ScrollView>,
+    );
+  }
+
+  if (verificationChecked && !profileVerified) {
+    return frame(
+      <ScrollView
+        contentContainerStyle={styles.gateScroll}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.gateVisual}>
+          <View style={styles.gateHaloOne} />
+          <View style={styles.gateHaloTwo} />
+          <View style={styles.gateHeart}>
+            <Icon name="shield-checkmark" size={34} color={DATING.accent} />
+          </View>
+        </View>
+        <Text style={styles.gateEyebrow}>VERIFIED MEMBERS</Text>
+        <Text style={styles.gateTitle}>Verify before you meet.</Text>
+        <Text style={styles.gateBody}>
+          Dating is for verified Blyp profiles. Submit identity info or link a trusted
+          authenticator in Edit Profile, then come back here.
+        </Text>
+        <View style={styles.assuranceCard}>
+          <Icon name="checkmark-circle-outline" size={22} color={DATING.petal} />
+          <Text style={styles.assuranceText}>
+            Verification also unlocks applying to run your own team.
+          </Text>
+        </View>
+        <GradientButton
+          label="Go to Edit Profile"
+          icon="arrow-forward"
+          onPress={() => navigation.navigate('EditProfile')}
           style={styles.gateCta}
         />
         {!embedded ? (

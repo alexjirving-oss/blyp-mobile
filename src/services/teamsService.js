@@ -786,7 +786,7 @@ export async function decideAudition(auditionId, candidateUid, decision) {
   return true;
 }
 
-/** User applies to run their own team. */
+/** User applies to run their own team. Requires profile verification. */
 export async function applyToRunTeam(user, pitch) {
   // Cognito users often have `sub` / attributes.sub, not Firebase-style `.uid`.
   const uid =
@@ -803,6 +803,26 @@ export async function applyToRunTeam(user, pitch) {
     // Still attempt the write — bridge may already be ready.
     console.warn('[teams] ensureFirebaseAuthReady:', e?.message || e);
   }
+
+  try {
+    const { isProfileVerified } = await import('./verificationService');
+    const userSnap = await getDoc(doc(db, 'users', uid));
+    const userData = userSnap.exists() ? userSnap.data() : {};
+    if (!isProfileVerified(userData || {})) {
+      const err = new Error('Verify your profile before applying to run a team.');
+      err.code = 'VERIFICATION_REQUIRED';
+      throw err;
+    }
+  } catch (e) {
+    if (e?.code === 'VERIFICATION_REQUIRED' || String(e?.message || '').includes('Verify your profile')) {
+      throw e;
+    }
+    console.warn('[teams] verification check failed', e?.message || e);
+    const err = new Error('Verify your profile before applying to run a team.');
+    err.code = 'VERIFICATION_REQUIRED';
+    throw err;
+  }
+
   const person = await resolvePublicPerson(
     {
       uid,
@@ -826,6 +846,7 @@ export async function applyToRunTeam(user, pitch) {
       status: JOIN_STATUS.PENDING,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      requiresVerified: true,
     },
     { merge: true }
   );

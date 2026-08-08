@@ -2,15 +2,15 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ScreenContainer from '../components/ScreenContainer';
 import Icon from '../components/Icon';
 import { Alert, Image, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import Toast from 'react-native-toast-message';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs, limit as fsLimit } from 'firebase/firestore';
 import { storage, firestore as db } from '../config/firebase';
 import { useAuth } from '../hooks/useCommon';
 import { useHasAI } from '../hooks/useEntitlement';
 import BlypLogo from '../components/BlypLogo';
+import StandingBadge from '../components/StandingBadge';
 import { COLORS } from '../styles/theme';
 import {
   BADGE_CATALOG,
@@ -25,6 +25,18 @@ import { syncClubMembershipIndex } from '../services/clubDiscoveryService';
 import { fetchEarnedBadgeIds, syncBadgeAwards } from '../services/badgeAwardsService';
 import { setOwnProfileCache } from '../services/ownProfileCache';
 import { claimUsername, validateUsername } from '../services/usernameProfileService';
+import {
+  EXTERNAL_AUTH_PROVIDERS,
+  ID_DOCUMENT_TYPES,
+  VERIFICATION_STATUS,
+  listAvailableExternalProviders,
+  normalizeVerificationStatus,
+  readCognitoLinkedProviders,
+  submitVerification,
+  verificationStatusLabel,
+} from '../services/verificationService';
+
+const PRONOUN_OPTIONS = ['she/her', 'he/him', 'they/them', 'custom'];
 
 const EditProfileScreen = ({ navigation, route }) => {
   const profileFromRoute = route?.params?.profile ?? route?.params?.user ?? null;
@@ -35,6 +47,11 @@ const EditProfileScreen = ({ navigation, route }) => {
   const [username, setUsername] = useState(profileFromRoute?.username ?? profileFromRoute?.handle ?? '');
   const [bio, setBio] = useState(profileFromRoute?.bio ?? '');
   const [profileImage, setProfileImage] = useState(profileFromRoute?.photoURL ?? '');
+  const [location, setLocation] = useState(profileFromRoute?.location ?? profileFromRoute?.city ?? '');
+  const [country, setCountry] = useState(profileFromRoute?.country ?? '');
+  const [website, setWebsite] = useState(profileFromRoute?.website ?? '');
+  const [pronouns, setPronouns] = useState(profileFromRoute?.pronouns ?? '');
+  const [pronounCustom, setPronounCustom] = useState('');
   const [profileClubs, setProfileClubs] = useState(() =>
     normalizeProfileClubs(profileFromRoute?.profileClubs, getProfileIdentityCaps(false).maxClubs)
   );
@@ -54,11 +71,32 @@ const EditProfileScreen = ({ navigation, route }) => {
   const [savedProfileClubs, setSavedProfileClubs] = useState(() =>
     normalizeProfileClubs(profileFromRoute?.profileClubs, getProfileIdentityCaps(false).maxClubs)
   );
+  const [verificationStatus, setVerificationStatus] = useState(() =>
+    normalizeVerificationStatus(profileFromRoute?.verificationStatus, profileFromRoute?.verified)
+  );
+  const [verificationMethod, setVerificationMethod] = useState(profileFromRoute?.verificationMethod || null);
+  const [verificationBusy, setVerificationBusy] = useState(false);
+  const [verifyPath, setVerifyPath] = useState('identity'); // identity | external
+  const [legalFullName, setLegalFullName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
+  const [idCity, setIdCity] = useState('');
+  const [idRegion, setIdRegion] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [idCountry, setIdCountry] = useState('');
+  const [idDocumentType, setIdDocumentType] = useState('passport');
+  const [idDocumentLast4, setIdDocumentLast4] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState('Google');
   const initialUsernameRef = useRef(
     String(profileFromRoute?.username || profileFromRoute?.handle || '')
       .trim()
       .replace(/^@/, '')
   );
+
+  const externalProviders = useMemo(() => listAvailableExternalProviders(authUser), [authUser]);
+  const linkedProviders = useMemo(() => readCognitoLinkedProviders(authUser), [authUser]);
+  const profileVerified = verificationStatus === VERIFICATION_STATUS.VERIFIED;
 
   const resolvedEmail = useMemo(() => {
     if (profileFromRoute?.email) return profileFromRoute.email;
@@ -119,6 +157,24 @@ const EditProfileScreen = ({ navigation, route }) => {
           }
           if (userData.bio) setBio(userData.bio);
           if (userData.photoURL) setProfileImage((prev) => prev || userData.photoURL);
+          if (userData.location || userData.city) {
+            setLocation(String(userData.location || userData.city || ''));
+          }
+          if (userData.country) setCountry(String(userData.country));
+          if (userData.website) setWebsite(String(userData.website));
+          if (userData.pronouns) {
+            const p = String(userData.pronouns);
+            if (PRONOUN_OPTIONS.includes(p) && p !== 'custom') {
+              setPronouns(p);
+            } else {
+              setPronouns('custom');
+              setPronounCustom(p);
+            }
+          }
+          setVerificationStatus(
+            normalizeVerificationStatus(userData.verificationStatus, userData.verified || userData.isVerified)
+          );
+          setVerificationMethod(userData.verificationMethod || null);
           const loadedClubs = normalizeProfileClubs(userData.profileClubs, identityCaps.maxClubs);
           setProfileClubs(loadedClubs);
           setSavedProfileClubs(loadedClubs);
@@ -173,6 +229,87 @@ const EditProfileScreen = ({ navigation, route }) => {
       setDisplayName(mirrored);
     }
   }, [username, displayName]);
+
+  const resolvedPronouns = useMemo(() => {
+    if (pronouns === 'custom') return String(pronounCustom || '').trim().slice(0, 40);
+    return String(pronouns || '').trim().slice(0, 40);
+  }, [pronouns, pronounCustom]);
+
+  const markVerifiedLocally = (result) => {
+    setVerificationStatus(
+      normalizeVerificationStatus(result?.verificationStatus, result?.verified)
+    );
+    setVerificationMethod(result?.verificationMethod || null);
+  };
+
+  const handleSubmitIdentityVerification = async () => {
+    if (profileVerified || verificationBusy) return;
+    setVerificationBusy(true);
+    try {
+      const result = await submitVerification({
+        method: 'identity',
+        identity: {
+          legalFullName,
+          dateOfBirth,
+          addressLine1,
+          addressLine2,
+          city: idCity || location,
+          region: idRegion,
+          postalCode,
+          country: idCountry || country,
+          idDocumentType,
+          idDocumentLast4,
+        },
+      });
+      markVerifiedLocally(result);
+      Toast.show({
+        type: 'success',
+        text1: 'You are verified',
+        text2: 'Dating and running a team are now unlocked.',
+        position: 'bottom',
+        visibilityTime: 2400,
+      });
+    } catch (e) {
+      Alert.alert('Verification', e?.message || 'Could not submit identity verification.');
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
+
+  const handleSubmitExternalVerification = async () => {
+    if (profileVerified || verificationBusy) return;
+    const provider = selectedProvider || 'Google';
+    const linked = linkedProviders.length
+      ? linkedProviders
+      : readCognitoLinkedProviders(authUser);
+    if (!linked.some((p) => String(p).toLowerCase().includes(String(provider).toLowerCase()))) {
+      Alert.alert(
+        'Link required',
+        `Sign in once with ${provider} so Blyp can confirm that authenticator on this account, or submit identity info instead.`,
+      );
+      return;
+    }
+    setVerificationBusy(true);
+    try {
+      const result = await submitVerification({
+        method: 'external_auth',
+        provider,
+        linkedProviders: linked,
+      });
+      markVerifiedLocally(result);
+      Toast.show({
+        type: 'success',
+        text1: 'You are verified',
+        text2: `Linked via ${provider}.`,
+        position: 'bottom',
+        visibilityTime: 2400,
+      });
+    } catch (e) {
+      Alert.alert('Verification', e?.message || 'Could not verify with that authenticator.');
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
 
   const pickImage = async () => {
     try {
@@ -321,6 +458,10 @@ const EditProfileScreen = ({ navigation, route }) => {
         identityCaps.maxBadges
       );
       const bioTrimmed = bio.trim();
+      const locationTrimmed = String(location || '').trim().slice(0, 80);
+      const countryTrimmed = String(country || '').trim().slice(0, 80);
+      const websiteTrimmed = String(website || '').trim().slice(0, 160);
+      const pronounsTrimmed = resolvedPronouns;
       const userDocRef = doc(db, 'users', uid);
       await claimUsername({
         uid,
@@ -336,6 +477,11 @@ const EditProfileScreen = ({ navigation, route }) => {
         photoURL: photoURL,
         bio: bioTrimmed,
         email: resolvedEmail,
+        location: locationTrimmed,
+        city: locationTrimmed,
+        country: countryTrimmed,
+        website: websiteTrimmed,
+        pronouns: pronounsTrimmed,
         profileClubs: clubsToSave,
         profileBadges: badgesToSave,
         updatedAt: new Date(),
@@ -354,8 +500,15 @@ const EditProfileScreen = ({ navigation, route }) => {
             photoURL,
             bio: bioTrimmed,
             email: resolvedEmail,
+            location: locationTrimmed,
+            city: locationTrimmed,
+            country: countryTrimmed,
+            website: websiteTrimmed,
+            pronouns: pronounsTrimmed,
             profileClubs: clubsToSave,
             profileBadges: badgesToSave,
+            verified: profileVerified,
+            verificationStatus,
           },
         });
       } catch (cacheErr) {
@@ -513,6 +666,86 @@ const EditProfileScreen = ({ navigation, route }) => {
               <Text style={styles.helperText}>Email cannot be changed</Text>
             </View>
 
+            <View style={styles.sectionDivider}>
+              <Text style={styles.sectionEyebrow}>ABOUT YOU</Text>
+              <Text style={styles.sectionTitle}>Core profile details</Text>
+              <Text style={styles.sectionBody}>
+                These show on your public profile and help Blyp personalize clubs, Dating, and teams.
+              </Text>
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Pronouns</Text>
+              <View style={styles.chipGrid}>
+                {PRONOUN_OPTIONS.map((option) => {
+                  const selected = pronouns === option;
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.pickChip, selected && styles.pickChipSelected]}
+                      onPress={() => setPronouns(option)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                    >
+                      <Text style={[styles.pickChipText, selected && styles.pickChipTextSelected]}>
+                        {option === 'custom' ? 'Custom' : option}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {pronouns === 'custom' ? (
+                <TextInput
+                  style={[styles.input, { marginTop: 10 }]}
+                  value={pronounCustom}
+                  onChangeText={setPronounCustom}
+                  placeholder="e.g. xe/xem"
+                  placeholderTextColor="#9ca3af"
+                  maxLength={40}
+                />
+              ) : null}
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>City / location</Text>
+              <TextInput
+                style={styles.input}
+                value={location}
+                onChangeText={setLocation}
+                placeholder="Where you're based"
+                placeholderTextColor="#9ca3af"
+                maxLength={80}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Country</Text>
+              <TextInput
+                style={styles.input}
+                value={country}
+                onChangeText={setCountry}
+                placeholder="Country"
+                placeholderTextColor="#9ca3af"
+                maxLength={80}
+              />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <Text style={styles.label}>Website or link</Text>
+              <TextInput
+                style={styles.input}
+                value={website}
+                onChangeText={setWebsite}
+                placeholder="https://"
+                placeholderTextColor="#9ca3af"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                maxLength={160}
+              />
+              <Text style={styles.helperText}>Optional public link for your profile.</Text>
+            </View>
+
             <View style={styles.inputContainer}>
               <Text style={styles.label}>Clubs</Text>
               <Text style={styles.helperText}>
@@ -639,40 +872,257 @@ const EditProfileScreen = ({ navigation, route }) => {
             </View>
           </View>
 
-          {/* Additional Options */}
-          <View style={styles.optionsSection}>
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={() => navigation.navigate('NotificationSettings')}
-              accessibilityRole="button"
-              accessibilityLabel="Notification Settings"
-            >
-              <Icon name="notifications-outline" size={24} color="#d1d5db" />
-              <Text style={styles.optionText}>Notification Settings</Text>
-              <Icon name="chevron-forward" size={20} color="#9ca3af" />
-            </TouchableOpacity>
+          <View style={styles.verificationSection}>
+            <View style={styles.sectionDivider}>
+              <Text style={styles.sectionEyebrow}>TRUST</Text>
+              <View style={styles.verificationTitleRow}>
+                <Text style={styles.sectionTitle}>Verification</Text>
+                {profileVerified ? (
+                  <StandingBadge
+                    profile={{ verified: true }}
+                    variant="chip"
+                    label="Verified"
+                  />
+                ) : null}
+              </View>
+              <Text style={styles.sectionBody}>
+                Verified members can use Dating and apply to run their own team. Choose identity
+                details or a linked authenticator.
+              </Text>
+            </View>
 
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={() => navigation.navigate('PrivacySettings')}
-              accessibilityRole="button"
-              accessibilityLabel="Privacy and Security"
+            <View
+              style={[
+                styles.statusCard,
+                profileVerified && styles.statusCardVerified,
+                verificationStatus === VERIFICATION_STATUS.PENDING && styles.statusCardPending,
+                verificationStatus === VERIFICATION_STATUS.REJECTED && styles.statusCardRejected,
+              ]}
             >
-              <Icon name="shield-outline" size={24} color="#d1d5db" />
-              <Text style={styles.optionText}>Privacy & Security</Text>
-              <Icon name="chevron-forward" size={20} color="#9ca3af" />
-            </TouchableOpacity>
+              <Icon
+                name={profileVerified ? 'checkmark-circle' : 'shield-outline'}
+                size={22}
+                color={profileVerified ? '#34c759' : '#00D2BE'}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.statusTitle}>
+                  Status: {verificationStatusLabel(verificationStatus)}
+                </Text>
+                <Text style={styles.statusBody}>
+                  {profileVerified
+                    ? `Verified via ${verificationMethod === 'external_auth' ? 'linked authenticator' : 'identity info'}.`
+                    : verificationStatus === VERIFICATION_STATUS.REJECTED
+                      ? 'Previous submission needs updates. Submit again below.'
+                      : 'Unverified — Dating and team ownership stay locked until you verify.'}
+                </Text>
+              </View>
+            </View>
 
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={() => navigation.navigate('HelpSupport')}
-              accessibilityRole="button"
-              accessibilityLabel="Help and Support"
-            >
-              <Icon name="help-circle-outline" size={24} color="#d1d5db" />
-              <Text style={styles.optionText}>Help & Support</Text>
-              <Icon name="chevron-forward" size={20} color="#9ca3af" />
-            </TouchableOpacity>
+            {!profileVerified ? (
+              <>
+                <View style={styles.pathRow}>
+                  <TouchableOpacity
+                    style={[styles.pathChip, verifyPath === 'identity' && styles.pathChipActive]}
+                    onPress={() => setVerifyPath('identity')}
+                  >
+                    <Text
+                      style={[
+                        styles.pathChipText,
+                        verifyPath === 'identity' && styles.pathChipTextActive,
+                      ]}
+                    >
+                      Identity info
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.pathChip, verifyPath === 'external' && styles.pathChipActive]}
+                    onPress={() => setVerifyPath('external')}
+                  >
+                    <Text
+                      style={[
+                        styles.pathChipText,
+                        verifyPath === 'external' && styles.pathChipTextActive,
+                      ]}
+                    >
+                      Link authenticator
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {verifyPath === 'identity' ? (
+                  <View style={styles.verifyForm}>
+                    <Text style={styles.helperText}>
+                      Legal details stay private for review. Only the verified badge is public.
+                    </Text>
+                    <Text style={styles.fieldLabel}>Full legal name</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={legalFullName}
+                      onChangeText={setLegalFullName}
+                      placeholder="Name as on your ID"
+                      placeholderTextColor="#9ca3af"
+                      maxLength={120}
+                    />
+                    <Text style={styles.fieldLabel}>Date of birth (YYYY-MM-DD)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={dateOfBirth}
+                      onChangeText={setDateOfBirth}
+                      placeholder="1998-04-12"
+                      placeholderTextColor="#9ca3af"
+                      autoCapitalize="none"
+                      maxLength={10}
+                    />
+                    <Text style={styles.fieldLabel}>Street address</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={addressLine1}
+                      onChangeText={setAddressLine1}
+                      placeholder="Address line 1"
+                      placeholderTextColor="#9ca3af"
+                      maxLength={160}
+                    />
+                    <TextInput
+                      style={[styles.input, { marginTop: 8 }]}
+                      value={addressLine2}
+                      onChangeText={setAddressLine2}
+                      placeholder="Address line 2 (optional)"
+                      placeholderTextColor="#9ca3af"
+                      maxLength={160}
+                    />
+                    <Text style={styles.fieldLabel}>City</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={idCity}
+                      onChangeText={setIdCity}
+                      placeholder={location || 'City'}
+                      placeholderTextColor="#9ca3af"
+                      maxLength={80}
+                    />
+                    <Text style={styles.fieldLabel}>State / region</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={idRegion}
+                      onChangeText={setIdRegion}
+                      placeholder="Region"
+                      placeholderTextColor="#9ca3af"
+                      maxLength={80}
+                    />
+                    <Text style={styles.fieldLabel}>Postal / ZIP code</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={postalCode}
+                      onChangeText={setPostalCode}
+                      placeholder="Postal code"
+                      placeholderTextColor="#9ca3af"
+                      maxLength={32}
+                    />
+                    <Text style={styles.fieldLabel}>Country</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={idCountry}
+                      onChangeText={setIdCountry}
+                      placeholder={country || 'Country'}
+                      placeholderTextColor="#9ca3af"
+                      maxLength={80}
+                    />
+                    <Text style={styles.fieldLabel}>ID document type</Text>
+                    <View style={styles.chipGrid}>
+                      {ID_DOCUMENT_TYPES.map((docType) => {
+                        const selected = idDocumentType === docType.id;
+                        return (
+                          <TouchableOpacity
+                            key={docType.id}
+                            style={[styles.pickChip, selected && styles.pickChipSelected]}
+                            onPress={() => setIdDocumentType(docType.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.pickChipText,
+                                selected && styles.pickChipTextSelected,
+                              ]}
+                            >
+                              {docType.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                    <Text style={styles.fieldLabel}>Last 4 of ID number</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={idDocumentLast4}
+                      onChangeText={setIdDocumentLast4}
+                      placeholder="••••"
+                      placeholderTextColor="#9ca3af"
+                      autoCapitalize="characters"
+                      maxLength={4}
+                    />
+                    <TouchableOpacity
+                      style={[styles.verifyButton, verificationBusy && styles.verifyButtonDisabled]}
+                      onPress={handleSubmitIdentityVerification}
+                      disabled={verificationBusy}
+                      accessibilityRole="button"
+                      accessibilityLabel="Submit identity verification"
+                    >
+                      <Text style={styles.verifyButtonText}>
+                        {verificationBusy ? 'Submitting…' : 'Submit identity verification'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.verifyForm}>
+                    <Text style={styles.helperText}>
+                      Use a Google, Apple, or Facebook session already linked on this Cognito account.
+                      If nothing is linked yet, sign in with that provider once, then return here — or
+                      use identity info instead.
+                    </Text>
+                    <View style={styles.chipGrid}>
+                      {(externalProviders.length ? externalProviders : EXTERNAL_AUTH_PROVIDERS).map(
+                        (provider) => {
+                          const id = provider.id || provider;
+                          const label = provider.label || provider;
+                          const linked = !!provider.linked;
+                          const selected = selectedProvider === id;
+                          return (
+                            <TouchableOpacity
+                              key={id}
+                              style={[
+                                styles.pickChip,
+                                selected && styles.pickChipSelected,
+                                linked && styles.providerLinked,
+                              ]}
+                              onPress={() => setSelectedProvider(id)}
+                            >
+                              <Text
+                                style={[
+                                  styles.pickChipText,
+                                  selected && styles.pickChipTextSelected,
+                                ]}
+                              >
+                                {label}
+                                {linked ? ' · linked' : ''}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        }
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.verifyButton, verificationBusy && styles.verifyButtonDisabled]}
+                      onPress={handleSubmitExternalVerification}
+                      disabled={verificationBusy}
+                      accessibilityRole="button"
+                      accessibilityLabel="Verify with linked authenticator"
+                    >
+                      <Text style={styles.verifyButtonText}>
+                        {verificationBusy ? 'Verifying…' : `Verify with ${selectedProvider}`}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            ) : null}
           </View>
         </ScrollView>
       </View>
@@ -852,27 +1302,127 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 16,
   },
-  optionsSection: {
+  sectionDivider: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  sectionEyebrow: {
+    color: '#00D2BE',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    marginBottom: 6,
+  },
+  sectionTitle: {
+    color: '#f8fafc',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  sectionBody: {
+    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+  },
+  verificationSection: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 32,
+    paddingBottom: 40,
   },
-  optionItem: {
+  verificationTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#141418',
-    borderRadius: 12,
-    marginBottom: 8,
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  statusCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#3F3F46',
+    backgroundColor: '#141418',
+    marginBottom: 14,
   },
-  optionText: {
-    flex: 1,
+  statusCardVerified: {
+    borderColor: 'rgba(52, 199, 89, 0.45)',
+    backgroundColor: 'rgba(52, 199, 89, 0.08)',
+  },
+  statusCardPending: {
+    borderColor: 'rgba(245, 166, 35, 0.45)',
+    backgroundColor: 'rgba(245, 166, 35, 0.08)',
+  },
+  statusCardRejected: {
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  statusTitle: {
     color: '#f8fafc',
-    fontSize: 16,
-    marginLeft: 16,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  statusBody: {
+    color: '#9ca3af',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  pathRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  pathChip: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+    backgroundColor: '#141418',
+    alignItems: 'center',
+  },
+  pathChipActive: {
+    borderColor: 'rgba(0, 210, 190, 0.55)',
+    backgroundColor: 'rgba(0, 210, 190, 0.12)',
+  },
+  pathChipText: {
+    color: '#d1d5db',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pathChipTextActive: {
+    color: '#E6FFFB',
+  },
+  verifyForm: {
+    gap: 4,
+    paddingBottom: 12,
+  },
+  fieldLabel: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  providerLinked: {
+    borderColor: 'rgba(52, 199, 89, 0.4)',
+  },
+  verifyButton: {
+    marginTop: 18,
+    backgroundColor: '#00D2BE',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  verifyButtonDisabled: {
+    opacity: 0.55,
+  },
+  verifyButtonText: {
+    color: '#001b18',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });
 

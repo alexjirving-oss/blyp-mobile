@@ -19,7 +19,12 @@
         "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
         "EXPO_PUBLIC_AWS_IDENTITY_POOL_ID": "eu-west-2:d398d19e-6d42-4ce2-860d-958803cb61f3",
         "EXPO_PUBLIC_STREAMING_BACKEND": "ivs",
-        "EXPO_PUBLIC_API_BASE_URL": "http://127.0.0.1:4000"
+        "EXPO_PUBLIC_API_BASE_URL": "http://127.0.0.1:4000",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "true",
+        "EXPO_PUBLIC_ENABLE_AMPLIFY": "true",
+        "EXPO_PUBLIC_SOCIAL_PROVIDERS": "Google,Facebook,TikTok",
+        "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN": "blyp://auth/",
+        "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT": "blyp://auth/signout/"
       },
       "cache": {
         "key": "webrtc-dev-001"
@@ -54,6 +59,11 @@
         "EXPO_PUBLIC_AWS_COGNITO_REGION": "eu-west-2",
         "EXPO_PUBLIC_AWS_USER_POOL_ID": "eu-west-2_ITX07Zvnt",
         "EXPO_PUBLIC_AWS_USER_POOL_WEB_CLIENT_ID": "4a7r115hllaedriqsjlsa00snj",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "true",
+        "EXPO_PUBLIC_ENABLE_AMPLIFY": "true",
+        "EXPO_PUBLIC_SOCIAL_PROVIDERS": "Google,Facebook,TikTok",
+        "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN": "blyp://auth/",
+        "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT": "blyp://auth/signout/",
         "FORCE_GENERATE_AWS_EXPORTS": "1"
       }
     },
@@ -88,6 +98,11 @@
         "EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED": "1",
         "EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED": "1",
         "EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED": "1",
+        "EXPO_PUBLIC_ENABLE_SOCIAL_AUTH": "true",
+        "EXPO_PUBLIC_ENABLE_AMPLIFY": "true",
+        "EXPO_PUBLIC_SOCIAL_PROVIDERS": "Google,Facebook,TikTok",
+        "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN": "blyp://auth/",
+        "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT": "blyp://auth/signout/",
         "FORCE_GENERATE_AWS_EXPORTS": "1"
       }
     }
