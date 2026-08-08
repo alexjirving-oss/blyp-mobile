@@ -103,9 +103,9 @@ const ROLE_PERMISSIONS: Record<AdminRole, PermSet> = {
     'appeals.resolve',
     'users.message',
   ),
+  // Mel (admin): ops + fraud + withdraw reject — never coin/gem credit (owner-only).
   admin: set(
     'kill.soft.write',
-    'economy.credit',
     'economy.withdraw.reject',
     'users.ban',
     'users.unban',

@@ -557,6 +557,17 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
     }
   }
 
+  if (!canCredit) {
+    return (
+      <div className="card stack">
+        <h3 className="panel-title">Wallet · add bonus coins</h3>
+        <InfoNote>
+          Coin credit is Owner-only (<code>economy.credit</code>). Balances and ledger remain on User 360 / Economy.
+        </InfoNote>
+      </div>
+    );
+  }
+
   return (
     <div className="card stack">
       <h3 className="panel-title">Wallet · add bonus coins</h3>
@@ -584,9 +595,8 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
         </div>
       </div>
 
-      {!canCredit && <WarnNote>Credit disabled for your role (needs economy.credit).</WarnNote>}
       {!confirming ? (
-        <button className="btn" disabled={!validAmount || !canCredit} onClick={() => { setErr(null); setMsg(null); setConfirming(true); }}>
+        <button className="btn" disabled={!validAmount} onClick={() => { setErr(null); setMsg(null); setConfirming(true); }}>
           Add bonus coins
         </button>
       ) : (
@@ -595,7 +605,7 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
             Confirm crediting <strong>{amount.toLocaleString()}</strong> non-withdrawable bonus coins to {u.displayName || u.username || u.userId}.
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <button className="btn" disabled={busy || !canCredit} onClick={submit}>
+            <button className="btn" disabled={busy} onClick={submit}>
               {busy ? "Crediting…" : "Confirm & add bonus coins"}
             </button>
             <button className="btn ghost" disabled={busy} onClick={() => setConfirming(false)}>

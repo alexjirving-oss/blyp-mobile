@@ -561,10 +561,11 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, requirePermission
 });
 
 /**
- * Credit coins from the admin dashboard.
- * Auth: ADMIN_ALLOWLIST_SUBS only (same as other /admin/* routes).
- * Reuses economy creditCoinsAdmin ledger path. The separate
- * /economy/admin/credit-coins endpoint still requires ECONOMY_ADMIN_CREDIT_ENABLED
+ * Credit bonus coins from the admin dashboard.
+ * Auth: ADMIN_ALLOWLIST + requirePermission('economy.credit') — owner role only
+ * (stripped from default admin / Mel). Soft cap still applies if credit is ever
+ * re-granted to a non-owner role. Reuses economy creditCoinsAdmin ledger path.
+ * Separate /economy/admin/credit-coins still needs ECONOMY_ADMIN_CREDIT_ENABLED
  * + ECONOMY_ADMIN_ALLOWLIST_SUBS for non-dashboard callers.
  */
 router.post('/admin/users/:userId/credit-coins', requireAdmin, requirePermission('economy.credit'), async (req: AuthedRequest, res: Response) => {

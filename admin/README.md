@@ -32,7 +32,7 @@ npm run dev
 
 | Action | How | Auth |
 |--------|-----|------|
-| Dashboard coin credit | Person detail → Wallet → `POST /admin/users/:id/credit-coins` | `ADMIN_ALLOWLIST_SUBS` (dashboard only). Credits **BONUS_COIN** (non-withdrawable). |
+| Dashboard coin credit | Person detail → Wallet → `POST /admin/users/:id/credit-coins` | Allowlist + RBAC `economy.credit` (**owner** only; stripped from `admin` / Mel). Credits **BONUS_COIN** (non-withdrawable). |
 | Withdrawal settle | Economy → pending review → Approve/Reject | `ADMIN_ALLOWLIST_SUBS`; Approve needs Stripe secrets |
 | Direct economy credit | `POST /economy/admin/credit-coins` | `ECONOMY_ADMIN_CREDIT_ENABLED=1` **and** `ECONOMY_ADMIN_ALLOWLIST_SUBS` |
 | In-app (mobile) admin | Person detail → Role `admin`/`manager` → Save capabilities | Syncs Firestore `users/{cognitoSub}` (`roles` + `isAdmin`) via Admin SDK |
