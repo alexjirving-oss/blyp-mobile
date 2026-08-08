@@ -63,6 +63,10 @@ import {
   getWithdrawEligibility,
   requestWithdrawal,
 } from './withdrawalService';
+import {
+  CreatorInsightsPeriod,
+  getCreatorInsights,
+} from './creatorInsightsService';
 import { followUser, unfollowUser } from './socialFollowService';
 import {
   checkMatchdayEntitlement,
@@ -236,6 +240,31 @@ router.get('/wallet', async (req: AuthedRequest, res) => {
   } catch (e: any) {
     const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+router.get('/creator/insights', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const rawPeriod =
+      typeof req.query?.period === 'string' ? req.query.period.trim().toLowerCase() : 'month';
+    if (rawPeriod !== 'week' && rawPeriod !== 'month' && rawPeriod !== 'all') {
+      return res.status(400).json({
+        error: 'INVALID_INPUT',
+        code: 'INVALID_INPUT',
+        detail: 'period must be week, month, or all',
+      });
+    }
+    const result = await getCreatorInsights(userId, rawPeriod as CreatorInsightsPeriod);
+    res.json(result);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({
+      error: err.message,
+      code: err.code,
+      detail: err.detail,
+    });
   }
 });
 

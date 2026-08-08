@@ -288,6 +288,88 @@ export interface StreamSummaryResponse {
   };
 }
 
+export type CreatorInsightsPeriod = 'week' | 'month' | 'all';
+
+export interface CreatorGiftMetric {
+  count: number;
+  events: number;
+  coins: number;
+}
+
+export interface CreatorGiftPerson {
+  userId: string;
+  displayName: string;
+  handle: string;
+  photoURL: string | null;
+  giftCount: number;
+  eventCount: number;
+  coins: number;
+}
+
+export interface CreatorInsightsResponse {
+  period: CreatorInsightsPeriod;
+  window: {
+    startAt: string | null;
+    endAt: string;
+  };
+  content: {
+    publishedCount: number;
+    videoCount: number;
+    postCount: number;
+    likesReceived: number;
+    commentsReceived: number;
+    shares: number;
+    views: number;
+    watchTimeSeconds: number;
+    completions: number;
+    bestPost: {
+      id: string;
+      title: string;
+      thumbnail: string | null;
+      likes: number;
+      comments: number;
+      shares: number;
+      views: number;
+      watchTimeSeconds: number;
+      type: string;
+      videoUrl: string | null;
+    } | null;
+  };
+  live: {
+    sessionCount: number;
+    durationSeconds: number;
+    likesReceived: number;
+    views: number;
+    peakViewers: number;
+  };
+  audience: {
+    followersTotal: number;
+    followingTotal: number;
+    followersGained: number;
+  };
+  gifts: {
+    posts: CreatorGiftMetric;
+    live: CreatorGiftMetric;
+    sent: CreatorGiftMetric & { people: number };
+    topGifters: CreatorGiftPerson[];
+    topGifted: CreatorGiftPerson[];
+  };
+  battles: {
+    played: number;
+    wins: number;
+    losses: number;
+    draws: number;
+  };
+  availability: {
+    watchTime: 'post_reach_dwell_ms';
+    resultCapped: boolean;
+    postEngagementBasis: string;
+    followerGainBasis: string;
+    giftContextBasis: string;
+  };
+  generatedAt: string;
+}
+
 export interface AdminCreditCoinsInput {
   targetUserId: string;
   coins: number;
@@ -387,6 +469,16 @@ export async function getMyPromotions(): Promise<MyPromotionsResponse> {
 
 export async function getEconomyStreamSummary(streamId: string): Promise<StreamSummaryResponse> {
   return await callEconomyBackend<StreamSummaryResponse>(`/economy/stream/${encodeURIComponent(streamId)}/summary`, 'GET');
+}
+
+export async function getCreatorInsights(
+  period: CreatorInsightsPeriod = 'month'
+): Promise<CreatorInsightsResponse> {
+  return await callEconomyBackend<CreatorInsightsResponse>(
+    '/creator/insights',
+    'GET',
+    { period }
+  );
 }
 
 export async function creditEconomyCoinsAdmin(

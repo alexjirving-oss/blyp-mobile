@@ -23,7 +23,8 @@ import PressableLift from '../motion/PressableLift';
 import { COLORS, SHADOWS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
 import { useAuth } from '../../hooks/useCommon';
-import { getProfileStats, getCreatorAnalytics } from '../../services/profileStatsService';
+import { getProfileStats } from '../../services/profileStatsService';
+import { getCreatorInsights } from '../../api/economyLiveApi';
 import { fixStorageUrl } from '../../utils/urlUtils';
 
 const fmt = (n) => {
@@ -32,6 +33,20 @@ const fmt = (n) => {
   if (v >= 1000) return `${(v / 1000).toFixed(1)}K`;
   return String(v);
 };
+
+const fmtDuration = (seconds) => {
+  const totalMinutes = Math.max(0, Math.round((Number(seconds) || 0) / 60));
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+};
+
+const PERIODS = [
+  { key: 'week', label: '7 days', detail: 'the last 7 days' },
+  { key: 'month', label: '30 days', detail: 'the last 30 days' },
+  { key: 'all', label: 'All time', detail: 'all time' },
+];
 
 const QUICK_LINKS = [
   {
@@ -70,13 +85,6 @@ const RHYTHM_STATS = [
   { key: 'watched', label: 'Watched', icon: 'play-circle', color: COLORS.success },
 ];
 
-const CREATOR_STATS = [
-  { key: 'totalViews', label: 'Views' },
-  { key: 'totalComments', label: 'Comments' },
-  { key: 'avgLikes', label: 'Avg likes' },
-  { key: 'postsLast30', label: 'Last 30 days' },
-];
-
 const SectionHeading = ({ eyebrow, title, detail }) => (
   <View style={styles.sectionHeading}>
     <Text style={styles.sectionEyebrow}>{eyebrow}</Text>
@@ -93,19 +101,100 @@ const HeroMetric = ({ label, value, color }) => (
   </View>
 );
 
+const InsightMetric = ({ icon, label, value, detail, color = COLORS.primary }) => (
+  <View style={styles.insightMetric}>
+    <View style={[styles.insightIcon, { backgroundColor: `${color}18` }]}>
+      <Icon name={icon} size={17} color={color} />
+    </View>
+    <Text style={styles.insightValue} numberOfLines={1} adjustsFontSizeToFit>
+      {value}
+    </Text>
+    <Text style={styles.insightLabel}>{label}</Text>
+    {detail ? <Text style={styles.insightDetail}>{detail}</Text> : null}
+  </View>
+);
+
+const GiftMetric = ({ icon, label, count, coins, detail, color }) => (
+  <View style={styles.giftMetric}>
+    <View style={[styles.giftMetricIcon, { backgroundColor: `${color}18` }]}>
+      <Icon name={icon} size={18} color={color} />
+    </View>
+    <View style={styles.giftMetricCopy}>
+      <Text style={styles.giftMetricLabel}>{label}</Text>
+      <View style={styles.giftMetricValues}>
+        <Text style={styles.giftMetricValue}>{fmt(count)} gifts</Text>
+        <View style={styles.giftMetricDot} />
+        <Text style={styles.giftMetricCoins}>{fmt(coins)} coins</Text>
+      </View>
+      {detail ? <Text style={styles.giftMetricDetail}>{detail}</Text> : null}
+    </View>
+  </View>
+);
+
+const PeopleList = ({ title, eyebrow, people, emptyText }) => (
+  <View style={styles.peoplePanel}>
+    <View style={styles.peopleHeading}>
+      <Text style={styles.peopleEyebrow}>{eyebrow}</Text>
+      <Text style={styles.peopleTitle}>{title}</Text>
+    </View>
+    {people.length > 0 ? (
+      people.map((person, index) => {
+        const avatar = person.photoURL ? fixStorageUrl(person.photoURL) : null;
+        return (
+          <View
+            key={person.userId}
+            style={[styles.personRow, index === people.length - 1 && styles.personRowLast]}
+          >
+            <View style={styles.personRank}>
+              <Text style={styles.personRankText}>{index + 1}</Text>
+            </View>
+            {avatar ? (
+              <Image source={{ uri: avatar }} style={styles.personAvatar} />
+            ) : (
+              <View style={[styles.personAvatar, styles.personAvatarFallback]}>
+                <Icon name="person-outline" size={17} color={COLORS.textMuted} />
+              </View>
+            )}
+            <View style={styles.personCopy}>
+              <Text style={styles.personName} numberOfLines={1}>
+                {person.displayName}
+              </Text>
+              <Text style={styles.personMeta} numberOfLines={1}>
+                {person.handle ? `@${person.handle} · ` : ''}
+                {fmt(person.giftCount)} gifts
+              </Text>
+            </View>
+            <View style={styles.personCoins}>
+              <Icon name="sparkles" size={12} color={COLORS.warning} />
+              <Text style={styles.personCoinsText}>{fmt(person.coins)}</Text>
+            </View>
+          </View>
+        );
+      })
+    ) : (
+      <View style={styles.peopleEmpty}>
+        <Icon name="gift" size={19} color={COLORS.textMuted} />
+        <Text style={styles.peopleEmptyText}>{emptyText}</Text>
+      </View>
+    )}
+  </View>
+);
+
 const YourBlypContent = ({ navigation }) => {
   const { uid } = useAuth();
   const [stats, setStats] = useState(null);
   const [analytics, setAnalytics] = useState(null);
+  const [period, setPeriod] = useState('month');
   const [loading, setLoading] = useState(true);
+  const [periodLoading, setPeriodLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const entrance = useRef(new Animated.Value(0)).current;
 
-  const requestData = useCallback(async () => {
+  const requestData = useCallback(async (selectedPeriod = 'month') => {
     const [nextStats, nextAnalytics] = await Promise.all([
       getProfileStats(uid),
-      getCreatorAnalytics(uid),
+      getCreatorInsights(selectedPeriod),
     ]);
     return { nextStats, nextAnalytics };
   }, [uid]);
@@ -116,8 +205,9 @@ const YourBlypContent = ({ navigation }) => {
     setError('');
     setStats(null);
     setAnalytics(null);
+    setPeriod('month');
 
-    requestData()
+    requestData('month')
       .then(({ nextStats, nextAnalytics }) => {
         if (!active) return;
         setStats(nextStats);
@@ -136,7 +226,7 @@ const YourBlypContent = ({ navigation }) => {
   }, [requestData]);
 
   useEffect(() => {
-    if (loading || error) return undefined;
+    if (loading || (error && !analytics)) return undefined;
     let active = true;
     entrance.setValue(0);
 
@@ -159,33 +249,55 @@ const YourBlypContent = ({ navigation }) => {
       active = false;
       entrance.stopAnimation();
     };
-  }, [entrance, error, loading]);
+  }, [analytics, entrance, error, loading]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const { nextStats, nextAnalytics } = await requestData();
+      const { nextStats, nextAnalytics } = await requestData(period);
       setStats(nextStats);
       setAnalytics(nextAnalytics);
       setError('');
     } catch {
-      if (!stats) setError('Your recap could not be refreshed right now.');
+      setError(
+        analytics
+          ? 'This snapshot could not be refreshed right now.'
+          : 'Your creator insights could not be refreshed right now.',
+      );
     } finally {
       setRefreshing(false);
     }
-  }, [requestData, stats]);
+  }, [analytics, period, requestData]);
 
   const retry = useCallback(() => {
     setLoading(true);
     setError('');
-    requestData()
+    requestData(period)
       .then(({ nextStats, nextAnalytics }) => {
         setStats(nextStats);
         setAnalytics(nextAnalytics);
       })
-      .catch(() => setError('Your recap could not be loaded right now.'))
+      .catch(() => setError('Your creator insights could not be loaded right now.'))
       .finally(() => setLoading(false));
-  }, [requestData]);
+  }, [period, requestData]);
+
+  const selectPeriod = useCallback(
+    async (nextPeriod) => {
+      if (nextPeriod === period || periodLoading) return;
+      setPeriodLoading(true);
+      setError('');
+      try {
+        const nextAnalytics = await getCreatorInsights(nextPeriod);
+        setAnalytics(nextAnalytics);
+        setPeriod(nextPeriod);
+      } catch {
+        setError('That time range could not be loaded. Your previous snapshot is still shown.');
+      } finally {
+        setPeriodLoading(false);
+      }
+    },
+    [period, periodLoading],
+  );
 
   const navigate = useCallback(
     (route, params) => {
@@ -215,7 +327,7 @@ const YourBlypContent = ({ navigation }) => {
     );
   }
 
-  if (error && !stats) {
+  if (error && !analytics) {
     return (
       <View style={styles.stateWrap}>
         <View style={styles.errorCard}>
@@ -240,17 +352,34 @@ const YourBlypContent = ({ navigation }) => {
     );
   }
 
-  const hasActivity = [
-    stats?.posts,
-    stats?.likes,
-    stats?.followers,
-    stats?.following,
-    stats?.saved,
-    stats?.watched,
+  const content = analytics?.content || {};
+  const live = analytics?.live || {};
+  const audience = analytics?.audience || {};
+  const gifts = analytics?.gifts || {};
+  const battles = analytics?.battles || {};
+  const periodMeta = PERIODS.find((item) => item.key === period) || PERIODS[1];
+  const likesReceived = (Number(content.likesReceived) || 0) + (Number(live.likesReceived) || 0);
+  const viewsReceived = (Number(content.views) || 0) + (Number(live.views) || 0);
+  const followerValue =
+    period === 'all' ? Number(audience.followersTotal) || 0 : Number(audience.followersGained) || 0;
+  const followerLabel = period === 'all' ? 'Followers' : 'New followers';
+  const hasCreatorActivity = [
+    content.publishedCount,
+    live.sessionCount,
+    likesReceived,
+    gifts?.posts?.count,
+    gifts?.live?.count,
+    gifts?.sent?.count,
+    battles.played,
+  ].some((value) => Number(value) > 0);
+  const hasGiftActivity = [
+    gifts?.posts?.count,
+    gifts?.live?.count,
+    gifts?.sent?.count,
   ].some((value) => Number(value) > 0);
   const interests = Array.isArray(stats?.interests) ? stats.interests : [];
-  const bestThumb = analytics?.bestPost?.thumbnail
-    ? fixStorageUrl(analytics.bestPost.thumbnail)
+  const bestThumb = content?.bestPost?.thumbnail
+    ? fixStorageUrl(content.bestPost.thumbnail)
     : null;
 
   return (
@@ -297,12 +426,12 @@ const YourBlypContent = ({ navigation }) => {
               <Icon name="pulse" size={22} color={COLORS.primary} />
             </View>
             <View style={styles.heroCopy}>
-              <Text style={styles.heroEyebrow}>YOUR SIGNAL</Text>
-              <Text style={styles.heroTitle}>Your corner of Blyp</Text>
+              <Text style={styles.heroEyebrow}>CREATOR INSIGHTS</Text>
+              <Text style={styles.heroTitle}>Your Blyp, in focus</Text>
               <Text style={styles.heroSubtitle}>
-                {hasActivity
-                  ? 'A live view of what you create, collect and connect with.'
-                  : 'Explore, save and create. Your story will take shape here.'}
+                {hasCreatorActivity
+                  ? `Your output, audience and support across ${periodMeta.detail}.`
+                  : `Create, go live or join a battle. Your ${periodMeta.label.toLowerCase()} signal will build here.`}
               </Text>
             </View>
           </View>
@@ -310,63 +439,219 @@ const YourBlypContent = ({ navigation }) => {
           <View style={styles.statusPill}>
             <View style={styles.statusDot} />
             <Text style={styles.statusText}>
-              {analytics?.hasPosts ? 'CREATOR MODE' : hasActivity ? 'TAKING SHAPE' : 'READY WHEN YOU ARE'}
+              {periodLoading ? 'UPDATING SIGNAL' : hasCreatorActivity ? 'LIVE DATA' : 'READY WHEN YOU ARE'}
             </Text>
+            {periodLoading ? (
+              <ActivityIndicator style={styles.statusSpinner} size="small" color={COLORS.primary} />
+            ) : null}
+          </View>
+
+          <View style={styles.periodTabs} accessibilityRole="tablist">
+            {PERIODS.map((item) => {
+              const active = period === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: active, disabled: periodLoading }}
+                  accessibilityLabel={`Show creator insights for ${item.label}`}
+                  style={[styles.periodTab, active && styles.periodTabActive]}
+                  activeOpacity={0.82}
+                  disabled={periodLoading}
+                  onPress={() => selectPeriod(item.key)}
+                >
+                  <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <View style={styles.heroMetrics}>
-            <HeroMetric label="Posts" value={stats?.posts} color={COLORS.primary} />
+            <HeroMetric label="Published" value={content.publishedCount} color={COLORS.primary} />
             <View style={styles.metricDivider} />
-            <HeroMetric label="Likes" value={stats?.likes} color={COLORS.error} />
+            <HeroMetric label="Likes" value={likesReceived} color={COLORS.error} />
             <View style={styles.metricDivider} />
-            <HeroMetric label="Followers" value={stats?.followers} color={COLORS.info} />
+            <HeroMetric label={followerLabel} value={followerValue} color={COLORS.info} />
           </View>
         </LinearGradient>
 
-        <SectionHeading
-          eyebrow="YOUR RHYTHM"
-          title="What you keep close"
-          detail="The people and moments shaping your feed."
-        />
-        <View style={styles.rhythmRow}>
-          {RHYTHM_STATS.map((item) => (
-            <View key={item.key} style={styles.rhythmCard}>
-              <View style={[styles.rhythmIcon, { backgroundColor: `${item.color}18` }]}>
-                <Icon name={item.icon} size={17} color={item.color} />
-              </View>
-              <Text style={styles.rhythmValue}>{fmt(stats?.[item.key])}</Text>
-              <Text style={styles.rhythmLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
+        {error ? (
+          <View style={styles.inlineNotice}>
+            <Icon name="cloud-offline-outline" size={17} color={COLORS.warning} />
+            <Text style={styles.inlineNoticeText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {analytics?.availability?.resultCapped ? (
+          <View style={styles.inlineNotice}>
+            <Icon name="alert-circle-outline" size={17} color={COLORS.warning} />
+            <Text style={styles.inlineNoticeText}>
+              Very large account: totals include the most recent 1,000 posts and live sessions.
+            </Text>
+          </View>
+        ) : null}
 
         <SectionHeading
           eyebrow="CREATOR SIGNAL"
-          title="How your work is landing"
-          detail={
-            analytics?.hasPosts
-              ? 'A clear read on the response to your posts.'
-              : 'Your creator insights will grow with your first post.'
-          }
+          title="What you made happen"
+          detail={`Engagement totals are from posts published in ${periodMeta.detail}; gifts and live time use events inside the window.`}
         />
-        {analytics?.hasPosts ? (
-          <View style={styles.creatorPanel}>
-            <View style={styles.creatorGrid}>
-              {CREATOR_STATS.map((item) => (
-                <View key={item.key} style={styles.creatorMetric}>
-                  <Text style={styles.creatorMetricValue}>{fmt(analytics?.[item.key])}</Text>
-                  <Text style={styles.creatorMetricLabel}>{item.label}</Text>
-                </View>
-              ))}
-            </View>
+        <View style={styles.insightGrid}>
+          <InsightMetric
+            icon="radio-outline"
+            label="Time live"
+            value={fmtDuration(live.durationSeconds)}
+            detail={`${fmt(live.sessionCount)} sessions`}
+            color={COLORS.primary}
+          />
+          <InsightMetric
+            icon="create-outline"
+            label="Published"
+            value={fmt(content.publishedCount)}
+            detail={`${fmt(content.videoCount)} videos · ${fmt(content.postCount)} posts`}
+            color={COLORS.electric}
+          />
+          <InsightMetric
+            icon="heart"
+            label="Likes received"
+            value={fmt(likesReceived)}
+            detail={`${fmt(content.likesReceived)} posts · ${fmt(live.likesReceived)} live`}
+            color={COLORS.error}
+          />
+          <InsightMetric
+            icon="eye-outline"
+            label="Views"
+            value={fmt(viewsReceived)}
+            detail={`Best live peak ${fmt(live.peakViewers)}`}
+            color={COLORS.info}
+          />
+          <InsightMetric
+            icon="time-outline"
+            label="Watch time"
+            value={fmtDuration(content.watchTimeSeconds)}
+            detail={`${fmt(content.completions)} completions`}
+            color={COLORS.electric}
+          />
+          <InsightMetric
+            icon="chatbubble-outline"
+            label="Comments"
+            value={fmt(content.commentsReceived)}
+            detail="On published posts"
+            color={COLORS.success}
+          />
+          <InsightMetric
+            icon="share-social-outline"
+            label="Shares"
+            value={fmt(content.shares)}
+            detail="On published posts"
+            color={COLORS.warning}
+          />
+          <InsightMetric
+            icon="person-add"
+            label={followerLabel}
+            value={fmt(followerValue)}
+            detail={`${fmt(audience.followersTotal)} total`}
+            color={COLORS.info}
+          />
+          <InsightMetric
+            icon="trophy-outline"
+            label="Battle record"
+            value={`${fmt(battles.wins)}-${fmt(battles.losses)}`}
+            detail={`${fmt(battles.draws)} draws · ${fmt(battles.played)} played`}
+            color={COLORS.warning}
+          />
+        </View>
 
-            {analytics.bestPost ? (
+        {!hasCreatorActivity ? (
+          <View style={styles.sectionEmpty}>
+            <View style={styles.sectionEmptyIcon}>
+              <Icon name="pulse-outline" size={23} color={COLORS.primary} />
+            </View>
+            <View style={styles.sectionEmptyCopy}>
+              <Text style={styles.sectionEmptyTitle}>No creator activity in this window</Text>
+              <Text style={styles.sectionEmptyText}>
+                Try another range, publish a post or start a live to begin building your signal.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <SectionHeading
+          eyebrow="GIFTS & SUPPORT"
+          title="How support is moving"
+          detail={`Gift ledger activity across ${periodMeta.detail}. Counts are gift items, not taps.`}
+        />
+        <View style={styles.giftPanel}>
+          <GiftMetric
+            icon="play-circle-outline"
+            label="On your videos & posts"
+            count={gifts?.posts?.count}
+            coins={gifts?.posts?.coins}
+            detail={`${fmt(gifts?.posts?.events)} gift sends`}
+            color={COLORS.electric}
+          />
+          <GiftMetric
+            icon="radio-outline"
+            label="During live sessions"
+            count={gifts?.live?.count}
+            coins={gifts?.live?.coins}
+            detail={`${fmt(gifts?.live?.events)} gift sends`}
+            color={COLORS.primary}
+          />
+          <GiftMetric
+            icon="send-outline"
+            label="You sent"
+            count={gifts?.sent?.count}
+            coins={gifts?.sent?.coins}
+            detail={`${fmt(gifts?.sent?.people)} people gifted`}
+            color={COLORS.warning}
+          />
+        </View>
+
+        {!hasGiftActivity ? (
+          <View style={styles.sectionEmpty}>
+            <View style={styles.sectionEmptyIcon}>
+              <Icon name="gift" size={23} color={COLORS.primary} />
+            </View>
+            <View style={styles.sectionEmptyCopy}>
+              <Text style={styles.sectionEmptyTitle}>No gifts in this window</Text>
+              <Text style={styles.sectionEmptyText}>
+                Gifts you receive and send will appear here with their real coin totals.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.peopleStack}>
+          <PeopleList
+            eyebrow="TOP GIFTERS"
+            title="Who supports you"
+            people={Array.isArray(gifts.topGifters) ? gifts.topGifters : []}
+            emptyText="No supporters to rank in this window yet."
+          />
+          <PeopleList
+            eyebrow="TOP GIFTED"
+            title="Who you support"
+            people={Array.isArray(gifts.topGifted) ? gifts.topGifted : []}
+            emptyText="People you gift will be ranked here."
+          />
+        </View>
+
+        <SectionHeading
+          eyebrow="TOP CONTENT"
+          title="Your strongest post"
+          detail={`Ranked by likes, comments, shares and views among work published in ${periodMeta.detail}.`}
+        />
+        {content.bestPost ? (
+          <View style={styles.creatorPanel}>
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel={`Open top post: ${analytics.bestPost.title || 'Post'}`}
+                accessibilityLabel={`Open top post: ${content.bestPost.title || 'Post'}`}
                 style={styles.bestCard}
                 activeOpacity={0.86}
-                onPress={() => navigate('MediaViewer', { post: { ...analytics.bestPost } })}
+                onPress={() => navigate('MediaViewer', { post: { ...content.bestPost } })}
               >
                 {bestThumb ? (
                   <Image source={{ uri: bestThumb }} style={styles.bestThumb} />
@@ -378,21 +663,22 @@ const YourBlypContent = ({ navigation }) => {
                 <View style={styles.bestInfo}>
                   <View style={styles.bestLabelRow}>
                     <View style={styles.bestSignal} />
-                    <Text style={styles.bestEyebrow}>TOP POST</Text>
+                    <Text style={styles.bestEyebrow}>BEST IN THIS WINDOW</Text>
                   </View>
                   <Text style={styles.bestTitle} numberOfLines={2}>
-                    {analytics.bestPost.title}
+                    {content.bestPost.title}
                   </Text>
                   <View style={styles.bestMeta}>
                     <Icon name="heart" size={13} color={COLORS.error} />
-                    <Text style={styles.bestMetaText}>{fmt(analytics.bestPost.likes)}</Text>
+                    <Text style={styles.bestMetaText}>{fmt(content.bestPost.likes)}</Text>
                     <Icon name="chatbubble" size={13} color={COLORS.info} style={styles.bestMetaIcon} />
-                    <Text style={styles.bestMetaText}>{fmt(analytics.bestPost.comments)}</Text>
+                    <Text style={styles.bestMetaText}>{fmt(content.bestPost.comments)}</Text>
+                    <Icon name="eye-outline" size={13} color={COLORS.success} style={styles.bestMetaIcon} />
+                    <Text style={styles.bestMetaText}>{fmt(content.bestPost.views)}</Text>
                     <Icon name="chevron-forward" size={16} color={COLORS.textMuted} style={styles.bestChevron} />
                   </View>
                 </View>
               </TouchableOpacity>
-            ) : null}
           </View>
         ) : (
           <View style={styles.creatorEmpty}>
@@ -400,9 +686,9 @@ const YourBlypContent = ({ navigation }) => {
               <Icon name="create-outline" size={25} color={COLORS.primary} />
             </View>
             <View style={styles.creatorEmptyCopy}>
-              <Text style={styles.creatorEmptyTitle}>Your creator story starts here</Text>
+              <Text style={styles.creatorEmptyTitle}>Nothing published in this window</Text>
               <Text style={styles.creatorEmptyText}>
-                Share something you care about and this space becomes your performance snapshot.
+                Switch ranges to find older work, or publish your next Blyp to start a new signal.
               </Text>
             </View>
             <TouchableOpacity
@@ -418,6 +704,23 @@ const YourBlypContent = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         )}
+
+        <SectionHeading
+          eyebrow="YOUR RHYTHM"
+          title="What you keep close"
+          detail="Personal totals that sit outside the creator time filter."
+        />
+        <View style={styles.rhythmRow}>
+          {RHYTHM_STATS.map((item) => (
+            <View key={item.key} style={styles.rhythmCard}>
+              <View style={[styles.rhythmIcon, { backgroundColor: `${item.color}18` }]}>
+                <Icon name={item.icon} size={17} color={item.color} />
+              </View>
+              <Text style={styles.rhythmValue}>{fmt(stats?.[item.key])}</Text>
+              <Text style={styles.rhythmLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
 
         <SectionHeading
           eyebrow="YOUR TOPICS"
@@ -697,6 +1000,39 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.9,
   },
+  statusSpinner: {
+    marginLeft: responsiveSize(7),
+    transform: [{ scale: 0.68 }],
+  },
+  periodTabs: {
+    flexDirection: 'row',
+    marginTop: responsiveSize(15),
+    padding: responsiveSize(3),
+    borderRadius: responsiveSize(13),
+    backgroundColor: 'rgba(0,0,0,0.24)',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  periodTab: {
+    flex: 1,
+    minHeight: responsiveSize(34),
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: responsiveSize(10),
+  },
+  periodTabActive: {
+    backgroundColor: 'rgba(0,210,190,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.28)',
+  },
+  periodTabText: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(10),
+    fontWeight: '800',
+  },
+  periodTabTextActive: {
+    color: COLORS.primaryLight,
+  },
   heroMetrics: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -734,6 +1070,26 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.divider,
   },
 
+  inlineNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(9),
+    marginTop: responsiveSize(10),
+    paddingHorizontal: responsiveSize(13),
+    paddingVertical: responsiveSize(11),
+    borderRadius: responsiveSize(13),
+    backgroundColor: 'rgba(251,191,36,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.18)',
+  },
+  inlineNoticeText: {
+    flex: 1,
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(10),
+    lineHeight: responsiveFont(15),
+    fontWeight: '600',
+  },
+
   sectionHeading: {
     marginTop: responsiveSize(28),
     marginBottom: responsiveSize(13),
@@ -757,6 +1113,250 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontSize: responsiveFont(12),
     lineHeight: responsiveFont(18),
+  },
+
+  insightGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: responsiveSize(9),
+  },
+  insightMetric: {
+    width: '48.5%',
+    minHeight: responsiveSize(132),
+    paddingHorizontal: responsiveSize(13),
+    paddingVertical: responsiveSize(13),
+    borderRadius: responsiveSize(17),
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  insightIcon: {
+    width: responsiveSize(32),
+    height: responsiveSize(32),
+    borderRadius: responsiveSize(11),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: responsiveSize(10),
+  },
+  insightValue: {
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(20),
+    lineHeight: responsiveFont(23),
+    fontWeight: '900',
+    letterSpacing: -0.35,
+  },
+  insightLabel: {
+    marginTop: responsiveSize(4),
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(11),
+    fontWeight: '800',
+  },
+  insightDetail: {
+    marginTop: responsiveSize(4),
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(9),
+    lineHeight: responsiveFont(13),
+    fontWeight: '600',
+  },
+  sectionEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(12),
+    marginTop: responsiveSize(10),
+    padding: responsiveSize(14),
+    borderRadius: responsiveSize(16),
+    backgroundColor: 'rgba(0,210,190,0.055)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.14)',
+  },
+  sectionEmptyIcon: {
+    width: responsiveSize(42),
+    height: responsiveSize(42),
+    borderRadius: responsiveSize(14),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,210,190,0.10)',
+  },
+  sectionEmptyCopy: {
+    flex: 1,
+  },
+  sectionEmptyTitle: {
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(12),
+    fontWeight: '900',
+  },
+  sectionEmptyText: {
+    marginTop: responsiveSize(3),
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(10),
+    lineHeight: responsiveFont(15),
+  },
+
+  giftPanel: {
+    borderRadius: responsiveSize(20),
+    paddingHorizontal: responsiveSize(13),
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  giftMetric: {
+    minHeight: responsiveSize(91),
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: responsiveSize(13),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  giftMetricIcon: {
+    width: responsiveSize(39),
+    height: responsiveSize(39),
+    borderRadius: responsiveSize(13),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: responsiveSize(12),
+  },
+  giftMetricCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  giftMetricLabel: {
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(10),
+    fontWeight: '800',
+  },
+  giftMetricValues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginTop: responsiveSize(4),
+  },
+  giftMetricValue: {
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(15),
+    fontWeight: '900',
+  },
+  giftMetricDot: {
+    width: responsiveSize(3),
+    height: responsiveSize(3),
+    borderRadius: responsiveSize(2),
+    marginHorizontal: responsiveSize(7),
+    backgroundColor: COLORS.textDisabled,
+  },
+  giftMetricCoins: {
+    color: COLORS.warning,
+    fontSize: responsiveFont(12),
+    fontWeight: '800',
+  },
+  giftMetricDetail: {
+    marginTop: responsiveSize(4),
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(9),
+    fontWeight: '600',
+  },
+
+  peopleStack: {
+    gap: responsiveSize(10),
+    marginTop: responsiveSize(12),
+  },
+  peoplePanel: {
+    paddingHorizontal: responsiveSize(13),
+    paddingTop: responsiveSize(14),
+    borderRadius: responsiveSize(20),
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+  },
+  peopleHeading: {
+    paddingBottom: responsiveSize(10),
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  peopleEyebrow: {
+    color: COLORS.primary,
+    fontSize: responsiveFont(8),
+    fontWeight: '900',
+    letterSpacing: 1.25,
+  },
+  peopleTitle: {
+    marginTop: responsiveSize(3),
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(14),
+    fontWeight: '900',
+  },
+  personRow: {
+    minHeight: responsiveSize(66),
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  personRowLast: {
+    borderBottomWidth: 0,
+  },
+  personRank: {
+    width: responsiveSize(22),
+    alignItems: 'flex-start',
+  },
+  personRankText: {
+    color: COLORS.textDisabled,
+    fontSize: responsiveFont(9),
+    fontWeight: '900',
+  },
+  personAvatar: {
+    width: responsiveSize(37),
+    height: responsiveSize(37),
+    borderRadius: responsiveSize(13),
+    backgroundColor: COLORS.surfaceAlt,
+  },
+  personAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  personCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: responsiveSize(10),
+  },
+  personName: {
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(11),
+    fontWeight: '800',
+  },
+  personMeta: {
+    marginTop: responsiveSize(3),
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(9),
+    fontWeight: '600',
+  },
+  personCoins: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(4),
+    paddingHorizontal: responsiveSize(8),
+    paddingVertical: responsiveSize(6),
+    borderRadius: responsiveSize(10),
+    backgroundColor: 'rgba(251,191,36,0.08)',
+  },
+  personCoinsText: {
+    color: COLORS.warning,
+    fontSize: responsiveFont(10),
+    fontWeight: '900',
+  },
+  peopleEmpty: {
+    minHeight: responsiveSize(70),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: responsiveSize(8),
+  },
+  peopleEmptyText: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(10),
+    fontWeight: '600',
   },
 
   rhythmRow: {
