@@ -1,7 +1,10 @@
 import {
   LIVE_LAYOUT_MODES,
   buildStickyGuestSlots,
+  buildVisibleGuestSlotIds,
   firstEmptyStickySlot,
+  guestTileWidthPercent,
+  guestsPerTrayPage,
   normalizeLiveLayoutMode,
   layoutUsesBottomTray,
   MAX_GUEST_SLOTS,
@@ -50,5 +53,28 @@ describe('multiGuestLayout sticky slots', () => {
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.BOTTOM_GRID)).toBe(true);
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.EQUAL_GRID)).toBe(false);
     expect(MAX_GUEST_SLOTS).toBe(11);
+  });
+
+  it('uses a 3-wide tray (collapsed 3 / expanded 6)', () => {
+    expect(guestsPerTrayPage(LIVE_LAYOUT_MODES.BOTTOM_GRID, 'collapsed')).toBe(3);
+    expect(guestsPerTrayPage(LIVE_LAYOUT_MODES.BOTTOM_GRID, 'expanded')).toBe(6);
+    expect(guestsPerTrayPage(LIVE_LAYOUT_MODES.HOST_FOCUS, 'expanded')).toBe(3);
+  });
+
+  it('builds a fluid visible slot list that skips empty sticky holes', () => {
+    expect(
+      buildVisibleGuestSlotIds({
+        occupiedSlots: [1, 3],
+        reservedSlots: [5],
+        joinSlotId: 2,
+      })
+    ).toEqual([1, 2, 3, 5]);
+    expect(buildVisibleGuestSlotIds({ occupiedSlots: [], joinSlotId: 1 })).toEqual([1]);
+  });
+
+  it('sizes tiles larger for 1–2 guests and 3-wide beyond that', () => {
+    expect(guestTileWidthPercent(1)).toBeGreaterThan(guestTileWidthPercent(3));
+    expect(guestTileWidthPercent(2)).toBeGreaterThan(guestTileWidthPercent(3));
+    expect(guestTileWidthPercent(4)).toBe(guestTileWidthPercent(3));
   });
 });

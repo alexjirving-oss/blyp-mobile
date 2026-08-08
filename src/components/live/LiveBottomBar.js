@@ -4,8 +4,8 @@ import Icon from '../Icon';
 
 /**
  * Unified live bottom bar. Comment field on the left; glass action pills on the
- * right (Like / Gift / Games / Share). Shared by host and viewer so the room
- * reads as one product — aligned with gift / games sheet chrome.
+ * right (Like / Gift / Games / Share). Shared by host and viewer — aligned with
+ * gift / games sheet chrome (near-black glass + teal accents).
  */
 export default function LiveBottomBar({
   onPressComment,
@@ -33,7 +33,7 @@ export default function LiveBottomBar({
         <Text style={styles.commentPlaceholder} allowFontScaling={false}>
           Say something...
         </Text>
-        <Icon name="happy-outline" size={18} color="rgba(255,255,255,0.55)" />
+        <Icon name="happy-outline" size={18} color="rgba(255,255,255,0.5)" />
       </TouchableOpacity>
 
       <View style={styles.actions}>
@@ -117,13 +117,13 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     paddingHorizontal: 14,
-    backgroundColor: 'rgba(10,10,12,0.62)',
+    backgroundColor: 'rgba(10,10,12,0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(0,210,190,0.28)',
     marginBottom: 16,
   },
   commentPlaceholder: {
-    color: 'rgba(255,255,255,0.55)',
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 14,
     fontWeight: '500',
     flexShrink: 1,
@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
+    gap: 9,
   },
   action: {
     alignItems: 'center',
@@ -144,9 +144,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(10,10,12,0.62)',
+    backgroundColor: 'rgba(10,10,12,0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   likeButton: {
     flexDirection: 'row',
@@ -159,17 +159,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   giftButton: {
-    backgroundColor: 'rgba(0,210,190,0.18)',
-    borderColor: 'rgba(0,210,190,0.55)',
+    backgroundColor: 'rgba(0,210,190,0.20)',
+    borderColor: 'rgba(0,210,190,0.58)',
   },
   gamesButtonActive: {
     backgroundColor: '#FDE68A',
     borderColor: '#FBBF24',
   },
   actionLabel: {
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.78)',
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
     marginTop: 4,
   },
 });
+

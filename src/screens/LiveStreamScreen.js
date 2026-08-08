@@ -26,7 +26,13 @@ import {
   PanResponder,
   InteractionManager,
   StatusBar as RNStatusBar,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -98,6 +104,7 @@ import { getIVSNativeClient } from '../streaming/IVSNativeClient';
 import { COLORS } from '../styles/theme';
 import LiveChatOverlay from '../components/live/LiveChatOverlay';
 import LiveBottomBar from '../components/live/LiveBottomBar';
+import LiveViewerHeader from '../components/live/LiveViewerHeader';
 import LiveReactionsHearts from '../components/live/LiveReactionsHearts';
 import LiveReactionTray from '../components/live/LiveReactionTray';
 import ReportModal from '../components/ReportModal';
@@ -122,7 +129,17 @@ import {
   normalizeLiveLayoutMode,
   layoutUsesBottomTray,
   guestsPerTrayPage,
+  buildVisibleGuestSlotIds,
+  guestTileWidthPercent,
+  guestTileHorizontalMarginPercent,
 } from '../live/ivs/multiGuestLayout';
+
+const GUEST_TRAY_LAYOUT_ANIM = {
+  duration: 280,
+  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+  update: { type: LayoutAnimation.Types.easeInEaseOut },
+  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+};
 import { useLiveStreamRouteParams } from './live/useLiveStreamRouteParams';
 
 import Toast from 'react-native-toast-message';
@@ -620,6 +637,7 @@ const LiveStreamScreen = (props) => {
   const prevHostGuestCountRef = useRef(0);
   const [showLayoutSwitcher, setShowLayoutSwitcher] = useState(false);
   const hostGuestPagerScrollRef = useRef(null);
+  const hostPrevVisibleGuestCountRef = useRef(null);
   const [streamId, setStreamId] = useState(null);
 
   useEffect(() => {
@@ -3824,58 +3842,16 @@ const LiveStreamScreen = (props) => {
           </TapGestureHandler>
         </GestureHandlerRootView>
 
-        {/* Unified compact live header */}
-        <View
-          style={[styles.liveHeader, { top: LIVE_TOP_INSET }]}
-          pointerEvents="box-none"
-        >
-          <View style={styles.liveHeaderIdentity}>
-            {resolvedHostPhotoUrl ? (
-              <Image source={{ uri: resolvedHostPhotoUrl }} style={styles.liveHeaderAvatar} />
-            ) : (
-              <View style={styles.liveHeaderAvatarPlaceholder} />
-            )}
-            <Text style={styles.liveHeaderName} numberOfLines={1} allowFontScaling={false}>
-              {normalizeHandle(resolvedHostName || 'Host')}
-            </Text>
-            <View style={styles.liveHeaderLivePill}>
-              <View style={styles.liveHeaderLiveDot} />
-              <Text style={styles.liveHeaderLiveText} allowFontScaling={false}>LIVE</Text>
-            </View>
-          </View>
-
-                    <View style={styles.liveHeaderSpacer} />
-
-          <View style={styles.liveHeaderStatCluster}>
-            <View style={styles.liveHeaderStat}>
-              <Icon name="eye" size={14} color="#fff" />
-              <Text style={styles.liveHeaderStatText} allowFontScaling={false}>{viewCount}</Text>
-            </View>
-            <View style={styles.liveHeaderStat}>
-              <Icon name="heart" size={14} color="#FB7185" />
-              <Text style={styles.liveHeaderStatText} allowFontScaling={false}>{heartCount}</Text>
-            </View>
-          </View>
-
-          <View style={styles.liveHeaderActionCluster}>
-            <TouchableOpacity
-              style={styles.liveHeaderClose}
-              onPress={openLiveSafetyMenu}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="More options"
-            >
-              <Icon name="ellipsis-horizontal" size={18} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.liveHeaderClose}
-              onPress={goToSummary}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Leave live"
-            >
-              <Icon name="close" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
+        {/* Unified TikTok/IG-class live header */}
+        <LiveViewerHeader
+          topInset={LIVE_TOP_INSET}
+          hostName={normalizeHandle(resolvedHostName || 'Host')}
+          hostPhotoUrl={resolvedHostPhotoUrl}
+          viewCount={viewCount}
+          heartCount={heartCount}
+          onPressMore={openLiveSafetyMenu}
+          onPressClose={goToSummary}
+        />
 
         <ReportModal
           visible={liveReportVisible}
@@ -3893,12 +3869,12 @@ const LiveStreamScreen = (props) => {
         />
 
         <LinearGradient
-          colors={['transparent', 'rgba(10,10,12,0.35)', 'rgba(10,10,12,0.78)']}
-          locations={[0, 0.45, 1]}
+          colors={['transparent', 'rgba(10,10,12,0.28)', 'rgba(10,10,12,0.82)']}
+          locations={[0, 0.4, 1]}
           pointerEvents="none"
           style={[
             styles.viewerBottomVignette,
-            { height: Math.max(160, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 88) },
+            { height: Math.max(180, (viewerCommentsOverlayHeight || 0) + (viewerGuestPagerHeight || 0) + 96) },
           ]}
         />
 
@@ -4401,7 +4377,6 @@ const LiveStreamScreen = (props) => {
                             ? 'expanded'
                             : 'collapsed';
                       const guestsPerPage = guestsPerTrayPage(guestLayoutMode, trayDensity);
-                      const pageCount = Math.max(1, Math.ceil(guestSlotsTotal / guestsPerPage));
                       const guestBySlot = new Map();
                       (ivsHostSession.participants || []).forEach((p) => {
                         // The host (local participant) should never consume a guest slot.
@@ -4418,38 +4393,61 @@ const LiveStreamScreen = (props) => {
                         }
                       });
 
+                      const reservedSlots = new Set();
+                      (liveGuests || []).forEach((g) => {
+                        if (g && typeof g.slotIndex === 'number' && g.slotIndex >= 1) {
+                          reservedSlots.add(g.slotIndex);
+                        }
+                      });
+
                       const firstInviteSlotId = (() => {
                         for (let i = 1; i <= guestSlotsTotal; i += 1) {
                           if (guestBySlot.has(i)) continue;
-                          const reserved = (liveGuests || []).some(
-                            (g) => g && typeof g.slotIndex === 'number' && g.slotIndex === i,
-                          );
-                          if (reserved) continue;
+                          if (reservedSlots.has(i)) continue;
                           return i;
                         }
                         return null;
                       })();
 
+                      const visibleGuestSlotIds = buildVisibleGuestSlotIds({
+                        totalSlots: guestSlotsTotal,
+                        occupiedSlots: guestBySlot.keys(),
+                        reservedSlots,
+                        joinSlotId: firstInviteSlotId,
+                      });
+                      if (firstInviteSlotId == null && visibleGuestSlotIds.length === 0) {
+                        visibleGuestSlotIds.push(1);
+                      }
+                      const pageCount = Math.max(1, Math.ceil(Math.max(1, visibleGuestSlotIds.length) / guestsPerPage));
+                      if (hostPrevVisibleGuestCountRef.current !== visibleGuestSlotIds.length) {
+                        LayoutAnimation.configureNext(GUEST_TRAY_LAYOUT_ANIM);
+                        hostPrevVisibleGuestCountRef.current = visibleGuestSlotIds.length;
+                      }
+
                       return Array.from({ length: pageCount }, (_, pageIdx) => {
-                        const baseIdx = pageIdx * guestsPerPage;
+                        const slotsOnPage = visibleGuestSlotIds.slice(
+                          pageIdx * guestsPerPage,
+                          pageIdx * guestsPerPage + guestsPerPage
+                        );
+                        const pageSlots =
+                          slotsOnPage.length > 0
+                            ? slotsOnPage
+                            : pageIdx === 0 && firstInviteSlotId
+                              ? [firstInviteSlotId]
+                              : pageIdx === 0
+                                ? [1]
+                                : [];
+                        const pageVisibleCount = Math.max(1, pageSlots.length);
+                        const tileWidthPct = guestTileWidthPercent(pageVisibleCount);
+                        const tileMarginPct = guestTileHorizontalMarginPercent(pageVisibleCount);
+                        const tileBaseStyle = {
+                          width: `${tileWidthPct}%`,
+                          marginHorizontal: `${tileMarginPct}%`,
+                        };
                         return (
                           <View key={`host-guest-page-${pageIdx}`} style={styles.ivsGuestPage}>
                             <View style={hostGuestTrayMode === 'collapsed' ? styles.ivsGuestGridCollapsed : styles.ivsGuestGrid}>
-                              {Array.from({ length: guestsPerPage }, (_, tileIdx) => {
-                                const slotId = 1 + baseIdx + tileIdx;
-                                const isOutOfRange = slotId > guestSlotsTotal;
-                                if (isOutOfRange) {
-                                  return (
-                                    <View
-                                      key={`host-guest-empty-${slotId}`}
-                                      style={[
-                                        hostGuestTrayMode === 'collapsed' ? styles.ivsGuestTileCollapsed : styles.ivsGuestTile,
-                                        styles.ivsGuestTileHidden,
-                                      ]}
-                                    />
-                                  );
-                                }
-
+                              {pageSlots.map((slotId) => {
                                 const p = guestBySlot.get(slotId) || null;
                                 const rosterGuest = (liveGuests || []).find(
                                   (g) => g && (
@@ -4464,7 +4462,10 @@ const LiveStreamScreen = (props) => {
                                 return (
                                   <View
                                     key={p?.participantId || `host-guest-slot-${slotId}`}
-                                    style={hostGuestTrayMode === 'collapsed' ? styles.ivsGuestTileCollapsed : styles.ivsGuestTile}
+                                    style={[
+                                      hostGuestTrayMode === 'collapsed' ? styles.ivsGuestTileCollapsed : styles.ivsGuestTile,
+                                      tileBaseStyle,
+                                    ]}
                                   >
                                     {p && NativeIVSRealTimeView && !remoteCamOff ? (
                                       <NativeIVSRealTimeView
@@ -5211,28 +5212,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ivsGuestTile: {
-    // 4 columns (2 rows) => 8 guest slots visible
-    width: '23%',
-    marginHorizontal: '1%',
-    aspectRatio: 1,
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.72)',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.28)',
-  },
-  ivsGuestTileCollapsed: {
-    // 4 columns (1 row) => 4 guest slots visible
-    width: '22.5%',
+    // Fluid 3-wide default; width overridden per visible count for 1→2→3 reflow.
+    width: '30.5%',
     marginHorizontal: '1.25%',
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.72)',
+    backgroundColor: 'rgba(10,10,12,0.78)',
+    marginBottom: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 210, 190, 0.42)',
+  },
+  ivsGuestTileCollapsed: {
+    // Fluid 3-wide row; width overridden when fewer guests for bigger tiles.
+    width: '30.5%',
+    marginHorizontal: '1.25%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,10,12,0.78)',
     marginBottom: 0,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.28)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 210, 190, 0.42)',
   },
   ivsGuestTileHidden: {
     opacity: 0,
@@ -5956,9 +5957,9 @@ const styles = StyleSheet.create({
   liveHeaderIdentity: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(10, 10, 12, 0.62)',
+    backgroundColor: 'rgba(10, 10, 12, 0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(0, 210, 190, 0.38)',
     borderRadius: 999,
     paddingLeft: 4,
     paddingRight: 10,

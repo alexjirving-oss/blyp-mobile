@@ -21,7 +21,14 @@ import {
   PanResponder,
   AppState,
   Image,
+  LayoutAnimation,
+  Platform,
+  UIManager,
 } from 'react-native';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UnifiedVideo from './UnifiedVideo';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
@@ -60,7 +67,17 @@ import {
   normalizeLiveLayoutMode,
   layoutUsesBottomTray,
   guestsPerTrayPage,
+  buildVisibleGuestSlotIds,
+  guestTileWidthPercent,
+  guestTileHorizontalMarginPercent,
 } from '../live/ivs/multiGuestLayout';
+
+const GUEST_TRAY_LAYOUT_ANIM = {
+  duration: 280,
+  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+  update: { type: LayoutAnimation.Types.easeInEaseOut },
+  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+};
 
 import {
   getNativeIVSBroadcastView,
@@ -203,6 +220,7 @@ const IVSLiveStreamViewer = ({
   const [selfPhotoUrl, setSelfPhotoUrl] = useState(null);
   // Set when the host invites this viewer up (host-initiated). Drives an accept prompt.
   const [hostInvite, setHostInvite] = useState(null);
+  const prevVisibleGuestCountRef = useRef(null);
   // Refs so the AppState listener (registered once) reads the latest enforced state.
   const mutedByHostRef = useRef(false);
   const cameraOffByHostRef = useRef(false);
@@ -1165,7 +1183,6 @@ const IVSLiveStreamViewer = ({
       useBottomTray && guestTrayMode !== 'hidden'
         ? guestsPerTrayPage(guestLayoutMode, trayDensity)
         : 0;
-    const pageCount = guestsPerPage > 0 ? Math.max(1, Math.ceil(guestSlotsTotal / guestsPerPage)) : 0;
 
     // Slot-aware tile mapping (single source of truth): place each guest in the
     // box matching its host-assigned slotIndex so the host and all viewers agree.
@@ -1234,6 +1251,34 @@ const IVSLiveStreamViewer = ({
     })();
     // Join CTA always sits in the first empty guest box (box 1 when the panel is empty).
     const firstJoinSlotId = guestMode ? null : firstEmptySlot;
+
+    // Fluid tray: only paint occupied / joining / join-CTA slots so tiles reflow
+    // as guests join and leave (sticky slotIndex still binds media).
+    const reservedSlotsForTray = new Set();
+    userBySlotIndex.forEach((_, slot) => {
+      if (typeof slot === 'number' && slot >= 1) reservedSlotsForTray.add(slot);
+    });
+    const visibleGuestSlotIds =
+      guestsPerPage > 0
+        ? buildVisibleGuestSlotIds({
+            totalSlots: guestSlotsTotal,
+            occupiedSlots,
+            reservedSlots: reservedSlotsForTray,
+            joinSlotId: firstJoinSlotId,
+          })
+        : [];
+    if (guestsPerPage > 0 && !guestMode && firstJoinSlotId == null && visibleGuestSlotIds.length === 0) {
+      visibleGuestSlotIds.push(1);
+    }
+    const pageCount =
+      guestsPerPage > 0 ? Math.max(1, Math.ceil(Math.max(1, visibleGuestSlotIds.length) / guestsPerPage)) : 0;
+    if (
+      guestsPerPage > 0 &&
+      prevVisibleGuestCountRef.current !== visibleGuestSlotIds.length
+    ) {
+      LayoutAnimation.configureNext(GUEST_TRAY_LAYOUT_ANIM);
+      prevVisibleGuestCountRef.current = visibleGuestSlotIds.length;
+    }
 
     // Keep a solid footer-colored band under the tiles so the area directly above
     // the comments overlay never shows the black hostStage background.
@@ -1543,7 +1588,26 @@ const IVSLiveStreamViewer = ({
               scrollEnabled={pageCount > 1}
             >
               {Array.from({ length: pageCount }, (_, pageIdx) => {
-                const baseGuestIndex = pageIdx * guestsPerPage;
+                const pageSlotIds = visibleGuestSlotIds.slice(
+                  pageIdx * guestsPerPage,
+                  pageIdx * guestsPerPage + guestsPerPage
+                );
+                // Always show at least the join tile on page 0 when nothing else yet.
+                const slotsOnPage =
+                  pageSlotIds.length > 0
+                    ? pageSlotIds
+                    : pageIdx === 0 && firstJoinSlotId
+                      ? [firstJoinSlotId]
+                      : pageIdx === 0
+                        ? [1]
+                        : [];
+                const pageVisibleCount = Math.max(1, slotsOnPage.length);
+                const tileWidthPct = guestTileWidthPercent(pageVisibleCount);
+                const tileMarginPct = guestTileHorizontalMarginPercent(pageVisibleCount);
+                const tileBaseStyle = {
+                  width: `${tileWidthPct}%`,
+                  marginHorizontal: `${tileMarginPct}%`,
+                };
                 return (
                   <View key={`guest-page-${pageIdx}`} style={[styles.guestPage, { width: layout.width || undefined }]}>
                     <View style={styles.guestPageInner}>
@@ -1554,27 +1618,13 @@ const IVSLiveStreamViewer = ({
                           if (h) setGuestGridHeight(h);
                         }}
                       >
-                        {Array.from({ length: guestsPerPage }, (_, tileIdx) => {
-                          const globalSlotId = 1 + baseGuestIndex + tileIdx;
-                          const isOutOfRange = globalSlotId > guestSlotsTotal;
+                        {slotsOnPage.map((globalSlotId) => {
                           // Place the guest whose host-assigned slotIndex matches this box,
                           // so the same guest lands in the same box on host + every viewer.
                           const stream =
                             !(guestMode && guestSlotId === globalSlotId)
                               ? streamForSlot(globalSlotId)
                               : null;
-
-                          if (isOutOfRange) {
-                            return (
-                              <View
-                                key={`guest-empty-${globalSlotId}`}
-                                style={[
-                                  guestTrayMode === 'collapsed' ? styles.guestTileSquareCollapsed : styles.guestTileSquare,
-                                  styles.guestTileHidden,
-                                ]}
-                              />
-                            );
-                          }
 
                           const tileUserId =
                             guestMode && guestSlotId === globalSlotId
@@ -1594,7 +1644,10 @@ const IVSLiveStreamViewer = ({
                           return (
                             <View
                               key={stream?.streamKey || stream?.participantId || `guest-slot-${globalSlotId}`}
-                              style={guestTrayMode === 'collapsed' ? styles.guestTileSquareCollapsed : styles.guestTileSquare}
+                              style={[
+                                guestTrayMode === 'collapsed' ? styles.guestTileSquareCollapsed : styles.guestTileSquare,
+                                tileBaseStyle,
+                              ]}
                             >
                               <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinStyles.guestPos} />
                               {isSelfTile ? (
@@ -2925,28 +2978,28 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   guestTileSquare: {
-    // 4 columns (2 rows) => 8 guest slots visible, matching host layout.
-    width: '23%',
-    marginHorizontal: '1%',
-    aspectRatio: 1,
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.72)',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.28)',
-  },
-  guestTileSquareCollapsed: {
-    // 4 columns (1 row) => 4 guest slots visible
-    width: '22.5%',
+    // Fluid 3-wide default; width overridden per visible count for 1→2→3 reflow.
+    width: '30.5%',
     marginHorizontal: '1.25%',
     aspectRatio: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: 'rgba(10,10,12,0.72)',
+    backgroundColor: 'rgba(10,10,12,0.78)',
+    marginBottom: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 210, 190, 0.42)',
+  },
+  guestTileSquareCollapsed: {
+    // Fluid 3-wide row; width overridden when fewer guests for bigger tiles.
+    width: '30.5%',
+    marginHorizontal: '1.25%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(10,10,12,0.78)',
     marginBottom: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 210, 190, 0.28)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 210, 190, 0.42)',
   },
   guestTileHidden: {
     opacity: 0,
