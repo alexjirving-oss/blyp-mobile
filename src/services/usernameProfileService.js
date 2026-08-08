@@ -51,6 +51,27 @@ export function hasValidPublicUsername(profile, uid = '') {
   return validateUsername(candidate, uid).ok;
 }
 
+/**
+ * Cognito Hosted UI / federated accounts (Google, Facebook, Apple, TikTok…).
+ * Email/password users must never see a post-login username overlay.
+ */
+export function isFederatedAuthUser(user) {
+  if (!user) return false;
+  const attrs = user.attributes || {};
+  const rawIdentities = attrs.identities ?? user.identities;
+  if (rawIdentities) {
+    try {
+      const parsed =
+        typeof rawIdentities === 'string' ? JSON.parse(rawIdentities) : rawIdentities;
+      if (Array.isArray(parsed) && parsed.length > 0) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  const username = String(user.username || user.userId || attrs.sub || '').trim();
+  return /^(Google_|Facebook_|SignInWithApple_|LoginWithAmazon_|TikTok)/i.test(username);
+}
+
 export async function rememberPendingProfile(data = {}) {
   const email = String(data.email || '').trim().toLowerCase();
   const payload = {
@@ -115,7 +136,7 @@ export async function clearUsernameDeferred(uid) {
 
 /**
  * After email signup (or when pending carries a username), claim the handle once
- * during AuthScreen success. There is no post-login username overlay.
+ * during AuthScreen success. Post-login overlay is social one-time only.
  */
 export async function claimPendingUsernameIfNeeded({ uid, email, photoURL, username } = {}) {
   if (!uid) return null;

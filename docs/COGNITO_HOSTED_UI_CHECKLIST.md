@@ -1,39 +1,34 @@
 # Cognito Hosted UI — Alex checklist
 
-Client wiring for Google / Facebook / TikTok is in the app. Buttons call
-`signInWithRedirect` via `src/services/socialAuthService.js` when the Hosted UI
-domain is set. **OAuth cannot complete until the items below are done in Console
-+ EAS.** Full runbook: `_agent/auth/SOCIAL_SIGNIN.md`.
+Client + env are wired. Domain is live in AWS:
+`eu-west-2itx07zvnt.auth.eu-west-2.amazoncognito.com`
+(pool `eu-west-2_ITX07Zvnt`, app client `4a7r115hllaedriqsjlsa00snj`).
 
-## Blocked on Alex (not inventable)
+Tapping Google / Facebook / TikTok calls Amplify `signInWithRedirect`. **OAuth
+cannot finish until IdPs exist in Console** (currently `list-identity-providers`
+is empty).
 
-1. **Create / confirm Cognito Hosted UI domain**  
-   Example shape: `<prefix>.auth.eu-west-2.amazoncognito.com` (no `https://`).
-2. **Set EAS env (production + preview)**  
-   `EXPO_PUBLIC_COGNITO_DOMAIN=<that-domain>`  
-   Already present for redirects:
-   - `EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN=blyp://auth/`
-   - `EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT=blyp://auth/signout/`
-3. **Enable IdPs on the app client** (pool `eu-west-2_ITX07Zvnt`, client
-   `4a7r115hllaedriqsjlsa00snj`): Google, Facebook; Apple only if listed in
-   `EXPO_PUBLIC_SOCIAL_PROVIDERS`.
-4. **Hosted UI app client**: Authorization code grant; scopes `openid email
-   profile`; callback / sign-out URLs above; **no client secret**.
-5. **TikTok**: needs the server OIDC bridge (not a direct Cognito OIDC paste) —
-   see SOCIAL_SIGNIN.md. Until the bridge exists, TikTok stays “setup needed”.
-6. **Rebuild / bake** after the domain env is set so `generate-aws-exports.js`
-   embeds oauth into the binary.
+## Remaining Console clicks (secrets only Alex can supply)
+
+1. **Google** — Cognito → User pool → Social / IdP → Add Google. Paste Google
+   OAuth client id + secret. Enable Google on app client
+   `4a7r115hllaedriqsjlsa00snj`. Callback already: `blyp://auth/`.
+2. **Facebook** — Same path with Facebook App id + secret; enable on the same
+   app client.
+3. **Hosted UI / Managed Login** — Authorization code; scopes `openid email
+   profile`; sign-out URL `blyp://auth/signout/`; **no client secret**.
+4. **TikTok** — Needs the server OIDC bridge (not a direct Cognito paste). Until
+   that exists, TikTok may open Hosted UI then fail — expected.
+5. **Optional** — After IdPs exist, set
+   `EXPO_PUBLIC_COGNITO_IDP_PROVIDERS=Google,Facebook` (add TikTok when ready)
+   so builds only advertise live providers.
+
+No bake required for client wiring already in repo; rebuild only if an older tip
+lacks `EXPO_PUBLIC_COGNITO_DOMAIN`.
 
 ## Already done in code
 
-- AuthScreen social buttons + Hosted UI launch path
-- Amplify oauth config from env / aws-exports generator
-- Clear in-app alert when domain / IdP not configured
-- Username overlay first-time only (deferral persisted; no launch spam)
-
-## Verify after Alex sets domain
-
-1. Fresh install of the new tip
-2. Tap Continue with Google → Cognito Hosted UI → return to Blyp signed in
-3. Same for Facebook
-4. TikTok only after bridge + IdP exist
+- `EXPO_PUBLIC_COGNITO_DOMAIN` in `eas.json` (dev / preview / production)
+- Amplify oauth merge in `src/config/amplify.js` + `scripts/generate-aws-exports.js`
+- AuthScreen buttons → `signInWithRedirect` (no “coming soon” gate when domain set)
+- Username: email signup only; social missing-handle = one-time max, never every launch

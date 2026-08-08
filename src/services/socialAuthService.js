@@ -112,38 +112,42 @@ export const isSocialProviderVisible = (provider) =>
     .map((item) => item.toLowerCase())
     .includes(String(provider || '').toLowerCase());
 
-/** Provider is ready when Hosted UI domain is set AND Cognito IdP exists for it. */
+/**
+ * Provider can launch Hosted UI when domain + SOCIAL_PROVIDERS allow it.
+ * Optional EXPO_PUBLIC_COGNITO_IDP_PROVIDERS narrows the set once IdPs exist;
+ * unset/empty means launch OAuth for all listed SOCIAL_PROVIDERS (Console IdP
+ * secrets still required for the redirect to succeed).
+ */
 export const isSocialProviderEnabled = (provider) => {
   if (!isSocialAuthEnabled()) return false;
   const name = String(provider || '').toLowerCase();
   if (!configuredReadyProviders().has(name)) return false;
-  // EXPO_PUBLIC_COGNITO_IDP_PROVIDERS lists IdPs actually created in Cognito.
-  // Empty / unset = none linked yet (Hosted UI would 400). Don't fake-enable.
   const idpRaw = readEnv('EXPO_PUBLIC_COGNITO_IDP_PROVIDERS');
-  if (idpRaw == null || String(idpRaw).trim() === '') return false;
-  if (falsy(idpRaw) || String(idpRaw).trim().toLowerCase() === 'none') return false;
-  const idps = parseProviderList(idpRaw, []).map((p) => p.toLowerCase());
-  return idps.includes(name);
+  if (idpRaw != null && String(idpRaw).trim() !== '') {
+    if (falsy(idpRaw) || String(idpRaw).trim().toLowerCase() === 'none') return false;
+    const idps = parseProviderList(idpRaw, []).map((p) => p.toLowerCase());
+    return idps.includes(name);
+  }
+  return true;
 };
 
 export const getSocialProviderSetupMessage = (provider) => {
   const name = String(provider || 'Social');
   if (!isCognitoFederationConfigured()) {
     return (
-      `${name} sign-in is almost ready — Cognito Hosted UI domain is missing from this build. ` +
-      `Rebuild after EXPO_PUBLIC_COGNITO_DOMAIN is set, then add the ${name} identity provider in Cognito Console.`
+      `${name} sign-in needs Cognito Hosted UI. Set EXPO_PUBLIC_COGNITO_DOMAIN ` +
+      `(eu-west-2itx07zvnt.auth.eu-west-2.amazoncognito.com) and rebuild. ` +
+      `See docs/COGNITO_HOSTED_UI_CHECKLIST.md.`
     );
   }
   if (!configuredReadyProviders().has(name.toLowerCase())) {
     return (
-      `${name} is not listed for this build. Add it to EXPO_PUBLIC_SOCIAL_PROVIDERS after the Cognito provider exists.`
+      `${name} is not listed for this build. Add it to EXPO_PUBLIC_SOCIAL_PROVIDERS.`
     );
   }
   return (
-    `${name} needs the Cognito identity provider on pool eu-west-2_ITX07Zvnt ` +
-    `(Google/Facebook client id+secret from their consoles), enable it on app client ` +
-    `4a7r115hllaedriqsjlsa00snj, then set EXPO_PUBLIC_COGNITO_IDP_PROVIDERS and rebuild. ` +
-    `See docs/COGNITO_HOSTED_UI_CHECKLIST.md.`
+    `${name} Hosted UI should launch. If Cognito returns an IdP error, finish ` +
+    `docs/COGNITO_HOSTED_UI_CHECKLIST.md (add ${name} on pool eu-west-2_ITX07Zvnt).`
   );
 };
 

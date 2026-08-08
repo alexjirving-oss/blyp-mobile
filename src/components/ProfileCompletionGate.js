@@ -1,9 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { db } from '../config/firebase';
+import ProfileCompletionScreen from '../screens/ProfileCompletionScreen';
 import {
   claimUsername,
   clearPendingProfile,
   hasValidPublicUsername,
+  isFederatedAuthUser,
+  isUsernameDeferred,
   markUsernameDeferred,
   readPendingProfileForUser,
   usernameKey,
@@ -11,20 +14,21 @@ import {
 import { snapData } from '../utils/firestoreSnap';
 
 /**
- * Post-auth username helper — NEVER a blocking UI.
+ * Post-auth username helper.
  *
- * Username is collected once during AuthScreen email signup (and claimed on
- * verify). This component only silently finishes that claim if needed.
- *
- * It must never show a username completion screen on cold start, sign-in, or
- * app reopen. Returning users with a handle see zero username UI. Accounts
- * still missing a handle are marked deferred so nothing can re-nag later;
- * they can set a handle in Edit Profile.
+ * - Email/password: username is collected once on AuthScreen signup/verify.
+ *   This gate only silently finishes that claim — never shows UI.
+ * - Social (federated) missing a public handle: one optional prompt, then
+ *   durable deferral so cold start / re-sign-in never re-nags.
+ * - Never blocks the app behind a loading spinner.
  */
 export default function ProfileCompletionGate({ uid, user, children }) {
+  const [socialPrompt, setSocialPrompt] = useState(null);
+
   useEffect(() => {
     if (!uid) return undefined;
     let active = true;
+    setSocialPrompt(null);
 
     const run = async () => {
       const attributes = user?.attributes || {};
@@ -32,8 +36,9 @@ export default function ProfileCompletionGate({ uid, user, children }) {
       const photoURL = String(attributes.picture || user?.photoURL || '').trim();
 
       try {
-        const [pending, snap] = await Promise.all([
+        const [pending, deferred, snap] = await Promise.all([
           readPendingProfileForUser({ email }),
+          isUsernameDeferred(uid),
           db.collection('users').doc(uid).get(),
         ]);
         if (!active) return;
@@ -41,10 +46,8 @@ export default function ProfileCompletionGate({ uid, user, children }) {
         let profile = snapData(snap) || {};
         const currentUsername = profile.username || profile.handle || '';
 
-        // Already has a real public handle — clear leftover signup pending and exit.
         if (hasValidPublicUsername(profile, uid)) {
           if (pending) await clearPendingProfile().catch(() => {});
-          // Backfill usernameKey quietly when missing; never wipe username on failure.
           if (currentUsername && profile.usernameKey !== usernameKey(currentUsername)) {
             try {
               await claimUsername({
@@ -63,7 +66,6 @@ export default function ProfileCompletionGate({ uid, user, children }) {
           return;
         }
 
-        // Finish signup-chosen handle in the background (no overlay).
         const candidate = String(pending?.username || '').trim();
         if (candidate) {
           try {
@@ -76,14 +78,32 @@ export default function ProfileCompletionGate({ uid, user, children }) {
             return;
           } catch (error) {
             console.warn(
-              '[AUTH][PROFILE_GATE] pending claim failed; will not overlay',
+              '[AUTH][PROFILE_GATE] pending claim failed; will not overlay email path',
               error?.code || error?.message || error,
             );
             await clearPendingProfile().catch(() => {});
+            // Fall through — social may still get one-time UI; email stays silent.
           }
         }
 
-        // No handle and nothing left to claim — permanently stop any future nag.
+        // Already skipped once — never re-prompt on later launches / sign-ins.
+        if (deferred) {
+          await clearPendingProfile().catch(() => {});
+          return;
+        }
+
+        // Social only: one-time optional @handle prompt.
+        if (isFederatedAuthUser(user)) {
+          if (!active) return;
+          setSocialPrompt({
+            email: profile.email || email || '',
+            photoURL: profile.photoURL || photoURL || '',
+            initialUsername: candidate || profile.suggestedUsername || '',
+          });
+          return;
+        }
+
+        // Email/password or legacy without a handle — never overlay; stop future nags.
         await markUsernameDeferred(uid).catch(() => {});
         await clearPendingProfile().catch(() => {});
       } catch (error) {
@@ -95,8 +115,29 @@ export default function ProfileCompletionGate({ uid, user, children }) {
     return () => {
       active = false;
     };
-  }, [uid, user?.email, user?.attributes?.email, user?.attributes?.picture, user?.photoURL]);
+  }, [uid, user?.email, user?.username, user?.userId, user?.attributes?.email, user?.attributes?.picture, user?.attributes?.identities, user?.photoURL]);
 
-  // Always render the app. Never block on username UI or a loading spinner.
+  if (socialPrompt) {
+    return (
+      <ProfileCompletionScreen
+        uid={uid}
+        initialUsername={socialPrompt.initialUsername}
+        email={socialPrompt.email}
+        photoURL={socialPrompt.photoURL}
+        canSkip
+        onComplete={() => setSocialPrompt(null)}
+        onSkip={async () => {
+          try {
+            await markUsernameDeferred(uid);
+            await clearPendingProfile();
+          } catch {
+            /* non-fatal */
+          }
+          setSocialPrompt(null);
+        }}
+      />
+    );
+  }
+
   return children;
 }

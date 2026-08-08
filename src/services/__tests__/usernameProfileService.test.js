@@ -18,6 +18,7 @@ import {
   clearPendingProfile,
   clearUsernameDeferred,
   hasValidPublicUsername,
+  isFederatedAuthUser,
   isUsernameDeferred,
   markUsernameDeferred,
   normalizeUsername,
@@ -97,6 +98,21 @@ describe('usernameProfileService', () => {
     }));
     const pending = await readPendingProfileForUser({ email: 'alex@example.com' });
     expect(pending?.username).toBe('Alex.Blyp');
+  });
+
+  it('detects federated Cognito users and rejects email/password', () => {
+    expect(
+      isFederatedAuthUser({
+        attributes: { identities: JSON.stringify([{ providerName: 'Google' }]) },
+      }),
+    ).toBe(true);
+    expect(isFederatedAuthUser({ username: 'Facebook_abc' })).toBe(true);
+    expect(
+      isFederatedAuthUser({
+        username: 'opaque-uuid-user',
+        attributes: { email: 'a@b.com' },
+      }),
+    ).toBe(false);
   });
 
   it('persists username deferral so the overlay does not return every launch', async () => {

@@ -47,6 +47,7 @@ describe('socialAuthService UI + TikTok federation', () => {
     delete process.env.EXPO_PUBLIC_COGNITO_DOMAIN;
     delete process.env.EXPO_PUBLIC_SOCIAL_PROVIDERS;
     delete process.env.EXPO_PUBLIC_SOCIAL_UI_PROVIDERS;
+    delete process.env.EXPO_PUBLIC_COGNITO_IDP_PROVIDERS;
   });
 
   it('shows Google/Facebook/TikTok in the UI without a feature flag', () => {
@@ -63,6 +64,15 @@ describe('socialAuthService UI + TikTok federation', () => {
     expect(listSocialProvidersForUi()).toEqual([]);
   });
 
+  it('starts OAuth when Hosted UI domain is set (no IdP allowlist required)', async () => {
+    process.env.EXPO_PUBLIC_COGNITO_DOMAIN = 'eu-west-2itx07zvnt.auth.eu-west-2.amazoncognito.com';
+    process.env.EXPO_PUBLIC_SOCIAL_PROVIDERS = 'Google,Facebook,TikTok';
+    expect(isSocialProviderEnabled('Google')).toBe(true);
+    expect(isSocialProviderEnabled('TikTok')).toBe(true);
+    await signInWithGoogle();
+    expect(mockSignInWithRedirect).toHaveBeenCalledWith({ provider: 'Google' });
+  });
+
   it('starts the case-sensitive Cognito custom provider when ready', async () => {
     process.env.EXPO_PUBLIC_COGNITO_DOMAIN = 'example.auth.eu-west-2.amazoncognito.com';
     process.env.EXPO_PUBLIC_SOCIAL_PROVIDERS = 'Google,Facebook,TikTok';
@@ -74,7 +84,7 @@ describe('socialAuthService UI + TikTok federation', () => {
   });
 
   it('explains missing Hosted UI domain instead of starting OAuth', async () => {
-    await expect(signInWithGoogle()).rejects.toThrow(/COGNITO_DOMAIN/i);
+    await expect(signInWithGoogle()).rejects.toThrow(/COGNITO_DOMAIN|Hosted UI/i);
     expect(getSocialProviderSetupMessage('Google')).toMatch(/Hosted UI/i);
     expect(mockSignInWithRedirect).not.toHaveBeenCalled();
   });
@@ -83,8 +93,16 @@ describe('socialAuthService UI + TikTok federation', () => {
     process.env.EXPO_PUBLIC_COGNITO_DOMAIN = 'example.auth.eu-west-2.amazoncognito.com';
     process.env.EXPO_PUBLIC_SOCIAL_PROVIDERS = 'Google,Facebook';
     await expect(signInWithTikTok()).rejects.toThrow(
-      /not listed in EXPO_PUBLIC_SOCIAL_PROVIDERS/i,
+      /not listed/i,
     );
     expect(mockSignInWithRedirect).not.toHaveBeenCalled();
+  });
+
+  it('honours an explicit IdP allowlist when set', () => {
+    process.env.EXPO_PUBLIC_COGNITO_DOMAIN = 'example.auth.eu-west-2.amazoncognito.com';
+    process.env.EXPO_PUBLIC_SOCIAL_PROVIDERS = 'Google,Facebook,TikTok';
+    process.env.EXPO_PUBLIC_COGNITO_IDP_PROVIDERS = 'Google';
+    expect(isSocialProviderEnabled('Google')).toBe(true);
+    expect(isSocialProviderEnabled('Facebook')).toBe(false);
   });
 });

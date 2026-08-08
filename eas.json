@@ -26,7 +26,6 @@
         "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_IN": "blyp://auth/",
         "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT": "blyp://auth/signout/",
         "EXPO_PUBLIC_COGNITO_DOMAIN": "eu-west-2itx07zvnt.auth.eu-west-2.amazoncognito.com",
-        "EXPO_PUBLIC_COGNITO_IDP_PROVIDERS": "",
         "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "",
         "EXPO_PUBLIC_SPOTIFY_REDIRECT_URI": "blyp://spotify"
       },
@@ -70,7 +69,6 @@
         "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT": "blyp://auth/signout/",
         "FORCE_GENERATE_AWS_EXPORTS": "1",
         "EXPO_PUBLIC_COGNITO_DOMAIN": "eu-west-2itx07zvnt.auth.eu-west-2.amazoncognito.com",
-        "EXPO_PUBLIC_COGNITO_IDP_PROVIDERS": "",
         "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "",
         "EXPO_PUBLIC_SPOTIFY_REDIRECT_URI": "blyp://spotify"
       }
@@ -113,7 +111,6 @@
         "EXPO_PUBLIC_COGNITO_REDIRECT_SIGN_OUT": "blyp://auth/signout/",
         "FORCE_GENERATE_AWS_EXPORTS": "1",
         "EXPO_PUBLIC_COGNITO_DOMAIN": "eu-west-2itx07zvnt.auth.eu-west-2.amazoncognito.com",
-        "EXPO_PUBLIC_COGNITO_IDP_PROVIDERS": "",
         "EXPO_PUBLIC_SPOTIFY_CLIENT_ID": "",
         "EXPO_PUBLIC_SPOTIFY_REDIRECT_URI": "blyp://spotify"
       }
