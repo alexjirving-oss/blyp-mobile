@@ -21,6 +21,7 @@ import {
   signInWithApple,
   signInWithFacebook,
   signInWithGoogle,
+  signInWithTikTok,
 } from '../services/socialAuthService';
 import { ensureUserProfile } from '../services/LiveService';
 import { enterGuestMode } from '../services/guestSessionService';
@@ -551,6 +552,7 @@ const AuthScreen = () => {
   const handleGoogleSignInPress = () => handleSocialSignInPress('Google', signInWithGoogle);
   const handleFacebookSignInPress = () => handleSocialSignInPress('Facebook', signInWithFacebook);
   const handleAppleSignInPress = () => handleSocialSignInPress('Apple', signInWithApple);
+  const handleTikTokSignInPress = () => handleSocialSignInPress('TikTok', signInWithTikTok);
 
   const handleReset = async () => {
     setLoading(true);
@@ -724,6 +726,20 @@ const AuthScreen = () => {
                   >
                     <Text style={styles.socialButtonText} allowFontScaling={false}>
                       Continue with Facebook
+                    </Text>
+                  </TouchableOpacity>}
+
+                  {isSocialProviderEnabled('TikTok') && <TouchableOpacity
+                    style={[
+                      styles.socialButton,
+                      isSocialAuthInProgress && styles.socialButtonDisabled,
+                    ]}
+                    onPress={handleTikTokSignInPress}
+                    disabled={isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil}
+                    activeOpacity={isSocialAuthInProgress ? 1 : 0.8}
+                  >
+                    <Text style={styles.socialButtonText} allowFontScaling={false}>
+                      Continue with TikTok
                     </Text>
                   </TouchableOpacity>}
 

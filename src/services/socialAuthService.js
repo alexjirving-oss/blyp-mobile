@@ -38,16 +38,20 @@ const configuredProviders = () => {
 export const isSocialProviderEnabled = (provider) =>
   isSocialAuthEnabled() && configuredProviders().has(String(provider || '').toLowerCase());
 
-const signInWithProvider = async (provider) => {
+const signInWithProvider = async (provider, redirectProvider = provider) => {
   if (!isSocialProviderEnabled(provider)) {
     throw new Error(`${provider} sign-in is not configured for this build.`);
   }
-  await signInWithRedirect({ provider });
+  await signInWithRedirect({ provider: redirectProvider });
 };
 
 export const signInWithGoogle = () => signInWithProvider('Google');
 export const signInWithFacebook = () => signInWithProvider('Facebook');
 export const signInWithApple = () => signInWithProvider('Apple');
+// TikTok Login Kit is OAuth 2.0 rather than OIDC. Cognito therefore reaches it
+// through the server-side custom OIDC bridge documented in SOCIAL_SIGNIN.md.
+export const signInWithTikTok = () =>
+  signInWithProvider('TikTok', { custom: 'TikTok' });
 
 export default {
   isSocialAuthEnabled,
@@ -56,4 +60,5 @@ export default {
   signInWithGoogle,
   signInWithFacebook,
   signInWithApple,
+  signInWithTikTok,
 };
