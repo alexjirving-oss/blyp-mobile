@@ -1,9 +1,8 @@
 /**
- * Agent proposal worker — generates comment proposals for enabled suggest_only
- * (or approve-queue) agents when real follow/post context exists.
- *
- * Never posts, never gifts/wallet. Auto-post stays hard-off; this only queues
- * pending proposals for Boss approval at /agents.
+ * Agent proposal worker — generates comment proposals for enabled agents when
+ * real follow/post context exists. Default path is suggest_only (approve queue).
+ * When mode=auto_with_limits and global forceSuggestOnly is off, comments may
+ * auto-send under daily + hourly rate caps. Never posts, never gifts/wallet.
  */
 
 import { getFirestore } from './firestoreAdmin';
@@ -12,8 +11,10 @@ import {
   listAgentDirectory,
   listPhrases,
   proposeAgentAction,
+  tryAutoApproveAndExecute,
   type AgentSettings,
 } from './agentAutomationService';
+import { writeAgentCommentToPost } from './agentExecuteWorker';
 import { getEconomyInfra } from '../economy/infra';
 import { ensureAdminSchema } from './adminSchema';
 import { logger } from '../config/logger';
@@ -38,9 +39,11 @@ const MAX_ENABLED_USERS = 80;
 export type AgentProposalSweepResult = {
   ok: boolean;
   paused: boolean;
+  forceSuggestOnly: boolean;
   usersScanned: number;
   candidatesSeen: number;
   proposed: number;
+  autoExecuted: number;
   skipped: Record<string, number>;
   errors: string[];
   durationMs: number;
@@ -211,6 +214,7 @@ export async function runAgentProposalSweep(opts?: {
   const errors: string[] = [];
   const proposalIds: string[] = [];
   let proposed = 0;
+  let autoExecuted = 0;
   let candidatesSeen = 0;
   let usersScanned = 0;
 
@@ -219,9 +223,11 @@ export async function runAgentProposalSweep(opts?: {
     return {
       ok: true,
       paused: true,
+      forceSuggestOnly: global.forceSuggestOnly,
       usersScanned: 0,
       candidatesSeen: 0,
       proposed: 0,
+      autoExecuted: 0,
       skipped: { globally_paused: 1 },
       errors: [],
       durationMs: Date.now() - started,
@@ -233,9 +239,11 @@ export async function runAgentProposalSweep(opts?: {
     return {
       ok: false,
       paused: false,
+      forceSuggestOnly: global.forceSuggestOnly,
       usersScanned: 0,
       candidatesSeen: 0,
       proposed: 0,
+      autoExecuted: 0,
       skipped: { firestore_unavailable: 1 },
       errors: ['firestore_unavailable'],
       durationMs: Date.now() - started,
@@ -254,8 +262,6 @@ export async function runAgentProposalSweep(opts?: {
     if (proposed >= maxProposals) break;
     usersScanned += 1;
 
-    // MVP only proposes into the approve queue — never execute.
-    // Accept suggest_only and auto_with_limits (forced into suggest path by global flag).
     if (settings.mode === 'off') {
       bump(skipped, 'mode_off');
       continue;
@@ -285,6 +291,9 @@ export async function runAgentProposalSweep(opts?: {
       bump(skipped, 'no_following');
       continue;
     }
+
+    const canAutoSend =
+      settings.mode === 'auto_with_limits' && !global.forceSuggestOnly && !dryRun;
 
     let userProposed = 0;
     for (const creatorId of following.slice(0, MAX_CREATORS_PER_USER)) {
@@ -345,6 +354,24 @@ export async function runAgentProposalSweep(opts?: {
           proposalIds.push(out.proposalId);
           userProposed += 1;
           proposed += 1;
+
+          if (canAutoSend) {
+            try {
+              const auto = await tryAutoApproveAndExecute({
+                proposal: out,
+                settings,
+                writeComment: writeAgentCommentToPost,
+              });
+              if (auto) {
+                autoExecuted += 1;
+              } else {
+                bump(skipped, 'auto_blocked_caps_or_force');
+              }
+            } catch (autoErr: any) {
+              bump(skipped, 'auto_execute_failed');
+              errors.push(`auto:${out.proposalId}:${autoErr?.message || autoErr}`.slice(0, 200));
+            }
+          }
         } catch (e: any) {
           const msg = e?.message || String(e);
           errors.push(`${settings.userId}:${post.postId}:${msg}`.slice(0, 200));
@@ -359,9 +386,11 @@ export async function runAgentProposalSweep(opts?: {
   const result: AgentProposalSweepResult = {
     ok: errors.length === 0,
     paused: false,
+    forceSuggestOnly: global.forceSuggestOnly,
     usersScanned,
     candidatesSeen,
     proposed,
+    autoExecuted,
     skipped,
     errors: errors.slice(0, 20),
     durationMs: Date.now() - started,
@@ -371,9 +400,11 @@ export async function runAgentProposalSweep(opts?: {
   logger.info(
     {
       proposed: result.proposed,
+      autoExecuted: result.autoExecuted,
       usersScanned: result.usersScanned,
       candidatesSeen: result.candidatesSeen,
       skipped: result.skipped,
+      forceSuggestOnly: result.forceSuggestOnly,
       dryRun,
       durationMs: result.durationMs,
     },

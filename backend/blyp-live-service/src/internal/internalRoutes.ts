@@ -11,6 +11,7 @@ import { logger } from '../config/logger';
 import { createConnectOnboardLink } from '../economy/withdrawalService';
 import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
 import { runAgentProposalSweep } from '../admin/agentProposalWorker';
+import { runAgentExecuteSweep } from '../admin/agentExecuteWorker';
 
 /**
  * Internal service-to-service routes.
@@ -33,6 +34,11 @@ import { runAgentProposalSweep } from '../admin/agentProposalWorker';
  *   POST /internal/cron/agent-proposals
  *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
  *   Body (optional): { "dryRun": false, "maxUsers": 80, "maxProposals": 25 }
+ *
+ * Agent execute worker cron (retries approved comments):
+ *   POST /internal/cron/agent-execute
+ *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
+ *   Body (optional): { "dryRun": false, "maxExecutes": 25 }
  *
  * Example gcloud (replace SECRET; prefer Secret Manager / headers-file):
  *   gcloud scheduler jobs create http rankings-materialize \
@@ -227,9 +233,9 @@ const agentProposalsSchema = z
   .optional();
 
 /**
- * Generate comment proposals for enabled suggest_only agents when followed
- * creators have recent live posts. Queues pending rows for Boss /agents —
- * never posts, never gifts/wallet.
+ * Generate comment proposals for enabled agents when followed creators have
+ * recent live posts. Queues pending rows for /agents approve; may auto-send
+ * comments when mode=auto_with_limits and forceSuggestOnly is off.
  */
 router.post('/internal/cron/agent-proposals', requireInternalSecret, async (req, res) => {
   try {
@@ -247,6 +253,7 @@ router.post('/internal/cron/agent-proposals', requireInternalSecret, async (req,
     logger.info(
       {
         proposed: out.proposed,
+        autoExecuted: out.autoExecuted,
         usersScanned: out.usersScanned,
         paused: out.paused,
         durationMs: out.durationMs,
@@ -258,6 +265,46 @@ router.post('/internal/cron/agent-proposals', requireInternalSecret, async (req,
     const err = toEconomyError(e);
     if (err.code === 'INTERNAL') {
       logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/agent-proposals');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+const agentExecuteSchema = z
+  .object({
+    dryRun: z.coerce.boolean().optional(),
+    maxExecutes: z.coerce.number().int().min(1).max(100).optional(),
+  })
+  .strict()
+  .optional();
+
+/** Retry execute for approved-but-not-executed comment proposals. */
+router.post('/internal/cron/agent-execute', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = agentExecuteSchema.safeParse(
+      req.body && Object.keys(req.body).length ? req.body : undefined,
+    );
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await runAgentExecuteSweep({
+      dryRun: parsed.data?.dryRun,
+      maxExecutes: parsed.data?.maxExecutes,
+    });
+    logger.info(
+      {
+        executed: out.executed,
+        scanned: out.scanned,
+        paused: out.paused,
+        durationMs: out.durationMs,
+      },
+      '[internal] agent execute sweep complete',
+    );
+    return res.status(out.ok || out.paused ? 200 : 207).json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/agent-execute');
     }
     return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }

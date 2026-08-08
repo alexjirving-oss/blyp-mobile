@@ -1,7 +1,7 @@
 /**
- * Busy-person automated agent MVP — settings, propose/approve queue, boss oversight.
- * Default mode is suggest_only (never auto-post). Proposal generation: agentProposalWorker.
- * Execution (posting after approve) is still out of scope for v1.
+ * Busy-person automated agent — settings, propose/approve queue, boss oversight.
+ * Default mode is suggest_only. Comments execute after human approve (or limited
+ * auto_with_limits when global forceSuggestOnly is off). Auto-post stays hard-off.
  */
 
 import { createHash, randomUUID } from 'crypto';
@@ -450,9 +450,195 @@ export async function reviewProposal(input: {
     actorUserId: input.actorUserId,
   });
 
-  // MVP: approval does not execute — worker not wired. Status stays approved until executor ships.
   const updated = await db('agent_action_proposals').where({ proposal_id: input.proposalId }).first();
   return rowProposal(updated);
+}
+
+export async function listApprovedPendingExecution(opts?: {
+  limit?: number;
+}): Promise<AgentProposal[]> {
+  const db = await getDb();
+  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+  const rows = await db('agent_action_proposals')
+    .where({ status: 'approved' })
+    .whereNull('executed_at')
+    .orderBy('reviewed_at', 'asc')
+    .limit(limit);
+  return rows.map(rowProposal);
+}
+
+export type WriteAgentCommentFn = (input: {
+  userId: string;
+  postId: string;
+  text: string;
+  proposalId: string;
+}) => Promise<{ commentId: string | null; skipped?: string }>;
+
+/**
+ * Execute an approved comment proposal (or auto path). Posts stay disabled.
+ * Idempotent: already-executed rows are returned as-is.
+ */
+export async function executeAgentProposal(input: {
+  proposalId: string;
+  actorUserId: string;
+  writeComment: WriteAgentCommentFn;
+}): Promise<AgentProposal> {
+  const global = await getGlobalAgentControl();
+  if (global.paused) throw new Error('AGENTS_GLOBALLY_PAUSED');
+
+  const db = await getDb();
+  const row = await db('agent_action_proposals').where({ proposal_id: input.proposalId }).first();
+  if (!row) throw new Error('NOT_FOUND');
+
+  const current = rowProposal(row);
+  if (current.status === 'executed') return current;
+  if (current.status === 'rejected' || current.status === 'cancelled') {
+    throw new Error('NOT_EXECUTABLE');
+  }
+  if (current.status !== 'approved' && current.status !== 'pending') {
+    throw new Error('NOT_EXECUTABLE');
+  }
+  // Only approved (or pending→approved by caller) rows execute.
+  if (current.status === 'pending') throw new Error('NOT_APPROVED');
+
+  if (current.actionType === 'post') throw new Error('AUTO_POST_DISABLED');
+  if (current.actionType !== 'comment') throw new Error('ACTION_NOT_EXECUTABLE');
+
+  const settings = await getAgentSettings(current.userId);
+  if (!settings.allowComment) throw new Error('COMMENT_DISABLED');
+
+  const text = String(current.proposedText || '').trim();
+  if (!text) throw new Error('EMPTY_TEXT');
+
+  const targetId = String(current.targetId || '').trim();
+  const writeResult = await input.writeComment({
+    userId: current.userId,
+    postId: targetId,
+    text,
+    proposalId: current.proposalId,
+  });
+
+  const now = new Date().toISOString();
+  let metadata = { ...current.metadata };
+  if (writeResult.skipped) {
+    metadata = {
+      ...metadata,
+      executeSkipped: true,
+      skipReason: writeResult.skipped,
+    };
+  } else if (writeResult.commentId) {
+    metadata = {
+      ...metadata,
+      commentId: writeResult.commentId,
+      executedVia: 'agent_execute',
+    };
+  }
+
+  await db('agent_action_proposals')
+    .where({ proposal_id: input.proposalId })
+    .update({
+      status: 'executed',
+      executed_at: now,
+      updated_at: now,
+      metadata: JSON.stringify(metadata),
+    });
+
+  await appendAgentLog({
+    userId: current.userId,
+    proposalId: input.proposalId,
+    actionType: current.actionType,
+    outcome: writeResult.skipped ? 'execute_skipped' : 'executed',
+    detail: writeResult.skipped
+      ? `skipped: ${writeResult.skipped}`
+      : writeResult.commentId
+        ? `comment ${writeResult.commentId}`
+        : 'executed',
+    actorUserId: input.actorUserId,
+  });
+
+  const updated = await db('agent_action_proposals').where({ proposal_id: input.proposalId }).first();
+  return rowProposal(updated);
+}
+
+/** Count executed comments today (UTC) for rate caps. */
+export async function countExecutedToday(userId: string): Promise<number> {
+  const db = await getDb();
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const row = await db('agent_action_proposals')
+    .where({ user_id: userId, status: 'executed' })
+    .andWhere('executed_at', '>=', start.toISOString())
+    .count<{ count: string }[]>('* as count');
+  return Number(row[0]?.count || 0);
+}
+
+/** Count auto-executed comments in the last hour (spam brake for auto_with_limits). */
+export async function countAutoExecutedLastHour(userId: string): Promise<number> {
+  const db = await getDb();
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const rows = await db('agent_action_proposals')
+    .where({ user_id: userId, status: 'executed', action_type: 'comment' })
+    .andWhere('executed_at', '>=', since)
+    .select('metadata');
+  let n = 0;
+  for (const r of rows) {
+    let meta: Record<string, unknown> = {};
+    try {
+      meta =
+        typeof r.metadata === 'string'
+          ? JSON.parse(r.metadata)
+          : r.metadata && typeof r.metadata === 'object'
+            ? r.metadata
+            : {};
+    } catch {
+      meta = {};
+    }
+    if (meta.autoExecuted === true) n += 1;
+  }
+  return n;
+}
+
+/**
+ * Approve + execute in one step for auto_with_limits (rate-capped).
+ * Returns null when caps / forceSuggestOnly block auto-send.
+ */
+export async function tryAutoApproveAndExecute(input: {
+  proposal: AgentProposal;
+  settings: AgentSettings;
+  writeComment: WriteAgentCommentFn;
+}): Promise<AgentProposal | null> {
+  const global = await getGlobalAgentControl();
+  if (global.paused || global.forceSuggestOnly) return null;
+  if (input.settings.mode !== 'auto_with_limits') return null;
+  if (!input.settings.allowComment || !input.settings.enabled) return null;
+
+  const executedToday = await countExecutedToday(input.settings.userId);
+  if (executedToday >= Math.max(1, Number(input.settings.maxActionsPerDay || 5))) {
+    return null;
+  }
+  const hourCap = Math.min(3, Math.max(1, Number(input.settings.maxActionsPerDay || 5)));
+  const lastHour = await countAutoExecutedLastHour(input.settings.userId);
+  if (lastHour >= hourCap) return null;
+
+  const approved = await reviewProposal({
+    proposalId: input.proposal.proposalId,
+    decision: 'approved',
+    actorUserId: 'system:agent_auto_limits',
+    reviewNote: 'auto_with_limits (rate-capped comment send)',
+  });
+
+  // Tag metadata before execute so hour-cap counting sees auto path.
+  const db = await getDb();
+  const meta = { ...approved.metadata, autoExecuted: true };
+  await db('agent_action_proposals')
+    .where({ proposal_id: approved.proposalId })
+    .update({ metadata: JSON.stringify(meta), updated_at: new Date().toISOString() });
+
+  return executeAgentProposal({
+    proposalId: approved.proposalId,
+    actorUserId: 'system:agent_auto_limits',
+    writeComment: input.writeComment,
+  });
 }
 
 async function appendAgentLog(input: {

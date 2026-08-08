@@ -25,6 +25,7 @@ const Config = lazy(() => import("./pages/Config"));
 const Teams = lazy(() => import("./pages/Teams"));
 const Workbook = lazy(() => import("./pages/Workbook"));
 const Agents = lazy(() => import("./pages/Agents"));
+const AgentDetail = lazy(() => import("./pages/AgentDetail"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthed } = useAuth();
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/people" element={<PageSuspense><People /></PageSuspense>} />
             <Route path="/people/:userId" element={<PageSuspense><PersonDetail /></PageSuspense>} />
             <Route path="/agents" element={<PageSuspense><Agents /></PageSuspense>} />
+            <Route path="/agents/:userId" element={<PageSuspense><AgentDetail /></PageSuspense>} />
             <Route path="/content" element={<PageSuspense><Content /></PageSuspense>} />
             <Route path="/import-schedule" element={<PageSuspense><ImportSchedule /></PageSuspense>} />
             <Route path="/live" element={<PageSuspense><Live /></PageSuspense>} />

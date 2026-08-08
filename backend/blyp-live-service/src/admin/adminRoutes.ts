@@ -177,6 +177,7 @@ import {
     AGENT_MODES,
     AGENT_ACTION_TYPES,
 } from './agentAutomationService';
+import { executeApprovedProposalNow } from './agentExecuteWorker';
 
 const router = Router();
 
@@ -2408,7 +2409,7 @@ router.get('/admin/agents', requireAdmin, async (req: AuthedRequest, res: Respon
             defaults: {
                 mode: 'suggest_only',
                 allowPost: false,
-                note: 'MVP: proposal worker queues comments for human approve; auto-post disabled.',
+                note: 'Comments: approve→execute (or auto_with_limits under caps). Posts: hard-off.',
             },
         });
     } catch (e: any) {
@@ -2453,6 +2454,19 @@ router.get('/admin/agents/proposals', requireAdmin, async (req: AuthedRequest, r
         const limit = req.query.limit ? Number(req.query.limit) : 50;
         const out = await listProposals({ userId, status, limit });
         return res.json(out);
+    } catch (e: any) {
+        return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
+    }
+});
+
+/** Recent agent action log across users (Boss/Mel ops timeline). */
+router.get('/admin/agents/activity', requireAdmin, async (req: AuthedRequest, res: Response) => {
+    try {
+        const items = await listAgentLog({
+            userId: req.query.userId ? String(req.query.userId) : undefined,
+            limit: req.query.limit ? Number(req.query.limit) : 50,
+        });
+        return res.json({ items });
     } catch (e: any) {
         return res.status(500).json({ error: 'INTERNAL', detail: e?.message || String(e) });
     }
@@ -2513,7 +2527,29 @@ router.post('/admin/agents/proposals/:proposalId/approve', requireAdmin, require
             targetId: out.proposalId,
             metadata: { userId: out.userId },
         });
-        return res.json({ ...out, note: 'Approved for queue; executor worker not shipped yet (no auto-post).' });
+
+        // Approve → execute comment immediately when possible; cron retries leftovers.
+        let executed = out;
+        let executeNote = 'approved';
+        if (out.actionType === 'comment') {
+            try {
+                executed = await executeApprovedProposalNow(out, actorUserId);
+                executeNote =
+                    executed.metadata?.executeSkipped
+                        ? `approved; execute skipped (${executed.metadata?.skipReason || 'n/a'})`
+                        : 'approved and comment executed';
+            } catch (execErr: any) {
+                executeNote = `approved; execute deferred (${execErr?.message || execErr})`;
+                logger.warn(
+                    { err: execErr?.message || String(execErr), proposalId: out.proposalId },
+                    '[admin] agent approve execute deferred',
+                );
+            }
+        } else {
+            executeNote = 'approved; non-comment actions are not auto-executed';
+        }
+
+        return res.json({ ...executed, note: executeNote });
     } catch (e: any) {
         const msg = e?.message || String(e);
         const status = msg === 'NOT_FOUND' ? 404 : msg === 'NOT_PENDING' ? 409 : 500;
@@ -2568,7 +2604,8 @@ router.post('/admin/agents/:userId/settings', requireAdmin, requirePermission('a
         if (mode != null && !AGENT_MODES.includes(mode)) {
             return res.status(400).json({ error: 'BAD_REQUEST', detail: 'Invalid mode' });
         }
-        // Force suggest_only unless owner explicitly sets auto_with_limits later; still never auto-executes without worker.
+        // Force allowPost=false always. auto_with_limits only auto-sends comments when
+        // global forceSuggestOnly is cleared by Boss/Mel.
         const out = await upsertAgentSettings({
             userId: String(req.params.userId),
             actorUserId,
