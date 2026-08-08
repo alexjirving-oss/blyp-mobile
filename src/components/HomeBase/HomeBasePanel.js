@@ -171,9 +171,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const [unread, setUnread] = useState(0);
   const [watch, setWatch] = useState([]);
   const [forYou, setForYou] = useState([]);
-  // Which "For you" rail tile is snapped into view — that one autoplays a muted,
-  // looping preview. Defaults to 0 so the first tile plays as soon as the home
-  // screen loads.
+  // Which "For you" rail tile is snapped into view — that one autoplays with
+  // sound (neighbors stay muted). Defaults to 0 so the first tile plays as soon
+  // as the home screen loads.
   const [activeForYou, setActiveForYou] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   // Snap step = forYouCard width (150) + railRow gap (12). Keep in sync with styles.
@@ -938,9 +938,15 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                           shouldLoad
                           shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
                           isLooping
-                          // Home hub preview is always silent — only the For You
-                          // feed tab owns audible playback (sticky mute there).
-                          isMuted={true}
+                          // Active snapped tile is audible; preload neighbor + voice
+                          // overlay / blur stay silent. Distinct owner id so this
+                          // never steals For You feed sticky mute ownership.
+                          isMuted={!isActive || !isScreenFocused || listening || transcribing}
+                          audioOwnerId={
+                            isActive && isScreenFocused && !listening && !transcribing
+                              ? `home-rail:${p.id}`
+                              : null
+                          }
                         />
                       )}
                       {isVideo && !isActive && (
