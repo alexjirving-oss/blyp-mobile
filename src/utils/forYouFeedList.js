@@ -150,6 +150,69 @@ export function shuffleArray(items, random = Math.random) {
 }
 
 /**
+ * Apply a cold-open boot-widen list without yanking a mid-swipe viewer.
+ *
+ * Full reshuffle/replace is only safe while still on the provisional head
+ * (discover index 0, no focus pin, head id unchanged). After the user leaves
+ * index 0, keep the playing prefix and append unseen boot posts to the tail.
+ *
+ * @param {{
+ *   currentList?: any[],
+ *   widenedList?: any[],
+ *   discoverIndex?: number,
+ *   focusPinned?: boolean,
+ *   provisionalHeadId?: string|null,
+ * }} [opts]
+ * @returns {{ mode: 'replace'|'append'|'skip', list: any[]|null }}
+ */
+export function resolveForYouBootWidenApply({
+  currentList,
+  widenedList,
+  discoverIndex = 0,
+  focusPinned = false,
+  provisionalHeadId = null,
+} = {}) {
+  if (focusPinned) {
+    return { mode: 'skip', list: null };
+  }
+
+  const current = Array.isArray(currentList) ? currentList : [];
+  const widened = Array.isArray(widenedList) ? widenedList : [];
+  if (!widened.length) {
+    return { mode: 'skip', list: null };
+  }
+
+  const atHead = Number(discoverIndex) === 0;
+  const liveHeadId = current[0]?.id != null ? String(current[0].id) : '';
+  const expectedHead =
+    provisionalHeadId != null && String(provisionalHeadId)
+      ? String(provisionalHeadId)
+      : '';
+  const headUnchanged = !expectedHead || liveHeadId === expectedHead;
+
+  // Cold open still at head: keep shuffle-on-reload variety.
+  if (atHead && headUnchanged) {
+    return { mode: 'replace', list: widened };
+  }
+
+  if (!current.length) {
+    return { mode: 'replace', list: widened };
+  }
+
+  // Mid-swipe: never reshuffle under the finger — only widen the unseen tail.
+  const seen = new Set(
+    current
+      .map((p) => (p?.id != null ? String(p.id) : ''))
+      .filter(Boolean),
+  );
+  const tail = widened.filter((p) => p?.id != null && !seen.has(String(p.id)));
+  if (!tail.length) {
+    return { mode: 'skip', list: null };
+  }
+  return { mode: 'append', list: [...current, ...tail] };
+}
+
+/**
  * Shuffle feed candidates for a cold open / pull-refresh / rail rematch.
  * Light rule only: previous session's first N go after everything else when
  * the pool still has other clips (nothing elaborate).

@@ -5,6 +5,7 @@ const {
   getLastFeedHeadIds,
   resetLastFeedHeadIds,
   resolveFeedVideoUri,
+  resolveForYouBootWidenApply,
   shuffleArray,
   shufflePostsVaried,
   stampFeedKeys,
@@ -105,5 +106,56 @@ describe('forYouFeedList', () => {
     const freshCount = posts.length - avoided.size;
     expect(second.slice(0, freshCount).every((p) => !avoided.has(p.id))).toBe(true);
     expect(second.slice(freshCount).every((p) => avoided.has(p.id))).toBe(true);
+  });
+
+  describe('resolveForYouBootWidenApply', () => {
+    const provisional = [{ id: 'a' }, { id: 'b' }];
+    const widened = [{ id: 'z' }, { id: 'a' }, { id: 'c' }, { id: 'd' }];
+
+    it('replaces when still at head with unchanged provisional head', () => {
+      expect(
+        resolveForYouBootWidenApply({
+          currentList: provisional,
+          widenedList: widened,
+          discoverIndex: 0,
+          provisionalHeadId: 'a',
+        }),
+      ).toEqual({ mode: 'replace', list: widened });
+    });
+
+    it('appends unseen boot posts without reshuffling when user left index 0', () => {
+      const current = [{ id: 'a' }, { id: 'b' }];
+      expect(
+        resolveForYouBootWidenApply({
+          currentList: current,
+          widenedList: widened,
+          discoverIndex: 1,
+          provisionalHeadId: 'a',
+        }),
+      ).toEqual({
+        mode: 'append',
+        list: [{ id: 'a' }, { id: 'b' }, { id: 'z' }, { id: 'c' }, { id: 'd' }],
+      });
+    });
+
+    it('skips when focus is pinned or there is nothing new to append', () => {
+      expect(
+        resolveForYouBootWidenApply({
+          currentList: provisional,
+          widenedList: widened,
+          discoverIndex: 0,
+          focusPinned: true,
+        }),
+      ).toEqual({ mode: 'skip', list: null });
+
+      expect(
+        resolveForYouBootWidenApply({
+          currentList: [{ id: 'z' }, { id: 'a' }, { id: 'c' }, { id: 'd' }],
+          widenedList: widened,
+          discoverIndex: 2,
+          provisionalHeadId: 'z',
+        }),
+      ).toEqual({ mode: 'skip', list: null });
+    });
   });
 });

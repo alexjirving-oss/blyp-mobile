@@ -55,6 +55,7 @@ import {
   ensureFocusPostInList,
   feedInventoryStats,
   resolveFeedVideoUri,
+  resolveForYouBootWidenApply,
   shufflePostsVaried,
 } from '../utils/forYouFeedList';
 import { claimFeedAudio, releaseFeedAudio } from '../services/feedAudioSession';
@@ -989,13 +990,35 @@ const HomeScreen = ({ navigation, route }) => {
                           (p) => p.userId || p.uid,
                         ).filter(isValidFeedPost);
                         if (!bootPosts.length) return;
-                        if (forYouFocusPinIdRef.current) return;
+                        if (forYouFocusPinIdRef.current || pendingForYouFocusRef.current) return;
+                        // Capture head before the async shuffle gap so mid-swipe
+                        // apply can refuse a full replace under the playing clip.
+                        const provisionalHeadId = randomPostsRef.current?.[0]?.id != null
+                          ? String(randomPostsRef.current[0].id)
+                          : null;
                         const ordered = await prepareForYouOrder(bootPosts);
                         if (!mounted) return;
+                        if (forYouFocusPinIdRef.current || pendingForYouFocusRef.current) return;
                         const shuffled = buildForYouList(ordered, cycle);
-                        randomPostsRef.current = shuffled;
-                        setRandomPosts(shuffled);
-                        logForYouInventory('boot', shuffled);
+                        const decision = resolveForYouBootWidenApply({
+                          currentList: randomPostsRef.current,
+                          widenedList: shuffled,
+                          discoverIndex: currentDiscoverIndexRef.current,
+                          focusPinned: Boolean(
+                            forYouFocusPinIdRef.current || pendingForYouFocusRef.current,
+                          ),
+                          provisionalHeadId,
+                        });
+                        if (decision.mode === 'skip' || !decision.list) return;
+                        const next = decision.mode === 'append'
+                          ? buildForYouList(decision.list, cycle)
+                          : decision.list;
+                        randomPostsRef.current = next;
+                        setRandomPosts(next);
+                        logForYouInventory(
+                          decision.mode === 'append' ? 'boot-append' : 'boot',
+                          next,
+                        );
                       } catch (bootErr) {
                         console.warn(
                           'HOME: For You boot widen failed',
