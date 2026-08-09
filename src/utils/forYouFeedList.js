@@ -2,7 +2,7 @@
 // Pure helpers for the Home For You continuum: hard id dedupe, focus-pin survival,
 // inventory stats, preferred playback URI, and a simple reload shuffle.
 
-import { fixStorageUrl } from './urlUtils';
+import { pickProgressiveFeedVideoUri } from './feedVideoUri';
 
 /** First-occurrence wins. Empty / missing ids are dropped. */
 export function dedupePostsById(posts) {
@@ -56,36 +56,30 @@ export function ensureFocusPostInList(
 }
 
 /**
- * Prefer progressive / CDN / compressed playback when the post document carries
- * one; fall back to the raw Firebase Storage videoUrl.
+ * Prefer progressive / CDN / compressed MP4 when the post document carries one.
+ * HLS (hlsUrl / .m3u8) is last — feed disk cache + expo-av expect a file, not a playlist.
  */
 export function resolveFeedVideoUri(post) {
   if (!post) return null;
   const media = Array.isArray(post.media) ? post.media : [];
   const videoMedia =
     media.find((m) => String(m?.type || '').includes('video')) || media[0] || null;
-  const candidates = [
+  return pickProgressiveFeedVideoUri([
     post.playbackUrl,
-    post.hlsUrl,
-    post.streamUrl,
     post.cdnUrl,
     post.compressedUrl,
     post.optimizedUrl,
     post.videoUrl,
     post.mediaUrl,
+    post.streamUrl,
     videoMedia?.playbackUrl,
-    videoMedia?.hlsUrl,
     videoMedia?.cdnUrl,
     videoMedia?.compressedUrl,
     videoMedia?.url,
-  ];
-  for (const c of candidates) {
-    if (typeof c !== 'string') continue;
-    const trimmed = c.trim();
-    if (!trimmed) continue;
-    return fixStorageUrl(trimmed) || trimmed;
-  }
-  return null;
+    // HLS last (and only if nothing progressive exists).
+    post.hlsUrl,
+    videoMedia?.hlsUrl,
+  ]);
 }
 
 /** Live list shape vs repeats — useful for diagnosing low-inventory loops. */

@@ -8,10 +8,13 @@ import { Image, InteractionManager } from 'react-native';
 import { prefetchVideoToCache } from './videoCache';
 import { fixStorageUrl } from './urlUtils';
 import { resolveFeedVideoUri } from './forYouFeedList';
+import { isHlsVideoUri } from './feedVideoUri';
 
 const MAX_INFLIGHT = 2; // Flip/Fold memory: never stampede downloads
 const seenImages = new Set();
 const seenVideos = new Set();
+/** In-flight / queued keys — failures stay retryable (unlike seenVideos). */
+const pendingVideos = new Set();
 let inflight = 0;
 const queue = [];
 
@@ -67,10 +70,10 @@ export function prefetchImageUri(uri, { idle = false } = {}) {
   }
 }
 
-/** Warm video disk cache. Deduped. Prefer idle for neighbors beyond ±1. */
+/** Warm video disk cache. Deduped on success; failures remain retryable. */
 export function prefetchVideoUri(uri, { idle = false, priority = false } = {}) {
   const key = normalizeUri(uri);
-  if (!key || seenVideos.has(key)) return;
+  if (!key || seenVideos.has(key) || pendingVideos.has(key)) return;
   if (!(key.startsWith('http://') || key.startsWith('https://') || key.startsWith('file:') || key.startsWith('content:'))) {
     return;
   }
@@ -78,10 +81,33 @@ export function prefetchVideoUri(uri, { idle = false, priority = false } = {}) {
     seenVideos.add(key);
     return;
   }
-  seenVideos.add(key);
+  // HLS cannot be warm-downloaded as a single file — skip (resolveFeedVideoUri prefers MP4).
+  if (isHlsVideoUri(key)) {
+    seenVideos.add(key);
+    return;
+  }
+
+  pendingVideos.add(key);
 
   const run = () => {
-    enqueue(() => prefetchVideoToCache(key).catch(() => {}), { priority: !!priority && !idle });
+    enqueue(
+      () =>
+        prefetchVideoToCache(key)
+          .then((local) => {
+            // Only permanent-dedupe real disk hits. Remote fallback stays retryable.
+            if (
+              local &&
+              (String(local).startsWith('file:') || String(local).startsWith('content:'))
+            ) {
+              seenVideos.add(key);
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            pendingVideos.delete(key);
+          }),
+      { priority: !!priority && !idle },
+    );
   };
 
   if (idle) {
@@ -144,10 +170,11 @@ export function prefetchPostWindow(list, centerIndex, { radius = 3, images = tru
     if (i < 0 || i >= list.length) continue;
     const post = list[i];
     const dist = Math.abs(i - center);
-    const idle = dist > 1;
-    const priority = i === center + 1; // next clip wins the download queue
+    const idle = dist > 2; // keep next+2 snappy for fast paging
+    const priority = i === center + 1 || i === center + 2; // ahead wins the queue
     const video = postVideoUri(post);
     if (video) prefetchVideoUri(video, { idle, priority });
+
     if (images) {
       for (const img of postImageUris(post)) {
         prefetchImageUri(img, { idle });

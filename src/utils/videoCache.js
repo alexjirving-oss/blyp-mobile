@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { isHlsVideoUri } from './feedVideoUri';
 
 const VIDEO_CACHE_DIR = `${FileSystem.cacheDirectory}videos/`;
 /** Reject tiny/corrupt cache files (failed or interrupted downloads). */
@@ -114,6 +115,12 @@ export async function getPlayableVideoUri(remoteUri, opts = {}) {
   }
 
   if (remoteUri.startsWith('file:') || remoteUri.startsWith('content:')) {
+    return remoteUri;
+  }
+
+  // HLS playlists are not a single MP4 — full-file downloadAsync would cache garbage.
+  // Let expo-av stream the remote URL (rare on For You after resolveFeedVideoUri).
+  if (isHlsVideoUri(remoteUri)) {
     return remoteUri;
   }
 

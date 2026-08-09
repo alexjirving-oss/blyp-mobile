@@ -57,6 +57,20 @@ describe('forYouFeedList', () => {
     ).toContain('cdn.example.com/c.mp4');
   });
 
+  it('prefers progressive MP4 over HLS playlists', () => {
+    expect(
+      resolveFeedVideoUri({
+        hlsUrl: 'https://cdn.example.com/v/master.m3u8',
+        videoUrl: 'https://cdn.example.com/v/clip.mp4',
+      }),
+    ).toContain('clip.mp4');
+    expect(
+      resolveFeedVideoUri({
+        hlsUrl: 'https://cdn.example.com/v/master.m3u8',
+      }),
+    ).toContain('master.m3u8');
+  });
+
   it('reports inventory unique vs duplicates', () => {
     expect(
       feedInventoryStats([
