@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.amazonaws.ivs.broadcast.StageAudioManager
 
 /**
  * Owns the operating-system audio route while an IVS live session is active.
@@ -15,6 +16,11 @@ import android.util.Log
  * publishing a Stage can put AudioManager back into MODE_IN_COMMUNICATION with the receiver
  * selected. This guard keeps the built-in speaker selected for the full session and repairs
  * later route/mode changes made by IVS, expo-av, LiveKit, or an OEM audio policy.
+ *
+ * For PUBLISHING profiles it also re-asserts StageAudioManager AEC on every force/watchdog
+ * tick. Join-time configureStageAudio enables AEC once, but SUBSCRIBE_ONLY / OEM / expo-av
+ * route churn can clear it while the mic stays open and the loudspeaker stays forced —
+ * that is the Android single-device screech path (local SubscribeType.NONE does not prevent it).
  */
 internal class LiveLoudspeakerController(
     context: Context,
@@ -25,8 +31,9 @@ internal class LiveLoudspeakerController(
         PLAYBACK,
     }
 
+    private val appContext = context.applicationContext
     private val audioManager =
-        context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -150,10 +157,26 @@ internal class LiveLoudspeakerController(
             @Suppress("DEPRECATION")
             run { audioManager.isSpeakerphoneOn = true }
 
+            // Watchdog/route churn can leave StageAudioManager without AEC after a prior
+            // SUBSCRIBE_ONLY session or OEM/expo-av audio-policy reset. Re-assert on every
+            // publishing force so loudspeaker output cannot re-enter the open mic.
+            // Does not fix two phones in the same physical room (air-path coupling).
+            var aec = "n/a"
+            if (profile == Profile.PUBLISHING && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                try {
+                    val stageAudio = StageAudioManager.getInstance(appContext)
+                    stageAudio.enableEchoCancellation(true)
+                    aec = "on"
+                } catch (aecError: Throwable) {
+                    aec = "failed:${aecError.message}"
+                    Log.w(logTag, "[IVS_AUDIO_ROUTE] AEC reassert failed reason=$reason", aecError)
+                }
+            }
+
             @Suppress("DEPRECATION")
             val speakerOn = audioManager.isSpeakerphoneOn
             val signature =
-                "profile=$profile mode=${audioManager.mode} speakerphoneOn=$speakerOn communicationDevice=$communicationDevice"
+                "profile=$profile mode=${audioManager.mode} speakerphoneOn=$speakerOn communicationDevice=$communicationDevice aec=$aec"
             if (reason != "watchdog" || signature != lastSignature) {
                 Log.i(logTag, "[IVS_AUDIO_ROUTE] forced reason=$reason $signature")
             }
