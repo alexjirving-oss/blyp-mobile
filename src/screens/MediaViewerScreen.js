@@ -45,6 +45,7 @@ import { useAuth } from '../hooks/useCommon';
 import { recordWatch } from '../services/watchHistoryService';
 import { setReachSession, reportWatch, reportEngagement, flushReachEvents, reachSummary } from '../services/blypReachClient';
 import { prefetchPostWindow } from '../utils/mediaPrefetch';
+import { resolveFeedVideoUri } from '../utils/forYouFeedList';
 import { isVideoPost } from '../utils/mediaViewerPlaylist';
 import { updatePostCategory } from '../services/postEditService';
 import { normalizeProfileCategories } from '../utils/profileCategories';
@@ -681,18 +682,21 @@ const MediaViewerItem = ({
 
   const renderMedia = () => {
     // Handle video content
-    if (post.videoUrl) {
-      const fixedUrl = fixStorageUrl(post.videoUrl);
+    if (post.videoUrl || resolveFeedVideoUri(actualPost)) {
+      const fixedUrl =
+        resolveFeedVideoUri(actualPost) || fixStorageUrl(post.videoUrl);
+      const cellActive = isActive && isScreenFocused;
       return (
         <PremiumFeedVideo
           uri={fixedUrl}
           poster={actualPost.thumbnail || actualPost.imageUrl}
           style={mediaFillStyle}
-          shouldPlay={isActive && isScreenFocused}
+          shouldPlay={cellActive}
           shouldLoad={shouldLoadVideo}
           paused={paused}
           isLooping
-          isMuted={false}
+          isMuted={!cellActive}
+          audioOwnerId={cellActive && post?.id != null ? String(post.id) : null}
           mediaDisplay={mediaDisplay}
           onNaturalSize={(ns) => {
             if (ns?.width > 0 && ns?.height > 0) {
@@ -735,17 +739,21 @@ const MediaViewerItem = ({
       // If there's a video, show it
       if (videos.length > 0) {
         const firstVideo = videos[0];
-        const fixedUrl = fixStorageUrl(firstVideo.url || firstVideo.uri);
+        const fixedUrl =
+          resolveFeedVideoUri(actualPost) ||
+          fixStorageUrl(firstVideo.url || firstVideo.uri);
+        const cellActive = isActive && isScreenFocused;
         return (
           <PremiumFeedVideo
             uri={fixedUrl}
             poster={firstVideo.thumbnail || actualPost.thumbnail}
             style={mediaFillStyle}
-            shouldPlay={isActive && isScreenFocused}
+            shouldPlay={cellActive}
             shouldLoad={shouldLoadVideo}
             paused={paused}
             isLooping
-            isMuted={false}
+            isMuted={!cellActive}
+            audioOwnerId={cellActive && post?.id != null ? String(post.id) : null}
             mediaDisplay={mediaDisplay}
             onNaturalSize={(ns) => {
               if (ns?.width > 0 && ns?.height > 0) {
@@ -1645,6 +1653,10 @@ const MediaViewerScreen = ({ route, navigation }) => {
   }, [initialPost, posts, initialIndexParam]);
 
   const [activeIndex, setActiveIndex] = useState(resolvedInitialIndex);
+  // Decode center can lead the audible index mid-swipe (match Home For You).
+  const [loadIndex, setLoadIndex] = useState(resolvedInitialIndex);
+  const loadIndexRef = useRef(resolvedInitialIndex);
+  const itemsLengthRef = useRef(0);
 
   useEffect(() => {
     if (winWidth > 0) {
@@ -1654,6 +1666,12 @@ const MediaViewerScreen = ({ route, navigation }) => {
       setPageHeight((prev) => (Math.abs(winHeight - prev) > 1 ? winHeight : prev));
     }
   }, [winWidth, winHeight]);
+
+  useEffect(() => {
+    if (loadIndexRef.current === activeIndex) return;
+    loadIndexRef.current = activeIndex;
+    setLoadIndex(activeIndex);
+  }, [activeIndex]);
   const [creatorVideos, setCreatorVideos] = useState([]);
   // Screen-level set of creators the user follows. Lives here (not per page) so
   // following one of a creator's videos persists as you swipe to their others.
@@ -1750,6 +1768,8 @@ const MediaViewerScreen = ({ route, navigation }) => {
     return [initialPost, ...rest];
   }, [initialPost, creatorVideos, posts]);
 
+  itemsLengthRef.current = items.length;
+
   const safeInitialIndex = useMemo(() => {
     if (!items.length) return 0;
     return Math.min(Math.max(0, resolvedInitialIndex), items.length - 1);
@@ -1762,6 +1782,21 @@ const MediaViewerScreen = ({ route, navigation }) => {
     }
   });
   const viewConfigRef = useRef({ itemVisiblePercentThreshold: 80 });
+
+  const handleViewerScroll = useCallback(
+    (e) => {
+      const y = e?.nativeEvent?.contentOffset?.y;
+      if (!Number.isFinite(y) || !pageHeight) return;
+      const maxIndex = Math.max(0, itemsLengthRef.current - 1);
+      const raw = Math.floor(y / pageHeight + 0.55);
+      const next = Math.min(maxIndex, Math.max(0, raw));
+      if (next !== loadIndexRef.current) {
+        loadIndexRef.current = next;
+        setLoadIndex(next);
+      }
+    },
+    [pageHeight],
+  );
 
   const keyExtractor = useCallback((item, index) => String(item?.id || index), []);
 
@@ -1776,13 +1811,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
       <MediaViewerItem
         post={item}
         isActive={index === activeIndex}
-        shouldLoadVideo={
-          index === activeIndex ||
-          index === activeIndex - 1 ||
-          index === activeIndex + 1 ||
-          index === activeIndex - 2 ||
-          index === activeIndex + 2
-        }
+        shouldLoadVideo={Math.abs(loadIndex - index) <= 2}
         pageHeight={pageHeight}
         pageWidth={pageWidth}
         navigation={navigation}
@@ -1795,6 +1824,7 @@ const MediaViewerScreen = ({ route, navigation }) => {
     ),
     [
       activeIndex,
+      loadIndex,
       pageHeight,
       pageWidth,
       navigation,
@@ -1806,11 +1836,10 @@ const MediaViewerScreen = ({ route, navigation }) => {
     ],
   );
 
-  // Prefetch adjacent ±2 clips (prev + next) so swipe either way is warm.
-  // Disk-only — no React state thrash; EnhancedVideo hits videoCache.
+  // Prefetch around the mid-swipe load center (disk-only; no React thrash).
   useEffect(() => {
-    prefetchPostWindow(items, activeIndex, { radius: 2, images: true });
-  }, [activeIndex, items]);
+    prefetchPostWindow(items, loadIndex, { radius: 3, images: true });
+  }, [loadIndex, items]);
 
   const getItemLayout = useCallback(
     (_data, index) => ({ length: pageHeight, offset: pageHeight * index, index }),
@@ -1846,12 +1875,14 @@ const MediaViewerScreen = ({ route, navigation }) => {
         decelerationRate="fast"
         disableIntervalMomentum
         initialScrollIndex={safeInitialIndex > 0 ? safeInitialIndex : undefined}
+        onScroll={handleViewerScroll}
+        scrollEventThrottle={16}
         onViewableItemsChanged={onViewRef.current}
         viewabilityConfig={viewConfigRef.current}
-        windowSize={3}
+        windowSize={5}
         initialNumToRender={2}
-        maxToRenderPerBatch={2}
-        removeClippedSubviews
+        maxToRenderPerBatch={3}
+        removeClippedSubviews={false}
       />
       <FeedStickyEngagement
         key={activePost?.id ? `engage-${activePost.id}` : 'engage-none'}

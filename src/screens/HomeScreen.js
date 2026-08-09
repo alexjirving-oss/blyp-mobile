@@ -296,6 +296,9 @@ const HomeScreen = ({ navigation, route }) => {
     loadingRef.current = loading;
   }, [loading]);
   const [currentDiscoverIndex, setCurrentDiscoverIndex] = useState(0);
+  // Decode/prefetch center can lead the audible index during a swipe so next
+  // mounts before momentum ends. Audible play still uses currentDiscoverIndex.
+  const [discoverLoadIndex, setDiscoverLoadIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [isTitleBarMinimized, setIsTitleBarMinimized] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -316,6 +319,7 @@ const HomeScreen = ({ navigation, route }) => {
   const likePendingRef = useRef(new Set());
   const commentScrollValue = useRef(new Animated.Value(0)).current;
   const currentDiscoverIndexRef = useRef(0);
+  const discoverLoadIndexRef = useRef(0);
   const hasLoggedFirebaseAuthNotReadyRef = useRef(false);
 
   // For You pagination: cursor = last Firestore doc loaded (by date), used to
@@ -762,6 +766,13 @@ const HomeScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     currentDiscoverIndexRef.current = currentDiscoverIndex;
+  }, [currentDiscoverIndex]);
+
+  // Keep decode center aligned when audible index jumps outside scroll (refresh / focus pin).
+  useEffect(() => {
+    if (discoverLoadIndexRef.current === currentDiscoverIndex) return;
+    discoverLoadIndexRef.current = currentDiscoverIndex;
+    setDiscoverLoadIndex(currentDiscoverIndex);
   }, [currentDiscoverIndex]);
 
   // Details stay off by default. "Show details" reveals them briefly, then hides again.
@@ -1603,6 +1614,23 @@ const HomeScreen = ({ navigation, route }) => {
     });
   }).current;
 
+  const handleDiscoverScroll = useCallback(
+    (e) => {
+      if (selectedTabRef.current !== 'A') return;
+      const y = e?.nativeEvent?.contentOffset?.y;
+      if (!Number.isFinite(y) || !feedHeight) return;
+      const maxIndex = Math.max(0, (randomPostsRef.current?.length || 0) - 1);
+      // Bias slightly toward the destination page so next mounts mid-swipe.
+      const raw = Math.floor(y / feedHeight + 0.55);
+      const loadIndex = Math.min(maxIndex, Math.max(0, raw));
+      if (loadIndex !== discoverLoadIndexRef.current) {
+        discoverLoadIndexRef.current = loadIndex;
+        setDiscoverLoadIndex(loadIndex);
+      }
+    },
+    [feedHeight],
+  );
+
   const handleDiscoverScrollEnd = useCallback(
     (e) => {
       if (selectedTabRef.current !== 'A') return;
@@ -1612,6 +1640,10 @@ const HomeScreen = ({ navigation, route }) => {
       const rawIndex = Math.round(y / feedHeight);
       const maxIndex = Math.max(0, (randomPosts?.length || 0) - 1);
       const nextIndex = Math.min(maxIndex, Math.max(0, rawIndex));
+      if (nextIndex !== discoverLoadIndexRef.current) {
+        discoverLoadIndexRef.current = nextIndex;
+        setDiscoverLoadIndex(nextIndex);
+      }
       if (nextIndex !== currentDiscoverIndexRef.current) {
         currentDiscoverIndexRef.current = nextIndex;
         setDescriptionVisibleIndex(null);
@@ -1645,19 +1677,19 @@ const HomeScreen = ({ navigation, route }) => {
     return index === currentDiscoverIndex;
   };
 
-  // Disk-warm current ±3 videos + avatars/thumbs. Decode mounts stay at ±2 so
-  // the next swipe has a buffered neighbor; farther cells cancel via shouldLoad.
+  // Disk-warm around the load center (±3) + farther ahead idle. Decode uses
+  // discoverLoadIndex so mid-swipe already has the destination buffered.
   useEffect(() => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
-    const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
+    const current = isRandomFeed ? discoverLoadIndex : currentIndex;
     if (!list?.length) return;
     prefetchPostWindow(list, current, { radius: 3, images: true });
     // Also warm +4/+5 ahead while idle so fast paging never waits on first byte.
     if (list[current + 4] || list[current + 5]) {
       prefetchPostWindow(list, current + 4, { radius: 1, images: true });
     }
-  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts]);
+  }, [currentIndex, discoverLoadIndex, selectedTab, videos, randomPosts]);
 
   // (HEAD connection warm removed — it competed with progressive playback.)
 
@@ -1776,8 +1808,8 @@ const HomeScreen = ({ navigation, route }) => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = resolveFeedVideoUri(item) || fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            // Decode current ±2 (next/prev buffered). Farther cells cancel players.
-            const shouldLoad = Math.abs(currentDiscoverIndex - index) <= 2;
+            // Decode around mid-swipe load center (±2). Audible stays on settled index.
+            const shouldLoad = Math.abs(discoverLoadIndex - index) <= 2;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
@@ -1805,7 +1837,7 @@ const HomeScreen = ({ navigation, route }) => {
                 user={item.user}
                 title={item.title}
                 autoPlay={cellActive && !feedAudioMuted}
-                shouldLoad={Math.abs(currentDiscoverIndex - index) <= 2}
+                shouldLoad={Math.abs(discoverLoadIndex - index) <= 2}
                 style={StyleSheet.absoluteFill}
               />
             ) : (
@@ -1893,6 +1925,7 @@ const HomeScreen = ({ navigation, route }) => {
     isScreenFocused,
     selectedTab,
     currentDiscoverIndex,
+    discoverLoadIndex,
     descriptionVisibleIndex,
     userPillLayout,
     feedHeight,
@@ -2131,15 +2164,16 @@ const HomeScreen = ({ navigation, route }) => {
               snapToAlignment="start"
               decelerationRate="fast"
               removeClippedSubviews={false}
-              maxToRenderPerBatch={2}
+              maxToRenderPerBatch={3}
               windowSize={5}
-              initialNumToRender={1}
+              initialNumToRender={2}
               updateCellsBatchingPeriod={32}
               getItemLayout={(data, index) => ({
                 length: feedHeight,
                 offset: feedHeight * index,
                 index,
               })}
+              onScroll={handleDiscoverScroll}
               onMomentumScrollEnd={handleDiscoverScrollEnd}
               onScrollEndDrag={handleDiscoverScrollEnd}
               onEndReached={loadMoreForYou}

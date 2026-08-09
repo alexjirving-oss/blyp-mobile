@@ -11,8 +11,11 @@ import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
  * - Cache hit → play local file immediately (swipe feels instant).
  * - Cache miss → show poster, try progressive stream AND download in parallel.
  * - Many Firebase phone uploads are moov-at-end (won't stream). When download
- *   finishes we switch to the local file if the stream hasn't painted yet, or
- *   on stream error.
+ *   finishes we switch to the local file only if the stream hasn't painted yet
+ *   (never remount a painted neighbor — that killed warm decode on swipe).
+ * - Soft unload: dropping shouldLoad tears down the native player but keeps the
+ *   resolved URI in a ref so re-entry skips async probe.
+ * - Adjacent cells briefly muted-warm the decoder, then park at 0.
  * - Teal loading spiral while the focused cell is resolving/buffering to first
  *   frame (poster may sit underneath). Hidden once ready/playing, or on error.
  */
@@ -25,15 +28,25 @@ function EnhancedVideo(props) {
   const resolveGen = useRef(0);
   const sourceHttpRef = useRef(null);
   const paintedRef = useRef(false);
+  const warmedRef = useRef(false);
+  /** Soft-retain resolved playable URI across shouldLoad teardown (keyed by remote). */
+  const retainedRef = useRef({ remote: null, uri: null });
 
   const remoteUri = props.uri || props.videoUrl;
   const isFocused = (props.shouldPlay ?? true) && appActive;
   const shouldLoad = props.shouldLoad ?? true;
   const posterUri = props.poster;
-  // Active / playing intent: always show teal spiral until first frame.
-  // Off-screen preload with a poster: keep poster only (no stacked spinners).
-  // No poster: spiral even when off-screen so we never flash a dead black frame.
-  const showLoadingSpinner = shouldLoad && !videoLoaded && !hasError && (isFocused || !posterUri);
+  // FlatList recycle: never paint a prior cell's URI under a new remote.
+  const safePlayableUri =
+    playableUri && retainedRef.current.remote === remoteUri ? playableUri : null;
+  const showLoadingSpinner =
+    shouldLoad && !videoLoaded && !hasError && (isFocused || !posterUri);
+
+  const rememberPlayable = (uri) => {
+    if (!remoteUri || !uri) return;
+    retainedRef.current = { remote: remoteUri, uri };
+    setPlayableUri(uri);
+  };
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
@@ -52,11 +65,15 @@ function EnhancedVideo(props) {
     let cancelled = false;
     const gen = (resolveGen.current += 1);
     paintedRef.current = false;
+    warmedRef.current = false;
 
     if (!shouldLoad) {
-      // Cancel off-screen players: drop source so expo-av releases decoder memory.
+      // Soft unload: release the native decoder (not rendered) but keep
+      // retainedRef so the next shouldLoad mount skips the async cache probe.
       paintedRef.current = false;
-      setPlayableUri(null);
+      if (retainedRef.current.remote !== remoteUri) {
+        setPlayableUri(null);
+      }
       setVideoLoaded(false);
       setHasError(false);
       return () => {};
@@ -73,10 +90,43 @@ function EnhancedVideo(props) {
       remoteUri.startsWith('http://') || remoteUri.startsWith('https://') ? remoteUri : null;
 
     if (isLocal) {
-      setPlayableUri(remoteUri);
+      rememberPlayable(remoteUri);
       setHasError(false);
       setVideoLoaded(false);
       return () => {};
+    }
+
+    const retained =
+      retainedRef.current.remote === remoteUri ? retainedRef.current.uri : null;
+    if (
+      retained &&
+      (retained === remoteUri ||
+        String(retained).startsWith('file:') ||
+        String(retained).startsWith('content:'))
+    ) {
+      setPlayableUri(retained);
+      setHasError(false);
+      setVideoLoaded(false);
+      if (retained === remoteUri) {
+        (async () => {
+          try {
+            const local = await prefetchVideoToCache(remoteUri);
+            if (cancelled || gen !== resolveGen.current) return;
+            if (!local || !(local.startsWith('file:') || local.startsWith('content:'))) return;
+            if (!paintedRef.current) {
+              rememberPlayable(local);
+              setHasError(false);
+            } else {
+              retainedRef.current = { remote: remoteUri, uri: local };
+            }
+          } catch {
+            /* ignore */
+          }
+        })();
+      }
+      return () => {
+        cancelled = true;
+      };
     }
 
     setVideoLoaded(false);
@@ -84,36 +134,33 @@ function EnhancedVideo(props) {
 
     (async () => {
       try {
-        // Fast path: already on disk from prefetch.
         const cached = await getPlayableVideoUri(remoteUri, { waitForDownload: false });
         if (cancelled || gen !== resolveGen.current) return;
 
         if (cached && (cached.startsWith('file:') || cached.startsWith('content:'))) {
-          setPlayableUri(cached);
+          rememberPlayable(cached);
           setHasError(false);
           return;
         }
 
-        // Start progressive stream immediately for clips that support it.
-        setPlayableUri(remoteUri);
+        rememberPlayable(remoteUri);
 
-        // Parallel full download — required for moov-at-end MP4s, and warms swipe.
         const local = await prefetchVideoToCache(remoteUri);
         if (cancelled || gen !== resolveGen.current) return;
         if (!local || !(local.startsWith('file:') || local.startsWith('content:'))) return;
 
-        // Switch to local if stream never painted (moov-at-end / black frame), or
-        // when idle. Do NOT remount a focused painted stream — key flip hitch.
-        if (!paintedRef.current || !isFocused) {
-          setPlayableUri(local);
+        if (!paintedRef.current) {
+          rememberPlayable(local);
           setHasError(false);
+        } else {
+          retainedRef.current = { remote: remoteUri, uri: local };
         }
       } catch (error) {
         if (cancelled || gen !== resolveGen.current) return;
         if (__DEV__) {
           console.warn('[EnhancedVideo] URI resolution failed, using remote', { error });
         }
-        setPlayableUri(remoteUri);
+        rememberPlayable(remoteUri);
         setHasError(false);
       }
     })();
@@ -121,6 +168,7 @@ function EnhancedVideo(props) {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteUri, shouldLoad]);
 
   useEffect(() => {
@@ -135,9 +183,6 @@ function EnhancedVideo(props) {
         ? String(props.audioOwnerId)
         : null;
 
-    // Imperative mute/play must be idempotent. Neighbor preload cells (±2) finish
-    // loading and used to spam setIsMutedAsync(true)+pauseAsync, which steals
-    // Android audio focus from the active For You player → audible mute flicker.
     const apply = async () => {
       if (cancelled) return false;
       try {
@@ -145,8 +190,6 @@ function EnhancedVideo(props) {
         if (cancelled) return false;
 
         if (isFocused) {
-          // Re-assert loudspeaker media mode before unmuting — Live / STT / notify
-          // can leave the process in earpiece / communication mode.
           if (!wantMuted && ownerId) {
             const owned = await claimFeedAudio(ownerId);
             if (cancelled || !owned) return false;
@@ -176,9 +219,9 @@ function EnhancedVideo(props) {
             }
             if (!status.isPlaying) {
               await v.playAsync?.();
-              return false; // may still be buffering — retry
+              return false;
             }
-            return true; // already playing at intended mute
+            return true;
           }
           try {
             await v.setVolumeAsync?.(wantMuted ? 0 : 1);
@@ -194,10 +237,14 @@ function EnhancedVideo(props) {
           return false;
         }
 
-        // Inactive / blurred: only touch native audio if something is still
-        // audible or playing. Silent no-ops avoid focus thrash with the active cell.
+        // Inactive: only kill audible bleed. Silent muted neighbor-warm may be
+        // playing briefly to prime the decoder — leave that alone.
         if (ownerId) releaseFeedAudio(ownerId);
-        if (status?.isLoaded && (status.isPlaying || status.isMuted === false || status.volume > 0)) {
+        const audible =
+          status?.isLoaded &&
+          (status.isMuted === false ||
+            (typeof status.volume === 'number' && status.volume > 0));
+        if (audible) {
           try {
             await v.setVolumeAsync?.(0);
           } catch {
@@ -211,7 +258,7 @@ function EnhancedVideo(props) {
           if (status.isPlaying) {
             await v.pauseAsync?.();
           }
-          return false; // one safety retry for navigation bleed
+          return false;
         }
         return true;
       } catch {
@@ -222,8 +269,6 @@ function EnhancedVideo(props) {
     (async () => {
       const settled = await apply();
       if (cancelled || settled) return;
-      // Focused: retry until playing. Unfocused audible: one bleed-safety retry.
-      // Never schedule the old fixed 200/500 spam on every preload load.
       timers.push(
         setTimeout(() => {
           apply().then((done) => {
@@ -240,6 +285,50 @@ function EnhancedVideo(props) {
       if (ownerId && !isFocused) releaseFeedAudio(ownerId);
     };
   }, [isFocused, videoLoaded, hasError, props.isMuted, props.audioOwnerId]);
+
+  // TikTok-style neighbor warm: pull first GOPs muted, then park at 0.
+  // Never claims feed audio / never calls setAudioModeAsync (Stage-safe).
+  useEffect(() => {
+    if (!shouldLoad || isFocused || !videoLoaded || hasError || !playableUri) return undefined;
+    if (warmedRef.current) return undefined;
+    const v = videoRef.current;
+    if (!v) return undefined;
+
+    let cancelled = false;
+    warmedRef.current = true;
+
+    (async () => {
+      try {
+        try {
+          await v.setVolumeAsync?.(0);
+        } catch {
+          /* best-effort */
+        }
+        try {
+          await v.setIsMutedAsync?.(true);
+        } catch {
+          /* best-effort */
+        }
+        await v.playAsync?.();
+        await new Promise((r) => setTimeout(r, 320));
+        if (cancelled) return;
+        const stillUnfocused = !((props.shouldPlay ?? true) && AppState.currentState === 'active');
+        if (!stillUnfocused) return;
+        await v.pauseAsync?.();
+        try {
+          await v.setPositionAsync?.(0);
+        } catch {
+          /* best-effort */
+        }
+      } catch {
+        /* warm is best-effort */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldLoad, isFocused, videoLoaded, hasError, playableUri, props.shouldPlay]);
 
   const emitNaturalSize = (raw) => {
     if (!props.onNaturalSize || !raw || !(raw.width > 0) || !(raw.height > 0)) return;
@@ -272,6 +361,7 @@ function EnhancedVideo(props) {
     setHasError(true);
     setVideoLoaded(false);
     paintedRef.current = false;
+    warmedRef.current = false;
     if (props.onError) props.onError(error);
 
     const httpSource = sourceHttpRef.current || remoteUri;
@@ -283,7 +373,7 @@ function EnhancedVideo(props) {
           await invalidateCachedVideo(httpSource);
           const retry = await prefetchVideoToCache(httpSource);
           if (gen !== resolveGen.current || !retry) return;
-          setPlayableUri(retry);
+          rememberPlayable(retry);
           setHasError(false);
           setVideoLoaded(false);
         } catch {
@@ -300,21 +390,23 @@ function EnhancedVideo(props) {
     ? [styles.containerFill, props.style]
     : [styles.container, props.style];
 
+  const uriKey =
+    safePlayableUri &&
+    (String(safePlayableUri).startsWith('file:') ||
+      String(safePlayableUri).startsWith('content:'))
+      ? `local:${remoteUri || safePlayableUri}`
+      : `net:${remoteUri || safePlayableUri}`;
+
   return (
     <View style={containerStyle}>
-      {shouldLoad && playableUri && (
+      {shouldLoad && safePlayableUri && (
         <UnifiedVideo
-          // Remount only when switching remote↔local (expo-av often ignores source
-          // updates). Same remote keeps one instance so stream→local is one swap, not thrash.
-          key={
-            playableUri &&
-            (String(playableUri).startsWith('file:') || String(playableUri).startsWith('content:'))
-              ? `local:${remoteUri || playableUri}`
-              : `net:${remoteUri || playableUri}`
-          }
+          // Remount only when switching remote↔local before first paint.
+          // After paint we keep the key stable by refusing stream→local swaps.
+          key={uriKey}
           ref={videoRef}
           style={styles.video}
-          source={{ uri: playableUri }}
+          source={{ uri: safePlayableUri }}
           resizeMode={props.resizeMode || 'cover'}
           isLooping={props.isLooping ?? true}
           isMuted={(props.isMuted ?? true) || !isFocused}
