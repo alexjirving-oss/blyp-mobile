@@ -8,6 +8,7 @@
  */
 
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { isLiveStagePublishing } from './livePublishAudioGuard';
 
 const BLYP_NOTIFY = require('../../assets/sounds/blyp_notify.wav');
 
@@ -23,6 +24,10 @@ let ringModeActive = false;
  * @param {{ background?: boolean }} [opts]
  */
 export async function ensureMediaPlaybackAudioMode({ background = false } = {}) {
+  // Never steal IVS VIDEO_CHAT / call-volume while host/guest mic is open.
+  if (isLiveStagePublishing()) {
+    return;
+  }
   try {
     await Audio.setAudioModeAsync({
       // iOS: true → AVAudioSession PlayAndRecord → earpiece. Always false for UI sounds.

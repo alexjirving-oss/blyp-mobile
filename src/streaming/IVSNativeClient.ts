@@ -103,6 +103,17 @@ export class IVSNativeClient implements LiveStreamingClient {
     }
   }
 
+  private setActiveAudioPath(path: 'stage-publishing' | 'stage-viewing' | 'player-viewing' | null) {
+    this.activeAudioPath = path;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { setLiveStagePublishing } = require('../services/livePublishAudioGuard');
+      setLiveStagePublishing(path === 'stage-publishing');
+    } catch {
+      // guard is best-effort; native watchdog still owns the route
+    }
+  }
+
   private reassertLiveLoudspeaker(reason: string) {
     void this.forceLiveLoudspeaker(reason).catch((error) => {
       console.warn('[IVS_AUDIO_ROUTE][JS_REASSERT_FAILED]', {
@@ -476,7 +487,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     });
 
     this.currentSessionId = params.sessionId;
-    this.activeAudioPath = 'stage-publishing';
+    this.setActiveAudioPath('stage-publishing');
 
     return new Promise((resolve, reject) => {
       IVSBroadcastModule.startHostSession(
@@ -485,7 +496,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.sessionId,
         (error: any) => {
           if (error) {
-            this.activeAudioPath = null;
+            this.setActiveAudioPath(null);
             console.error('[IVS_CLIENT][HOST_START_FAILED]', {
               error: error.message || error,
               code: error.code || 'unknown',
@@ -512,7 +523,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
     console.log('[IVS_CLIENT] Stopping host session');
     this.isHostOrGuestActive = false;
-    this.activeAudioPath = null;
+    this.setActiveAudioPath(null);
     this.participants.clear();
     this.remoteVideoTrackCounts.clear();
     this.localMediaState = { videoEnabled: false, audioEnabled: false };
@@ -561,7 +572,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     });
 
     this.currentSessionId = params.sessionId;
-    this.activeAudioPath = 'stage-publishing';
+    this.setActiveAudioPath('stage-publishing');
 
     return new Promise((resolve, reject) => {
       IVSBroadcastModule.startGuestSession(
@@ -571,7 +582,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.slotIndex,
         (error: any) => {
           if (error) {
-            this.activeAudioPath = null;
+            this.setActiveAudioPath(null);
             console.error('[IVS_CLIENT] Guest start failed:', error);
             reject(new Error(error.message || 'Failed to start guest session'));
           } else {
@@ -595,7 +606,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
     console.log('[IVS_CLIENT] Stopping guest session');
     this.isHostOrGuestActive = false;
-    this.activeAudioPath = null;
+    this.setActiveAudioPath(null);
     this.participants.clear();
     this.remoteVideoTrackCounts.clear();
     this.localMediaState = { videoEnabled: false, audioEnabled: false };
@@ -625,7 +636,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       region: this.ivsEnv.region,
     });
     this.currentSessionId = params.sessionId;
-    this.activeAudioPath = 'stage-viewing';
+    this.setActiveAudioPath('stage-viewing');
 
     // For IVS Real-Time viewers, use the broadcast module's read-only stage join
     // instead of trying to load an HLS playback URL
@@ -636,7 +647,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.sessionId,
         (error: any) => {
           if (error) {
-            this.activeAudioPath = null;
+            this.setActiveAudioPath(null);
             console.error('[IVS_CLIENT] Viewer join failed:', error);
             reject(new Error(error.message || 'Failed to join as viewer'));
           } else {
@@ -668,7 +679,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       playbackUrlLength: params.playbackUrl.length,
     });
     this.currentSessionId = params.sessionId;
-    this.activeAudioPath = 'player-viewing';
+    this.setActiveAudioPath('player-viewing');
 
     return new Promise((resolve, reject) => {
       IVSPlayerModule.joinAsViewer(
@@ -676,7 +687,7 @@ export class IVSNativeClient implements LiveStreamingClient {
         params.sessionId,
         (error: any) => {
           if (error) {
-            this.activeAudioPath = null;
+            this.setActiveAudioPath(null);
             console.error('[IVS_CLIENT] Viewer playback join failed:', error);
             reject(new Error(error.message || 'Failed to join as viewer'));
           } else {
@@ -728,7 +739,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     console.log('[IVS_CLIENT] Leaving viewer session');
     const audioPath = this.activeAudioPath;
     this.isViewerActive = false;
-    this.activeAudioPath = null;
+    this.setActiveAudioPath(null);
     this.remoteVideoTrackCounts.clear();
 
     return new Promise((resolve, reject) => {
