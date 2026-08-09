@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from "react";
+﻿import React, { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, FlatList, ScrollView, TouchableOpacity, Image, StyleSheet, ActivityIndicator, RefreshControl, Modal, Alert } from "react-native";
 import { subscribeToLiveStreams } from "../services/LiveService";
 import { useNavigation, CommonActions, StackActions } from "@react-navigation/native";
@@ -10,6 +10,10 @@ import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import { useAuth } from '../hooks/useCommon';
 import { isFollowing, followUser, unfollowUser, getFollowersCount } from '../utils/followUtils';
 import { getLiveSessionStatus } from '../api/ivsLiveApi';
+import {
+  getRootishNavigationState,
+  shouldEjectEndedLiveProbe,
+} from '../live/joinStatusPreflight';
 
 export default function LiveUsersTab() {
   const [liveUsers, setLiveUsers] = useState([]);
@@ -21,6 +25,7 @@ export default function LiveUsersTab() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
+  const joinLiveProbeGenRef = useRef(0);
   const insets = useSafeAreaInsets();
   const { uid } = useAuth();
 
@@ -74,30 +79,15 @@ export default function LiveUsersTab() {
     }
   }, [uid, previewHostUid, rel.iFollow, relBusy]);
 
-  const joinLive = useCallback(async (item) => {
+  const joinLive = useCallback((item) => {
     if (!item?.id && !item?.streamId) return;
     const streamId = item.streamId || item.id || item.liveId || item.sessionId || null;
     if (!streamId) return;
 
-    // Preflight against Dynamo LIVE before pushing viewer UI. Ghost Firestore
-    // cards (ended host, client cleanup missed) used to land Alex on a dead
-    // join that looked like "cannot watch as guest/viewer".
-    try {
-      const status = await getLiveSessionStatus(String(streamId));
-      if (!status?.live) {
-        setPreviewItem(null);
-        setRefreshTick((n) => n + 1);
-        Alert.alert(
-          'Stream ended',
-          'This live is no longer available. Pull to refresh the Live list.',
-        );
-        return;
-      }
-    } catch (probeErr) {
-      console.warn('[LiveUsersTab][JOIN_PREFLIGHT_FAIL]', probeErr?.message || String(probeErr));
-      // Fall through — join path still clears ghosts on session_not_found.
-    }
-
+    // Navigate immediately so join-realtime / stage subscribe start in parallel
+    // with the status probe. Blocking on Cognito+status added a full RTT before
+    // first frame; join-realtime still clears ghosts on SESSION_NOT_FOUND.
+    const probeGeneration = ++joinLiveProbeGenRef.current;
     const params = {
       mode: 'viewer',
       streamId,
@@ -111,10 +101,13 @@ export default function LiveUsersTab() {
       __BLYP_LIVE_VIEWER_INTENT: 'viewer_tap_live_card',
     };
     setPreviewItem(null);
+    // Pop must target the same navigator that received the push.
+    let liveNav = navigation;
     try {
       const parentNav = typeof navigation?.getParent === 'function' ? navigation.getParent() : null;
       if (parentNav && typeof parentNav.dispatch === 'function') {
         parentNav.dispatch(StackActions.push('LiveStreamScreen', params));
+        liveNav = parentNav;
       } else if (typeof navigation?.dispatch === 'function') {
         navigation.dispatch(StackActions.push('LiveStreamScreen', params));
       } else {
@@ -123,6 +116,37 @@ export default function LiveUsersTab() {
     } catch (e) {
       console.warn('[LiveUsersTab][NAVIGATE_ERROR]', e);
     }
+
+    void getLiveSessionStatus(String(streamId))
+      .then((status) => {
+        if (status?.live) return;
+        setRefreshTick((n) => n + 1);
+        // Late !live must not eject after leave / another live / superseded open.
+        // Pop on the same navigator that received the push (parent stack vs tab).
+        if (!shouldEjectEndedLiveProbe({
+          probeGeneration,
+          currentGeneration: joinLiveProbeGenRef.current,
+          expectedStreamId: streamId,
+          navigationState: getRootishNavigationState(liveNav),
+        })) {
+          return;
+        }
+        Alert.alert(
+          'Stream ended',
+          'This live is no longer available. Pull to refresh the Live list.',
+        );
+        try {
+          if (typeof liveNav?.canGoBack === 'function' && liveNav.canGoBack()) {
+            liveNav.goBack();
+          }
+        } catch {
+          // ignore
+        }
+      })
+      .catch((probeErr) => {
+        // Probe network failure: fall through (do not eject).
+        console.warn('[LiveUsersTab][JOIN_PREFLIGHT_FAIL]', probeErr?.message || String(probeErr));
+      });
   }, [navigation]);
 
   const openProfile = useCallback((item) => {

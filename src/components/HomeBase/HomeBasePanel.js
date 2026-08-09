@@ -97,6 +97,10 @@ import { resolveFeedVideoUri } from '../../utils/forYouFeedList';
 import { mediaViewerParams } from '../../utils/mediaViewerPlaylist';
 import { getLiveSessionStatus } from '../../api/ivsLiveApi';
 import {
+  getRootishNavigationState,
+  shouldEjectEndedLiveProbe,
+} from '../../live/joinStatusPreflight';
+import {
   prefetchPostWindow,
   prefetchUriList,
   runWhenIdle,
@@ -658,21 +662,14 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     if (typeof onOpenPage === 'function') onOpenPage('A');
   };
 
-  const openLive = async (stream) => {
+  const openLiveProbeGenRef = useRef(0);
+
+  const openLive = (stream) => {
     const streamId = stream.streamId || stream.id || stream.liveId;
     if (!streamId) return;
-    try {
-      const status = await getLiveSessionStatus(String(streamId));
-      if (!status?.live) {
-        Alert.alert(
-          'Stream ended',
-          'This live is no longer available. Pull to refresh.',
-        );
-        return;
-      }
-    } catch (probeErr) {
-      console.warn('[home] openLive preflight failed', probeErr?.message || String(probeErr));
-    }
+    // Navigate first; status probe runs in parallel so Cognito+Dynamo RTT does
+    // not delay stage subscribe / first frame.
+    const probeGeneration = ++openLiveProbeGenRef.current;
     navigation.navigate('LiveStreamScreen', {
       mode: 'viewer',
       streamId,
@@ -681,6 +678,34 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       source: 'home_base',
       liveViewerIntent: true,
     });
+    void getLiveSessionStatus(String(streamId))
+      .then((status) => {
+        if (status?.live) return;
+        // Late !live must not eject after leave / another live / superseded open.
+        if (!shouldEjectEndedLiveProbe({
+          probeGeneration,
+          currentGeneration: openLiveProbeGenRef.current,
+          expectedStreamId: streamId,
+          navigationState: getRootishNavigationState(navigation),
+        })) {
+          return;
+        }
+        Alert.alert(
+          'Stream ended',
+          'This live is no longer available. Pull to refresh.',
+        );
+        try {
+          if (typeof navigation?.canGoBack === 'function' && navigation.canGoBack()) {
+            navigation.goBack();
+          }
+        } catch {
+          // ignore
+        }
+      })
+      .catch((probeErr) => {
+        // Probe network failure: fall through (do not eject).
+        console.warn('[home] openLive preflight failed', probeErr?.message || String(probeErr));
+      });
   };
 
   const openCreator = (user) =>
