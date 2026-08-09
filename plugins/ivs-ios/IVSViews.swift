@@ -81,7 +81,17 @@ final class BlypIVSRealTimeView: UIView {
     private var attachedPreview: IVSImagePreviewView?
     @objc var participantId: NSString? { didSet { reattach() } }
     @objc var slotId: NSNumber = -1
-    @objc var remoteTrackCount: NSNumber = 0 { didSet { reattach() } }
+    // Session-wide track totals used to reattach every tile on every guest join.
+    // Only (re)attach when tracks first become available for this tile.
+    @objc var remoteTrackCount: NSNumber = 0 {
+        didSet {
+            let prev = oldValue.intValue
+            let next = remoteTrackCount.intValue
+            if prev <= 0 && next > 0 {
+                reattach()
+            }
+        }
+    }
     @objc var zoom: NSNumber = 1.0 { didSet { reapplyZoom() } }
     // Accepted for parity with the JS/Android prop contract; unused on iOS.
     @objc var stageArn: NSString?
