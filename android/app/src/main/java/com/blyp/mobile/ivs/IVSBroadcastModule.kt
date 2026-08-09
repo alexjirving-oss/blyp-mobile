@@ -899,8 +899,8 @@ class IVSBroadcastModule(
             audioManager.setAudioModeManagementEnabled(isIdle)
 
             if (publishing) {
-                // Call-volume rocker + AEC/NS. Speaker output is forced separately by
-                // LiveLoudspeakerController (setCommunicationDevice / speakerphone).
+                // Call-volume rocker + AEC/NS. Physical output is owned by
+                // LiveLoudspeakerController (BT/wired preferred, else built-in speaker).
                 audioManager.setPreset(StageAudioManager.UseCasePreset.VIDEO_CHAT)
                 // Preset may follow a previous SUBSCRIBE_ONLY session, which disables AEC.
                 // Explicitly restore AEC so speaker output does not feed the mic.
@@ -911,7 +911,11 @@ class IVSBroadcastModule(
 
             Log.i(
                 IVS_TAG,
-                "[IVS_AUDIO_ROUTE] role=$role publishing=$publishing usage=${audioManager.usage} source=${audioManager.source} contentType=${audioManager.contentType}"
+                "[IVS_AUDIO_ROUTE] role=$role publishing=$publishing " +
+                    "usage=${audioManager.usage} source=${audioManager.source} " +
+                    "contentType=${audioManager.contentType} " +
+                    "aec=${audioManager.isEchoCancellationEnabled} " +
+                    "modeMgmt=${isIdle}",
             )
         } catch (e: Exception) {
             Log.e(
@@ -1394,8 +1398,19 @@ class IVSBroadcastModule(
     }
 
     private fun rebuildLocalAudioStream() {
-        localAudioStream = currentMic?.let { AudioLocalStageStream(it, StageAudioConfiguration()) }
+        // Defaults match VIDEO_CHAT (mono, NS on, 64kbps). Set explicitly so a future
+        // SDK default drift cannot silently disable publish-path noise suppression.
+        val audioConfig = StageAudioConfiguration().apply {
+            enableNoiseSuppression(true)
+            setStereo(false)
+        }
+        localAudioStream = currentMic?.let { AudioLocalStageStream(it, audioConfig) }
         localAudioStream?.setListener(stageStreamListener)
+        Log.i(
+            IVS_TAG,
+            "[IVS_AUDIO_ROUTE] local mic stream ns=${audioConfig.isNoiseSuppressionEnabled} " +
+                "stereo=${audioConfig.isStereo} maxBitrate=${audioConfig.maxBitrate}",
+        )
     }
 
     private fun rebuildLocalStreams() {
