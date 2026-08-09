@@ -1,11 +1,13 @@
 /**
  * Frenemies prize wheel — 11 segments, right-side pointer, ease-out land
  * on the authoritative server slot (targetSlot / landedSlot).
+ * Occupied slots paint guest photo (else initials) when roster is known.
  */
-import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
 import Svg, { G, Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { Audio } from 'expo-av';
+import { pickPublicLabel } from '../../../utils/publicLabel';
 
 const TEAL_DEEP = '#0A6B62';
 const GOLD = '#F5C542';
@@ -80,6 +82,67 @@ function segUnderPointer(rotationDeg, maxSlots) {
   return Math.floor(under / seg) % n;
 }
 
+function initialsFor(name) {
+  const s = String(name || '').trim().replace(/^@/, '');
+  if (!s) return '?';
+  return s.slice(0, 1).toUpperCase();
+}
+
+function guestLabel(g) {
+  if (!g) return null;
+  return pickPublicLabel(g, { uid: g.userId, fallback: 'Guest' });
+}
+
+function guestPhoto(g) {
+  if (!g) return null;
+  const u = g.photoUrl || g.photoURL || g.avatarUrl || g.avatar || null;
+  return typeof u === 'string' && u.trim() ? u.trim() : null;
+}
+
+/** Compact face chip — same quality bar as Frenemies throw grid. */
+function SegFace({ uri, name, size = 22 }) {
+  const [failedUri, setFailedUri] = useState(null);
+  const r = size / 2;
+  const showPhoto = !!uri && failedUri !== uri;
+  if (showPhoto) {
+    return (
+      <Image
+        source={{ uri }}
+        onError={() => setFailedUri(uri)}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: r,
+          borderWidth: 1.5,
+          borderColor: GOLD,
+          backgroundColor: 'rgba(255,255,255,0.08)',
+        }}
+      />
+    );
+  }
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: r,
+        backgroundColor: 'rgba(0,210,190,0.35)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: GOLD,
+      }}
+    >
+      <Text
+        style={{ color: '#fff', fontWeight: '900', fontSize: size * 0.42 }}
+        allowFontScaling={false}
+      >
+        {initialsFor(name)}
+      </Text>
+    </View>
+  );
+}
+
 export default function PrizeWheel({
   size = 196,
   maxSlots = 11,
@@ -104,6 +167,8 @@ export default function PrizeWheel({
   const rInner = size * 0.14;
   const seg = 360 / maxSlots;
 
+  const faceSize = Math.max(18, Math.min(26, Math.round(size * 0.12)));
+
   const segments = useMemo(() => {
     return Array.from({ length: maxSlots }, (_, i) => {
       const start = i * seg;
@@ -111,13 +176,17 @@ export default function PrizeWheel({
       const mid = start + seg / 2;
       const labelPos = polar(cx, cy, rOuter * 0.72, mid);
       const n = i + 1;
-      const guest = occupiedBySlot[n];
+      const guest = occupiedBySlot[n] || occupiedBySlot[String(n)] || null;
+      const name = guestLabel(guest) || (guest ? 'Guest' : null);
+      const photo = guestPhoto(guest);
       return {
         n,
         path: segmentPath(cx, cy, rOuter, rInner, start, end),
         color: SEG_COLORS[i % SEG_COLORS.length],
         labelPos,
         occupied: !!guest,
+        name,
+        photo,
       };
     });
   }, [maxSlots, seg, cx, cy, rOuter, rInner, occupiedBySlot]);
@@ -281,22 +350,32 @@ export default function PrizeWheel({
           <Circle cx={cx} cy={cy} r={rInner} fill="url(#hubGold)" stroke={INK} strokeWidth={2} />
         </Svg>
         <View style={[StyleSheet.absoluteFillObject, { width: size, height: size }]} pointerEvents="none">
-          {segments.map((s) => (
-            <View
-              key={`t-${s.n}`}
-              style={[
-                styles.segLabel,
-                {
-                  left: s.labelPos.x - 12,
-                  top: s.labelPos.y - 12,
-                },
-              ]}
-            >
-              <Text style={[styles.segNum, s.occupied && styles.segNumHot]} allowFontScaling={false}>
-                {s.n}
-              </Text>
-            </View>
-          ))}
+          {segments.map((s) => {
+            const chip = s.occupied ? faceSize + 2 : 24;
+            const half = chip / 2;
+            return (
+              <View
+                key={`t-${s.n}`}
+                style={[
+                  styles.segLabel,
+                  {
+                    left: s.labelPos.x - half,
+                    top: s.labelPos.y - half,
+                    width: chip,
+                    height: chip,
+                  },
+                ]}
+              >
+                {s.occupied ? (
+                  <SegFace uri={s.photo} name={s.name} size={faceSize} />
+                ) : (
+                  <Text style={styles.segNum} allowFontScaling={false}>
+                    {s.n}
+                  </Text>
+                )}
+              </View>
+            );
+          })}
           <View style={[styles.hubLabel, { left: cx - 22, top: cy - 10, width: 44 }]}>
             <Text style={styles.hubText} allowFontScaling={false}>
               {phase === 'ready' ? 'READY' : 'SPIN'}
@@ -352,8 +431,6 @@ const styles = StyleSheet.create({
   },
   segLabel: {
     position: 'absolute',
-    width: 24,
-    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -365,10 +442,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.65)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
-  },
-  segNumHot: {
-    color: '#fff',
-    fontSize: 13,
   },
   hubLabel: {
     position: 'absolute',
