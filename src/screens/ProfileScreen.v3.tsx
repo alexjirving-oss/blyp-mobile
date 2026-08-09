@@ -46,7 +46,8 @@ import PromoteTab from '../components/PromoteTab';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import ProfileCategoryChips from '../components/ProfileCategoryChips';
 import ManageProfileCategoriesSheet from '../components/ManageProfileCategoriesSheet';
-import StageView from '../components/stage/StageView';
+import StageViewMod from '../components/stage/StageView';
+const StageView = StageViewMod as React.ComponentType<any>;
 import {
   buildProfileCategoryChips,
   filterPostsByCategory,
