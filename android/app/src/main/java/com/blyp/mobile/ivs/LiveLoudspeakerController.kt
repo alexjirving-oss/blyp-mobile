@@ -54,12 +54,14 @@ internal class LiveLoudspeakerController(
     private var publishFocusHeld: Boolean = false
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { change ->
-        // expo-av / OEM focus loss is repaired on the next watchdog tick; log only.
+        // expo-av / OEM focus loss is repaired on the next watchdog tick via ensurePublishAudioFocus.
+        // Clear the held flag immediately so ensure cannot no-op on a stale grant.
         if (activeProfile == Profile.PUBLISHING &&
             (change == AudioManager.AUDIOFOCUS_LOSS ||
                 change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT ||
                 change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK)
         ) {
+            publishFocusHeld = false
             Log.w(logTag, "[IVS_AUDIO_ROUTE] publish audio focus lost change=$change")
             mainHandler.post {
                 if (activeProfile == Profile.PUBLISHING) {
