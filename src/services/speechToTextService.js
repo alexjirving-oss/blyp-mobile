@@ -1,5 +1,6 @@
 import { Audio } from 'expo-av';
 import { Platform, Alert } from 'react-native';
+import { isLiveStagePublishing } from './livePublishAudioGuard';
 
 /**
  * Speech-to-Text Service for Blyp Mobile
@@ -66,6 +67,10 @@ class SpeechToTextService {
    * Set up audio mode for recording
    */
   async setupAudioMode() {
+    // Never steal IVS VIDEO_CHAT / call-volume while host/guest mic is open.
+    if (isLiveStagePublishing()) {
+      return;
+    }
     try {
       // Use a simpler audio mode configuration to avoid compatibility issues
       await Audio.setAudioModeAsync({
@@ -99,6 +104,14 @@ class SpeechToTextService {
     this._starting = true;
     this._lastError = null;
     try {
+      // Soft-fail while Stage mic is open — setAudioModeAsync would yank IVS call audio.
+      if (isLiveStagePublishing()) {
+        this._starting = false;
+        this._lastError = new Error('Speech-to-text unavailable while live Stage publishing');
+        console.warn('⚠️ Skipping STT start: live Stage publishing active');
+        return false;
+      }
+
       // Request permissions
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
@@ -110,7 +123,7 @@ class SpeechToTextService {
       await this.setupAudioMode();
       // Additional Android audio config for robustness
       try {
-        if (Platform.OS === 'android') {
+        if (Platform.OS === 'android' && !isLiveStagePublishing()) {
           await Audio.setAudioModeAsync({
             allowsRecordingIOS: true,
             playsInSilentModeIOS: true,
@@ -287,6 +300,8 @@ class SpeechToTextService {
       const { ensureMediaPlaybackAudioMode } = require('./notifySound');
       await ensureMediaPlaybackAudioMode({ background: false });
     } catch {
+      // Same latch as ensureMediaPlaybackAudioMode — never reclaim media mode mid-publish.
+      if (isLiveStagePublishing()) return;
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,

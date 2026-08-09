@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { COLORS } from '../styles/theme';
+import { isLiveStagePublishing } from '../services/livePublishAudioGuard';
 
 const VoiceMemoScreen = () => {
   const navigation = useNavigation();
@@ -32,6 +33,12 @@ const VoiceMemoScreen = () => {
 
   const startRecording = async () => {
     try {
+      // Soft-fail while Stage mic is open — setAudioModeAsync would yank IVS call audio.
+      if (isLiveStagePublishing()) {
+        Alert.alert('Unavailable', 'Voice memo is unavailable while you are live.');
+        return;
+      }
+
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission required', 'Please grant microphone permissions');
@@ -69,6 +76,8 @@ const VoiceMemoScreen = () => {
       const { ensureMediaPlaybackAudioMode } = require('../services/notifySound');
       await ensureMediaPlaybackAudioMode({ background: false });
     } catch {
+      // Same latch as ensureMediaPlaybackAudioMode — never reclaim media mode mid-publish.
+      if (isLiveStagePublishing()) return;
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -91,11 +100,13 @@ const VoiceMemoScreen = () => {
         const { ensureMediaPlaybackAudioMode } = require('../services/notifySound');
         await ensureMediaPlaybackAudioMode({ background: false });
       } catch {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          playThroughEarpieceAndroid: false,
-        });
+        if (!isLiveStagePublishing()) {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+            playThroughEarpieceAndroid: false,
+          });
+        }
       }
       const { sound } = await Audio.Sound.createAsync({ uri: recordingUri });
       setSound(sound);
