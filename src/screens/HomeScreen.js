@@ -43,7 +43,6 @@ import {
   getFirstEnabledPageKey,
   isTopicPageKey,
   topicIdFromKey,
-  INTEREST_CATALOG,
 } from '../services/userPreferencesService';
 import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
@@ -56,6 +55,7 @@ import {
   ensureFocusPostInList,
   feedInventoryStats,
   resolveFeedVideoUri,
+  shufflePostsVaried,
 } from '../utils/forYouFeedList';
 import { claimFeedAudio, releaseFeedAudio } from '../services/feedAudioSession';
 import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
@@ -75,13 +75,9 @@ import { useAuth, hardLogout } from '../hooks/useCommon';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import {
   attachAccountFeedPriority,
-  ensureFollowMixCandidates,
   filterSuppressedAccounts,
   isAccountFeedSuppressed,
-  prepareRankedFeed,
-  rankPosts,
 } from '../services/feedRankingService';
-import { attachPromoteBoost } from '../services/promoteBoostService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -223,8 +219,9 @@ const getPostGiftCoins = (post) => {
 
 // How many posts we pull per Firestore page. Many rows are images/silent clips
 // filtered out for For You, so we over-fetch and keep paging until we have enough
-// playable videos.
+// playable videos. Boot/refresh uses a wider window so shuffle has a real pool.
 const FEED_PAGE_SIZE = 15;
+const FEED_BOOT_FETCH = 60;
 const FEED_GATHER_TARGET = 12;
 const FEED_PREFETCH_REMAINING = 4;
 
@@ -232,63 +229,25 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
-/** Deterministic organic score + diversity pass for already-enriched candidates. */
-function rankForYouPosts(posts, contextOrGetter = {}) {
-  const context = typeof contextOrGetter === 'function'
-    ? (contextOrGetter() || {})
-    : (contextOrGetter || {});
-  return rankPosts(
-    posts || [],
-    context.terms || [],
-    context.following || new Set(),
-    {
-      seenIds: context.seenIds || new Set(),
-      recentOwners: context.recentOwners || [],
-      minCreatorGap: context.minCreatorGap,
-    },
-  );
-}
-
 /**
- * Hydrate follow mix + author tiers + promote boosts, then score and diversify.
- * Pass a context *getter* (not a snapshot) so follows/interests that arrive while
- * enrichment is in flight are used when scoring — not the empty set from first paint.
+ * Simple For You order: drop suppressed accounts, then shuffle.
+ * No follow-mix hydrate, promote fair-cap, score, or diversity pass.
+ * @param {any[]} posts
+ * @param {{ avoidCount?: number, remember?: boolean }} [opts]
  */
-async function prepareForYouOrder(posts, contextOrGetter = {}, rankOpts = {}) {
-  const getContext = typeof contextOrGetter === 'function'
-    ? contextOrGetter
-    : () => contextOrGetter || {};
-  let candidates = posts || [];
+async function prepareForYouOrder(posts, opts = {}) {
+  const candidates = Array.isArray(posts) ? posts : [];
+  if (!candidates.length) return [];
+  const shuffleOpts = {
+    avoidCount: Number.isFinite(opts.avoidCount) ? opts.avoidCount : 3,
+    remember: opts.remember !== false,
+  };
   try {
-    const ctx = getContext();
-    candidates = await ensureFollowMixCandidates(candidates, ctx.following || new Set(), {
-      isEligible: isValidFeedPost,
-    });
+    const withAccount = await attachAccountFeedPriority(candidates);
+    return shufflePostsVaried(filterSuppressedAccounts(withAccount), shuffleOpts);
   } catch (_) {
-    candidates = posts || [];
+    return shufflePostsVaried(candidates, shuffleOpts);
   }
-  const recentOwners = Array.isArray(rankOpts.recentOwners)
-    ? rankOpts.recentOwners
-    : undefined;
-  return prepareRankedFeed(candidates, {
-    mode: 'rank',
-    getContext: () => {
-      const live = getContext() || {};
-      return {
-        ...live,
-        recentOwners: recentOwners ?? live.recentOwners,
-        minCreatorGap: rankOpts.minCreatorGap ?? live.minCreatorGap,
-      };
-    },
-  });
-}
-
-function feedTailOwners(posts, count = 3) {
-  const list = Array.isArray(posts) ? posts : [];
-  return list
-    .slice(-Math.max(1, count))
-    .map((p) => String(p?.userId || p?.uid || p?.authorId || '').trim())
-    .filter(Boolean);
 }
 
 function logForYouInventory(label, posts) {
@@ -447,26 +406,10 @@ const HomeScreen = ({ navigation, route }) => {
   const enabledPagesRef = useRef(enabledPages);
   useEffect(() => { enabledPagesRef.current = enabledPages; }, [enabledPages]);
 
-  // Personalization signals for the For You ranking, kept in refs so the live
-  // Firestore feed listener can read the latest values without re-subscribing.
-  const interestTermsRef = useRef([]);
   const followingRef = useRef(new Set());
+  // Local impression dedupe (not used for ordering).
   const forYouRecentlySeenIdsRef = useRef(new Set());
   const forYouRecentlySeenOrderRef = useRef([]);
-  // Bumped whenever a soft re-rank starts so a slower, older ranking cannot
-  // overwrite a fresher one (the "looked good then snapped back" race).
-  const forYouRankGenRef = useRef(0);
-
-  const getForYouRankingContext = useCallback(() => ({
-    terms: interestTermsRef.current || [],
-    following: followingRef.current || new Set(),
-    seenIds: new Set(forYouRecentlySeenIdsRef.current || []),
-  }), []);
-
-  const beginForYouRank = useCallback(() => {
-    forYouRankGenRef.current += 1;
-    return forYouRankGenRef.current;
-  }, []);
 
   /** Stamp + hard-dedupe + keep Home-rail focus post through list rebuilds. */
   const buildForYouList = useCallback((posts, cycle = forYouCycleRef.current) => {
@@ -488,20 +431,6 @@ const HomeScreen = ({ navigation, route }) => {
   }, []);
 
   useEffect(() => {
-    const byId = new Map(INTEREST_CATALOG.map((i) => [i.id, i.label]));
-    interestTermsRef.current = [
-      ...new Set(
-        (prefs?.interests || []).flatMap((id) => {
-          const label = byId.get(id);
-          return [id, label, ...(label ? String(label).split(/\s+/) : [])]
-            .filter(Boolean)
-            .map((term) => String(term).toLowerCase());
-        }),
-      ),
-    ];
-  }, [prefs]);
-
-  useEffect(() => {
     if (!uid) return undefined;
     const unsub = subscribeToFollowingList(uid, (set) => {
       followingRef.current = set || new Set();
@@ -519,69 +448,9 @@ const HomeScreen = ({ navigation, route }) => {
     return unsub;
   }, [uid]);
 
-  // Preferences and the follow graph hydrate independently of the first Firestore
-  // page. If either arrives just after first paint, apply it while the viewer is
-  // still on item zero; never jump the list once they have started swiping.
-  // Soft re-rank also skips while a Home-rail focus pin is holding index 0.
-  useEffect(() => {
-    const current = randomPostsRef.current || [];
-    if (selectedTabRef.current !== 'A' || currentDiscoverIndexRef.current !== 0 || !current.length) {
-      return undefined;
-    }
-    if (forYouFocusPinIdRef.current) {
-      return undefined;
-    }
-    let cancelled = false;
-    const gen = beginForYouRank();
-    prepareForYouOrder(current, getForYouRankingContext)
-      .then((ordered) => {
-        if (
-          cancelled
-          || gen !== forYouRankGenRef.current
-          || currentDiscoverIndexRef.current !== 0
-          || forYouFocusPinIdRef.current
-        ) {
-          return;
-        }
-        const next = buildForYouList(ordered, forYouCycleRef.current);
-        // Soft re-rank hitch guard: if the visible prefix is unchanged, skip
-        // setState so FlatList does not rebuild cells under the finger.
-        const prev = randomPostsRef.current || [];
-        const pinId = forYouFocusPinIdRef.current;
-        const samePrefix = (() => {
-          const n = Math.min(prev.length, next.length, 6);
-          if (n === 0) return false;
-          for (let i = 0; i < n; i += 1) {
-            if (String(prev[i]?.id || '') !== String(next[i]?.id || '')) return false;
-          }
-          return true;
-        })();
-        if (samePrefix && !pinId) {
-          // Still refresh the tail without touching the playing head.
-          const headIds = new Set(prev.slice(0, 3).map((p) => String(p?.id || '')));
-          const tail = next.filter((p) => p?.id && !headIds.has(String(p.id)));
-          if (!tail.length) return;
-          const merged = dedupePostsById([
-            ...prev.slice(0, Math.max(3, currentDiscoverIndexRef.current + 2)),
-            ...tail,
-          ]);
-          const stamped = buildForYouList(merged, forYouCycleRef.current);
-          randomPostsRef.current = stamped;
-          setRandomPosts(stamped);
-          return;
-        }
-        randomPostsRef.current = next;
-        setRandomPosts(next);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [prefs?.interests, following, getForYouRankingContext, beginForYouRank, buildForYouList]);
-
   // Position the For You FlatList on a deep-linked / Home-rail post. Prefer the
-  // post's place in the ranked continuum; if it isn't in the loaded window yet,
-  // inject it at the front and keep the rest of the ranked feed after it.
+  // post's place in the loaded continuum; if it isn't in the window yet,
+  // inject it at the front and keep the rest of the feed after it.
   const applyPendingForYouFocus = useCallback(() => {
     const pending = pendingForYouFocusRef.current;
     const postId = String(
@@ -1085,9 +954,12 @@ const HomeScreen = ({ navigation, route }) => {
                 (async () => {
                   try {
                     if (initial) {
-                      // Paint immediately from the snapshot — do not block first frame
-                      // on account hydrate + promote API. Preserve Home-rail focus pin.
-                      const provisional = buildForYouList(validPosts, cycle);
+                      // Paint a shuffled first page immediately, then widen the
+                      // pool with a one-shot boot fetch so reload has variety.
+                      const provisional = buildForYouList(
+                        await prepareForYouOrder(validPosts),
+                        cycle,
+                      );
                       setRandomPosts(provisional);
                       randomPostsRef.current = provisional;
                       setCurrentIndex(0);
@@ -1097,47 +969,42 @@ const HomeScreen = ({ navigation, route }) => {
                       }
                       setIsEmptyFeed(false);
                       setLoading(false);
+                      logForYouInventory('boot-provisional', provisional);
 
-                      const rankGen = beginForYouRank();
-                      const ordered = await prepareForYouOrder(
-                        validPosts,
-                        getForYouRankingContext,
-                      );
-                      if (!mounted) return;
-                      const pinId = forYouFocusPinIdRef.current;
-                      // Never reshuffle under a Home-rail focus pin — provisional
-                      // already kept the clip via buildForYouList.
-                      if (pinId) {
-                        return;
-                      }
-                      // Soft re-rank only if this is still the latest ranking
-                      // attempt and the user is still on the first clip.
-                      if (
-                        rankGen === forYouRankGenRef.current
-                        && currentDiscoverIndexRef.current === 0
-                      ) {
-                        const ranked = buildForYouList(ordered, cycle);
-                        const prev = randomPostsRef.current || [];
-                        const sameHead =
-                          prev.length > 0 &&
-                          String(prev[0]?.id || '') === String(ranked[0]?.id || '') &&
-                          String(prev[1]?.id || '') === String(ranked[1]?.id || '');
-                        if (sameHead) {
-                          // Keep playing head stable; splice ranked tail only.
-                          const head = prev.slice(0, Math.max(2, currentDiscoverIndexRef.current + 1));
-                          const headIds = new Set(head.map((p) => String(p?.id || '')));
-                          const tail = ranked.filter((p) => p?.id && !headIds.has(String(p.id)));
-                          const merged = buildForYouList([...head, ...tail], cycle);
-                          randomPostsRef.current = merged;
-                          setRandomPosts(merged);
-                        } else {
-                          setRandomPosts(ranked);
-                          randomPostsRef.current = ranked;
+                      try {
+                        const bootSnap = await db
+                          .collection('posts')
+                          .orderBy('date', 'desc')
+                          .limit(FEED_BOOT_FETCH)
+                          .get();
+                        if (!mounted) return;
+                        const bootDocs = bootSnap?.docs || [];
+                        if (bootDocs.length) {
+                          forYouCursorRef.current = bootDocs[bootDocs.length - 1];
+                          forYouHasMoreRef.current = bootDocs.length >= FEED_BOOT_FETCH;
+                          forYouShownIdsRef.current = new Set(bootDocs.map((d) => d.id));
                         }
+                        const bootPosts = filterBlocked(
+                          bootDocs.map((d) => ({ id: d.id, ...d.data() })),
+                          (p) => p.userId || p.uid,
+                        ).filter(isValidFeedPost);
+                        if (!bootPosts.length) return;
+                        if (forYouFocusPinIdRef.current) return;
+                        const ordered = await prepareForYouOrder(bootPosts);
+                        if (!mounted) return;
+                        const shuffled = buildForYouList(ordered, cycle);
+                        randomPostsRef.current = shuffled;
+                        setRandomPosts(shuffled);
+                        logForYouInventory('boot', shuffled);
+                      } catch (bootErr) {
+                        console.warn(
+                          'HOME: For You boot widen failed',
+                          bootErr?.message || String(bootErr),
+                        );
                       }
                     } else {
                       // Fast path: likes/views/gifts on the live page must not
-                      // re-hit promote/account APIs or reshuffle the feed.
+                      // reshuffle the feed under the user's finger.
                       const liveIds = new Set(validPosts.map((p) => p.id));
                       const prev = randomPostsRef.current || [];
                       const prevIds = new Set(prev.map((p) => String(p.id)));
@@ -1187,13 +1054,12 @@ const HomeScreen = ({ navigation, route }) => {
                         }
                       } else {
                         const withAccount = await attachAccountFeedPriority(validPosts);
-                        const withPromote = await attachPromoteBoost(withAccount);
                         if (!mounted) return;
-                        const visible = filterSuppressedAccounts(withPromote);
+                        const visible = filterSuppressedAccounts(withAccount);
                         setRandomPosts((prevList) => {
                           if (!Array.isArray(prevList) || prevList.length === 0) {
                             const stamped = buildForYouList(
-                              rankForYouPosts(visible, getForYouRankingContext),
+                              shufflePostsVaried(visible, { avoidCount: 3 }),
                               cycle,
                             );
                             randomPostsRef.current = stamped;
@@ -1213,11 +1079,6 @@ const HomeScreen = ({ navigation, route }) => {
                               next.push({
                                 ...updated,
                                 feedKey: existing.feedKey || `${updated.id}__${cycle}`,
-                                promoteType: updated.promoteType ?? existing.promoteType ?? null,
-                                promoteBoostWeight:
-                                  updated.promoteBoostWeight ?? existing.promoteBoostWeight ?? 0,
-                                promoteBattleRef:
-                                  updated.promoteBattleRef ?? existing.promoteBattleRef ?? null,
                               });
                               byId.delete(eid);
                             } else if (!isAccountFeedSuppressed(existing)) {
@@ -1226,9 +1087,9 @@ const HomeScreen = ({ navigation, route }) => {
                             }
                           });
 
-                          const brandNew = rankForYouPosts(
+                          const brandNew = shufflePostsVaried(
                             visible.filter((p) => byId.has(String(p.id))),
-                            getForYouRankingContext,
+                            { avoidCount: 0, remember: false },
                           );
                           brandNew.forEach((p) => {
                             const id = String(p.id);
@@ -1247,7 +1108,7 @@ const HomeScreen = ({ navigation, route }) => {
                       setLoading(false);
                     }
                   } catch (e) {
-                    console.warn('HOME: For You priority hydrate failed', e?.message || String(e));
+                    console.warn('HOME: For You order failed', e?.message || String(e));
                     if (!mounted) return;
                     setIsEmptyFeed(false);
                     setLoading(false);
@@ -1318,20 +1179,15 @@ const HomeScreen = ({ navigation, route }) => {
     isAuthenticated,
     isScreenFocused,
     selectedTab,
-    getForYouRankingContext,
-    beginForYouRank,
     buildForYouList,
   ]);
 
-  // Pull-to-refresh: actually re-fetch the freshest page from Firestore (not just
-  // a local reshuffle), re-rank it, and reset the pagination cursor so "load more"
-  // continues correctly from the new top.
+  // Pull-to-refresh: re-fetch a wider candidate window, shuffle, reset cursors.
   const loadRandomPosts = useCallback(async () => {
     if (!firebaseEnabled || !db || typeof db.collection !== 'function') {
-      // Fall back to a local reshuffle if Firestore isn't available.
       setRandomPosts((prev) => {
         const next = buildForYouList(
-          rankForYouPosts(prev, getForYouRankingContext),
+          shufflePostsVaried(prev, { avoidCount: 3 }),
           forYouCycleRef.current,
         );
         randomPostsRef.current = next;
@@ -1345,11 +1201,11 @@ const HomeScreen = ({ navigation, route }) => {
       const snap = await db
         .collection('posts')
         .orderBy('date', 'desc')
-        .limit(FEED_PAGE_SIZE)
+        .limit(FEED_BOOT_FETCH)
         .get();
       const docs = snap?.docs || [];
       forYouCursorRef.current = docs.length ? docs[docs.length - 1] : null;
-      forYouHasMoreRef.current = docs.length >= FEED_PAGE_SIZE;
+      forYouHasMoreRef.current = docs.length >= FEED_BOOT_FETCH;
       // Reset phase 2 (all-posts) paginator on refresh.
       forYouPhaseRef.current = 'date';
       forYouAllCursorRef.current = null;
@@ -1367,31 +1223,30 @@ const HomeScreen = ({ navigation, route }) => {
         randomPostsRef.current = [];
         setIsEmptyFeed(true);
       } else {
-        const ordered = await prepareForYouOrder(fresh, getForYouRankingContext);
-        const ranked = buildForYouList(ordered, forYouCycleRef.current);
-        setRandomPosts(ranked);
-        randomPostsRef.current = ranked;
+        const ordered = await prepareForYouOrder(fresh);
+        const shuffled = buildForYouList(ordered, forYouCycleRef.current);
+        setRandomPosts(shuffled);
+        randomPostsRef.current = shuffled;
         setIsEmptyFeed(false);
         setCurrentDiscoverIndex(0);
         currentDiscoverIndexRef.current = 0;
-        logForYouInventory('refresh', ranked);
+        logForYouInventory('refresh', shuffled);
       }
     } catch (e) {
       console.warn('[HOME] pull-to-refresh failed', e?.message);
     } finally {
       setLoading(false);
     }
-  }, [getForYouRankingContext, buildForYouList]);
+  }, [buildForYouList]);
 
   // Load the next (older) page of the For You feed and append it. Called as the
   // viewer nears the end of the list, which makes the feed effectively endless.
   const appendFeedPosts = useCallback(async (newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    const recentOwners = feedTailOwners(randomPostsRef.current || [], 3);
-    const ordered = await prepareForYouOrder(newPosts, getForYouRankingContext, {
-      recentOwners,
-    });
+    // Shuffle only the new page; do not re-order clips already on screen
+    // or overwrite the session head used by the next pull-to-refresh.
+    const ordered = await prepareForYouOrder(newPosts, { avoidCount: 0, remember: false });
     const stamped = buildForYouList(ordered, forYouCycleRef.current);
     setRandomPosts((prev) => {
       const haveIds = new Set(
@@ -1428,7 +1283,7 @@ const HomeScreen = ({ navigation, route }) => {
         return next;
       });
     }
-  }, [uid, getForYouRankingContext, buildForYouList]);
+  }, [uid, buildForYouList]);
 
   const loadMoreForYou = useCallback(async () => {
     if (loadingMoreRef.current) return;
@@ -1522,7 +1377,6 @@ const HomeScreen = ({ navigation, route }) => {
   }, [
     firebaseEnabled,
     appendFeedPosts,
-    getForYouRankingContext,
   ]);
 
   // Keep the first screen full even when the opening Firestore page is mostly images.

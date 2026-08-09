@@ -10,13 +10,14 @@
 
 import { db, firebaseEnabled } from '../config/firebase';
 import { fixStorageUrl } from '../utils/urlUtils';
-import { rankPosts, attachAccountFeedPriority, filterSuppressedAccounts } from './feedRankingService';
+import { attachAccountFeedPriority, filterSuppressedAccounts } from './feedRankingService';
 import {
   attachPromoteBoost,
   applyPromoteFairCap,
   promoteBoostAdjust,
 } from './promoteBoostService';
 import { filterForYouPosts } from '../utils/forYouFeedFilter';
+import { shufflePostsVaried } from '../utils/forYouFeedList';
 import { filterBlocked, loadBlockedUsers } from './BlockService';
 
 const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
@@ -146,20 +147,21 @@ export async function getTopicPosts(terms = [], limit = 30, opts = {}) {
   }
 }
 
-/** A personalized "For You" set: recent posts ranked by follows + interests. */
+/**
+ * Home carousel "For You" rail: recent playable videos, shuffled per reload.
+ * `terms` / `followingIds` kept for call-site compatibility; order is not ranked.
+ */
 export async function getForYouPosts(terms = [], followingIds = [], limit = 12) {
   if (!firebaseEnabled || !db?.collection) return [];
+  void terms;
+  void followingIds;
   try {
     const snap = await db.collection('posts').orderBy('date', 'desc').limit(80).get();
     const all = await visiblePosts((snap?.docs || []).map((d) => ({ id: d.id, ...d.data() })));
     const withAccount = await attachAccountFeedPriority(all);
-    const withPromote = await attachPromoteBoost(withAccount);
-    const ranked = rankPosts(
-      withPromote,
-      terms,
-      new Set((followingIds || []).filter(Boolean)),
-    );
-    return filterForYouPosts(ranked).slice(0, limit);
+    const visible = filterSuppressedAccounts(withAccount);
+    const playable = filterForYouPosts(visible);
+    return shufflePostsVaried(playable, { avoidCount: 3 }).slice(0, limit);
   } catch (e) {
     console.warn('[DISCOVERY] for-you failed', e?.message || String(e));
     return [];

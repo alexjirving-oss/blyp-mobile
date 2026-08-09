@@ -279,8 +279,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     return unsub;
   }, [uid]);
 
-  // Personalized "For You" rail — ranked mix of follows + interests, then a
-  // fresh session mix so order changes on each load / Home revisit / pull-refresh.
+  // "For You" rail — shuffled playable videos; remixed on load / focus / refresh.
   const refreshForYouRail = useCallback(() => {
     let active = true;
     getForYouPosts(interestTerms, Array.from(followingSet), 12).then((r) => {
