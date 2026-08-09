@@ -34,7 +34,9 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         val sessionId = IVSBroadcastModule.getCurrentSessionId()
         val pid = participantId
         if (sessionId.isNullOrEmpty() || pid.isNullOrEmpty()) return null
-        return "$sessionId|$pid|$slotId|$remoteTrackCount"
+        // Do NOT include remoteTrackCount: session-wide track totals change whenever
+        // any guest joins/leaves and would force every tile to re-attach (flicker).
+        return "$sessionId|$pid|$slotId"
     }
 
     private fun attemptAttach(reason: String) {
@@ -82,10 +84,13 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
     }
 
     fun setSlotId(id: Int) {
+        if (slotId == id) return
         slotId = id
         lastAttachedKey = null
-        surfaceReady = false
+        // Keep surfaceReady: TextureView is still valid; clearing it without a
+        // re-attach left tiles black until the next surface callback.
         FirstFrameProbe.reset("viewer slotId=$slotId")
+        post { attemptAttach("slotIdChanged") }
     }
 
     fun setParticipantId(id: String?) {
@@ -97,9 +102,16 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
 
     fun setRemoteTrackCount(count: Int) {
         if (remoteTrackCount == count) return
+        val wasAssignable = remoteTrackCount > 0
         remoteTrackCount = count
-        lastAttachedKey = null
-        post { attemptAttach("trackCountChanged") }
+        // Only (re)attach when tracks first become available for this tile.
+        // Mid-session global count bumps must not tear down a healthy attach.
+        if (!wasAssignable && count > 0) {
+            lastAttachedKey = null
+            post { attemptAttach("trackCountBecamePositive") }
+        } else if (wasAssignable && count <= 0) {
+            lastAttachedKey = null
+        }
     }
 
     fun setZoom(value: Float) {
