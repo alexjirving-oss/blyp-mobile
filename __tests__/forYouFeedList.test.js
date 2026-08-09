@@ -2,7 +2,11 @@ const {
   dedupePostsById,
   ensureFocusPostInList,
   feedInventoryStats,
+  getLastFeedHeadIds,
+  resetLastFeedHeadIds,
   resolveFeedVideoUri,
+  shuffleArray,
+  shufflePostsVaried,
   stampFeedKeys,
 } = require('../src/utils/forYouFeedList');
 
@@ -60,5 +64,46 @@ describe('forYouFeedList', () => {
         { id: '1', userId: 'u1' },
       ]),
     ).toEqual({ total: 3, unique: 2, duplicates: 1, creators: 2 });
+  });
+
+  it('shuffleArray permutes with a deterministic RNG', () => {
+    const seq = [0.9, 0.1, 0.5, 0.2];
+    let i = 0;
+    const random = () => seq[i++ % seq.length];
+    const out = shuffleArray(['a', 'b', 'c', 'd'], random);
+    expect(out).toHaveLength(4);
+    expect(new Set(out)).toEqual(new Set(['a', 'b', 'c', 'd']));
+    expect(out).not.toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('shufflePostsVaried keeps last head out of the fresh prefix when pool allows', () => {
+    resetLastFeedHeadIds();
+    const posts = [
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c' },
+      { id: 'd' },
+      { id: 'e' },
+    ];
+    // Force a stable shuffle order via a constant RNG that always picks j=0.
+    const random = () => 0;
+    const first = shufflePostsVaried(posts, {
+      avoidFirstIds: [],
+      avoidCount: 3,
+      random,
+    });
+    expect(getLastFeedHeadIds()).toEqual(first.slice(0, 3).map((p) => p.id));
+
+    const second = shufflePostsVaried(posts, {
+      avoidFirstIds: getLastFeedHeadIds(),
+      avoidCount: 3,
+      random,
+      remember: false,
+    });
+    const avoided = new Set(first.slice(0, 3).map((p) => p.id));
+    // Fresh clips (not in last head) must lead; avoided ids trail.
+    const freshCount = posts.length - avoided.size;
+    expect(second.slice(0, freshCount).every((p) => !avoided.has(p.id))).toBe(true);
+    expect(second.slice(freshCount).every((p) => avoided.has(p.id))).toBe(true);
   });
 });

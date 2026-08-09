@@ -1,6 +1,6 @@
 // forYouFeedList.js
 // Pure helpers for the Home For You continuum: hard id dedupe, focus-pin survival,
-// inventory stats, and preferred playback URI (CDN / compressed when present).
+// inventory stats, preferred playback URI, and a simple reload shuffle.
 
 import { fixStorageUrl } from './urlUtils';
 
@@ -108,4 +108,97 @@ export function feedInventoryStats(posts) {
     duplicates,
     creators: owners.size,
   };
+}
+
+/** In-memory head from the last shuffle (process lifetime). */
+let lastFeedHeadIds = [];
+
+export function getLastFeedHeadIds() {
+  return lastFeedHeadIds.slice();
+}
+
+export function rememberFeedHead(posts, count = 3) {
+  const n = Math.max(0, Number(count) || 0);
+  lastFeedHeadIds = (posts || [])
+    .slice(0, n)
+    .map((p) => (p?.id != null ? String(p.id) : ''))
+    .filter(Boolean);
+  return lastFeedHeadIds.slice();
+}
+
+/** Test-only reset for the in-memory head. */
+export function resetLastFeedHeadIds() {
+  lastFeedHeadIds = [];
+}
+
+/**
+ * Fisher–Yates shuffle. Pass `random` for deterministic tests.
+ * @template T
+ * @param {T[]} items
+ * @param {() => number} [random]
+ * @returns {T[]}
+ */
+export function shuffleArray(items, random = Math.random) {
+  const next = [...(items || [])];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    const tmp = next[i];
+    next[i] = next[j];
+    next[j] = tmp;
+  }
+  return next;
+}
+
+/**
+ * Shuffle feed candidates for a cold open / pull-refresh / rail rematch.
+ * Light rule only: previous session's first N go after everything else when
+ * the pool still has other clips (nothing elaborate).
+ *
+ * @param {any[]} posts
+ * @param {{
+ *   avoidFirstIds?: string[]|Set<string>,
+ *   avoidCount?: number,
+ *   random?: () => number,
+ *   remember?: boolean,
+ * }} [opts]
+ */
+export function shufflePostsVaried(posts, opts = {}) {
+  const list = dedupePostsById(posts);
+  if (list.length <= 1) {
+    if (opts.remember !== false) rememberFeedHead(list, opts.avoidCount ?? 3);
+    return list;
+  }
+
+  const random = typeof opts.random === 'function' ? opts.random : Math.random;
+  const avoidCount = Math.max(0, Number.isFinite(opts.avoidCount) ? opts.avoidCount : 3);
+  const rawAvoid = opts.avoidFirstIds instanceof Set
+    ? [...opts.avoidFirstIds]
+    : (opts.avoidFirstIds || getLastFeedHeadIds());
+  const avoid = new Set(
+    rawAvoid
+      .map((id) => String(id || ''))
+      .filter(Boolean)
+      .slice(0, avoidCount || undefined),
+  );
+
+  let ordered;
+  if (avoid.size === 0) {
+    ordered = shuffleArray(list, random);
+  } else {
+    const fresh = [];
+    const recent = [];
+    for (const post of list) {
+      if (avoid.has(String(post.id))) recent.push(post);
+      else fresh.push(post);
+    }
+    // Tiny catalog: if every candidate was in the last head, just reshuffle.
+    ordered = fresh.length === 0
+      ? shuffleArray(list, random)
+      : [...shuffleArray(fresh, random), ...shuffleArray(recent, random)];
+  }
+
+  if (opts.remember !== false) {
+    rememberFeedHead(ordered, avoidCount || 3);
+  }
+  return ordered;
 }
