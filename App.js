@@ -168,6 +168,7 @@ const FindPeopleScreen = React.lazy(() => import('./src/screens/FindPeopleScreen
 const TeamDetailScreen = React.lazy(() => import('./src/screens/TeamDetailScreen'));
 const MyTeamScreen = React.lazy(() => import('./src/screens/MyTeamScreen'));
 const EditProfileScreen = React.lazy(() => import('./src/screens/EditProfileScreen'));
+const EditStageScreen = React.lazy(() => import('./src/screens/EditStageScreen'));
 const PrivacySettingsScreen = React.lazy(() => import('./src/screens/PrivacySettingsScreen'));
 const NotificationSettingsScreen = React.lazy(() => import('./src/screens/NotificationSettingsScreen'));
 const PersonNotificationSettingsScreen = React.lazy(() => import('./src/screens/PersonNotificationSettingsScreen'));
@@ -623,6 +624,11 @@ function AppStack() {
       <Stack.Screen name="EditProfile" children={(navProps) => (
         <Suspense fallback={null}>
           <EditProfileScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="EditStage" children={(navProps) => (
+        <Suspense fallback={null}>
+          <EditStageScreen {...navProps} />
         </Suspense>
       )} />
       <Stack.Screen name="PrivacySettings" children={(navProps) => (

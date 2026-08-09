@@ -92,10 +92,10 @@ export async function sharePosts(posts) {
 export async function shareProfile(user) {
   const id = user?.id || user?.uid || user?.userId;
   if (!id) return false;
-  const name = user.username || user.displayName || 'a creator';
+  const name = String(user.username || user.displayName || 'a creator').replace(/^@/, '');
   return safeShare({
-    title: 'Share profile',
-    message: `Follow @${name} on Blyp\n${userUrl(id)}`,
+    title: 'Share Stage',
+    message: `Visit @${name}'s Stage on Blyp\n${userUrl(id)}`,
   });
 }
 

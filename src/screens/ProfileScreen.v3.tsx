@@ -46,18 +46,16 @@ import PromoteTab from '../components/PromoteTab';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import ProfileCategoryChips from '../components/ProfileCategoryChips';
 import ManageProfileCategoriesSheet from '../components/ManageProfileCategoriesSheet';
-import ProfileIdentityFlair from '../components/ProfileIdentityFlair';
+import StageView from '../components/stage/StageView';
 import {
   buildProfileCategoryChips,
   filterPostsByCategory,
   normalizeProfileCategories,
 } from '../utils/profileCategories';
 import { updatePostCategory } from '../services/postEditService';
-import { sharePosts } from '../services/shareService';
-import {
-  normalizeProfileBadges,
-  normalizeProfileClubs,
-} from '../services/profileIdentityCatalog';
+import { sharePosts, shareProfile } from '../services/shareService';
+import { buildStageModel } from '../services/stageService';
+import { STAGE_CONTENT_MAX } from '../services/stageCatalog';
 import {
   getCachedOwnProfile,
   loadOwnProfileFromStorage,
@@ -254,6 +252,60 @@ const ProfileScreenV3: React.FC = () => {
   const tabBarHeight = useBottomTabBarHeight();
   const isCompact = width < 390;
   const isShort = height < 750;
+  const stageContentWidth = Math.min(width, STAGE_CONTENT_MAX);
+  const [topCirclePeople, setTopCirclePeople] = useState<any[]>([]);
+  const [pinnedStagePosts, setPinnedStagePosts] = useState<any[]>([]);
+
+  const ownerStageModel = useMemo(() => {
+    if (!uid) return null;
+    return buildStageModel(uid, profile || {});
+  }, [uid, profile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const circleIds = ownerStageModel?.stage?.topCircle || [];
+      const pinIds = ownerStageModel?.stage?.pinnedPostIds || [];
+      const people: any[] = [];
+      for (const id of circleIds) {
+        try {
+          if (!firebaseEnabled || !db?.collection) break;
+          const snap = await db.collection('users').doc(id).get();
+          const d = typeof snap?.data === 'function' ? snap.data() : snap?.data;
+          if (!d) continue;
+          people.push({
+            userId: id,
+            username: d.username || d.handle || '',
+            displayName: d.displayName || d.username || d.handle || 'User',
+            photoURL: d.photoURL || d.avatar || null,
+          });
+        } catch {
+          /* skip */
+        }
+      }
+      if (!cancelled) setTopCirclePeople(people);
+
+      const pins: any[] = [];
+      for (const id of pinIds) {
+        const fromFeed = userPosts.find((p) => p.id === id);
+        if (fromFeed) {
+          pins.push(fromFeed);
+          continue;
+        }
+        try {
+          if (!firebaseEnabled || !db?.collection) break;
+          const snap = await db.collection('posts').doc(id).get();
+          const d = typeof snap?.data === 'function' ? snap.data() : snap?.data;
+          if (d) pins.push({ id, ...d });
+        } catch {
+          /* skip */
+        }
+      }
+      if (!cancelled) setPinnedStagePosts(pins);
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [ownerStageModel?.stage?.topCircle, ownerStageModel?.stage?.pinnedPostIds, userPosts, firebaseEnabled]);
 
   const loadBalances = useCallback(async () => {
     if (!uid || !authReady) {
@@ -804,6 +856,21 @@ const ProfileScreenV3: React.FC = () => {
     try { nav.navigate('EditProfile' as never); } catch { }
     try { console.log('📈 profile_edit_tap', { userId: uid, source: 'profile_self' }); } catch { }
   }, [nav, uid]);
+
+  const onEditStage = useCallback(() => {
+    if (!uid) return;
+    try { (nav as any).navigate('EditStage'); } catch { }
+    try { console.log('📈 stage_edit_tap', { userId: uid, source: 'profile_self' }); } catch { }
+  }, [nav, uid]);
+
+  const onShareStage = useCallback(() => {
+    if (!uid) return;
+    shareProfile({
+      id: uid,
+      username: profile?.username || profile?.handle,
+      displayName: profile?.displayName || profile?.username,
+    });
+  }, [uid, profile]);
 
   const onWallet = useCallback(() => {
     if (!uid) return; // B1 gate
@@ -1453,57 +1520,69 @@ const ProfileScreenV3: React.FC = () => {
             removeClippedSubviews
             ListHeaderComponent={(
               <>
-                {/* ── Premium Profile Card ── */}
-                <View style={styles.profileCard}>
-                  <ProfileIdentity
-                    avatarSource={avatarSource}
-                    displayName={computedDisplayName}
-                    handleLabel={handleLabel}
-                    computedHandle={computedHandle}
-                    fallbackInitial={(displayName || 'U').slice(0, 1).toUpperCase()}
-                    badgeProfile={profile}
-                    onAvatarPress={onAvatarPress}
-                    onEditProfile={onEditProfile}
-                    styles={styles}
-                  />
-
-                  <ProfileBioLinks
-                    bio={profile?.bio}
-                    pronouns={profile?.pronouns}
-                    location={profile?.location || profile?.city}
-                    country={profile?.country}
-                    website={profile?.website}
-                    onEditProfile={onEditProfile}
-                    styles={styles}
-                  />
-
-                  <ProfileIdentityFlair
-                    clubIds={normalizeProfileClubs(profile?.profileClubs)}
-                    badgeIds={normalizeProfileBadges(profile?.profileBadges)}
-                    style={styles.identityFlair}
-                  />
-
-                  <ProfileStats
-                    stats={stats}
-                    styles={styles}
-                    onPressFollowers={() => {
-                      if (!uid) return;
-                      (nav as any).navigate?.('Followers', { userId: uid, type: 'followers' });
-                    }}
-                    onPressFollowing={() => {
-                      if (!uid) return;
-                      (nav as any).navigate?.('Followers', { userId: uid, type: 'following' });
-                    }}
-                  />
-
-                  <ProfileActions
-                    onEditProfile={onEditProfile}
-                    onWallet={() => setActiveTab('Wallet')}
-                    onSettings={() => setActiveTab('Menu')}
-                    isCompact={isShort}
-                    styles={styles}
-                  />
-                </View>
+                {/* Stage preview — same renderer visitors see on UserProfile */}
+                <StageView
+                  model={ownerStageModel}
+                  mode="owner"
+                  contentWidth={stageContentWidth}
+                  followerCount={typeof stats.followers === 'number' ? stats.followers : 0}
+                  followingCount={typeof stats.following === 'number' ? stats.following : 0}
+                  postCount={typeof stats.posts === 'number' ? stats.posts : filteredPosts.length}
+                  topCirclePeople={topCirclePeople}
+                  pinnedPosts={pinnedStagePosts}
+                  onEditStage={onEditStage}
+                  onFollowers={() => {
+                    if (!uid) return;
+                    (nav as any).navigate?.('Followers', { userId: uid, type: 'followers' });
+                  }}
+                  onFollowing={() => {
+                    if (!uid) return;
+                    (nav as any).navigate?.('Followers', { userId: uid, type: 'following' });
+                  }}
+                  onPersonPress={(p: any) => {
+                    if (!p?.userId) return;
+                    (nav as any).navigate?.('UserProfile', {
+                      userId: p.userId,
+                      username: p.username || p.displayName || '@user',
+                    });
+                  }}
+                  onPostPress={(post: any) => {
+                    (nav as any).navigate?.(
+                      'MediaViewer',
+                      mediaViewerParams(post, pinnedStagePosts.length ? pinnedStagePosts : filteredPosts, { source: 'profile' }),
+                    );
+                  }}
+                  actions={(
+                    <View style={[styles.actionsContainer, isShort ? { flexDirection: 'column', gap: theme.spacing.sm } : null]}>
+                      <PressableLift
+                        style={[styles.primaryActionBtn, isShort ? { flex: undefined, width: '100%' } : { flex: 1.4 }]}
+                        onPress={onEditStage}
+                        lifted={false}
+                      >
+                        <View style={styles.primaryActionBtnGradient}>
+                          <Icon name={"sparkles" as any} size={16} color={theme.colors.textPrimary} style={{}} strokeWidth={undefined} />
+                          <Text style={styles.actionBtnText} numberOfLines={1}>Edit Stage</Text>
+                        </View>
+                      </PressableLift>
+                      <TouchableOpacity
+                        style={[styles.secondaryActionBtn, isShort ? { flex: 1 } : { flex: 1 }]}
+                        onPress={onShareStage}
+                        activeOpacity={0.8}
+                      >
+                        <Icon name={"share-outline" as any} size={16} color={theme.colors.textSecondary} style={{}} strokeWidth={undefined} />
+                        <Text style={styles.secondaryActionText} numberOfLines={1}>Share</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.secondaryActionBtn, { flex: 1 }]}
+                        onPress={onEditProfile}
+                        activeOpacity={0.8}
+                      >
+                        <Icon name={"create" as any} size={16} color={theme.colors.textSecondary} style={{}} strokeWidth={undefined} />
+                        <Text style={styles.secondaryActionText} numberOfLines={1}>Account</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                />
 
                 <View style={styles.divider} />
 
@@ -1642,6 +1721,7 @@ const ProfileScreenV3: React.FC = () => {
           >
             {profileTab === 'tab3' ? (
               <ProfileMenuTab
+                onEditStage={onEditStage}
                 onEditProfile={onEditProfile}
                 onPlans={onPlans}
                 onTransparency={onTransparency}
@@ -2914,6 +2994,7 @@ const ProfileLogout: React.FC<{ onLogout: () => void; styles: any }> = ({ onLogo
 };
 
 const ProfileMenuTab: React.FC<{
+  onEditStage?: () => void;
   onEditProfile: () => void;
   onPlans?: () => void;
   onTransparency?: () => void;
@@ -2927,6 +3008,7 @@ const ProfileMenuTab: React.FC<{
   onLogout: () => void;
   styles: any;
 }> = ({
+  onEditStage,
   onEditProfile,
   onPlans,
   onTransparency,
@@ -2957,6 +3039,11 @@ const ProfileMenuTab: React.FC<{
       <Text style={styles.tabPageTitle}>Menu</Text>
 
       <View style={styles.tabMenuList}>
+        <TouchableOpacity style={styles.tabMenuItem} onPress={onEditStage} activeOpacity={0.85}>
+          <Text style={styles.tabMenuItemText}>Edit Stage</Text>
+          <Text style={styles.tabMenuChevron}>›</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.tabMenuItem} onPress={onEditProfile} activeOpacity={0.85}>
           <Text style={styles.tabMenuItemText}>Edit profile settings</Text>
           <Text style={styles.tabMenuChevron}>›</Text>
