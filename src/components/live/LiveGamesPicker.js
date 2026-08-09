@@ -59,24 +59,26 @@ export default function LiveGamesPicker({
               accessibilityState={{ disabled: standaloneGamesDisabled }}
             >
               <LinearGradient
-                colors={['#0E3D38', '#0A0A0C']}
+                colors={['#0E3D38', '#1A1520', '#0A0A0C']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.card}
               >
                 <View style={[styles.badge, { backgroundColor: TEAL }]}>
                   <Text style={styles.badgeText} allowFontScaling={false}>
-                    HOST
+                    LIVE
                   </Text>
                 </View>
-                <Text style={styles.cardIcon} allowFontScaling={false}>
-                  🎡
-                </Text>
+                <View style={styles.frenemiesGlyph}>
+                  <Text style={styles.frenemiesGlyphText} allowFontScaling={false}>
+                    W
+                  </Text>
+                </View>
                 <Text style={styles.cardTitle} allowFontScaling={false}>
                   Frenemies
                 </Text>
                 <Text style={styles.cardSub} allowFontScaling={false}>
-                  Prize wheel · throw · HOUSE coins
+                  Host spins · throw · room challenges
                 </Text>
                 <View style={[styles.cta, { backgroundColor: TEAL }]}>
                   <Text style={styles.ctaText} allowFontScaling={false}>
@@ -267,6 +269,18 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: INK, fontWeight: '900', fontSize: 10, letterSpacing: 1 },
   cardIcon: { fontSize: 28, marginBottom: 6 },
+  frenemiesGlyph: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(245,197,66,0.18)',
+    borderWidth: 2,
+    borderColor: GOLD,
+  },
+  frenemiesGlyphText: { color: GOLD, fontWeight: '900', fontSize: 16 },
   cardTitle: { color: '#fff', fontWeight: '900', fontSize: 17, letterSpacing: 0.2 },
   cardSub: {
     color: 'rgba(244,247,250,0.72)',

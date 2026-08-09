@@ -1,8 +1,9 @@
 // GamesContent — Chat/Games "Games" header tab.
 // Mirrors the live Games picker without reviving the old create-sheet lobby.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
 import { responsiveFont, responsiveSize } from '../../utils/scaleUtils';
@@ -12,11 +13,17 @@ import {
   isMarbleRaceEnabled,
   isReactionDuelEnabled,
 } from '../../config/LiveGamesFlags';
+import FrenemiesRulesSheet from '../live/frenemies/FrenemiesRulesSheet';
 
 const MARBLE_ENABLED = isMarbleRaceEnabled();
 const ARTILLERY_ENABLED = isArtilleryEnabled();
 const FRENEMIES_ENABLED = isFrenemiesEnabled();
 const REACTION_DUEL_ENABLED = isReactionDuelEnabled();
+
+const TEAL = '#00D2BE';
+const GOLD = '#F5C542';
+const GOLD_SOFT = '#FDE68A';
+const INK = '#0A0A0C';
 
 function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
   return (
@@ -51,7 +58,80 @@ function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
   );
 }
 
+function FrenemiesHubCard({ enabled, onOpenLive, onHowItWorks }) {
+  return (
+    <View style={[styles.frenemiesWrap, !enabled && styles.cardMuted]}>
+      <LinearGradient
+        colors={['#0E3D38', '#1A1520', '#0A0A0C']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.frenemiesCard}
+      >
+        <View style={styles.frenemiesTop}>
+          <View style={styles.frenemiesBadge}>
+            <Text style={styles.frenemiesBadgeText} allowFontScaling={false}>
+              {enabled ? 'LIVE' : 'SOON'}
+            </Text>
+          </View>
+          <View style={styles.frenemiesGlyph}>
+            <Text style={styles.frenemiesGlyphText} allowFontScaling={false}>
+              W
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.frenemiesTitle} allowFontScaling={false}>
+          Frenemies
+        </Text>
+        <Text style={styles.frenemiesSub} allowFontScaling={false}>
+          {enabled
+            ? 'Host spins · throw · room challenges'
+            : 'Frenemies will return to the live Games picker when enabled.'}
+        </Text>
+        {enabled ? (
+          <View style={styles.frenemiesSteps}>
+            {[
+              'Go live and invite guests on stage.',
+              'Open Games → Frenemies — Rules are always one tap away.',
+              'Open the show, then tap Spin when the room is ready — no auto-spin.',
+            ].map((step, i) => (
+              <View key={step} style={styles.frenemiesStepRow}>
+                <Text style={styles.frenemiesStepNum} allowFontScaling={false}>
+                  {i + 1}
+                </Text>
+                <Text style={styles.frenemiesStepText} allowFontScaling={false}>
+                  {step}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {enabled ? (
+          <View style={styles.frenemiesCtas}>
+            <TouchableOpacity
+              style={styles.frenemiesRulesBtn}
+              activeOpacity={0.85}
+              onPress={onHowItWorks}
+            >
+              <Text style={styles.frenemiesRulesText} allowFontScaling={false}>
+                How it works
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.frenemiesOpenBtn} activeOpacity={0.85} onPress={onOpenLive}>
+              <Text style={styles.frenemiesOpenText} allowFontScaling={false}>
+                Open from Live
+              </Text>
+              <Icon name="chevron-forward" size={responsiveFont(16)} color={INK} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </LinearGradient>
+    </View>
+  );
+}
+
 export default function GamesContent({ navigation, onSelectChatTab }) {
+  const [rulesOpen, setRulesOpen] = useState(false);
+
   const startFromLive = (source) => {
     try {
       navigation?.navigate?.('LiveStreamScreen', {
@@ -79,31 +159,10 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
         after you go live; battles open in Battle HQ.
       </Text>
 
-      <GameCard
-        icon="people"
-        title="Frenemies"
-        badge={FRENEMIES_ENABLED ? 'Live only' : 'Coming soon'}
-        body={
-          FRENEMIES_ENABLED
-            ? 'Prize wheel, guest throws, challenges, and HOUSE coins. Frenemies runs inside a host live with an on-stage guest.'
-            : 'Frenemies will return to the live Games picker when enabled.'
-        }
-        steps={
-          FRENEMIES_ENABLED
-            ? [
-                'Start your live and bring a guest on stage.',
-                'Tap Games in the live bottom bar.',
-                'Choose Frenemies, then Start Frenemies.',
-              ]
-            : null
-        }
-        ctaLabel={FRENEMIES_ENABLED ? 'Start from Live' : null}
-        onCta={
-          FRENEMIES_ENABLED
-            ? () => startFromLive('GamesFrenemies')
-            : null
-        }
-        muted={!FRENEMIES_ENABLED}
+      <FrenemiesHubCard
+        enabled={FRENEMIES_ENABLED}
+        onOpenLive={() => startFromLive('GamesFrenemies')}
+        onHowItWorks={() => setRulesOpen(true)}
       />
 
       <GameCard
@@ -193,6 +252,8 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
           Matchmaking rooms (RPS, Tic Tac Toe, and friends) stay paused. Live overlay games above are the path for now.
         </Text>
       </View>
+
+      <FrenemiesRulesSheet visible={rulesOpen} onClose={() => setRulesOpen(false)} />
     </ScrollView>
   );
 }
@@ -268,6 +329,100 @@ const styles = StyleSheet.create({
     paddingVertical: responsiveSize(12),
   },
   ctaText: { color: '#0A0A0C', fontWeight: '800', fontSize: responsiveFont(14) },
+  frenemiesWrap: {
+    borderRadius: responsiveSize(18),
+    overflow: 'hidden',
+    marginBottom: responsiveSize(14),
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,66,0.38)',
+  },
+  frenemiesCard: {
+    padding: responsiveSize(16),
+  },
+  frenemiesTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: responsiveSize(10),
+  },
+  frenemiesBadge: {
+    backgroundColor: TEAL,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  frenemiesBadgeText: {
+    color: INK,
+    fontWeight: '900',
+    fontSize: responsiveFont(10),
+    letterSpacing: 1,
+  },
+  frenemiesGlyph: {
+    width: responsiveSize(40),
+    height: responsiveSize(40),
+    borderRadius: responsiveSize(20),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(245,197,66,0.18)',
+    borderWidth: 2,
+    borderColor: GOLD,
+  },
+  frenemiesGlyphText: { color: GOLD, fontWeight: '900', fontSize: responsiveFont(17) },
+  frenemiesTitle: {
+    color: GOLD_SOFT,
+    fontWeight: '900',
+    fontSize: responsiveFont(22),
+    letterSpacing: 0.2,
+  },
+  frenemiesSub: {
+    color: 'rgba(244,247,250,0.78)',
+    fontWeight: '700',
+    fontSize: responsiveFont(13),
+    lineHeight: responsiveFont(19),
+    marginTop: 6,
+    marginBottom: responsiveSize(12),
+  },
+  frenemiesSteps: { gap: responsiveSize(8), marginBottom: responsiveSize(14) },
+  frenemiesStepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: responsiveSize(10) },
+  frenemiesStepNum: {
+    width: responsiveSize(22),
+    height: responsiveSize(22),
+    borderRadius: responsiveSize(11),
+    overflow: 'hidden',
+    textAlign: 'center',
+    lineHeight: responsiveSize(22),
+    backgroundColor: 'rgba(0,210,190,0.18)',
+    color: TEAL,
+    fontWeight: '900',
+    fontSize: responsiveFont(11),
+  },
+  frenemiesStepText: {
+    flex: 1,
+    color: 'rgba(244,247,250,0.9)',
+    fontSize: responsiveFont(13),
+    lineHeight: responsiveFont(19),
+    fontWeight: '600',
+  },
+  frenemiesCtas: { gap: responsiveSize(8) },
+  frenemiesRulesBtn: {
+    borderRadius: responsiveSize(12),
+    paddingVertical: responsiveSize(11),
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.5)',
+    backgroundColor: 'rgba(0,210,190,0.12)',
+  },
+  frenemiesRulesText: { color: TEAL, fontWeight: '900', fontSize: responsiveFont(14) },
+  frenemiesOpenBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: responsiveSize(6),
+    backgroundColor: TEAL,
+    borderRadius: responsiveSize(12),
+    paddingVertical: responsiveSize(12),
+  },
+  frenemiesOpenText: { color: INK, fontWeight: '900', fontSize: responsiveFont(14) },
   lobbyCard: {
     alignItems: 'center',
     paddingVertical: responsiveSize(28),

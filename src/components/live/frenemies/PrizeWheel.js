@@ -210,7 +210,7 @@ export default function PrizeWheel({
   }, [phase, roundId, targetSlot, slot, maxSlots, spinStartedAt, spinEndsAt, spinAnim]);
 
   useEffect(() => {
-    if (phase !== 'spinning') {
+    if (phase !== 'spinning' && phase !== 'ready') {
       pulse.setValue(0);
       return undefined;
     }
@@ -218,13 +218,13 @@ export default function PrizeWheel({
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: 900,
+          duration: phase === 'ready' ? 1400 : 900,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: 900,
+          duration: phase === 'ready' ? 1400 : 900,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
@@ -299,7 +299,7 @@ export default function PrizeWheel({
           ))}
           <View style={[styles.hubLabel, { left: cx - 22, top: cy - 10, width: 44 }]}>
             <Text style={styles.hubText} allowFontScaling={false}>
-              SPIN
+              {phase === 'ready' ? 'READY' : 'SPIN'}
             </Text>
           </View>
         </View>

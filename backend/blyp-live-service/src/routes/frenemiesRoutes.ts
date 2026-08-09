@@ -1,6 +1,6 @@
 /**
  * Frenemies live party game routes.
- * Gated by LIVE_FRENEMIES_ENABLED (default ON for demo; set 0 to dark-ship).
+ * Gated by LIVE_FRENEMIES_ENABLED (default ON; set 0 to kill-switch).
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -11,6 +11,8 @@ import { logger } from '../config/logger';
 import {
   startGame,
   endGame,
+  spinRound,
+  updateSettings,
   throwGuest,
   submitQuizAnswer,
   submitChatPhrase,
@@ -20,6 +22,7 @@ import {
   resumeTicksIfNeeded,
   bumpEngagement,
   getSessionEngagement,
+  getHostPrizePreview,
   isFrenemiesAdmin,
 } from '../games/frenemies/frenemiesRoomService';
 
@@ -31,7 +34,6 @@ function frenemiesEnabled(): boolean {
   return !/^(0|false|no|off)$/i.test(raw);
 }
 
-// Scope to this router's paths only — do not block sibling `/api` routers.
 router.use((req, res, next) => {
   const ours =
     req.path.startsWith('/live-game/frenemies') || req.path.startsWith('/live/engagement');
@@ -72,6 +74,23 @@ const engageSchema = z.object({
   coinsSpent: z.coerce.number().int().min(0).max(1_000_000).optional(),
   coinsReceived: z.coerce.number().int().min(0).max(1_000_000).optional(),
 });
+const settingsSchema = z.object({
+  sessionId: z.string().min(1),
+  spinMs: z.coerce.number().int().optional(),
+  chooseMs: z.coerce.number().int().optional(),
+  challengeMs: z.coerce.number().int().optional(),
+  resultMs: z.coerce.number().int().optional(),
+  autoContinue: z.boolean().optional(),
+  autoContinueDelayMs: z.coerce.number().int().optional(),
+  throwCoins: z.coerce.number().int().min(0).max(500).optional(),
+  soloCoins: z.coerce.number().int().min(0).max(500).optional(),
+  likesTarget: z.coerce.number().int().min(10).max(500).optional(),
+  challengeQuiz: z.boolean().optional(),
+  challengeChat: z.boolean().optional(),
+  challengeLikes: z.boolean().optional(),
+  housePays: z.boolean().optional(),
+  showPayerBadge: z.boolean().optional(),
+});
 
 function mapError(res: any, e: any) {
   const code = e?.code as string | undefined;
@@ -80,6 +99,8 @@ function mapError(res: any, e: any) {
     NOT_HOST: 403,
     NOT_CHOOSER: 403,
     NOT_CHOOSING: 409,
+    NOT_READY: 409,
+    SETTINGS_LOCKED: 409,
     BAD_TARGET: 400,
     TARGET_NOT_ON_STAGE: 409,
     GAME_NOT_FOUND: 404,
@@ -87,8 +108,16 @@ function mapError(res: any, e: any) {
     NO_QUIZ: 409,
     FROZEN: 409,
     SESSION_NOT_FOUND: 404,
+    INSUFFICIENT_FUNDS: 409,
   };
-  if (code && map[code]) return res.status(map[code]).json({ error: code, code });
+  if (code && map[code]) {
+    const body: any = { error: code, code };
+    if (code === 'INSUFFICIENT_FUNDS') {
+      body.needed = e?.needed;
+      body.balance = e?.balance;
+    }
+    return res.status(map[code]).json(body);
+  }
   logger.error({ err: e?.message, code }, '[frenemies] route error');
   return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
 }
@@ -103,7 +132,6 @@ router.post('/live-game/frenemies/start', requireNotBanned, async (req: AuthedRe
     }
     const session = await getSessionById(parsed.data.sessionId);
     if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND', code: 'SESSION_NOT_FOUND' });
-    // The live host owns game start. Staff admins retain the ability to run demos.
     if (session.hostUserId !== userId && !isFrenemiesAdmin(userId)) {
       return res.status(403).json({ error: 'HOST_ONLY', code: 'HOST_ONLY' });
     }
@@ -116,6 +144,33 @@ router.post('/live-game/frenemies/start', requireNotBanned, async (req: AuthedRe
       starterUserId: userId,
     });
     res.json(publicEvent(room, 'PHASE'));
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
+router.post('/live-game/frenemies/spin', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = sessionSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const room = await spinRound({ sessionId: parsed.data.sessionId, userId });
+    res.json(publicEvent(room, 'PHASE'));
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
+router.post('/live-game/frenemies/settings', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = settingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const { sessionId, ...patch } = parsed.data;
+    const room = await updateSettings({ sessionId, userId, patch });
+    res.json(publicEvent(room, 'SNAPSHOT'));
   } catch (e: any) {
     mapError(res, e);
   }
@@ -220,7 +275,17 @@ router.get('/live-game/frenemies/state', async (req: AuthedRequest, res) => {
   }
 });
 
-/** Session engagement tallies for Guest Control sheet. */
+router.get('/live-game/frenemies/preview', async (req: AuthedRequest, res) => {
+  try {
+    const sessionId = String(req.query.sessionId || '');
+    if (!sessionId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const preview = await getHostPrizePreview(sessionId);
+    res.json(preview);
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
 router.post('/live/engagement/bump', requireNotBanned, async (req: AuthedRequest, res) => {
   try {
     const userId = req.user?.sub;
@@ -228,7 +293,6 @@ router.post('/live/engagement/bump', requireNotBanned, async (req: AuthedRequest
     const parsed = engageSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
     const { sessionId, ...delta } = parsed.data;
-    // If likes reported, also feed Frenemies likes challenge.
     if (delta.likes && delta.likes > 0) {
       await reportLikes({ sessionId, userId, count: delta.likes });
     } else {

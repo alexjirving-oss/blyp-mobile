@@ -385,6 +385,7 @@ const LiveStreamScreen = (props) => {
         isAdmin={!!isAdmin}
         isHost={isHost}
         liveGuests={liveGuests || []}
+        navigation={navigation}
         controlsVisible={
           gamesOpen &&
           selectedLiveGame === 'frenemies' &&

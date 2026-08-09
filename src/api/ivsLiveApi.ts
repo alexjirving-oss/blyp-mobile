@@ -1460,6 +1460,23 @@ export async function marbleGetState(sessionId: string): Promise<MarbleGameEvent
 // FRENEMIES — live party game (server-authoritative)
 // ============================================================================
 
+export interface FrenemiesSettings {
+  spinMs: number;
+  chooseMs: number;
+  challengeMs: number;
+  resultMs: number;
+  autoContinue: boolean;
+  autoContinueDelayMs: number;
+  throwCoins: number;
+  soloCoins: number;
+  likesTarget: number;
+  challengeQuiz: boolean;
+  challengeChat: boolean;
+  challengeLikes: boolean;
+  housePays: boolean;
+  showPayerBadge: boolean;
+}
+
 export interface FrenemiesGameEvent {
   game: 'frenemies';
   sessionId: string;
@@ -1468,15 +1485,46 @@ export interface FrenemiesGameEvent {
   hostUserId: string;
   startedByUserId?: string;
   state: any;
+  settings?: FrenemiesSettings;
+  stats?: any;
   spinMs?: number;
   chooseMs?: number;
   challengeMs?: number;
+  resultMs?: number;
   houseCoins?: number;
+  throwCoins?: number;
+  soloCoins?: number;
   maxSlots?: number;
+  maxCoins?: number;
+  spinOptionsMs?: number[];
+  isAdminHost?: boolean;
 }
 
 export async function frenemiesStart(sessionId: string): Promise<FrenemiesGameEvent> {
   return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/start', 'POST', { sessionId });
+}
+
+export async function frenemiesSpin(sessionId: string): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/spin', 'POST', { sessionId });
+}
+
+export async function frenemiesUpdateSettings(
+  sessionId: string,
+  patch: Partial<FrenemiesSettings>
+): Promise<FrenemiesGameEvent> {
+  return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/settings', 'POST', {
+    sessionId,
+    ...patch,
+  });
+}
+
+export async function frenemiesGetPreview(sessionId: string): Promise<{
+  balance: number;
+  needed: number;
+  canSpin: boolean;
+  payer: 'host' | 'house';
+}> {
+  return callLiveBackend('/api/live-game/frenemies/preview', 'GET', { sessionId });
 }
 
 export async function frenemiesEnd(sessionId: string): Promise<FrenemiesGameEvent> {

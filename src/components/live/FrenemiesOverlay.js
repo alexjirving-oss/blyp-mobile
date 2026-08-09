@@ -1,5 +1,6 @@
 /**
- * FrenemiesOverlay — polished TikTok-LIVE-style wheel + challenge + throw UI.
+ * FrenemiesOverlay — EA-grade host-conducted live party show.
+ * Ready → host Spin → land → challenge|throw → result → Ready.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,14 +12,21 @@ import {
   Image,
   Animated,
   Easing,
+  Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   frenemiesStart,
   frenemiesEnd,
+  frenemiesSpin,
   frenemiesThrow,
   frenemiesQuizAnswer,
   frenemiesGetState,
+  frenemiesUpdateSettings,
+  frenemiesGetPreview,
   MAX_GUEST_SLOTS,
 } from '../../api/ivsLiveApi';
 import { subscribeToFrenemiesGameEvents } from '../../realtime/frenemiesGameSocket';
@@ -26,19 +34,16 @@ import PrizeWheel from './frenemies/PrizeWheel';
 import { pickPublicLabel } from '../../utils/publicLabel';
 import CelebrationBurst from './frenemies/CelebrationBurst';
 import TimerRing from './frenemies/TimerRing';
+import FrenemiesRulesSheet from './frenemies/FrenemiesRulesSheet';
+import FrenemiesSettingsSheet from './frenemies/FrenemiesSettingsSheet';
+import BuyCoinsOverlay from '../BuyCoinsOverlay';
 
 const TEAL = '#00D2BE';
 const ROSE = '#FB7185';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
 const INK = '#0A0A0C';
-
-function countdownLabel(endsAt) {
-  if (!endsAt) return '';
-  const ms = Date.parse(endsAt) - Date.now();
-  if (!Number.isFinite(ms)) return '';
-  return `${Math.max(0, Math.ceil(ms / 1000))}s`;
-}
+const RULES_TIP_KEY = '@blyp/frenemies_rules_tip_v1';
 
 function initialsFor(name) {
   const s = String(name || '').trim().replace(/^@/, '');
@@ -108,6 +113,28 @@ function LikesProgressBar({ value, target }) {
   );
 }
 
+function RulesChip({ onPress }) {
+  return (
+    <TouchableOpacity style={styles.rulesChip} onPress={onPress} activeOpacity={0.85}>
+      <Text style={styles.rulesChipText} allowFontScaling={false}>
+        Rules
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+function PayerBadge({ payer, show }) {
+  if (!show) return null;
+  const house = payer === 'house';
+  return (
+    <View style={[styles.payerBadge, house ? styles.payerHouse : styles.payerHost]}>
+      <Text style={styles.payerText} allowFontScaling={false}>
+        {house ? 'House pays' : 'Host pays'}
+      </Text>
+    </View>
+  );
+}
+
 export default function FrenemiesOverlay({
   sessionId,
   currentUid,
@@ -116,6 +143,7 @@ export default function FrenemiesOverlay({
   isHost = false,
   liveGuests = [],
   controlsVisible = false,
+  navigation = null,
   onClose,
   onBackToPicker,
 }) {
@@ -123,8 +151,19 @@ export default function FrenemiesOverlay({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [tick, setTick] = useState(0);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [spinCue, setSpinCue] = useState(false);
+  const [landFlash, setLandFlash] = useState(null);
+  const [confirmTarget, setConfirmTarget] = useState(null);
+  const [endRecap, setEndRecap] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [showRulesTip, setShowRulesTip] = useState(false);
+  const [topUpOpen, setTopUpOpen] = useState(false);
   const subRef = useRef(null);
   const tension = useRef(new Animated.Value(0)).current;
+  const landAnim = useRef(new Animated.Value(0)).current;
+  const prevPhaseRef = useRef(null);
 
   const applyEvent = useCallback(
     (payload) => {
@@ -132,6 +171,9 @@ export default function FrenemiesOverlay({
       if (payload.sessionId && payload.sessionId !== sessionId) return;
       setEvent(payload);
       setErr(null);
+      if (payload.type === 'ENDED') {
+        setEndRecap(payload.stats || payload.state?.lastResult ? payload.stats : null);
+      }
     },
     [sessionId]
   );
@@ -171,13 +213,50 @@ export default function FrenemiesOverlay({
     return () => clearInterval(t);
   }, []);
 
+  // First-open tip once per account: Rules are always reachable.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem(RULES_TIP_KEY);
+        if (!cancelled && !seen) setShowRulesTip(true);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const dismissRulesTip = useCallback(async () => {
+    setShowRulesTip(false);
+    try {
+      await AsyncStorage.setItem(RULES_TIP_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const openRules = useCallback(() => {
+    void dismissRulesTip();
+    setRulesOpen(true);
+  }, [dismissRulesTip]);
+
   const state = event?.state;
   const phase = state?.phase;
+  const settings = event?.settings || {};
+  const stats = event?.stats || {};
   const active = state?.active && phase && phase !== 'ended' && phase !== 'idle';
   const maxSlots = event?.maxSlots || MAX_GUEST_SLOTS;
-  const houseCoins = event?.houseCoins || 25;
-  const spinMs = event?.spinMs || 30_000;
-  const chooseMs = event?.chooseMs || 20_000;
+  const throwCoins = event?.throwCoins ?? settings.throwCoins ?? event?.houseCoins ?? 25;
+  const soloCoins = event?.soloCoins ?? settings.soloCoins ?? 25;
+  const spinMs = event?.spinMs || settings.spinMs || 15_000;
+  const chooseMs = event?.chooseMs || settings.chooseMs || 20_000;
+  const payer = state?.payer || (settings.housePays ? 'house' : 'host');
+  const showPayer = settings.showPayerBadge !== false;
+  const prizePreview = state?.prizePreview ?? Math.max(throwCoins, soloCoins);
+  const canConduct = isHost || isAdmin;
 
   const occupiedBySlot = useMemo(() => {
     const map = {};
@@ -200,15 +279,53 @@ export default function FrenemiesOverlay({
   const resolveName = useCallback(
     (userId, fallback) => {
       const g = userId ? rosterByUser[userId] : null;
-      return guestLabel(g) || pickPublicLabel(
-        { displayName: fallback },
-        { uid: userId, fallback: 'Guest' },
+      return (
+        guestLabel(g) ||
+        pickPublicLabel({ displayName: fallback }, { uid: userId, fallback: 'Guest' })
       );
     },
     [rosterByUser]
   );
 
-  // Spin tension pulse — keeps the wait feeling alive.
+  // Refresh host prize preview on Ready.
+  useEffect(() => {
+    if (!active || phase !== 'ready' || !canConduct) return undefined;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const p = await frenemiesGetPreview(sessionId);
+        if (!cancelled) setPreview(p);
+      } catch {
+        if (!cancelled) setPreview(null);
+      }
+    };
+    void load();
+    const t = setInterval(load, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [active, phase, canConduct, sessionId, settings.throwCoins, settings.soloCoins, settings.housePays]);
+
+  // Land sting when leaving spinning.
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prev === 'spinning' && phase && phase !== 'spinning' && state?.landedSlot) {
+      const label = state.landedOccupied
+        ? `Box ${state.landedSlot} — ${resolveName(state.chooserUserId, state.chooserDisplayName)}`
+        : `Box ${state.landedSlot} — EMPTY · CHALLENGE`;
+      setLandFlash(label);
+      landAnim.setValue(0);
+      Animated.sequence([
+        Animated.timing(landAnim, { toValue: 1, duration: 180, useNativeDriver: true }),
+        Animated.timing(landAnim, { toValue: 0.92, duration: 220, useNativeDriver: true }),
+        Animated.delay(900),
+        Animated.timing(landAnim, { toValue: 0, duration: 280, useNativeDriver: true }),
+      ]).start(() => setLandFlash(null));
+    }
+  }, [phase, state?.landedSlot, state?.landedOccupied, state?.chooserUserId, landAnim, resolveName]);
+
   useEffect(() => {
     if (phase !== 'spinning') {
       tension.setValue(0);
@@ -237,31 +354,100 @@ export default function FrenemiesOverlay({
   const start = async () => {
     setBusy(true);
     setErr(null);
+    setEndRecap(null);
     try {
       const res = await frenemiesStart(sessionId);
       applyEvent(res);
     } catch (e) {
-      setErr(e?.message || e?.code || 'Start failed');
+      setErr(e?.message || e?.code || 'Open failed');
     } finally {
       setBusy(false);
     }
   };
 
-  const end = async () => {
-    setBusy(true);
-    try {
-      const res = await frenemiesEnd(sessionId);
-      applyEvent(res);
-      onClose?.();
-    } catch (e) {
-      setErr(e?.message || e?.code || 'End failed');
-    } finally {
-      setBusy(false);
+  const openTopUp = useCallback(() => {
+    setTopUpOpen(true);
+  }, []);
+
+  const doSpin = async () => {
+    if (spinCue || busy) return;
+    const needed = preview?.needed ?? prizePreview;
+    const hostFunded = payer === 'host' && needed > 0;
+    if (hostFunded && preview && !preview.canSpin) {
+      setErr(`You need ${needed} coins to cover prizes.`);
+      Alert.alert('Insufficient coins', `You need ${needed} coins to cover prizes.`, [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Top up', onPress: openTopUp },
+      ]);
+      return;
     }
+
+    const run = async () => {
+      setSpinCue(true);
+      setErr(null);
+      // 1.2s lock-in cue before server spin.
+      await new Promise((r) => setTimeout(r, 1200));
+      setBusy(true);
+      try {
+        const res = await frenemiesSpin(sessionId);
+        applyEvent(res);
+      } catch (e) {
+        const code = String(e?.code || e?.message || '');
+        if (/INSUFFICIENT/i.test(code)) {
+          const need = e?.needed || needed;
+          setErr(`You need ${need} coins to cover prizes.`);
+          Alert.alert('Insufficient coins', `You need ${need} coins to cover prizes.`, [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Top up', onPress: openTopUp },
+          ]);
+        } else {
+          setErr(e?.message || e?.code || 'Spin failed');
+        }
+      } finally {
+        setBusy(false);
+        setSpinCue(false);
+      }
+    };
+
+    if (hostFunded) {
+      Alert.alert(
+        'Spin Frenemies',
+        `This spin reserves up to ${needed} coins from your balance.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Spin', onPress: () => void run() },
+        ]
+      );
+      return;
+    }
+    await run();
+  };
+
+  const end = () => {
+    Alert.alert('End Frenemies?', 'Show recap, then close the stage.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'End show',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
+          try {
+            const res = await frenemiesEnd(sessionId);
+            applyEvent(res);
+            setEndRecap(res.stats || null);
+          } catch (e) {
+            setErr(e?.message || e?.code || 'End failed');
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]);
   };
 
   const throwTarget = async (targetUserId) => {
     setBusy(true);
+    setConfirmTarget(null);
     try {
       const res = await frenemiesThrow(sessionId, targetUserId);
       applyEvent(res);
@@ -286,6 +472,11 @@ export default function FrenemiesOverlay({
     }
   };
 
+  const saveSettings = async (patch) => {
+    const res = await frenemiesUpdateSettings(sessionId, patch);
+    applyEvent(res);
+  };
+
   const isChooser = state?.chooserUserId && state.chooserUserId === currentUid;
   const challenge = state?.challenge;
   const frozen = (challenge?.frozenUserIds || []).includes(currentUid);
@@ -302,54 +493,129 @@ export default function FrenemiesOverlay({
     : 0;
   const spinTotalSecs = Math.max(1, Math.round(spinMs / 1000));
   const tensionScale = tension.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
+  const landScale = landAnim.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.06] });
   const chooserName = resolveName(state?.chooserUserId, state?.chooserDisplayName);
+  const settingsLocked = phase !== 'ready' && phase !== 'idle' && !!active;
+  const isAdminHost = !!(isAdmin || event?.isAdminHost);
 
   void tick;
 
   const resultCopy = (() => {
     if (!lastResult?.text) return null;
-    // Prefer roster names over server "Box N" placeholders when we can.
     let text = String(lastResult.text);
     if (lastResult.kickedUserId) {
       const n = resolveName(lastResult.kickedUserId, null);
-      if (n && n !== 'Guest') {
-        text = text.replace(/Box\s+\d+/i, n);
-      }
+      if (n && n !== 'Guest') text = text.replace(/Box\s+\d+/i, n);
     }
     if (lastResult.coinUserId) {
       const n = resolveName(lastResult.coinUserId, null);
-      if (n && n !== 'Guest' && /Chooser/i.test(text)) {
-        text = text.replace(/Chooser/i, n);
-      }
+      if (n && n !== 'Guest' && /Chooser/i.test(text)) text = text.replace(/Chooser/i, n);
     }
     return text;
   })();
 
+  const phaseLabel = (() => {
+    if (phase === 'ready') return 'Ready';
+    if (phase === 'spinning') return spinCue ? 'Locking in…' : 'Spinning';
+    if (phase === 'choosing') return 'Throw';
+    if (phase === 'challenge') return 'Challenge';
+    if (phase === 'resolving') return 'Result';
+    return phase || '';
+  })();
+
+  const needsTopUp =
+    canConduct && payer === 'host' && preview && !preview.canSpin && (preview.needed || 0) > 0;
+
+  const topBar = (
+    <View>
+      <View style={styles.hudRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.brandKicker} allowFontScaling={false}>
+            FRENEMIES
+          </Text>
+          <Text style={styles.hudPhase} allowFontScaling={false}>
+            {phase === 'ready' ? 'On air' : `Round ${state?.roundIndex || 1}`}
+            {phaseLabel ? ` · ${phaseLabel}` : ''}
+          </Text>
+        </View>
+        <View style={styles.topActions}>
+          <View>
+            <RulesChip onPress={openRules} />
+            {showRulesTip ? (
+              <TouchableOpacity style={styles.rulesTip} onPress={openRules} activeOpacity={0.9}>
+                <Text style={styles.rulesTipText} allowFontScaling={false}>
+                  Rules anytime →
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          {canConduct ? (
+            <TouchableOpacity
+              style={styles.gearChip}
+              onPress={() => setSettingsOpen(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.gearText} allowFontScaling={false}>
+                Settings
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {canConduct ? (
+            <TouchableOpacity style={styles.endBtn} onPress={end} disabled={busy}>
+              <Text style={styles.endBtnText} allowFontScaling={false}>
+                End
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+
   return (
     <View style={styles.root} pointerEvents="box-none">
-      {(isHost || isAdmin) && controlsVisible && !active ? (
+      {(canConduct && controlsVisible && !active && !endRecap) ? (
         <View style={styles.startCard} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(14,61,56,0.95)', 'rgba(10,10,12,0.96)']}
+            colors={['rgba(14,61,56,0.97)', 'rgba(26,21,32,0.96)', 'rgba(10,10,12,0.98)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.startGrad}
           >
-            <Text style={styles.brandKicker} allowFontScaling={false}>
-              BLYP
-            </Text>
-            <Text style={styles.title} allowFontScaling={false}>
-              Frenemies
-            </Text>
+            <View style={styles.openBrandRow}>
+              <View style={styles.wheelGlyph}>
+                <Text style={styles.wheelGlyphText} allowFontScaling={false}>
+                  W
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.brandKicker} allowFontScaling={false}>
+                  BLYP LIVE
+                </Text>
+                <Text style={styles.title} allowFontScaling={false}>
+                  Frenemies
+                </Text>
+              </View>
+              <View>
+                <RulesChip onPress={openRules} />
+                {showRulesTip ? (
+                  <TouchableOpacity style={styles.rulesTip} onPress={openRules} activeOpacity={0.9}>
+                    <Text style={styles.rulesTipText} allowFontScaling={false}>
+                      Rules anytime →
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
             <Text style={styles.sub} allowFontScaling={false}>
-              Spin the prize wheel · throw a guest · win {houseCoins} HOUSE coins
+              Host-conducted prize wheel · throw a frenemy · room challenges on empty boxes
             </Text>
             <TouchableOpacity style={styles.startBtn} onPress={start} disabled={busy} activeOpacity={0.85}>
               {busy ? (
                 <ActivityIndicator color={INK} />
               ) : (
                 <Text style={styles.startBtnText} allowFontScaling={false}>
-                  Start Frenemies
+                  Open Frenemies
                 </Text>
               )}
             </TouchableOpacity>
@@ -368,34 +634,87 @@ export default function FrenemiesOverlay({
       {active ? (
         <View style={styles.hud} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(10,10,12,0.88)', 'rgba(14,61,56,0.55)']}
+            colors={['rgba(10,10,12,0.92)', 'rgba(14,61,56,0.62)', 'rgba(60,20,28,0.35)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.hudInner}
           >
-            <View style={styles.hudRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.brandKicker} allowFontScaling={false}>
-                  FRENEMIES
-                </Text>
-                <Text style={styles.hudPhase} allowFontScaling={false}>
-                  Round {state.roundIndex || 1}
-                  {phase === 'spinning' ? ' · spinning' : ''}
-                  {phase === 'choosing' ? ' · throw' : ''}
-                  {phase === 'challenge' ? ' · challenge' : ''}
-                  {phase === 'resolving' ? ' · result' : ''}
-                </Text>
-              </View>
-              {(isAdmin || isHost) ? (
-                <TouchableOpacity style={styles.endBtn} onPress={end} disabled={busy}>
-                  <Text style={styles.endBtnText} allowFontScaling={false}>
-                    End
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
+            {topBar}
+
+            <View style={styles.scoreStrip}>
+              <Text style={styles.scoreItem} allowFontScaling={false}>
+                Rounds {stats.rounds || state?.roundIndex || 0}
+              </Text>
+              <Text style={styles.scoreDot}>·</Text>
+              <Text style={styles.scoreItem} allowFontScaling={false}>
+                Prize {prizePreview}
+              </Text>
+              <Text style={styles.scoreDot}>·</Text>
+              <PayerBadge payer={payer} show={showPayer} />
             </View>
 
-            {phase === 'spinning' ? (
+            {(phase === 'ready' || spinCue) ? (
+              <View style={styles.readyBlock}>
+                <PrizeWheel
+                  size={168}
+                  maxSlots={maxSlots}
+                  phase={spinCue ? 'spinning' : 'ready'}
+                  roundId={state?.roundId || 'ready'}
+                  targetSlot={1}
+                  landedSlot={null}
+                  spinStartedAt={spinCue ? new Date().toISOString() : null}
+                  spinEndsAt={
+                    spinCue ? new Date(Date.now() + 1200).toISOString() : null
+                  }
+                  occupiedBySlot={occupiedBySlot}
+                />
+                <Text style={styles.readyTitle} allowFontScaling={false}>
+                  {spinCue ? 'Here we go…' : 'Ready when you are'}
+                </Text>
+                <Text style={styles.readyHint} allowFontScaling={false}>
+                  {payer === 'house'
+                    ? `House covers up to ${prizePreview} coins`
+                    : preview && !preview.canSpin
+                      ? `Need ${preview.needed} coins to cover prizes`
+                      : `Up to ${prizePreview} coins reserved at Spin`}
+                </Text>
+                {canConduct && !spinCue ? (
+                  needsTopUp ? (
+                    <TouchableOpacity
+                      style={styles.topUpBtn}
+                      onPress={openTopUp}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.topUpBtnText} allowFontScaling={false}>
+                        Top up · need {preview.needed}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.spinBtn}
+                      onPress={doSpin}
+                      disabled={busy}
+                      activeOpacity={0.85}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color={INK} />
+                      ) : (
+                        <Text style={styles.spinBtnText} allowFontScaling={false}>
+                          Spin · {spinTotalSecs}s
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  )
+                ) : null}
+                {!canConduct ? (
+                  <Text style={styles.readyHint} allowFontScaling={false}>
+                    Host is setting up Frenemies
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            {phase === 'spinning' && !spinCue ? (
               <Animated.View style={[styles.wheelBlock, { transform: [{ scale: tensionScale }] }]}>
                 <PrizeWheel
                   size={188}
@@ -430,9 +749,7 @@ export default function FrenemiesOverlay({
                         style={[
                           styles.tensionFill,
                           {
-                            width: `${Math.round(
-                              (1 - spinSecsLeft / spinTotalSecs) * 100
-                            )}%`,
+                            width: `${Math.round((1 - spinSecsLeft / spinTotalSecs) * 100)}%`,
                           },
                         ]}
                       />
@@ -443,30 +760,52 @@ export default function FrenemiesOverlay({
             ) : null}
 
             {(phase === 'choosing' || phase === 'challenge' || phase === 'resolving') &&
-              state.landedSlot ? (
+            state.landedSlot &&
+            !landFlash ? (
               <Text style={styles.landText} allowFontScaling={false}>
                 Landed on box {state.landedSlot}
                 {state.landedOccupied
                   ? ` · ${resolveName(
-                    Object.values(occupiedBySlot).find((g) => g.slotIndex === state.landedSlot)
-                      ?.userId || state.chooserUserId,
-                    chooserName
-                  )}`
+                      Object.values(occupiedBySlot).find((g) => g.slotIndex === state.landedSlot)
+                        ?.userId || state.chooserUserId,
+                      chooserName
+                    )}`
                   : ' · empty box challenge'}
               </Text>
             ) : null}
 
-            {resultCopy ? (
+            {resultCopy && (phase === 'resolving' || phase === 'ready') ? (
               <View style={styles.resultBanner}>
                 <Text style={styles.resultText} allowFontScaling={false}>
                   {resultCopy}
                 </Text>
+                {lastResult?.coins > 0 && lastResult?.payer ? (
+                  <Text style={styles.ledgerChip} allowFontScaling={false}>
+                    {lastResult.coins} BONUS · {lastResult.payer === 'house' ? 'House' : 'Host'}
+                  </Text>
+                ) : null}
               </View>
             ) : null}
 
             {err ? <Text style={styles.err}>{err}</Text> : null}
           </LinearGradient>
         </View>
+      ) : null}
+
+      {landFlash ? (
+        <Animated.View
+          style={[styles.landSlam, { opacity: landAnim, transform: [{ scale: landScale }] }]}
+          pointerEvents="none"
+        >
+          <LinearGradient colors={['rgba(245,197,66,0.95)', 'rgba(0,210,190,0.9)']} style={styles.landSlamInner}>
+            <Text style={styles.landSlamKicker} allowFontScaling={false}>
+              LAND
+            </Text>
+            <Text style={styles.landSlamText} allowFontScaling={false}>
+              {landFlash}
+            </Text>
+          </LinearGradient>
+        </Animated.View>
       ) : null}
 
       {celebrationKey ? (
@@ -476,20 +815,22 @@ export default function FrenemiesOverlay({
       {showChallenge && challenge ? (
         <View style={styles.overlayCard} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(12,12,14,0.97)', 'rgba(14,61,56,0.9)']}
+            colors={['rgba(12,12,14,0.97)', 'rgba(14,61,56,0.92)', 'rgba(26,21,32,0.9)']}
             style={styles.overlayGrad}
           >
-            <Text style={styles.overlayEyebrow} allowFontScaling={false}>
-              EMPTY BOX
-            </Text>
+            <View style={styles.overlayTop}>
+              <Text style={styles.overlayEyebrow} allowFontScaling={false}>
+                EMPTY BOX · {(challenge.type || '').toUpperCase()}
+              </Text>
+              <RulesChip onPress={openRules} />
+            </View>
             <Text style={styles.overlayTitle} allowFontScaling={false}>
               Challenge!
             </Text>
-
             <View style={styles.timerRow}>
               <TimerRing
                 endsAt={challenge.endsAt}
-                totalMs={event?.challengeMs || 20_000}
+                totalMs={event?.challengeMs || settings.challengeMs || 20_000}
                 size={70}
                 tone="teal"
                 label="SEC"
@@ -562,21 +903,23 @@ export default function FrenemiesOverlay({
       {showChooserOverlay ? (
         <View style={styles.overlayCard} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(12,12,14,0.97)', 'rgba(60,20,28,0.88)']}
+            colors={['rgba(12,12,14,0.97)', 'rgba(60,20,28,0.9)', 'rgba(14,61,56,0.55)']}
             style={styles.overlayGrad}
           >
-            <Text style={styles.overlayEyebrow} allowFontScaling={false}>
-              {isChooser ? 'YOUR MOVE' : 'CHOOSER'}
-            </Text>
+            <View style={styles.overlayTop}>
+              <Text style={styles.overlayEyebrow} allowFontScaling={false}>
+                {isChooser ? 'YOUR MOVE' : 'CHOOSER'}
+              </Text>
+              <RulesChip onPress={openRules} />
+            </View>
             <Text style={styles.overlayTitle} allowFontScaling={false}>
               {isChooser ? 'Throw someone out!' : `${chooserName} is choosing…`}
             </Text>
             <Text style={styles.overlayBody} allowFontScaling={false}>
               {isChooser
-                ? `Pick an occupied box. Land the throw in time for ${houseCoins} HOUSE coins.`
+                ? `Confirm a target. Land the throw for ${throwCoins} coins.`
                 : 'Waiting for the chooser to pick a target…'}
             </Text>
-
             <View style={styles.timerRow}>
               <TimerRing
                 endsAt={state.chooseEndsAt}
@@ -587,7 +930,6 @@ export default function FrenemiesOverlay({
                 nowTick={tick}
               />
             </View>
-
             {isChooser ? (
               <View style={styles.throwGrid}>
                 {Array.from({ length: maxSlots }, (_, i) => {
@@ -599,13 +941,22 @@ export default function FrenemiesOverlay({
                   return (
                     <TouchableOpacity
                       key={n}
-                      style={[styles.throwCell, !canThrow && styles.throwEmpty]}
+                      style={[
+                        styles.throwCell,
+                        !canThrow && styles.throwEmpty,
+                        canThrow && styles.throwDanger,
+                      ]}
                       disabled={!canThrow || busy}
-                      onPress={() => canThrow && throwTarget(g.userId)}
+                      onPress={() => canThrow && setConfirmTarget({ userId: g.userId, name, slot: n })}
                       activeOpacity={0.85}
                     >
                       {g ? (
-                        <Avatar uri={photo} name={name} size={34} ringColor={canThrow ? ROSE : 'rgba(255,255,255,0.25)'} />
+                        <Avatar
+                          uri={photo}
+                          name={name}
+                          size={34}
+                          ringColor={canThrow ? ROSE : 'rgba(255,255,255,0.25)'}
+                        />
                       ) : (
                         <View style={styles.emptyDot}>
                           <Text style={styles.throwNum} allowFontScaling={false}>
@@ -627,6 +978,114 @@ export default function FrenemiesOverlay({
           </LinearGradient>
         </View>
       ) : null}
+
+      {/* Throw confirm */}
+      <Modal visible={!!confirmTarget} transparent animationType="fade">
+        <Pressable style={styles.confirmBackdrop} onPress={() => setConfirmTarget(null)}>
+          <Pressable style={styles.confirmCard} onPress={(e) => e.stopPropagation()}>
+            <LinearGradient colors={['#3C141C', '#0A0A0C']} style={styles.confirmGrad}>
+              <Text style={styles.overlayEyebrow} allowFontScaling={false}>
+                CONFIRM THROW
+              </Text>
+              <Text style={styles.overlayTitle} allowFontScaling={false}>
+                Throw {confirmTarget?.name}?
+              </Text>
+              <Text style={styles.overlayBody} allowFontScaling={false}>
+                Box {confirmTarget?.slot} leaves the stage. You earn {throwCoins} coins if it lands.
+              </Text>
+              <View style={styles.confirmRow}>
+                <TouchableOpacity style={styles.confirmCancel} onPress={() => setConfirmTarget(null)}>
+                  <Text style={styles.confirmCancelText} allowFontScaling={false}>
+                    Back
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.confirmGo}
+                  onPress={() => confirmTarget && throwTarget(confirmTarget.userId)}
+                  disabled={busy}
+                >
+                  <Text style={styles.confirmGoText} allowFontScaling={false}>
+                    Throw
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* End recap */}
+      <Modal visible={!!endRecap && !active} transparent animationType="fade">
+        <View style={styles.confirmBackdrop}>
+          <View style={styles.confirmCard}>
+            <LinearGradient colors={['#0E3D38', '#0A0A0C']} style={styles.confirmGrad}>
+              <Text style={styles.overlayEyebrow} allowFontScaling={false}>
+                SHOW OVER
+              </Text>
+              <Text style={styles.overlayTitle} allowFontScaling={false}>
+                Frenemies recap
+              </Text>
+              <Text style={styles.overlayBody} allowFontScaling={false}>
+                Rounds {endRecap?.rounds || 0} · Throws {endRecap?.throws || 0} · Coins out{' '}
+                {endRecap?.coinsAwarded || 0}
+              </Text>
+              {(endRecap?.topWinners || []).slice(0, 3).map((w) => (
+                <Text key={w.userId} style={styles.recapWinner} allowFontScaling={false}>
+                  {w.displayName} · {w.coins}
+                </Text>
+              ))}
+              <TouchableOpacity
+                style={styles.spinBtn}
+                onPress={() => {
+                  setEndRecap(null);
+                  onClose?.();
+                }}
+              >
+                <Text style={styles.spinBtnText} allowFontScaling={false}>
+                  Close
+                </Text>
+              </TouchableOpacity>
+              <RulesChip onPress={openRules} />
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
+
+      <FrenemiesRulesSheet
+        visible={rulesOpen}
+        onClose={() => setRulesOpen(false)}
+        throwCoins={throwCoins}
+        soloCoins={soloCoins}
+        payer={payer}
+        isHost={canConduct}
+        autoContinue={!!settings.autoContinue}
+        spinSec={spinTotalSecs}
+      />
+
+      <FrenemiesSettingsSheet
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        isAdminHost={isAdminHost}
+        readOnly={settingsLocked}
+        onSave={saveSettings}
+      />
+
+      <BuyCoinsOverlay
+        visible={topUpOpen}
+        onClose={() => {
+          setTopUpOpen(false);
+          if (canConduct && phase === 'ready') {
+            void frenemiesGetPreview(sessionId)
+              .then((p) => setPreview(p))
+              .catch(() => {});
+          }
+        }}
+        requiredCoins={preview?.needed || prizePreview || 0}
+        currentCoins={preview?.balance || 0}
+        title="Top up for Frenemies"
+        navigation={navigation}
+      />
     </View>
   );
 }
@@ -641,9 +1100,21 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.4)',
+    borderColor: 'rgba(0,210,190,0.45)',
   },
   startGrad: { padding: 16 },
+  openBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  wheelGlyph: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(245,197,66,0.2)',
+    borderWidth: 2,
+    borderColor: GOLD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wheelGlyphText: { color: GOLD_SOFT, fontWeight: '900', fontSize: 18 },
   brandKicker: {
     color: TEAL,
     fontWeight: '900',
@@ -657,7 +1128,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
     marginTop: 2,
   },
-  sub: { color: 'rgba(244,247,250,0.75)', marginTop: 6, marginBottom: 14, fontSize: 13, lineHeight: 18 },
+  sub: {
+    color: 'rgba(244,247,250,0.75)',
+    marginTop: 10,
+    marginBottom: 14,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   startBtn: {
     backgroundColor: TEAL,
     borderRadius: 14,
@@ -675,20 +1152,111 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(245,197,66,0.28)',
+    borderColor: 'rgba(245,197,66,0.32)',
   },
   hudInner: { padding: 12 },
   hudRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   hudPhase: { color: '#fff', fontWeight: '800', fontSize: 15, marginTop: 2 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rulesChip: {
+    backgroundColor: 'rgba(0,210,190,0.16)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.45)',
+  },
+  rulesChipText: { color: TEAL, fontWeight: '900', fontSize: 11, letterSpacing: 0.3 },
+  rulesTip: {
+    position: 'absolute',
+    top: 30,
+    right: 0,
+    backgroundColor: GOLD,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    minWidth: 110,
+    zIndex: 2,
+  },
+  rulesTipText: { color: INK, fontWeight: '900', fontSize: 10 },
+  topUpBtn: {
+    marginTop: 10,
+    backgroundColor: GOLD,
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+  },
+  topUpBtnText: { color: INK, fontWeight: '900', fontSize: 15 },
+  gearChip: {
+    backgroundColor: 'rgba(245,197,66,0.14)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,66,0.4)',
+  },
+  gearText: { color: GOLD_SOFT, fontWeight: '800', fontSize: 11 },
   endBtn: {
     backgroundColor: 'rgba(251,113,133,0.22)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(251,113,133,0.45)',
   },
-  endBtnText: { color: ROSE, fontWeight: '800', fontSize: 12 },
+  endBtnText: { color: ROSE, fontWeight: '800', fontSize: 11 },
+  scoreStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  scoreItem: { color: 'rgba(244,247,250,0.7)', fontWeight: '800', fontSize: 11 },
+  scoreDot: { color: 'rgba(255,255,255,0.3)' },
+  payerBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  payerHost: {
+    backgroundColor: 'rgba(245,197,66,0.12)',
+    borderColor: 'rgba(245,197,66,0.4)',
+  },
+  payerHouse: {
+    backgroundColor: 'rgba(0,210,190,0.14)',
+    borderColor: 'rgba(0,210,190,0.45)',
+  },
+  payerText: { color: GOLD_SOFT, fontWeight: '900', fontSize: 10, letterSpacing: 0.4 },
+  readyBlock: { alignItems: 'center', marginTop: 6 },
+  readyTitle: {
+    color: '#fff',
+    fontWeight: '900',
+    fontSize: 18,
+    marginTop: 8,
+    letterSpacing: 0.2,
+  },
+  readyHint: {
+    color: 'rgba(244,247,250,0.7)',
+    fontWeight: '700',
+    fontSize: 12,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  spinBtn: {
+    marginTop: 12,
+    backgroundColor: GOLD,
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    minWidth: 180,
+  },
+  spinBtnDisabled: { opacity: 0.4 },
+  spinBtnText: { color: INK, fontWeight: '900', fontSize: 16, letterSpacing: 0.3 },
   wheelBlock: { alignItems: 'center', marginTop: 8 },
   spinMeta: {
     flexDirection: 'row',
@@ -716,6 +1284,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
   },
+  landSlam: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    top: '38%',
+    zIndex: 80,
+  },
+  landSlamInner: {
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(10,10,12,0.35)',
+  },
+  landSlamKicker: {
+    color: INK,
+    fontWeight: '900',
+    fontSize: 11,
+    letterSpacing: 2.4,
+    textAlign: 'center',
+  },
+  landSlamText: {
+    color: INK,
+    fontWeight: '900',
+    fontSize: 18,
+    textAlign: 'center',
+    marginTop: 4,
+  },
   resultBanner: {
     marginTop: 8,
     backgroundColor: 'rgba(0,210,190,0.14)',
@@ -726,18 +1322,30 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,210,190,0.35)',
   },
   resultText: { color: TEAL, fontWeight: '800', textAlign: 'center', fontSize: 13, lineHeight: 18 },
+  ledgerChip: {
+    color: GOLD_SOFT,
+    fontWeight: '900',
+    textAlign: 'center',
+    fontSize: 11,
+    marginTop: 4,
+  },
   err: { color: ROSE, marginTop: 6, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   overlayCard: {
     position: 'absolute',
     left: 12,
     right: 12,
-    top: '24%',
+    top: '22%',
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(0,210,190,0.4)',
   },
   overlayGrad: { padding: 16 },
+  overlayTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   overlayEyebrow: {
     color: GOLD,
     fontWeight: '900',
@@ -802,7 +1410,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     letterSpacing: 0.4,
   },
-  progressText: { color: TEAL, textAlign: 'center', fontWeight: '900', marginBottom: 8, fontSize: 15 },
+  progressText: {
+    color: TEAL,
+    textAlign: 'center',
+    fontWeight: '900',
+    marginBottom: 8,
+    fontSize: 15,
+  },
   likesTrack: {
     height: 10,
     borderRadius: 5,
@@ -822,6 +1436,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  throwDanger: {
+    shadowColor: ROSE,
+    shadowOpacity: 0.45,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
+  },
   throwEmpty: {
     opacity: 0.4,
     borderColor: 'rgba(255,255,255,0.15)',
@@ -838,4 +1458,41 @@ const styles = StyleSheet.create({
   throwNum: { color: GOLD_SOFT, fontWeight: '900', fontSize: 14 },
   throwSlot: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontWeight: '800' },
   throwName: { color: '#fff', fontSize: 11, fontWeight: '700', maxWidth: 80, textAlign: 'center' },
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  confirmCard: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(251,113,133,0.45)',
+  },
+  confirmGrad: { padding: 18 },
+  confirmRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  confirmCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  confirmCancelText: { color: '#fff', fontWeight: '800' },
+  confirmGo: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: ROSE,
+  },
+  confirmGoText: { color: '#fff', fontWeight: '900' },
+  recapWinner: {
+    color: GOLD_SOFT,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginTop: 4,
+    fontSize: 13,
+  },
 });

@@ -1,6 +1,6 @@
 /**
- * Frenemies — server-authoritative TikTok-style live party game.
- * Redis state + in-process tick for spin / choose / challenge timeouts.
+ * Frenemies — server-authoritative host-conducted live party game (EA v1).
+ * Ready → host Spin → land → challenge|throw → result → Ready (auto-continue OFF).
  */
 import { randomUUID, createHash } from 'crypto';
 import { getEconomyInfra } from '../../economy/infra';
@@ -8,29 +8,42 @@ import { logger } from '../../config/logger';
 import { listGuests, leaveGuestSession } from '../../live/guestSlotStore';
 import { MAX_GUEST_SLOTS } from '../../live/guestSlotAllocator';
 import { emitFrenemiesGameEvent, emitRoomEvent } from '../../realtime/realtimeBus';
-import { creditCoinsAdmin } from '../../economy/economyService';
 import { BOOTSTRAP_STAFF_ROLES } from '../../admin/adminRbac';
 import { getAdminEnv } from '../../config/adminEnv';
 import { pickQuiz, pickPhrase } from './questions';
+import { EconomyError } from '../../economy/economyErrors';
+import {
+  getSpendableCoins,
+  holdHostPrize,
+  releaseHostHold,
+  settlePrizeAward,
+  type PrizeHold,
+} from './frenemiesEconomy';
+import {
+  SPIN_OPTIONS_MS,
+  DEFAULT_SPIN_MS,
+  DEFAULT_CHOOSE_MS,
+  DEFAULT_CHALLENGE_MS,
+  DEFAULT_RESULT_MS,
+  DEFAULT_COINS,
+  DEFAULT_LIKES,
+  MAX_COINS,
+  defaultSettings,
+  maxPrizeForSettings,
+  nearestSpinMs,
+  type FrenemiesSettings,
+} from './frenemiesSettings';
 
 const TTL_SECONDS = 60 * 60 * 2;
 const stateKey = (sessionId: string) => `frenemies:game:${sessionId}`;
 const lockKey = (sessionId: string) => `frenemies:lock:${sessionId}`;
 const engageKey = (sessionId: string) => `frenemies:engage:${sessionId}`;
 
-/** Default spin 30s; override with FRENEMIES_SPIN_MS for demos. */
-export const SPIN_MS = Math.max(
-  5_000,
-  Number(process.env.FRENEMIES_SPIN_MS || 30_000) || 30_000,
-);
-export const CHOOSE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHOOSE_MS || 20_000) || 20_000);
-export const CHALLENGE_MS = Math.max(5_000, Number(process.env.FRENEMIES_CHALLENGE_MS || 20_000) || 20_000);
-export const RESULT_DISPLAY_MS = 6_000;
-export const HOUSE_COINS = 25;
-export const LIKES_TARGET = Math.max(5, Number(process.env.FRENEMIES_LIKES_TARGET || 50) || 50);
+export { defaultSettings, maxPrizeForSettings, type FrenemiesSettings };
 
 export type FrenemiesPhase =
   | 'idle'
+  | 'ready'
   | 'spinning'
   | 'challenge'
   | 'choosing'
@@ -47,16 +60,22 @@ export interface SlotOccupant {
 
 export interface ChallengePublic {
   type: ChallengeType;
-  /** Quiz prompt (no correct answer). */
   question?: string;
   choices?: string[];
-  /** Chat phrase to type. */
   phrase?: string;
-  /** Likes needed. */
   likesTarget?: number;
   likeProgress?: Record<string, number>;
   frozenUserIds?: string[];
   endsAt: string;
+}
+
+export interface SessionStats {
+  rounds: number;
+  throws: number;
+  challengeWins: number;
+  coinsAwarded: number;
+  coinsSpentByHost: number;
+  topWinners: { userId: string; displayName: string; coins: number }[];
 }
 
 export interface FrenemiesState {
@@ -65,7 +84,6 @@ export interface FrenemiesState {
   roundIndex: number;
   spinStartedAt: string | null;
   spinEndsAt: string | null;
-  /** Deterministic landing slot 1..MAX_GUEST_SLOTS once spin resolves. */
   targetSlot: number | null;
   landedSlot: number | null;
   landedOccupied: boolean;
@@ -73,7 +91,6 @@ export interface FrenemiesState {
   chooserDisplayName: string | null;
   chooseEndsAt: string | null;
   challenge: ChallengePublic | null;
-  /** Server-only quiz answer index — stripped in publicEvent. */
   challengeCorrectIndex?: number | null;
   lastResult: {
     kind: string;
@@ -81,14 +98,23 @@ export interface FrenemiesState {
     kickedUserId?: string | null;
     coinUserId?: string | null;
     coins?: number;
+    payer?: 'host' | 'house' | null;
   } | null;
   active: boolean;
+  /** After result, auto-spin at this time when autoContinue ON. */
+  nextSpinAt: string | null;
+  prizeHold: PrizeHold | null;
+  prizePreview: number;
+  payer: 'host' | 'house';
 }
 
 export interface FrenemiesRoom {
   sessionId: string;
   hostUserId: string;
   startedByUserId: string;
+  settings: FrenemiesSettings;
+  stats: SessionStats;
+  winnerCoins: Record<string, { displayName: string; coins: number }>;
   state: FrenemiesState;
   version: number;
   createdAt: string;
@@ -118,6 +144,21 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function emptyStats(): SessionStats {
+  return {
+    rounds: 0,
+    throws: 0,
+    challengeWins: 0,
+    coinsAwarded: 0,
+    coinsSpentByHost: 0,
+    topWinners: [],
+  };
+}
+
+function payerFor(room: FrenemiesRoom): 'host' | 'house' {
+  return room.settings.housePays ? 'house' : 'host';
+}
+
 export function isFrenemiesAdmin(userId: string): boolean {
   if (!userId) return false;
   if (BOOTSTRAP_STAFF_ROLES[userId]) return true;
@@ -134,7 +175,22 @@ async function loadRoom(sessionId: string): Promise<FrenemiesRoom | null> {
   const raw = await redis().get(stateKey(sessionId));
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as FrenemiesRoom;
+    const room = JSON.parse(raw) as FrenemiesRoom;
+    if (!room.settings) room.settings = defaultSettings();
+    else room.settings = defaultSettings(room.settings);
+    if (!room.stats) room.stats = emptyStats();
+    if (!room.winnerCoins) room.winnerCoins = {};
+    if (!room.state.prizeHold) room.state.prizeHold = null;
+    if (room.state.nextSpinAt === undefined) room.state.nextSpinAt = null;
+    if (!room.state.payer) room.state.payer = payerFor(room);
+    if (typeof room.state.prizePreview !== 'number') {
+      room.state.prizePreview = maxPrizeForSettings(room.settings);
+    }
+    // Migrate legacy idle+active auto-loop rooms.
+    if (room.state.active && room.state.phase === 'idle') {
+      room.state.phase = 'ready';
+    }
+    return room;
   } catch {
     return null;
   }
@@ -172,13 +228,37 @@ async function withLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> 
 function stripPrivate(state: FrenemiesState): FrenemiesState {
   const copy = { ...state };
   delete copy.challengeCorrectIndex;
+  // Never expose debit breakdown details beyond amount/payer.
+  if (copy.prizeHold) {
+    copy.prizeHold = {
+      amount: copy.prizeHold.amount,
+      roundId: copy.prizeHold.roundId,
+      paidBy: copy.prizeHold.paidBy,
+      hostUserId: copy.prizeHold.hostUserId,
+      coinDebited: 0,
+      bonusDebited: 0,
+    };
+  }
   return copy;
+}
+
+function buildTopWinners(room: FrenemiesRoom): SessionStats['topWinners'] {
+  return Object.entries(room.winnerCoins || {})
+    .map(([userId, v]) => ({
+      userId,
+      displayName: v.displayName || 'Winner',
+      coins: v.coins || 0,
+    }))
+    .sort((a, b) => b.coins - a.coins)
+    .slice(0, 5);
 }
 
 export function publicEvent(
   room: FrenemiesRoom,
   type: 'PHASE' | 'SNAPSHOT' | 'RESULT' | 'ENDED' = 'SNAPSHOT',
 ) {
+  const s = room.settings;
+  const stats = { ...room.stats, topWinners: buildTopWinners(room) };
   return {
     game: 'frenemies' as const,
     sessionId: room.sessionId,
@@ -187,11 +267,19 @@ export function publicEvent(
     hostUserId: room.hostUserId,
     startedByUserId: room.startedByUserId,
     state: stripPrivate(room.state),
-    spinMs: SPIN_MS,
-    chooseMs: CHOOSE_MS,
-    challengeMs: CHALLENGE_MS,
-    houseCoins: HOUSE_COINS,
+    settings: { ...s },
+    stats,
+    spinMs: s.spinMs,
+    chooseMs: s.chooseMs,
+    challengeMs: s.challengeMs,
+    resultMs: s.resultMs,
+    houseCoins: s.throwCoins,
+    throwCoins: s.throwCoins,
+    soloCoins: s.soloCoins,
     maxSlots: MAX_GUEST_SLOTS,
+    maxCoins: MAX_COINS,
+    spinOptionsMs: [...SPIN_OPTIONS_MS],
+    isAdminHost: isFrenemiesAdmin(room.hostUserId) || isFrenemiesAdmin(room.startedByUserId),
   };
 }
 
@@ -221,10 +309,14 @@ function ensureTicks(sessionId: string) {
 async function liveOccupants(sessionId: string): Promise<SlotOccupant[]> {
   const guests = await listGuests(sessionId);
   return guests
-    .filter((g) => g.state === 'LIVE' && typeof g.slotIndex === 'number' && g.slotIndex >= 1 && g.slotIndex <= MAX_GUEST_SLOTS)
+    .filter(
+      (g) =>
+        g.state === 'LIVE' &&
+        typeof g.slotIndex === 'number' &&
+        g.slotIndex >= 1 &&
+        g.slotIndex <= MAX_GUEST_SLOTS,
+    )
     .map((g) => {
-      // Guest slot store has no profile fields; prefer a stable human label.
-      // Clients overlay real roster names/avatars from the live guest mirror.
       const anyName = (g as any)?.displayName || (g as any)?.name || (g as any)?.username;
       return {
         userId: g.userId,
@@ -239,15 +331,18 @@ function hashSeed(s: string): number {
   return h.readUInt32BE(0);
 }
 
-/** Pick landing slot 1..11 (any). Empty vs occupied handled after land. */
 function pickTargetSlot(roundId: string): number {
   const seed = hashSeed(roundId);
   return (seed % MAX_GUEST_SLOTS) + 1;
 }
 
-function pickChallengeType(roundId: string): ChallengeType {
-  const types: ChallengeType[] = ['quiz', 'chat', 'likes'];
-  return types[hashSeed(`${roundId}:ch`) % types.length];
+function pickChallengeType(room: FrenemiesRoom, roundId: string): ChallengeType {
+  const enabled: ChallengeType[] = [];
+  if (room.settings.challengeQuiz) enabled.push('quiz');
+  if (room.settings.challengeChat) enabled.push('chat');
+  if (room.settings.challengeLikes) enabled.push('likes');
+  if (enabled.length === 0) enabled.push('quiz', 'chat', 'likes');
+  return enabled[hashSeed(`${roundId}:ch`) % enabled.length];
 }
 
 async function forceKick(sessionId: string, guestUserId: string): Promise<void> {
@@ -259,28 +354,69 @@ async function forceKick(sessionId: string, guestUserId: string): Promise<void> 
   }
 }
 
-async function grantHouseCoins(userId: string, roundId: string, reason: string): Promise<void> {
-  try {
-    await creditCoinsAdmin('system:frenemies', {
-      targetUserId: userId,
-      coins: HOUSE_COINS,
-      idempotencyKey: `frenemies:${roundId}:${userId}`,
-      reason,
-    });
-  } catch (e: any) {
-    logger.error({ userId, roundId, err: e?.message || String(e) }, '[frenemies] coin grant failed');
-  }
+function recordWin(room: FrenemiesRoom, userId: string, displayName: string, coins: number) {
+  if (coins <= 0) return;
+  const prev = room.winnerCoins[userId] || { displayName, coins: 0 };
+  room.winnerCoins[userId] = {
+    displayName: displayName || prev.displayName,
+    coins: prev.coins + coins,
+  };
+  room.stats.coinsAwarded += coins;
 }
 
-function beginSpin(room: FrenemiesRoom): void {
+function enterReady(room: FrenemiesRoom): void {
+  room.state.phase = 'ready';
+  room.state.spinStartedAt = null;
+  room.state.spinEndsAt = null;
+  room.state.targetSlot = null;
+  room.state.landedSlot = null;
+  room.state.landedOccupied = false;
+  room.state.chooserUserId = null;
+  room.state.chooserDisplayName = null;
+  room.state.chooseEndsAt = null;
+  room.state.challenge = null;
+  room.state.challengeCorrectIndex = null;
+  room.state.nextSpinAt = null;
+  room.state.prizeHold = null;
+  room.state.prizePreview = maxPrizeForSettings(room.settings);
+  room.state.payer = payerFor(room);
+  room.state.active = true;
+  room.version += 1;
+}
+
+async function beginSpin(room: FrenemiesRoom): Promise<void> {
   const roundId = randomUUID();
   const now = Date.now();
+  const spinMs = room.settings.spinMs;
+  const maxPrize = maxPrizeForSettings(room.settings);
+  const payer = payerFor(room);
+
+  let hold: PrizeHold | null = null;
+  if (payer === 'host' && maxPrize > 0) {
+    hold = await holdHostPrize({
+      hostUserId: room.hostUserId,
+      amount: maxPrize,
+      roundId,
+      sessionId: room.sessionId,
+    });
+    room.stats.coinsSpentByHost += maxPrize;
+  } else if (payer === 'house') {
+    hold = {
+      amount: maxPrize,
+      roundId,
+      paidBy: 'house',
+      hostUserId: room.hostUserId,
+      coinDebited: 0,
+      bonusDebited: 0,
+    };
+  }
+
   room.state = {
     phase: 'spinning',
     roundId,
     roundIndex: (room.state.roundIndex || 0) + 1,
     spinStartedAt: new Date(now).toISOString(),
-    spinEndsAt: new Date(now + SPIN_MS).toISOString(),
+    spinEndsAt: new Date(now + spinMs).toISOString(),
     targetSlot: pickTargetSlot(roundId),
     landedSlot: null,
     landedOccupied: false,
@@ -291,7 +427,78 @@ function beginSpin(room: FrenemiesRoom): void {
     challengeCorrectIndex: null,
     lastResult: null,
     active: true,
+    nextSpinAt: null,
+    prizeHold: hold,
+    prizePreview: maxPrize,
+    payer,
   };
+  room.stats.rounds += 1;
+  room.version += 1;
+}
+
+async function awardAndResolve(
+  room: FrenemiesRoom,
+  args: {
+    kind: string;
+    text: string;
+    winnerUserId?: string | null;
+    winnerName?: string | null;
+    awardAmount: number;
+    kickedUserId?: string | null;
+  },
+): Promise<void> {
+  let coins = 0;
+  let payer: 'host' | 'house' | null = room.state.payer || payerFor(room);
+  if (args.winnerUserId && args.awardAmount > 0) {
+    try {
+      const settled = await settlePrizeAward({
+        hold: room.state.prizeHold,
+        winnerUserId: args.winnerUserId,
+        awardAmount: args.awardAmount,
+        roundId: room.state.roundId,
+        reason: args.text,
+      });
+      coins = settled.coins;
+      payer = settled.payer;
+      recordWin(room, args.winnerUserId, args.winnerName || 'Winner', coins);
+    } catch (e: any) {
+      logger.error({ err: e?.message }, '[frenemies] settle failed');
+      room.state.lastResult = {
+        kind: 'award_failed',
+        text: 'Prize could not be paid — hold released. Sorry!',
+        payer,
+      };
+      room.state.prizeHold = null;
+      room.state.phase = 'resolving';
+      room.state.chooseEndsAt = new Date(Date.now() + room.settings.resultMs).toISOString();
+      room.state.challenge = null;
+      room.version += 1;
+      return;
+    }
+  } else {
+    await releaseHostHold(room.state.prizeHold, args.kind);
+  }
+
+  room.state.prizeHold = null;
+  room.state.lastResult = {
+    kind: args.kind,
+    text: args.text,
+    kickedUserId: args.kickedUserId || null,
+    coinUserId: args.winnerUserId || null,
+    coins,
+    payer,
+  };
+  room.state.phase = 'resolving';
+  room.state.challenge = null;
+  room.state.challengeCorrectIndex = null;
+  room.state.chooseEndsAt = new Date(Date.now() + room.settings.resultMs).toISOString();
+  if (room.settings.autoContinue) {
+    room.state.nextSpinAt = new Date(
+      Date.now() + room.settings.resultMs + room.settings.autoContinueDelayMs,
+    ).toISOString();
+  } else {
+    room.state.nextSpinAt = null;
+  }
   room.version += 1;
 }
 
@@ -305,14 +512,12 @@ async function resolveSpinLand(room: FrenemiesRoom): Promise<void> {
   room.state.spinEndsAt = nowIso();
 
   if (atSlot) {
-    // Occupied: that guest becomes chooser.
     enterChoosing(room, atSlot.userId, atSlot.displayName);
     return;
   }
 
-  // Empty box → everyone sees a challenge.
-  const ctype = pickChallengeType(room.state.roundId);
-  const endsAt = new Date(Date.now() + CHALLENGE_MS).toISOString();
+  const ctype = pickChallengeType(room, room.state.roundId);
+  const endsAt = new Date(Date.now() + room.settings.challengeMs).toISOString();
   const seed = hashSeed(room.state.roundId);
 
   if (ctype === 'quiz') {
@@ -334,7 +539,7 @@ async function resolveSpinLand(room: FrenemiesRoom): Promise<void> {
   } else {
     room.state.challenge = {
       type: 'likes',
-      likesTarget: LIKES_TARGET,
+      likesTarget: room.settings.likesTarget,
       likeProgress: {},
       endsAt,
     };
@@ -347,28 +552,25 @@ function enterChoosing(room: FrenemiesRoom, userId: string, displayName: string)
   room.state.phase = 'choosing';
   room.state.chooserUserId = userId;
   room.state.chooserDisplayName = displayName;
-  room.state.chooseEndsAt = new Date(Date.now() + CHOOSE_MS).toISOString();
+  room.state.chooseEndsAt = new Date(Date.now() + room.settings.chooseMs).toISOString();
   room.state.challenge = null;
   room.state.challengeCorrectIndex = null;
   room.version += 1;
 }
 
 async function afterChooserReady(room: FrenemiesRoom, userId: string, displayName: string): Promise<void> {
+  room.stats.challengeWins += 1;
   const occ = await liveOccupants(room.sessionId);
   const throwable = occ.filter((o) => o.userId !== userId);
   if (throwable.length === 0) {
-    // No one to throw — grant coins and next spin.
-    await grantHouseCoins(userId, room.state.roundId, 'Frenemies empty-box win (no guests to throw)');
-    room.state.lastResult = {
+    const amount = room.settings.soloCoins;
+    await awardAndResolve(room, {
       kind: 'solo_win',
-      text: `${displayName} wins 25 HOUSE coins — no guests to throw!`,
-      coinUserId: userId,
-      coins: HOUSE_COINS,
-    };
-    room.state.phase = 'resolving';
-    room.version += 1;
-    // Keep the win visible before the next spin is handled in tick.
-    room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
+      text: `${displayName} wins ${amount} coins — no guests to throw!`,
+      winnerUserId: userId,
+      winnerName: displayName,
+      awardAmount: amount,
+    });
     return;
   }
   enterChoosing(room, userId, displayName);
@@ -377,35 +579,66 @@ async function afterChooserReady(room: FrenemiesRoom, userId: string, displayNam
 async function onChooseTimeout(room: FrenemiesRoom): Promise<void> {
   const chooser = room.state.chooserUserId;
   if (!chooser) {
-    beginSpin(room);
+    await releaseHostHold(room.state.prizeHold, 'no_chooser');
+    room.state.prizeHold = null;
+    enterReady(room);
     return;
   }
   await forceKick(room.sessionId, chooser);
-  room.state.lastResult = {
+  await awardAndResolve(room, {
     kind: 'timeout_kick',
     text: `${room.state.chooserDisplayName || 'Chooser'} ran out of time — thrown out with no coins.`,
     kickedUserId: chooser,
-  };
-  room.state.phase = 'resolving';
-  room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
-  room.version += 1;
+    awardAmount: 0,
+  });
 }
 
 async function onChallengeTimeout(room: FrenemiesRoom): Promise<void> {
-  room.state.lastResult = {
+  await awardAndResolve(room, {
     kind: 'challenge_timeout',
-    text: 'Nobody won the empty-box challenge — spinning again.',
-  };
-  room.state.phase = 'resolving';
-  room.state.challenge = null;
-  room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
-  room.version += 1;
+    text: 'Nobody won the empty-box challenge.',
+    awardAmount: 0,
+  });
+}
+
+async function finishResolving(room: FrenemiesRoom): Promise<void> {
+  if (room.settings.autoContinue) {
+    const nextAt = room.state.nextSpinAt ? Date.parse(room.state.nextSpinAt) : 0;
+    if (nextAt && Date.now() < nextAt) {
+      return;
+    }
+    try {
+      await beginSpin(room);
+    } catch (e: any) {
+      if (e instanceof EconomyError && e.code === 'INSUFFICIENT_FUNDS') {
+        room.state.lastResult = {
+          kind: 'insufficient_funds',
+          text: `Need ${maxPrizeForSettings(room.settings)} coins to cover prizes — top up to keep spinning.`,
+          payer: 'host',
+        };
+        enterReady(room);
+        return;
+      }
+      throw e;
+    }
+    return;
+  }
+  // Clear result banner when returning to Ready; keep stats.
+  const last = room.state.lastResult;
+  enterReady(room);
+  room.state.lastResult = last;
 }
 
 async function tickOnce(sessionId: string) {
   await withLock(sessionId, async () => {
     const room = await loadRoom(sessionId);
     if (!room || !room.state.active || room.state.phase === 'ended' || room.state.phase === 'idle') {
+      stopTicks(sessionId);
+      return;
+    }
+
+    // Ready with no auto-continue: no timed work — stop ticking until host spins.
+    if (room.state.phase === 'ready' && !room.settings.autoContinue) {
       stopTicks(sessionId);
       return;
     }
@@ -431,8 +664,38 @@ async function tickOnce(sessionId: string) {
       }
     } else if (room.state.phase === 'resolving' && room.state.chooseEndsAt) {
       if (now >= Date.parse(room.state.chooseEndsAt)) {
-        beginSpin(room);
+        if (room.settings.autoContinue && room.state.nextSpinAt && now < Date.parse(room.state.nextSpinAt)) {
+          // Wait for auto delay — keep resolving visual.
+        } else {
+          await finishResolving(room);
+          emitType = 'PHASE';
+        }
+      } else if (
+        room.settings.autoContinue &&
+        room.state.nextSpinAt &&
+        now >= Date.parse(room.state.chooseEndsAt) &&
+        now >= Date.parse(room.state.nextSpinAt)
+      ) {
+        await finishResolving(room);
         emitType = 'PHASE';
+      }
+    } else if (room.state.phase === 'ready' && room.settings.autoContinue && room.state.nextSpinAt) {
+      if (now >= Date.parse(room.state.nextSpinAt)) {
+        try {
+          await beginSpin(room);
+          emitType = 'PHASE';
+        } catch (e: any) {
+          if (e instanceof EconomyError && e.code === 'INSUFFICIENT_FUNDS') {
+            room.state.lastResult = {
+              kind: 'insufficient_funds',
+              text: `Need ${maxPrizeForSettings(room.settings)} coins to cover prizes.`,
+              payer: 'host',
+            };
+            emitType = 'RESULT';
+          } else {
+            throw e;
+          }
+        }
       }
     }
 
@@ -449,9 +712,9 @@ export async function getRoom(sessionId: string): Promise<FrenemiesRoom | null> 
 
 export async function resumeTicksIfNeeded(sessionId: string): Promise<void> {
   const room = await loadRoom(sessionId);
-  if (room?.state?.active && room.state.phase !== 'ended' && room.state.phase !== 'idle') {
-    ensureTicks(sessionId);
-  }
+  if (!room?.state?.active || room.state.phase === 'ended' || room.state.phase === 'idle') return;
+  if (room.state.phase === 'ready' && !room.settings.autoContinue) return;
+  ensureTicks(sessionId);
 }
 
 export async function startGame(args: {
@@ -469,16 +732,25 @@ export async function startGame(args: {
   return withLock(sessionId, async () => {
     let room = await loadRoom(sessionId);
     if (room && room.state.active && room.state.phase !== 'ended') {
-      ensureTicks(sessionId);
+      resumeTicksIfNeeded(sessionId);
       return room;
+    }
+
+    const settings = defaultSettings();
+    // Non-admins cannot start with house pays.
+    if (!isFrenemiesAdmin(starterUserId) && !isFrenemiesAdmin(hostUserId)) {
+      settings.housePays = false;
     }
 
     room = {
       sessionId,
       hostUserId,
       startedByUserId: starterUserId,
+      settings,
+      stats: emptyStats(),
+      winnerCoins: {},
       state: {
-        phase: 'idle',
+        phase: 'ready',
         roundId: '',
         roundIndex: 0,
         spinStartedAt: null,
@@ -493,15 +765,115 @@ export async function startGame(args: {
         challengeCorrectIndex: null,
         lastResult: null,
         active: true,
+        nextSpinAt: null,
+        prizeHold: null,
+        prizePreview: maxPrizeForSettings(settings),
+        payer: settings.housePays ? 'house' : 'host',
       },
-      version: 0,
+      version: 1,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
-    beginSpin(room);
     await saveRoom(room);
-    ensureTicks(sessionId);
     emitFrenemiesGameEvent(sessionId, publicEvent(room, 'PHASE'));
+    return room;
+  });
+}
+
+export async function spinRound(args: {
+  sessionId: string;
+  userId: string;
+}): Promise<FrenemiesRoom> {
+  return withLock(args.sessionId, async () => {
+    const room = await loadRoom(args.sessionId);
+    if (!room || !room.state.active) {
+      const err: any = new Error('GAME_NOT_FOUND');
+      err.code = 'GAME_NOT_FOUND';
+      throw err;
+    }
+    if (room.hostUserId !== args.userId && !isFrenemiesAdmin(args.userId)) {
+      const err: any = new Error('NOT_HOST');
+      err.code = 'NOT_HOST';
+      throw err;
+    }
+    if (room.state.phase !== 'ready' && room.state.phase !== 'idle') {
+      const err: any = new Error('NOT_READY');
+      err.code = 'NOT_READY';
+      throw err;
+    }
+
+    const maxPrize = maxPrizeForSettings(room.settings);
+    if (!room.settings.housePays && maxPrize > 0) {
+      const bal = await getSpendableCoins(room.hostUserId);
+      if (bal < maxPrize) {
+        const err: any = new Error('INSUFFICIENT_FUNDS');
+        err.code = 'INSUFFICIENT_FUNDS';
+        err.needed = maxPrize;
+        err.balance = bal;
+        throw err;
+      }
+    }
+
+    try {
+      await beginSpin(room);
+    } catch (e: any) {
+      if (e instanceof EconomyError && e.code === 'INSUFFICIENT_FUNDS') {
+        const err: any = new Error('INSUFFICIENT_FUNDS');
+        err.code = 'INSUFFICIENT_FUNDS';
+        err.needed = maxPrize;
+        throw err;
+      }
+      throw e;
+    }
+
+    await saveRoom(room);
+    ensureTicks(args.sessionId);
+    emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'PHASE'));
+    return room;
+  });
+}
+
+export async function updateSettings(args: {
+  sessionId: string;
+  userId: string;
+  patch: Partial<FrenemiesSettings>;
+}): Promise<FrenemiesRoom> {
+  return withLock(args.sessionId, async () => {
+    const room = await loadRoom(args.sessionId);
+    if (!room || !room.state.active) {
+      const err: any = new Error('GAME_NOT_FOUND');
+      err.code = 'GAME_NOT_FOUND';
+      throw err;
+    }
+    if (room.hostUserId !== args.userId && !isFrenemiesAdmin(args.userId)) {
+      const err: any = new Error('NOT_HOST');
+      err.code = 'NOT_HOST';
+      throw err;
+    }
+    // Fairness: settings mutable only on Ready / Between (ready).
+    if (room.state.phase !== 'ready' && room.state.phase !== 'idle') {
+      const err: any = new Error('SETTINGS_LOCKED');
+      err.code = 'SETTINGS_LOCKED';
+      throw err;
+    }
+
+    const patch = { ...args.patch };
+    if (patch.spinMs != null) patch.spinMs = nearestSpinMs(Number(patch.spinMs));
+    if (patch.housePays != null) {
+      if (!isFrenemiesAdmin(args.userId)) {
+        delete patch.housePays;
+      }
+    }
+
+    room.settings = defaultSettings({ ...room.settings, ...patch });
+    if (!isFrenemiesAdmin(args.userId) && !isFrenemiesAdmin(room.hostUserId)) {
+      room.settings.housePays = false;
+    }
+    room.state.prizePreview = maxPrizeForSettings(room.settings);
+    room.state.payer = payerFor(room);
+    room.version += 1;
+    await saveRoom(room);
+    emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'SNAPSHOT'));
     return room;
   });
 }
@@ -513,13 +885,20 @@ export async function endGame(args: {
   return withLock(args.sessionId, async () => {
     const room = await loadRoom(args.sessionId);
     if (!room) return null;
-    if (!isFrenemiesAdmin(args.userId) && room.hostUserId !== args.userId && room.startedByUserId !== args.userId) {
+    if (
+      !isFrenemiesAdmin(args.userId) &&
+      room.hostUserId !== args.userId &&
+      room.startedByUserId !== args.userId
+    ) {
       const err: any = new Error('NOT_ADMIN');
       err.code = 'NOT_ADMIN';
       throw err;
     }
+    await releaseHostHold(room.state.prizeHold, 'game_ended');
+    room.state.prizeHold = null;
     room.state.phase = 'ended';
     room.state.active = false;
+    room.stats.topWinners = buildTopWinners(room);
     room.version += 1;
     await saveRoom(room);
     stopTicks(args.sessionId);
@@ -565,23 +944,18 @@ export async function throwGuest(args: {
     }
 
     await forceKick(args.sessionId, args.targetUserId);
-    await grantHouseCoins(
-      args.chooserUserId,
-      room.state.roundId,
-      'Frenemies throw reward',
-    );
-
-    room.state.lastResult = {
+    const amount = room.settings.throwCoins;
+    room.stats.throws += 1;
+    await awardAndResolve(room, {
       kind: 'throw',
-      text: `${room.state.chooserDisplayName || 'Chooser'} threw out Box ${target.slotIndex} and earned 25 HOUSE coins!`,
+      text: `${room.state.chooserDisplayName || 'Chooser'} threw out Box ${target.slotIndex} and earned ${amount} coins!`,
+      winnerUserId: args.chooserUserId,
+      winnerName: room.state.chooserDisplayName || 'Chooser',
+      awardAmount: amount,
       kickedUserId: args.targetUserId,
-      coinUserId: args.chooserUserId,
-      coins: HOUSE_COINS,
-    };
-    room.state.phase = 'resolving';
-    room.state.chooseEndsAt = new Date(Date.now() + RESULT_DISPLAY_MS).toISOString();
-    room.version += 1;
+    });
     await saveRoom(room);
+    ensureTicks(args.sessionId);
     emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'RESULT'));
     return room;
   });
@@ -618,6 +992,7 @@ export async function submitQuizAnswer(args: {
     const name = args.displayName || 'Winner';
     await afterChooserReady(room, args.userId, name);
     await saveRoom(room);
+    ensureTicks(args.sessionId);
     emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'PHASE'));
     return room;
   });
@@ -646,6 +1021,7 @@ export async function submitChatPhrase(args: {
     const name = args.displayName || 'Winner';
     await afterChooserReady(room, args.userId, name);
     await saveRoom(room);
+    ensureTicks(args.sessionId);
     emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'PHASE'));
     return room;
   });
@@ -658,7 +1034,6 @@ export async function reportLikes(args: {
   count?: number;
 }): Promise<FrenemiesRoom | null> {
   const add = Math.max(1, Math.min(20, Number(args.count) || 1));
-  // Always record session engagement.
   await bumpEngagement(args.sessionId, args.userId, { likes: add });
 
   return withLock(args.sessionId, async () => {
@@ -671,11 +1046,12 @@ export async function reportLikes(args: {
     room.state.challenge.likeProgress = progress;
     room.version += 1;
 
-    const target = room.state.challenge.likesTarget || LIKES_TARGET;
+    const target = room.state.challenge.likesTarget || room.settings.likesTarget;
     if (progress[args.userId] >= target) {
       const name = args.displayName || 'Winner';
       await afterChooserReady(room, args.userId, name);
       await saveRoom(room);
+      ensureTicks(args.sessionId);
       emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'PHASE'));
       return room;
     }
@@ -685,8 +1061,6 @@ export async function reportLikes(args: {
     return room;
   });
 }
-
-// ── Session engagement tallies (Guest Control sheet + Frenemies likes) ──
 
 export async function bumpEngagement(
   sessionId: string,
@@ -726,5 +1100,33 @@ export async function getSessionEngagement(sessionId: string): Promise<Record<st
   }
   return out;
 }
+
+/** Host balance preview for Ready plate. */
+export async function getHostPrizePreview(sessionId: string): Promise<{
+  balance: number;
+  needed: number;
+  canSpin: boolean;
+  payer: 'host' | 'house';
+}> {
+  const room = await loadRoom(sessionId);
+  if (!room) {
+    return { balance: 0, needed: 0, canSpin: false, payer: 'host' };
+  }
+  const needed = maxPrizeForSettings(room.settings);
+  const payer = payerFor(room);
+  if (payer === 'house') {
+    return { balance: 0, needed, canSpin: true, payer };
+  }
+  const balance = await getSpendableCoins(room.hostUserId);
+  return { balance, needed, canSpin: balance >= needed || needed === 0, payer };
+}
+
+// Back-compat exports used by older imports / ops docs.
+export const SPIN_MS = DEFAULT_SPIN_MS;
+export const CHOOSE_MS = DEFAULT_CHOOSE_MS;
+export const CHALLENGE_MS = DEFAULT_CHALLENGE_MS;
+export const RESULT_DISPLAY_MS = DEFAULT_RESULT_MS;
+export const HOUSE_COINS = DEFAULT_COINS;
+export const LIKES_TARGET = DEFAULT_LIKES;
 
 export { loadRoom };
