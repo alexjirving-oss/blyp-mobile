@@ -1,5 +1,6 @@
 package com.blyp.mobile.ivs
 
+import android.app.Activity
 import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -8,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.amazonaws.ivs.broadcast.StageAudioManager
+import com.facebook.react.bridge.ReactContext
 
 /**
  * Owns the operating-system audio route while an IVS live session is active.
@@ -17,10 +19,13 @@ import com.amazonaws.ivs.broadcast.StageAudioManager
  * selected. This guard keeps the built-in speaker selected for the full session and repairs
  * later route/mode changes made by IVS, expo-av, LiveKit, or an OEM audio policy.
  *
- * For PUBLISHING profiles it also re-asserts StageAudioManager AEC on every force/watchdog
- * tick. Join-time configureStageAudio enables AEC once, but SUBSCRIBE_ONLY / OEM / expo-av
- * route churn can clear it while the mic stays open and the loudspeaker stays forced —
- * that is the Android single-device screech path (local SubscribeType.NONE does not prevent it).
+ * For PUBLISHING profiles it also:
+ * - Re-asserts StageAudioManager AEC on every force/watchdog tick (join-time configure can
+ *   be cleared by SUBSCRIBE_ONLY / OEM / expo-av churn while the mic stays open).
+ * - Binds Activity volume keys to STREAM_VOICE_CALL so OEMs (notably Samsung Fold) do not
+ *   leave the rocker on STREAM_MUSIC while Stage plays on the communication path.
+ *
+ * PLAYBACK keeps media volume (viewer/HLS path).
  */
 internal class LiveLoudspeakerController(
     context: Context,
@@ -32,6 +37,7 @@ internal class LiveLoudspeakerController(
     }
 
     private val appContext = context.applicationContext
+    private val reactContext = context as? ReactContext
     private val audioManager =
         appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -94,7 +100,12 @@ internal class LiveLoudspeakerController(
                 }
                 @Suppress("DEPRECATION")
                 run { audioManager.isSpeakerphoneOn = false }
-                Log.i(logTag, "[IVS_AUDIO_ROUTE] owner released reason=$reason mode=${audioManager.mode}")
+                val volumeControlStream = bindVolumeControlStream(null)
+                Log.i(
+                    logTag,
+                    "[IVS_AUDIO_ROUTE] owner released reason=$reason mode=${audioManager.mode} " +
+                        "volumeControlStream=${volumeControlStreamLabel(volumeControlStream)}",
+                )
             } catch (error: Throwable) {
                 Log.e(logTag, "[IVS_AUDIO_ROUTE] owner release failed reason=$reason", error)
             } finally {
@@ -173,10 +184,19 @@ internal class LiveLoudspeakerController(
                 }
             }
 
+            val volumeControlStream = bindVolumeControlStream(profile)
+
             @Suppress("DEPRECATION")
             val speakerOn = audioManager.isSpeakerphoneOn
+            val voiceVol = audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            val voiceMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            val mediaVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val mediaMax = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             val signature =
-                "profile=$profile mode=${audioManager.mode} speakerphoneOn=$speakerOn communicationDevice=$communicationDevice aec=$aec"
+                "profile=$profile mode=${audioManager.mode} speakerphoneOn=$speakerOn " +
+                    "communicationDevice=$communicationDevice aec=$aec " +
+                    "volumeControlStream=${volumeControlStreamLabel(volumeControlStream)} " +
+                    "voiceVol=$voiceVol/$voiceMax mediaVol=$mediaVol/$mediaMax"
             if (reason != "watchdog" || signature != lastSignature) {
                 Log.i(logTag, "[IVS_AUDIO_ROUTE] forced reason=$reason $signature")
             }
@@ -190,8 +210,37 @@ internal class LiveLoudspeakerController(
         }
     }
 
+    /**
+     * Samsung Fold (and some OEMs) key volume off AudioAttributes.Usage / the Activity
+     * volume-control stream more strictly than MODE_IN_COMMUNICATION alone. Keep keys on
+     * the same stream Stage is using for the active profile.
+     */
+    private fun bindVolumeControlStream(profile: Profile?): Int {
+        val activity: Activity = reactContext?.currentActivity ?: return VOLUME_CONTROL_UNAVAILABLE
+        val desired = when (profile) {
+            Profile.PUBLISHING -> AudioManager.STREAM_VOICE_CALL
+            Profile.PLAYBACK -> AudioManager.STREAM_MUSIC
+            null -> AudioManager.USE_DEFAULT_STREAM_TYPE
+        }
+        if (activity.volumeControlStream != desired) {
+            activity.volumeControlStream = desired
+        }
+        return activity.volumeControlStream
+    }
+
+    private fun volumeControlStreamLabel(stream: Int): String {
+        return when (stream) {
+            AudioManager.STREAM_VOICE_CALL -> "STREAM_VOICE_CALL"
+            AudioManager.STREAM_MUSIC -> "STREAM_MUSIC"
+            AudioManager.USE_DEFAULT_STREAM_TYPE -> "USE_DEFAULT"
+            VOLUME_CONTROL_UNAVAILABLE -> "unavailable(no-activity)"
+            else -> "stream:$stream"
+        }
+    }
+
     private companion object {
         const val INITIAL_REASSERT_DELAY_MS = 250L
         const val WATCHDOG_INTERVAL_MS = 2_000L
+        const val VOLUME_CONTROL_UNAVAILABLE = Int.MIN_VALUE
     }
 }

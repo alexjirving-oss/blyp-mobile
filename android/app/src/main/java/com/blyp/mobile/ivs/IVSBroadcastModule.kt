@@ -871,15 +871,16 @@ class IVSBroadcastModule(
     /**
      * StageAudioManager must be configured before creating DeviceDiscovery or Stage.
      *
-     * The SDK default VIDEO_CHAT preset uses VOICE_COMMUNICATION for both capture and
-     * playback, which selects the call-volume path and can route remote guests through
-     * the receiver/earpiece. Keep the voice-processed microphone and echo cancellation,
-     * but mark subscribed stage audio as MEDIA so the built-in loudspeaker/media path is
-     * the default. Read-only viewers use the SDK's SUBSCRIBE_ONLY media preset.
+     * Publishers (host/guest) use VIDEO_CHAT so Stage playback attributes are
+     * USAGE_VOICE_COMMUNICATION. That binds the hardware volume rocker to Call /
+     * voice-call volume — required for AEC gain alignment. A prior MEDIA usage
+     * hybrid left Fold OEMs on the Media slider while MODE_IN_COMMUNICATION +
+     * speakerphone played on the call path (reverb/screech).
      *
      * StageAudioManager's attributes do not select a physical output device. Disable its
      * AudioManager-mode ownership while active, then let LiveLoudspeakerController own
-     * MODE_IN_COMMUNICATION + the built-in speaker for publishers (MODE_NORMAL for viewers).
+     * MODE_IN_COMMUNICATION + the built-in speaker for publishers (MODE_NORMAL +
+     * SUBSCRIBE_ONLY / media volume for viewers).
      */
     private fun configureStageAudio(publishing: Boolean, role: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -898,14 +899,11 @@ class IVSBroadcastModule(
             audioManager.setAudioModeManagementEnabled(isIdle)
 
             if (publishing) {
-                audioManager.setConfiguration(
-                    StageAudioManager.Source.VOICE_COMMUNICATION,
-                    StageAudioManager.ContentType.SPEECH,
-                    StageAudioManager.Usage.MEDIA,
-                )
-                // setConfiguration may follow a previous SUBSCRIBE_ONLY session, which
-                // disables AEC. Explicitly restore AEC so speaker output does not feed the
-                // host/guest microphone.
+                // Call-volume rocker + AEC/NS. Speaker output is forced separately by
+                // LiveLoudspeakerController (setCommunicationDevice / speakerphone).
+                audioManager.setPreset(StageAudioManager.UseCasePreset.VIDEO_CHAT)
+                // Preset may follow a previous SUBSCRIBE_ONLY session, which disables AEC.
+                // Explicitly restore AEC so speaker output does not feed the mic.
                 audioManager.enableEchoCancellation(true)
             } else {
                 audioManager.setPreset(StageAudioManager.UseCasePreset.SUBSCRIBE_ONLY)
@@ -918,7 +916,7 @@ class IVSBroadcastModule(
         } catch (e: Exception) {
             Log.e(
                 IVS_TAG,
-                "[IVS_AUDIO_ROUTE] Failed to configure loudspeaker/media routing role=$role: ${e.message}",
+                "[IVS_AUDIO_ROUTE] Failed to configure stage audio role=$role: ${e.message}",
                 e,
             )
         }
