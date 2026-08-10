@@ -25,6 +25,7 @@ export type RoomEventType =
   | 'moderator.added'
   | 'moderator.removed'
   | 'viewer.joined'
+  | 'frenemies.queue.promoted'
   | 'room.ended';
 
 export interface RoomEventBase {
@@ -46,9 +47,11 @@ export interface GuestRoomEvent extends RoomEventBase {
     | 'guest.muted'
     | 'guest.unmuted'
     | 'guest.camera_off'
-    | 'guest.camera_on';
+    | 'guest.camera_on'
+    | 'frenemies.queue.promoted';
   guestUserId: string;
   slotIndex?: number;
+  reason?: string;
 }
 
 export interface ModeratorRoomEvent extends RoomEventBase {
@@ -75,7 +78,8 @@ export type RoomEvent = GuestRoomEvent | ModeratorRoomEvent | ViewerRoomEvent | 
  * union, which collapses to the common keys).
  */
 export type RoomEventInput =
-  | { type: 'guest.invited' | 'guest.rejected' | 'guest.kicked' | 'guest.left' | 'guest.muted' | 'guest.unmuted' | 'guest.camera_off' | 'guest.camera_on'; guestUserId: string; slotIndex?: number }
+  | { type: 'guest.invited' | 'guest.rejected' | 'guest.kicked' | 'guest.left' | 'guest.muted' | 'guest.unmuted' | 'guest.camera_off' | 'guest.camera_on'; guestUserId: string; slotIndex?: number; reason?: string }
+  | { type: 'frenemies.queue.promoted'; guestUserId: string; slotIndex?: number }
   | { type: 'moderator.added' | 'moderator.removed'; moderatorUserId: string }
   | { type: 'viewer.joined'; viewerUserId?: string; displayName?: string }
   | { type: 'room.ended' };

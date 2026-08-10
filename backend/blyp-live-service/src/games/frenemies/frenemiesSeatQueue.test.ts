@@ -9,6 +9,7 @@ import {
   recordDrop,
   emptySeatRoster,
   ensureSeatMeta,
+  QueueEntry,
 } from './frenemiesSeatQueue';
 
 describe('frenemies seat/queue rules', () => {
@@ -49,7 +50,7 @@ describe('frenemies seat/queue rules', () => {
   });
 
   it('queue is FIFO and deduped', () => {
-    let q = [];
+    let q: QueueEntry[] = [];
     let r = enqueueJoin(q, {
       userId: 'a',
       displayName: 'A',
