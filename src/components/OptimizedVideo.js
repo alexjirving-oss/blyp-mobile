@@ -8,7 +8,7 @@ const SimpleVideo = ({
   shouldPlay, 
   isLooping = true, 
   isMuted = false, 
-  resizeMode = "cover", 
+  resizeMode = "contain", 
   poster
 }) => {
   const videoRef = useRef(null);

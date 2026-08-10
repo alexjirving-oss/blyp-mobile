@@ -20,7 +20,7 @@ const UnifiedVideo = React.forwardRef(function UnifiedVideo({
   streamUrl,
   hlsUrl,
   style,
-  resizeMode = 'cover',
+  resizeMode = 'contain',
   shouldPlay = false,
   isLooping = false,
   isMuted = false,

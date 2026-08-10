@@ -1060,7 +1060,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                           uri={videoUri}
                           poster={uri}
                           style={[styles.forYouThumb, StyleSheet.absoluteFill]}
-                          resizeMode="cover"
+                          resizeMode="contain"
                           shouldLoad
                           shouldPlay
                           isLooping

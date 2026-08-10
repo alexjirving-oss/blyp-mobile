@@ -26,7 +26,7 @@ function clamp(n, min, max) {
 
 function normalizeDisplay(raw) {
   return {
-    fitMode: ['auto', 'cover', 'contain'].includes(raw?.fitMode) ? raw.fitMode : 'cover',
+    fitMode: ['auto', 'cover', 'contain'].includes(raw?.fitMode) ? raw.fitMode : 'contain',
     scale: clamp(Number(raw?.scale) || 1, FRAMING_MIN_SCALE, FRAMING_MAX_SCALE),
     offsetX: clamp(Number(raw?.offsetX) || 0, -1, 1),
     offsetY: clamp(Number(raw?.offsetY) || 0, -1, 1),
@@ -56,7 +56,7 @@ export default function VideoFramingSheet({
   onSaved,
 }) {
   const initial = useMemo(() => normalizeDisplay(post?.mediaDisplay), [post?.id, visible]);
-  const [fitMode, setFitMode] = useState(initial.fitMode === 'auto' ? 'cover' : initial.fitMode);
+  const [fitMode, setFitMode] = useState(initial.fitMode === 'auto' ? 'contain' : initial.fitMode);
   const [scale, setScale] = useState(initial.scale);
   const [offsetX, setOffsetX] = useState(initial.offsetX);
   const [offsetY, setOffsetY] = useState(initial.offsetY);
@@ -77,7 +77,7 @@ export default function VideoFramingSheet({
   React.useEffect(() => {
     if (!visible) return;
     const next = normalizeDisplay(post?.mediaDisplay);
-    setFitMode(next.fitMode === 'auto' ? 'cover' : next.fitMode);
+    setFitMode(next.fitMode === 'auto' ? 'contain' : next.fitMode);
     setScale(next.scale);
     setOffsetX(next.offsetX);
     setOffsetY(next.offsetY);

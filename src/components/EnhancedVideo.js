@@ -412,7 +412,7 @@ function EnhancedVideo(props) {
           ref={videoRef}
           style={styles.video}
           source={{ uri: safePlayableUri }}
-          resizeMode={props.resizeMode || 'cover'}
+          resizeMode={props.resizeMode || 'contain'}
           isLooping={props.isLooping ?? true}
           isMuted={(props.isMuted ?? true) || !isFocused}
           shouldPlay={isFocused}
@@ -437,7 +437,7 @@ function EnhancedVideo(props) {
         <Image
           source={{ uri: posterUri }}
           style={styles.overlay}
-          resizeMode={props.resizeMode || 'cover'}
+          resizeMode={props.resizeMode || 'contain'}
         />
       )}
 

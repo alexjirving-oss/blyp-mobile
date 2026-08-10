@@ -9,11 +9,12 @@ import { FEED_VIDEO_VERTICAL_NUDGE_Y } from './feedVideoLayout';
 const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
 
 /**
- * PremiumFeedVideo — full-bleed TikTok-style playback chrome.
+ * PremiumFeedVideo — full-screen VOD playback chrome.
  *
- * Portrait / square clips use `cover` (edge-to-edge). Wide landscape clips use
- * `contain` top-anchored so letterboxing sits under the action rail, not above
- * the frame. Includes a progress strip, pause glyph, and brand vignettes.
+ * Default / catalog / seed clips use `contain` (fit, no aspect warp). Explicit
+ * mediaDisplay.fitMode `cover` still crops edge-to-edge when the creator chose it.
+ * Wide auto clips stay top-anchored so letterboxing sits under the action rail.
+ * LIVE camera full-bleed is elsewhere (LiveStreamViewer) and stays cover.
  *
  * Cover / custom-fit frames apply FEED_VIDEO_VERTICAL_NUDGE_Y so the subject
  * sits optically between header chrome and the absolute tab bar / viewer footer.
@@ -47,10 +48,11 @@ export default function PremiumFeedVideo({
   const userScale = Math.min(2.5, Math.max(0.5, Number(mediaDisplay?.scale) || 1));
   const offsetX = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetX) || 0));
   const offsetY = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetY) || 0));
-  const hasCustomFit = fitMode === 'cover' || fitMode === 'contain';
+  // Only an explicit creator choice of `cover` crops; auto/missing/contain → fit.
+  const useCover = fitMode === 'cover';
 
-  const isWide = !hasCustomFit && aspect > 1.15;
-  const resizeMode = hasCustomFit ? fitMode : isWide ? 'contain' : 'cover';
+  const isWide = !useCover && aspect > 1.15;
+  const resizeMode = useCover ? 'cover' : 'contain';
 
   useEffect(() => {
     Animated.timing(pauseOpacity, {
@@ -91,9 +93,9 @@ export default function PremiumFeedVideo({
   );
 
   const fillStyle = useMemo(() => {
-    if (hasCustomFit) return StyleSheet.absoluteFill;
+    if (useCover || fitMode === 'contain') return StyleSheet.absoluteFill;
     if (!isWide || !(aspect > 0)) return StyleSheet.absoluteFill;
-    // Wide landscape: pin to top at natural aspect; letterbox sits below.
+    // Wide auto landscape: pin to top at natural aspect; letterbox sits below.
     return {
       position: 'absolute',
       top: 0,
@@ -102,7 +104,7 @@ export default function PremiumFeedVideo({
       width: '100%',
       aspectRatio: aspect,
     };
-  }, [hasCustomFit, isWide, aspect]);
+  }, [useCover, fitMode, isWide, aspect]);
 
   const framingTransform = useMemo(() => {
     if (!mediaDisplay) return null;
@@ -125,8 +127,8 @@ export default function PremiumFeedVideo({
   }, [mediaDisplay, offsetX, offsetY, userScale]);
 
   // Top-anchored wide contain already pins under the header; only nudge cover /
-  // custom-fit fills whose geometric center sits low under absolute footers.
-  const isTopAnchoredWide = isWide && aspect > 0 && !hasCustomFit;
+  // fills whose geometric center sits low under absolute footers.
+  const isTopAnchoredWide = isWide && aspect > 0 && !useCover && fitMode !== 'contain';
   const hostTransform = useMemo(() => {
     const parts = [];
     if (!isTopAnchoredWide && FEED_VIDEO_VERTICAL_NUDGE_Y) {

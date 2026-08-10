@@ -156,7 +156,7 @@ const PostPreviewScreen = () => {
             shouldPlay={isFocused}
             isLooping={true}
             isMuted={false}
-            resizeMode="cover"
+            resizeMode="contain"
             onPlaybackStatusUpdate={setVideoStatus}
           />
           

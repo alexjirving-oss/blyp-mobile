@@ -2025,7 +2025,7 @@ const HomeScreen = ({ navigation, route }) => {
             shouldLoad={Math.abs(currentIndex - index) <= 2}
             isLooping={true}
             isMuted={!(isScreenFocused && selectedTab === 'B' && index === currentIndex)}
-            resizeMode="cover"
+            resizeMode="contain"
           />
         </TouchableOpacity>
       )}
