@@ -243,12 +243,11 @@ export function runWhenIdle(fn) {
 }
 
 /**
- * Home cold-start warm — poster-first, then progressive MP4s, never blocks UI.
+ * Home cold-start warm — posters/avatars ONLY.
  *
- * Phase 1 (same tick): enqueue posters/avatars on the image queue.
- * Phase 2 (same tick): kick first N For You + Continue watching MP4s on the
- *   video queue (parallel to posters; priority).
- * Phase 3 (after interactions): widen window + trending so first paint wins.
+ * MP4 disk warm + multi-decoder neighbor play made Home feel heavier than
+ * full-screen For You. Defer video IO until the user opens the full feed
+ * (or a single focused Home rail tile mounts its own decoder).
  */
 export function warmHomeVideoRails({
   forYou = [],
@@ -257,7 +256,6 @@ export function warmHomeVideoRails({
   live = [],
   creators = [],
 } = {}) {
-  // Phase 1 — posters first so rail tiles paint with thumbs immediately.
   prefetchUriList(
     [
       ...(forYou || []).flatMap((p) => [
@@ -276,28 +274,8 @@ export function warmHomeVideoRails({
     { idle: false },
   );
 
-  // Phase 2 — Home caps harder than full-screen For You: one hot MP4 kick so
-  // hub scroll / rail swipe keep the JS + IO threads free.
-  const kickHotVideos = (list, limit) => {
-    for (const p of (list || []).slice(0, limit)) {
-      const v =
-        postVideoUri(p) ||
-        normalizeUri(p?.videoUrl) ||
-        normalizeUri(p?.mediaUrl) ||
-        null;
-      if (v) prefetchVideoUri(v, { idle: false, priority: true });
-    }
-  };
-  kickHotVideos(forYou, 1);
-  kickHotVideos(watch, 1);
-
-  // Phase 3 — narrow bidirectional disk warm (±1) after paint; trending idle.
   runWhenIdle(() => {
-    if (Array.isArray(forYou) && forYou.length) {
-      prefetchPostWindow(forYou, 0, { radius: 1, images: true, maxPriorityDist: 1 });
-    }
-    kickHotVideos(trending, 1);
-    for (const w of (watch || []).slice(0, 2)) {
+    for (const w of (watch || []).slice(0, 4)) {
       const thumb = normalizeUri(w?.thumbnail);
       if (thumb) prefetchImageUri(thumb, { idle: true });
     }

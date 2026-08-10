@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "node ./scripts/assert-live-game-routes.cjs && tsc -p tsconfig.json",
+    "gcp-build": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "worker:dev": "node ./scripts/not-implemented.cjs worker:dev",

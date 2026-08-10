@@ -180,6 +180,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   // Hub vertical scroll gate — pause rail decode so nested horizontal warm
   // never fights the Home scroll thread (1.0.48 jank mode).
   const [hubScrolling, setHubScrolling] = useState(false);
+  // Do not mount a Home-rail decoder until the user actually engages the rail.
+  // Cold Home stays poster-only (instant paint, zero video CPU/IO).
+  const [forYouRailEngaged, setForYouRailEngaged] = useState(false);
   const hubScrollIdleTimer = useRef(null);
   const markHubScrolling = useCallback(() => {
     setHubScrolling(true);
@@ -200,15 +203,18 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     if (idx === activeForYouRef.current) return;
     activeForYouRef.current = idx;
     setActiveForYou(idx);
-    // Home hub: ±1 disk warm only — harder cap than full-screen For You.
-    prefetchPostWindow(forYou, idx, { radius: 1, images: true, maxPriorityDist: 1 });
+    // Home hub stays poster-light: warm thumbs only. MP4/decoder work waits
+    // until the user opens full-screen For You (or the single focused rail tile).
+    prefetchPostWindow(forYou, idx, { radius: 0, images: true, maxPriorityDist: 0 });
   }, [forYou]);
   const onForYouScroll = useCallback((e) => {
+    if (!forYouRailEngaged) setForYouRailEngaged(true);
     syncForYouIndex(e?.nativeEvent?.contentOffset?.x || 0);
-  }, [syncForYouIndex]);
+  }, [syncForYouIndex, forYouRailEngaged]);
   const onForYouScrollEnd = useCallback((e) => {
+    if (!forYouRailEngaged) setForYouRailEngaged(true);
     syncForYouIndex(e?.nativeEvent?.contentOffset?.x || 0);
-  }, [syncForYouIndex]);
+  }, [syncForYouIndex, forYouRailEngaged]);
 
   // The home Blyp bar accepts typed input: reminders are created in place and
   // listed right below; anything else opens the full Blyp assistant.
@@ -1028,16 +1034,17 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                 const isVideo = p.type === 'video' || !!p.videoUrl || !!resolveFeedVideoUri(p);
                 const videoUri = isVideo ? (resolveFeedVideoUri(p) || '') : '';
                 const isActive = index === activeForYou;
-                const dist = Math.abs(index - activeForYou);
                 const railAudible =
                   isScreenFocused && !listening && !transcribing;
-                // Hub FPS: unload ±1 while hub scrolls. Keep ACTIVE shouldPlay
-                // (muted) so EnhancedVideo warm-then-park never seeks the live
-                // tile back to 0 when railPlaying flickers.
+                // Home P0: posters until the rail is engaged, then at most ONE
+                // decoder on the focused tile — never ±1 neighbor mounts.
                 const mountVideo =
                   isVideo &&
                   !!videoUri &&
-                  (isActive || (dist === 1 && railAudible && !hubScrolling));
+                  forYouRailEngaged &&
+                  isActive &&
+                  railAudible &&
+                  !hubScrolling;
                 return (
                   <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openForYouRailPost(p)}>
                     <View>
@@ -1052,24 +1059,16 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                         <EnhancedVideo
                           uri={videoUri}
                           poster={uri}
-                          style={[
-                            styles.forYouThumb,
-                            StyleSheet.absoluteFill,
-                            !isActive ? styles.forYouPreloadHidden : null,
-                          ]}
+                          style={[styles.forYouThumb, StyleSheet.absoluteFill]}
                           resizeMode="cover"
                           shouldLoad
-                          shouldPlay={isActive && railAudible}
+                          shouldPlay
                           isLooping
-                          isMuted={!isActive || !railAudible || hubScrolling}
-                          audioOwnerId={
-                            isActive && railAudible && !hubScrolling
-                              ? `home-rail:${p.id}`
-                              : null
-                          }
+                          isMuted={false}
+                          audioOwnerId={`home-rail:${p.id}`}
                         />
                       )}
-                      {isVideo && !isActive && (
+                      {isVideo && !mountVideo && (
                         <View style={styles.resumeBadge}>
                           <Icon name="play" size={12} color={COLORS.white} />
                         </View>
