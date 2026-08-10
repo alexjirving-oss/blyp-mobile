@@ -12,7 +12,7 @@
 
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import {
 
@@ -254,24 +254,19 @@ export default function FrenemiesSettingsSheet({
 
   const [saving, setSaving] = useState(false);
 
-
+  const wasVisibleRef = useRef(false);
 
   useEffect(() => {
-
-    if (visible && settings) {
-
+    // Sync draft only on open — live SNAPSHOTs must not wipe mid-edit toggles.
+    const justOpened = !!visible && !wasVisibleRef.current;
+    wasVisibleRef.current = !!visible;
+    if (justOpened && settings) {
       setDraft(settings);
-
       setThrowText(String(settings.throwCoins ?? 25));
-
       setSoloText(String(settings.soloCoins ?? 25));
-
       setLikesText(String(settings.likesTarget ?? 50));
-
     }
-
   }, [visible, settings]);
-
 
 
   const spinSec = nearestOpt(Math.round((draft.spinMs || 15000) / 1000), SPIN_OPTS);

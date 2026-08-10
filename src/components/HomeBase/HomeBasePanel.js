@@ -868,50 +868,62 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
 
   const layoutWidgets = homeLayout?.widgets || [];
 
+  const applyLayoutState = useCallback((next) => {
+    // Layout mutations must return { version, widgets }. Guard against full prefs
+    // objects (historical wipe: setHomeLayoutState(prefs) → widgets undefined).
+    if (next && Array.isArray(next.widgets)) {
+      setHomeLayoutState(next);
+      return;
+    }
+    if (next?.homeLayout && Array.isArray(next.homeLayout.widgets)) {
+      setHomeLayoutState(next.homeLayout);
+    }
+  }, []);
+
   const onMoveWidget = useCallback(
     async (widgetId, direction) => {
       if (!uid) return;
       const next = await reorderHomeWidget(uid, widgetId, direction);
-      if (next) setHomeLayoutState(next);
+      applyLayoutState(next);
     },
-    [uid]
+    [uid, applyLayoutState]
   );
 
   const onToggleWidget = useCallback(
     async (widget) => {
       if (!uid || !widget?.id) return;
       const next = await setHomeWidgetEnabled(uid, widget.id, widget.enabled === false);
-      if (next) setHomeLayoutState(next);
+      applyLayoutState(next);
     },
-    [uid]
+    [uid, applyLayoutState]
   );
 
   const onRemoveWidget = useCallback(
     async (widgetId) => {
       if (!uid) return;
       const next = await removeHomeWidget(uid, widgetId);
-      if (next) setHomeLayoutState(next);
+      applyLayoutState(next);
     },
-    [uid]
+    [uid, applyLayoutState]
   );
 
   const onAddWidget = useCallback(
     async (type) => {
       if (!uid) return;
       const next = await addHomeWidget(uid, type);
-      if (next) setHomeLayoutState(next);
+      applyLayoutState(next);
       setAddSheetOpen(false);
       setEditMode(true);
     },
-    [uid]
+    [uid, applyLayoutState]
   );
 
   const onResetLayout = useCallback(async () => {
     if (!uid) return;
     const next = await resetHomeLayout(uid);
-    if (next) setHomeLayoutState(next);
+    applyLayoutState(next);
     setAddSheetOpen(false);
-  }, [uid]);
+  }, [uid, applyLayoutState]);
 
   const onToggleSportPageKey = useCallback(
     async (widgetId, pageKey, add) => {
@@ -933,9 +945,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         ? Array.from(new Set([...current, pageKey]))
         : current.filter((k) => k !== pageKey);
       const next = await updateHomeWidgetConfig(uid, widgetId, { pageKeys: nextKeys });
-      if (next) setHomeLayoutState(next);
+      applyLayoutState(next);
     },
-    [uid, layoutWidgets]
+    [uid, layoutWidgets, applyLayoutState]
   );
 
   const onToggleDmPerson = useCallback(
@@ -947,9 +959,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         ? Array.from(new Set([...current, personId])).slice(0, 16)
         : current.filter((id) => id !== personId);
       const next = await updateHomeWidgetConfig(uid, widgetId, { peopleIds: nextIds });
-      if (next) setHomeLayoutState(next);
+      applyLayoutState(next);
     },
-    [uid, layoutWidgets]
+    [uid, layoutWidgets, applyLayoutState]
   );
 
   const renderWidgetBody = (widget) => {

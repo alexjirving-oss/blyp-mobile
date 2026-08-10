@@ -293,7 +293,9 @@ export async function setHomeLayout(uid, layout) {
   const { setHomeLayout: persist } = await import('./userPreferencesService');
   const prefs = await getPreferences(uid);
   const normalized = normalizeHomeLayout(layout, prefs.interests);
-  return persist(uid, normalized);
+  // persist() returns full prefs — callers expect { version, widgets }.
+  await persist(uid, normalized);
+  return normalized;
 }
 
 export async function reorderHomeWidget(uid, widgetId, direction) {
