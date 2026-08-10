@@ -87,7 +87,7 @@ import {
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
 import { logStreamingEvent } from '../streaming/StreamingLog';
 import HLSLiveStreamServiceInstance from '../services/HLSLiveStreamService';
-import { listGuestRequests, inviteGuest, rejectGuest, kickGuest, muteGuest, setGuestCamera, hostInviteGuest, MAX_GUEST_SLOTS, bumpLiveEngagement, getLiveEngagementSession, frenemiesChat } from '../api/ivsLiveApi';
+import { listGuestRequests, inviteGuest, rejectGuest, kickGuest, muteGuest, setGuestCamera, hostInviteGuest, MAX_GUEST_SLOTS, bumpLiveEngagement, getLiveEngagementSession, frenemiesChat, frenemiesQueueJoin } from '../api/ivsLiveApi';
 // IVS Architecture imports (feature-flagged, default OFF)
 import { streamingConfig } from '../config/StreamingFeatureConfig';
 import { StreamingBackend } from '../config/StreamingBackend';
@@ -2956,6 +2956,21 @@ const LiveStreamScreen = (props) => {
         await frenemiesChat(String(activeStreamId), content, dn);
       } catch {
         // no active challenge / non-fatal
+      }
+      // Comment join CTA: "join" / "!join" / "join queue" while Frenemies is live.
+      try {
+        const joinIntent =
+          /^(?:!)?join\b/i.test(content) ||
+          /\bjoin\s+(?:the\s+)?(?:queue|frenemies|stage|game)\b/i.test(content) ||
+          /^(?:queue|sit)\b/i.test(content);
+        if (joinIntent) {
+          await frenemiesQueueJoin(String(activeStreamId), {
+            displayName: getDisplayNameSafe() || undefined,
+            source: 'comment',
+          });
+        }
+      } catch {
+        // GAME_NOT_FOUND / cooldown — comment itself still posted
       }
     } catch (error) {
       console.error('Error sending comment:', error);

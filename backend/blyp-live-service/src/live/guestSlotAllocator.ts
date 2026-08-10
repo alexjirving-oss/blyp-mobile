@@ -46,7 +46,9 @@ export function collectUsedGuestSlots(
   for (const g of guests) {
     if (!g) continue;
     if (opts.hostUserId && g.userId && g.userId === opts.hostUserId) continue;
-    const active = g.state === 'INVITED' || (g.state === 'LIVE' && !opts.isStale(g));
+    const active =
+      (g.state === 'INVITED' && !opts.isStale(g)) ||
+      (g.state === 'LIVE' && !opts.isStale(g));
     if (
       active &&
       typeof g.slotIndex === 'number' &&

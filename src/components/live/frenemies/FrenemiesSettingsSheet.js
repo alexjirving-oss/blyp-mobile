@@ -240,6 +240,8 @@ export default function FrenemiesSettingsSheet({
 
   readOnly = false,
 
+  allowAutoContinueAnytime = false,
+
   onSave,
 
 }) {
@@ -342,13 +344,27 @@ export default function FrenemiesSettingsSheet({
 
 
   const save = async () => {
-
-    if (readOnly || !onSave) {
-
+    if (!onSave) {
       onClose?.();
-
       return;
+    }
 
+    // P0: mid-round emergency Auto OFF/ON — autoContinue-only patch.
+    if (readOnly) {
+      if (!allowAutoContinueAnytime) {
+        onClose?.();
+        return;
+      }
+      setSaving(true);
+      try {
+        await onSave({ autoContinue: draft.autoContinue === true });
+        onClose?.();
+      } catch (e) {
+        Alert.alert('Could not save', e?.message || e?.code || 'Try again');
+      } finally {
+        setSaving(false);
+      }
+      return;
     }
 
     let throwCoins = Math.floor(Number(throwText));
@@ -621,14 +637,14 @@ export default function FrenemiesSettingsSheet({
 
                 label="Auto-continue"
 
-                hint="OFF = tap Spin every round (default)"
+                hint="OFF = tap Spin every round (default). Can change any phase."
 
                 value={draft.autoContinue === true}
 
-                disabled={readOnly}
+                disabled={readOnly && !allowAutoContinueAnytime}
 
                 onValueChange={(v) => {
-                  if (readOnly) return;
+                  if (readOnly && !allowAutoContinueAnytime) return;
                   const next = v === true;
                   setDraft((d) => ({ ...d, autoContinue: next }));
                 }}
@@ -837,7 +853,7 @@ export default function FrenemiesSettingsSheet({
 
 
 
-            {!readOnly ? (
+            {!readOnly || allowAutoContinueAnytime ? (
 
               <TouchableOpacity
 
@@ -853,7 +869,11 @@ export default function FrenemiesSettingsSheet({
 
                 <Text style={styles.saveText} allowFontScaling={false}>
 
-                  {saving ? 'Saving…' : 'Save settings'}
+                  {saving
+                    ? 'Saving…'
+                    : readOnly
+                      ? 'Save Auto-continue'
+                      : 'Save settings'}
 
                 </Text>
 

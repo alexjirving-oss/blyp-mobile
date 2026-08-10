@@ -1797,10 +1797,9 @@ const HomeScreen = ({ navigation, route }) => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = resolveFeedVideoUri(item) || fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            // Symmetric warm: ±1/±2 both directions so swipe-up and swipe-down
-            // BAM-land equally. Neighbors keep muted decode running (not
-            // warm-then-park) under expo-av constraints.
-            const WARM_RADIUS = 2;
+            // P0 decode budget: ≤1 playing + ≤1 muted warm neighbor (bidirectional).
+            // Do NOT keep ±2 continuous decoders — that was the Fold lag path.
+            const WARM_RADIUS = 1;
             const nearLoad =
               index >= discoverLoadIndex - WARM_RADIUS &&
               index <= discoverLoadIndex + WARM_RADIUS;
@@ -1810,8 +1809,7 @@ const HomeScreen = ({ navigation, route }) => {
             const keepDecodeHot =
               shouldLoad &&
               !cellActive &&
-              distFocus >= 1 &&
-              distFocus <= WARM_RADIUS;
+              distFocus === 1;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>

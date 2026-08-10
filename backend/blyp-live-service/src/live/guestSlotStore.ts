@@ -288,7 +288,7 @@ export async function inviteGuest(
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: { sessionId, userId },
-    UpdateExpression: 'set #state = :state, slotIndex = :slotIndex, updatedAt = :updatedAt',
+    UpdateExpression: 'set #state = :state, slotIndex = :slotIndex, invitedAt = :updatedAt, updatedAt = :updatedAt',
     ExpressionAttributeNames: {
       '#state': 'state',
     },
@@ -316,7 +316,7 @@ export async function hostInviteGuest(
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: { sessionId, userId },
-    UpdateExpression: 'set #state = :state, slotIndex = :slotIndex, requestedAt = :now, updatedAt = :now REMOVE guestSessionId, connectedAt, disconnectedAt',
+    UpdateExpression: 'set #state = :state, slotIndex = :slotIndex, invitedAt = :now, requestedAt = :now, updatedAt = :now REMOVE guestSessionId, connectedAt, disconnectedAt',
     ExpressionAttributeNames: {
       '#state': 'state',
     },
@@ -362,15 +362,17 @@ export async function rejectGuest(sessionId: string, userId: string, nowIso: str
   await docClient.send(new UpdateCommand({
     TableName: TABLE_NAME,
     Key: { sessionId, userId },
-    UpdateExpression: 'set #state = :state, updatedAt = :updatedAt',
+    UpdateExpression: 'set #state = :state, updatedAt = :updatedAt REMOVE slotIndex, invitedAt',
     ExpressionAttributeNames: {
       '#state': 'state',
     },
     ExpressionAttributeValues: {
       ':state': 'REJECTED',
       ':updatedAt': nowIso,
-      ':expected': 'REQUESTED',
+      ':requested': 'REQUESTED',
+      ':invited': 'INVITED',
     },
-    ConditionExpression: 'attribute_exists(sessionId) AND attribute_exists(userId) AND #state = :expected',
+    ConditionExpression:
+      'attribute_exists(sessionId) AND attribute_exists(userId) AND (#state = :requested OR #state = :invited)',
   }));
 }

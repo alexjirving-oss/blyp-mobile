@@ -69,4 +69,13 @@ describe('collectUsedGuestSlots', () => {
     assert.equal(used.size, 0);
     assert.equal(pickSlotIndex(used), 1);
   });
+
+  it('ignores expired INVITED guests so their box can be reused', () => {
+    const used = collectUsedGuestSlots(
+      [{ userId: 'g1', state: 'INVITED', slotIndex: 2 }],
+      { isStale: () => true }
+    );
+    assert.equal(used.size, 0);
+    assert.equal(pickSlotIndex(used), 1);
+  });
 });

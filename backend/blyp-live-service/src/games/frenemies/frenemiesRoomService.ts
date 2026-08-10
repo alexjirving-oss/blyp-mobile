@@ -988,14 +988,19 @@ export async function updateSettings(args: {
       err.code = 'NOT_HOST';
       throw err;
     }
-    // Fairness: settings mutable only on Ready / Between (ready).
-    if (room.state.phase !== 'ready' && room.state.phase !== 'idle') {
+    const patch = { ...args.patch };
+    const autoOnly =
+      Object.keys(patch).length > 0 &&
+      Object.keys(patch).every((k) => k === 'autoContinue');
+
+    // Fairness: most settings mutable only on Ready / Between (ready).
+    // P0: Auto-continue may be changed ANY phase (host emergency OFF).
+    if (!autoOnly && room.state.phase !== 'ready' && room.state.phase !== 'idle') {
       const err: any = new Error('SETTINGS_LOCKED');
       err.code = 'SETTINGS_LOCKED';
       throw err;
     }
 
-    const patch = { ...args.patch };
     if (patch.spinMs != null) patch.spinMs = nearestSpinMs(Number(patch.spinMs));
     if (patch.housePays != null) {
       if (!isFrenemiesAdmin(args.userId)) {
@@ -1003,14 +1008,22 @@ export async function updateSettings(args: {
       }
     }
 
-    room.settings = defaultSettings({ ...room.settings, ...patch });
-    if (!isFrenemiesAdmin(args.userId) && !isFrenemiesAdmin(room.hostUserId)) {
-      room.settings.housePays = false;
-    }
-    // Host explicitly chose auto-continue via settings — remember across reloads.
-    if (Object.prototype.hasOwnProperty.call(patch, 'autoContinue')) {
-      room.autoContinueExplicit = patch.autoContinue === true;
-      room.autoContinuePolicyVersion = 2;
+    if (autoOnly) {
+      if (Object.prototype.hasOwnProperty.call(patch, 'autoContinue')) {
+        room.settings.autoContinue = patch.autoContinue === true;
+        room.autoContinueExplicit = patch.autoContinue === true;
+        room.autoContinuePolicyVersion = 2;
+      }
+    } else {
+      room.settings = defaultSettings({ ...room.settings, ...patch });
+      if (!isFrenemiesAdmin(args.userId) && !isFrenemiesAdmin(room.hostUserId)) {
+        room.settings.housePays = false;
+      }
+      // Host explicitly chose auto-continue via settings — remember across reloads.
+      if (Object.prototype.hasOwnProperty.call(patch, 'autoContinue')) {
+        room.autoContinueExplicit = patch.autoContinue === true;
+        room.autoContinuePolicyVersion = 2;
+      }
     }
     // Turning auto-continue off must kill any scheduled auto-spin immediately.
     if (room.settings.autoContinue !== true) {

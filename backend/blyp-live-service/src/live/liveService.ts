@@ -117,6 +117,8 @@ export async function removeModerator(sessionId: string, requesterUserId: string
 }
 
 const GUEST_HEARTBEAT_TTL_MS = Number(process.env.GUEST_HEARTBEAT_TTL_MS) || 45_000;
+/** INVITED slots expire so ignored invites cannot hold a box forever. */
+const INVITED_TTL_MS = Number(process.env.GUEST_INVITED_TTL_MS) || 45_000;
 
 function isoToMs(iso?: string): number {
   if (!iso) return 0;
@@ -126,10 +128,48 @@ function isoToMs(iso?: string): number {
 
 function isGuestStale(g: any): boolean {
   if (!g) return true;
+  if (g.state === 'INVITED') {
+    const invitedAt = isoToMs(g.invitedAt || g.updatedAt || g.requestedAt);
+    if (!invitedAt) return true;
+    return Date.now() - invitedAt > INVITED_TTL_MS;
+  }
   if (g.state !== 'LIVE') return false;
   const last = isoToMs(g.lastHeartbeatAt);
   if (!last) return true;
   return Date.now() - last > GUEST_HEARTBEAT_TTL_MS;
+}
+
+/** Clear expired INVITED holds and re-queue for Frenemies when applicable. */
+async function expireStaleInvites(sessionId: string, guests: any[]): Promise<any[]> {
+  const kept: any[] = [];
+  for (const g of guests || []) {
+    if (!g || g.state !== 'INVITED' || !isGuestStale(g)) {
+      kept.push(g);
+      continue;
+    }
+    try {
+      await leaveGuestSession(sessionId, g.userId, nowIso(), { force: true });
+      emitRoomEvent(sessionId, {
+        type: 'guest.rejected',
+        guestUserId: g.userId,
+        reason: 'invite_expired',
+      } as any);
+      try {
+        const { requestJoinQueue } = await import('../games/frenemies/frenemiesRoomService');
+        await requestJoinQueue({
+          sessionId,
+          userId: g.userId,
+          displayName: 'Guest',
+          source: 'cta',
+        });
+      } catch {
+        /* Frenemies inactive */
+      }
+    } catch {
+      kept.push(g);
+    }
+  }
+  return kept;
 }
 
 type StartLiveSessionError = Error & {
@@ -372,8 +412,28 @@ export async function heartbeatGuest(sessionId: string, guestUserId: string, gue
 }
 
 export async function leaveGuest(sessionId: string, guestUserId: string, opts?: { guestSessionId?: string; force?: boolean }): Promise<void> {
+  const prior = await getGuestStore(sessionId, guestUserId);
   await leaveGuestSession(sessionId, guestUserId, nowIso(), opts);
   emitRoomEvent(sessionId, { type: 'guest.left', guestUserId });
+  // Declining / abandoning an INVITED seat must free the box and re-queue for Frenemies.
+  if (prior?.state === 'INVITED') {
+    emitRoomEvent(sessionId, {
+      type: 'guest.rejected',
+      guestUserId,
+      reason: 'invite_declined',
+    } as any);
+    try {
+      const { requestJoinQueue } = await import('../games/frenemies/frenemiesRoomService');
+      await requestJoinQueue({
+        sessionId,
+        userId: guestUserId,
+        displayName: 'Guest',
+        source: 'cta',
+      });
+    } catch {
+      /* Frenemies not active — slot free is enough */
+    }
+  }
 }
 
 export async function requestGuestSlot(sessionId: string, guestUserId: string, slotIndexRequested?: number): Promise<void> {
@@ -415,7 +475,7 @@ export async function inviteGuest(sessionId: string, guestUserId: string, reques
     throw new Error('Host cannot be invited as a guest');
   }
 
-  const allGuests = await listGuestsStore(sessionId);
+  const allGuests = await expireStaleInvites(sessionId, await listGuestsStore(sessionId));
   const used = collectUsedGuestSlots(allGuests, {
     hostUserId: session.hostUserId,
     isStale: isGuestStale,
@@ -459,7 +519,7 @@ export async function hostInviteGuest(
     throw new Error('Host cannot invite themselves as a guest');
   }
 
-  const allGuests = await listGuestsStore(sessionId);
+  const allGuests = await expireStaleInvites(sessionId, await listGuestsStore(sessionId));
   const used = collectUsedGuestSlots(allGuests, {
     hostUserId: session.hostUserId,
     isStale: isGuestStale,
@@ -489,8 +549,27 @@ export async function rejectGuest(sessionId: string, guestUserId: string, reques
   if (requesterUserId && session.hostUserId !== requesterUserId) {
     throw forbidden('Only the host can reject guests');
   }
-  await rejectGuestStore(sessionId, guestUserId, nowIso());
+  const prior = await getGuestStore(sessionId, guestUserId);
+  try {
+    await rejectGuestStore(sessionId, guestUserId, nowIso());
+  } catch {
+    // INVITED decline path may already be LEFT — force-clear slot.
+    await leaveGuestSession(sessionId, guestUserId, nowIso(), { force: true });
+  }
   emitRoomEvent(sessionId, { type: 'guest.rejected', guestUserId });
+  if (prior?.state === 'INVITED' || prior?.state === 'REQUESTED') {
+    try {
+      const { requestJoinQueue } = await import('../games/frenemies/frenemiesRoomService');
+      await requestJoinQueue({
+        sessionId,
+        userId: guestUserId,
+        displayName: 'Guest',
+        source: 'cta',
+      });
+    } catch {
+      /* no frenemies game */
+    }
+  }
 }
 
 /**

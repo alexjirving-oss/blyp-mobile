@@ -512,14 +512,11 @@ export default function FrenemiesOverlay({
 
   const toggleAutoContinue = async () => {
     if (!canConduct) return;
-    if (settingsLocked) {
-      setSettingsOpen(true);
-      return;
-    }
+    // P0: Auto OFF/ON must work in any phase (server allows autoContinue-only patch).
     const next = !(settings.autoContinue === true);
     setBusy(true);
     try {
-      await saveSettings({ ...settings, autoContinue: next });
+      await saveSettings({ autoContinue: next });
     } catch (e) {
       setErr(e?.message || e?.code || 'Could not update auto-continue');
     } finally {
@@ -1220,6 +1217,7 @@ export default function FrenemiesOverlay({
         settings={settings}
         isAdminHost={isAdminHost}
         readOnly={settingsLocked}
+        allowAutoContinueAnytime
         onSave={saveSettings}
       />
 

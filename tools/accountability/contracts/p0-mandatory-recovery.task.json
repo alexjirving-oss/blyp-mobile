@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "id": "p0-mandatory-recovery-20260810",
+  "title": "P0 mandatory recovery (IAP + Frenemies + For You/Home)",
+  "objective": "On branch feat/full-tip-package-20260809 from clean base 723c27d8 (+ live-service compile commit), implement ONLY mandatory P0 recovery: (1) IAP Play title = app label = grant for 100/500/1000/2500/5000 with no oversell; (2) Frenemies Auto OFF anytime, host-tap default, settings work, queue drop/fill, first-hit protection, just-dropped cooldown, comment join wired, INVITED slot expiry; (3) For You/Home lag: max ~1 playing + limited warm (not 5 continuous decoders), bidirectional warm, Home scroll pauses rail decode. Do not survey product history. Do not tip-bake or Play-upload. Do not deploy from builders.",
+  "baseRef": "HEAD",
+  "acceptanceCriteria": [
+    "App coin pack labels and server iapCatalog grants are exactly 100/500/1000/2500/5000; playTitle matches grant; no UI/path credits legacy oversell totals (550/1150/3000/6500).",
+    "Frenemies: autoContinue defaults OFF; host can set Auto OFF (and ON) in any phase via autoContinue-only settings patch without SETTINGS_LOCKED; other settings remain fairness-locked mid-round.",
+    "Frenemies queue: drop/fill FIFO, first-hit protection, just-dropped cooldown, comment-source join path exists, INVITED seats expire and free the slot (decline/expiry re-queues when game active).",
+    "For You feed: at most 1 playing decoder plus at most 1 muted warm neighbor (WARM_RADIUS<=1); bidirectional; Home For You rail unloads warm neighbors while hub scrolls.",
+    "Deterministic live-service unit tests and focused mobile/type checks listed in verification pass on the frozen candidate.",
+    "No tip bake, Play upload, merge, or production deploy performed by agents."
+  ],
+  "allowedPaths": [
+    "src/**",
+    "__tests__/**",
+    "backend/blyp-live-service/src/**",
+    "backend/blyp-live-service/scripts/**",
+    "tools/release/SYNC_PLAY_IAP_TITLES.*"
+  ],
+  "forbiddenPaths": [
+    ".cursor/**",
+    ".accountability/**",
+    "tools/accountability/**",
+    ".github/**",
+    "package.json",
+    "package-lock.json",
+    "app.config.js",
+    "eas.json",
+    "android/**",
+    "ios/**",
+    "functions/**",
+    "admin/**"
+  ],
+  "verification": [
+    {
+      "id": "live-service-unit",
+      "runner": "npm",
+      "args": ["--prefix", "backend/blyp-live-service", "test"],
+      "timeoutMs": 600000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    },
+    {
+      "id": "iap-grant-alignment",
+      "runner": "node",
+      "args": [
+        "-e",
+        "const fs=require('fs');const cat=fs.readFileSync('backend/blyp-live-service/src/economy/iapCatalog.ts','utf8');const svc=fs.readFileSync('src/services/BlypCoinService.js','utf8');const need=[100,500,1000,2500,5000];for(const n of need){if(!cat.includes('coinsGranted: '+n)||!cat.includes(\"playTitle: '\"+n+\" coins'\")) {console.error('catalog missing',n);process.exit(1);} if(!svc.includes('coins: '+n+',')){console.error('client missing',n);process.exit(1);}} if(/coinsGranted:\\s*(550|1150|3000|6500)/.test(cat)) {console.error('oversell grant');process.exit(1);} console.log('iap-ok');"
+      ],
+      "timeoutMs": 30000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    },
+    {
+      "id": "decode-budget-grep",
+      "runner": "node",
+      "args": [
+        "-e",
+        "const fs=require('fs');const h=fs.readFileSync('src/screens/HomeScreen.js','utf8');if(!/WARM_RADIUS\\s*=\\s*1/.test(h)){console.error('WARM_RADIUS must be 1');process.exit(1);} if(/WARM_RADIUS\\s*=\\s*2/.test(h)){console.error('WARM_RADIUS=2 still present');process.exit(1);} console.log('decode-ok');"
+      ],
+      "timeoutMs": 30000,
+      "required": true,
+      "onFailure": "REJECT",
+      "envAllowlist": []
+    }
+  ],
+  "swarm": {
+    "defaultModel": "auto",
+    "maxParallelAgents": 3,
+    "maxRepairAttempts": 1,
+    "agentTimeoutMs": 2700000,
+    "analysts": [
+      {
+        "id": "p0-analyst",
+        "responsibility": "Map ONLY the P0 acceptance criteria to concrete files under allowedPaths. Do not audit unrelated product history.",
+        "required": true
+      }
+    ],
+    "builders": [
+      {
+        "id": "builder-primary",
+        "responsibility": "Implement the smallest complete P0 fix set for IAP alignment, Frenemies Auto/queue/invite expiry/comment join, and For You/Home decode budget.",
+        "required": true
+      },
+      {
+        "id": "builder-defensive",
+        "responsibility": "Independently implement the same P0 contract with emphasis on fail-closed Auto OFF, invite expiry, and decoder cap regressions.",
+        "required": true
+      }
+    ],
+    "reviewers": [
+      {
+        "id": "correctness-reviewer",
+        "responsibility": "Falsify every P0 acceptance criterion against the frozen diff. PASS only if criteria are met in code.",
+        "required": true
+      },
+      {
+        "id": "regression-reviewer",
+        "responsibility": "Look for weakened tests, SETTINGS_LOCKED still blocking Auto OFF, WARM_RADIUS>1, oversell grants, and missing INVITED expiry.",
+        "required": true
+      }
+    ]
+  },
+  "selection": "smallest-diff"
+}
