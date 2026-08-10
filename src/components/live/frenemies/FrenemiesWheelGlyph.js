@@ -1,17 +1,18 @@
 /**
  * Compact branded Frenemies wheel glyph for hub / picker / open card.
- * Not a letter placeholder — readable 8-seg mark at small sizes.
+ * Neon magenta + electric mint — unmistakably different from the teal mark.
  */
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import Svg, { Circle, G, Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 
-const GOLD = '#F5C542';
-const GOLD_SOFT = '#FDE68A';
-const TEAL = '#00D2BE';
-const TEAL_DEEP = '#0A6B62';
-const INK = '#0A0A0C';
-const ROSE = '#FB7185';
+const GOLD = '#FFE566';
+const GOLD_SOFT = '#FFF1A8';
+const TEAL = '#00F5D4';
+const MAGENTA = '#FF2D95';
+const MAGENTA_DEEP = '#8B1048';
+const INK = '#050508';
+const ELECTRIC = '#7CFFB2';
 
 function polar(cx, cy, r, deg) {
   const rad = ((deg - 90) * Math.PI) / 180;
@@ -33,13 +34,22 @@ function wedge(cx, cy, rOuter, rInner, startDeg, endDeg) {
   ].join(' ');
 }
 
-const SEG_FILLS = [TEAL_DEEP, '#124F48', '#163D36', TEAL_DEEP, '#1A3A2F', '#0E3D38', TEAL_DEEP, '#124F48'];
+const SEG_FILLS = [
+  MAGENTA_DEEP,
+  '#5A0F3A',
+  '#0E3D38',
+  MAGENTA_DEEP,
+  '#163D36',
+  '#4A0A30',
+  MAGENTA_DEEP,
+  '#0A6B62',
+];
 
 export default function FrenemiesWheelGlyph({ size = 44 }) {
   const cx = size / 2;
   const cy = size / 2;
   const rOuter = size * 0.42;
-  const rInner = size * 0.16;
+  const rInner = size * 0.18;
   const segs = 8;
   const step = 360 / segs;
 
@@ -47,20 +57,27 @@ export default function FrenemiesWheelGlyph({ size = 44 }) {
     <View style={[styles.wrap, { width: size, height: size }]}>
       <Svg width={size} height={size}>
         <Defs>
-          <LinearGradient id="feHub" x1="0" y1="0" x2="1" y2="1">
+          <LinearGradient id="feHubNeon" x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0%" stopColor={GOLD_SOFT} />
-            <Stop offset="55%" stopColor={GOLD} />
-            <Stop offset="100%" stopColor="#C9A227" />
+            <Stop offset="45%" stopColor={MAGENTA} />
+            <Stop offset="100%" stopColor={TEAL} />
           </LinearGradient>
         </Defs>
-        <Circle cx={cx} cy={cy} r={rOuter + size * 0.06} fill={INK} stroke={GOLD} strokeWidth={size * 0.035} />
+        <Circle
+          cx={cx}
+          cy={cy}
+          r={rOuter + size * 0.07}
+          fill={INK}
+          stroke={MAGENTA}
+          strokeWidth={size * 0.045}
+        />
         <Circle
           cx={cx}
           cy={cy}
           r={rOuter + size * 0.02}
           fill="none"
-          stroke="rgba(0,210,190,0.35)"
-          strokeWidth={size * 0.02}
+          stroke={ELECTRIC}
+          strokeWidth={size * 0.025}
         />
         <G>
           {SEG_FILLS.map((fill, i) => (
@@ -68,23 +85,22 @@ export default function FrenemiesWheelGlyph({ size = 44 }) {
               key={i}
               d={wedge(cx, cy, rOuter, rInner, i * step, (i + 1) * step)}
               fill={fill}
-              stroke="rgba(245,197,66,0.4)"
-              strokeWidth={0.8}
+              stroke="rgba(255,229,102,0.45)"
+              strokeWidth={0.9}
             />
           ))}
         </G>
-        <Circle cx={cx} cy={cy} r={rInner} fill="url(#feHub)" stroke={INK} strokeWidth={1.2} />
-        <Circle cx={cx} cy={cy} r={rInner * 0.35} fill={INK} />
-        {/* Right-side pointer cue */}
+        <Circle cx={cx} cy={cy} r={rInner} fill="url(#feHubNeon)" stroke={INK} strokeWidth={1.4} />
+        <Circle cx={cx} cy={cy} r={rInner * 0.32} fill={INK} />
         <Path
-          d={`M ${cx + rOuter + size * 0.02} ${cy} L ${cx + rOuter + size * 0.14} ${cy - size * 0.07} L ${
-            cx + rOuter + size * 0.14
-          } ${cy + size * 0.07} Z`}
-          fill={ROSE}
+          d={`M ${cx + rOuter + size * 0.02} ${cy} L ${cx + rOuter + size * 0.16} ${cy - size * 0.08} L ${
+            cx + rOuter + size * 0.16
+          } ${cy + size * 0.08} Z`}
+          fill={MAGENTA}
           stroke={GOLD}
-          strokeWidth={0.6}
+          strokeWidth={0.7}
         />
-        <Circle cx={cx} cy={cy - rOuter * 0.55} r={size * 0.035} fill={TEAL} />
+        <Circle cx={cx} cy={cy - rOuter * 0.55} r={size * 0.04} fill={ELECTRIC} />
       </Svg>
     </View>
   );

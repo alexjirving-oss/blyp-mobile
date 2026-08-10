@@ -330,9 +330,21 @@ export async function removeHomeWidget(uid, widgetId) {
 export async function addHomeWidget(uid, type, config) {
   if (!CATALOG_BY_TYPE.has(type)) return getHomeLayout(uid);
   const layout = await getHomeLayout(uid);
-  if (layout.widgets.some((w) => w.type === type)) return layout;
+  // Re-enable if the type already exists but was hidden (core hide path).
+  const existing = layout.widgets.find((w) => w.type === type);
+  if (existing) {
+    if (existing.enabled === false) {
+      return setHomeWidgetEnabled(uid, existing.id, true);
+    }
+    return layout;
+  }
   const widget = makeWidget(type, config);
-  return setHomeLayout(uid, { ...layout, widgets: [...layout.widgets, widget] });
+  // Preserve every existing widget — never rebuild from defaults on add.
+  const nextWidgets = [...layout.widgets, widget];
+  return setHomeLayout(uid, {
+    version: HOME_LAYOUT_VERSION,
+    widgets: nextWidgets,
+  });
 }
 
 export async function updateHomeWidgetConfig(uid, widgetId, configPatch) {

@@ -15,7 +15,7 @@ import { isHlsVideoUri } from './feedVideoUri';
 /** Image.prefetch is cheap — allow a few in parallel for poster-first paint. */
 const MAX_INFLIGHT_IMG = 4;
 /** Full MP4 disk warm is heavy (Flip/Fold memory) — keep tight. */
-const MAX_INFLIGHT_VID = 2;
+const MAX_INFLIGHT_VID = 1;
 const seenImages = new Set();
 const seenVideos = new Set();
 /** In-flight / queued keys — failures stay retryable (unlike seenVideos). */
@@ -281,16 +281,17 @@ export function warmHomeVideoRails({
       if (v) prefetchVideoUri(v, { idle: false, priority: true });
     }
   };
-  kickHotVideos(forYou, 3);
-  kickHotVideos(watch, 4);
+  kickHotVideos(forYou, 2);
+  kickHotVideos(watch, 2);
 
   // Phase 3 — wider disk warm after first interactions / paint settle.
+  // Keep idle work small so Home scroll FPS is not destroyed by MP4 downloads.
   runWhenIdle(() => {
     if (Array.isArray(forYou) && forYou.length) {
-      prefetchPostWindow(forYou, 0, { radius: 5, images: true });
+      prefetchPostWindow(forYou, 0, { radius: 2, images: true });
     }
-    kickHotVideos(trending, 6);
-    for (const w of (watch || []).slice(0, 6)) {
+    kickHotVideos(trending, 2);
+    for (const w of (watch || []).slice(0, 3)) {
       const thumb = normalizeUri(w?.thumbnail);
       if (thumb) prefetchImageUri(thumb, { idle: true });
     }

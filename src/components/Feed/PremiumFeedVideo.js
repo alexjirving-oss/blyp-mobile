@@ -37,6 +37,8 @@ export default function PremiumFeedVideo({
 }) {
   const [aspect, setAspect] = useState(0);
   const [progress, setProgress] = useState(0);
+  const progressRef = useRef(0);
+  const lastProgressEmitRef = useRef(0);
   const pauseOpacity = useRef(new Animated.Value(0)).current;
   const playing = shouldPlay && !paused;
 
@@ -75,6 +77,13 @@ export default function PremiumFeedVideo({
       const dur = status.durationMillis || 0;
       const pos = status.positionMillis || 0;
       const next = dur > 0 ? Math.min(1, Math.max(0, pos / dur)) : 0;
+      // Throttle progress setState — status fires ~4–10×/s and was janking swipe JS.
+      const now = Date.now();
+      if (Math.abs(next - progressRef.current) < 0.02 && now - lastProgressEmitRef.current < 120) {
+        return;
+      }
+      lastProgressEmitRef.current = now;
+      progressRef.current = next;
       setProgress(next);
       onProgress?.(next, status);
     },

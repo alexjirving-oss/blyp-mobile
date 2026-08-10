@@ -8,6 +8,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Alert,
 } from 'react-native';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
@@ -99,7 +100,20 @@ const EditHomeSheet = ({
               </>
             )}
 
-            <TouchableOpacity style={styles.resetBtn} activeOpacity={0.88} onPress={onReset}>
+            <TouchableOpacity
+              style={styles.resetBtn}
+              activeOpacity={0.88}
+              onPress={() => {
+                Alert.alert(
+                  'Reset Home layout?',
+                  'This restores the default sections and removes anything you added.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Reset', style: 'destructive', onPress: () => onReset?.() },
+                  ],
+                );
+              }}
+            >
               <Icon name="refresh-outline" size={16} color={COLORS.textSecondary} />
               <Text style={styles.resetText}>Reset to default layout</Text>
             </TouchableOpacity>

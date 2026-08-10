@@ -319,10 +319,27 @@ async function hydrateFromRemote(uid) {
       (remoteNorm.onboarded && !local.onboarded) ||
       (remoteNorm.tourCompleted && !local.tourCompleted);
     if (shouldAdopt) {
-      cache.set(uid, remoteNorm);
-      emit(uid, remoteNorm);
+      // Field-merge homeLayout: never let a newer remote prefs blob without a
+      // layout wipe a locally customized Home (felt like "Add cleared everything").
+      const merged = { ...remoteNorm };
+      const remoteLayout = remoteNorm.homeLayout;
+      const localLayout = local.homeLayout;
+      const remoteWidgets = Array.isArray(remoteLayout?.widgets) ? remoteLayout.widgets : [];
+      const localWidgets = Array.isArray(localLayout?.widgets) ? localLayout.widgets : [];
+      if (remoteWidgets.length === 0 && localWidgets.length > 0) {
+        merged.homeLayout = localLayout;
+      } else if (
+        remoteWidgets.length > 0 &&
+        localWidgets.length > remoteWidgets.length &&
+        (local.updatedAt || 0) >= (remoteNorm.updatedAt || 0) - 5000
+      ) {
+        // Local just added a widget; prefer the richer layout if clocks are close.
+        merged.homeLayout = localLayout;
+      }
+      cache.set(uid, merged);
+      emit(uid, merged);
       try {
-        await AsyncStorage.setItem(KEY(uid), JSON.stringify(remoteNorm));
+        await AsyncStorage.setItem(KEY(uid), JSON.stringify(merged));
       } catch {
         /* ignore */
       }

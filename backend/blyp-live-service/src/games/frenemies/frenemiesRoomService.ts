@@ -113,6 +113,10 @@ export interface FrenemiesRoom {
   hostUserId: string;
   startedByUserId: string;
   settings: FrenemiesSettings;
+  /** Host saved autoContinue via settings (survives legacy policy migrate). */
+  autoContinueExplicit?: boolean;
+  /** Bump when auto-continue sticky-migrate policy changes. */
+  autoContinuePolicyVersion?: number;
   stats: SessionStats;
   winnerCoins: Record<string, { displayName: string; coins: number }>;
   state: FrenemiesState;
@@ -187,8 +191,35 @@ async function loadRoom(sessionId: string): Promise<FrenemiesRoom | null> {
       room.state.prizePreview = maxPrizeForSettings(room.settings);
     }
     // Migrate legacy idle+active auto-loop rooms.
+    let dirty = false;
     if (room.state.active && room.state.phase === 'idle') {
       room.state.phase = 'ready';
+      dirty = true;
+    }
+    // Tip P0 migration: older defaults left autoContinue:true sticky in Redis.
+    // Force host-tap until the host explicitly opts in via settings (sets flag).
+    const migrated = Number(room.autoContinuePolicyVersion || 0);
+    if (migrated < 2) {
+      const explicit = room.autoContinueExplicit === true;
+      if (!explicit) {
+        room.settings.autoContinue = false;
+        room.state.nextSpinAt = null;
+      } else if (room.settings.autoContinue !== true) {
+        room.state.nextSpinAt = null;
+      }
+      room.autoContinuePolicyVersion = 2;
+      dirty = true;
+    } else if (room.settings.autoContinue !== true) {
+      if (room.settings.autoContinue !== false || room.state.nextSpinAt) {
+        room.settings.autoContinue = false;
+        room.state.nextSpinAt = null;
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      // Must persist — otherwise the next Redis read re-arms legacy auto-spin.
+      room.updatedAt = nowIso();
+      await redis().set(stateKey(room.sessionId), JSON.stringify(room), 'EX', TTL_SECONDS);
     }
     return room;
   } catch {
@@ -743,7 +774,16 @@ export async function startGame(args: {
   return withLock(sessionId, async () => {
     let room = await loadRoom(sessionId);
     if (room && room.state.active && room.state.phase !== 'ended') {
-      resumeTicksIfNeeded(sessionId);
+      // Resuming an active game must never leave a stale auto-spin schedule when
+      // auto-continue is off (legacy Redis state was the device "can't stop" bug).
+      if (room.settings.autoContinue !== true) {
+        room.settings.autoContinue = false;
+        room.state.nextSpinAt = null;
+        await saveRoom(room);
+        stopTicks(sessionId);
+      } else {
+        resumeTicksIfNeeded(sessionId);
+      }
       return room;
     }
 
@@ -760,6 +800,8 @@ export async function startGame(args: {
       hostUserId,
       startedByUserId: starterUserId,
       settings,
+      autoContinueExplicit: false,
+      autoContinuePolicyVersion: 2,
       stats: emptyStats(),
       winnerCoins: {},
       state: {
@@ -882,6 +924,11 @@ export async function updateSettings(args: {
     if (!isFrenemiesAdmin(args.userId) && !isFrenemiesAdmin(room.hostUserId)) {
       room.settings.housePays = false;
     }
+    // Host explicitly chose auto-continue via settings — remember across reloads.
+    if (Object.prototype.hasOwnProperty.call(patch, 'autoContinue')) {
+      room.autoContinueExplicit = patch.autoContinue === true;
+      room.autoContinuePolicyVersion = 2;
+    }
     // Turning auto-continue off must kill any scheduled auto-spin immediately.
     if (room.settings.autoContinue !== true) {
       room.settings.autoContinue = false;
@@ -889,6 +936,8 @@ export async function updateSettings(args: {
       if (room.state.phase === 'ready') {
         stopTicks(args.sessionId);
       }
+    } else if (room.state.phase === 'ready') {
+      ensureTicks(args.sessionId);
     }
     room.state.prizePreview = maxPrizeForSettings(room.settings);
     room.state.payer = payerFor(room);

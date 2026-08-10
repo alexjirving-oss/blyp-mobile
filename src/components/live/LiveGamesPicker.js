@@ -71,7 +71,7 @@ export default function LiveGamesPicker({
                   </Text>
                 </View>
                 <View style={styles.frenemiesGlyph}>
-                  <FrenemiesWheelGlyph size={48} />
+                  <FrenemiesWheelGlyph size={64} />
                 </View>
                 <Text style={styles.cardTitle} allowFontScaling={false}>
                   Frenemies
@@ -269,12 +269,15 @@ const styles = StyleSheet.create({
   badgeText: { color: INK, fontWeight: '900', fontSize: 10, letterSpacing: 1 },
   cardIcon: { fontSize: 28, marginBottom: 6 },
   frenemiesGlyph: {
-    width: 52,
-    height: 52,
+    width: 68,
+    height: 68,
     marginBottom: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(255,45,149,0.12)',
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,45,149,0.55)',
   },
   frenemiesGlyphText: { color: GOLD, fontWeight: '900', fontSize: 16 },
   cardTitle: { color: '#fff', fontWeight: '900', fontSize: 17, letterSpacing: 0.2 },

@@ -1670,18 +1670,14 @@ const HomeScreen = ({ navigation, route }) => {
     return index === currentDiscoverIndex;
   };
 
-  // Disk-warm around the load center (±3) + farther ahead idle. Decode uses
-  // discoverLoadIndex so mid-swipe already has the destination buffered.
+  // Disk-warm around the load center. Decode warm is owned by shouldLoad windows
+  // on PremiumFeedVideo — this path stays disk-only so JS swipe stays light.
   useEffect(() => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? discoverLoadIndex : currentIndex;
     if (!list?.length) return;
-    prefetchPostWindow(list, current, { radius: 3, images: true });
-    // Also warm +4/+5 ahead while idle so fast paging never waits on first byte.
-    if (list[current + 4] || list[current + 5]) {
-      prefetchPostWindow(list, current + 4, { radius: 1, images: true });
-    }
+    prefetchPostWindow(list, current, { radius: 4, images: true });
   }, [currentIndex, discoverLoadIndex, selectedTab, videos, randomPosts]);
 
   // (HEAD connection warm removed — it competed with progressive playback.)
@@ -1801,8 +1797,16 @@ const HomeScreen = ({ navigation, route }) => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = resolveFeedVideoUri(item) || fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            // Decode around mid-swipe load center (±2). Audible stays on settled index.
-            const shouldLoad = Math.abs(discoverLoadIndex - index) <= 2;
+            // TikTok-speed warm: keep 1 behind + 3 ahead decoded around the mid-swipe
+            // load center, and never tear down the settled audible cell / its neighbor.
+            // URL disk prefetch alone cannot hit ~2 swipes/sec — decode must stay hot.
+            const WARM_BEHIND = 1;
+            const WARM_AHEAD = 3;
+            const nearLoad =
+              index >= discoverLoadIndex - WARM_BEHIND &&
+              index <= discoverLoadIndex + WARM_AHEAD;
+            const nearFocus = Math.abs(index - currentDiscoverIndex) <= 1;
+            const shouldLoad = nearLoad || nearFocus;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
@@ -1830,7 +1834,7 @@ const HomeScreen = ({ navigation, route }) => {
                 user={item.user}
                 title={item.title}
                 autoPlay={cellActive && !feedAudioMuted}
-                shouldLoad={Math.abs(discoverLoadIndex - index) <= 2}
+                shouldLoad={shouldLoad}
                 style={StyleSheet.absoluteFill}
               />
             ) : (
@@ -2157,10 +2161,11 @@ const HomeScreen = ({ navigation, route }) => {
               snapToAlignment="start"
               decelerationRate="fast"
               removeClippedSubviews={false}
-              maxToRenderPerBatch={3}
-              windowSize={5}
-              initialNumToRender={2}
-              updateCellsBatchingPeriod={32}
+              maxToRenderPerBatch={4}
+              windowSize={7}
+              initialNumToRender={3}
+              updateCellsBatchingPeriod={16}
+              extraData={`${currentDiscoverIndex}:${discoverLoadIndex}:${feedAudioMuted ? 1 : 0}:${pausedFeedId || ''}`}
               getItemLayout={(data, index) => ({
                 length: feedHeight,
                 offset: feedHeight * index,

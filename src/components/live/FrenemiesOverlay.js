@@ -39,12 +39,14 @@ import FrenemiesSettingsSheet from './frenemies/FrenemiesSettingsSheet';
 import FrenemiesWheelGlyph from './frenemies/FrenemiesWheelGlyph';
 import BuyCoinsOverlay from '../BuyCoinsOverlay';
 
-const TEAL = '#00D2BE';
-const ROSE = '#FB7185';
-const GOLD = '#F5C542';
-const GOLD_SOFT = '#FDE68A';
-const INK = '#0A0A0C';
+const TEAL = '#00F5D4';
+const ROSE = '#FF2D95';
+const GOLD = '#FFE566';
+const GOLD_SOFT = '#FFF1A8';
+const INK = '#050508';
 const RULES_TIP_KEY = '@blyp/frenemies_rules_tip_v1';
+const MAGENTA = '#FF2D95';
+const ELECTRIC = '#7CFFB2';
 
 function initialsFor(name) {
   const s = String(name || '').trim().replace(/^@/, '');
@@ -506,6 +508,23 @@ export default function FrenemiesOverlay({
   const settingsLocked = phase !== 'ready' && phase !== 'idle' && !!active;
   const isAdminHost = !!(isAdmin || event?.isAdminHost);
 
+  const toggleAutoContinue = async () => {
+    if (!canConduct) return;
+    if (settingsLocked) {
+      setSettingsOpen(true);
+      return;
+    }
+    const next = !(settings.autoContinue === true);
+    setBusy(true);
+    try {
+      await saveSettings({ ...settings, autoContinue: next });
+    } catch (e) {
+      setErr(e?.message || e?.code || 'Could not update auto-continue');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   void tick;
 
   const resultCopy = (() => {
@@ -585,19 +604,24 @@ export default function FrenemiesOverlay({
       {(canConduct && controlsVisible && !active && !endRecap) ? (
         <View style={styles.startCard} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(14,61,56,0.97)', 'rgba(26,21,32,0.96)', 'rgba(10,10,12,0.98)']}
+            colors={['rgba(42,10,36,0.98)', 'rgba(6,42,40,0.96)', 'rgba(5,5,8,0.99)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.startGrad}
           >
             <View style={styles.openBrandRow}>
-              <FrenemiesWheelGlyph size={52} />
+              <View style={styles.hubGlyphWrap}>
+                <FrenemiesWheelGlyph size={72} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.brandKicker} allowFontScaling={false}>
-                  BLYP LIVE
+                  BLYP LIVE · PARTY
                 </Text>
                 <Text style={styles.title} allowFontScaling={false}>
                   Frenemies
+                </Text>
+                <Text style={styles.titleTag} allowFontScaling={false}>
+                  neon wheel · host-run
                 </Text>
               </View>
               <View>
@@ -638,7 +662,7 @@ export default function FrenemiesOverlay({
       {active ? (
         <View style={styles.hud} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(10,10,12,0.92)', 'rgba(14,61,56,0.62)', 'rgba(60,20,28,0.35)']}
+            colors={['rgba(42,10,36,0.94)', 'rgba(6,42,40,0.72)', 'rgba(5,5,8,0.55)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.hudInner}
@@ -656,15 +680,37 @@ export default function FrenemiesOverlay({
               <Text style={styles.scoreDot}>·</Text>
               <PayerBadge payer={payer} show={showPayer} />
               <Text style={styles.scoreDot}>·</Text>
-              <Text
-                style={[
-                  styles.scoreItem,
-                  settings.autoContinue === true ? styles.autoOn : styles.autoOff,
-                ]}
-                allowFontScaling={false}
-              >
-                Auto {settings.autoContinue === true ? 'ON' : 'OFF'}
-              </Text>
+              {canConduct ? (
+                <TouchableOpacity
+                  onPress={toggleAutoContinue}
+                  disabled={busy}
+                  hitSlop={8}
+                  style={[
+                    styles.autoChip,
+                    settings.autoContinue === true ? styles.autoOnChip : styles.autoOffChip,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.scoreItem,
+                      settings.autoContinue === true ? styles.autoOn : styles.autoOff,
+                    ]}
+                    allowFontScaling={false}
+                  >
+                    Auto {settings.autoContinue === true ? 'ON' : 'OFF'} · tap
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <Text
+                  style={[
+                    styles.scoreItem,
+                    settings.autoContinue === true ? styles.autoOn : styles.autoOff,
+                  ]}
+                  allowFontScaling={false}
+                >
+                  Auto {settings.autoContinue === true ? 'ON' : 'OFF'}
+                </Text>
+              )}
             </View>
 
             {(phase === 'ready' || spinCue) ? (
@@ -1107,19 +1153,29 @@ export default function FrenemiesOverlay({
 }
 
 const styles = StyleSheet.create({
-  root: { ...StyleSheet.absoluteFillObject, zIndex: 55 },
+  root: { ...StyleSheet.absoluteFillObject, zIndex: 220 },
   startCard: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 10,
+    right: 10,
     bottom: 72,
-    borderRadius: 18,
+    borderRadius: 22,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.45)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,45,149,0.65)',
   },
   startGrad: { padding: 16 },
-  openBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  openBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  hubGlyphWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,45,149,0.18)',
+    borderWidth: 2,
+    borderColor: MAGENTA,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   wheelGlyph: {
     width: 44,
     height: 44,
@@ -1132,32 +1188,39 @@ const styles = StyleSheet.create({
   },
   wheelGlyphText: { color: GOLD_SOFT, fontWeight: '900', fontSize: 18 },
   brandKicker: {
-    color: TEAL,
+    color: ELECTRIC,
     fontWeight: '900',
-    fontSize: 10,
-    letterSpacing: 2.2,
+    fontSize: 11,
+    letterSpacing: 2.4,
   },
   title: {
     color: GOLD_SOFT,
-    fontSize: 26,
+    fontSize: 30,
     fontWeight: '900',
     letterSpacing: 0.3,
     marginTop: 2,
   },
+  titleTag: {
+    color: MAGENTA,
+    fontWeight: '800',
+    fontSize: 12,
+    marginTop: 2,
+    letterSpacing: 0.4,
+  },
   sub: {
-    color: 'rgba(244,247,250,0.75)',
+    color: 'rgba(244,247,250,0.8)',
     marginTop: 10,
     marginBottom: 14,
     fontSize: 13,
     lineHeight: 18,
   },
   startBtn: {
-    backgroundColor: TEAL,
+    backgroundColor: MAGENTA,
     borderRadius: 14,
-    paddingVertical: 13,
+    paddingVertical: 14,
     alignItems: 'center',
   },
-  startBtnText: { color: INK, fontWeight: '900', fontSize: 15, letterSpacing: 0.2 },
+  startBtnText: { color: '#fff', fontWeight: '900', fontSize: 16, letterSpacing: 0.2 },
   backChip: { alignSelf: 'center', marginTop: 10, padding: 4 },
   backChipText: { color: 'rgba(255,255,255,0.55)', fontWeight: '700', fontSize: 12 },
   hud: {
@@ -1165,10 +1228,10 @@ const styles = StyleSheet.create({
     top: 104,
     left: 10,
     right: 10,
-    borderRadius: 16,
+    borderRadius: 18,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(245,197,66,0.32)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,45,149,0.45)',
   },
   hudInner: { padding: 12 },
   hudRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1249,16 +1312,30 @@ const styles = StyleSheet.create({
   payerText: { color: GOLD_SOFT, fontWeight: '900', fontSize: 10, letterSpacing: 0.4 },
   readyBlock: { alignItems: 'center', marginTop: 6 },
   stageFrame: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(245,197,66,0.38)',
-    backgroundColor: 'rgba(10,10,12,0.45)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: 'rgba(255,45,149,0.55)',
+    backgroundColor: 'rgba(42,10,36,0.55)',
     marginBottom: 4,
   },
-  autoOn: { color: ROSE },
-  autoOff: { color: TEAL },
+  autoOn: { color: MAGENTA },
+  autoOff: { color: ELECTRIC },
+  autoChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  autoOnChip: {
+    backgroundColor: 'rgba(255,45,149,0.18)',
+    borderColor: 'rgba(255,45,149,0.55)',
+  },
+  autoOffChip: {
+    backgroundColor: 'rgba(124,255,178,0.12)',
+    borderColor: 'rgba(124,255,178,0.45)',
+  },
   readyTitle: {
     color: '#fff',
     fontWeight: '900',

@@ -71,6 +71,7 @@ function EnhancedVideo(props) {
       // Soft unload: release the native decoder (not rendered) but keep
       // retainedRef so the next shouldLoad mount skips the async cache probe.
       paintedRef.current = false;
+      warmedRef.current = false;
       if (retainedRef.current.remote !== remoteUri) {
         setPlayableUri(null);
       }
@@ -288,11 +289,13 @@ function EnhancedVideo(props) {
 
   // TikTok-style neighbor warm: pull first GOPs muted, then park at 0.
   // Never claims feed audio / never calls setAudioModeAsync (Stage-safe).
+  // Re-warm when the cell is re-loaded after a soft unload so fast reverse swipes
+  // still land on a primed decoder.
   useEffect(() => {
     if (!shouldLoad || isFocused || !videoLoaded || hasError || !playableUri) return undefined;
-    if (warmedRef.current) return undefined;
     const v = videoRef.current;
     if (!v) return undefined;
+    if (warmedRef.current) return undefined;
 
     let cancelled = false;
     warmedRef.current = true;
@@ -310,7 +313,8 @@ function EnhancedVideo(props) {
           /* best-effort */
         }
         await v.playAsync?.();
-        await new Promise((r) => setTimeout(r, 320));
+        // Longer prime so first GOPs + decoder pipeline settle (~2 swipe/sec target).
+        await new Promise((r) => setTimeout(r, 480));
         if (cancelled) return;
         const stillUnfocused = !((props.shouldPlay ?? true) && AppState.currentState === 'active');
         if (!stillUnfocused) return;

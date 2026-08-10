@@ -283,7 +283,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     return unsub;
   }, [uid]);
 
-  // "For You" rail — shuffled playable videos; remixed on load / focus / refresh.
+  // "For You" rail — shuffled playable videos; remixed on focus / refresh.
+  // Initial mount is covered by the parallel first-paint effect — do not double-fetch.
   const refreshForYouRail = useCallback(() => {
     let active = true;
     getForYouPosts(interestTerms, Array.from(followingSet), 12).then((r) => {
@@ -297,12 +298,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       active = false;
     };
   }, [interestTerms, followingSet]);
-
-  useEffect(() => {
-    const cancel = refreshForYouRail();
-    return cancel;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uid, interestKey, followingSet, refreshForYouRail]);
 
   // Re-mix the rail when Home regains focus (mount effect already loaded once).
   const forYouFocusArmedRef = useRef(false);
@@ -906,6 +901,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       const next = await addHomeWidget(uid, type);
       if (next) setHomeLayoutState(next);
       setAddSheetOpen(false);
+      setEditMode(true);
     },
     [uid]
   );
@@ -963,7 +959,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         // Retired: history lives only in the search-bar dropdown.
         return null;
       case 'forYou':
-        if (forYou.length === 0 && !editMode) return null;
         if (forYou.length === 0) {
           return <Text style={styles.widgetEmptyHint}>For you rail populates as you watch</Text>;
         }
@@ -991,7 +986,10 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                 const isVideo = p.type === 'video' || !!p.videoUrl || !!resolveFeedVideoUri(p);
                 const videoUri = isVideo ? (resolveFeedVideoUri(p) || '') : '';
                 const isActive = index === activeForYou;
-                const mountVideo = (isActive || index === activeForYou + 1 || index === activeForYou + 2) && isVideo && !!videoUri;
+                // Home scroll FPS: decode only the focused rail tile. Neighbors
+                // stay poster + disk-warm (mediaPrefetch) — mounting 3 EnhancedVideos
+                // on the hub destroyed main-thread frame time.
+                const mountVideo = isActive && isVideo && !!videoUri;
                 return (
                   <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openForYouRailPost(p)}>
                     <View>
@@ -1006,14 +1004,14 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                         <EnhancedVideo
                           uri={videoUri}
                           poster={uri}
-                          style={[styles.forYouThumb, StyleSheet.absoluteFill, !isActive && styles.forYouPreloadHidden]}
+                          style={[styles.forYouThumb, StyleSheet.absoluteFill]}
                           resizeMode="cover"
                           shouldLoad
-                          shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
+                          shouldPlay={isScreenFocused && !listening && !transcribing}
                           isLooping
-                          isMuted={!isActive || !isScreenFocused || listening || transcribing}
+                          isMuted={!isScreenFocused || listening || transcribing}
                           audioOwnerId={
-                            isActive && isScreenFocused && !listening && !transcribing
+                            isScreenFocused && !listening && !transcribing
                               ? `home-rail:${p.id}`
                               : null
                           }
@@ -1035,7 +1033,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'continueWatching':
-        if (watch.length === 0 && !editMode) return null;
         if (watch.length === 0) {
           return <Text style={styles.widgetEmptyHint}>Continue watching shows up after you start a video</Text>;
         }
@@ -1071,7 +1068,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'liveNow':
-        if (live.length === 0 && !editMode) return null;
         if (live.length === 0) {
           return <Text style={styles.widgetEmptyHint}>No one is live right now</Text>;
         }
@@ -1108,7 +1104,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'trending':
-        if (trending.length === 0 && !editMode) return null;
         if (trending.length === 0) {
           return <Text style={styles.widgetEmptyHint}>Trending will fill in as the network heats up</Text>;
         }
@@ -1139,7 +1134,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'creators':
-        if (creators.length === 0 && !editMode) return null;
         if (creators.length === 0) {
           return <Text style={styles.widgetEmptyHint}>Creator suggestions appear as you follow interests</Text>;
         }
@@ -1209,7 +1203,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       case 'clubs':
         // Never dump the full club catalog as "Explore clubs" chrome.
-        if (myClubDefs.length === 0 && !editMode) return null;
         if (myClubDefs.length === 0) {
           return <Text style={styles.widgetEmptyHint}>Join clubs in Edit profile to pin them here</Text>;
         }
@@ -1240,7 +1233,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'clubPeople':
-        if (clubPeople.length === 0 && !editMode) return null;
         if (clubPeople.length === 0) {
           return <Text style={styles.widgetEmptyHint}>Join clubs to meet people who share them</Text>;
         }
@@ -1327,7 +1319,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'interests':
-        if (interestChips.length === 0 && !editMode) return null;
         if (interestChips.length === 0) {
           return <Text style={styles.widgetEmptyHint}>Pick interests in Customize to pin them here</Text>;
         }
@@ -1355,7 +1346,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'pageList':
-        if (otherPages.length === 0 && !editMode) return null;
         if (otherPages.length === 0) {
           return <Text style={styles.widgetEmptyHint}>No extra pages yet</Text>;
         }
@@ -1697,8 +1687,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
 
       {/* Home Layout Engine — ordered, user-customizable widgets */}
       {layoutWidgets.map((widget, index) => {
+        if (widget?.enabled === false && !editMode) return null;
         const body = renderWidgetBody(widget);
-        if (!body && !editMode) return null;
         return (
           <HomeWidgetFrame
             key={widget.id}
