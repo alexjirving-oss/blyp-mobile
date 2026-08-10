@@ -313,8 +313,9 @@ function EnhancedVideo(props) {
           /* best-effort */
         }
         await v.playAsync?.();
-        // Longer prime so first GOPs + decoder pipeline settle (~2 swipe/sec target).
-        await new Promise((r) => setTimeout(r, 480));
+        // Short prime only for farther parked cells. Nearest ahead stays in
+        // continuous muted decode via shouldPlay (HomeScreen keepDecodeHot).
+        await new Promise((r) => setTimeout(r, 180));
         if (cancelled) return;
         const stillUnfocused = !((props.shouldPlay ?? true) && AppState.currentState === 'active');
         if (!stillUnfocused) return;

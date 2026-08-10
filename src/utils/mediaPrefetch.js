@@ -14,8 +14,8 @@ import { isHlsVideoUri } from './feedVideoUri';
 
 /** Image.prefetch is cheap — allow a few in parallel for poster-first paint. */
 const MAX_INFLIGHT_IMG = 4;
-/** Full MP4 disk warm is heavy (Flip/Fold memory) — keep tight. */
-const MAX_INFLIGHT_VID = 1;
+/** Full MP4 disk warm is heavy (Flip/Fold memory). Allow 2 so For You +1/+2 can race. */
+const MAX_INFLIGHT_VID = 2;
 const seenImages = new Set();
 const seenVideos = new Set();
 /** In-flight / queued keys — failures stay retryable (unlike seenVideos). */

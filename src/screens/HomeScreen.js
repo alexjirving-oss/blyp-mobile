@@ -1797,16 +1797,22 @@ const HomeScreen = ({ navigation, route }) => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = resolveFeedVideoUri(item) || fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            // TikTok-speed warm: keep 1 behind + 3 ahead decoded around the mid-swipe
-            // load center, and never tear down the settled audible cell / its neighbor.
-            // URL disk prefetch alone cannot hit ~2 swipes/sec — decode must stay hot.
+            // Keep 1 behind + 2 ahead mounted. Ahead neighbors keep muted decode
+            // running (not warm-then-park) so focus lands on an already-painting
+            // surface — closest path to BAM BAM under expo-av constraints.
             const WARM_BEHIND = 1;
-            const WARM_AHEAD = 3;
+            const WARM_AHEAD = 2;
             const nearLoad =
               index >= discoverLoadIndex - WARM_BEHIND &&
               index <= discoverLoadIndex + WARM_AHEAD;
             const nearFocus = Math.abs(index - currentDiscoverIndex) <= 1;
             const shouldLoad = nearLoad || nearFocus;
+            const keepDecodeHot =
+              shouldLoad &&
+              !cellActive &&
+              (index === currentDiscoverIndex + 1 ||
+                index === currentDiscoverIndex + 2 ||
+                index === discoverLoadIndex + 1);
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
@@ -1814,13 +1820,12 @@ const HomeScreen = ({ navigation, route }) => {
                   uri={videoUri}
                   poster={item.thumbnail || item.imageUrl || item.user?.avatar}
                   style={StyleSheet.absoluteFill}
-                  shouldPlay={cellActive}
+                  shouldPlay={cellActive || keepDecodeHot}
                   shouldLoad={shouldLoad}
                   paused={pausedFeedId === item.id}
                   isLooping
-                  // Explicit mute on inactive/preload cells — never rely only on
-                  // shouldPlay→isFocused inside EnhancedVideo (preload thrash).
-                  isMuted={cellMuted}
+                  // Active cell respects sticky mute; decode-hot neighbors stay silent.
+                  isMuted={cellMuted || !cellActive}
                   audioOwnerId={cellActive ? String(item.id) : null}
                   mediaDisplay={item.mediaDisplay || null}
                   onError={(e) => {
