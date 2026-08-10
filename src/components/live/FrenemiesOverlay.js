@@ -36,6 +36,7 @@ import CelebrationBurst from './frenemies/CelebrationBurst';
 import TimerRing from './frenemies/TimerRing';
 import FrenemiesRulesSheet from './frenemies/FrenemiesRulesSheet';
 import FrenemiesSettingsSheet from './frenemies/FrenemiesSettingsSheet';
+import FrenemiesWheelGlyph from './frenemies/FrenemiesWheelGlyph';
 import BuyCoinsOverlay from '../BuyCoinsOverlay';
 
 const TEAL = '#00D2BE';
@@ -161,6 +162,7 @@ export default function FrenemiesOverlay({
   const [showRulesTip, setShowRulesTip] = useState(false);
   const [topUpOpen, setTopUpOpen] = useState(false);
   const subRef = useRef(null);
+  const spinCueWindowRef = useRef(null);
   const tension = useRef(new Animated.Value(0)).current;
   const landAnim = useRef(new Animated.Value(0)).current;
   const prevPhaseRef = useRef(null);
@@ -383,6 +385,11 @@ export default function FrenemiesOverlay({
     }
 
     const run = async () => {
+      const cueStart = Date.now();
+      spinCueWindowRef.current = {
+        start: new Date(cueStart).toISOString(),
+        end: new Date(cueStart + 1200).toISOString(),
+      };
       setSpinCue(true);
       setErr(null);
       // 1.2s lock-in cue before server spin.
@@ -406,6 +413,7 @@ export default function FrenemiesOverlay({
       } finally {
         setBusy(false);
         setSpinCue(false);
+        spinCueWindowRef.current = null;
       }
     };
 
@@ -583,11 +591,7 @@ export default function FrenemiesOverlay({
             style={styles.startGrad}
           >
             <View style={styles.openBrandRow}>
-              <View style={styles.wheelGlyph}>
-                <Text style={styles.wheelGlyphText} allowFontScaling={false}>
-                  W
-                </Text>
-              </View>
+              <FrenemiesWheelGlyph size={52} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.brandKicker} allowFontScaling={false}>
                   BLYP LIVE
@@ -651,23 +655,33 @@ export default function FrenemiesOverlay({
               </Text>
               <Text style={styles.scoreDot}>·</Text>
               <PayerBadge payer={payer} show={showPayer} />
+              <Text style={styles.scoreDot}>·</Text>
+              <Text
+                style={[
+                  styles.scoreItem,
+                  settings.autoContinue === true ? styles.autoOn : styles.autoOff,
+                ]}
+                allowFontScaling={false}
+              >
+                Auto {settings.autoContinue === true ? 'ON' : 'OFF'}
+              </Text>
             </View>
 
             {(phase === 'ready' || spinCue) ? (
               <View style={styles.readyBlock}>
-                <PrizeWheel
-                  size={168}
-                  maxSlots={maxSlots}
-                  phase={spinCue ? 'spinning' : 'ready'}
-                  roundId={state?.roundId || 'ready'}
-                  targetSlot={1}
-                  landedSlot={null}
-                  spinStartedAt={spinCue ? new Date().toISOString() : null}
-                  spinEndsAt={
-                    spinCue ? new Date(Date.now() + 1200).toISOString() : null
-                  }
-                  occupiedBySlot={occupiedBySlot}
-                />
+                <View style={styles.stageFrame}>
+                  <PrizeWheel
+                    size={196}
+                    maxSlots={maxSlots}
+                    phase={spinCue ? 'spinning' : 'ready'}
+                    roundId={state?.roundId || 'ready'}
+                    targetSlot={1}
+                    landedSlot={null}
+                    spinStartedAt={spinCue ? spinCueWindowRef.current?.start || null : null}
+                    spinEndsAt={spinCue ? spinCueWindowRef.current?.end || null : null}
+                    occupiedBySlot={occupiedBySlot}
+                  />
+                </View>
                 <Text style={styles.readyTitle} allowFontScaling={false}>
                   {spinCue ? 'Here we go…' : 'Ready when you are'}
                 </Text>
@@ -716,17 +730,19 @@ export default function FrenemiesOverlay({
 
             {phase === 'spinning' && !spinCue ? (
               <Animated.View style={[styles.wheelBlock, { transform: [{ scale: tensionScale }] }]}>
-                <PrizeWheel
-                  size={188}
-                  maxSlots={maxSlots}
-                  phase={phase}
-                  roundId={state.roundId}
-                  targetSlot={state.targetSlot}
-                  landedSlot={state.landedSlot}
-                  spinStartedAt={state.spinStartedAt}
-                  spinEndsAt={state.spinEndsAt}
-                  occupiedBySlot={occupiedBySlot}
-                />
+                <View style={styles.stageFrame}>
+                  <PrizeWheel
+                    size={210}
+                    maxSlots={maxSlots}
+                    phase={phase}
+                    roundId={state.roundId}
+                    targetSlot={state.targetSlot}
+                    landedSlot={state.landedSlot}
+                    spinStartedAt={state.spinStartedAt}
+                    spinEndsAt={state.spinEndsAt}
+                    occupiedBySlot={occupiedBySlot}
+                  />
+                </View>
                 <View style={styles.spinMeta}>
                   <TimerRing
                     endsAt={state.spinEndsAt}
@@ -1232,6 +1248,17 @@ const styles = StyleSheet.create({
   },
   payerText: { color: GOLD_SOFT, fontWeight: '900', fontSize: 10, letterSpacing: 0.4 },
   readyBlock: { alignItems: 'center', marginTop: 6 },
+  stageFrame: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,66,0.38)',
+    backgroundColor: 'rgba(10,10,12,0.45)',
+    marginBottom: 4,
+  },
+  autoOn: { color: ROSE },
+  autoOff: { color: TEAL },
   readyTitle: {
     color: '#fff',
     fontWeight: '900',

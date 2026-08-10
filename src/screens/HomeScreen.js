@@ -9,7 +9,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { db, auth, firebaseEnabled } from '../config/firebase';
 import EnhancedVideo from '../components/EnhancedVideo';
-import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker';
 import { addTestPostsWithMultiplePhotos } from '../utils/testDataHelper';
 import CategoriesTab from '../components/CategoriesTab';
 import HashtagsTab from '../components/HashtagsTab';
@@ -1443,7 +1442,13 @@ const HomeScreen = ({ navigation, route }) => {
     setLikeCounts((prev) => ({ ...prev, [postId]: nextLikeCount }));
 
     try {
-      const res = await setPostLiked({ postId, userId, like: !wasLiked });
+      const res = await setPostLiked({
+        postId,
+        userId,
+        metadata: {
+          postTitle: post?.title || post?.caption || post?.description,
+        },
+      });
       if (!res?.ok) {
         throw res?.error || new Error(res?.reason || 'LIKE_FAILED');
       }
@@ -1457,24 +1462,12 @@ const HomeScreen = ({ navigation, route }) => {
         setLikeCounts((prev) => ({ ...prev, [postId]: res.count }));
       }
 
-      if (wasLiked) {
-        if (post?.userId) {
-          await trackActivity(ACTIVITY_TYPES.UNLIKE, userId, post.userId, {
-            postId,
-            postTitle: post.title || post.caption || post.description,
-          });
-        }
-      } else {
+      if (!wasLiked) {
         setHeartsBurst((prev) => ({ postId, key: prev.key + 1 }));
         // Earn-your-reach: a genuine like is a positive merit signal.
         reportEngagement('like', postId, post?.userId || post?.uid);
-        if (post?.userId) {
-          await trackActivity(ACTIVITY_TYPES.LIKE, userId, post.userId, {
-            postId,
-            postTitle: post.title || post.caption || post.description,
-          });
-        }
       }
+      // Activity timestamps: LikeService.setPostLiked writes trackActivity(LIKE|UNLIKE).
     } catch (error) {
       console.error('Error updating like:', error);
       // revert explicitly

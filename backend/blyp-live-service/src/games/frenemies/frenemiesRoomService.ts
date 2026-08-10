@@ -492,7 +492,7 @@ async function awardAndResolve(
   room.state.challenge = null;
   room.state.challengeCorrectIndex = null;
   room.state.chooseEndsAt = new Date(Date.now() + room.settings.resultMs).toISOString();
-  if (room.settings.autoContinue) {
+  if (room.settings.autoContinue === true) {
     room.state.nextSpinAt = new Date(
       Date.now() + room.settings.resultMs + room.settings.autoContinueDelayMs,
     ).toISOString();
@@ -602,9 +602,11 @@ async function onChallengeTimeout(room: FrenemiesRoom): Promise<void> {
 }
 
 async function finishResolving(room: FrenemiesRoom): Promise<void> {
-  if (room.settings.autoContinue) {
-    const nextAt = room.state.nextSpinAt ? Date.parse(room.state.nextSpinAt) : 0;
-    if (nextAt && Date.now() < nextAt) {
+  // Host tap-spin is default. Auto-spin only when explicitly ON *and* scheduled.
+  const autoOn = room.settings.autoContinue === true;
+  const nextAt = room.state.nextSpinAt ? Date.parse(room.state.nextSpinAt) : NaN;
+  if (autoOn && Number.isFinite(nextAt)) {
+    if (Date.now() < nextAt) {
       return;
     }
     try {
@@ -638,7 +640,8 @@ async function tickOnce(sessionId: string) {
     }
 
     // Ready with no auto-continue: no timed work — stop ticking until host spins.
-    if (room.state.phase === 'ready' && !room.settings.autoContinue) {
+    if (room.state.phase === 'ready' && room.settings.autoContinue !== true) {
+      room.state.nextSpinAt = null;
       stopTicks(sessionId);
       return;
     }
@@ -664,14 +667,18 @@ async function tickOnce(sessionId: string) {
       }
     } else if (room.state.phase === 'resolving' && room.state.chooseEndsAt) {
       if (now >= Date.parse(room.state.chooseEndsAt)) {
-        if (room.settings.autoContinue && room.state.nextSpinAt && now < Date.parse(room.state.nextSpinAt)) {
+        if (
+          room.settings.autoContinue === true &&
+          room.state.nextSpinAt &&
+          now < Date.parse(room.state.nextSpinAt)
+        ) {
           // Wait for auto delay — keep resolving visual.
         } else {
           await finishResolving(room);
           emitType = 'PHASE';
         }
       } else if (
-        room.settings.autoContinue &&
+        room.settings.autoContinue === true &&
         room.state.nextSpinAt &&
         now >= Date.parse(room.state.chooseEndsAt) &&
         now >= Date.parse(room.state.nextSpinAt)
@@ -679,7 +686,11 @@ async function tickOnce(sessionId: string) {
         await finishResolving(room);
         emitType = 'PHASE';
       }
-    } else if (room.state.phase === 'ready' && room.settings.autoContinue && room.state.nextSpinAt) {
+    } else if (
+      room.state.phase === 'ready' &&
+      room.settings.autoContinue === true &&
+      room.state.nextSpinAt
+    ) {
       if (now >= Date.parse(room.state.nextSpinAt)) {
         try {
           await beginSpin(room);
@@ -713,7 +724,7 @@ export async function getRoom(sessionId: string): Promise<FrenemiesRoom | null> 
 export async function resumeTicksIfNeeded(sessionId: string): Promise<void> {
   const room = await loadRoom(sessionId);
   if (!room?.state?.active || room.state.phase === 'ended' || room.state.phase === 'idle') return;
-  if (room.state.phase === 'ready' && !room.settings.autoContinue) return;
+  if (room.state.phase === 'ready' && room.settings.autoContinue !== true) return;
   ensureTicks(sessionId);
 }
 
@@ -736,7 +747,9 @@ export async function startGame(args: {
       return room;
     }
 
-    const settings = defaultSettings();
+    const settings = defaultSettings({ autoContinue: false });
+    // Locked product default: host tap-spin only until host opts in.
+    settings.autoContinue = false;
     // Non-admins cannot start with house pays.
     if (!isFrenemiesAdmin(starterUserId) && !isFrenemiesAdmin(hostUserId)) {
       settings.housePays = false;
@@ -868,6 +881,14 @@ export async function updateSettings(args: {
     room.settings = defaultSettings({ ...room.settings, ...patch });
     if (!isFrenemiesAdmin(args.userId) && !isFrenemiesAdmin(room.hostUserId)) {
       room.settings.housePays = false;
+    }
+    // Turning auto-continue off must kill any scheduled auto-spin immediately.
+    if (room.settings.autoContinue !== true) {
+      room.settings.autoContinue = false;
+      room.state.nextSpinAt = null;
+      if (room.state.phase === 'ready') {
+        stopTicks(args.sessionId);
+      }
     }
     room.state.prizePreview = maxPrizeForSettings(room.settings);
     room.state.payer = payerFor(room);

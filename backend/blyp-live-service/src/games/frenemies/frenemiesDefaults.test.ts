@@ -12,6 +12,15 @@ describe('frenemies defaultSettings', () => {
     assert.equal(s.soloCoins, 25);
   });
 
+  it('only enables autoContinue when explicitly true', () => {
+    assert.equal(defaultSettings({ autoContinue: true }).autoContinue, true);
+    assert.equal(defaultSettings({ autoContinue: false }).autoContinue, false);
+    assert.equal(defaultSettings({ autoContinue: undefined }).autoContinue, false);
+    assert.equal(defaultSettings({ autoContinue: null as any }).autoContinue, false);
+    assert.equal(defaultSettings({ autoContinue: 1 as any }).autoContinue, false);
+    assert.equal(defaultSettings({ autoContinue: 'true' as any }).autoContinue, false);
+  });
+
   it('snaps spin to 10/15/20/30', () => {
     assert.equal(defaultSettings({ spinMs: 12_000 }).spinMs, 10_000);
     assert.equal(defaultSettings({ spinMs: 18_000 }).spinMs, 20_000);

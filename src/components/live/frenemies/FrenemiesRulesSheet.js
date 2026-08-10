@@ -71,9 +71,20 @@ export default function FrenemiesRulesSheet({
   } (BONUS coins).`;
 
   return (
-    <Modal visible={!!visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+    <Modal
+      visible={!!visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={styles.backdrop} pointerEvents="box-none">
+        <Pressable
+          style={StyleSheet.absoluteFillObject}
+          onPress={onClose}
+          accessibilityLabel="Dismiss rules"
+        />
+        <View style={styles.sheet} pointerEvents="auto">
           <LinearGradient
             colors={['#0E3D38', '#0A0A0C', '#1A1520']}
             start={{ x: 0, y: 0 }}
@@ -96,7 +107,11 @@ export default function FrenemiesRulesSheet({
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={styles.scroll}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
               {STEPS.map((step) => (
                 <View key={step.n} style={styles.step}>
                   <View style={styles.numBadge}>
@@ -130,8 +145,8 @@ export default function FrenemiesRulesSheet({
               </View>
             </ScrollView>
           </LinearGradient>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -149,6 +164,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(0,210,190,0.45)',
+    zIndex: 2,
+    elevation: 8,
   },
   grad: { padding: 16, maxHeight: '100%' },
   topRow: {

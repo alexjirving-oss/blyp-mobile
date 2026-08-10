@@ -22,7 +22,7 @@ import Icon from '../components/Icon';
 import { COLORS } from '../styles/theme';
 import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 import { useAuth } from '../hooks/useCommon';
-import { getActivity } from '../services/activityService';
+import { getActivity, pickCircleStripActors } from '../services/activityService';
 import { setActivitySeen } from '../services/userPreferencesService';
 import { looksLikeRawId, pickPublicLabel } from '../utils/publicLabel';
 
@@ -89,20 +89,14 @@ const ActivityScreen = ({ navigation }) => {
     setActivitySeen(uid);
   }, [load, uid]);
 
+  // Prefer Top Circle actors; if Top Circle is empty, fall back to following
+  // so "From your Circle" is not a dead empty strip.
   const circleActors = useMemo(() => {
-    const seen = new Set();
-    const out = [];
-    for (const item of items) {
-      if (!item?.inTopCircle || !item?.actorId || seen.has(item.actorId)) continue;
-      seen.add(item.actorId);
-      out.push({
-        actorId: item.actorId,
-        username: actorLabel(item),
-        avatar: item.avatar || null,
-      });
-      if (out.length >= 8) break;
-    }
-    return out;
+    return pickCircleStripActors(items, { limit: 8 }).map((item) => ({
+      actorId: item.actorId,
+      username: actorLabel(item),
+      avatar: item.avatar || null,
+    }));
   }, [items]);
 
   const openProfile = (actorId, name) => {

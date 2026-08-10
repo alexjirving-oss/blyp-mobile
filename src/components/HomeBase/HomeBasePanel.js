@@ -104,8 +104,7 @@ import {
 } from '../../live/joinStatusPreflight';
 import {
   prefetchPostWindow,
-  prefetchUriList,
-  prefetchVideoUri,
+  warmHomeVideoRails,
 } from '../../utils/mediaPrefetch';
 import EnhancedVideo from '../EnhancedVideo';
 import HomeWidgetFrame from './HomeWidgetFrame';
@@ -149,34 +148,6 @@ const QUICK_ACTIONS = [
   { id: 'recap', label: 'Your Blyp', icon: 'stats-chart', route: 'YourBlyp' },
   { id: 'wallet', label: 'Wallet', icon: 'wallet', route: 'CoinStore' },
 ];
-
-/** Warm Home video rails like a product that has to beat cold-start. */
-function warmHomeVideoRails({ forYou = [], trending = [], watch = [], live = [], creators = [] } = {}) {
-  // Posters first — first paint wins.
-  prefetchUriList(
-    [
-      ...forYou.flatMap((p) => [postThumbnail(p), p.thumbnail, p.imageUrl, p.userPhotoURL, p.user?.avatar, p.user?.photoURL]),
-      ...trending.flatMap((p) => [postThumbnail(p), p.thumbnail, p.imageUrl]),
-      ...watch.map((w) => w.thumbnail || w.imageUrl),
-      ...live.map((l) => l.thumbnail || l.coverUrl || l.photoURL),
-      ...creators.map((c) => c.photoURL || c.avatar),
-    ],
-    { idle: false },
-  );
-
-  // Progressive MP4 disk warm — first N For You + Continue watching + Trending.
-  prefetchPostWindow(forYou, 0, { radius: 4, images: true });
-  for (const p of (trending || []).slice(0, 6)) {
-    const v = resolveFeedVideoUri(p);
-    if (v) prefetchVideoUri(v, { idle: false, priority: true });
-  }
-  for (const w of (watch || []).slice(0, 6)) {
-    const v = resolveFeedVideoUri(w) || fixStorageUrl(w.videoUrl) || w.videoUrl;
-    if (v) prefetchVideoUri(v, { idle: false, priority: true });
-    const thumb = fixStorageUrl(w.thumbnail);
-    if (thumb) prefetchUriList([thumb], { idle: false });
-  }
-}
 
 function greeting() {
   const h = new Date().getHours();
@@ -267,6 +238,13 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         getPreferences(uid),
       ]);
       if (!active) return;
+      // Kick CDN warm before React commit so posters/MP4s race the first paint.
+      warmHomeVideoRails({
+        forYou: forYouRes,
+        trending: trendRes,
+        live: liveRes,
+        creators: creatorRes,
+      });
       setLive(liveRes);
       setTrending(trendRes);
       setCreators(creatorRes);
@@ -274,14 +252,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       setActiveForYou(0);
       setRecent(prefs.recentSearches || []);
       setLoading(false);
-
-      // Ship-blocker warm: posters + first N progressive MP4s immediately.
-      warmHomeVideoRails({
-        forYou: forYouRes,
-        trending: trendRes,
-        live: liveRes,
-        creators: creatorRes,
-      });
 
       try {
         const activity = await getActivity(uid);
@@ -318,9 +288,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     let active = true;
     getForYouPosts(interestTerms, Array.from(followingSet), 12).then((r) => {
       if (active) {
+        warmHomeVideoRails({ forYou: r });
         setForYou(r);
         setActiveForYou(0);
-        warmHomeVideoRails({ forYou: r });
       }
     });
     return () => {
@@ -390,18 +360,18 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         getPreferences(uid),
         getForYouPosts(interestTerms, Array.from(followingSet), 12),
       ]);
-      setLive(liveRes);
-      setTrending(trendRes);
-      setCreators(creatorRes);
-      setRecent(prefs.recentSearches || []);
-      setForYou(forYouRes);
-      setActiveForYou(0);
       warmHomeVideoRails({
         forYou: forYouRes,
         trending: trendRes,
         live: liveRes,
         creators: creatorRes,
       });
+      setLive(liveRes);
+      setTrending(trendRes);
+      setCreators(creatorRes);
+      setRecent(prefs.recentSearches || []);
+      setForYou(forYouRes);
+      setActiveForYou(0);
       try {
         const activity = await getActivity(uid);
         setUnread(countUnread(activity, prefs.lastSeenActivityAt || 0));

@@ -14,6 +14,7 @@ import {
   isReactionDuelEnabled,
 } from '../../config/LiveGamesFlags';
 import FrenemiesRulesSheet from '../live/frenemies/FrenemiesRulesSheet';
+import FrenemiesWheelGlyph from '../live/frenemies/FrenemiesWheelGlyph';
 
 const MARBLE_ENABLED = isMarbleRaceEnabled();
 const ARTILLERY_ENABLED = isArtilleryEnabled();
@@ -74,9 +75,7 @@ function FrenemiesHubCard({ enabled, onOpenLive, onHowItWorks }) {
             </Text>
           </View>
           <View style={styles.frenemiesGlyph}>
-            <Text style={styles.frenemiesGlyphText} allowFontScaling={false}>
-              W
-            </Text>
+            <FrenemiesWheelGlyph size={responsiveSize(44)} />
           </View>
         </View>
         <Text style={styles.frenemiesTitle} allowFontScaling={false}>
@@ -358,14 +357,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   frenemiesGlyph: {
-    width: responsiveSize(40),
-    height: responsiveSize(40),
-    borderRadius: responsiveSize(20),
+    width: responsiveSize(48),
+    height: responsiveSize(48),
+    borderRadius: responsiveSize(24),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(245,197,66,0.18)',
-    borderWidth: 2,
-    borderColor: GOLD,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   frenemiesGlyphText: { color: GOLD, fontWeight: '900', fontSize: responsiveFont(17) },
   frenemiesTitle: {

@@ -4,6 +4,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import FrenemiesWheelGlyph from './frenemies/FrenemiesWheelGlyph';
 
 const TEAL = '#00D2BE';
 const GOLD = '#F5C542';
@@ -70,9 +71,7 @@ export default function LiveGamesPicker({
                   </Text>
                 </View>
                 <View style={styles.frenemiesGlyph}>
-                  <Text style={styles.frenemiesGlyphText} allowFontScaling={false}>
-                    W
-                  </Text>
+                  <FrenemiesWheelGlyph size={48} />
                 </View>
                 <Text style={styles.cardTitle} allowFontScaling={false}>
                   Frenemies
@@ -270,15 +269,12 @@ const styles = StyleSheet.create({
   badgeText: { color: INK, fontWeight: '900', fontSize: 10, letterSpacing: 1 },
   cardIcon: { fontSize: 28, marginBottom: 6 },
   frenemiesGlyph: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 52,
+    height: 52,
     marginBottom: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(245,197,66,0.18)',
-    borderWidth: 2,
-    borderColor: GOLD,
+    backgroundColor: 'transparent',
   },
   frenemiesGlyphText: { color: GOLD, fontWeight: '900', fontSize: 16 },
   cardTitle: { color: '#fff', fontWeight: '900', fontSize: 17, letterSpacing: 0.2 },

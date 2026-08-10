@@ -1,6 +1,8 @@
 // mediaPrefetch.js
 // Aggressive-but-safe warm path for feeds / profile / home rails.
 // Videos go through videoCache (disk). Images use RN Image.prefetch (native disk).
+// Separate image vs video queues so posters never starve first MP4 bytes (and
+// heavy downloads never block avatar/poster first paint).
 // Idle work runs after interactions so first paint / scroll stay snappy.
 // Respects For You audio flicker fix: never touches AV mute/play — disk only.
 
@@ -10,33 +12,57 @@ import { fixStorageUrl } from './urlUtils';
 import { resolveFeedVideoUri } from './forYouFeedList';
 import { isHlsVideoUri } from './feedVideoUri';
 
-const MAX_INFLIGHT = 2; // Flip/Fold memory: never stampede downloads
+/** Image.prefetch is cheap — allow a few in parallel for poster-first paint. */
+const MAX_INFLIGHT_IMG = 4;
+/** Full MP4 disk warm is heavy (Flip/Fold memory) — keep tight. */
+const MAX_INFLIGHT_VID = 2;
 const seenImages = new Set();
 const seenVideos = new Set();
 /** In-flight / queued keys — failures stay retryable (unlike seenVideos). */
 const pendingVideos = new Set();
-let inflight = 0;
-const queue = [];
+let inflightImg = 0;
+let inflightVid = 0;
+const queueImg = [];
+const queueVid = [];
 
-function pump() {
-  while (inflight < MAX_INFLIGHT && queue.length) {
-    const job = queue.shift();
-    inflight += 1;
+function pumpImg() {
+  while (inflightImg < MAX_INFLIGHT_IMG && queueImg.length) {
+    const job = queueImg.shift();
+    inflightImg += 1;
     Promise.resolve()
       .then(job)
       .catch(() => {})
       .finally(() => {
-        inflight -= 1;
-        pump();
+        inflightImg -= 1;
+        pumpImg();
       });
   }
 }
 
-/** Prefer next-ahead warm over behind; higher priority jobs jump the queue. */
-function enqueue(job, { priority = false } = {}) {
-  if (priority) queue.unshift(job);
-  else queue.push(job);
-  pump();
+function pumpVid() {
+  while (inflightVid < MAX_INFLIGHT_VID && queueVid.length) {
+    const job = queueVid.shift();
+    inflightVid += 1;
+    Promise.resolve()
+      .then(job)
+      .catch(() => {})
+      .finally(() => {
+        inflightVid -= 1;
+        pumpVid();
+      });
+  }
+}
+
+function enqueueImage(job) {
+  queueImg.push(job);
+  pumpImg();
+}
+
+/** Prefer next-ahead warm over behind; higher priority jobs jump the video queue. */
+function enqueueVideo(job, { priority = false } = {}) {
+  if (priority) queueVid.unshift(job);
+  else queueVid.push(job);
+  pumpVid();
 }
 
 function normalizeUri(uri) {
@@ -54,7 +80,7 @@ export function prefetchImageUri(uri, { idle = false } = {}) {
   seenImages.add(key);
 
   const run = () => {
-    enqueue(() => {
+    enqueueImage(() => {
       try {
         return Promise.resolve(Image.prefetch(key)).catch(() => {});
       } catch {
@@ -90,7 +116,7 @@ export function prefetchVideoUri(uri, { idle = false, priority = false } = {}) {
   pendingVideos.add(key);
 
   const run = () => {
-    enqueue(
+    enqueueVideo(
       () =>
         prefetchVideoToCache(key)
           .then((local) => {
@@ -208,4 +234,65 @@ export function runWhenIdle(fn) {
       /* ignore */
     }
   }
+}
+
+/**
+ * Home cold-start warm — poster-first, then progressive MP4s, never blocks UI.
+ *
+ * Phase 1 (same tick): enqueue posters/avatars on the image queue.
+ * Phase 2 (same tick): kick first N For You + Continue watching MP4s on the
+ *   video queue (parallel to posters; priority).
+ * Phase 3 (after interactions): widen window + trending so first paint wins.
+ */
+export function warmHomeVideoRails({
+  forYou = [],
+  trending = [],
+  watch = [],
+  live = [],
+  creators = [],
+} = {}) {
+  // Phase 1 — posters first so rail tiles paint with thumbs immediately.
+  prefetchUriList(
+    [
+      ...(forYou || []).flatMap((p) => [
+        p?.thumbnail,
+        p?.imageUrl,
+        p?.userPhotoURL,
+        p?.user?.avatar,
+        p?.user?.photoURL,
+        ...(Array.isArray(p?.media) ? p.media.map((m) => m?.thumbnail || m?.url) : []),
+      ]),
+      ...(trending || []).flatMap((p) => [p?.thumbnail, p?.imageUrl]),
+      ...(watch || []).map((w) => w?.thumbnail || w?.imageUrl),
+      ...(live || []).map((l) => l?.thumbnail || l?.coverUrl || l?.photoURL),
+      ...(creators || []).map((c) => c?.photoURL || c?.avatar),
+    ],
+    { idle: false },
+  );
+
+  // Phase 2 — first progressive MP4s ASAP (separate queue; UI already committed).
+  const kickHotVideos = (list, limit) => {
+    for (const p of (list || []).slice(0, limit)) {
+      const v =
+        postVideoUri(p) ||
+        normalizeUri(p?.videoUrl) ||
+        normalizeUri(p?.mediaUrl) ||
+        null;
+      if (v) prefetchVideoUri(v, { idle: false, priority: true });
+    }
+  };
+  kickHotVideos(forYou, 3);
+  kickHotVideos(watch, 4);
+
+  // Phase 3 — wider disk warm after first interactions / paint settle.
+  runWhenIdle(() => {
+    if (Array.isArray(forYou) && forYou.length) {
+      prefetchPostWindow(forYou, 0, { radius: 5, images: true });
+    }
+    kickHotVideos(trending, 6);
+    for (const w of (watch || []).slice(0, 6)) {
+      const thumb = normalizeUri(w?.thumbnail);
+      if (thumb) prefetchImageUri(thumb, { idle: true });
+    }
+  });
 }

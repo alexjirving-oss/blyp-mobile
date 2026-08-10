@@ -2,6 +2,7 @@ import { firestore, firebaseEnabled } from '../config/firebase';
 import { doc as webDoc, runTransaction as runWebTransaction } from 'firebase/firestore';
 import { ensureFirebaseAuthReady } from '../utils/firebaseAuthHelper';
 import { snapExists, snapData } from '../utils/firestoreSnap';
+import { trackActivity, ACTIVITY_TYPES } from '../utils/activityTracker';
 
 function toLikeInt(value) {
   const n = Number(value);
@@ -43,7 +44,11 @@ export function computePostLikeNext(data, userId) {
 // threw a TypeError on every tap and the catch silently reverted the optimistic
 // heart ("likes flash on then turn off"). Mirrors CommentsModal's dual path:
 // native SDK when available, web modular SDK otherwise.
-export async function setPostLiked({ postId, userId }) {
+//
+// After a successful write, records trackActivity(LIKE|UNLIKE) with a real
+// serverTimestamp so Activity inbox can avoid likedBy → ts:0 soft fallbacks.
+// Activity write is fire-and-forget and never fails the like itself.
+export async function setPostLiked({ postId, userId, metadata = {} }) {
   if (!postId || typeof postId !== 'string') {
     return { ok: false, reason: 'INVALID_POST_ID' };
   }
@@ -73,9 +78,15 @@ export async function setPostLiked({ postId, userId }) {
       result = await firestore.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         if (!snapExists(snap)) throw new Error('POST_NOT_FOUND');
-        const next = computeNext(snapData(snap) || {});
+        const data = snapData(snap) || {};
+        const next = computeNext(data);
         tx.update(ref, next.payload);
-        return { liked: next.liked, count: next.count };
+        return {
+          liked: next.liked,
+          count: next.count,
+          ownerId: data.userId || data.uid || null,
+          postTitle: data.title || data.caption || data.description || null,
+        };
       });
     } else {
       // Web modular instance (the path release builds actually take).
@@ -83,11 +94,30 @@ export async function setPostLiked({ postId, userId }) {
       result = await runWebTransaction(firestore, async (tx) => {
         const snap = await tx.get(ref);
         if (!snapExists(snap)) throw new Error('POST_NOT_FOUND');
-        const next = computeNext(snapData(snap) || {});
+        const data = snapData(snap) || {};
+        const next = computeNext(data);
         tx.update(ref, next.payload);
-        return { liked: next.liked, count: next.count };
+        return {
+          liked: next.liked,
+          count: next.count,
+          ownerId: data.userId || data.uid || null,
+          postTitle: data.title || data.caption || data.description || null,
+        };
       });
     }
+
+    const ownerId = result.ownerId;
+    if (ownerId && ownerId !== userId) {
+      const type = result.liked ? ACTIVITY_TYPES.LIKE : ACTIVITY_TYPES.UNLIKE;
+      const title = metadata.postTitle || result.postTitle || undefined;
+      Promise.resolve(
+        trackActivity(type, userId, ownerId, {
+          postId,
+          ...(title ? { postTitle: title } : {}),
+        }),
+      ).catch(() => {});
+    }
+
     return { ok: true, liked: result.liked, count: result.count };
   } catch (e) {
     console.warn('[LikeService] setPostLiked failed', e?.code || '', e?.message || String(e));

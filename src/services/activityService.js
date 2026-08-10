@@ -379,4 +379,25 @@ export function countUnread(items, lastSeenAt = 0) {
   return (items || []).filter((i) => (i.ts || 0) > (lastSeenAt || 0)).length;
 }
 
-export default { getActivity, countUnread };
+/**
+ * "From your Circle" strip: prefer Top Circle actors; if none, fall back to
+ * following so the row is not empty when Top Circle has not been filled yet.
+ */
+export function pickCircleStripActors(items, { limit = 8 } = {}) {
+  const collect = (predicate) => {
+    const seen = new Set();
+    const out = [];
+    for (const item of items || []) {
+      if (!predicate(item) || !item?.actorId || seen.has(item.actorId)) continue;
+      seen.add(item.actorId);
+      out.push(item);
+      if (out.length >= limit) break;
+    }
+    return out;
+  };
+  const fromTop = collect((item) => !!item?.inTopCircle);
+  if (fromTop.length) return fromTop;
+  return collect((item) => !!item?.inFollowing);
+}
+
+export default { getActivity, countUnread, pickCircleStripActors };

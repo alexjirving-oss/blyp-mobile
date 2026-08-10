@@ -2,33 +2,58 @@
  * Frenemies prize wheel — 11 segments, right-side pointer, ease-out land
  * on the authoritative server slot (targetSlot / landedSlot).
  * Occupied slots paint guest photo (else initials) when roster is known.
+ * Idle (ready) never rotates — only a soft outer glow pulse.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
-import Svg, { G, Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import Svg, {
+  G,
+  Path,
+  Circle,
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Stop,
+} from 'react-native-svg';
 import { Audio } from 'expo-av';
 import { pickPublicLabel } from '../../../utils/publicLabel';
 
 const TEAL_DEEP = '#0A6B62';
+const TEAL = '#00D2BE';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
+const GOLD_DARK = '#C9A227';
 const INK = '#0A0A0C';
 const ROSE = '#FB7185';
+const ROSE_DEEP = '#9F1239';
 
 /** Pointer sits at 3 o'clock (degrees from top, clockwise). */
 const POINTER_DEG = 90;
 
 const SEG_COLORS = [
-  '#0E3D38',
-  '#124F48',
-  '#0A6B62',
-  '#0E3D38',
-  '#1A3A2F',
-  '#124F48',
-  '#0A6B62',
-  '#0E3D38',
+  '#0B2F2C',
+  '#123F3A',
+  '#0E4A44',
+  '#1A2A38',
+  '#0B2F2C',
   '#163D36',
-  '#124F48',
+  '#0E4A44',
+  '#1A2530',
+  '#0B2F2C',
+  '#123F3A',
+  '#0E4A44',
+];
+
+const SEG_COLORS_ALT = [
+  '#0F3D38',
+  '#15524A',
+  '#0A6B62',
+  '#1C3340',
+  '#0F3D38',
+  '#1A4A40',
+  '#0A6B62',
+  '#243040',
+  '#0F3D38',
+  '#15524A',
   '#0A6B62',
 ];
 
@@ -126,7 +151,7 @@ function SegFace({ uri, name, size = 22 }) {
         width: size,
         height: size,
         borderRadius: r,
-        backgroundColor: 'rgba(0,210,190,0.35)',
+        backgroundColor: 'rgba(0,210,190,0.4)',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1.5,
@@ -163,43 +188,43 @@ export default function PrizeWheel({
   const slot = landedSlot || targetSlot;
   const cx = size / 2;
   const cy = size / 2;
-  const rOuter = size * 0.46;
-  const rInner = size * 0.14;
+  const rOuter = size * 0.44;
+  const rInner = size * 0.15;
+  const rBezel = rOuter + size * 0.035;
   const seg = 360 / maxSlots;
 
-  const faceSize = Math.max(18, Math.min(26, Math.round(size * 0.12)));
+  const faceSize = Math.max(18, Math.min(28, Math.round(size * 0.125)));
 
   const segments = useMemo(() => {
     return Array.from({ length: maxSlots }, (_, i) => {
       const start = i * seg;
       const end = (i + 1) * seg;
       const mid = start + seg / 2;
-      const labelPos = polar(cx, cy, rOuter * 0.72, mid);
+      const labelPos = polar(cx, cy, rOuter * 0.7, mid);
+      const stud = polar(cx, cy, rBezel - 1, mid);
       const n = i + 1;
       const guest = occupiedBySlot[n] || occupiedBySlot[String(n)] || null;
       const name = guestLabel(guest) || (guest ? 'Guest' : null);
       const photo = guestPhoto(guest);
+      const occupied = !!guest;
       return {
         n,
         path: segmentPath(cx, cy, rOuter, rInner, start, end),
-        color: SEG_COLORS[i % SEG_COLORS.length],
+        color: occupied ? TEAL_DEEP : i % 2 === 0 ? SEG_COLORS[i % SEG_COLORS.length] : SEG_COLORS_ALT[i % SEG_COLORS_ALT.length],
+        accent: i % 3 === 0,
         labelPos,
-        occupied: !!guest,
+        stud,
+        occupied,
         name,
         photo,
       };
     });
-  }, [maxSlots, seg, cx, cy, rOuter, rInner, occupiedBySlot]);
+  }, [maxSlots, seg, cx, cy, rOuter, rInner, rBezel, occupiedBySlot]);
 
-  // Load tick once; unload on unmount.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Do not call Audio.setAudioModeAsync here. The native IVS live-audio
-        // guard owns PlayAndRecord/video-chat + the speaker route; replacing it
-        // would briefly disable the publishing mic/AEC until the guard repairs
-        // the session. The short tick plays inside the existing IVS session.
         const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
           shouldPlay: false,
           volume: 0.25,
@@ -235,6 +260,7 @@ export default function PrizeWheel({
       });
   };
 
+  // Rotation only while spinning — ready/idle stays parked (no auto-spin visual).
   useEffect(() => {
     if (phase !== 'spinning') {
       const land = landRotationForSlot(slot || 1, maxSlots, 0);
@@ -278,6 +304,7 @@ export default function PrizeWheel({
     };
   }, [phase, roundId, targetSlot, slot, maxSlots, spinStartedAt, spinEndsAt, spinAnim]);
 
+  // Glow pulse only — never tied to rotation (ready must not look like a spin).
   useEffect(() => {
     if (phase !== 'spinning' && phase !== 'ready') {
       pulse.setValue(0);
@@ -287,13 +314,13 @@ export default function PrizeWheel({
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: phase === 'ready' ? 1400 : 900,
+          duration: phase === 'ready' ? 1600 : 900,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(pulse, {
           toValue: 0,
-          duration: phase === 'ready' ? 1400 : 900,
+          duration: phase === 'ready' ? 1600 : 900,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
@@ -308,84 +335,128 @@ export default function PrizeWheel({
     outputRange: ['-7200deg', '7200deg'],
   });
 
-  const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.045] });
+  const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] });
 
   return (
-    <View style={[styles.wrap, { width: size + 28, height: size + 8 }]}>
-      <Animated.View
-        style={[
-          styles.wheelStage,
-          { width: size, height: size, transform: [{ scale: glowScale }, { rotate }] },
-        ]}
-      >
-        <View
+    <View style={[styles.wrap, { width: size + 36, height: size + 12 }]}>
+      <View style={[styles.wheelStage, { width: size, height: size }]}>
+        <Animated.View
+          pointerEvents="none"
           style={[
             styles.glow,
             {
-              width: size,
-              height: size,
-              borderRadius: size / 2,
+              width: size + 10,
+              height: size + 10,
+              borderRadius: (size + 10) / 2,
+              opacity: glowOpacity,
+              transform: [{ scale: glowScale }],
             },
           ]}
         />
-        <Svg width={size} height={size}>
-          <Defs>
-            <LinearGradient id="hubGold" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0%" stopColor={GOLD_SOFT} />
-              <Stop offset="100%" stopColor={GOLD} />
-            </LinearGradient>
-          </Defs>
-          <Circle cx={cx} cy={cy} r={rOuter + 3} fill={INK} stroke={GOLD} strokeWidth={3} />
-          <G>
+        <Animated.View
+          style={{
+            width: size,
+            height: size,
+            transform: [{ rotate }],
+          }}
+        >
+          <Svg width={size} height={size}>
+            <Defs>
+              <SvgLinearGradient id="hubGold" x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0%" stopColor={GOLD_SOFT} />
+                <Stop offset="45%" stopColor={GOLD} />
+                <Stop offset="100%" stopColor={GOLD_DARK} />
+              </SvgLinearGradient>
+              <SvgLinearGradient id="bezelRing" x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0%" stopColor="#2A2418" />
+                <Stop offset="50%" stopColor={INK} />
+                <Stop offset="100%" stopColor="#1A1520" />
+              </SvgLinearGradient>
+              <SvgLinearGradient id="rimGold" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0%" stopColor={GOLD_SOFT} />
+                <Stop offset="100%" stopColor={GOLD_DARK} />
+              </SvgLinearGradient>
+            </Defs>
+
+            {/* Outer bezel */}
+            <Circle cx={cx} cy={cy} r={rBezel + 2} fill="url(#bezelRing)" stroke="url(#rimGold)" strokeWidth={3.5} />
+            <Circle cx={cx} cy={cy} r={rOuter + 1.5} fill={INK} stroke="rgba(0,210,190,0.45)" strokeWidth={1.5} />
+
+            <G>
+              {segments.map((s) => (
+                <Path
+                  key={s.n}
+                  d={s.path}
+                  fill={s.color}
+                  stroke={s.occupied ? TEAL : s.accent ? 'rgba(245,197,66,0.55)' : 'rgba(245,197,66,0.28)'}
+                  strokeWidth={s.occupied ? 1.6 : 1}
+                />
+              ))}
+            </G>
+
+            {/* Gold studs on bezel */}
             {segments.map((s) => (
-              <Path
-                key={s.n}
-                d={s.path}
-                fill={s.occupied ? TEAL_DEEP : s.color}
-                stroke="rgba(245,197,66,0.35)"
-                strokeWidth={1}
+              <Circle
+                key={`stud-${s.n}`}
+                cx={s.stud.x}
+                cy={s.stud.y}
+                r={Math.max(1.6, size * 0.012)}
+                fill={s.occupied ? TEAL : GOLD}
+                stroke={INK}
+                strokeWidth={0.6}
               />
             ))}
-          </G>
-          <Circle cx={cx} cy={cy} r={rInner} fill="url(#hubGold)" stroke={INK} strokeWidth={2} />
-        </Svg>
-        <View style={[StyleSheet.absoluteFillObject, { width: size, height: size }]} pointerEvents="none">
-          {segments.map((s) => {
-            const chip = s.occupied ? faceSize + 2 : 24;
-            const half = chip / 2;
-            return (
-              <View
-                key={`t-${s.n}`}
-                style={[
-                  styles.segLabel,
-                  {
-                    left: s.labelPos.x - half,
-                    top: s.labelPos.y - half,
-                    width: chip,
-                    height: chip,
-                  },
-                ]}
-              >
-                {s.occupied ? (
-                  <SegFace uri={s.photo} name={s.name} size={faceSize} />
-                ) : (
-                  <Text style={styles.segNum} allowFontScaling={false}>
-                    {s.n}
-                  </Text>
-                )}
-              </View>
-            );
-          })}
-          <View style={[styles.hubLabel, { left: cx - 22, top: cy - 10, width: 44 }]}>
-            <Text style={styles.hubText} allowFontScaling={false}>
-              {phase === 'ready' ? 'READY' : 'SPIN'}
-            </Text>
+
+            {/* Hub */}
+            <Circle cx={cx} cy={cy} r={rInner + 3} fill={INK} stroke={GOLD} strokeWidth={2} />
+            <Circle cx={cx} cy={cy} r={rInner} fill="url(#hubGold)" stroke={INK} strokeWidth={1.5} />
+            <Circle cx={cx} cy={cy} r={rInner * 0.38} fill={INK} />
+            <Circle cx={cx} cy={cy} r={rInner * 0.18} fill={GOLD} />
+          </Svg>
+
+          <View style={[StyleSheet.absoluteFillObject, { width: size, height: size }]} pointerEvents="none">
+            {segments.map((s) => {
+              const chip = s.occupied ? faceSize + 2 : Math.max(20, Math.round(size * 0.11));
+              const half = chip / 2;
+              return (
+                <View
+                  key={`t-${s.n}`}
+                  style={[
+                    styles.segLabel,
+                    {
+                      left: s.labelPos.x - half,
+                      top: s.labelPos.y - half,
+                      width: chip,
+                      height: chip,
+                    },
+                  ]}
+                >
+                  {s.occupied ? (
+                    <SegFace uri={s.photo} name={s.name} size={faceSize} />
+                  ) : (
+                    <View style={styles.emptyChip}>
+                      <Text style={[styles.segNum, { fontSize: Math.max(10, size * 0.055) }]} allowFontScaling={false}>
+                        {s.n}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+            <View style={[styles.hubLabel, { left: cx - 26, top: cy - 11, width: 52 }]}>
+              <Text style={styles.hubText} allowFontScaling={false}>
+                {phase === 'ready' ? 'READY' : phase === 'spinning' ? 'SPIN' : 'FE'}
+              </Text>
+            </View>
           </View>
-        </View>
-      </Animated.View>
+        </Animated.View>
+      </View>
 
       <View style={[styles.pointerWrap, { height: size }]} pointerEvents="none">
+        <View style={styles.pointerStem} />
         <View style={styles.pointer} />
+        <View style={styles.pointerCore} />
       </View>
     </View>
   );
@@ -396,28 +467,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    paddingRight: 2,
+    paddingRight: 4,
   },
   pointerWrap: {
-    width: 22,
-    marginLeft: -6,
+    width: 28,
+    marginLeft: -8,
     zIndex: 6,
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
+  },
+  pointerStem: {
+    position: 'absolute',
+    left: 0,
+    width: 10,
+    height: 6,
+    backgroundColor: GOLD_DARK,
+    borderRadius: 2,
   },
   pointer: {
     width: 0,
     height: 0,
-    borderTopWidth: 11,
-    borderBottomWidth: 11,
-    borderRightWidth: 20,
+    marginLeft: 6,
+    borderTopWidth: 12,
+    borderBottomWidth: 12,
+    borderRightWidth: 22,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
     borderRightColor: ROSE,
-    shadowColor: '#000',
-    shadowOpacity: 0.45,
-    shadowRadius: 3,
+    shadowColor: ROSE_DEEP,
+    shadowOpacity: 0.55,
+    shadowRadius: 4,
     shadowOffset: { width: -1, height: 0 },
+  },
+  pointerCore: {
+    position: 'absolute',
+    left: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: GOLD,
+    borderWidth: 1,
+    borderColor: INK,
   },
   wheelStage: {
     alignItems: 'center',
@@ -425,19 +515,29 @@ const styles = StyleSheet.create({
   },
   glow: {
     position: 'absolute',
-    backgroundColor: 'rgba(0,210,190,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.35)',
+    backgroundColor: 'rgba(0,210,190,0.22)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(245,197,66,0.4)',
   },
   segLabel: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  emptyChip: {
+    minWidth: 20,
+    minHeight: 20,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(10,10,12,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,197,66,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   segNum: {
     color: GOLD_SOFT,
     fontWeight: '900',
-    fontSize: 12,
     letterSpacing: 0.3,
     textShadowColor: 'rgba(0,0,0,0.65)',
     textShadowOffset: { width: 0, height: 1 },
@@ -450,7 +550,7 @@ const styles = StyleSheet.create({
   hubText: {
     color: INK,
     fontWeight: '900',
-    fontSize: 11,
-    letterSpacing: 1.2,
+    fontSize: 10,
+    letterSpacing: 1.4,
   },
 });
