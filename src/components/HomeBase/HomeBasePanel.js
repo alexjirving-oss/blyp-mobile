@@ -177,14 +177,38 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   // as the home screen loads.
   const [activeForYou, setActiveForYou] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Hub vertical scroll gate — pause rail decode so nested horizontal warm
+  // never fights the Home scroll thread (1.0.48 jank mode).
+  const [hubScrolling, setHubScrolling] = useState(false);
+  const hubScrollIdleTimer = useRef(null);
+  const markHubScrolling = useCallback(() => {
+    setHubScrolling(true);
+    if (hubScrollIdleTimer.current) clearTimeout(hubScrollIdleTimer.current);
+    hubScrollIdleTimer.current = setTimeout(() => {
+      hubScrollIdleTimer.current = null;
+      setHubScrolling(false);
+    }, 140);
+  }, []);
+  useEffect(() => () => {
+    if (hubScrollIdleTimer.current) clearTimeout(hubScrollIdleTimer.current);
+  }, []);
   // Snap step = forYouCard width (150) + railRow gap (12). Keep in sync with styles.
   const FORYOU_SNAP = 162;
-  const onForYouScrollEnd = useCallback((e) => {
-    const x = e?.nativeEvent?.contentOffset?.x || 0;
-    const idx = Math.max(0, Math.round(x / FORYOU_SNAP));
+  const activeForYouRef = useRef(0);
+  const syncForYouIndex = useCallback((x) => {
+    const idx = Math.max(0, Math.round((x || 0) / FORYOU_SNAP));
+    if (idx === activeForYouRef.current) return;
+    activeForYouRef.current = idx;
     setActiveForYou(idx);
-    prefetchPostWindow(forYou, idx, { radius: 3, images: true });
+    // Home hub: ±1 disk warm only — harder cap than full-screen For You.
+    prefetchPostWindow(forYou, idx, { radius: 1, images: true, maxPriorityDist: 1 });
   }, [forYou]);
+  const onForYouScroll = useCallback((e) => {
+    syncForYouIndex(e?.nativeEvent?.contentOffset?.x || 0);
+  }, [syncForYouIndex]);
+  const onForYouScrollEnd = useCallback((e) => {
+    syncForYouIndex(e?.nativeEvent?.contentOffset?.x || 0);
+  }, [syncForYouIndex]);
 
   // The home Blyp bar accepts typed input: reminders are created in place and
   // listed right below; anything else opens the full Blyp assistant.
@@ -249,6 +273,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       setTrending(trendRes);
       setCreators(creatorRes);
       setForYou(forYouRes);
+      activeForYouRef.current = 0;
       setActiveForYou(0);
       setRecent(prefs.recentSearches || []);
       setLoading(false);
@@ -291,6 +316,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       if (active) {
         warmHomeVideoRails({ forYou: r });
         setForYou(r);
+        activeForYouRef.current = 0;
         setActiveForYou(0);
       }
     });
@@ -366,6 +392,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       setCreators(creatorRes);
       setRecent(prefs.recentSearches || []);
       setForYou(forYouRes);
+      activeForYouRef.current = 0;
       setActiveForYou(0);
       try {
         const activity = await getActivity(uid);
@@ -990,6 +1017,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
               snapToAlignment="start"
               decelerationRate="fast"
               disableIntervalMomentum
+              scrollEventThrottle={16}
+              nestedScrollEnabled
+              onScroll={onForYouScroll}
               onMomentumScrollEnd={onForYouScrollEnd}
               onScrollEndDrag={onForYouScrollEnd}
             >
@@ -998,10 +1028,16 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                 const isVideo = p.type === 'video' || !!p.videoUrl || !!resolveFeedVideoUri(p);
                 const videoUri = isVideo ? (resolveFeedVideoUri(p) || '') : '';
                 const isActive = index === activeForYou;
-                // Home scroll FPS: decode only the focused rail tile. Neighbors
-                // stay poster + disk-warm (mediaPrefetch) — mounting 3 EnhancedVideos
-                // on the hub destroyed main-thread frame time.
-                const mountVideo = isActive && isVideo && !!videoUri;
+                const dist = Math.abs(index - activeForYou);
+                const railAudible =
+                  isScreenFocused && !listening && !transcribing;
+                // Hub FPS: unload ±1 while hub scrolls. Keep ACTIVE shouldPlay
+                // (muted) so EnhancedVideo warm-then-park never seeks the live
+                // tile back to 0 when railPlaying flickers.
+                const mountVideo =
+                  isVideo &&
+                  !!videoUri &&
+                  (isActive || (dist === 1 && railAudible && !hubScrolling));
                 return (
                   <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openForYouRailPost(p)}>
                     <View>
@@ -1016,14 +1052,18 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                         <EnhancedVideo
                           uri={videoUri}
                           poster={uri}
-                          style={[styles.forYouThumb, StyleSheet.absoluteFill]}
+                          style={[
+                            styles.forYouThumb,
+                            StyleSheet.absoluteFill,
+                            !isActive ? styles.forYouPreloadHidden : null,
+                          ]}
                           resizeMode="cover"
                           shouldLoad
-                          shouldPlay={isScreenFocused && !listening && !transcribing}
+                          shouldPlay={isActive && railAudible}
                           isLooping
-                          isMuted={!isScreenFocused || listening || transcribing}
+                          isMuted={!isActive || !railAudible || hubScrolling}
                           audioOwnerId={
-                            isScreenFocused && !listening && !transcribing
+                            isActive && railAudible && !hubScrolling
                               ? `home-rail:${p.id}`
                               : null
                           }
@@ -1437,6 +1477,10 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
+      scrollEventThrottle={32}
+      onScroll={markHubScrolling}
+      onScrollBeginDrag={markHubScrolling}
+      onMomentumScrollBegin={markHubScrolling}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}

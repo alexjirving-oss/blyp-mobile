@@ -482,10 +482,8 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         if (!exists) {
           logger.warn('[economy-schema] iap_products missing after ensure; skipping seed');
         } else {
-          // coins_granted = total coins delivered to the wallet (base + bonus).
-          // SKUs must match the Google Play product IDs and the client coin packs.
-          // Idempotent (onConflict ignore) so it safely tops up already-seeded DBs
-          // with any newly added packs without overwriting manual edits.
+          // coins_granted = website BASE only (1 coin = 1p). App never grants web bonus.
+          // Merge on conflict so legacy bonus totals (550/1150/…) converge to catalog.
           await db('iap_products')
             .insert(
               IAP_CATALOG.map((entry) => ({
@@ -497,7 +495,11 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
               }))
             )
             .onConflict(['platform', 'sku'])
-            .ignore();
+            .merge({
+              coins_granted: db.raw('excluded.coins_granted'),
+              enabled: true,
+              metadata: db.raw('excluded.metadata'),
+            });
         }
       } catch (e: any) {
         logger.warn({ err: e?.message || String(e) }, '[economy-schema] seed iap_products failed');

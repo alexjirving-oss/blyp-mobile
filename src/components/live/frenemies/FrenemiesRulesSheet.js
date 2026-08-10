@@ -54,6 +54,16 @@ const STEPS = [
     title: 'Host conducts',
     body: 'The host taps Spin each round (unless Auto-continue is on). Opening the show does not auto-spin.',
   },
+  {
+    n: '8',
+    title: 'Queue & seats',
+    body: 'Request to join from the show or guest CTA — fair FIFO queue. After each round settles, one eligible player may auto-drop and the next queued person is seated.',
+  },
+  {
+    n: '9',
+    title: 'First spin & cooldown',
+    body: 'New seats are protected until their box number hits once. Just-dropped players sit out at least one full round before they can return.',
+  },
 ];
 
 export default function FrenemiesRulesSheet({

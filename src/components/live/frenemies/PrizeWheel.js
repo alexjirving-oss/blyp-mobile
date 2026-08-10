@@ -3,9 +3,22 @@
  * on the authoritative server slot (targetSlot / landedSlot).
  * Occupied slots paint guest photo (else initials) when roster is known.
  * Idle (ready) never rotates — only a soft outer glow pulse.
+ *
+ * Spin: Reanimated native rotation (60fps). Peg ticks are scheduled from the
+ * easing curve (no Animated.addListener) so ticks stay consistent with angular
+ * velocity without stalling the JS thread.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Easing, Image } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, {
   G,
   Path,
@@ -88,16 +101,29 @@ export function landRotationForSlot(slot, maxSlots, extraSpins = 8) {
   return extraSpins * 360 + POINTER_DEG - centerFromTop;
 }
 
-function easeOutCubic(t) {
-  return 1 - (1 - t) ** 3;
+/**
+ * Long high-speed phase then smooth ease-out.
+ * First ~58% of time covers ~78% of travel; remaining time eases into the land.
+ * Worklet so Reanimated can drive native rotation without JS stutter.
+ */
+export function easeWheelSpin(t) {
+  'worklet';
+  const x = Math.min(1, Math.max(0, t));
+  if (x <= 0.58) {
+    return (0.78 * x) / 0.58;
+  }
+  const u = (x - 0.58) / 0.42;
+  const eased = 1 - (1 - u) ** 3;
+  return 0.78 + 0.22 * eased;
 }
 
 function spinsForDuration(ms) {
   const s = Math.max(0, ms) / 1000;
-  if (s <= 8) return 4;
-  if (s <= 20) return 6;
-  if (s <= 40) return 9;
-  return 12;
+  // More revolutions + longer coast for a "keeps spinning fast" feel.
+  if (s <= 8) return 6;
+  if (s <= 20) return 10;
+  if (s <= 40) return 14;
+  return 18;
 }
 
 function segUnderPointer(rotationDeg, maxSlots) {
@@ -105,6 +131,21 @@ function segUnderPointer(rotationDeg, maxSlots) {
   const seg = 360 / n;
   const under = ((POINTER_DEG - rotationDeg) % 360 + 360) % 360;
   return Math.floor(under / seg) % n;
+}
+
+/**
+ * Inverse of easeWheelSpin for scheduling peg-pass ticks at wall-clock times.
+ */
+function invertEaseWheelSpin(y) {
+  const target = Math.min(1, Math.max(0, y));
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 28; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (easeWheelSpin(mid) < target) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 function initialsFor(name) {
@@ -179,11 +220,12 @@ export default function PrizeWheel({
   spinEndsAt,
   occupiedBySlot = {},
 }) {
-  const spinAnim = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0)).current;
+  const spinDeg = useSharedValue(0);
+  const pulse = useSharedValue(0);
   const tickSoundRef = useRef(null);
-  const lastTickSeg = useRef(-1);
-  const tickBusy = useRef(false);
+  const tickTimersRef = useRef([]);
+  const tickPoolRef = useRef([]);
+  const tickPoolIdx = useRef(0);
 
   const slot = landedSlot || targetSlot;
   const cx = size / 2;
@@ -210,7 +252,11 @@ export default function PrizeWheel({
       return {
         n,
         path: segmentPath(cx, cy, rOuter, rInner, start, end),
-        color: occupied ? TEAL_DEEP : i % 2 === 0 ? SEG_COLORS[i % SEG_COLORS.length] : SEG_COLORS_ALT[i % SEG_COLORS_ALT.length],
+        color: occupied
+          ? TEAL_DEEP
+          : i % 2 === 0
+            ? SEG_COLORS[i % SEG_COLORS.length]
+            : SEG_COLORS_ALT[i % SEG_COLORS_ALT.length],
         accent: i % 3 === 0,
         labelPos,
         stud,
@@ -223,120 +269,153 @@ export default function PrizeWheel({
 
   useEffect(() => {
     let cancelled = false;
+    const pool = [];
     (async () => {
       try {
-        const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
-          shouldPlay: false,
-          volume: 0.25,
-          isLooping: false,
-        });
-        if (cancelled) {
-          await sound.unloadAsync().catch(() => {});
-          return;
+        // Small pool so rapid peg passes never skip (replayAsync on one sound stalls).
+        for (let i = 0; i < 3; i += 1) {
+          const { sound } = await Audio.Sound.createAsync(WHEEL_TICK, {
+            shouldPlay: false,
+            volume: 0.32,
+            isLooping: false,
+          });
+          if (cancelled) {
+            await sound.unloadAsync().catch(() => {});
+            return;
+          }
+          pool.push(sound);
         }
-        tickSoundRef.current = sound;
+        tickPoolRef.current = pool;
+        tickSoundRef.current = pool[0] || null;
       } catch {
         // Best-effort — wheel still works silent.
       }
     })();
     return () => {
       cancelled = true;
-      const s = tickSoundRef.current;
+      tickTimersRef.current.forEach(clearTimeout);
+      tickTimersRef.current = [];
+      const sounds = tickPoolRef.current.splice(0);
       tickSoundRef.current = null;
-      if (s) s.unloadAsync().catch(() => {});
+      sounds.forEach((s) => s.unloadAsync().catch(() => {}));
     };
   }, []);
 
   const playTick = () => {
-    const s = tickSoundRef.current;
-    if (!s || tickBusy.current) return;
-    tickBusy.current = true;
-    s.replayAsync()
-      .catch(() => s.setPositionAsync(0).then(() => s.playAsync()).catch(() => {}))
-      .finally(() => {
-        setTimeout(() => {
-          tickBusy.current = false;
-        }, 28);
-      });
+    const pool = tickPoolRef.current;
+    if (!pool.length) return;
+    const s = pool[tickPoolIdx.current % pool.length];
+    tickPoolIdx.current += 1;
+    if (!s) return;
+    s.replayAsync().catch(() => {
+      s.setPositionAsync(0)
+        .then(() => s.playAsync())
+        .catch(() => {});
+    });
+  };
+
+  const clearTickTimers = () => {
+    tickTimersRef.current.forEach(clearTimeout);
+    tickTimersRef.current = [];
+  };
+
+  /** Schedule one tick per segment boundary crossed during the remaining spin. */
+  const schedulePegTicks = (fromDeg, toDeg, durationMs, maxSlotsLocal) => {
+    clearTickTimers();
+    if (!(durationMs > 40) || !(toDeg > fromDeg)) return;
+    const delta = toDeg - fromDeg;
+    const segSize = 360 / Math.max(1, maxSlotsLocal);
+    const startSeg = segUnderPointer(fromDeg, maxSlotsLocal);
+    let lastSeg = startSeg;
+    const crossings = [];
+    // Sample rotation progress densely enough to catch every boundary.
+    const steps = Math.min(2400, Math.max(80, Math.ceil(delta / (segSize * 0.2))));
+    for (let i = 1; i <= steps; i += 1) {
+      const p = i / steps;
+      const deg = fromDeg + delta * p;
+      const idx = segUnderPointer(deg, maxSlotsLocal);
+      if (idx !== lastSeg) {
+        lastSeg = idx;
+        crossings.push(p);
+      }
+    }
+    const startWall = Date.now();
+    for (const p of crossings) {
+      // Map travel fraction → eased wall time so ticks match perceived speed.
+      const tNorm = invertEaseWheelSpin(p);
+      const delay = Math.max(0, Math.round(tNorm * durationMs) - (Date.now() - startWall));
+      const id = setTimeout(() => {
+        playTick();
+      }, delay);
+      tickTimersRef.current.push(id);
+    }
   };
 
   // Rotation only while spinning — ready/idle stays parked (no auto-spin visual).
   useEffect(() => {
+    clearTickTimers();
     if (phase !== 'spinning') {
+      cancelAnimation(spinDeg);
       const land = landRotationForSlot(slot || 1, maxSlots, 0);
-      spinAnim.setValue(land);
-      lastTickSeg.current = -1;
+      spinDeg.value = land;
       return undefined;
     }
 
     const endMs = Date.parse(spinEndsAt || '') || Date.now() + 30_000;
     const startMs = Date.parse(spinStartedAt || '') || Date.now();
     const total = Math.max(1, endMs - startMs);
-    const remaining = Math.max(120, endMs - Date.now());
+    const remaining = Math.max(180, endMs - Date.now());
     const elapsed = Math.max(0, Math.min(total, Date.now() - startMs));
     const progress = elapsed / total;
 
     const extra = spinsForDuration(total);
     const finalDeg = landRotationForSlot(targetSlot || slot || 1, maxSlots, extra);
-    const fromDeg = easeOutCubic(progress) * finalDeg;
-    spinAnim.setValue(fromDeg);
-    lastTickSeg.current = segUnderPointer(fromDeg, maxSlots);
+    const fromDeg = easeWheelSpin(progress) * finalDeg;
+    spinDeg.value = fromDeg;
 
-    const id = spinAnim.addListener(({ value }) => {
-      const idx = segUnderPointer(value, maxSlots);
-      if (idx !== lastTickSeg.current) {
-        lastTickSeg.current = idx;
-        playTick();
-      }
-    });
+    schedulePegTicks(fromDeg, finalDeg, remaining, maxSlots);
 
-    const anim = Animated.timing(spinAnim, {
-      toValue: finalDeg,
+    spinDeg.value = withTiming(finalDeg, {
       duration: remaining,
-      easing: Easing.bezier(0.12, 0.75, 0.18, 1),
-      useNativeDriver: true,
+      easing: easeWheelSpin,
     });
-    anim.start();
 
     return () => {
-      anim.stop();
-      spinAnim.removeListener(id);
+      cancelAnimation(spinDeg);
+      clearTickTimers();
     };
-  }, [phase, roundId, targetSlot, slot, maxSlots, spinStartedAt, spinEndsAt, spinAnim]);
+    // spinDeg is a stable shared value; omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, roundId, targetSlot, slot, maxSlots, spinStartedAt, spinEndsAt]);
 
   // Glow pulse only — never tied to rotation (ready must not look like a spin).
   useEffect(() => {
     if (phase !== 'spinning' && phase !== 'ready') {
-      pulse.setValue(0);
+      cancelAnimation(pulse);
+      pulse.value = 0;
       return undefined;
     }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: phase === 'ready' ? 1600 : 900,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0,
-          duration: phase === 'ready' ? 1600 : 900,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
+    const half = phase === 'ready' ? 1600 : 900;
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: half, easing: Easing.inOut(Easing.sin) }),
+        withTiming(0, { duration: half, easing: Easing.inOut(Easing.sin) })
+      ),
+      -1,
+      false
     );
-    loop.start();
-    return () => loop.stop();
-  }, [phase, pulse]);
+    return () => cancelAnimation(pulse);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
-  const rotate = spinAnim.interpolate({
-    inputRange: [-7200, 7200],
-    outputRange: ['-7200deg', '7200deg'],
-  });
+  const wheelStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${spinDeg.value}deg` }],
+  }));
 
-  const glowScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
-  const glowOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] });
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: 0.35 + pulse.value * 0.35,
+    transform: [{ scale: 1 + pulse.value * 0.06 }],
+  }));
 
   return (
     <View style={[styles.wrap, { width: size + 36, height: size + 12 }]}>
@@ -349,17 +428,18 @@ export default function PrizeWheel({
               width: size + 10,
               height: size + 10,
               borderRadius: (size + 10) / 2,
-              opacity: glowOpacity,
-              transform: [{ scale: glowScale }],
             },
+            glowStyle,
           ]}
         />
         <Animated.View
-          style={{
-            width: size,
-            height: size,
-            transform: [{ rotate }],
-          }}
+          style={[
+            {
+              width: size,
+              height: size,
+            },
+            wheelStyle,
+          ]}
         >
           <Svg width={size} height={size}>
             <Defs>

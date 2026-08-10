@@ -58,7 +58,7 @@ import { useIVSViewerSession } from '../live/ivs/hooks/useIVSViewerSession';
 import { COLORS } from '../styles/theme';
 import Icon from './Icon';
 import ReservedGuestTile from './live/ReservedGuestTile';
-import { createGuestToken, requestGuestSlot, getMyGuestRequest, leaveGuest, guestHeartbeat, MAX_GUEST_SLOTS } from '../api/ivsLiveApi';
+import { createGuestToken, requestGuestSlot, getMyGuestRequest, leaveGuest, guestHeartbeat, MAX_GUEST_SLOTS, frenemiesQueueJoin } from '../api/ivsLiveApi';
 import { requestCameraAndAudioPermission } from '../utils/permissions';
 import { getIVSNativeClient } from '../streaming/IVSNativeClient';
 import { subscribeToRoomEvents } from '../realtime/roomEventsSocket';
@@ -1066,6 +1066,16 @@ const IVSLiveStreamViewer = ({
 
         // Create a guest request record. Host must accept before guest-token can be minted.
         await requestGuestSlot(streamId, slotId);
+        // While Frenemies is live, also enter the fair FIFO queue (auto-fill on drop).
+        // Ignore if Frenemies is not running.
+        try {
+          await frenemiesQueueJoin(streamId, {
+            displayName: viewerDisplayName || undefined,
+            source: 'guest_request',
+          });
+        } catch {
+          /* GAME_NOT_FOUND / cooldown — guest request still stands */
+        }
         // Mirror the request into Firestore so the host gets a reliable,
         // instant real-time notification (the live-service poll alone proved
         // flaky — host often "never saw" the request). Best-effort.

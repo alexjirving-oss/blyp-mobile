@@ -557,7 +557,7 @@ const CoinStoreScreen = ({
     const confirmPrice = localizedPrices[packageData.sku] || `$${packageData.price}`;
     Alert.alert(
       'Purchase Blypcoins',
-      `Buy ${packageData.coins + packageData.bonus} Blypcoins for ${confirmPrice}?`,
+      `Buy ${packageData.coins} Blypcoins for ${confirmPrice}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -647,9 +647,9 @@ const CoinStoreScreen = ({
   };
 
   const renderPackage = (pkg) => {
-    const totalCoins = pkg.coins + pkg.bonus;
-    const coinValue = pkg.price / totalCoins;
-    const savings = pkg.bonus > 0 ? Math.round((pkg.bonus / pkg.coins) * 100) : 0;
+    const totalCoins = Number(pkg.coins || 0);
+    const coinValue = totalCoins > 0 ? pkg.price / totalCoins : 0;
+    const savings = 0;
     const displayPrice = localizedPrices[pkg.sku] || `$${pkg.price}`;
 
     return (
@@ -674,10 +674,14 @@ const CoinStoreScreen = ({
 
           <View style={styles.coinInfo}>
             <Text style={styles.coinAmount}>{pkg.coins.toLocaleString()}</Text>
-            {pkg.bonus > 0 && (
-              <Text style={styles.bonusText}>+{pkg.bonus} BONUS</Text>
+            {pkg.bonus > 0 ? (
+              <>
+                <Text style={styles.bonusText}>+{pkg.bonus} BONUS</Text>
+                <Text style={styles.totalCoins}>= {totalCoins.toLocaleString()} total</Text>
+              </>
+            ) : (
+              <Text style={styles.totalCoins}>coins</Text>
             )}
-            <Text style={styles.totalCoins}>= {totalCoins.toLocaleString()} total</Text>
           </View>
 
           <View style={styles.priceInfo}>

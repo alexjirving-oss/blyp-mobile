@@ -33,6 +33,20 @@ import {
   nearestSpinMs,
   type FrenemiesSettings,
 } from './frenemiesSettings';
+import {
+  emptySeatRoster,
+  enqueueJoin,
+  dequeueUser,
+  ensureSeatMeta,
+  isCooldownClear,
+  isDropProtected,
+  markWheelHit,
+  publicSeatSnapshot,
+  recordDrop,
+  settleSeatsAfterRound,
+  type QueueEntry,
+  type SeatRoster,
+} from './frenemiesSeatQueue';
 
 const TTL_SECONDS = 60 * 60 * 2;
 const stateKey = (sessionId: string) => `frenemies:game:${sessionId}`;
@@ -119,6 +133,12 @@ export interface FrenemiesRoom {
   autoContinuePolicyVersion?: number;
   stats: SessionStats;
   winnerCoins: Record<string, { displayName: string; coins: number }>;
+  /** Per-player seat protection / cooldown (server-enforced). */
+  seatRoster: SeatRoster;
+  /** FIFO join queue (comment CTA / guest request). */
+  joinQueue: QueueEntry[];
+  /** Kick that already happened this round (throw/timeout) — counts as the auto-drop. */
+  droppedThisRoundUserId?: string | null;
   state: FrenemiesState;
   version: number;
   createdAt: string;
@@ -184,6 +204,9 @@ async function loadRoom(sessionId: string): Promise<FrenemiesRoom | null> {
     else room.settings = defaultSettings(room.settings);
     if (!room.stats) room.stats = emptyStats();
     if (!room.winnerCoins) room.winnerCoins = {};
+    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+    if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
+    if (room.droppedThisRoundUserId === undefined) room.droppedThisRoundUserId = null;
     if (!room.state.prizeHold) room.state.prizeHold = null;
     if (room.state.nextSpinAt === undefined) room.state.nextSpinAt = null;
     if (!room.state.payer) room.state.payer = payerFor(room);
@@ -290,6 +313,7 @@ export function publicEvent(
 ) {
   const s = room.settings;
   const stats = { ...room.stats, topWinners: buildTopWinners(room) };
+  const seats = publicSeatSnapshot(room.seatRoster || {}, room.joinQueue || []);
   return {
     game: 'frenemies' as const,
     sessionId: room.sessionId,
@@ -311,6 +335,8 @@ export function publicEvent(
     maxCoins: MAX_COINS,
     spinOptionsMs: [...SPIN_OPTIONS_MS],
     isAdminHost: isFrenemiesAdmin(room.hostUserId) || isFrenemiesAdmin(room.startedByUserId),
+    seatMeta: seats.seatMeta,
+    queue: seats.queue,
   };
 }
 
@@ -442,10 +468,20 @@ async function beginSpin(room: FrenemiesRoom): Promise<void> {
     };
   }
 
+  const nextRoundIndex = (room.state.roundIndex || 0) + 1;
+  room.droppedThisRoundUserId = null;
+
+  // Snapshot seat meta for everyone currently live (first-spin protection starts here).
+  const occ = await liveOccupants(room.sessionId);
+  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+  for (const o of occ) {
+    ensureSeatMeta(room.seatRoster, o.userId, o.displayName, nextRoundIndex);
+  }
+
   room.state = {
     phase: 'spinning',
     roundId,
-    roundIndex: (room.state.roundIndex || 0) + 1,
+    roundIndex: nextRoundIndex,
     spinStartedAt: new Date(now).toISOString(),
     spinEndsAt: new Date(now + spinMs).toISOString(),
     targetSlot: pickTargetSlot(roundId),
@@ -543,6 +579,10 @@ async function resolveSpinLand(room: FrenemiesRoom): Promise<void> {
   room.state.spinEndsAt = nowIso();
 
   if (atSlot) {
+    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+    ensureSeatMeta(room.seatRoster, atSlot.userId, atSlot.displayName, room.state.roundIndex || 0);
+    // First-spin protection clears when their number comes up.
+    markWheelHit(room.seatRoster, atSlot.userId);
     enterChoosing(room, atSlot.userId, atSlot.displayName);
     return;
   }
@@ -592,7 +632,14 @@ function enterChoosing(room: FrenemiesRoom, userId: string, displayName: string)
 async function afterChooserReady(room: FrenemiesRoom, userId: string, displayName: string): Promise<void> {
   room.stats.challengeWins += 1;
   const occ = await liveOccupants(room.sessionId);
-  const throwable = occ.filter((o) => o.userId !== userId);
+  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+  for (const o of occ) {
+    ensureSeatMeta(room.seatRoster, o.userId, o.displayName, room.state.roundIndex || 0);
+  }
+  // Only guests who already had a wheel hit can be thrown (first-spin protection).
+  const throwable = occ.filter(
+    (o) => o.userId !== userId && !isDropProtected(room.seatRoster, o.userId),
+  );
   if (throwable.length === 0) {
     const amount = room.settings.soloCoins;
     await awardAndResolve(room, {
@@ -616,6 +663,15 @@ async function onChooseTimeout(room: FrenemiesRoom): Promise<void> {
     return;
   }
   await forceKick(room.sessionId, chooser);
+  room.droppedThisRoundUserId = chooser;
+  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+  recordDrop(
+    room.seatRoster,
+    chooser,
+    room.state.chooserDisplayName || 'Chooser',
+    room.state.roundIndex || 0,
+  );
+  room.joinQueue = dequeueUser(room.joinQueue || [], chooser);
   await awardAndResolve(room, {
     kind: 'timeout_kick',
     text: `${room.state.chooserDisplayName || 'Chooser'} ran out of time — thrown out with no coins.`,
@@ -633,13 +689,34 @@ async function onChallengeTimeout(room: FrenemiesRoom): Promise<void> {
 }
 
 async function finishResolving(room: FrenemiesRoom): Promise<void> {
+  // Round settle: outcome banner done → auto-drop (if needed) + auto-fill queue.
+  const occ = await liveOccupants(room.sessionId);
+  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+  if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
+  try {
+    const settled = await settleSeatsAfterRound({
+      sessionId: room.sessionId,
+      hostUserId: room.hostUserId,
+      roundIndex: room.state.roundIndex || 0,
+      roster: room.seatRoster,
+      queue: room.joinQueue,
+      occupants: occ,
+      alreadyDroppedUserId: room.droppedThisRoundUserId || room.state.lastResult?.kickedUserId || null,
+    });
+    room.seatRoster = settled.roster;
+    room.joinQueue = settled.queue;
+    room.droppedThisRoundUserId = null;
+    if (settled.droppedUserId || settled.seatedUserIds.length) {
+      room.version += 1;
+    }
+  } catch (e: any) {
+    logger.warn({ err: e?.message }, '[frenemies] seat settle failed');
+  }
+
   // Host tap-spin is default. Auto-spin only when explicitly ON *and* scheduled.
   const autoOn = room.settings.autoContinue === true;
   const nextAt = room.state.nextSpinAt ? Date.parse(room.state.nextSpinAt) : NaN;
-  if (autoOn && Number.isFinite(nextAt)) {
-    if (Date.now() < nextAt) {
-      return;
-    }
+  if (autoOn && Number.isFinite(nextAt) && Date.now() >= nextAt) {
     try {
       await beginSpin(room);
     } catch (e: any) {
@@ -654,6 +731,9 @@ async function finishResolving(room: FrenemiesRoom): Promise<void> {
       }
       throw e;
     }
+    return;
+  }
+  if (autoOn && Number.isFinite(nextAt) && Date.now() < nextAt) {
     return;
   }
   // Clear result banner when returning to Ready; keep stats.
@@ -804,6 +884,9 @@ export async function startGame(args: {
       autoContinuePolicyVersion: 2,
       stats: emptyStats(),
       winnerCoins: {},
+      seatRoster: emptySeatRoster(),
+      joinQueue: [],
+      droppedThisRoundUserId: null,
       state: {
         phase: 'ready',
         roundId: '',
@@ -1012,8 +1095,19 @@ export async function throwGuest(args: {
       err.code = 'TARGET_NOT_ON_STAGE';
       throw err;
     }
+    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+    ensureSeatMeta(room.seatRoster, target.userId, target.displayName, room.state.roundIndex || 0);
+    // First-spin protection: cannot throw someone whose box has never landed.
+    if (isDropProtected(room.seatRoster, target.userId)) {
+      const err: any = new Error('TARGET_PROTECTED');
+      err.code = 'TARGET_PROTECTED';
+      throw err;
+    }
 
     await forceKick(args.sessionId, args.targetUserId);
+    room.droppedThisRoundUserId = args.targetUserId;
+    recordDrop(room.seatRoster, args.targetUserId, target.displayName, room.state.roundIndex || 0);
+    room.joinQueue = dequeueUser(room.joinQueue || [], args.targetUserId);
     const amount = room.settings.throwCoins;
     room.stats.throws += 1;
     await awardAndResolve(room, {
@@ -1189,6 +1283,91 @@ export async function getHostPrizePreview(sessionId: string): Promise<{
   }
   const balance = await getSpendableCoins(room.hostUserId);
   return { balance, needed, canSpin: balance >= needed || needed === 0, payer };
+}
+
+/**
+ * Viewer/guest join request → FIFO Frenemies queue (+ underlying guest REQUESTED).
+ * Comment CTA and stage join CTA should both call this while Frenemies is active.
+ */
+export async function requestJoinQueue(args: {
+  sessionId: string;
+  userId: string;
+  displayName?: string;
+  photoUrl?: string | null;
+  source?: 'comment' | 'guest_request' | 'cta';
+}): Promise<FrenemiesRoom> {
+  if (!args.userId) {
+    const err: any = new Error('NO_USER');
+    err.code = 'NO_USER';
+    throw err;
+  }
+  return withLock(args.sessionId, async () => {
+    const room = await loadRoom(args.sessionId);
+    if (!room || !room.state.active || room.state.phase === 'ended' || room.state.phase === 'idle') {
+      const err: any = new Error('GAME_NOT_FOUND');
+      err.code = 'GAME_NOT_FOUND';
+      throw err;
+    }
+    if (args.userId === room.hostUserId) {
+      const err: any = new Error('HOST_CANNOT_QUEUE');
+      err.code = 'HOST_CANNOT_QUEUE';
+      throw err;
+    }
+
+    const occ = await liveOccupants(args.sessionId);
+    if (occ.some((o) => o.userId === args.userId)) {
+      const err: any = new Error('ALREADY_SEATED');
+      err.code = 'ALREADY_SEATED';
+      throw err;
+    }
+
+    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+    const meta = room.seatRoster[args.userId];
+    if (meta && !isCooldownClear(meta, room.state.roundIndex || 0)) {
+      const err: any = new Error('DROP_COOLDOWN');
+      err.code = 'DROP_COOLDOWN';
+      throw err;
+    }
+
+    try {
+      const { requestGuestSlot } = await import('../../live/liveService');
+      await requestGuestSlot(args.sessionId, args.userId);
+    } catch (e: any) {
+      if (e?.code !== 'GUEST_SESSION_ACTIVE') {
+        logger.warn({ err: e?.message }, '[frenemies] join queue guest request failed');
+      }
+    }
+
+    if (!Array.isArray(room.joinQueue)) room.joinQueue = [];
+    const result = enqueueJoin(room.joinQueue, {
+      userId: args.userId,
+      displayName: (args.displayName || 'Guest').slice(0, 40),
+      photoUrl: args.photoUrl || null,
+      requestedAt: nowIso(),
+      source: args.source || 'cta',
+    });
+    room.joinQueue = result.queue;
+    if (result.enqueued) room.version += 1;
+    await saveRoom(room);
+    emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'SNAPSHOT'));
+    return room;
+  });
+}
+
+export async function leaveJoinQueue(args: {
+  sessionId: string;
+  userId: string;
+}): Promise<FrenemiesRoom | null> {
+  return withLock(args.sessionId, async () => {
+    const room = await loadRoom(args.sessionId);
+    if (!room) return null;
+    const before = (room.joinQueue || []).length;
+    room.joinQueue = dequeueUser(room.joinQueue || [], args.userId);
+    if (room.joinQueue.length !== before) room.version += 1;
+    await saveRoom(room);
+    emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'SNAPSHOT'));
+    return room;
+  });
 }
 
 // Back-compat exports used by older imports / ops docs.

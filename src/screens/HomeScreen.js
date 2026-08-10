@@ -1613,8 +1613,8 @@ const HomeScreen = ({ navigation, route }) => {
       const y = e?.nativeEvent?.contentOffset?.y;
       if (!Number.isFinite(y) || !feedHeight) return;
       const maxIndex = Math.max(0, (randomPostsRef.current?.length || 0) - 1);
-      // Bias slightly toward the destination page so next mounts mid-swipe.
-      const raw = Math.floor(y / feedHeight + 0.55);
+      // Symmetric mid-swipe mount so reverse (±) warms like forward.
+      const raw = Math.floor(y / feedHeight + 0.5);
       const loadIndex = Math.min(maxIndex, Math.max(0, raw));
       if (loadIndex !== discoverLoadIndexRef.current) {
         discoverLoadIndexRef.current = loadIndex;
@@ -1797,22 +1797,21 @@ const HomeScreen = ({ navigation, route }) => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
             const videoUri = resolveFeedVideoUri(item) || fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            // Keep 1 behind + 2 ahead mounted. Ahead neighbors keep muted decode
-            // running (not warm-then-park) so focus lands on an already-painting
-            // surface — closest path to BAM BAM under expo-av constraints.
-            const WARM_BEHIND = 1;
-            const WARM_AHEAD = 2;
+            // Symmetric warm: ±1/±2 both directions so swipe-up and swipe-down
+            // BAM-land equally. Neighbors keep muted decode running (not
+            // warm-then-park) under expo-av constraints.
+            const WARM_RADIUS = 2;
             const nearLoad =
-              index >= discoverLoadIndex - WARM_BEHIND &&
-              index <= discoverLoadIndex + WARM_AHEAD;
-            const nearFocus = Math.abs(index - currentDiscoverIndex) <= 1;
+              index >= discoverLoadIndex - WARM_RADIUS &&
+              index <= discoverLoadIndex + WARM_RADIUS;
+            const distFocus = Math.abs(index - currentDiscoverIndex);
+            const nearFocus = distFocus <= 1;
             const shouldLoad = nearLoad || nearFocus;
             const keepDecodeHot =
               shouldLoad &&
               !cellActive &&
-              (index === currentDiscoverIndex + 1 ||
-                index === currentDiscoverIndex + 2 ||
-                index === discoverLoadIndex + 1);
+              distFocus >= 1 &&
+              distFocus <= WARM_RADIUS;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>

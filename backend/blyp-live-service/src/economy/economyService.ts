@@ -1271,23 +1271,23 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
       .where({ platform: input.platform, sku: input.sku, enabled: true })
       .first();
 
-    if (!product) {
-      // Self-heal: the iap_products row can be missing if the startup seed never
-      // ran on an older deployment. Fall back to the authoritative in-code
-      // catalog (never trust client-supplied amounts) and upsert the row so the
-      // table converges. Only known SKUs resolve; unknown SKUs still 404.
-      const catalogEntry = findIapCatalogEntry(input.platform, input.sku);
-      if (!catalogEntry) {
+    // Authoritative grant is always the in-code catalog (website BASE, no bonus).
+    // Converge stale iap_products rows that still hold legacy bonus totals.
+    const catalogEntry = findIapCatalogEntry(input.platform, input.sku);
+    if (!catalogEntry) {
+      if (!product) {
         throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
       }
-
+    } else {
       await trx('iap_products')
         .insert({
           platform: catalogEntry.platform,
           sku: catalogEntry.sku,
           coins_granted: catalogEntry.coinsGranted,
           enabled: true,
-          metadata: trx.raw('?::jsonb', [JSON.stringify({ label: catalogEntry.label, priceUsd: catalogEntry.priceUsd, source: 'self_heal' })]),
+          metadata: trx.raw('?::jsonb', [
+            JSON.stringify({ label: catalogEntry.label, priceUsd: catalogEntry.priceUsd, source: 'catalog' }),
+          ]),
         })
         .onConflict(['platform', 'sku'])
         .merge({ coins_granted: catalogEntry.coinsGranted, enabled: true });
@@ -1299,6 +1299,12 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
       if (!product) {
         throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
       }
+      // Never trust a stale DB grant over the locked base catalog.
+      product = { ...product, coins_granted: catalogEntry.coinsGranted };
+    }
+
+    if (!product) {
+      throw new EconomyError('NOT_FOUND', 404, 'IAP product not found or disabled');
     }
 
     const verifyResult = await verifyProviderPurchase(input);

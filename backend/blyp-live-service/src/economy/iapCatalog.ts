@@ -9,9 +9,9 @@
  *      older deployment. This guarantees a verified Google Play purchase can
  *      always resolve a grant instead of failing with NOT_FOUND.
  *
- * coins_granted = total coins delivered to the wallet (base + bonus).
- * SKUs MUST match the Google Play in-app product IDs and the client coin packs
- * in src/services/BlypCoinService.js exactly.
+ * coins_granted = website BASE only (1 coin = 1p). App never grants web +15% bonus.
+ * SKU product ids may keep legacy Play names (.550 etc.); titles/grants are base.
+ * Client packs in src/services/BlypCoinService.js must match these grants.
  */
 
 export type IapPlatform = 'ANDROID' | 'IOS';
@@ -26,19 +26,19 @@ export type IapCatalogEntry = {
 
 export const ANDROID_IAP_CATALOG: ReadonlyArray<IapCatalogEntry> = Object.freeze([
   { platform: 'ANDROID', sku: 'blyp.android.proof.coinpack.100', coinsGranted: 100, label: '100 coins', priceUsd: 0.99 },
-  { platform: 'ANDROID', sku: 'blyp.android.coinpack.550', coinsGranted: 550, label: '500 + 50 bonus', priceUsd: 4.99 },
-  { platform: 'ANDROID', sku: 'blyp.android.coinpack.1150', coinsGranted: 1150, label: '1000 + 150 bonus', priceUsd: 9.99 },
-  { platform: 'ANDROID', sku: 'blyp.android.coinpack.3000', coinsGranted: 3000, label: '2500 + 500 bonus', priceUsd: 19.99 },
-  { platform: 'ANDROID', sku: 'blyp.android.coinpack.6500', coinsGranted: 6500, label: '5000 + 1500 bonus', priceUsd: 39.99 },
+  { platform: 'ANDROID', sku: 'blyp.android.coinpack.550', coinsGranted: 500, label: '500 coins', priceUsd: 4.99 },
+  { platform: 'ANDROID', sku: 'blyp.android.coinpack.1150', coinsGranted: 1000, label: '1000 coins', priceUsd: 9.99 },
+  { platform: 'ANDROID', sku: 'blyp.android.coinpack.3000', coinsGranted: 2500, label: '2500 coins', priceUsd: 19.99 },
+  { platform: 'ANDROID', sku: 'blyp.android.coinpack.6500', coinsGranted: 5000, label: '5000 coins', priceUsd: 39.99 },
 ]);
 
 /** iOS App Store product IDs — mirror Android grants; create matching IAPs in App Store Connect. */
 export const IOS_IAP_CATALOG: ReadonlyArray<IapCatalogEntry> = Object.freeze([
   { platform: 'IOS', sku: 'blyp.ios.proof.coinpack.100', coinsGranted: 100, label: '100 coins', priceUsd: 0.99 },
-  { platform: 'IOS', sku: 'blyp.ios.coinpack.550', coinsGranted: 550, label: '500 + 50 bonus', priceUsd: 4.99 },
-  { platform: 'IOS', sku: 'blyp.ios.coinpack.1150', coinsGranted: 1150, label: '1000 + 150 bonus', priceUsd: 9.99 },
-  { platform: 'IOS', sku: 'blyp.ios.coinpack.3000', coinsGranted: 3000, label: '2500 + 500 bonus', priceUsd: 19.99 },
-  { platform: 'IOS', sku: 'blyp.ios.coinpack.6500', coinsGranted: 6500, label: '5000 + 1500 bonus', priceUsd: 39.99 },
+  { platform: 'IOS', sku: 'blyp.ios.coinpack.550', coinsGranted: 500, label: '500 coins', priceUsd: 4.99 },
+  { platform: 'IOS', sku: 'blyp.ios.coinpack.1150', coinsGranted: 1000, label: '1000 coins', priceUsd: 9.99 },
+  { platform: 'IOS', sku: 'blyp.ios.coinpack.3000', coinsGranted: 2500, label: '2500 coins', priceUsd: 19.99 },
+  { platform: 'IOS', sku: 'blyp.ios.coinpack.6500', coinsGranted: 5000, label: '5000 coins', priceUsd: 39.99 },
 ]);
 
 export const IAP_CATALOG: ReadonlyArray<IapCatalogEntry> = Object.freeze([

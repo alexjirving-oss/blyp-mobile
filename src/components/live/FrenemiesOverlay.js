@@ -27,6 +27,8 @@ import {
   frenemiesGetState,
   frenemiesUpdateSettings,
   frenemiesGetPreview,
+  frenemiesQueueJoin,
+  frenemiesQueueLeave,
   MAX_GUEST_SLOTS,
 } from '../../api/ivsLiveApi';
 import { subscribeToFrenemiesGameEvents } from '../../realtime/frenemiesGameSocket';
@@ -553,6 +555,50 @@ export default function FrenemiesOverlay({
   const needsTopUp =
     canConduct && payer === 'host' && preview && !preview.canSpin && (preview.needed || 0) > 0;
 
+  const joinQueue = Array.isArray(event?.queue) ? event.queue : [];
+  const seatMeta = event?.seatMeta || {};
+  const isSeated = !!(currentUid && rosterByUser[currentUid]);
+  const myQueuePos = joinQueue.find((q) => q.userId === currentUid)?.position || null;
+
+  const joinFrenemiesQueue = useCallback(async () => {
+    if (!sessionId || !currentUid || busy) return;
+    setBusy(true);
+    setErr('');
+    try {
+      const res = await frenemiesQueueJoin(sessionId, {
+        displayName: displayName || 'Guest',
+        source: 'cta',
+      });
+      if (res) setEvent(res);
+    } catch (e) {
+      const code = e?.code || e?.error;
+      if (code === 'DROP_COOLDOWN') {
+        setErr('Just dropped — sit out one full round before rejoining.');
+      } else if (code === 'ALREADY_SEATED') {
+        setErr('You are already on stage.');
+      } else if (code === 'ALREADY_QUEUED') {
+        setErr('You are already in the queue.');
+      } else {
+        setErr(e?.message || 'Could not join queue');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId, currentUid, busy, displayName]);
+
+  const leaveFrenemiesQueue = useCallback(async () => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    try {
+      const res = await frenemiesQueueLeave(sessionId);
+      if (res) setEvent(res);
+    } catch {
+      /* best-effort */
+    } finally {
+      setBusy(false);
+    }
+  }, [sessionId, busy]);
+
   const topBar = (
     <View>
       <View style={styles.hudRow}>
@@ -767,9 +813,51 @@ export default function FrenemiesOverlay({
                   )
                 ) : null}
                 {!canConduct ? (
-                  <Text style={styles.readyHint} allowFontScaling={false}>
-                    Host is setting up Frenemies
-                  </Text>
+                  <View style={styles.queueViewerBlock}>
+                    {isSeated ? (
+                      <Text style={styles.readyHint} allowFontScaling={false}>
+                        You are on stage · first spin is protected until your box hits
+                      </Text>
+                    ) : myQueuePos ? (
+                      <>
+                        <Text style={styles.readyHint} allowFontScaling={false}>
+                          In queue · #{myQueuePos} — fair fill after each round
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.queueLeaveBtn}
+                          onPress={leaveFrenemiesQueue}
+                          disabled={busy}
+                        >
+                          <Text style={styles.queueLeaveText} allowFontScaling={false}>
+                            Leave queue
+                          </Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.queueJoinBtn}
+                        onPress={joinFrenemiesQueue}
+                        disabled={busy}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.queueJoinText} allowFontScaling={false}>
+                          Request to join · queue
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : null}
+                {canConduct && joinQueue.length ? (
+                  <View style={styles.queueHostBlock}>
+                    <Text style={styles.queueHostTitle} allowFontScaling={false}>
+                      Queue · {joinQueue.length}
+                    </Text>
+                    {joinQueue.slice(0, 5).map((q) => (
+                      <Text key={q.userId} style={styles.queueHostRow} numberOfLines={1} allowFontScaling={false}>
+                        #{q.position} {q.displayName || 'Guest'}
+                      </Text>
+                    ))}
+                  </View>
                 ) : null}
               </View>
             ) : null}
@@ -997,7 +1085,8 @@ export default function FrenemiesOverlay({
                 {Array.from({ length: maxSlots }, (_, i) => {
                   const n = i + 1;
                   const g = occupiedBySlot[n];
-                  const canThrow = g && g.userId !== currentUid;
+                  const protectedSeat = !!(g?.userId && seatMeta[g.userId]?.protected);
+                  const canThrow = g && g.userId !== currentUid && !protectedSeat;
                   const name = guestLabel(g) || (g ? 'Guest' : 'Empty');
                   const photo = guestPhoto(g);
                   return (
@@ -1007,6 +1096,7 @@ export default function FrenemiesOverlay({
                         styles.throwCell,
                         !canThrow && styles.throwEmpty,
                         canThrow && styles.throwDanger,
+                        protectedSeat && styles.throwProtected,
                       ]}
                       disabled={!canThrow || busy}
                       onPress={() => canThrow && setConfirmTarget({ userId: g.userId, name, slot: n })}
@@ -1030,7 +1120,7 @@ export default function FrenemiesOverlay({
                         Box {n}
                       </Text>
                       <Text style={styles.throwName} numberOfLines={1} allowFontScaling={false}>
-                        {g ? name : '—'}
+                        {g ? (protectedSeat ? `${name} · safe` : name) : '—'}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -1546,11 +1636,43 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 0 },
   },
+  throwProtected: {
+    borderColor: 'rgba(0,245,212,0.55)',
+    backgroundColor: 'rgba(0,245,212,0.12)',
+  },
   throwEmpty: {
     opacity: 0.4,
     borderColor: 'rgba(255,255,255,0.15)',
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
+  queueViewerBlock: { marginTop: 10, alignItems: 'center', gap: 8 },
+  queueJoinBtn: {
+    backgroundColor: TEAL,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    minWidth: 220,
+    alignItems: 'center',
+  },
+  queueJoinText: { color: INK, fontWeight: '900', fontSize: 14 },
+  queueLeaveBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  queueLeaveText: { color: 'rgba(255,255,255,0.75)', fontWeight: '800', fontSize: 12 },
+  queueHostBlock: {
+    marginTop: 10,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    padding: 10,
+    gap: 4,
+  },
+  queueHostTitle: { color: GOLD_SOFT, fontWeight: '900', fontSize: 12, letterSpacing: 0.4 },
+  queueHostRow: { color: 'rgba(255,255,255,0.82)', fontWeight: '700', fontSize: 12 },
   emptyDot: {
     width: 34,
     height: 34,

@@ -58,10 +58,16 @@ function enqueueImage(job) {
   pumpImg();
 }
 
-/** Prefer next-ahead warm over behind; higher priority jobs jump the video queue. */
+/** Near neighbors jump ahead of idle work; FIFO among priority so ±1 before ±2. */
 function enqueueVideo(job, { priority = false } = {}) {
-  if (priority) queueVid.unshift(job);
-  else queueVid.push(job);
+  if (priority) {
+    let i = 0;
+    while (i < queueVid.length && queueVid[i].__priority) i += 1;
+    job.__priority = true;
+    queueVid.splice(i, 0, job);
+  } else {
+    queueVid.push(job);
+  }
   pumpVid();
 }
 
@@ -175,15 +181,15 @@ function postImageUris(post) {
 
 /**
  * Prefetch a window of feed/profile posts around `centerIndex`.
- * near = current + next (immediate, priority), then previous, then far (idle).
- * Does not mutate React state — disk warm only (avoids list re-render thrash).
+ * Symmetric ± neighbors: previous and next get equal priority so reverse
+ * swipe BAM-lands like forward. Farther slots idle. Disk warm only.
  */
-export function prefetchPostWindow(list, centerIndex, { radius = 3, images = true } = {}) {
+export function prefetchPostWindow(list, centerIndex, { radius = 3, images = true, maxPriorityDist = 2 } = {}) {
   if (!Array.isArray(list) || !list.length) return;
   const center = Math.min(Math.max(0, centerIndex | 0), list.length - 1);
 
   const order = [];
-  // Current + ahead first (swipe direction), then behind.
+  // Current first, then ±1, ±2, … (symmetric — no ahead-only bias).
   for (let d = 0; d <= radius; d += 1) {
     if (d === 0) order.push(center);
     else {
@@ -196,8 +202,8 @@ export function prefetchPostWindow(list, centerIndex, { radius = 3, images = tru
     if (i < 0 || i >= list.length) continue;
     const post = list[i];
     const dist = Math.abs(i - center);
-    const idle = dist > 2; // keep next+2 snappy for fast paging
-    const priority = i === center + 1 || i === center + 2; // ahead wins the queue
+    const idle = dist > maxPriorityDist;
+    const priority = dist >= 1 && dist <= maxPriorityDist;
     const video = postVideoUri(post);
     if (video) prefetchVideoUri(video, { idle, priority });
 
@@ -270,7 +276,8 @@ export function warmHomeVideoRails({
     { idle: false },
   );
 
-  // Phase 2 — first progressive MP4s ASAP (separate queue; UI already committed).
+  // Phase 2 — Home caps harder than full-screen For You: one hot MP4 kick so
+  // hub scroll / rail swipe keep the JS + IO threads free.
   const kickHotVideos = (list, limit) => {
     for (const p of (list || []).slice(0, limit)) {
       const v =
@@ -281,17 +288,16 @@ export function warmHomeVideoRails({
       if (v) prefetchVideoUri(v, { idle: false, priority: true });
     }
   };
-  kickHotVideos(forYou, 2);
-  kickHotVideos(watch, 2);
+  kickHotVideos(forYou, 1);
+  kickHotVideos(watch, 1);
 
-  // Phase 3 — wider disk warm after first interactions / paint settle.
-  // Keep idle work small so Home scroll FPS is not destroyed by MP4 downloads.
+  // Phase 3 — narrow bidirectional disk warm (±1) after paint; trending idle.
   runWhenIdle(() => {
     if (Array.isArray(forYou) && forYou.length) {
-      prefetchPostWindow(forYou, 0, { radius: 2, images: true });
+      prefetchPostWindow(forYou, 0, { radius: 1, images: true, maxPriorityDist: 1 });
     }
-    kickHotVideos(trending, 2);
-    for (const w of (watch || []).slice(0, 3)) {
+    kickHotVideos(trending, 1);
+    for (const w of (watch || []).slice(0, 2)) {
       const thumb = normalizeUri(w?.thumbnail);
       if (thumb) prefetchImageUri(thumb, { idle: true });
     }

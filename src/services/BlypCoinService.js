@@ -112,7 +112,8 @@ class BlypCoinService {
     if (!sku) return 0;
     const pkg = this.getCoinPackages().find((entry) => String(entry?.sku || '').trim() === sku);
     if (!pkg) return 0;
-    return Number(pkg.coins || 0) + Number(pkg.bonus || 0);
+    // App grants base only — never add bonus (web +15% is website-only).
+    return Number(pkg.coins || 0);
   }
 
   static getPurchaseRecordRef(userId, purchaseToken) {
@@ -638,11 +639,10 @@ class BlypCoinService {
     }
   }
 
-  // Coin packages for purchase
+  // Coin packages for purchase — website BASE only (1 coin = 1p). No app bonus.
+  // `sku` MUST match Play Console product IDs (legacy names may include old totals).
+  // Server `iapCatalog` grants the same base amounts; do not credit bonus here.
   static getCoinPackages() {
-    // `sku` MUST match the in-app product ID created in the Google Play Console
-    // exactly, and the backend `iap_products` table must grant the matching total
-    // coins (coins + bonus). The small pack reuses the existing proof product.
     return [
       {
         id: 'small',
@@ -658,7 +658,7 @@ class BlypCoinService {
         sku: 'blyp.android.coinpack.550',
         coins: 500,
         price: 4.99,
-        bonus: 50,
+        bonus: 0,
         popular: false,
         icon: '💎'
       },
@@ -667,7 +667,7 @@ class BlypCoinService {
         sku: 'blyp.android.coinpack.1150',
         coins: 1000,
         price: 9.99,
-        bonus: 150,
+        bonus: 0,
         popular: true,
         icon: '💍'
       },
@@ -676,7 +676,7 @@ class BlypCoinService {
         sku: 'blyp.android.coinpack.3000',
         coins: 2500,
         price: 19.99,
-        bonus: 500,
+        bonus: 0,
         popular: false,
         icon: '👑'
       },
@@ -685,7 +685,7 @@ class BlypCoinService {
         sku: 'blyp.android.coinpack.6500',
         coins: 5000,
         price: 39.99,
-        bonus: 1500,
+        bonus: 0,
         popular: false,
         icon: '🔮'
       }

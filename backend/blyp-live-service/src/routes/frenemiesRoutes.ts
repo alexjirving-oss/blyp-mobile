@@ -24,6 +24,8 @@ import {
   getSessionEngagement,
   getHostPrizePreview,
   isFrenemiesAdmin,
+  requestJoinQueue,
+  leaveJoinQueue,
 } from '../games/frenemies/frenemiesRoomService';
 
 const router = Router();
@@ -103,6 +105,11 @@ function mapError(res: any, e: any) {
     SETTINGS_LOCKED: 409,
     BAD_TARGET: 400,
     TARGET_NOT_ON_STAGE: 409,
+    TARGET_PROTECTED: 409,
+    DROP_COOLDOWN: 409,
+    ALREADY_SEATED: 409,
+    ALREADY_QUEUED: 409,
+    HOST_CANNOT_QUEUE: 400,
     GAME_NOT_FOUND: 404,
     GAME_BUSY: 409,
     NO_QUIZ: 409,
@@ -281,6 +288,46 @@ router.get('/live-game/frenemies/preview', async (req: AuthedRequest, res) => {
     if (!sessionId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
     const preview = await getHostPrizePreview(sessionId);
     res.json(preview);
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
+const joinQueueSchema = z.object({
+  sessionId: z.string().min(1),
+  displayName: z.string().min(1).max(40).optional(),
+  photoUrl: z.string().max(500).optional().nullable(),
+  source: z.enum(['comment', 'guest_request', 'cta']).optional(),
+});
+
+router.post('/live-game/frenemies/queue/join', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = joinQueueSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const room = await requestJoinQueue({
+      sessionId: parsed.data.sessionId,
+      userId,
+      displayName: parsed.data.displayName,
+      photoUrl: parsed.data.photoUrl,
+      source: parsed.data.source || 'cta',
+    });
+    res.json(publicEvent(room, 'SNAPSHOT'));
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
+router.post('/live-game/frenemies/queue/leave', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = sessionSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const room = await leaveJoinQueue({ sessionId: parsed.data.sessionId, userId });
+    if (!room) return res.status(404).json({ error: 'GAME_NOT_FOUND', code: 'GAME_NOT_FOUND' });
+    res.json(publicEvent(room, 'SNAPSHOT'));
   } catch (e: any) {
     mapError(res, e);
   }
