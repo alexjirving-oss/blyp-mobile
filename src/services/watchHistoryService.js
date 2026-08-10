@@ -29,6 +29,16 @@ function emit(uid, list) {
 
 function compact(post) {
   if (!post || !post.id) return null;
+  // Prefer progressive MP4 fields so Home Continue watching can warm-disk the
+  // same URI the rail / MediaViewer will play (never stash HLS-only).
+  const progressive =
+    post.playbackUrl ||
+    post.cdnUrl ||
+    post.compressedUrl ||
+    post.optimizedUrl ||
+    post.videoUrl ||
+    post.mediaUrl ||
+    null;
   return {
     id: post.id,
     title: post.title || post.captionTitle || post.caption || post.description || 'Post',
@@ -37,11 +47,12 @@ function compact(post) {
       post.imageUrl ||
       post.media?.[0]?.thumbnail ||
       post.media?.[0]?.url ||
-      post.videoUrl ||
-      post.mediaUrl ||
       null,
-    videoUrl: post.videoUrl || null,
-    type: post.type || (post.videoUrl ? 'video' : 'post'),
+    videoUrl: progressive,
+    playbackUrl: post.playbackUrl || null,
+    cdnUrl: post.cdnUrl || null,
+    compressedUrl: post.compressedUrl || null,
+    type: post.type || (progressive ? 'video' : 'post'),
     username: post.username || post.userDisplayName || post.user?.username || null,
     userId: post.userId || post.uid || null,
     watchedAt: Date.now(),

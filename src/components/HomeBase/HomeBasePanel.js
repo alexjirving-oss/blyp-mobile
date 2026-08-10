@@ -64,6 +64,8 @@ import {
   getPreferences,
   addPage as addPagePref,
   topicPageForInterest,
+  addRecentSearch,
+  clearRecentSearches,
 } from '../../services/userPreferencesService';
 import {
   subscribeHomeLayout,
@@ -87,7 +89,7 @@ import {
   getMyProfileClubs,
   getPeopleInSharedClubs,
 } from '../../services/clubDiscoveryService';
-import { CLUB_CATALOG, getClubById, resolveClubs } from '../../services/profileIdentityCatalog';
+import { getClubById, resolveClubs } from '../../services/profileIdentityCatalog';
 import { postThumbnail } from '../../services/blypAiService';
 import { followUser, unfollowUser, subscribeToFollowingList } from '../../utils/followUtils';
 import { getActivity, countUnread } from '../../services/activityService';
@@ -103,19 +105,13 @@ import {
 import {
   prefetchPostWindow,
   prefetchUriList,
-  runWhenIdle,
+  prefetchVideoUri,
 } from '../../utils/mediaPrefetch';
 import EnhancedVideo from '../EnhancedVideo';
 import HomeWidgetFrame from './HomeWidgetFrame';
 import SportPagesWidget from './SportPagesWidget';
 import QuickDmWidget from './QuickDmWidget';
 import EditHomeSheet from './EditHomeSheet';
-
-const GENERIC_SUGGESTIONS = [
-  "What's worth watching right now?",
-  'Find creators like me',
-  'What can I do on Blyp?',
-];
 
 const INTEREST_PROMPTS = {
   football: 'Football clips and creators',
@@ -154,6 +150,34 @@ const QUICK_ACTIONS = [
   { id: 'wallet', label: 'Wallet', icon: 'wallet', route: 'CoinStore' },
 ];
 
+/** Warm Home video rails like a product that has to beat cold-start. */
+function warmHomeVideoRails({ forYou = [], trending = [], watch = [], live = [], creators = [] } = {}) {
+  // Posters first — first paint wins.
+  prefetchUriList(
+    [
+      ...forYou.flatMap((p) => [postThumbnail(p), p.thumbnail, p.imageUrl, p.userPhotoURL, p.user?.avatar, p.user?.photoURL]),
+      ...trending.flatMap((p) => [postThumbnail(p), p.thumbnail, p.imageUrl]),
+      ...watch.map((w) => w.thumbnail || w.imageUrl),
+      ...live.map((l) => l.thumbnail || l.coverUrl || l.photoURL),
+      ...creators.map((c) => c.photoURL || c.avatar),
+    ],
+    { idle: false },
+  );
+
+  // Progressive MP4 disk warm — first N For You + Continue watching + Trending.
+  prefetchPostWindow(forYou, 0, { radius: 4, images: true });
+  for (const p of (trending || []).slice(0, 6)) {
+    const v = resolveFeedVideoUri(p);
+    if (v) prefetchVideoUri(v, { idle: false, priority: true });
+  }
+  for (const w of (watch || []).slice(0, 6)) {
+    const v = resolveFeedVideoUri(w) || fixStorageUrl(w.videoUrl) || w.videoUrl;
+    if (v) prefetchVideoUri(v, { idle: false, priority: true });
+    const thumb = fixStorageUrl(w.thumbnail);
+    if (thumb) prefetchUriList([thumb], { idle: false });
+  }
+}
+
 function greeting() {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
@@ -188,17 +212,20 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     const x = e?.nativeEvent?.contentOffset?.x || 0;
     const idx = Math.max(0, Math.round(x / FORYOU_SNAP));
     setActiveForYou(idx);
-  }, []);
+    prefetchPostWindow(forYou, idx, { radius: 3, images: true });
+  }, [forYou]);
 
   // The home Blyp bar accepts typed input: reminders are created in place and
   // listed right below; anything else opens the full Blyp assistant.
   const [queryText, setQueryText] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   const [reminders, setReminders] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [editReminder, setEditReminder] = useState(null);
   const [watches, setWatches] = useState([]);
   const [watchNotice, setWatchNotice] = useState('');
   const [locationPrompt, setLocationPrompt] = useState(null);
+  const blurHideTimer = useRef(null);
 
   // Home Layout Engine — ordered widgets persisted in blyp.prefs.homeLayout.
   const [homeLayout, setHomeLayoutState] = useState(null);
@@ -231,28 +258,29 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     let active = true;
     setLoading(true);
     (async () => {
-      // Layout + first rails in parallel so Home paints without serial waterfall.
-      const [liveRes, trendRes, creatorRes, prefs] = await Promise.all([
+      // Parallel first paint: live + trending + creators + For You + prefs together.
+      const [liveRes, trendRes, creatorRes, forYouRes, prefs] = await Promise.all([
         getLiveNow(10),
         getTrendingPosts(10, interestTerms),
         getSuggestedCreators(12, interestTerms, uid),
+        getForYouPosts(interestTerms, [], 12),
         getPreferences(uid),
       ]);
       if (!active) return;
       setLive(liveRes);
       setTrending(trendRes);
       setCreators(creatorRes);
+      setForYou(forYouRes);
+      setActiveForYou(0);
       setRecent(prefs.recentSearches || []);
       setLoading(false);
 
-      // Non-critical badge + rail image warm after first paint.
-      runWhenIdle(() => {
-        const thumbs = [
-          ...(trendRes || []).map((p) => p.thumbnail || p.imageUrl),
-          ...(liveRes || []).map((l) => l.thumbnail || l.coverUrl || l.photoURL),
-          ...(creatorRes || []).map((c) => c.photoURL || c.avatar),
-        ];
-        prefetchUriList(thumbs, { idle: false });
+      // Ship-blocker warm: posters + first N progressive MP4s immediately.
+      warmHomeVideoRails({
+        forYou: forYouRes,
+        trending: trendRes,
+        live: liveRes,
+        creators: creatorRes,
       });
 
       try {
@@ -275,7 +303,13 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   }, [uid]);
 
   useEffect(() => {
-    const unsub = subscribeWatchHistory(uid, setWatch);
+    if (!uid) return undefined;
+    const unsub = subscribeWatchHistory(uid, (list) => {
+      setWatch(list);
+      if (Array.isArray(list) && list.length) {
+        warmHomeVideoRails({ watch: list });
+      }
+    });
     return unsub;
   }, [uid]);
 
@@ -285,14 +319,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     getForYouPosts(interestTerms, Array.from(followingSet), 12).then((r) => {
       if (active) {
         setForYou(r);
-        setActiveForYou(0); // first tile autoplays whenever the rail refreshes
-        runWhenIdle(() => {
-          prefetchPostWindow(r, 0, { radius: 2, images: true });
-          prefetchUriList(
-            (r || []).flatMap((p) => [p.thumbnail, p.imageUrl, p.userPhotoURL, p.user?.avatar]),
-            { idle: false },
-          );
-        });
+        setActiveForYou(0);
+        warmHomeVideoRails({ forYou: r });
       }
     });
     return () => {
@@ -368,6 +396,12 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       setRecent(prefs.recentSearches || []);
       setForYou(forYouRes);
       setActiveForYou(0);
+      warmHomeVideoRails({
+        forYou: forYouRes,
+        trending: trendRes,
+        live: liveRes,
+        creators: creatorRes,
+      });
       try {
         const activity = await getActivity(uid);
         setUnread(countUnread(activity, prefs.lastSeenActivityAt || 0));
@@ -412,8 +446,18 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       if (!text) return;
       // Keep the spoken/typed text visible in the bar while we process.
       setQueryText(text);
+      setSearchFocused(false);
       setSubmitting(true);
       try {
+        // Persist into search history (dropdown only — never a chip row).
+        try {
+          const updated = await addRecentSearch(uid, text);
+          if (updated?.recentSearches) setRecent(updated.recentSearches);
+          else setRecent((prev) => [text, ...prev.filter((s) => s.toLowerCase() !== text.toLowerCase())].slice(0, 12));
+        } catch {
+          setRecent((prev) => [text, ...prev.filter((s) => s.toLowerCase() !== text.toLowerCase())].slice(0, 12));
+        }
+
         const eventWatch = await resolveEventWatch(text);
         if (eventWatch.isEventWatch) {
           const rec = await addEventWatch(uid, eventWatch.type);
@@ -520,6 +564,37 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     },
     [locationPrompt, navigation]
   );
+
+  const onClearSearchHistory = useCallback(async () => {
+    setRecent([]);
+    try {
+      await clearRecentSearches(uid);
+    } catch {
+      /* ignore */
+    }
+  }, [uid]);
+
+  const onPickRecentSearch = useCallback(
+    (q) => {
+      setQueryText(q);
+      setSearchFocused(false);
+      handleQuery(q);
+    },
+    [handleQuery]
+  );
+
+  const onSearchFocus = useCallback(() => {
+    if (blurHideTimer.current) {
+      clearTimeout(blurHideTimer.current);
+      blurHideTimer.current = null;
+    }
+    setSearchFocused(true);
+  }, []);
+
+  const onSearchBlur = useCallback(() => {
+    // Delay so Clear history / row taps register before the dropdown unmounts.
+    blurHideTimer.current = setTimeout(() => setSearchFocused(false), 180);
+  }, []);
 
   const onCancelWatch = useCallback(
     async (w) => {
@@ -754,13 +829,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   // Club rails — Phase 2 wired the UI but never defined these helpers, which
   // threw ReferenceError on every HomeBase render (blank / error-boundary hub).
   const myClubDefs = useMemo(() => resolveClubs(myClubs), [myClubs]);
-  const exploreClubs = useMemo(() => {
-    const mine = myClubDefs.slice(0, 8);
-    if (mine.length >= 6) return mine;
-    const seen = new Set(mine.map((c) => c.id));
-    const extras = CLUB_CATALOG.filter((c) => !seen.has(c.id)).slice(0, 8 - mine.length);
-    return [...mine, ...extras];
-  }, [myClubDefs]);
 
   useEffect(() => {
     let active = true;
@@ -831,14 +899,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     [pages, uid, onOpenPage, blyp]
   );
 
-  const smartSuggestions = useMemo(() => {
-    const fromInterests = (interests || [])
-      .map((id) => INTEREST_PROMPTS[id])
-      .filter(Boolean)
-      .slice(0, 3);
-    return Array.from(new Set([...fromInterests, ...GENERIC_SUGGESTIONS])).slice(0, 4);
-  }, [interests]);
-
   const otherPages = (pages || []).filter((p) => p.key !== 'home');
 
   const layoutWidgets = homeLayout?.widgets || [];
@@ -890,6 +950,17 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const onToggleSportPageKey = useCallback(
     async (widgetId, pageKey, add) => {
       if (!uid || !widgetId) return;
+      if (add) {
+        const id = String(pageKey || '').replace(/^topic:/, '');
+        const interest = INTEREST_CATALOG.find((i) => i.id === id);
+        if (interest) {
+          try {
+            await addPagePref(uid, topicPageForInterest(interest));
+          } catch {
+            /* best effort */
+          }
+        }
+      }
       const widget = layoutWidgets.find((w) => w.id === widgetId);
       const current = Array.isArray(widget?.config?.pageKeys) ? [...widget.config.pageKeys] : [];
       const nextKeys = add
@@ -918,34 +989,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const renderWidgetBody = (widget) => {
     switch (widget.type) {
       case 'suggestions':
-        return (
-          <View style={styles.chipRowWrap}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {smartSuggestions.map((s) => (
-                <TouchableOpacity key={s} style={styles.suggestChip} activeOpacity={0.85} onPress={() => blyp(s)}>
-                  <Icon name="sparkles-outline" size={13} color={COLORS.primary} />
-                  <Text style={styles.suggestChipText}>{s}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        );
       case 'recentSearches':
-        if (recent.length === 0 && !editMode) return null;
-        return recent.length > 0 ? (
-          <View style={styles.chipRowWrap}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {recent.slice(0, 8).map((r) => (
-                <TouchableOpacity key={r} style={styles.recentChip} activeOpacity={0.85} onPress={() => blyp(r)}>
-                  <Icon name="time-outline" size={13} color={COLORS.textMuted} />
-                  <Text style={styles.recentChipText} numberOfLines={1}>{r}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        ) : (
-          <Text style={styles.widgetEmptyHint}>Recent searches will appear here</Text>
-        );
+        // Retired: history lives only in the search-bar dropdown.
+        return null;
       case 'forYou':
         if (forYou.length === 0 && !editMode) return null;
         if (forYou.length === 0) {
@@ -968,13 +1014,14 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
               decelerationRate="fast"
               disableIntervalMomentum
               onMomentumScrollEnd={onForYouScrollEnd}
+              onScrollEndDrag={onForYouScrollEnd}
             >
               {forYou.map((p, index) => {
                 const uri = postThumbnail(p);
                 const isVideo = p.type === 'video' || !!p.videoUrl || !!resolveFeedVideoUri(p);
                 const videoUri = isVideo ? (resolveFeedVideoUri(p) || '') : '';
                 const isActive = index === activeForYou;
-                const mountVideo = (isActive || index === activeForYou + 1) && isVideo && !!videoUri;
+                const mountVideo = (isActive || index === activeForYou + 1 || index === activeForYou + 2) && isVideo && !!videoUri;
                 return (
                   <TouchableOpacity key={p.id} style={styles.forYouCard} activeOpacity={0.85} onPress={() => openForYouRailPost(p)}>
                     <View>
@@ -994,9 +1041,6 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                           shouldLoad
                           shouldPlay={isActive && isScreenFocused && !listening && !transcribing}
                           isLooping
-                          // Active snapped tile is audible; preload neighbor + voice
-                          // overlay / blur stay silent. Distinct owner id so this
-                          // never steals For You feed sticky mute ownership.
                           isMuted={!isActive || !isScreenFocused || listening || transcribing}
                           audioOwnerId={
                             isActive && isScreenFocused && !listening && !transcribing
@@ -1170,8 +1214,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
             </ScrollView>
           </>
         );
-      case 'sportPages':
-        return (
+      case 'sportPages': {
+        const body = (
           <SportPagesWidget
             pages={pages}
             interests={interests}
@@ -1181,6 +1225,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
             onTogglePageKey={(key, add) => onToggleSportPageKey(widget.id, key, add)}
           />
         );
+        return body;
+      }
       case 'quickDm':
         return (
           <QuickDmWidget
@@ -1192,21 +1238,24 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           />
         );
       case 'clubs':
+        // Never dump the full club catalog as "Explore clubs" chrome.
+        if (myClubDefs.length === 0 && !editMode) return null;
+        if (myClubDefs.length === 0) {
+          return <Text style={styles.widgetEmptyHint}>Join clubs in Edit profile to pin them here</Text>;
+        }
         return (
           <>
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>
-                {myClubDefs.length > 0 ? 'Your clubs' : 'Explore clubs'}
-              </Text>
+              <Text style={styles.sectionTitle}>Your clubs</Text>
               <TouchableOpacity
                 onPress={() => navigation.navigate('EditProfile')}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Text style={styles.editLink}>{myClubDefs.length > 0 ? 'Edit' : 'Join'}</Text>
+                <Text style={styles.editLink}>Edit</Text>
               </TouchableOpacity>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.railRow}>
-              {exploreClubs.map((club) => (
+              {myClubDefs.slice(0, 8).map((club) => (
                 <TouchableOpacity
                   key={club.id}
                   style={styles.clubChip}
@@ -1414,6 +1463,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
       style={styles.root}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -1479,46 +1530,86 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         </View>
       )}
 
-      {/* The one Blyp bar (hero): type to ask or set a reminder, or tap the mic. */}
-      <View style={styles.blypBar}>
-        <Text style={styles.blypMark}>blyp</Text>
-        <TextInput
-          style={styles.blypInput}
-          value={queryText}
-          onChangeText={setQueryText}
-          onSubmitEditing={onSubmitQuery}
-          placeholder="Ask Blyp, find places, or “remind me…”"
-          placeholderTextColor={COLORS.textMuted}
-          returnKeyType="search"
-          blurOnSubmit
-          editable={!submitting}
-        />
-        {submitting ? (
-          <View style={styles.micCircle}>
-            <ActivityIndicator size="small" color={COLORS.primary} />
-          </View>
-        ) : queryText.trim().length > 0 ? (
-          <TouchableOpacity
-            style={[styles.micCircle, styles.sendCircle]}
-            activeOpacity={0.85}
-            onPress={onSubmitQuery}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Icon name="arrow-forward" size={16} color={COLORS.black} />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.micCircle, listening && styles.micCircleActive]}
-            activeOpacity={0.85}
-            onPress={onMicPress}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            {transcribing ? (
+      {/* The one Blyp bar (hero): type to ask — history only in focus dropdown. */}
+      <View style={styles.searchBlock}>
+        <View style={[styles.blypBar, searchFocused && styles.blypBarFocused]}>
+          <Text style={styles.blypMark}>blyp</Text>
+          <TextInput
+            style={styles.blypInput}
+            value={queryText}
+            onChangeText={setQueryText}
+            onSubmitEditing={onSubmitQuery}
+            onFocus={onSearchFocus}
+            onBlur={onSearchBlur}
+            placeholder="Search or ask Blyp…"
+            placeholderTextColor={COLORS.textMuted}
+            returnKeyType="search"
+            blurOnSubmit
+            editable={!submitting}
+          />
+          {submitting ? (
+            <View style={styles.micCircle}>
               <ActivityIndicator size="small" color={COLORS.primary} />
+            </View>
+          ) : queryText.trim().length > 0 ? (
+            <TouchableOpacity
+              style={[styles.micCircle, styles.sendCircle]}
+              activeOpacity={0.85}
+              onPress={onSubmitQuery}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Icon name="arrow-forward" size={16} color={COLORS.black} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.micCircle, listening && styles.micCircleActive]}
+              activeOpacity={0.85}
+              onPress={onMicPress}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              {transcribing ? (
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              ) : (
+                <Icon name={listening ? 'stop' : 'mic'} size={16} color={listening ? COLORS.black : COLORS.primary} />
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {searchFocused && (
+          <View style={styles.searchDropdown}>
+            <View style={styles.searchDropdownHeader}>
+              <Text style={styles.searchDropdownTitle}>Recent searches</Text>
+              {recent.length > 0 ? (
+                <TouchableOpacity
+                  onPress={onClearSearchHistory}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search history"
+                >
+                  <Text style={styles.clearHistoryText}>Clear history</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {recent.length === 0 ? (
+              <Text style={styles.searchDropdownEmpty}>Searches you run will show up here</Text>
             ) : (
-              <Icon name={listening ? 'stop' : 'mic'} size={16} color={listening ? COLORS.black : COLORS.primary} />
+              recent.slice(0, 10).map((r) => (
+                <TouchableOpacity
+                  key={r}
+                  style={styles.searchHistoryRow}
+                  activeOpacity={0.85}
+                  onPress={() => onPickRecentSearch(r)}
+                >
+                  <Icon name="time-outline" size={16} color={COLORS.textMuted} />
+                  <Text style={styles.searchHistoryText} numberOfLines={1}>
+                    {r}
+                  </Text>
+                  <Icon name="return-down-forward-outline" size={14} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              ))
             )}
-          </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -1698,9 +1789,9 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.pageBackground },
-  content: { paddingHorizontal: 16, paddingTop: 8 },
+  content: { paddingHorizontal: 16, paddingTop: 4 },
 
-  greetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  greetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   greetText: { color: COLORS.textSecondary, fontSize: responsiveFont(15), fontWeight: '600', letterSpacing: -0.2 },
   greetActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   savedBtn: {
@@ -1729,16 +1820,25 @@ const styles = StyleSheet.create({
   },
   bellBadgeText: { color: '#fff', fontSize: responsiveFont(9), fontWeight: '800' },
 
+  searchBlock: {
+    zIndex: 40,
+    elevation: 12,
+    marginBottom: 4,
+  },
   blypBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     paddingHorizontal: 16,
-    height: 54,
+    height: 52,
     borderRadius: 16,
     backgroundColor: COLORS.surface,
     borderWidth: 1.5,
     borderColor: COLORS.primary,
+  },
+  blypBarFocused: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.backgroundCard,
   },
   blypMark: { color: COLORS.primary, fontWeight: '800', fontSize: responsiveFont(16) },
   blypInput: {
@@ -1757,6 +1857,62 @@ const styles = StyleSheet.create({
   },
   micCircleActive: { backgroundColor: COLORS.primary },
   sendCircle: { backgroundColor: COLORS.primary },
+
+  searchDropdown: {
+    marginTop: 6,
+    borderRadius: 16,
+    backgroundColor: COLORS.backgroundCard,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
+  },
+  searchDropdownHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  searchDropdownTitle: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(12),
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  clearHistoryText: {
+    color: COLORS.primary,
+    fontSize: responsiveFont(13),
+    fontWeight: '700',
+  },
+  searchDropdownEmpty: {
+    color: COLORS.textMuted,
+    fontSize: responsiveFont(13),
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 4,
+  },
+  searchHistoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: COLORS.border,
+  },
+  searchHistoryText: {
+    flex: 1,
+    color: COLORS.textPrimary,
+    fontSize: responsiveFont(14),
+    fontWeight: '600',
+  },
 
   remindersWrap: { marginTop: 14, gap: 8 },
   reminderRow: {
@@ -1829,39 +1985,11 @@ const styles = StyleSheet.create({
   },
   voiceStopText: { color: COLORS.primary, fontSize: responsiveFont(14), fontWeight: '700' },
 
-  chipRowWrap: { marginTop: 12, marginHorizontal: -16 },
-  chipRow: { gap: 8, paddingHorizontal: 16 },
-  suggestChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  suggestChipText: { color: COLORS.textPrimary, fontSize: responsiveFont(13), fontWeight: '600' },
-  recentChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    maxWidth: 200,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  recentChipText: { color: COLORS.textSecondary, fontSize: responsiveFont(13), fontWeight: '600', flexShrink: 1 },
+  loadingRow: { paddingVertical: 16, alignItems: 'center' },
 
-  loadingRow: { paddingVertical: 24, alignItems: 'center' },
-
-  sectionTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(17), fontWeight: '800', marginTop: 24, marginBottom: 12 },
+  sectionTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(17), fontWeight: '800', marginTop: 16, marginBottom: 10 },
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  editLink: { color: COLORS.primary, fontSize: responsiveFont(13), fontWeight: '700', marginTop: 24, marginBottom: 12 },
+  editLink: { color: COLORS.primary, fontSize: responsiveFont(13), fontWeight: '700', marginTop: 16, marginBottom: 10 },
   liveTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30', marginTop: 12 },
 

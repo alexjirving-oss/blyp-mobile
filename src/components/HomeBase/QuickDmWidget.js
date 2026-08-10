@@ -1,4 +1,5 @@
 // QuickDmWidget.js — message favorites / recent chats from Home.
+// Avatars always resolve through users + userProfiles (Activity/Top Circle path).
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -15,6 +16,10 @@ import { COLORS } from '../../styles/theme';
 import { responsiveFont } from '../../utils/scaleUtils';
 import { firestore, firebaseEnabled } from '../../config/firebase';
 import { conversationsMessagingService } from '../../services/messaging';
+import {
+  fetchMessengerUserProfiles,
+  resolveUserPhoto,
+} from '../../services/messaging/resolveMessengerUser';
 import { fixStorageUrl } from '../../utils/urlUtils';
 
 function otherParticipant(thread, uid) {
@@ -22,11 +27,13 @@ function otherParticipant(thread, uid) {
   const otherId = parts.find((id) => id && id !== uid) || null;
   const profiles = thread?.participantProfiles || thread?.participantsData || {};
   const profile = (otherId && (profiles[otherId] || profiles[String(otherId)])) || {};
+  const denormPhoto = resolveUserPhoto(profile) || fixStorageUrl(profile.photoURL || '') || null;
   return {
     id: otherId,
     displayName: profile.displayName || profile.username || thread?.otherDisplayName || 'Chat',
     username: profile.username || profile.displayName || '',
-    photoURL: fixStorageUrl(profile.photoURL || profile.avatarUrl || profile.profilePicture || ''),
+    // Denorm often has name without photo — treat as hint only until profile fetch.
+    photoURL: denormPhoto,
   };
 }
 
@@ -39,6 +46,7 @@ const QuickDmWidget = ({
 }) => {
   const [threads, setThreads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [profileById, setProfileById] = useState(() => new Map());
 
   const favoriteIds = useMemo(
     () => (Array.isArray(config.peopleIds) ? config.peopleIds.filter(Boolean) : []),
@@ -69,14 +77,42 @@ const QuickDmWidget = ({
     };
   }, [uid]);
 
+  // Always hydrate peer photos from live profiles — thread denorm skips photoURL often.
+  useEffect(() => {
+    let cancelled = false;
+    const ids = threads
+      .map((t) => otherParticipant(t, uid).id)
+      .filter(Boolean);
+    if (!ids.length) {
+      setProfileById(new Map());
+      return undefined;
+    }
+    (async () => {
+      const map = await fetchMessengerUserProfiles(ids);
+      if (!cancelled) setProfileById(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threads, uid]);
+
   const people = useMemo(() => {
     const mapped = threads
       .map((t) => {
         const other = otherParticipant(t, uid);
         if (!other.id) return null;
+        const live = profileById.get(other.id) || profileById.get(String(other.id));
+        const photoURL =
+          resolveUserPhoto(live) ||
+          other.photoURL ||
+          null;
         return {
           threadId: t.id,
-          ...other,
+          id: other.id,
+          displayName:
+            live?.displayName || live?.username || other.displayName || other.username || 'Chat',
+          username: live?.username || other.username || '',
+          photoURL,
           lastMessage: t.lastMessage || '',
           unread: Number(t.unreadCount?.[uid] || t.unreadCounts?.[uid] || 0) || 0,
         };
@@ -86,13 +122,12 @@ const QuickDmWidget = ({
     if (favoriteIds.length > 0) {
       const byId = new Map(mapped.map((p) => [p.id, p]));
       const favs = favoriteIds.map((id) => byId.get(id)).filter(Boolean);
-      // Keep favorites first; fill with recent if under 6.
       const favSet = new Set(favoriteIds);
       const rest = mapped.filter((p) => !favSet.has(p.id));
       return [...favs, ...rest].slice(0, 10);
     }
     return mapped.slice(0, 8);
-  }, [threads, uid, favoriteIds]);
+  }, [threads, uid, favoriteIds, profileById]);
 
   const openChat = (person) => {
     if (editMode) {

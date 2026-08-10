@@ -150,10 +150,10 @@ const ActivityFeed = ({ navigation }) => {
 
   const handleActivityPress = (activity) => {
     if (activity.metadata?.postId) {
-      // Navigate to the post if it exists
-      navigation.navigate('PostPreview', { postId: activity.metadata.postId });
-    } else if (activity.type === ACTIVITY_TYPES.PROFILE_VIEW) {
-      // Navigate to the actor's profile
+      navigation.navigate('MediaViewer', {
+        post: { id: activity.metadata.postId, ...(activity.metadata.post || {}) },
+      });
+    } else if (activity.actorId) {
       navigation.navigate('UserProfile', { userId: activity.actorId });
     }
   };
@@ -204,10 +204,7 @@ const ActivityFeed = ({ navigation }) => {
           { uid: activity.actorId, fallback: 'Someone' }
         );
         const initial = (actorName || 'U').charAt(0).toUpperCase();
-        const photo =
-          actorProfile?.photoURL ||
-          actorProfile?.avatar ||
-          `https://placehold.co/40x40/475569/e2e8f0?text=${initial}`;
+        const photo = actorProfile?.photoURL || actorProfile?.avatar || null;
 
         return (
           <TouchableOpacity
@@ -215,10 +212,13 @@ const ActivityFeed = ({ navigation }) => {
             style={[styles.activityItem, !activity.read && styles.unreadActivity]}
             onPress={() => handleActivityPress(activity)}
           >
-            <Image
-              source={{ uri: photo }}
-              style={styles.actorAvatar}
-            />
+            {photo ? (
+              <Image source={{ uri: photo }} style={styles.actorAvatar} />
+            ) : (
+              <View style={[styles.actorAvatar, styles.actorAvatarFallback]}>
+                <Text style={styles.actorInitial}>{initial}</Text>
+              </View>
+            )}
             
             <View style={styles.activityContent}>
               <Text style={styles.activityText}>
@@ -300,7 +300,18 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     marginRight: 12,
     borderWidth: 2,
+    borderColor: COLORS.primary,
+  },
+  actorAvatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#141418',
     borderColor: '#374151',
+  },
+  actorInitial: {
+    color: '#E4E4E7',
+    fontSize: 16,
+    fontWeight: '800',
   },
   activityContent: {
     flex: 1,

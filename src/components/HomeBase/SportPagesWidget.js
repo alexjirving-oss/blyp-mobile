@@ -1,4 +1,4 @@
-// SportPagesWidget.js — pin interest / sport pages onto Home.
+// SportPagesWidget.js — only real pages the user has. No decorative catalog junk.
 
 import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -36,50 +36,78 @@ const SportPagesWidget = ({
 }) => {
   const byId = useMemo(() => new Map(INTEREST_CATALOG.map((i) => [i.id, i])), []);
 
+  // Real topic pages the user actually has enabled — never invent from interests.
+  const realTopicPages = useMemo(() => {
+    return (pages || []).filter((p) => isTopicPageKey(p?.key) && p.enabled !== false);
+  }, [pages]);
+
   const configuredKeys = Array.isArray(config.pageKeys) ? config.pageKeys : [];
 
   const cards = useMemo(() => {
-    let keys = configuredKeys.filter(isTopicPageKey);
-    if (keys.length === 0) {
-      // Fallback: enabled topic pages, sport first.
-      const topicPages = (pages || []).filter((p) => isTopicPageKey(p.key) && p.enabled !== false);
-      const sport = topicPages.filter((p) => SPORT_PAGE_IDS.includes(topicIdFromKey(p.key)));
-      const rest = topicPages.filter((p) => !SPORT_PAGE_IDS.includes(topicIdFromKey(p.key)));
-      keys = [...sport, ...rest].map((p) => p.key).slice(0, 8);
-    }
-    if (keys.length === 0) {
-      keys = (interests || []).slice(0, 4).map((id) => `${TOPIC_PREFIX}${id}`);
-    }
+    const realByKey = new Map(realTopicPages.map((p) => [p.key, p]));
+    // Only show pages the user explicitly pinned in this widget config.
+    // Never invent Football/F1 tiles from interests alone — that reads as junk.
+    const keys = configuredKeys.filter((k) => realByKey.has(k)).slice(0, 8);
     return keys
       .map((key) => {
+        const page = realByKey.get(key);
+        if (!page) return null;
         const id = topicIdFromKey(key);
         const interest = byId.get(id);
-        const page = (pages || []).find((p) => p.key === key);
-        if (!interest && !page) return null;
         return {
           key,
           id,
-          label: page?.label || interest?.label || id,
+          label: page.label || interest?.label || id,
           icon: interest?.icon || 'apps-outline',
           accent: accentFor(id),
           isSport: SPORT_PAGE_IDS.includes(id),
         };
       })
       .filter(Boolean);
-  }, [configuredKeys, pages, interests, byId]);
+  }, [configuredKeys, realTopicPages, byId]);
 
   const availableToPin = useMemo(() => {
     if (!editMode) return [];
-    const pinned = new Set(configuredKeys);
-    return INTEREST_CATALOG.filter((i) => !pinned.has(`${TOPIC_PREFIX}${i.id}`)).slice(0, 12);
-  }, [editMode, configuredKeys]);
+    const pinned = new Set(configuredKeys.length ? configuredKeys : cards.map((c) => c.key));
+    // Offer interests the user follows that aren't pinned yet — only in edit mode.
+    const followSet = new Set(interests || []);
+    return INTEREST_CATALOG.filter((i) => {
+      const key = `${TOPIC_PREFIX}${i.id}`;
+      if (pinned.has(key)) return false;
+      // Prefer interests they already follow; fall back to full catalog if none.
+      return followSet.size === 0 || followSet.has(i.id);
+    }).slice(0, 12);
+  }, [editMode, configuredKeys, cards, interests]);
 
+  // Product rule: hide entirely when empty (no decorative Football/F1 placeholders).
   if (cards.length === 0 && !editMode) {
+    return null;
+  }
+
+  if (cards.length === 0 && editMode) {
     return (
-      <View style={styles.empty}>
-        <Icon name="football-outline" size={22} color={COLORS.textMuted} />
-        <Text style={styles.emptyTitle}>Pin your pages</Text>
-        <Text style={styles.emptySub}>Add Football, Formula 1, or any interest to Home.</Text>
+      <View>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Your pages</Text>
+          <Text style={styles.hint}>Pin real pages</Text>
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+          {availableToPin.map((i) => (
+            <TouchableOpacity
+              key={`add_${i.id}`}
+              style={styles.addCard}
+              activeOpacity={0.88}
+              onPress={() => onTogglePageKey?.(`${TOPIC_PREFIX}${i.id}`, true)}
+            >
+              <View style={styles.addOrb}>
+                <Icon name="add" size={22} color={COLORS.primary} />
+              </View>
+              <Text style={styles.addLabel} numberOfLines={2}>
+                {i.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
     );
   }
@@ -88,9 +116,7 @@ const SportPagesWidget = ({
     <View>
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionTitle}>Your pages</Text>
-        {!editMode && (
-          <Text style={styles.hint}>Tap to open</Text>
-        )}
+        {!editMode && <Text style={styles.hint}>Tap to open</Text>}
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {cards.map((c) => (
@@ -223,18 +249,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  empty: {
-    marginTop: 18,
-    padding: 20,
-    borderRadius: 18,
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    gap: 6,
-  },
-  emptyTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(15), fontWeight: '800' },
-  emptySub: { color: COLORS.textMuted, fontSize: responsiveFont(12), textAlign: 'center' },
 });
 
 export default SportPagesWidget;

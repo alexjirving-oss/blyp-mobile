@@ -9,24 +9,35 @@ import {
   subscribePreferences,
 } from './userPreferencesService';
 
-export const HOME_LAYOUT_VERSION = 1;
+export const HOME_LAYOUT_VERSION = 3;
+
+/** Types retired from Home chrome — history lives in the search-bar dropdown only. */
+export const RETIRED_HOME_WIDGET_TYPES = new Set(['suggestions', 'recentSearches']);
+
+/**
+ * Promo / catalog chrome stripped on v2→v3 so tip Home is video-first.
+ * Still available in WIDGET_CATALOG for Edit Home re-add.
+ */
+export const DEFAULT_STRIP_WIDGET_TYPES = new Set([
+  'clubs',
+  'clubPeople',
+  'battles',
+  'rankings',
+  'quickActions',
+  'interests',
+  'pageList',
+]);
+
+/** Always present on Home — hide/disable, never silently re-add after user remove. */
+export const CORE_HOME_WIDGET_TYPES = new Set([
+  'forYou',
+  'continueWatching',
+  'liveNow',
+  'quickDm',
+]);
 
 /** Widget types available in the catalog. */
 export const WIDGET_CATALOG = [
-  {
-    type: 'suggestions',
-    title: 'Smart suggestions',
-    blurb: 'Ask Blyp prompts tuned to your interests',
-    icon: 'sparkles-outline',
-    category: 'assist',
-  },
-  {
-    type: 'recentSearches',
-    title: 'Recent searches',
-    blurb: 'Jump back into what you asked',
-    icon: 'time-outline',
-    category: 'assist',
-  },
   {
     type: 'forYou',
     title: 'For you',
@@ -65,7 +76,7 @@ export const WIDGET_CATALOG = [
   {
     type: 'sportPages',
     title: 'Your pages',
-    blurb: 'Pin Football, F1, and other interest pages',
+    blurb: 'Pages you follow — hidden when empty',
     icon: 'football-outline',
     category: 'pages',
     configurable: true,
@@ -148,40 +159,31 @@ export function makeWidget(type, config = {}) {
   };
 }
 
-/** Default layout for new users — coherent social home, not a junk drawer. */
+/** Default layout for new users — video-first home, not a junk drawer. */
 export function buildDefaultHomeLayout(interestIds = []) {
-  const sportKeys = (interestIds || [])
-    .filter((id) => id === 'football' || id === 'f1' || id === 'sport')
-    .map((id) => `topic:${id}`);
-  const topicKeys = (interestIds || []).map((id) => `topic:${id}`);
-  const pageKeys = sportKeys.length ? sportKeys : topicKeys.slice(0, 4);
-
+  void interestIds;
   return {
     version: HOME_LAYOUT_VERSION,
     widgets: [
-      makeWidget('suggestions'),
-      makeWidget('recentSearches'),
       makeWidget('forYou'),
       makeWidget('continueWatching'),
       makeWidget('liveNow'),
-      makeWidget('sportPages', { pageKeys }),
       makeWidget('quickDm', { peopleIds: [] }),
       makeWidget('trending'),
       makeWidget('creators'),
-      makeWidget('clubs'),
-      makeWidget('clubPeople'),
-      makeWidget('battles'),
-      makeWidget('rankings'),
-      makeWidget('quickActions'),
-      makeWidget('interests'),
-      makeWidget('pageList'),
+      // Clubs / battles / rankings / jump-in / page lists stay in the catalog
+      // for Edit Home — not forced into the default feed chrome.
     ],
   };
 }
 
-function sanitizeConfig(type, config) {
+function sanitizeConfig(type, config, { clearSportPins = false } = {}) {
   const c = config && typeof config === 'object' ? { ...config } : {};
   if (type === 'sportPages') {
+    if (clearSportPins) {
+      // v1→v2: interest-auto Football/F1 pins looked like junk. Hide until re-pin.
+      return { pageKeys: [] };
+    }
     const keys = Array.isArray(c.pageKeys)
       ? c.pageKeys.filter((k) => typeof k === 'string' && k.startsWith('topic:')).slice(0, 12)
       : [];
@@ -201,10 +203,17 @@ export function normalizeHomeLayout(raw, interestIds = []) {
     return buildDefaultHomeLayout(interestIds);
   }
 
+  const clearSportPins = !raw.version || Number(raw.version) < 2;
+  const stripDefaultJunk = !raw.version || Number(raw.version) < 3;
   const seenTypes = new Set();
   const widgets = [];
   for (const w of raw.widgets) {
-    if (!w || typeof w.type !== 'string' || !CATALOG_BY_TYPE.has(w.type)) continue;
+    if (!w || typeof w.type !== 'string') continue;
+    // Strip retired chip rows — search history lives under the Blyp bar dropdown.
+    if (RETIRED_HOME_WIDGET_TYPES.has(w.type)) continue;
+    // v3: drop auto-default promo sections; users can re-add from Edit Home.
+    if (stripDefaultJunk && DEFAULT_STRIP_WIDGET_TYPES.has(w.type)) continue;
+    if (!CATALOG_BY_TYPE.has(w.type)) continue;
     // One instance per type for P0 — keeps the home coherent.
     if (seenTypes.has(w.type)) continue;
     seenTypes.add(w.type);
@@ -212,24 +221,40 @@ export function normalizeHomeLayout(raw, interestIds = []) {
       id: typeof w.id === 'string' && w.id ? w.id : `w_${w.type}_${uidSuffix()}`,
       type: w.type,
       enabled: w.enabled !== false,
-      config: sanitizeConfig(w.type, w.config),
+      config: sanitizeConfig(w.type, w.config, { clearSportPins }),
     });
   }
 
   if (widgets.length === 0) return buildDefaultHomeLayout(interestIds);
 
-  // Heal: ensure sportPages / quickDm exist so customization always offers them.
-  for (const required of ['sportPages', 'quickDm', 'forYou', 'liveNow']) {
+  // Always repair missing core rails (hide via enabled=false is fine; delete is not).
+  for (const required of CORE_HOME_WIDGET_TYPES) {
     if (!seenTypes.has(required)) {
-      const extra =
-        required === 'sportPages'
-          ? makeWidget('sportPages', {
-              pageKeys: (interestIds || []).slice(0, 4).map((id) => `topic:${id}`),
-            })
-          : makeWidget(required);
-      widgets.push(extra);
+      widgets.push(makeWidget(required));
       seenTypes.add(required);
     }
+  }
+
+  // Force video-first lead only while migrating off junk defaults.
+  if (stripDefaultJunk || clearSportPins) {
+    const leadTypes = ['forYou', 'continueWatching', 'liveNow', 'quickDm'];
+    const lead = [];
+    const rest = [];
+    const used = new Set();
+    for (const t of leadTypes) {
+      const w = widgets.find((x) => x.type === t);
+      if (w) {
+        lead.push(w);
+        used.add(t);
+      }
+    }
+    for (const w of widgets) {
+      if (!used.has(w.type)) rest.push(w);
+    }
+    return {
+      version: HOME_LAYOUT_VERSION,
+      widgets: [...lead, ...rest],
+    };
   }
 
   return {
@@ -292,6 +317,12 @@ export async function setHomeWidgetEnabled(uid, widgetId, enabled) {
 
 export async function removeHomeWidget(uid, widgetId) {
   const layout = await getHomeLayout(uid);
+  const target = layout.widgets.find((w) => w.id === widgetId);
+  if (!target) return layout;
+  // Core rails cannot be deleted — hide instead so Edit Home controls tell the truth.
+  if (CORE_HOME_WIDGET_TYPES.has(target.type)) {
+    return setHomeWidgetEnabled(uid, widgetId, false);
+  }
   const widgets = layout.widgets.filter((w) => w.id !== widgetId);
   return setHomeLayout(uid, { ...layout, widgets });
 }
@@ -322,6 +353,9 @@ export async function resetHomeLayout(uid) {
 export default {
   HOME_LAYOUT_VERSION,
   WIDGET_CATALOG,
+  RETIRED_HOME_WIDGET_TYPES,
+  DEFAULT_STRIP_WIDGET_TYPES,
+  CORE_HOME_WIDGET_TYPES,
   getCatalogEntry,
   makeWidget,
   buildDefaultHomeLayout,

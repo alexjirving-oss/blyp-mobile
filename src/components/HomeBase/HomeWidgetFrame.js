@@ -5,7 +5,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
 import { responsiveFont } from '../../utils/scaleUtils';
-import { getCatalogEntry } from '../../services/homeLayoutService';
+import { CORE_HOME_WIDGET_TYPES, getCatalogEntry } from '../../services/homeLayoutService';
 
 const HomeWidgetFrame = ({
   widget,
@@ -21,6 +21,7 @@ const HomeWidgetFrame = ({
   const meta = getCatalogEntry(widget?.type);
   const title = meta?.title || widget?.type || 'Widget';
   const disabled = widget?.enabled === false;
+  const canRemove = !CORE_HOME_WIDGET_TYPES.has(widget?.type);
 
   if (!editMode) {
     if (disabled) return null;
@@ -66,13 +67,15 @@ const HomeWidgetFrame = ({
               color={disabled ? COLORS.textMuted : COLORS.primary}
             />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.iconBtn, styles.removeBtn]}
-            onPress={onRemove}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Icon name="close" size={16} color="#FF8A80" />
-          </TouchableOpacity>
+          {canRemove ? (
+            <TouchableOpacity
+              style={[styles.iconBtn, styles.removeBtn]}
+              onPress={onRemove}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Icon name="close" size={16} color="#FF8A80" />
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
       <View style={[styles.editBody, disabled && styles.editBodyOff]} pointerEvents={disabled ? 'none' : 'auto'}>

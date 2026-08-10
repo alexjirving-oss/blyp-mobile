@@ -1,14 +1,16 @@
 // activityService.js
 //
-// Derives a real "activity" / notifications feed for the current user from
-// existing data (there is no dedicated notifications collection):
+// Derives the Activity feed from live graph + tracked events:
 //   - new followers   (users/{uid}/followers)
 //   - comments on my posts (posts/{id}/comments)
-//   - likes on my posts    (posts.likedBy)
+//   - likes           (activities collection via trackActivity — real timestamps;
+//                      posts.likedBy is fallback only when no tracked like exists)
+//
+// Actors always resolve through user profiles so Activity can show real circular
+// photoURL avatars (same people language as Stage Top Circle). Top Circle +
+// following are used only to rank / tag — not a new social graph.
 //
 // Read-bounded and best-effort: never throws, returns [] when Firebase is off.
-// Actor labels skip Cognito-sub / UUID-shaped usernames and resolve profiles
-// on read so the Activity UI never shows a raw uid as @handle.
 
 import { db, firebaseEnabled } from '../config/firebase';
 import { fixStorageUrl } from '../utils/urlUtils';
@@ -38,11 +40,17 @@ async function getProfile(id) {
     const snap = await db.collection('users').doc(id).get();
     const d = snap?.data?.() || {};
     let username = pickPublicLabel(d, { uid: id, fallback: '' });
-    if (!username) {
+    let avatar =
+      fixStorageUrl(d.avatar || d.photoURL || d.profilePicture || d.userPhotoURL) || null;
+    if (!username || !avatar) {
       try {
         const pSnap = await db.collection('userProfiles').doc(id).get();
         const p = pSnap?.data?.() || {};
-        username = pickPublicLabel(p, { uid: id, fallback: '' });
+        if (!username) username = pickPublicLabel(p, { uid: id, fallback: '' });
+        if (!avatar) {
+          avatar =
+            fixStorageUrl(p.avatar || p.photoURL || p.profilePicture || p.userPhotoURL) || null;
+        }
       } catch {
         /* ignore */
       }
@@ -54,7 +62,7 @@ async function getProfile(id) {
         { displayName: d.displayName, name: d.name },
         { uid: id, fallback: username || 'Someone' }
       ),
-      avatar: fixStorageUrl(d.avatar || d.photoURL || d.profilePicture || d.userPhotoURL) || null,
+      avatar,
     };
     profileCache.set(id, profile);
     return profile;
@@ -78,11 +86,83 @@ function denormalizedActorLabel(data, actorId) {
   );
 }
 
+function postKind(post) {
+  if (!post) return 'post';
+  if (post.type === 'video' || post.videoUrl || post.media?.[0]?.type === 'video') return 'video';
+  return 'post';
+}
+
+/** Owner Top Circle + following — for ranking / badges only. */
+async function getCircleContext(uid) {
+  const topCircle = new Set();
+  const following = new Set();
+  try {
+    const snap = await db.collection('users').doc(uid).get();
+    const d = snap?.data?.() || {};
+    const raw = d?.stage?.topCircle;
+    const ids = Array.isArray(raw) ? raw : [];
+    for (const id of ids) {
+      const s = String(id || '').trim();
+      if (s) topCircle.add(s);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const snap = await db.collection('users').doc(uid).collection('following').limit(200).get();
+    for (const d of snap?.docs || []) {
+      following.add(d.id);
+    }
+  } catch {
+    /* ignore */
+  }
+  return { topCircle, following };
+}
+
+function annotateGraph(item, ctx) {
+  const id = String(item?.actorId || '');
+  const inTopCircle = !!(id && ctx.topCircle.has(id));
+  const inFollowing = !!(id && ctx.following.has(id));
+  return {
+    ...item,
+    inTopCircle,
+    inFollowing,
+    // Rank boost: Top Circle first, then people you follow, then everyone else.
+    _rank: inTopCircle ? 2 : inFollowing ? 1 : 0,
+  };
+}
+
+async function resolveActor(actorId, denormData = {}) {
+  const fromDoc = denormalizedActorLabel(denormData, actorId);
+  const fromAvatar =
+    fixStorageUrl(
+      denormData.avatar || denormData.photoURL || denormData.profilePicture || denormData.userPhotoURL
+    ) || null;
+  // Always load profile so Activity rows get real circular photos like Top Circle.
+  // Denormalized labels alone often lack photoURL (followers docs, likes).
+  const profile = await getProfile(actorId);
+  let username = fromDoc || profile?.username || 'Someone';
+  if (looksLikeRawId(username)) username = profile?.username || 'Someone';
+  if (looksLikeRawId(username)) username = 'Someone';
+  return {
+    actorId,
+    username,
+    displayName: profile?.displayName || username,
+    avatar: fromAvatar || profile?.avatar || null,
+  };
+}
+
 async function getFollowerActivity(uid) {
   try {
     let snap;
     try {
-      snap = await db.collection('users').doc(uid).collection('followers').orderBy('timestamp', 'desc').limit(20).get();
+      snap = await db
+        .collection('users')
+        .doc(uid)
+        .collection('followers')
+        .orderBy('timestamp', 'desc')
+        .limit(20)
+        .get();
     } catch {
       snap = await db.collection('users').doc(uid).collection('followers').limit(20).get();
     }
@@ -91,16 +171,14 @@ async function getFollowerActivity(uid) {
       docs.map(async (d) => {
         const data = d.data() || {};
         const followerId = data.userId || d.id;
-        const fromDoc = denormalizedActorLabel(data, followerId);
-        const profile = fromDoc ? null : await getProfile(followerId);
-        const username = fromDoc || profile?.username || 'Someone';
+        const actor = await resolveActor(followerId, data);
         return {
           id: `follow_${followerId}`,
           type: 'follow',
           actorId: followerId,
-          username,
-          displayName: profile?.displayName || username,
-          avatar: profile?.avatar || fixStorageUrl(data.avatar || data.photoURL) || null,
+          username: actor.username,
+          displayName: actor.displayName,
+          avatar: actor.avatar,
           ts: toMillis(data.timestamp),
         };
       })
@@ -114,7 +192,12 @@ async function getFollowerActivity(uid) {
 
 async function getPostActivity(uid) {
   try {
-    const postsSnap = await db.collection('posts').where('userId', '==', uid).orderBy('date', 'desc').limit(8).get();
+    const postsSnap = await db
+      .collection('posts')
+      .where('userId', '==', uid)
+      .orderBy('date', 'desc')
+      .limit(8)
+      .get();
     const myPosts = (postsSnap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
     if (myPosts.length === 0) return [];
 
@@ -135,23 +218,18 @@ async function getPostActivity(uid) {
             (cSnap?.docs || []).map(async (c) => {
               const cd = c.data() || {};
               const commenterId = cd.userId || cd.uid;
-              if (!commenterId || commenterId === uid) return; // skip my own comments
-              let username = denormalizedActorLabel(cd, commenterId);
-              let avatar = fixStorageUrl(cd.avatar || cd.photoURL || cd.profilePicture) || null;
-              if (!username || looksLikeRawId(username)) {
-                const profile = await getProfile(commenterId);
-                username = profile?.username || 'Someone';
-                avatar = avatar || profile?.avatar || null;
-              }
+              if (!commenterId || commenterId === uid) return;
+              const actor = await resolveActor(commenterId, cd);
               items.push({
                 id: `comment_${c.id}`,
                 type: 'comment',
                 actorId: commenterId,
-                username,
-                displayName: username,
-                avatar,
+                username: actor.username,
+                displayName: actor.displayName,
+                avatar: actor.avatar,
                 text: cd.text || '',
                 post,
+                postKind: postKind(post),
                 thumbnail: postThumb(post),
                 ts: toMillis(cd.createdAt) || toMillis(post.date),
               });
@@ -163,32 +241,42 @@ async function getPostActivity(uid) {
       })
     );
 
-    // Likes on my posts (no per-like timestamp, so we attribute the post date)
+    // Prefer tracked like events (real timestamps). Fall back to likedBy only
+    // for pairs missing from activities — never invent post.date as "liked at".
+    const trackedLikes = await getTrackedLikeActivity(uid, myPosts);
+    const trackedKeys = new Set(trackedLikes.map((x) => `${x.actorId}::${x.post?.id || ''}`));
+    items.push(...trackedLikes);
+
     const likerIds = new Set();
     const likeSeed = [];
     for (const post of myPosts) {
       const likedBy = Array.isArray(post.likedBy) ? post.likedBy : [];
+      // likedBy appends on like — tip of array is the most recent liker.
       for (const likerId of likedBy.slice(-6).reverse()) {
         if (likerId === uid || likerIds.has(likerId)) continue;
+        if (trackedKeys.has(`${likerId}::${post.id}`)) continue;
         likerIds.add(likerId);
         likeSeed.push({ likerId, post });
-        if (likerIds.size >= 14) break;
+        if (likerIds.size >= 8) break;
       }
-      if (likerIds.size >= 14) break;
+      if (likerIds.size >= 8) break;
     }
     await Promise.all(
       likeSeed.map(async ({ likerId, post }) => {
-        const profile = await getProfile(likerId);
+        const actor = await resolveActor(likerId);
         items.push({
           id: `like_${post.id}_${likerId}`,
           type: 'like',
           actorId: likerId,
-          username: profile?.username || 'Someone',
-          displayName: profile?.displayName || profile?.username || 'Someone',
-          avatar: profile?.avatar || null,
+          username: actor.username,
+          displayName: actor.displayName,
+          avatar: actor.avatar,
           post,
+          postKind: postKind(post),
           thumbnail: postThumb(post),
-          ts: toMillis(post.date),
+          // No event time on likedBy — omit fake clocks; sort after real events.
+          ts: 0,
+          _likeTsSoft: true,
         });
       })
     );
@@ -213,11 +301,78 @@ function postThumb(post) {
   );
 }
 
+/** Likes written by trackActivity — real server timestamps. */
+async function getTrackedLikeActivity(uid, myPosts = []) {
+  try {
+    let snap;
+    try {
+      snap = await db
+        .collection('activities')
+        .where('targetUserId', '==', uid)
+        .where('type', '==', 'like')
+        .orderBy('timestamp', 'desc')
+        .limit(24)
+        .get();
+    } catch {
+      // Missing composite index — fall back to target-only then filter.
+      snap = await db
+        .collection('activities')
+        .where('targetUserId', '==', uid)
+        .orderBy('timestamp', 'desc')
+        .limit(40)
+        .get();
+    }
+    const byPostId = new Map((myPosts || []).map((p) => [p.id, p]));
+    const out = [];
+    for (const d of snap?.docs || []) {
+      const data = d.data() || {};
+      if (data.type && data.type !== 'like') continue;
+      const actorId = data.actorId;
+      if (!actorId || actorId === uid) continue;
+      const postId = data.metadata?.postId || data.postId || null;
+      const post = (postId && byPostId.get(postId)) || (postId ? { id: postId, ...(data.metadata?.post || {}) } : null);
+      const actor = await resolveActor(actorId, data);
+      out.push({
+        id: `like_tracked_${d.id}`,
+        type: 'like',
+        actorId,
+        username: actor.username,
+        displayName: actor.displayName,
+        avatar: actor.avatar,
+        post,
+        postKind: postKind(post),
+        thumbnail: postThumb(post) || fixStorageUrl(data.metadata?.thumbnail) || null,
+        ts: toMillis(data.timestamp) || toMillis(data.createdAt),
+      });
+    }
+    return out;
+  } catch (e) {
+    console.warn('[ACTIVITY] tracked likes failed', e?.message || String(e));
+    return [];
+  }
+}
+
 /** Returns a merged, time-sorted activity list for the user. */
 export async function getActivity(uid) {
   if (!ready() || !uid || uid === 'anon') return [];
-  const [follows, postActivity] = await Promise.all([getFollowerActivity(uid), getPostActivity(uid)]);
-  return [...follows, ...postActivity].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
+  const [follows, postActivity, ctx] = await Promise.all([
+    getFollowerActivity(uid),
+    getPostActivity(uid),
+    getCircleContext(uid),
+  ]);
+  return [...follows, ...postActivity]
+    .map((item) => annotateGraph(item, ctx))
+    .sort((a, b) => {
+      // Recent Top Circle / following activity rises without inventing a new graph.
+      if ((b._rank || 0) !== (a._rank || 0)) return (b._rank || 0) - (a._rank || 0);
+      // Prefer hard event times over soft likedBy floors.
+      const aSoft = a._likeTsSoft ? 1 : 0;
+      const bSoft = b._likeTsSoft ? 1 : 0;
+      if (aSoft !== bSoft) return aSoft - bSoft;
+      return (b.ts || 0) - (a.ts || 0);
+    })
+    .slice(0, 60)
+    .map(({ _rank, _likeTsSoft, ...rest }) => rest);
 }
 
 export function countUnread(items, lastSeenAt = 0) {
