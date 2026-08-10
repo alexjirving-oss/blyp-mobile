@@ -553,7 +553,7 @@ export async function getStreamPlaybackForViewer(
  */
 export async function getUserTeamForEarnings(
   userId: string
-): Promise<{ teamId: string; leaderId: string } | null> {
+): Promise<{ teamId: string; leaderId: string; agencyTier: 'standard' | 'growth' } | null> {
   const fs = getFirestore();
   if (!fs) return null;
   const uid = String(userId || '').trim();
@@ -568,7 +568,14 @@ export async function getUserTeamForEarnings(
     const d = snap.docs[0];
     const data = d.data() || {};
     const leaderId = str(data.leaderId);
-    return { teamId: d.id, leaderId };
+    // TODO(product): define growth-tier promotion thresholds (volume / roster size).
+    // Until then, set teams/{id}.agencyTier = 'growth' manually for 15%; default 'standard' = 10%.
+    const rawTier = String(data.agencyTier || data.agency_tier || 'standard')
+      .trim()
+      .toLowerCase();
+    const agencyTier: 'standard' | 'growth' =
+      rawTier === 'growth' || rawTier === '15' || rawTier === 'tier2' ? 'growth' : 'standard';
+    return { teamId: d.id, leaderId, agencyTier };
   } catch (e: any) {
     logger.error({ err: e?.message || String(e), userId: uid }, '[firestore-admin] getUserTeamForEarnings failed');
     return null;

@@ -20,8 +20,9 @@ export const WITHDRAWAL_POLICY = {
   // Hard cap on a single request. Anything above MANUAL_REVIEW_ABOVE_COINS is
   // allowed but routed to manual review rather than auto-approved.
   MAX_SINGLE_PAYOUT_COINS: 500_000,
-  // Percentage the platform keeps (applied to the gross before payout).
-  PLATFORM_FEE_PERCENT: 30,
+  // Percentage the platform keeps on withdrawal (0 — creators withdraw full gem face;
+  // only real rail fees, if any, are outside this policy).
+  PLATFORM_FEE_PERCENT: 0,
 
   // --- Earnings clearance --------------------------------------------------
   // Earnings are held (pending) before they become withdrawable, so gifts funded

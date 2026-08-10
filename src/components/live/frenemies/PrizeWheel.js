@@ -30,44 +30,47 @@ import Svg, {
 import { Audio } from 'expo-av';
 import { pickPublicLabel } from '../../../utils/publicLabel';
 
+/** Blyp COLORS — PETRONAS teal, ink chrome, gold prize accents. */
 const TEAL_DEEP = '#0A6B62';
 const TEAL = '#00D2BE';
+const TEAL_DIM = '#00A89E';
+const TEAL_LIGHT = '#7FEDE2';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
 const GOLD_DARK = '#C9A227';
 const INK = '#0A0A0C';
-const ROSE = '#FB7185';
-const ROSE_DEEP = '#9F1239';
+const INK_CARD = '#121216';
 
 /** Pointer sits at 3 o'clock (degrees from top, clockwise). */
 const POINTER_DEG = 90;
 
+/** Empty boxes: ink / deep-teal checker — high contrast under gold rim. */
 const SEG_COLORS = [
   '#0B2F2C',
-  '#123F3A',
+  INK_CARD,
   '#0E4A44',
-  '#1A2A38',
+  '#141418',
   '#0B2F2C',
-  '#163D36',
+  INK_CARD,
   '#0E4A44',
-  '#1A2530',
+  '#141418',
   '#0B2F2C',
-  '#123F3A',
+  INK_CARD,
   '#0E4A44',
 ];
 
 const SEG_COLORS_ALT = [
-  '#0F3D38',
+  TEAL_DEEP,
   '#15524A',
-  '#0A6B62',
-  '#1C3340',
   '#0F3D38',
-  '#1A4A40',
-  '#0A6B62',
-  '#243040',
-  '#0F3D38',
+  TEAL_DEEP,
   '#15524A',
-  '#0A6B62',
+  '#0F3D38',
+  TEAL_DEEP,
+  '#15524A',
+  '#0F3D38',
+  TEAL_DEEP,
+  '#15524A',
 ];
 
 const WHEEL_TICK = require('../../../../assets/sounds/wheel_tick.wav');
@@ -449,19 +452,25 @@ export default function PrizeWheel({
                 <Stop offset="100%" stopColor={GOLD_DARK} />
               </SvgLinearGradient>
               <SvgLinearGradient id="bezelRing" x1="0" y1="0" x2="1" y2="1">
-                <Stop offset="0%" stopColor="#2A2418" />
+                <Stop offset="0%" stopColor="#141418" />
                 <Stop offset="50%" stopColor={INK} />
-                <Stop offset="100%" stopColor="#1A1520" />
+                <Stop offset="100%" stopColor="#0B2F2C" />
               </SvgLinearGradient>
-              <SvgLinearGradient id="rimGold" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0%" stopColor={GOLD_SOFT} />
+              <SvgLinearGradient id="rimBrand" x1="0" y1="0" x2="1" y2="1">
+                <Stop offset="0%" stopColor={TEAL_LIGHT} />
+                <Stop offset="40%" stopColor={TEAL} />
+                <Stop offset="75%" stopColor={GOLD} />
                 <Stop offset="100%" stopColor={GOLD_DARK} />
+              </SvgLinearGradient>
+              <SvgLinearGradient id="discTeal" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0%" stopColor="#0E4A44" />
+                <Stop offset="100%" stopColor={INK} />
               </SvgLinearGradient>
             </Defs>
 
-            {/* Outer bezel */}
-            <Circle cx={cx} cy={cy} r={rBezel + 2} fill="url(#bezelRing)" stroke="url(#rimGold)" strokeWidth={3.5} />
-            <Circle cx={cx} cy={cy} r={rOuter + 1.5} fill={INK} stroke="rgba(0,210,190,0.45)" strokeWidth={1.5} />
+            {/* Outer bezel — teal→gold rim on ink (Blyp stage) */}
+            <Circle cx={cx} cy={cy} r={rBezel + 2} fill="url(#bezelRing)" stroke="url(#rimBrand)" strokeWidth={4} />
+            <Circle cx={cx} cy={cy} r={rOuter + 1.5} fill="url(#discTeal)" stroke={TEAL} strokeWidth={1.75} />
 
             <G>
               {segments.map((s) => (
@@ -469,30 +478,30 @@ export default function PrizeWheel({
                   key={s.n}
                   d={s.path}
                   fill={s.color}
-                  stroke={s.occupied ? TEAL : s.accent ? 'rgba(245,197,66,0.55)' : 'rgba(245,197,66,0.28)'}
-                  strokeWidth={s.occupied ? 1.6 : 1}
+                  stroke={s.occupied ? TEAL : s.accent ? 'rgba(245,197,66,0.65)' : 'rgba(0,210,190,0.28)'}
+                  strokeWidth={s.occupied ? 1.8 : 1.1}
                 />
               ))}
             </G>
 
-            {/* Gold studs on bezel */}
+            {/* Rim studs — gold empty / teal occupied */}
             {segments.map((s) => (
               <Circle
                 key={`stud-${s.n}`}
                 cx={s.stud.x}
                 cy={s.stud.y}
-                r={Math.max(1.6, size * 0.012)}
+                r={Math.max(1.8, size * 0.013)}
                 fill={s.occupied ? TEAL : GOLD}
                 stroke={INK}
-                strokeWidth={0.6}
+                strokeWidth={0.7}
               />
             ))}
 
-            {/* Hub */}
-            <Circle cx={cx} cy={cy} r={rInner + 3} fill={INK} stroke={GOLD} strokeWidth={2} />
+            {/* Hub — gold prize core + teal pin */}
+            <Circle cx={cx} cy={cy} r={rInner + 3} fill={INK} stroke={GOLD} strokeWidth={2.2} />
             <Circle cx={cx} cy={cy} r={rInner} fill="url(#hubGold)" stroke={INK} strokeWidth={1.5} />
-            <Circle cx={cx} cy={cy} r={rInner * 0.38} fill={INK} />
-            <Circle cx={cx} cy={cy} r={rInner * 0.18} fill={GOLD} />
+            <Circle cx={cx} cy={cy} r={rInner * 0.4} fill={INK} stroke={TEAL_DIM} strokeWidth={1} />
+            <Circle cx={cx} cy={cy} r={rInner * 0.18} fill={TEAL} />
           </Svg>
 
           <View style={[StyleSheet.absoluteFillObject, { width: size, height: size }]} pointerEvents="none">
@@ -573,10 +582,10 @@ const styles = StyleSheet.create({
     borderRightWidth: 22,
     borderTopColor: 'transparent',
     borderBottomColor: 'transparent',
-    borderRightColor: ROSE,
-    shadowColor: ROSE_DEEP,
+    borderRightColor: GOLD,
+    shadowColor: TEAL,
     shadowOpacity: 0.55,
-    shadowRadius: 4,
+    shadowRadius: 5,
     shadowOffset: { width: -1, height: 0 },
   },
   pointerCore: {
@@ -585,7 +594,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: GOLD,
+    backgroundColor: TEAL,
     borderWidth: 1,
     borderColor: INK,
   },
@@ -595,9 +604,9 @@ const styles = StyleSheet.create({
   },
   glow: {
     position: 'absolute',
-    backgroundColor: 'rgba(0,210,190,0.22)',
+    backgroundColor: 'rgba(0,210,190,0.28)',
     borderWidth: 1.5,
-    borderColor: 'rgba(245,197,66,0.4)',
+    borderColor: 'rgba(245,197,66,0.45)',
   },
   segLabel: {
     position: 'absolute',
@@ -609,14 +618,14 @@ const styles = StyleSheet.create({
     minHeight: 20,
     paddingHorizontal: 3,
     borderRadius: 8,
-    backgroundColor: 'rgba(10,10,12,0.55)',
+    backgroundColor: 'rgba(10,10,12,0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(245,197,66,0.35)',
+    borderColor: 'rgba(0,210,190,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   segNum: {
-    color: GOLD_SOFT,
+    color: TEAL_LIGHT,
     fontWeight: '900',
     letterSpacing: 0.3,
     textShadowColor: 'rgba(0,0,0,0.65)',

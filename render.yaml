@@ -32,9 +32,9 @@ services:
       - key: REDIS_URL
         sync: false
       - key: ECONOMY_TAKE_RATE_BPS
-        value: 3000
+        value: 5000
       - key: CREATOR_SHARE_BPS
-        value: 7000
+        value: 5000
       - key: GEMS_PER_COIN_NUM
         value: 1
       - key: GEMS_PER_COIN_DEN

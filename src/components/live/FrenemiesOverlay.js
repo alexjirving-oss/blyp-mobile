@@ -41,14 +41,13 @@ import FrenemiesSettingsSheet from './frenemies/FrenemiesSettingsSheet';
 import FrenemiesWheelGlyph from './frenemies/FrenemiesWheelGlyph';
 import BuyCoinsOverlay from '../BuyCoinsOverlay';
 
-const TEAL = '#00F5D4';
-const ROSE = '#FF2D95';
-const GOLD = '#FFE566';
-const GOLD_SOFT = '#FFF1A8';
-const INK = '#050508';
+const TEAL = '#00D2BE';
+const ROSE = '#FB7185';
+const GOLD = '#F5C542';
+const GOLD_SOFT = '#FDE68A';
+const INK = '#0A0A0C';
 const RULES_TIP_KEY = '@blyp/frenemies_rules_tip_v1';
-const MAGENTA = '#FF2D95';
-const ELECTRIC = '#7CFFB2';
+const ELECTRIC = '#67E8F9';
 
 function initialsFor(name) {
   const s = String(name || '').trim().replace(/^@/, '');
@@ -647,7 +646,7 @@ export default function FrenemiesOverlay({
       {(canConduct && controlsVisible && !active && !endRecap) ? (
         <View style={styles.startCard} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(42,10,36,0.98)', 'rgba(6,42,40,0.96)', 'rgba(5,5,8,0.99)']}
+            colors={['rgba(14,61,56,0.98)', 'rgba(10,10,12,0.97)', 'rgba(18,18,22,0.99)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.startGrad}
@@ -664,7 +663,7 @@ export default function FrenemiesOverlay({
                   Frenemies
                 </Text>
                 <Text style={styles.titleTag} allowFontScaling={false}>
-                  neon wheel · host-run
+                  teal wheel · host-run
                 </Text>
               </View>
               <View>
@@ -705,7 +704,7 @@ export default function FrenemiesOverlay({
       {active ? (
         <View style={styles.hud} pointerEvents="box-none">
           <LinearGradient
-            colors={['rgba(42,10,36,0.94)', 'rgba(6,42,40,0.72)', 'rgba(5,5,8,0.55)']}
+            colors={['rgba(14,61,56,0.94)', 'rgba(10,10,12,0.78)', 'rgba(18,18,22,0.55)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.hudInner}
@@ -1250,7 +1249,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 2,
-    borderColor: 'rgba(255,45,149,0.65)',
+    borderColor: 'rgba(0,210,190,0.55)',
   },
   startGrad: { padding: 16 },
   openBrandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -1258,9 +1257,9 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: 'rgba(255,45,149,0.18)',
+    backgroundColor: 'rgba(0,210,190,0.12)',
     borderWidth: 2,
-    borderColor: MAGENTA,
+    borderColor: TEAL,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1289,7 +1288,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   titleTag: {
-    color: MAGENTA,
+    color: TEAL,
     fontWeight: '800',
     fontSize: 12,
     marginTop: 2,
@@ -1303,12 +1302,12 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   startBtn: {
-    backgroundColor: MAGENTA,
+    backgroundColor: TEAL,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  startBtnText: { color: '#fff', fontWeight: '900', fontSize: 16, letterSpacing: 0.2 },
+  startBtnText: { color: INK, fontWeight: '900', fontSize: 16, letterSpacing: 0.2 },
   backChip: { alignSelf: 'center', marginTop: 10, padding: 4 },
   backChipText: { color: 'rgba(255,255,255,0.55)', fontWeight: '700', fontSize: 12 },
   hud: {
@@ -1319,7 +1318,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,45,149,0.45)',
+    borderColor: 'rgba(0,210,190,0.4)',
   },
   hudInner: { padding: 12 },
   hudRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1404,12 +1403,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 22,
     borderWidth: 2,
-    borderColor: 'rgba(255,45,149,0.55)',
-    backgroundColor: 'rgba(42,10,36,0.55)',
+    borderColor: 'rgba(0,210,190,0.45)',
+    backgroundColor: 'rgba(11,47,44,0.55)',
     marginBottom: 4,
   },
-  autoOn: { color: MAGENTA },
-  autoOff: { color: ELECTRIC },
+  autoOn: { color: TEAL },
+  autoOff: { color: 'rgba(161,161,170,0.9)' },
   autoChip: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1417,12 +1416,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   autoOnChip: {
-    backgroundColor: 'rgba(255,45,149,0.18)',
-    borderColor: 'rgba(255,45,149,0.55)',
+    backgroundColor: 'rgba(0,210,190,0.18)',
+    borderColor: 'rgba(0,210,190,0.55)',
   },
   autoOffChip: {
-    backgroundColor: 'rgba(124,255,178,0.12)',
-    borderColor: 'rgba(124,255,178,0.45)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   readyTitle: {
     color: '#fff',
@@ -1635,8 +1634,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
   throwProtected: {
-    borderColor: 'rgba(0,245,212,0.55)',
-    backgroundColor: 'rgba(0,245,212,0.12)',
+    borderColor: 'rgba(0,210,190,0.55)',
+    backgroundColor: 'rgba(0,210,190,0.12)',
   },
   throwEmpty: {
     opacity: 0.4,

@@ -3,13 +3,10 @@
 // Builds Blyp share links and opens the native share sheet for posts, profiles
 // and Blyp queries.
 //
-// For posts we share an HTTPS web link (blyp.world) — NOT the raw blyp://
-// scheme — so chat apps like WhatsApp render a rich preview tile. The web link
-// carries the post title + public thumbnail as query params, which a small
-// Netlify function echoes into OpenGraph tags (og:title/og:image) and then
-// bounces the human on to the app/store. (WhatsApp's crawler doesn't run JS,
-// so the tags must be server-rendered; passing them in the URL avoids any
-// Firestore/secret dependency.)
+// For posts we share a clean HTTPS web link (blyp.world/p/{id}) — NOT the raw
+// blyp:// scheme and NOT giant ?t=&img=&v= query strings (WhatsApp truncates
+// those and fails the preview). The Netlify share-post function server-renders
+// og:title / og:image from Firestore for crawlers; humans land on /v/{id}.
 // All share calls are best-effort and never throw.
 
 import { Share } from 'react-native';
@@ -24,32 +21,11 @@ export const blypUrl = (q) => `${SCHEME}blyp?q=${encodeURIComponent(String(q || 
 const pickStr = (...vals) =>
   vals.map((v) => (typeof v === 'string' ? v.trim() : '')).find((v) => v.length > 0) || '';
 
-const postThumbFor = (post) =>
-  pickStr(
-    post?.thumbnail,
-    post?.thumbnailUrl,
-    post?.posterUrl,
-    post?.media?.[0]?.thumbnail,
-    post?.imageUrl,
-    post?.media?.[0]?.url,
-    post?.userPhotoURL,
-    post?.user?.avatar,
-  );
-
-const postVideoFor = (post) =>
-  pickStr(post?.videoUrl, post?.media?.[0]?.url);
-
 // Public, crawlable HTTPS link that yields a WhatsApp/iMessage preview tile.
 export const postWebUrl = (post) => {
   const id = post?.id;
   if (!id) return WEB_BASE;
-  const title = pickStr(post?.title, post?.captionTitle, post?.caption, post?.description) || 'A post on Blyp';
-  const img = postThumbFor(post);
-  const vid = postVideoFor(post);
-  const parts = [`t=${encodeURIComponent(title.slice(0, 140))}`];
-  if (img) parts.push(`img=${encodeURIComponent(img)}`);
-  if (vid) parts.push(`v=${encodeURIComponent(vid)}`);
-  return `${WEB_BASE}/p/${encodeURIComponent(String(id))}?${parts.join('&')}`;
+  return `${WEB_BASE}/p/${encodeURIComponent(String(id))}`;
 };
 
 async function safeShare(content) {

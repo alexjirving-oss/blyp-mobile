@@ -29,7 +29,7 @@ For users in `WITHDRAW_TEST_SUBS`, `ADMIN_ALLOWLIST_SUBS`, or Owner bootstrap:
 - Softened: `ACCOUNT_TOO_NEW`, `NEW_PAYOUT_ACCOUNT`, and request-velocity denies
   (`TOO_SOON_SINCE_LAST_REQUEST`, daily, weekly). This permits an immediate retry
   after a failed provider attempt.
-- Still enforced: min 1000 gems, 30% fee, KYC/Connect, open-request lock,
+- Still enforced: min 1000 gems, 0% platform fee, KYC/Connect, open-request lock,
   chargebacks, fraud freeze/review, payout-value caps, and large-amount review.
 - Normal users retain all request-velocity fraud limits.
 
@@ -87,7 +87,7 @@ available balance** to the creator's connected account. A connected account can
 have payouts enabled and a valid bank account while this transfer still fails if
 the platform balance is empty.
 
-- 1,000 gems = £10.00 gross at 1p/gem, less 30% fee = **£7.00 transfer**.
+- 1,000 gems = £10.00 at 1p/gem with **0% platform fee** = **£10.00 transfer** (rail fees if any are separate).
 - Google Play proceeds do not automatically fund the Stripe platform balance.
 - In Stripe Dashboard, open **Balances → Add funds**, fund enough GBP for the
   transfer plus a buffer, and wait until it is **available** (not pending).

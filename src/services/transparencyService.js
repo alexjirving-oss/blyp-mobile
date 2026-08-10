@@ -97,11 +97,11 @@ export const PLANS = [
 // ---------------------------------------------------------------------------
 export const ECONOMICS = [
   { label: 'Creator share of what their content earns', value: 'Majority to the creator' },
-  { label: 'Gifts — share to the receiving creator', value: '70%' },
+  { label: 'Gifts — share to the receiving creator', value: '50%' },
   { label: 'Sponsored slots per results page', value: 'Max 1, always labelled' },
   { label: 'Can paying outrank the top honest result?', value: 'Never' },
   { label: 'Purchased coins → cash', value: 'Not redeemable (spend-only)' },
-  { label: 'Creator gem earnings → cash', value: 'Withdraw via Stripe after hold + 30% fee' },
+  { label: 'Creator gem earnings → cash', value: 'Withdraw via Stripe after hold — no platform fee' },
   { label: 'Your data sold by default', value: 'No — only ever a paid, opt-in exchange with you' },
 ];
 

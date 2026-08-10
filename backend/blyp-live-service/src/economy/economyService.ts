@@ -30,12 +30,18 @@ import {
   LAUNCH_TEST_GEM_CREDIT_CAP,
 } from './withdrawLaunchTest';
 
-// Team gift bonus rates, expressed in micro-gems per base gem so all accrual is
-// done in integers (1 gem = 1_000_000 micro). Member earns +10% of base gems,
-// the team leader earns 5% of the member's base gems.
+// Agency commission from Blyp's platform half of gift face (coins → gems).
+// Creator already keeps 100% of CREATOR_SHARE_BPS (50%) — never deducted here.
+// standard = 10% of gift spend; growth = 15%. TODO(product): growth promotion thresholds.
 const MICRO_PER_GEM = 1_000_000n;
-const MEMBER_BONUS_MICRO_PER_GEM = 100_000n; // 10% => 0.10 gem per base gem
-const LEADER_BONUS_MICRO_PER_GEM = 50_000n; //  5% => 0.05 gem per base gem
+const AGENCY_COMMISSION_STANDARD_BPS = 1000n;
+const AGENCY_COMMISSION_GROWTH_BPS = 1500n;
+
+function agencyCommissionBps(tier: 'standard' | 'growth' | string | null | undefined): bigint {
+  const t = String(tier || 'standard').trim().toLowerCase();
+  if (t === 'growth' || t === '15' || t === 'tier2') return AGENCY_COMMISSION_GROWTH_BPS;
+  return AGENCY_COMMISSION_STANDARD_BPS;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -2005,10 +2011,9 @@ export async function sendGift(senderUserId: string, input: {
     }
   }
 
-  // Team bonus: if the recipient is in a team, mint an extra 10% of the gems
-  // they just earned to them, and 5% to their team leader. Done after the gift
-  // commit so it never blocks or fails the core gift. Skipped on idempotent
-  // replays (no new gems were earned).
+  // Agency commission: if the recipient is on a team, credit the agency/leader
+  // 10% (standard) or 15% (growth) of gift face from Blyp's half. Creator gems
+  // are untouched. Non-fatal / after commit so core gift never blocks.
   if (result.kind === 'success' && result.response.gemsCredited > 0) {
     try {
       await applyTeamGiftBonus({
@@ -2082,12 +2087,12 @@ export async function sendGift(senderUserId: string, input: {
 }
 
 /**
- * Pay out the team gift bonus for a single gift the member just received.
- *  - member earns an extra 10% of base gems
- *  - team leader earns 5% of base gems (skipped if the member IS the leader)
- * Accrual is tracked in micro-gems and only whole gems are credited to wallets,
- * with the fractional remainder carried forward (so 5% of 50 = 2.5 isn't lost —
- * the next gift tops it up). Idempotent per giftEventId via the unique ledger key.
+ * Credit agency/team-leader commission from Blyp's platform half of gift face.
+ * Locked marketing model:
+ *  - Creator already received CREATOR_SHARE_BPS (50%) gems — keep 100% of that (no member cut).
+ *  - Agency earns 10% (standard) or 15% (growth) of gift spend (coins→gems) from platform side.
+ *  - Guest gifts still credit the recipient (caller passes receiverUserId).
+ * Accrual is tracked in micro-gems; only whole gems hit wallets. Idempotent per giftEventId.
  */
 async function applyTeamGiftBonus(input: {
   giftEventId: string;
@@ -2097,7 +2102,8 @@ async function applyTeamGiftBonus(input: {
 }): Promise<void> {
   const { giftEventId, memberUserId } = input;
   const baseGems = BigInt(Math.max(0, Math.floor(input.baseGems)));
-  if (baseGems <= 0n) return;
+  const coins = BigInt(Math.max(0, Math.floor(input.coins)));
+  if (baseGems <= 0n || coins <= 0n) return;
 
   const team = await getUserTeamForEarnings(memberUserId);
   if (!team || !team.teamId) return;
@@ -2107,32 +2113,45 @@ async function applyTeamGiftBonus(input: {
   const { db } = getEconomyInfra();
   const env = getEconomyEnv();
   const gemColumn = env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'gem_pending' : 'gem_available';
+  const commissionBps = leaderIsMember ? 0n : agencyCommissionBps(team.agencyTier);
+  // agency gems (exact fraction via micro): coins * bps/10000 * gemsPerCoin
+  const agencyMicro =
+    commissionBps <= 0n
+      ? 0n
+      : (coins * commissionBps * BigInt(env.GEMS_PER_COIN_NUM) * MICRO_PER_GEM) /
+        (BigInt(10000) * BigInt(env.GEMS_PER_COIN_DEN));
 
   const deltas = await db.transaction(async (trx) => {
-    // Idempotency: if we already paid this gift's bonus, do nothing.
     const already = await trx('ledger_entries')
-      .where({ idempotency_key: `team-bonus:${giftEventId}:member` })
+      .where({ idempotency_key: `team-agency:${giftEventId}` })
       .first();
     if (already) return null;
 
-    // Upsert the accrual row and add this gift's micro-gems.
+    // Also treat legacy keys as processed so we never double-pay after the model flip.
+    const legacy = await trx('ledger_entries')
+      .whereIn('idempotency_key', [
+        `team-bonus:${giftEventId}:member`,
+        `team-bonus:${giftEventId}:leader`,
+      ])
+      .first();
+    if (legacy) return null;
+
     await trx('team_earnings')
       .insert({
         team_id: team.teamId,
         member_user_id: memberUserId,
         leader_user_id: leaderUserId || memberUserId,
-        coins_received: BigInt(Math.max(0, Math.floor(input.coins))).toString(),
+        coins_received: coins.toString(),
         base_gems: baseGems.toString(),
-        member_bonus_micro: (baseGems * MEMBER_BONUS_MICRO_PER_GEM).toString(),
-        leader_bonus_micro: (leaderIsMember ? 0n : baseGems * LEADER_BONUS_MICRO_PER_GEM).toString(),
+        member_bonus_micro: '0',
+        leader_bonus_micro: agencyMicro.toString(),
       })
       .onConflict(['team_id', 'member_user_id'])
       .merge({
         leader_user_id: leaderUserId || memberUserId,
-        coins_received: trx.raw('team_earnings.coins_received + ?', [BigInt(Math.max(0, Math.floor(input.coins))).toString()]),
+        coins_received: trx.raw('team_earnings.coins_received + ?', [coins.toString()]),
         base_gems: trx.raw('team_earnings.base_gems + ?', [baseGems.toString()]),
-        member_bonus_micro: trx.raw('team_earnings.member_bonus_micro + ?', [(baseGems * MEMBER_BONUS_MICRO_PER_GEM).toString()]),
-        leader_bonus_micro: trx.raw('team_earnings.leader_bonus_micro + ?', [(leaderIsMember ? 0n : baseGems * LEADER_BONUS_MICRO_PER_GEM).toString()]),
+        leader_bonus_micro: trx.raw('team_earnings.leader_bonus_micro + ?', [agencyMicro.toString()]),
         updated_at: trx.fn.now(),
       });
 
@@ -2142,55 +2161,34 @@ async function applyTeamGiftBonus(input: {
       .first();
     if (!row) return null;
 
-    const memberMicro = BigInt(row.member_bonus_micro);
-    const memberPaid = BigInt(row.member_bonus_paid);
-    const memberWholeOwed = memberMicro / MICRO_PER_GEM;
-    const memberCredit = memberWholeOwed > memberPaid ? memberWholeOwed - memberPaid : 0n;
-
     const leaderMicro = BigInt(row.leader_bonus_micro);
     const leaderPaid = BigInt(row.leader_bonus_paid);
     const leaderWholeOwed = leaderMicro / MICRO_PER_GEM;
-    const leaderCredit = !leaderIsMember && leaderWholeOwed > leaderPaid ? leaderWholeOwed - leaderPaid : 0n;
+    const leaderCredit =
+      !leaderIsMember && leaderWholeOwed > leaderPaid ? leaderWholeOwed - leaderPaid : 0n;
 
-    // Credit the member's wallet (whole gems) + ledger.
-    if (memberCredit > 0n) {
-      await trx('wallets').insert({ user_id: memberUserId }).onConflict('user_id').ignore();
-      await trx('wallets')
-        .where({ user_id: memberUserId })
-        .update({
-          [gemColumn]: trx.raw(`${gemColumn} + ?`, [memberCredit.toString()]),
-          lifetime_earned_gems: trx.raw('lifetime_earned_gems + ?', [memberCredit.toString()]),
-          updated_at: trx.fn.now(),
-        });
-      await trx('ledger_entries').insert({
-        ledger_id: randomUUID(),
-        user_id: memberUserId,
-        entry_type: 'TEAM_BONUS_EARN',
-        currency: 'GEM',
-        amount: memberCredit.toString(),
-        status: env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED',
-        reference_type: 'GIFT_EVENT',
-        reference_id: giftEventId,
-        idempotency_key: `team-bonus:${giftEventId}:member`,
-        metadata: { teamId: team.teamId, role: 'member', baseGems: baseGems.toString() },
-      });
-    } else {
-      // Still record the marker so this gift is treated as processed (idempotent).
-      await trx('ledger_entries').insert({
-        ledger_id: randomUUID(),
-        user_id: memberUserId,
-        entry_type: 'TEAM_BONUS_EARN',
-        currency: 'GEM',
-        amount: '0',
-        status: 'POSTED',
-        reference_type: 'GIFT_EVENT',
-        reference_id: giftEventId,
-        idempotency_key: `team-bonus:${giftEventId}:member`,
-        metadata: { teamId: team.teamId, role: 'member', baseGems: baseGems.toString(), carried: true },
-      });
-    }
+    // Idempotency marker on the roster member (always), so retries are no-ops.
+    await trx('ledger_entries').insert({
+      ledger_id: randomUUID(),
+      user_id: memberUserId,
+      entry_type: 'TEAM_BONUS_EARN',
+      currency: 'GEM',
+      amount: '0',
+      status: 'POSTED',
+      reference_type: 'GIFT_EVENT',
+      reference_id: giftEventId,
+      idempotency_key: `team-agency:${giftEventId}`,
+      metadata: {
+        teamId: team.teamId,
+        role: 'member',
+        baseGems: baseGems.toString(),
+        giftCoins: coins.toString(),
+        agencyCommissionBps: commissionBps.toString(),
+        agencyTier: team.agencyTier || 'standard',
+        creatorShareUntouched: true,
+      },
+    });
 
-    // Credit the leader's wallet (whole gems) + ledger.
     if (leaderCredit > 0n && leaderUserId) {
       await trx('wallets').insert({ user_id: leaderUserId }).onConflict('user_id').ignore();
       await trx('wallets')
@@ -2209,34 +2207,43 @@ async function applyTeamGiftBonus(input: {
         status: env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED',
         reference_type: 'GIFT_EVENT',
         reference_id: giftEventId,
-        idempotency_key: `team-bonus:${giftEventId}:leader`,
-        metadata: { teamId: team.teamId, role: 'leader', fromMember: memberUserId, baseGems: baseGems.toString() },
+        idempotency_key: `team-agency:${giftEventId}:leader`,
+        metadata: {
+          teamId: team.teamId,
+          role: 'agency',
+          fromMember: memberUserId,
+          baseGems: baseGems.toString(),
+          giftCoins: coins.toString(),
+          agencyCommissionBps: commissionBps.toString(),
+          agencyTier: team.agencyTier || 'standard',
+        },
       });
     }
 
-    // Apply the credited whole gems to the paid counters.
     await trx('team_earnings')
       .where({ team_id: team.teamId, member_user_id: memberUserId })
       .update({
-        member_bonus_paid: (memberPaid + memberCredit).toString(),
         leader_bonus_paid: (leaderPaid + leaderCredit).toString(),
         updated_at: trx.fn.now(),
       });
 
+    const agencyGemsExact =
+      commissionBps <= 0n
+        ? 0
+        : (Number(coins) * Number(commissionBps) * env.GEMS_PER_COIN_NUM) /
+          (10000 * env.GEMS_PER_COIN_DEN);
+
     return {
-      // For the Firestore mirror we report the PRECISE earned amounts (including
-      // fractions) so the dashboard reflects true earnings, not just whole gems.
       baseGemsDelta: Number(baseGems),
-      memberBonusDelta: Number(baseGems) * 0.1,
-      leaderBonusDelta: leaderIsMember ? 0 : Number(baseGems) * 0.05,
-      coinsDelta: Math.max(0, Math.floor(input.coins)),
+      memberBonusDelta: 0,
+      leaderBonusDelta: agencyGemsExact,
+      coinsDelta: Number(coins),
       leaderUserId,
     };
   });
 
   if (!deltas) return;
 
-  // Mirror to Firestore for the leader dashboard (best-effort, outside the txn).
   await mirrorTeamEarnings({
     teamId: team.teamId,
     memberUserId,

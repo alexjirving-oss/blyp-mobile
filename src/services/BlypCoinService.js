@@ -478,7 +478,7 @@ class BlypCoinService {
         }
 
         // NOW ALL WRITES - after all reads are complete
-        const receiverAmount = Math.floor(cost * 0.7); // 70% to receiver, 30% platform fee
+        const receiverAmount = Math.floor(cost * 0.5); // 50% to receiver, 50% platform (legacy FS path)
 
         // Update sender wallet
         const senderBalance = senderWallet.data().balance - cost;
