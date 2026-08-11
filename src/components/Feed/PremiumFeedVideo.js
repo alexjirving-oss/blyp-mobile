@@ -13,8 +13,7 @@ const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
  *
  * Frame is always absolute-fill (TikTok-stable). Natural size / aspect never
  * changes parent layout — fit is handled inside ForYouVideo / BlypShorts via
- * contain|cover matrix. Wide clips may paint a bottom fade once aspect is
- * known; that is overlay-only and does not reflow the cell.
+ * cover matrix. For You always covers (no letterbox jump / isWide chrome mount).
  *
  * Cover / custom-fit frames apply FEED_VIDEO_VERTICAL_NUDGE_Y so the subject
  * sits optically between header chrome and the absolute tab bar / viewer footer.
@@ -40,28 +39,18 @@ export default function PremiumFeedVideo({
   onReady,
   onProgress,
 }) {
-  const [aspect, setAspect] = useState(0);
   const [progress, setProgress] = useState(0);
   const progressRef = useRef(0);
   const lastProgressEmitRef = useRef(0);
   const pauseOpacity = useRef(new Animated.Value(0)).current;
   const playing = shouldPlay && !paused;
 
-  const fitMode = mediaDisplay?.fitMode;
   // Zoom-out (0.5) through zoom-in (2.5) — must match VideoFramingSheet / postEditService.
   const userScale = Math.min(2.5, Math.max(0.5, Number(mediaDisplay?.scale) || 1));
   const offsetX = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetX) || 0));
   const offsetY = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetY) || 0));
-  // Only an explicit creator choice of `cover` crops; auto/missing/contain → fit.
-  const useCover = fitMode === 'cover';
-
-  const isWide = !useCover && aspect > 1.15;
-  const resizeMode = useCover ? 'cover' : 'contain';
-
-  // New source → forget prior aspect (chrome only; never drives layout).
-  useEffect(() => {
-    setAspect(0);
-  }, [uri]);
+  // For You feed path: always cover (TikTok). No contain letterbox / aspect chrome.
+  const resizeMode = 'cover';
 
   useEffect(() => {
     Animated.timing(pauseOpacity, {
@@ -73,10 +62,7 @@ export default function PremiumFeedVideo({
 
   const handleNaturalSize = useCallback(
     (ns) => {
-      if (ns?.width > 0 && ns?.height > 0) {
-        const a = ns.width / ns.height;
-        if (a > 0) setAspect((prev) => (Math.abs(prev - a) < 0.001 ? prev : a));
-      }
+      // Chrome/analytics only — never setState aspect / never reflow layout.
       onNaturalSize?.(ns);
     },
     [onNaturalSize],
@@ -167,13 +153,6 @@ export default function PremiumFeedVideo({
             locations={[0.35, 0.7, 1]}
             style={styles.bottomVignette}
           />
-          {isWide && (
-            <LinearGradient
-              pointerEvents="none"
-              colors={['transparent', 'rgba(10,10,12,0.9)', COLORS.pageBackground]}
-              style={styles.wideFade}
-            />
-          )}
         </>
       )}
 
@@ -210,13 +189,6 @@ const styles = StyleSheet.create({
   },
   bottomVignette: {
     ...StyleSheet.absoluteFillObject,
-  },
-  wideFade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '28%',
   },
   pauseWrap: {
     ...StyleSheet.absoluteFillObject,

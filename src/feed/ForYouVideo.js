@@ -30,7 +30,7 @@ export default function ForYouVideo({
   isMuted = true,
   role = 'active',
   seekToZero = false,
-  resizeMode = 'contain',
+  resizeMode = 'cover',
   audioOwnerId = null,
   onReady,
   onError,
@@ -56,7 +56,8 @@ export default function ForYouVideo({
   const [activeUri, setActiveUri] = useState(ladder[0] || null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [seekEpoch, setSeekEpoch] = useState(0);
+  // -1 idle; >=0 seeks in place (no ShortsView remount).
+  const [seekToMs, setSeekToMs] = useState(-1);
   const [showSpinner, setShowSpinner] = useState(false);
   const ownedRef = useRef(false);
   const ladderRef = useRef(ladder);
@@ -69,21 +70,27 @@ export default function ForYouVideo({
     setReady(false);
     setFailed(false);
     setShowSpinner(false);
+    setSeekToMs(-1);
   }, [ladder]);
 
-  // Seek-to-0 on become-active only (edge), not every settled frame.
+  // Seek-to-0 on become-active only (edge) — reuse native view, do not remount.
   useEffect(() => {
     const isActiveRole = role === 'active' && shouldPlay;
     const becameActive = isActiveRole && !wasActiveRef.current;
     const pulse = !!seekToZero && !seekPulseRef.current && isActiveRole;
     if (becameActive || pulse) {
-      setSeekEpoch((n) => n + 1);
-      setReady(false);
-      setShowSpinner(false);
+      setSeekToMs(0);
     }
     wasActiveRef.current = isActiveRole;
     seekPulseRef.current = !!seekToZero && isActiveRole;
   }, [role, shouldPlay, seekToZero, activeUri]);
+
+  // Clear seek prop so the next edge can re-fire seekToMs=0.
+  useEffect(() => {
+    if (seekToMs < 0) return undefined;
+    const t = requestAnimationFrame(() => setSeekToMs(-1));
+    return () => cancelAnimationFrame(t);
+  }, [seekToMs]);
 
   // Delayed spinner — absolute overlay, never shifts layout.
   useEffect(() => {
@@ -93,7 +100,7 @@ export default function ForYouVideo({
     }
     const t = setTimeout(() => setShowSpinner(true), SPINNER_DELAY_MS);
     return () => clearTimeout(t);
-  }, [ready, failed, shouldPlay, shouldLoad, activeUri, seekEpoch]);
+  }, [ready, failed, shouldPlay, shouldLoad, activeUri]);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,14 +212,13 @@ export default function ForYouVideo({
         <Image source={{ uri: poster }} style={styles.layer} resizeMode="cover" />
       )}
       <ShortsView
-        key={`fy-${activeUri}-${seekEpoch}`}
         style={styles.layer}
         uri={activeUri}
         role={role === 'neighbor' ? 'neighbor' : 'active'}
         playing={!!shouldPlay}
         muted={!audible}
-        seekToMs={0}
-        resizeMode={resizeMode === 'cover' ? 'cover' : 'contain'}
+        seekToMs={seekToMs}
+        resizeMode={resizeMode === 'contain' ? 'contain' : 'cover'}
         onReady={onNativeReady}
         onFirstFrame={onNativeFirstFrame}
         onVideoSize={onNativeSize}

@@ -10,7 +10,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.uimanager.events.RCTEventEmitter
 
-/** TextureView host for BlypShorts — first frame always reveals (no poster-forever). */
+/** TextureView host for BlypShorts — reveal only after cover/contain transform is applied. */
 class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context),
   TextureView.SurfaceTextureListener {
 
@@ -18,7 +18,7 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
   var surface: Surface? = null
     private set
   private var slotIndex: Int = -1
-  private var resizeMode: String = "contain"
+  private var resizeMode: String = "cover"
   private var videoW: Int = 0
   private var videoH: Int = 0
   private var uri: String = ""
@@ -26,6 +26,8 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
   private var muted: Boolean = true
   private var role: String = "neighbor"
   private var hasFirstFrame: Boolean = false
+  private var transformReady: Boolean = false
+  private var firstFrameDispatched: Boolean = false
 
   init {
     ShortsPool.init(context)
@@ -46,6 +48,8 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
     videoW = 0
     videoH = 0
     hasFirstFrame = false
+    transformReady = false
+    firstFrameDispatched = false
     textureView.alpha = 0f
     rebind()
   }
@@ -70,9 +74,10 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
   }
 
   fun applyResizeMode(mode: String?) {
-    // Fit inside fixed MATCH_PARENT host — never change parent layout params.
-    resizeMode = if (mode.equals("cover", ignoreCase = true)) "cover" else "contain"
+    // Fit inside fixed MATCH_PARENT host — never change parent layout params / requestLayout.
+    resizeMode = if (mode.equals("contain", ignoreCase = true)) "contain" else "cover"
     applyTransform()
+    maybeReveal()
   }
 
   private fun rebind() {
@@ -89,10 +94,12 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
     ShortsPool.onSurfaceAvailable(this, surface!!)
     if (uri.isNotEmpty()) rebind()
     applyTransform()
+    maybeReveal()
   }
 
   override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {
     applyTransform()
+    maybeReveal()
   }
 
   override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
@@ -113,20 +120,17 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
 
   fun emitFirstFrame() {
     hasFirstFrame = true
-    // Reveal only after transform is known so contain/cover doesn't jump post-show.
-    if (videoW > 0 && videoH > 0 && width > 0 && height > 0) {
-      applyTransform()
-    }
-    dispatch("onFirstFrame", Arguments.createMap().apply {
-      putString("uri", uri)
-      putInt("slot", slotIndex)
-    })
+    // Size may already be known — transform while alpha=0 then reveal.
+    applyTransform()
+    maybeReveal()
   }
 
   fun emitVideoSize(w: Int, h: Int) {
     videoW = w
     videoH = h
+    // Apply cover/contain while still alpha=0 when possible, then reveal once.
     applyTransform()
+    maybeReveal()
     dispatch("onVideoSize", Arguments.createMap().apply {
       putInt("width", w)
       putInt("height", h)
@@ -148,7 +152,8 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
 
   private fun applyTransform() {
     if (videoW <= 0 || videoH <= 0 || width <= 0 || height <= 0) {
-      if (!hasFirstFrame) textureView.alpha = 0f
+      transformReady = false
+      textureView.alpha = 0f
       return
     }
     val viewW = width.toFloat()
@@ -159,32 +164,51 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
     val scaleX: Float
     val scaleY: Float
     // Matrix scales TextureView content inside a fixed parent — never requestLayout.
-    if (resizeMode == "cover") {
+    if (resizeMode == "contain") {
       if (videoAspect > viewAspect) {
-        scaleX = videoAspect / viewAspect
-        scaleY = 1f
-      } else {
         scaleX = 1f
         scaleY = viewAspect / videoAspect
+      } else {
+        scaleX = videoAspect / viewAspect
+        scaleY = 1f
       }
     } else {
-      // contain
+      // cover (default)
       if (videoAspect > viewAspect) {
-        scaleX = 1f
-        scaleY = viewAspect / videoAspect
-      } else {
         scaleX = videoAspect / viewAspect
         scaleY = 1f
+      } else {
+        scaleX = 1f
+        scaleY = viewAspect / videoAspect
       }
     }
     matrix.setScale(scaleX, scaleY, viewW / 2f, viewH / 2f)
     textureView.setTransform(matrix)
-    if (hasFirstFrame) textureView.alpha = 1f
+    transformReady = true
+  }
+
+  /** Alpha=1 only after transform with known videoW/H. Notify JS once. */
+  private fun maybeReveal() {
+    if (!hasFirstFrame || !transformReady) {
+      textureView.alpha = 0f
+      return
+    }
+    textureView.alpha = 1f
+    if (!firstFrameDispatched) {
+      firstFrameDispatched = true
+      dispatch("onFirstFrame", Arguments.createMap().apply {
+        putString("uri", uri)
+        putInt("slot", slotIndex)
+      })
+    }
   }
 
   override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
     super.onLayout(changed, left, top, right, bottom)
-    if (changed) applyTransform()
+    if (changed) {
+      applyTransform()
+      maybeReveal()
+    }
   }
 
   override fun onDetachedFromWindow() {
