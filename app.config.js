@@ -60,7 +60,9 @@ module.exports = () => {
     // Matchday Live: OFF unless explicitly enabled (staged rollout flag).
     EXPO_PUBLIC_ENABLE_MATCHDAY_LIVE: enableMatchdayLive,
     EXPO_PUBLIC_ENABLE_GUEST_PUBLISH: enableGuestPublish,
-    EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '',
+    // Client web API key (same as eas.json). Empty here stubs Firebase in local AAB bakes.
+    EXPO_PUBLIC_FIREBASE_API_KEY:
+      process.env.EXPO_PUBLIC_FIREBASE_API_KEY || 'AIzaSyAScxM-7tnuD0532VhY6bvaXvoWVEyDSF8',
     EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || 'blyp-master.firebaseapp.com',
     EXPO_PUBLIC_FIREBASE_PROJECT_ID: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || 'blyp-master',
     EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || 'blyp-master.firebasestorage.app',

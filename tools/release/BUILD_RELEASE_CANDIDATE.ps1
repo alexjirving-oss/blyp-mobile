@@ -333,6 +333,18 @@ $env:BLYP_CANONICAL_RELEASE = '1'
 $env:BLYP_RELEASE_BUILD = '1'
 $env:BLYP_EXPECTED_VERSION_CODE = [string]$ExpectedVersionCode
 
+# Local AAB bake is not EAS — without this, EXPO_PUBLIC_FIREBASE_API_KEY is empty
+# and the app boots Firebase stub mode (no feed / no auth bridge).
+$easForEnv = Get-Content -Raw -LiteralPath (Join-Path $RepoRoot 'eas.json') | ConvertFrom-Json
+$prodEnv = $easForEnv.build.production.env
+if ($null -ne $prodEnv) {
+  foreach ($property in $prodEnv.PSObject.Properties) {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($property.Name))) {
+      Set-Item -Path "Env:$($property.Name)" -Value ([string]$property.Value)
+    }
+  }
+}
+
 $buildLog = Join-Path $packetRoot '06_gradle_bundleRelease.txt'
 $buildCommand = 'cd /d android && gradlew.bat :app:clean :app:bundleRelease -Pandroid.useAndroidX=true'
 # Gradle/javac emit benign notes to stderr (e.g. "uses or overrides a deprecated API").

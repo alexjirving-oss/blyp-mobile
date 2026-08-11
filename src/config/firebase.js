@@ -58,7 +58,7 @@ const FORCE_NATIVE = readBool('EXPO_PUBLIC_USE_NATIVE_FIREBASE');
 
 // Firebase configuration (env → expo.extra → optional JSON → optional local file → defaults)
 let firebaseConfig = {
-  apiKey: pickEnv('EXPO_PUBLIC_FIREBASE_API_KEY', ''),
+  apiKey: pickEnv('EXPO_PUBLIC_FIREBASE_API_KEY', 'AIzaSyAScxM-7tnuD0532VhY6bvaXvoWVEyDSF8'),
   authDomain: pickEnv('EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN', 'blyp-master.firebaseapp.com'),
   projectId: pickEnv('EXPO_PUBLIC_FIREBASE_PROJECT_ID', 'blyp-master'),
   storageBucket: pickEnv('EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET', 'blyp-master.firebasestorage.app'),
