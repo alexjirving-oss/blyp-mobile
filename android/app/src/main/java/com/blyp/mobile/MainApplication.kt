@@ -39,6 +39,10 @@ class MainApplication : Application(), ReactApplication {
               if (none { it is com.blyp.mobile.calls.IncomingCallPackage }) {
                 add(com.blyp.mobile.calls.IncomingCallPackage())
               }
+              // For You ground-up shorts pool (not storm FeedPlayer).
+              if (none { it is com.blyp.mobile.shorts.ShortsPackage }) {
+                add(com.blyp.mobile.shorts.ShortsPackage())
+              }
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"

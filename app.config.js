@@ -247,6 +247,8 @@ module.exports = () => {
       // Integrates the Amazon IVS iOS SDKs (Stages + Player) and Blyp's native
       // Swift/ObjC bridge so live streaming works on iOS at parity with Android.
       './plugins/withIVSiOS',
+      // For You ground-up: AVPlayer shorts pool (BlypShorts) — not storm FeedPlayer.
+      './plugins/withBlypShortsIOS',
       // Strip BOOT_COMPLETED from expo-notifications (Android 15 mediaPlayback FGS).
       './plugins/withAndroid15BootFgsCompliance',
       // Foldables / Play large-screen: fullSensor MainActivity + ML Kit override.

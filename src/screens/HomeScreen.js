@@ -57,6 +57,14 @@ import {
   resolveForYouBootWidenApply,
   shufflePostsVaried,
 } from '../utils/forYouFeedList';
+import {
+  resolvePlayableUri,
+  shouldLoadCell,
+  roleForIndex,
+  playbackFlags,
+  prefetchShortsUri,
+  isShortsAvailable,
+} from '../feed';
 import { claimFeedAudio, releaseFeedAudio } from '../services/feedAudioSession';
 import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
 import {
@@ -319,6 +327,10 @@ const HomeScreen = ({ navigation, route }) => {
   const commentScrollValue = useRef(new Animated.Value(0)).current;
   const currentDiscoverIndexRef = useRef(0);
   const discoverLoadIndexRef = useRef(0);
+  const feedScrollVelocityRef = useRef(0);
+  const feedScrollSampleRef = useRef({ y: 0, t: 0 });
+  const feedSettledRef = useRef(true);
+  const [feedSettled, setFeedSettled] = useState(true);
   const hasLoggedFirebaseAuthNotReadyRef = useRef(false);
 
   // For You pagination: cursor = last Firestore doc loaded (by date), used to
@@ -1612,6 +1624,20 @@ const HomeScreen = ({ navigation, route }) => {
       if (selectedTabRef.current !== 'A') return;
       const y = e?.nativeEvent?.contentOffset?.y;
       if (!Number.isFinite(y) || !feedHeight) return;
+      const now = Date.now();
+      const prev = feedScrollSampleRef.current;
+      if (prev.t > 0 && now > prev.t) {
+        const dy = y - prev.y;
+        const dtSec = (now - prev.t) / 1000;
+        if (dtSec > 0.016) {
+          feedScrollVelocityRef.current = Math.abs(dy / feedHeight) / dtSec;
+        }
+      }
+      feedScrollSampleRef.current = { y, t: now };
+      if (feedSettledRef.current) {
+        feedSettledRef.current = false;
+        setFeedSettled(false);
+      }
       const maxIndex = Math.max(0, (randomPostsRef.current?.length || 0) - 1);
       // Symmetric mid-swipe mount so reverse (±) warms like forward.
       const raw = Math.floor(y / feedHeight + 0.5);
@@ -1629,6 +1655,12 @@ const HomeScreen = ({ navigation, route }) => {
       if (selectedTabRef.current !== 'A') return;
       const y = e?.nativeEvent?.contentOffset?.y;
       if (!Number.isFinite(y) || !feedHeight) return;
+      feedScrollSampleRef.current = { y, t: Date.now() };
+      feedScrollVelocityRef.current = 0;
+      if (!feedSettledRef.current) {
+        feedSettledRef.current = true;
+        setFeedSettled(true);
+      }
       // Plain vertical paging feed: post index maps directly to the offset.
       const rawIndex = Math.round(y / feedHeight);
       const maxIndex = Math.max(0, (randomPosts?.length || 0) - 1);
@@ -1670,17 +1702,25 @@ const HomeScreen = ({ navigation, route }) => {
     return index === currentDiscoverIndex;
   };
 
-  // Disk-warm around the load center. Decode warm is owned by shouldLoad windows
-  // on PremiumFeedVideo — this path stays disk-only so JS swipe stays light.
+  // Disk / poster warm around the load center. Video warm is ForYouEngine ±1
+  // + BlypShorts (when linked); storm openingBytePrefetch is gone.
   useEffect(() => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
     const current = isRandomFeed ? discoverLoadIndex : currentIndex;
     if (!list?.length) return;
     prefetchPostWindow(list, current, { radius: 4, images: true });
+    if (isRandomFeed && isShortsAvailable()) {
+      for (let d = 0; d <= 2; d += 1) {
+        const idxs = d === 0 ? [current] : [current + d, current - d];
+        for (const i of idxs) {
+          if (i < 0 || i >= list.length) continue;
+          const playUri = resolvePlayableUri(list[i]).playUri;
+          if (playUri) prefetchShortsUri(playUri).catch(() => {});
+        }
+      }
+    }
   }, [currentIndex, discoverLoadIndex, selectedTab, videos, randomPosts]);
-
-  // (HEAD connection warm removed — it competed with progressive playback.)
 
   const renderRandomPostItem = useCallback(({ item, index }) => {
     const mediaItems = item.media || [{ url: fixStorageUrl(item.imageUrl || item.videoUrl), type: item.type }];
@@ -1796,33 +1836,35 @@ const HomeScreen = ({ navigation, route }) => {
           (() => {
             const isVideo = item.type === 'video' || mediaItems[0]?.type === 'video' || (mediaItems[0]?.type && String(mediaItems[0]?.type).includes('video'));
             const isAudio = item.type === 'audio' || mediaItems[0]?.type === 'audio';
-            const videoUri = resolveFeedVideoUri(item) || fixStorageUrl(item.videoUrl || mediaItems[0]?.url);
-            // P0 decode budget: ≤1 playing + ≤1 muted warm neighbor (bidirectional).
-            // Do NOT keep ±2 continuous decoders — that was the Fold lag path.
-            const WARM_RADIUS = 1;
-            const nearLoad =
-              index >= discoverLoadIndex - WARM_RADIUS &&
-              index <= discoverLoadIndex + WARM_RADIUS;
-            const distFocus = Math.abs(index - currentDiscoverIndex);
-            const nearFocus = distFocus <= 1;
-            const shouldLoad = nearLoad || nearFocus;
-            const keepDecodeHot =
-              shouldLoad &&
-              !cellActive &&
-              distFocus === 1;
+            // Progressive-first only — never prefer dead startUrl (resolvePlayableUri).
+            const playback = resolvePlayableUri(item);
+            const videoUri = playback.playUri || null;
+            const fallbackUris = (playback.ladder || []).filter((u) => u && u !== videoUri);
+            const shouldLoad = shouldLoadCell(index, currentDiscoverIndex, discoverLoadIndex);
+            const role = roleForIndex(index, currentDiscoverIndex);
+            const flags = playbackFlags({
+              index,
+              activeIndex: currentDiscoverIndex,
+              cellActive,
+              feedMuted: feedAudioMuted,
+              paused: pausedFeedId === item.id,
+            });
+            const cellSettled = feedSettled && cellActive;
 
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
                 <PremiumFeedVideo
                   uri={videoUri}
+                  fallbackUris={fallbackUris}
                   poster={item.thumbnail || item.imageUrl || item.user?.avatar}
                   style={StyleSheet.absoluteFill}
-                  shouldPlay={cellActive || keepDecodeHot}
+                  shouldPlay={flags.shouldPlay}
                   shouldLoad={shouldLoad}
+                  role={role}
+                  seekToZero={cellSettled}
                   paused={pausedFeedId === item.id}
                   isLooping
-                  // Active cell respects sticky mute; decode-hot neighbors stay silent.
-                  isMuted={cellMuted || !cellActive}
+                  isMuted={flags.isMuted}
                   audioOwnerId={cellActive ? String(item.id) : null}
                   mediaDisplay={item.mediaDisplay || null}
                   onError={(e) => {
@@ -1930,6 +1972,7 @@ const HomeScreen = ({ navigation, route }) => {
     feedHeight,
     pausedFeedId,
     feedAudioMuted,
+    feedSettled,
     following,
     uid,
     forYouOverlayInset,
@@ -2167,7 +2210,7 @@ const HomeScreen = ({ navigation, route }) => {
               windowSize={7}
               initialNumToRender={3}
               updateCellsBatchingPeriod={16}
-              extraData={`${currentDiscoverIndex}:${discoverLoadIndex}:${feedAudioMuted ? 1 : 0}:${pausedFeedId || ''}`}
+              extraData={`${currentDiscoverIndex}:${discoverLoadIndex}:${feedAudioMuted ? 1 : 0}:${pausedFeedId || ''}:${feedSettled ? 1 : 0}`}
               getItemLayout={(data, index) => ({
                 length: feedHeight,
                 offset: feedHeight * index,

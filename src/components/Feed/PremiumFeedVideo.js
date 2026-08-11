@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Animated, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import EnhancedVideo from '../EnhancedVideo';
+import ForYouVideo from '../../feed/ForYouVideo';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
 import { FEED_VIDEO_VERTICAL_NUDGE_Y } from './feedVideoLayout';
@@ -31,6 +31,10 @@ export default function PremiumFeedVideo({
   showChrome = true,
   mediaDisplay = null,
   audioOwnerId = null,
+  role = 'active',
+  seekToZero = false,
+  settled = false,
+  fallbackUris = null,
   onNaturalSize,
   onError,
   onReady,
@@ -141,15 +145,17 @@ export default function PremiumFeedVideo({
   return (
     <View style={[styles.root, style]}>
       <View style={[isTopAnchoredWide ? fillStyle : styles.videoHost, hostTransform ? { transform: hostTransform } : null]}>
-        <EnhancedVideo
+        <ForYouVideo
           uri={uri}
+          fallbackUris={fallbackUris}
           poster={poster}
           style={StyleSheet.absoluteFill}
           resizeMode={resizeMode}
           shouldPlay={playing}
           shouldLoad={shouldLoad}
-          isLooping={isLooping}
           isMuted={isMuted}
+          role={role}
+          seekToZero={!!seekToZero}
           audioOwnerId={audioOwnerId}
           onNaturalSize={handleNaturalSize}
           onError={onError}

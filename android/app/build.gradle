@@ -93,8 +93,8 @@ android {
         applicationId 'com.blyp.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2026319972
-        versionName "1.0.56"
+        versionCode 2026319973
+        versionName "1.0.57"
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
@@ -414,6 +414,14 @@ dependencies {
     // Real-Time Stage SDK (Stage classifier). If this fails to resolve, fall back to 1.16.0:stages@aar
     implementation "com.amazonaws:ivs-broadcast:1.37.0:stages@aar"
     // implementation "com.amazonaws:ivs-broadcast:1.16.0:stages@aar"
+
+    // For You feed: Media3 ExoPlayer pool + disk cache (opening-byte prefetch / surface rebind)
+    def media3 = "1.5.1"
+    implementation "androidx.media3:media3-exoplayer:$media3"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3"
+    implementation "androidx.media3:media3-database:$media3"
+    implementation "androidx.media3:media3-datasource:$media3"
+    implementation "androidx.media3:media3-common:$media3"
 }
 
 if (file("./eas-build.gradle").exists()) {
