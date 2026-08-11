@@ -142,6 +142,37 @@ describe('ground-up path — storm FeedPlayer must be gone', () => {
     );
   });
 
+  it('ShortsNative availability does not require getViewManagerConfig', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, '../src/feed/ShortsNative.js'),
+      'utf8',
+    );
+    expect(src).not.toMatch(/getViewManagerConfig/);
+    expect(src).not.toMatch(/hasViewManagerConfig/);
+    expect(src).toMatch(/NativeMod\) return true/);
+    expect(src).toMatch(/requireNativeComponent/);
+    expect(src).toMatch(/BlypShortsView/);
+  });
+
+  it('ShortsModule/ViewManager native names are BlypShorts / BlypShortsView', () => {
+    const mod = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsModule.kt',
+      ),
+      'utf8',
+    );
+    const vm = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsViewManager.kt',
+      ),
+      'utf8',
+    );
+    expect(mod).toMatch(/getName\(\):\s*String\s*=\s*"BlypShorts"/);
+    expect(vm).toMatch(/getName\(\):\s*String\s*=\s*"BlypShortsView"/);
+  });
+
   it('ShortsPool is size 3 and does not touch AVAudioSession', () => {
     const fs = require('fs');
     const path = require('path');
