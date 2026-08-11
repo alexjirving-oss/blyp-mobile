@@ -9,9 +9,16 @@ import {
   isForYouAudioOwner,
 } from './forYouAudio';
 
+/** Spinner only after this ms — avoids flash on fast first-frame reveals. */
+const SPINNER_DELAY_MS = 280;
+
 /**
  * For You cell playback host — sole production path (DESIGN).
  * BlypShorts only. No storm FeedPlayer. No expo-av production fallback.
+ *
+ * Layout contract: root is a fixed frame (caller sizes it). Poster + native
+ * surface + spinner are absolute overlays — never change parent size on
+ * videoSize / ready. Reveal first frame in-place over the poster.
  */
 export default function ForYouVideo({
   uri,
@@ -50,6 +57,7 @@ export default function ForYouVideo({
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [seekEpoch, setSeekEpoch] = useState(0);
+  const [showSpinner, setShowSpinner] = useState(false);
   const ownedRef = useRef(false);
   const ladderRef = useRef(ladder);
   const wasActiveRef = useRef(false);
@@ -60,6 +68,7 @@ export default function ForYouVideo({
     setActiveUri(ladder[0] || null);
     setReady(false);
     setFailed(false);
+    setShowSpinner(false);
   }, [ladder]);
 
   // Seek-to-0 on become-active only (edge), not every settled frame.
@@ -70,10 +79,21 @@ export default function ForYouVideo({
     if (becameActive || pulse) {
       setSeekEpoch((n) => n + 1);
       setReady(false);
+      setShowSpinner(false);
     }
     wasActiveRef.current = isActiveRole;
     seekPulseRef.current = !!seekToZero && isActiveRole;
   }, [role, shouldPlay, seekToZero, activeUri]);
+
+  // Delayed spinner — absolute overlay, never shifts layout.
+  useEffect(() => {
+    if (ready || failed || !shouldPlay || !shouldLoad || !activeUri) {
+      setShowSpinner(false);
+      return undefined;
+    }
+    const t = setTimeout(() => setShowSpinner(true), SPINNER_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [ready, failed, shouldPlay, shouldLoad, activeUri, seekEpoch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +126,7 @@ export default function ForYouVideo({
   const onNativeReady = useCallback(
     (e) => {
       setReady(true);
+      setShowSpinner(false);
       onReady?.(e?.nativeEvent || e);
       onPlaybackStatusUpdate?.({ isLoaded: true, isPlaying: !!shouldPlay, positionMillis: 0 });
     },
@@ -115,6 +136,7 @@ export default function ForYouVideo({
   const onNativeFirstFrame = useCallback(
     (e) => {
       setReady(true);
+      setShowSpinner(false);
       onReady?.(e?.nativeEvent || e);
     },
     [onReady],
@@ -125,10 +147,12 @@ export default function ForYouVideo({
       const next = nextPlayableUri(ladderRef.current, activeUri);
       if (next && next !== activeUri) {
         setReady(false);
+        setShowSpinner(false);
         setActiveUri(next);
         return;
       }
       setFailed(true);
+      setShowSpinner(false);
       onError?.(e?.nativeEvent || e);
     },
     [activeUri, onError],
@@ -136,6 +160,7 @@ export default function ForYouVideo({
 
   const onNativeSize = useCallback(
     (e) => {
+      // Size is for chrome / analytics only — never mutate layout here.
       const { width, height } = e?.nativeEvent || {};
       if (width > 0 && height > 0) onNaturalSize?.({ width, height });
     },
@@ -146,7 +171,7 @@ export default function ForYouVideo({
     return (
       <View style={[styles.root, style]}>
         {!!poster && (
-          <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <Image source={{ uri: poster }} style={styles.layer} resizeMode="cover" />
         )}
       </View>
     );
@@ -157,7 +182,7 @@ export default function ForYouVideo({
     return (
       <View style={[styles.root, style]}>
         {!!poster && (
-          <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <Image source={{ uri: poster }} style={styles.layer} resizeMode="cover" />
         )}
         <View style={styles.failBanner} pointerEvents="none">
           <Text style={styles.failText} allowFontScaling={false}>
@@ -175,12 +200,13 @@ export default function ForYouVideo({
 
   return (
     <View style={[styles.root, style]}>
+      {/* Poster stays until first frame so reveal never collapses the cell. */}
       {!!poster && !ready && (
-        <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <Image source={{ uri: poster }} style={styles.layer} resizeMode="cover" />
       )}
       <ShortsView
         key={`fy-${activeUri}-${seekEpoch}`}
-        style={StyleSheet.absoluteFill}
+        style={styles.layer}
         uri={activeUri}
         role={role === 'neighbor' ? 'neighbor' : 'active'}
         playing={!!shouldPlay}
@@ -192,7 +218,7 @@ export default function ForYouVideo({
         onVideoSize={onNativeSize}
         onError={onNativeError}
       />
-      {!ready && shouldPlay && (
+      {showSpinner && (
         <View style={styles.spinner} pointerEvents="none">
           <ActivityIndicator color={COLORS.primary || '#00D2BE'} />
         </View>
@@ -205,6 +231,9 @@ const styles = StyleSheet.create({
   root: {
     backgroundColor: '#000',
     overflow: 'hidden',
+  },
+  layer: {
+    ...StyleSheet.absoluteFillObject,
   },
   spinner: {
     ...StyleSheet.absoluteFillObject,

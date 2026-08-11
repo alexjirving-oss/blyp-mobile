@@ -8,7 +8,7 @@
  * top pill/header band and the footer.
  *
  * Negative Y shifts the decoded frame up without moving overlays (bottom action
- * bar, user pill, comment stream). Wide top-anchored contain clips skip this nudge
- * in PremiumFeedVideo so letterboxing stays under the chrome.
+ * bar, user pill, comment stream). Applied as a transform only — never changes
+ * the reserved full-bleed cell size when natural aspect arrives.
  */
 export const FEED_VIDEO_VERTICAL_NUDGE_Y = -20;

@@ -11,10 +11,10 @@ const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
 /**
  * PremiumFeedVideo — full-screen VOD playback chrome.
  *
- * Default / catalog / seed clips use `contain` (fit, no aspect warp). Explicit
- * mediaDisplay.fitMode `cover` still crops edge-to-edge when the creator chose it.
- * Wide auto clips stay top-anchored so letterboxing sits under the action rail.
- * LIVE camera full-bleed is elsewhere (LiveStreamViewer) and stays cover.
+ * Frame is always absolute-fill (TikTok-stable). Natural size / aspect never
+ * changes parent layout — fit is handled inside ForYouVideo / BlypShorts via
+ * contain|cover matrix. Wide clips may paint a bottom fade once aspect is
+ * known; that is overlay-only and does not reflow the cell.
  *
  * Cover / custom-fit frames apply FEED_VIDEO_VERTICAL_NUDGE_Y so the subject
  * sits optically between header chrome and the absolute tab bar / viewer footer.
@@ -58,6 +58,11 @@ export default function PremiumFeedVideo({
   const isWide = !useCover && aspect > 1.15;
   const resizeMode = useCover ? 'cover' : 'contain';
 
+  // New source → forget prior aspect (chrome only; never drives layout).
+  useEffect(() => {
+    setAspect(0);
+  }, [uri]);
+
   useEffect(() => {
     Animated.timing(pauseOpacity, {
       toValue: paused ? 1 : 0,
@@ -96,20 +101,6 @@ export default function PremiumFeedVideo({
     [onProgress],
   );
 
-  const fillStyle = useMemo(() => {
-    if (useCover || fitMode === 'contain') return StyleSheet.absoluteFill;
-    if (!isWide || !(aspect > 0)) return StyleSheet.absoluteFill;
-    // Wide auto landscape: pin to top at natural aspect; letterbox sits below.
-    return {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      width: '100%',
-      aspectRatio: aspect,
-    };
-  }, [useCover, fitMode, isWide, aspect]);
-
   const framingTransform = useMemo(() => {
     if (!mediaDisplay) return null;
     // Map normalized offsets (-1..1) to real screen travel so drag/nudge
@@ -130,21 +121,19 @@ export default function PremiumFeedVideo({
     return [{ translateX: tx }, { translateY: ty }, { scale: userScale }];
   }, [mediaDisplay, offsetX, offsetY, userScale]);
 
-  // Top-anchored wide contain already pins under the header; only nudge cover /
-  // fills whose geometric center sits low under absolute footers.
-  const isTopAnchoredWide = isWide && aspect > 0 && !useCover && fitMode !== 'contain';
+  // Fixed host: optical nudge + creator framing via transform only (no layout).
   const hostTransform = useMemo(() => {
     const parts = [];
-    if (!isTopAnchoredWide && FEED_VIDEO_VERTICAL_NUDGE_Y) {
+    if (FEED_VIDEO_VERTICAL_NUDGE_Y) {
       parts.push({ translateY: FEED_VIDEO_VERTICAL_NUDGE_Y });
     }
     if (framingTransform) parts.push(...framingTransform);
     return parts.length ? parts : null;
-  }, [isTopAnchoredWide, framingTransform]);
+  }, [framingTransform]);
 
   return (
     <View style={[styles.root, style]}>
-      <View style={[isTopAnchoredWide ? fillStyle : styles.videoHost, hostTransform ? { transform: hostTransform } : null]}>
+      <View style={[styles.videoHost, hostTransform ? { transform: hostTransform } : null]}>
         <ForYouVideo
           uri={uri}
           fallbackUris={fallbackUris}

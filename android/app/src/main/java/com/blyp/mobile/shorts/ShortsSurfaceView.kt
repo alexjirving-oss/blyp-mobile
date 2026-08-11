@@ -70,7 +70,8 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
   }
 
   fun applyResizeMode(mode: String?) {
-    resizeMode = "contain"
+    // Fit inside fixed MATCH_PARENT host — never change parent layout params.
+    resizeMode = if (mode.equals("cover", ignoreCase = true)) "cover" else "contain"
     applyTransform()
   }
 
@@ -112,10 +113,9 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
 
   fun emitFirstFrame() {
     hasFirstFrame = true
+    // Reveal only after transform is known so contain/cover doesn't jump post-show.
     if (videoW > 0 && videoH > 0 && width > 0 && height > 0) {
       applyTransform()
-    } else {
-      textureView.alpha = 1f
     }
     dispatch("onFirstFrame", Arguments.createMap().apply {
       putString("uri", uri)
@@ -158,16 +158,28 @@ class ShortsSurfaceView(context: android.content.Context) : FrameLayout(context)
     val matrix = Matrix()
     val scaleX: Float
     val scaleY: Float
-    if (videoAspect > viewAspect) {
-      scaleX = 1f
-      scaleY = viewAspect / videoAspect
+    // Matrix scales TextureView content inside a fixed parent — never requestLayout.
+    if (resizeMode == "cover") {
+      if (videoAspect > viewAspect) {
+        scaleX = videoAspect / viewAspect
+        scaleY = 1f
+      } else {
+        scaleX = 1f
+        scaleY = viewAspect / videoAspect
+      }
     } else {
-      scaleX = videoAspect / viewAspect
-      scaleY = 1f
+      // contain
+      if (videoAspect > viewAspect) {
+        scaleX = 1f
+        scaleY = viewAspect / videoAspect
+      } else {
+        scaleX = videoAspect / viewAspect
+        scaleY = 1f
+      }
     }
     matrix.setScale(scaleX, scaleY, viewW / 2f, viewH / 2f)
     textureView.setTransform(matrix)
-    textureView.alpha = 1f
+    if (hasFirstFrame) textureView.alpha = 1f
   }
 
   override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
