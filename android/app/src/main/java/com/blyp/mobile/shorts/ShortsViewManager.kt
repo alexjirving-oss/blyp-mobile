@@ -1,4 +1,4 @@
-package com.blyp.mobile.shorts
+﻿package com.blyp.mobile.shorts
 
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.common.MapBuilder
@@ -28,12 +28,13 @@ class ShortsViewManager : SimpleViewManager<ShortsSurfaceView>() {
     view.setMuted(muted)
   }
 
+  // Named setFeedRole so we do not hide BaseViewManager.setRole.
   @ReactProp(name = "role")
-  fun setRole(view: ShortsSurfaceView, role: String?) {
+  fun setFeedRole(view: ShortsSurfaceView, role: String?) {
     view.setRole(role)
   }
 
-  /** When >= 0, seek that slot to ms (For You promote → 0). Prop change only re-fires. */
+  /** When >= 0, seek that slot to ms (For You promote -> 0). Prop change only re-fires. */
   @ReactProp(name = "seekToMs", defaultInt = -1)
   fun setSeekToMs(view: ShortsSurfaceView, ms: Int) {
     if (ms >= 0) view.seekToMs(ms.toLong())
@@ -44,13 +45,17 @@ class ShortsViewManager : SimpleViewManager<ShortsSurfaceView>() {
     view.applyResizeMode(mode)
   }
 
-  override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any> {
-    return MapBuilder.builder<String, Any>()
-      .put("onReady", MapBuilder.of("registrationName", "onReady"))
-      .put("onFirstFrame", MapBuilder.of("registrationName", "onFirstFrame"))
-      .put("onVideoSize", MapBuilder.of("registrationName", "onVideoSize"))
-      .put("onError", MapBuilder.of("registrationName", "onError"))
-      .build()
+  override fun getExportedCustomDirectEventTypeConstants(): MutableMap<String, Any>? {
+    val map: MutableMap<String, Any> = HashMap()
+    map.putAll(
+      MapBuilder.builder<String, Any>()
+        .put("onReady", MapBuilder.of("registrationName", "onReady"))
+        .put("onFirstFrame", MapBuilder.of("registrationName", "onFirstFrame"))
+        .put("onVideoSize", MapBuilder.of("registrationName", "onVideoSize"))
+        .put("onError", MapBuilder.of("registrationName", "onError"))
+        .build()
+    )
+    return map
   }
 
   override fun receiveCommand(root: ShortsSurfaceView, commandId: String?, args: ReadableArray?) {
