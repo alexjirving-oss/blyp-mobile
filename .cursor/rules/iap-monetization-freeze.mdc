@@ -10,10 +10,12 @@ Alex accepted restored Play Billing wiring. **Do not invent new catalogs or over
 | Field | Value |
 |-------|-------|
 | tip commit | `3dff7a74` (restore Play Billing as price source of truth) |
+| freeze locks | `883b5c97` (rules + protect_locked_paths) |
 | versionName | `1.0.87` |
 | versionCode | `2026323626` |
 | tag | `iap-freeze-1.0.87-2026323626` |
 | worktree | `C:\Users\Alex\Blyp26-frenemies-ea-v1` |
+| OneDrive pack | `OneDrive - TAP Aquatics\BLYP_IAP_FREEZE_*` |
 
 ## Source of truth
 
