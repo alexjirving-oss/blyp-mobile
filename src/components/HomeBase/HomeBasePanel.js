@@ -69,6 +69,7 @@ import {
 } from '../../services/userPreferencesService';
 import {
   subscribeHomeLayout,
+  buildDefaultHomeLayout,
   reorderHomeWidget,
   setHomeWidgetEnabled,
   removeHomeWidget,
@@ -110,6 +111,7 @@ import EnhancedVideo from '../EnhancedVideo';
 import HomeWidgetFrame from './HomeWidgetFrame';
 import SportPagesWidget from './SportPagesWidget';
 import QuickDmWidget from './QuickDmWidget';
+import HomePhoneStrip from './HomePhoneStrip';
 import EditHomeSheet from './EditHomeSheet';
 
 const INTEREST_PROMPTS = {
@@ -156,7 +158,43 @@ function greeting() {
   return 'Good evening';
 }
 
-const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage, onOpenForYouPost, onEditPages }) => {
+function isHashtagDump(s) {
+  const t = String(s || '').trim();
+  if (!t) return true;
+  const tags = t.match(/#\w+/g) || [];
+  if (tags.length < 2) return false;
+  const compact = t.replace(/\s+/g, '');
+  return tags.join('').length >= compact.length * 0.55;
+}
+
+function railCaption(item) {
+  const raw = item?.title || item?.captionTitle || item?.caption || item?.description || '';
+  const user =
+    item?.username ||
+    item?.userDisplayName ||
+    item?.user?.username ||
+    item?.user?.displayName ||
+    item?.hostUsername ||
+    item?.hostDisplayName;
+  if (raw && !isHashtagDump(raw)) return raw;
+  if (user) return `@${String(user).replace(/^@/, '')}`;
+  return raw || 'Video';
+}
+
+function RailSkeleton({ cards = 3 }) {
+  return (
+    <View style={styles.skelWrap}>
+      <View style={styles.skelTitle} />
+      <View style={styles.skelRow}>
+        {Array.from({ length: cards }).map((_, i) => (
+          <View key={i} style={styles.skelCard} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], edition = 'classic', onEditionChange, onOpenPage, onOpenForYouPost, onEditPages }) => {
   // Gate the For-You rail's autoplaying (unmuted) preview on navigation focus.
   // Without this, the active tile keeps playing audio after the user navigates
   // away (e.g. taps "Go live"), bleeding sound behind the live broadcast.
@@ -171,6 +209,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const [followingSet, setFollowingSet] = useState(new Set());
   const [unread, setUnread] = useState(0);
   const [watch, setWatch] = useState([]);
+  const [watchReady, setWatchReady] = useState(false);
   const [forYou, setForYou] = useState([]);
   // Which "For you" rail tile is snapped into view — that one autoplays with
   // sound (neighbors stay muted). Defaults to 0 so the first tile plays as soon
@@ -229,7 +268,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
   const blurHideTimer = useRef(null);
 
   // Home Layout Engine — ordered widgets persisted in blyp.prefs.homeLayout.
-  const [homeLayout, setHomeLayoutState] = useState(null);
+  const [homeLayout, setHomeLayoutState] = useState(() => buildDefaultHomeLayout());
   const [editMode, setEditMode] = useState(false);
   const [addSheetOpen, setAddSheetOpen] = useState(false);
 
@@ -307,6 +346,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
     if (!uid) return undefined;
     const unsub = subscribeWatchHistory(uid, (list) => {
       setWatch(list);
+      setWatchReady(true);
       if (Array.isArray(list) && list.length) {
         warmHomeVideoRails({ watch: list });
       }
@@ -1004,9 +1044,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         // Retired: history lives only in the search-bar dropdown.
         return null;
       case 'forYou':
-        if (forYou.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>For you rail populates as you watch</Text>;
-        }
+        if (forYou.length === 0) return loading ? <RailSkeleton /> : null;
         return (
           <>
             <View style={styles.sectionHeaderRow}>
@@ -1075,7 +1113,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                       )}
                     </View>
                     <Text style={styles.trendTitle} numberOfLines={2}>
-                      {p.title || p.caption || p.description || 'Post'}
+                      {railCaption(p)}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1084,9 +1122,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'continueWatching':
-        if (watch.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>Continue watching shows up after you start a video</Text>;
-        }
+        if (watch.length === 0) return !watchReady || loading ? <RailSkeleton /> : null;
         return (
           <>
             <View style={styles.sectionHeaderRow}>
@@ -1111,7 +1147,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                         </View>
                       )}
                     </View>
-                    <Text style={styles.trendTitle} numberOfLines={2}>{w.title}</Text>
+                    <Text style={styles.trendTitle} numberOfLines={2}>{railCaption(w)}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -1119,9 +1155,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'liveNow':
-        if (live.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>No one is live right now</Text>;
-        }
+        if (live.length === 0) return loading ? <RailSkeleton cards={2} /> : null;
         return (
           <>
             <View style={styles.sectionHeaderRow}>
@@ -1155,9 +1189,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
           </>
         );
       case 'trending':
-        if (trending.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>Trending will fill in as the network heats up</Text>;
-        }
+        if (trending.length === 0) return loading ? <RailSkeleton /> : null;
         return (
           <>
             <View style={styles.sectionHeaderRow}>
@@ -1176,7 +1208,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
                       </View>
                     )}
                     <Text style={styles.trendTitle} numberOfLines={2}>
-                      {p.title || p.caption || p.description || 'Post'}
+                      {railCaption(p)}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1186,7 +1218,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       case 'creators':
         if (creators.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>Creator suggestions appear as you follow interests</Text>;
+          return loading ? <RailSkeleton cards={4} /> : null;
         }
         return (
           <>
@@ -1254,9 +1286,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       case 'clubs':
         // Never dump the full club catalog as "Explore clubs" chrome.
-        if (myClubDefs.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>Join clubs in Edit profile to pin them here</Text>;
-        }
+        if (myClubDefs.length === 0) return editMode ? <Text style={styles.widgetEmptyHint}>Join clubs in Edit profile to pin them here</Text> : null;
         return (
           <>
             <View style={styles.sectionHeaderRow}>
@@ -1285,7 +1315,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       case 'clubPeople':
         if (clubPeople.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>Join clubs to meet people who share them</Text>;
+          return editMode ? <Text style={styles.widgetEmptyHint}>Join clubs to meet people who share them</Text> : null;
         }
         return (
           <>
@@ -1371,7 +1401,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       case 'interests':
         if (interestChips.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>Pick interests in Customize to pin them here</Text>;
+          return editMode ? <Text style={styles.widgetEmptyHint}>Pick interests in Customize to pin them here</Text> : null;
         }
         return (
           <>
@@ -1398,7 +1428,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       case 'pageList':
         if (otherPages.length === 0) {
-          return <Text style={styles.widgetEmptyHint}>No extra pages yet</Text>;
+          return editMode ? <Text style={styles.widgetEmptyHint}>No extra pages yet</Text> : null;
         }
         return (
           <>
@@ -1628,6 +1658,8 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         )}
       </View>
 
+      <HomePhoneStrip navigation={navigation} uid={uid} compact />
+
       {/* Transient confirmation for "notify me when <person>…" requests. */}
       {!!watchNotice && (
         <View style={styles.watchNotice}>
@@ -1734,16 +1766,10 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         </TouchableOpacity>
       </Modal>
 
-      {loading && (
-        <View style={styles.loadingRow}>
-          <ActivityIndicator size="small" color={COLORS.primary} />
-        </View>
-      )}
-
-      {/* Home Layout Engine — ordered, user-customizable widgets */}
       {layoutWidgets.map((widget, index) => {
         if (widget?.enabled === false && !editMode) return null;
         const body = renderWidgetBody(widget);
+        if (!body && !editMode) return null;
         return (
           <HomeWidgetFrame
             key={widget.id}
@@ -1765,7 +1791,7 @@ const HomeBasePanel = ({ navigation, uid, interests = [], pages = [], onOpenPage
         );
       })}
 
-      {!editMode && (
+      {!editMode && !loading && (
         <TouchableOpacity
           style={styles.editHomeCta}
           activeOpacity={0.88}
@@ -2001,6 +2027,21 @@ const styles = StyleSheet.create({
   voiceStopText: { color: COLORS.primary, fontSize: responsiveFont(14), fontWeight: '700' },
 
   loadingRow: { paddingVertical: 16, alignItems: 'center' },
+  skelWrap: { paddingVertical: 10 },
+  skelTitle: {
+    width: 92,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 12,
+  },
+  skelRow: { flexDirection: 'row', gap: 12 },
+  skelCard: {
+    width: 150,
+    height: 210,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
 
   sectionTitle: { color: COLORS.textPrimary, fontSize: responsiveFont(17), fontWeight: '800', marginTop: 16, marginBottom: 10 },
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

@@ -1,10 +1,10 @@
 import {
-  addDoc,
   collection,
   doc,
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -109,7 +109,9 @@ export const messengerExtrasService = {
       throw new Error('Invalid call participants');
     }
     const participants = [caller, callee];
-    const ref = await addDoc(collection(db, 'calls'), {
+    const ref = doc(collection(db, 'calls'));
+    // Room name === call id on the first write so mint never races an empty room.
+    await setDoc(ref, {
       participants,
       participantIds: participants,
       callerId: caller,
@@ -119,15 +121,13 @@ export const messengerExtrasService = {
       calleeName: calleeName ? String(calleeName) : '',
       status: 'ringing',
       type: 'audio',
-      livekitRoom: '', // filled with doc id after create
+      livekitRoom: ref.id,
       createdAt: serverTimestamp(),
       createdAtMs: Date.now(),
       answeredAt: null,
       endedAt: null,
       endedBy: null,
     });
-    // Room name === call id for stable LiveKit room naming.
-    await updateDoc(ref, { livekitRoom: ref.id });
     return { id: ref.id, livekitRoom: ref.id };
   },
 

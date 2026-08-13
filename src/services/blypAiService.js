@@ -171,7 +171,7 @@ Rules:
 
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024, responseMimeType: 'application/json' },
+    generationConfig: { temperature: 0.7, maxOutputTokens: 2048, responseMimeType: 'application/json' },
   };
 
   const controller = new AbortController();
@@ -186,6 +186,22 @@ Rules:
     clearTimeout(timer);
     if (!res.ok) {
       console.warn('[BLYP_AI] answer request failed', res.status);
+      let errBody = null;
+      try {
+        errBody = await res.json();
+      } catch {
+        /* ignore */
+      }
+      if (res.status === 402) {
+        return {
+          text: '',
+          usedAI: false,
+          related: [],
+          intent: '',
+          placeName: '',
+          error: errBody?.error || errBody || { message: 'subscription_required' },
+        };
+      }
       return { text: '', usedAI: false, related: [], intent: '', placeName: '' };
     }
     const json = await res.json();

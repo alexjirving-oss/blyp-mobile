@@ -149,6 +149,7 @@ export async function getTopicPosts(terms = [], limit = 30, opts = {}) {
 
 /**
  * Home carousel "For You" rail: recent playable videos, shuffled per reload.
+ * Over-fetches so the shuffle pool is larger than `limit` when the catalog allows.
  * `terms` / `followingIds` kept for call-site compatibility; order is not ranked.
  */
 export async function getForYouPosts(terms = [], followingIds = [], limit = 12) {
@@ -156,12 +157,15 @@ export async function getForYouPosts(terms = [], followingIds = [], limit = 12) 
   void terms;
   void followingIds;
   try {
-    const snap = await db.collection('posts').orderBy('date', 'desc').limit(80).get();
+    const want = Math.max(1, Number(limit) || 12);
+    // Pull a wide recent window so rails/pages do not always sample the same top N.
+    const fetchLimit = Math.min(200, Math.max(80, want * 10));
+    const snap = await db.collection('posts').orderBy('date', 'desc').limit(fetchLimit).get();
     const all = await visiblePosts((snap?.docs || []).map((d) => ({ id: d.id, ...d.data() })));
     const withAccount = await attachAccountFeedPriority(all);
     const visible = filterSuppressedAccounts(withAccount);
     const playable = filterForYouPosts(visible);
-    return shufflePostsVaried(playable, { avoidCount: 3 }).slice(0, limit);
+    return shufflePostsVaried(playable).slice(0, want);
   } catch (e) {
     console.warn('[DISCOVERY] for-you failed', e?.message || String(e));
     return [];
