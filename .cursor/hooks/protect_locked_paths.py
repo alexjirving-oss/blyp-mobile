@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail-closed preToolUse gate for locked Instant For You and control-plane paths."""
+"""Fail-closed path lock helper for frozen product surfaces and control-plane paths.
+
+NOTE: Do NOT wire this as preToolUse in hooks.json unless proven safe (prior
+preToolUse wedged Cursor). Always-apply .mdc rules are the primary lock;
+this script is the durable path list for optional/manual gates and docs.
+"""
 from __future__ import annotations
 
 import json
@@ -17,8 +22,6 @@ EDIT_TOOLS = {
 
 # Product lock — For You frozen at 1.0.86 / 2026320003.
 # Override only with Alex's explicit "unlock For You" + BLYP_ALLOW_INSTANT_FOR_YOU=1.
-# NOTE: Do NOT wire this as preToolUse in hooks.json unless proven safe (prior
-# preToolUse wedged Cursor). Rule file foryou-freeze-1.0.86.mdc is the primary lock.
 INSTANT_FOR_YOU_PREFIXES = (
     "src/feed/",
     "src/feed",
@@ -36,6 +39,56 @@ INSTANT_FOR_YOU_PREFIXES = (
     "__tests__/forYouFeedList.test.js",
     "__tests__/forYouGroundUpPath.test.js",
     "__tests__/feedAudioSession.test.js",
+)
+
+# Coin / IAP monetization freeze — unlock IAP / unlock monetization + BLYP_ALLOW_IAP=1.
+IAP_MONETIZATION_PREFIXES = (
+    "src/services/BlypCoinService.js",
+    "src/screens/CoinStoreScreen.js",
+    "src/services/AndroidPlayBillingService.ts",
+    "src/services/AndroidPlayBillingService.js",
+    "src/components/BuyCoinsOverlay.tsx",
+    "src/components/BlypCoinWallet.js",
+    "src/utils/recoverPendingAndroidIap.js",
+    "src/services/BillingVerificationService.js",
+    "backend/blyp-live-service/src/economy/iapCatalog.ts",
+    "tools/release/SYNC_PLAY_IAP_TITLES.md",
+    ".cursor/rules/iap-monetization-freeze.mdc",
+)
+
+# LIVE streaming freeze — unlock LIVE + BLYP_ALLOW_LIVE=1.
+LIVE_STREAMING_PREFIXES = (
+    "src/live/",
+    "src/live",
+    "src/streaming/",
+    "src/streaming",
+    "src/screens/LiveStreamScreen.js",
+    "src/screens/LiveSummaryScreen.js",
+    "src/screens/live/",
+    "src/screens/live",
+    "src/components/live/",
+    "src/components/live",
+    "src/components/LiveStreamViewer.js",
+    "src/components/LiveErrorBoundary.js",
+    "src/components/LiveUsersTab.js",
+    "src/services/LiveStreamService.js",
+    "src/services/LiveService.js",
+    "src/services/HLSLiveStreamService.js",
+    "src/services/liveApiBase.js",
+    "src/services/liveDirectory.js",
+    "src/services/liveDashboardService.js",
+    "src/services/livePublishAudioGuard.js",
+    "src/api/ivsLiveApi.ts",
+    "src/core/LiveSessionStore.ts",
+    "src/core/LiveSessionModel.ts",
+    "src/core/LiveGiftService.ts",
+    "src/core/LiveEarningsHook.ts",
+    "src/core/LiveStartNotificationHelper.ts",
+    "src/config/liveStreamModel.ts",
+    "src/config/LiveGamesFlags.js",
+    "src/config/LiveDashboardFlags.js",
+    "src/realtime/liveGiftSocket.ts",
+    ".cursor/rules/live-freeze.mdc",
 )
 
 # Control plane — agents must not casually rewrite enforcement. Override via
@@ -111,6 +164,8 @@ def main() -> int:
         return 0
 
     allow_foryou = os.environ.get("BLYP_ALLOW_INSTANT_FOR_YOU") == "1"
+    allow_iap = os.environ.get("BLYP_ALLOW_IAP") == "1"
+    allow_live = os.environ.get("BLYP_ALLOW_LIVE") == "1"
     allow_control = os.environ.get("BLYP_ALLOW_CONTROL_PLANE") == "1"
 
     for path in paths:
@@ -118,6 +173,17 @@ def main() -> int:
             return deny(
                 "For You is frozen at 1.0.86. Do not edit feed/shorts/For You paths unless "
                 "Alex explicitly says unlock For You (BLYP_ALLOW_INSTANT_FOR_YOU=1)."
+            )
+        if not allow_iap and _matches(path, IAP_MONETIZATION_PREFIXES):
+            return deny(
+                "IAP/coin monetization is frozen. Do not edit coin store / Play billing / "
+                "iapCatalog paths unless Alex says unlock IAP or unlock monetization "
+                "(BLYP_ALLOW_IAP=1)."
+            )
+        if not allow_live and _matches(path, LIVE_STREAMING_PREFIXES):
+            return deny(
+                "LIVE streaming is frozen. Do not edit live/streaming paths unless "
+                "Alex explicitly says unlock LIVE (BLYP_ALLOW_LIVE=1)."
             )
         if not allow_control and _matches(path, CONTROL_PLANE_PREFIXES):
             return deny(

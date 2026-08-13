@@ -1,0 +1,53 @@
+---
+description: HARD LOCK — LIVE streaming frozen. No edits without Alex unlock.
+alwaysApply: true
+---
+
+# LIVE streaming freeze
+
+Independent of For You and IAP freezes. Alex wants LIVE tip state saved and locked.
+
+| Field | Value |
+|-------|-------|
+| tip branch | `feat/full-tip-package-20260809` |
+| worktree | `C:\Users\Alex\Blyp26-frenemies-ea-v1` |
+| tag | `live-freeze-20260813` |
+
+## DO NOT EDIT (unless Alex says unlock LIVE)
+
+- `src/live/**` (IVS sessions, join preflight, multi-guest)
+- `src/streaming/**` (StreamingBackendFactory, LiveStreamingClient, IVS/HLS backends)
+- `src/screens/LiveStreamScreen.js`
+- `src/screens/LiveSummaryScreen.js`
+- `src/screens/live/**`
+- `src/components/live/**`
+- `src/components/LiveStreamViewer.js`
+- `src/components/LiveErrorBoundary.js`
+- `src/components/LiveUsersTab.js`
+- `src/services/LiveStreamService.js`
+- `src/services/LiveService.js`
+- `src/services/HLSLiveStreamService.js`
+- `src/services/liveApiBase.js`
+- `src/services/liveDirectory.js`
+- `src/services/liveDashboardService.js`
+- `src/services/livePublishAudioGuard.js`
+- `src/api/ivsLiveApi.ts`
+- `src/core/LiveSessionStore.ts`
+- `src/core/LiveSessionModel.ts`
+- `src/core/LiveGiftService.ts`
+- `src/core/LiveEarningsHook.ts`
+- `src/core/LiveStartNotificationHelper.ts`
+- `src/config/liveStreamModel.ts`
+- `src/config/LiveGamesFlags.js`
+- `src/config/LiveDashboardFlags.js`
+- `src/realtime/liveGiftSocket.ts`
+- Native LIVE bridges under `android/` / `plugins/` that are IVS/live-publish specific (not For You shorts)
+
+## Explicitly out of scope (other freezes)
+
+- For You / feed / shorts → `foryou-freeze-1.0.86.mdc`
+- Coin store / Play IAP → `iap-monetization-freeze.mdc`
+
+## Unlock
+
+Only Alex: explicit phrase **unlock LIVE**. Until then: no live join/audio/publish “improvements”, no streaming backend swaps, no LiveStreamScreen refactors.

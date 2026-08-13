@@ -1,0 +1,50 @@
+---
+description: HARD LOCK — Coin/IAP monetization frozen. No edits without Alex unlock.
+alwaysApply: true
+---
+
+# IAP / coin monetization freeze
+
+Alex accepted restored Play Billing wiring. **Do not invent new catalogs or override Play prices.**
+
+| Field | Value |
+|-------|-------|
+| tip commit | `3dff7a74` (restore Play Billing as price source of truth) |
+| versionName | `1.0.87` |
+| versionCode | `2026323626` |
+| tag | `iap-freeze-1.0.87-2026323626` |
+| worktree | `C:\Users\Alex\Blyp26-frenemies-ea-v1` |
+
+## Source of truth
+
+- **Google Play Console** owns live product IDs and what the user is charged.
+- App SKUs / grants must match existing Play products + `iapCatalog.ts`.
+- Wallet UI uses Play Billing `formattedPrice` when available; local `price` is fallback only.
+- Do **not** drop Play overlays that disagree with a local GBP table.
+
+## Live Android SKUs (do not rename casually)
+
+| SKU | Grant |
+|---|---|
+| `blyp.android.proof.coinpack.100` | 100 coins |
+| `blyp.android.coinpack.550` | 500 coins |
+| `blyp.android.coinpack.1150` | 1000 coins |
+| `blyp.android.coinpack.3000` | 2500 coins |
+| `blyp.android.coinpack.6500` | 5000 coins |
+
+## DO NOT EDIT (unless Alex says unlock IAP / unlock monetization)
+
+- `src/services/BlypCoinService.js`
+- `src/screens/CoinStoreScreen.js`
+- `src/services/AndroidPlayBillingService.ts` / `.js`
+- `src/components/BuyCoinsOverlay.tsx`
+- `src/components/BlypCoinWallet.js`
+- `src/utils/recoverPendingAndroidIap.js`
+- `src/services/BillingVerificationService.js` (if present)
+- `backend/blyp-live-service/src/economy/iapCatalog.ts`
+- `tools/release/SYNC_PLAY_IAP_TITLES.md`
+- IAP seed / verify grant paths in `backend/blyp-live-service/src/economy/schema.ts` and `economyService.ts` that change SKUs or grants
+
+## Unlock
+
+Only Alex: explicit phrase **unlock IAP** or **unlock monetization**. Until then: no re-pricing experiments, no local GBP lock tables, no SKU renames, no “ignore Play price” overlays.
