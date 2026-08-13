@@ -28,6 +28,7 @@ import {
   crossedComboMilestone,
   getFxBudget,
   getTierConfig,
+  GIFT_MOTION,
   heroHoldMs,
   paletteForRarity,
   resolveMotion,
@@ -40,8 +41,25 @@ const COMBO_IDLE_MS = 3400;
 const FALLBACK_LOOKUP = (() => {
   const map = {};
   try {
+    for (const g of Object.values(GIFT_MOTION || {})) {
+      if (g?.giftId) {
+        map[String(g.giftId).toLowerCase()] = {
+          id: g.giftId,
+          name: g.name,
+          cost: g.coinCost,
+          emoji: g.emoji,
+          rarity: g.rarity,
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
     for (const g of BlypCoinService.getGiftTypes() || []) {
-      if (g?.id) map[String(g.id).toLowerCase()] = g;
+      if (g?.id && !map[String(g.id).toLowerCase()]) {
+        map[String(g.id).toLowerCase()] = g;
+      }
     }
   } catch {
     // ignore

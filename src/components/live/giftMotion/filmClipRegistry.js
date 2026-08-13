@@ -55,6 +55,28 @@ export const FILM_CLIP_META = {
     composite: 'alphaSplitRgbLeft',
     storyBeat: 'Ember floor → luminous flame column → heat bloom + ember rain.',
   },
+  // Purchased full-scene lion films (H.264 from VP9 WEBM). Opaque composite —
+  // scenic backgrounds are not dark-keyed for screen blend.
+  lion_baby: {
+    cinemaId: 'lion_baby',
+    file: 'lion_baby.mp4',
+    durationMs: 7042,
+    gloryMs: 900,
+    impactAt: 0.32,
+    loopOnce: true,
+    composite: 'opaque',
+    storyBeat: 'Baby lion cub on a golden paw-print path at sunset.',
+  },
+  lion_big: {
+    cinemaId: 'lion_big',
+    file: 'lion_big.mp4',
+    durationMs: 12042,
+    gloryMs: 1100,
+    impactAt: 0.42,
+    loopOnce: true,
+    composite: 'opaque',
+    storyBeat: 'Epic lion spirit rises through lightning and stone rupture.',
+  },
 };
 
 /**
@@ -77,6 +99,8 @@ export const FILM_CLIPS = {
   diamond: require('../../../../assets/gifts/cinema/clips/diamond.mp4'),
   cheer_burst: require('../../../../assets/gifts/cinema/clips/cheer_burst.mp4'),
   fire: require('../../../../assets/gifts/cinema/clips/fire.mp4'),
+  lion_baby: require('../../../../assets/gifts/cinema/clips/lion_baby.mp4'),
+  lion_big: require('../../../../assets/gifts/cinema/clips/lion_big.mp4'),
 };
 
 export function resolveAlphaClip(motion) {

@@ -32,6 +32,28 @@ const { width } = Dimensions.get('window');
 const GIFT_TILE_WIDTH = Math.min(148, Math.max(128, Math.round(width * 0.36)));
 
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
+import { GIFT_MOTION } from './live/giftMotion/giftMotionSystem';
+
+/** Client fallback when /economy/catalog is unreachable (keeps picker usable offline). */
+function giftTypesFallback() {
+  try {
+    const fromMotion = Object.values(GIFT_MOTION || {}).map((g) => ({
+      id: g.giftId,
+      name: g.name,
+      cost: g.coinCost,
+      emoji: g.emoji,
+      rarity: g.rarity,
+    }));
+    if (fromMotion.length > 0) return fromMotion;
+  } catch {
+    // fall through
+  }
+  try {
+    return BlypCoinService.getGiftTypes();
+  } catch {
+    return [];
+  }
+}
 
 /** Gold coin mark — avoids emoji font clipping artifacts on Android edges. */
 function CoinMark({ size = 12, style }) {
@@ -100,7 +122,7 @@ const GiftSystem = ({
     lastError: null,
     lastUpdatedAt: 0,
   });
-  const [gifts, setGifts] = useState(() => BlypCoinService.getGiftTypes());
+  const [gifts, setGifts] = useState(() => giftTypesFallback());
   const [selectedGift, setSelectedGift] = useState(null);
   const [sending, setSending] = useState(false);
   const [giftAnimation] = useState(new Animated.Value(0));

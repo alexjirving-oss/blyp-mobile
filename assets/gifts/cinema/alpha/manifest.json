@@ -61,6 +61,30 @@
       "durationMs": 3300,
       "impactAt": 0.3,
       "gloryMs": 1100
+    },
+    "lion_baby": {
+      "id": "lion_baby",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/lion_baby.mp4",
+      "sourceNote": "converted from Downloads/babylion.webm (VP9)",
+      "durationMs": 7042,
+      "impactAt": 0.32,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 1000
+    },
+    "lion_big": {
+      "id": "lion_big",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/lion_big.mp4",
+      "sourceNote": "converted from Downloads/lionlang.webm (VP9)",
+      "durationMs": 12042,
+      "impactAt": 0.42,
+      "gloryMs": 1100,
+      "composite": "opaque",
+      "coinCost": 5000
     }
   }
 }

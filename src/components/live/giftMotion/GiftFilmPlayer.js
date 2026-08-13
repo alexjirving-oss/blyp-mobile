@@ -510,12 +510,12 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
 
   const stageH = tier.takeover === 'spotlight' ? SCREEN_H * 0.62 : SCREEN_H;
 
+  // Purchased full-scene films (composite: 'opaque') keep normal blend so scenic
+  // backgrounds stay solid. Authored dark-key heroes keep screen blend.
+  const useOpaque = meta?.composite === 'opaque' || meta?.blendMode === 'normal';
   const blendStyle =
-
-    Platform.OS === 'android' || Platform.OS === 'ios'
-
+    !useOpaque && (Platform.OS === 'android' || Platform.OS === 'ios')
       ? { mixBlendMode: 'screen' }
-
       : null;
 
 
