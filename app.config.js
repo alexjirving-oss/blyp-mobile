@@ -53,7 +53,7 @@ module.exports = () => {
   const extra = {
     ...(fromJson.extra || {}),
     eas: { projectId: '5a294a13-3ebd-417a-860f-3229f97f4faf' },
-    // P7.4: Gemini key intentionally NOT injected ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â client uses the server proxy.
+    // P7.4: Gemini key intentionally NOT injected ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â client uses the server proxy.
     EXPO_PUBLIC_GEMINI_API_KEY: '',
     // Release-safe default: streaming is ON unless explicitly disabled.
     EXPO_PUBLIC_ENABLE_STREAMING: enableStreaming,
@@ -91,7 +91,7 @@ module.exports = () => {
       return isProductionProfile ? '1' : '0';
     })(),
     EXPO_PUBLIC_STREAMING_BACKEND: process.env.EXPO_PUBLIC_STREAMING_BACKEND || 'HLS',
-    // Live overlay games ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â bake into extra so production Hermes can read them
+    // Live overlay games ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â bake into extra so production Hermes can read them
     // (process.env.EXPO_PUBLIC_* is often empty at runtime; see LiveGamesFlags.js).
     // Marble Race: ON unless explicitly disabled (backend LIVE_MARBLE_RACE_ENABLED=1).
     EXPO_PUBLIC_LIVE_MARBLE_RACE_ENABLED: (() => {
@@ -111,7 +111,7 @@ module.exports = () => {
       if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
       return '0';
     })(),
-    // Frenemies party game ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ON unless explicitly disabled.
+    // Frenemies party game ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ON unless explicitly disabled.
     EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED: (() => {
       const raw = String(process.env.EXPO_PUBLIC_LIVE_FRENEMIES_ENABLED || '')
         .trim()
@@ -120,7 +120,7 @@ module.exports = () => {
       if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
       return isProductionProfile ? '1' : '1';
     })(),
-    // Reaction Duel paid skill game ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ON unless explicitly disabled.
+    // Reaction Duel paid skill game ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ON unless explicitly disabled.
     EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED: (() => {
       const raw = String(process.env.EXPO_PUBLIC_LIVE_REACTION_DUEL_ENABLED || '')
         .trim()
@@ -139,7 +139,7 @@ module.exports = () => {
     name: 'Blyp',
     slug: 'blyp-mobile',
     scheme: 'blyp',
-    version: '1.0.93',
+    version: '1.0.94',
     // default = unspecified MainActivity orientation so Fold unfold works;
     // camera/live screens lock portrait in JS (lockPortraitWhileFocused).
     orientation: 'default',
@@ -190,14 +190,14 @@ module.exports = () => {
         // Incoming voice/video calls: full-screen ringing UI when the phone is locked.
         'android.permission.USE_FULL_SCREEN_INTENT',
         'android.permission.FOREGROUND_SERVICE',
-        // Incoming-call ringtone FGS (IncomingCallForegroundService) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â mediaPlayback only.
+        // Incoming-call ringtone FGS (IncomingCallForegroundService) ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â mediaPlayback only.
         // Do NOT declare FOREGROUND_SERVICE_MICROPHONE: no service uses type=microphone;
         // mic-typed FGS is also killed on API 34+ when the mic is not actively captured.
         'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
         // Do NOT declare RECEIVE_BOOT_COMPLETED: Android 15 forbids launching
         // mediaPlayback (and other restricted) FGS from BOOT_COMPLETED. Incoming-call
         // FGS starts from FCM only. Local reminders re-arm on app open.
-        // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â
+        // Reminders use local notifications. Do NOT declare USE_EXACT_ALARM ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â
         // Play only allows that for calendar/alarm-clock core apps (Blyp is neither).
         'android.permission.SCHEDULE_EXACT_ALARM',
         'android.permission.VIBRATE',
@@ -249,7 +249,7 @@ module.exports = () => {
       // Integrates the Amazon IVS iOS SDKs (Stages + Player) and Blyp's native
       // Swift/ObjC bridge so live streaming works on iOS at parity with Android.
       './plugins/withIVSiOS',
-      // For You ground-up: AVPlayer shorts pool (BlypShorts) — not storm FeedPlayer.
+      // For You ground-up: AVPlayer shorts pool (BlypShorts) â€” not storm FeedPlayer.
       './plugins/withBlypShortsIOS',
       // Strip BOOT_COMPLETED from expo-notifications (Android 15 mediaPlayback FGS).
       './plugins/withAndroid15BootFgsCompliance',
@@ -261,7 +261,7 @@ module.exports = () => {
       '@config-plugins/react-native-webrtc',
     ],
     extra,
-    // Style only ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â backgroundColor/translucent map to deprecated window APIs on Android 15+.
+    // Style only ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â backgroundColor/translucent map to deprecated window APIs on Android 15+.
     androidStatusBar: {
       barStyle: 'light-content',
     },
