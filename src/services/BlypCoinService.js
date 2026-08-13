@@ -639,56 +639,81 @@ class BlypCoinService {
     }
   }
 
-  // Coin packages for purchase — website BASE only (1 coin = 1p). No app bonus.
+  // Coin packages — website BASE only. 1 coin = £0.01 (1p). No app bonus.
   // `sku` MUST match Play Console product IDs (legacy names may include old totals).
   // Server `iapCatalog` grants the same base amounts; do not credit bonus here.
+  // Bump COIN_PACK_CATALOG_REVISION when pack prices/grants change so UI never
+  // treats stale Play Billing / AsyncStorage overlays as authoritative.
+  static COIN_PACK_CATALOG_REVISION = 3;
+
+  /** Exact GBP for a coin count at 1p/coin. */
+  static gbpForCoins(coins) {
+    const n = Math.max(0, Number(coins) || 0);
+    return Math.round(n) / 100;
+  }
+
+  static formatPackPriceGbp(coins) {
+    return `£${this.gbpForCoins(coins).toFixed(2)}`;
+  }
+
   static getCoinPackages() {
+    // price = GBP at 1p/coin (100 → £1.00). currency locked to GBP for UI fallback.
     return [
       {
         id: 'small',
         sku: 'blyp.android.proof.coinpack.100',
         coins: 100,
-        price: 0.99,
+        price: 1.0,
+        currency: 'GBP',
         bonus: 0,
         popular: false,
-        icon: '💰'
+        icon: '💰',
+        catalogRevision: this.COIN_PACK_CATALOG_REVISION,
       },
       {
         id: 'medium',
         sku: 'blyp.android.coinpack.550',
         coins: 500,
-        price: 4.99,
+        price: 5.0,
+        currency: 'GBP',
         bonus: 0,
         popular: false,
-        icon: '💎'
+        icon: '💎',
+        catalogRevision: this.COIN_PACK_CATALOG_REVISION,
       },
       {
         id: 'large',
         sku: 'blyp.android.coinpack.1150',
         coins: 1000,
-        price: 9.99,
+        price: 10.0,
+        currency: 'GBP',
         bonus: 0,
         popular: true,
-        icon: '💍'
+        icon: '💍',
+        catalogRevision: this.COIN_PACK_CATALOG_REVISION,
       },
       {
         id: 'mega',
         sku: 'blyp.android.coinpack.3000',
         coins: 2500,
-        price: 19.99,
+        price: 25.0,
+        currency: 'GBP',
         bonus: 0,
         popular: false,
-        icon: '👑'
+        icon: '👑',
+        catalogRevision: this.COIN_PACK_CATALOG_REVISION,
       },
       {
         id: 'ultimate',
         sku: 'blyp.android.coinpack.6500',
         coins: 5000,
-        price: 39.99,
+        price: 50.0,
+        currency: 'GBP',
         bonus: 0,
         popular: false,
-        icon: '🔮'
-      }
+        icon: '🔮',
+        catalogRevision: this.COIN_PACK_CATALOG_REVISION,
+      },
     ];
   }
 

@@ -491,7 +491,7 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
                 sku: entry.sku,
                 coins_granted: entry.coinsGranted,
                 enabled: true,
-                metadata: jsonbDefault(db, { label: entry.label, priceUsd: entry.priceUsd }),
+                metadata: jsonbDefault(db, { label: entry.label, priceGbp: entry.priceGbp, pricePerCoinGbp: 0.01 }),
               }))
             )
             .onConflict(['platform', 'sku'])
