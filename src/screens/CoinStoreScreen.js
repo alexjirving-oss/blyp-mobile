@@ -35,40 +35,8 @@ import {
   setWalletBalanceCache,
 } from '../services/walletBalanceCache';
 import { shouldUseLiveServiceWallet } from '../utils/walletSource';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
-
-/** Stale local keys from older pricing experiments — drop on catalog revision bump. */
-const STALE_COIN_PRICE_CACHE_KEYS = Object.freeze([
-  '@blyp/coin_pack_prices',
-  '@blyp/iap_product_cache',
-  '@blyp/coin_catalog',
-  'blyp.coin.packages',
-  'coinPackages',
-]);
-
-function formatCatalogPackPrice(pkg) {
-  if (typeof BlypCoinService.formatPackPriceGbp === 'function') {
-    return BlypCoinService.formatPackPriceGbp(pkg?.coins);
-  }
-  const pounds = Number(pkg?.price);
-  if (Number.isFinite(pounds)) return `£${pounds.toFixed(2)}`;
-  return '£0.00';
-}
-
-/** Only accept Play Billing prices that match catalog GBP at 1p/coin (±1p). */
-function playPriceMatchesCatalog(pkg, detail) {
-  if (!pkg || !detail) return false;
-  const expectedGbp = Number(pkg.price);
-  if (!Number.isFinite(expectedGbp)) return false;
-  const currency = String(detail.priceCurrencyCode || '').toUpperCase();
-  if (currency && currency !== 'GBP') return false;
-  const micros = Number(detail.priceAmountMicros);
-  if (!Number.isFinite(micros) || micros <= 0) return false;
-  const playGbp = micros / 1_000_000;
-  return Math.abs(playGbp - expectedGbp) <= 0.011;
-}
 
 const ECONOMY_MUTATION_BLOCKED_BASE = Object.freeze({
   ok: false,
@@ -175,8 +143,8 @@ const CoinStoreScreen = ({
   }, [packages]);
   const { uid, authReady, isAuthenticated } = useAuth();
 
-  // Play Billing prices keyed by sku — only used when they match catalog GBP
-  // (1p/coin). Stale Play Console / Billing cache amounts are ignored.
+  // Localized Play Store prices keyed by sku (e.g. "£0.99"). Falls back to the
+  // static USD price when unavailable (non-Android, store offline, etc.).
   const [localizedPrices, setLocalizedPrices] = useState({});
 
   const [overlayType, setOverlayType] = useState(null); // 'convert' | 'withdraw' | null
@@ -186,22 +154,6 @@ const CoinStoreScreen = ({
     if (embedded) return 12;
     return Math.max(12, (insets?.top || 0) + 12);
   }, [embedded, insets]);
-
-  // Drop any legacy local pack-price caches so old $0.99 / bonus catalogs cannot stick.
-  useEffect(() => {
-    const revision = String(BlypCoinService.COIN_PACK_CATALOG_REVISION || 3);
-    const markerKey = '@blyp/coin_pack_catalog_revision';
-    (async () => {
-      try {
-        const prev = await AsyncStorage.getItem(markerKey);
-        if (prev === revision) return;
-        await AsyncStorage.multiRemove([...STALE_COIN_PRICE_CACHE_KEYS]);
-        await AsyncStorage.setItem(markerKey, revision);
-      } catch (e) {
-        console.warn('[COIN_STORE] stale price cache clear failed', e?.message || String(e));
-      }
-    })();
-  }, []);
 
   // Seed from parent / disk cache so Wallet never waits on Stripe or network.
   useEffect(() => {
@@ -446,25 +398,9 @@ const CoinStoreScreen = ({
         if (skus.length === 0) return;
         const details = await getAndroidProductDetails(skus);
         if (cancelled || !Array.isArray(details) || details.length === 0) return;
-        const bySku = new Map(
-          purchasableCoinPackages.map((p) => [String(p?.sku || '').trim(), p])
-        );
         const map = {};
         details.forEach((d) => {
-          const sku = String(d?.sku || '').trim();
-          if (!sku || !d?.formattedPrice) return;
-          const pkg = bySku.get(sku);
-          if (playPriceMatchesCatalog(pkg, d)) {
-            map[sku] = d.formattedPrice;
-          } else {
-            console.warn(
-              '[COIN_STORE] ignoring stale Play price for',
-              sku,
-              d.formattedPrice,
-              'expected',
-              formatCatalogPackPrice(pkg)
-            );
-          }
+          if (d?.sku && d?.formattedPrice) map[d.sku] = d.formattedPrice;
         });
         if (Object.keys(map).length > 0) setLocalizedPrices(map);
       } catch (e) {
@@ -618,7 +554,7 @@ const CoinStoreScreen = ({
       return;
     }
 
-    const confirmPrice = localizedPrices[packageData.sku] || formatCatalogPackPrice(packageData);
+    const confirmPrice = localizedPrices[packageData.sku] || `$${packageData.price}`;
     Alert.alert(
       'Purchase Blypcoins',
       `Buy ${packageData.coins} Blypcoins for ${confirmPrice}?`,
@@ -714,7 +650,7 @@ const CoinStoreScreen = ({
     const totalCoins = Number(pkg.coins || 0);
     const coinValue = totalCoins > 0 ? pkg.price / totalCoins : 0;
     const savings = 0;
-    const displayPrice = localizedPrices[pkg.sku] || formatCatalogPackPrice(pkg);
+    const displayPrice = localizedPrices[pkg.sku] || `$${pkg.price}`;
 
     return (
       <TouchableOpacity

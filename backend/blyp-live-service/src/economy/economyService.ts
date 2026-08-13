@@ -1292,7 +1292,7 @@ export async function verifyIapPurchaseAndGrant(userId: string, input: IapVerify
           coins_granted: catalogEntry.coinsGranted,
           enabled: true,
           metadata: trx.raw('?::jsonb', [
-            JSON.stringify({ label: catalogEntry.label, priceGbp: catalogEntry.priceGbp, pricePerCoinGbp: 0.01, source: 'catalog' }),
+            JSON.stringify({ label: catalogEntry.label, priceUsd: catalogEntry.priceUsd, source: 'catalog' }),
           ]),
         })
         .onConflict(['platform', 'sku'])
