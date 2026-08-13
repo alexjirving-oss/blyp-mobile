@@ -25,6 +25,7 @@ import {
   battleGiftPledgesRefundSchema,
   withdrawRequestSchema,
   withdrawConnectOnboardSchema,
+  convertGemsToCoinsSchema,
   socialFollowSchema,
 } from './economySchemas';
 import { depositBattle, cancelRefundBattle, settleBattle } from './battleEscrowService';
@@ -41,6 +42,7 @@ import {
   purchasePromoteMethod,
   getMyPromotions,
   claimDailyReward,
+  convertGemsToCoins,
   creditCoinsAdmin,
   finalizeLiveGame,
   getCatalog,
@@ -903,6 +905,27 @@ router.post('/withdraw/request', async (req: AuthedRequest, res) => {
       return;
     }
     res.json(out.response);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+/** Convert cleared gems → spendable COIN at ceil(gems * 1.15). Independent of withdraw rails. */
+router.post('/wallet/convert-gems', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) throw new EconomyError('UNAUTH', 401, 'Unauthorized');
+    const parsed = convertGemsToCoinsSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Invalid input', parsed.error.flatten());
+    }
+    const out = await convertGemsToCoins(userId, parsed.data);
+    if (out.kind === 'replay') {
+      res.status(409).json({ code: 'IDEMPOTENT_REPLAY', ...out });
+      return;
+    }
+    res.json(out);
   } catch (e: any) {
     const err = toEconomyError(e);
     res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });

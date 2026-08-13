@@ -30,6 +30,12 @@ import {
   LAUNCH_TEST_GEM_CREDIT_CAP,
 } from './withdrawLaunchTest';
 import { planLiveGamePaidEntry } from './paidOnlyCoinDebit';
+import {
+  coinsFromGemsConvert,
+  describeGemToCoinRate,
+  GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
+  GEM_TO_COIN_FACE_RATIO,
+} from './gemToCoinConvert';
 
 // Agency commission from Blyp's platform half of gift face (coins → gems).
 const MICRO_PER_GEM = 1_000_000n;
@@ -2351,6 +2357,170 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
   });
 
   return out;
+}
+
+/**
+ * Convert cleared gem_available → spendable COIN (never cashable).
+ * Rate: ceil(gems * 1.15) — 1:1 face + 15% bonus (gift half already applied coins→gems).
+ * Debits only gem_available (not pending); fail-closed on insufficient / reserved.
+ * Does not touch Stripe/PayPal withdraw rails.
+ */
+export async function convertGemsToCoins(
+  userId: string,
+  input: { amountGems: number; idempotencyKey: string },
+): Promise<{
+  kind: 'ok' | 'replay';
+  gemsDebited: number;
+  coinsCredited: number;
+  rate: string;
+  faceRatio: number;
+  bonusMultiplier: number;
+  wallet: { coinBalance: number; bonusCoinBalance: number; gemAvailable: number; gemPending: number };
+}> {
+  const { db } = getEconomyInfra();
+  const gems = Math.floor(Number(input.amountGems || 0));
+  const idempotencyKey = String(input.idempotencyKey || '').trim();
+  if (!Number.isFinite(gems) || gems < 1) {
+    throw new EconomyError('INVALID_INPUT', 400, 'amountGems must be a positive integer');
+  }
+  if (!idempotencyKey || idempotencyKey.length > 120) {
+    throw new EconomyError('INVALID_INPUT', 400, 'idempotencyKey required');
+  }
+
+  const coinsCredited = coinsFromGemsConvert(gems);
+  if (coinsCredited < 1) {
+    throw new EconomyError(
+      'INVALID_INPUT',
+      400,
+      'amountGems too small to credit at least 1 coin at 1:1+15% rate',
+    );
+  }
+
+  const readWallet = async (q: any) => {
+    const w = await q('wallets').where({ user_id: userId }).first();
+    return {
+      coinBalance: Number(w?.coin_balance || 0),
+      bonusCoinBalance: Number(w?.bonus_coin_balance || 0),
+      gemAvailable: Number(w?.gem_available || 0),
+      gemPending: Number(w?.gem_pending || 0),
+    };
+  };
+
+  try {
+    return await db.transaction(async (trx) => {
+      await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+      const existing = await trx('ledger_entries')
+        .where({
+          user_id: userId,
+          entry_type: 'GEM_TO_COIN_CONVERT',
+          currency: 'COIN',
+          idempotency_key: `${idempotencyKey}:COIN`,
+        })
+        .first();
+      if (existing) {
+        return {
+          kind: 'replay' as const,
+          gemsDebited: 0,
+          coinsCredited: 0,
+          rate: describeGemToCoinRate(),
+          faceRatio: GEM_TO_COIN_FACE_RATIO,
+          bonusMultiplier: GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
+          wallet: await readWallet(trx),
+        };
+      }
+
+      const open = await trx('withdrawal_requests')
+        .where({ user_id: userId })
+        .whereIn('status', ['pending', 'pending_review', 'processing'])
+        .sum({ reserved: 'amount_gems' })
+        .first();
+      const reserved = Math.max(0, Math.floor(Number(open?.reserved || 0)));
+
+      const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+      if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+      const gemAvailable = BigInt(wallet.gem_available || 0);
+      const withdrawable = gemAvailable - BigInt(reserved);
+      if (withdrawable < BigInt(gems)) {
+        throw new EconomyError(
+          'INSUFFICIENT_FUNDS',
+          409,
+          'Insufficient available gems',
+          { gemAvailable: Number(gemAvailable), reserved, requested: gems },
+        );
+      }
+
+      const gemsDelta = BigInt(gems);
+      const coinsDelta = BigInt(coinsCredited);
+      const refId = randomUUID();
+      const meta = {
+        amountGems: gems,
+        coinsCredited,
+        faceRatio: GEM_TO_COIN_FACE_RATIO,
+        bonusMultiplier: GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
+        rate: describeGemToCoinRate(),
+        originalIdempotencyKey: idempotencyKey,
+      };
+
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: userId,
+        entry_type: 'GEM_TO_COIN_CONVERT',
+        currency: 'GEM',
+        amount: (-gemsDelta).toString(),
+        status: 'POSTED',
+        reference_type: 'GEM_TO_COIN_CONVERT',
+        reference_id: refId,
+        idempotency_key: `${idempotencyKey}:GEM`,
+        metadata: meta,
+      });
+
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: userId,
+        entry_type: 'GEM_TO_COIN_CONVERT',
+        currency: 'COIN',
+        amount: coinsDelta.toString(),
+        status: 'POSTED',
+        reference_type: 'GEM_TO_COIN_CONVERT',
+        reference_id: refId,
+        idempotency_key: `${idempotencyKey}:COIN`,
+        metadata: meta,
+      });
+
+      await trx('wallets')
+        .where({ user_id: userId })
+        .update({
+          gem_available: (gemAvailable - gemsDelta).toString(),
+          coin_balance: (BigInt(wallet.coin_balance || 0) + coinsDelta).toString(),
+          updated_at: trx.fn.now(),
+        });
+
+      return {
+        kind: 'ok' as const,
+        gemsDebited: gems,
+        coinsCredited,
+        rate: describeGemToCoinRate(),
+        faceRatio: GEM_TO_COIN_FACE_RATIO,
+        bonusMultiplier: GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
+        wallet: await readWallet(trx),
+      };
+    });
+  } catch (e: any) {
+    if (e?.code === '23505') {
+      return {
+        kind: 'replay',
+        gemsDebited: 0,
+        coinsCredited: 0,
+        rate: describeGemToCoinRate(),
+        faceRatio: GEM_TO_COIN_FACE_RATIO,
+        bonusMultiplier: GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
+        wallet: await readWallet(db),
+      };
+    }
+    throw e;
+  }
 }
 
 /**

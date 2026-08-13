@@ -304,6 +304,16 @@ export const withdrawConnectOnboardSchema = z
 export type WithdrawRequestInput = z.infer<typeof withdrawRequestSchema>;
 export type WithdrawConnectOnboardInput = z.infer<typeof withdrawConnectOnboardSchema>;
 
+/** Convert cleared gem_available → spendable COIN at ceil(gems * 1.15). */
+export const convertGemsToCoinsSchema = z
+  .object({
+    amountGems: z.coerce.number().int().min(1),
+    idempotencyKey: z.string().min(1).max(120),
+  })
+  .strict();
+
+export type ConvertGemsToCoinsInput = z.infer<typeof convertGemsToCoinsSchema>;
+
 export const socialFollowSchema = z
   .object({
     targetUserId: z.string().min(1).max(128),

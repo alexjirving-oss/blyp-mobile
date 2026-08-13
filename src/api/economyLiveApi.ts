@@ -905,6 +905,27 @@ export async function requestWithdrawGems(input: {
   return await callEconomyBackend('/withdraw/request', 'POST', input);
 }
 
+/** Convert cleared gem_available → spendable COIN. Rate: ceil(gems * 1.15). */
+export async function convertGemsToCoins(input: {
+  amountGems: number;
+  idempotencyKey: string;
+}): Promise<{
+  kind: 'ok' | 'replay';
+  gemsDebited: number;
+  coinsCredited: number;
+  rate: string;
+  faceRatio: number;
+  bonusMultiplier: number;
+  wallet: {
+    coinBalance: number;
+    bonusCoinBalance: number;
+    gemAvailable: number;
+    gemPending: number;
+  };
+}> {
+  return await callEconomyBackend('/wallet/convert-gems', 'POST', input);
+}
+
 export function makeIdempotencyKey(prefix: string = 'gift'): string {
   const randomUUID = (global as any)?.crypto?.randomUUID?.();
   if (randomUUID && typeof randomUUID === 'string') return `${prefix}:${randomUUID}`;

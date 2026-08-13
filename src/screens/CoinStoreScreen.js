@@ -13,10 +13,12 @@ import {
   getWithdrawConnectStatus,
   getWithdrawEligibility,
   makeIdempotencyKey,
+  convertGemsToCoins,
   requestWithdrawGems,
   startWithdrawConnectOnboard,
   verifyAndroidIapPurchase,
 } from '../api/economyLiveApi';
+import { coinsFromGemsConvert, describeGemToCoinRate } from '../utils/gemToCoinConvert';
 import { useAuth } from '../hooks/useCommon';
 import { requireAccount } from '../services/guestSessionService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -130,6 +132,8 @@ const CoinStoreScreen = ({
   const seedGems = Number.isFinite(Number(initialGems)) ? Number(initialGems) : 0;
   const [balance, setBalance] = useState(seedCoins);
   const [gemBalance, setGemBalance] = useState(seedGems);
+  /** Cleared gems only (excludes pending) — convert/withdraw debit this bucket. */
+  const [gemAvailable, setGemAvailable] = useState(seedGems);
   const [loading, setLoading] = useState(false);
   const [balancesRefreshing, setBalancesRefreshing] = useState(false);
   const [selectedTab, setSelectedTab] = useState(initialTab || 'coins'); // 'coins' or 'gems'
@@ -143,9 +147,15 @@ const CoinStoreScreen = ({
   }, [packages]);
   const { uid, authReady, isAuthenticated } = useAuth();
 
-  // Localized Play Store prices keyed by sku (e.g. "£0.99"). Falls back to the
-  // static USD price when unavailable (non-Android, store offline, etc.).
+  // Localized Play Store prices keyed by sku (e.g. "£1.00"). Falls back to
+  // grant × £0.01 GBP when Play details unavailable (offline / non-Android).
   const [localizedPrices, setLocalizedPrices] = useState({});
+
+  const formatGbpFallback = (price) => {
+    const n = Number(price);
+    if (!Number.isFinite(n)) return '£0.00';
+    return `£${n.toFixed(2)}`;
+  };
 
   const [overlayType, setOverlayType] = useState(null); // 'convert' | 'withdraw' | null
   const [overlayAmount, setOverlayAmount] = useState('');
@@ -318,9 +328,12 @@ const CoinStoreScreen = ({
       if (shouldUseLiveServiceWallet()) {
         const wallet = await getEconomyWallet();
         const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
-        const nextGems = Number(wallet?.gemAvailable || 0) + Number(wallet?.gemPending || 0);
+        const nextAvailable = Number(wallet?.gemAvailable || 0);
+        const nextPending = Number(wallet?.gemPending || 0);
+        const nextGems = nextAvailable + nextPending;
         if (Number.isFinite(nextCoins)) setBalance(nextCoins);
         if (Number.isFinite(nextGems)) setGemBalance(nextGems);
+        if (Number.isFinite(nextAvailable)) setGemAvailable(nextAvailable);
         if (uid && Number.isFinite(nextCoins) && Number.isFinite(nextGems)) {
           void setWalletBalanceCache(uid, { coins: nextCoins, gems: nextGems });
         }
@@ -509,18 +522,45 @@ const CoinStoreScreen = ({
     }
 
     if (overlayType === 'convert') {
-      if (!isClientEconomyMutationAllowed()) {
-        const blocked = getBlockedEconomyMutationResult('convertGemToCoin');
-        setOverlayError('Economy mutations are currently disabled.');
-        return blocked;
-      }
-
-      if (amount > gemBalance) {
-        setOverlayError('You do not have that many gems.');
+      if (amount > gemAvailable) {
+        setOverlayError(
+          gemAvailable < gemBalance
+            ? `Only ${gemAvailable.toLocaleString()} cleared gems can convert (pending still clearing).`
+            : 'You do not have that many gems.',
+        );
         return;
       }
 
-      setOverlayError('Conversion is not available in live-service mode yet.');
+      try {
+        setOverlayError('');
+        setLoading(true);
+        const res = await convertGemsToCoins({
+          amountGems: amount,
+          idempotencyKey: makeIdempotencyKey('gem-to-coin'),
+        });
+        closeOverlay();
+        const wallet = res?.wallet;
+        if (wallet) {
+          const nextCoins = Number(wallet.coinBalance || 0) + Number(wallet.bonusCoinBalance || 0);
+          const nextAvailable = Number(wallet.gemAvailable || 0);
+          const nextPending = Number(wallet.gemPending || 0);
+          setBalance(nextCoins);
+          setGemAvailable(nextAvailable);
+          setGemBalance(nextAvailable + nextPending);
+          emitWalletUpdated(wallet);
+        } else {
+          await refreshLiveWallet();
+        }
+        Alert.alert(
+          'Converted',
+          `Converted ${Number(res?.gemsDebited || amount).toLocaleString()} gems → ${Number(res?.coinsCredited || 0).toLocaleString()} coins.\n${describeGemToCoinRate()}`,
+        );
+      } catch (e) {
+        const msg = String(e?.message || e?.detail || e || 'Convert failed');
+        setOverlayError(msg);
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
@@ -557,7 +597,7 @@ const CoinStoreScreen = ({
       return;
     }
 
-    const confirmPrice = localizedPrices[packageData.sku] || `$${packageData.price}`;
+    const confirmPrice = localizedPrices[packageData.sku] || formatGbpFallback(packageData.price);
     Alert.alert(
       'Purchase Blypcoins',
       `Buy ${packageData.coins} Blypcoins for ${confirmPrice}?`,
@@ -653,7 +693,7 @@ const CoinStoreScreen = ({
     const totalCoins = Number(pkg.coins || 0);
     const coinValue = totalCoins > 0 ? pkg.price / totalCoins : 0;
     const savings = 0;
-    const displayPrice = localizedPrices[pkg.sku] || `$${pkg.price}`;
+    const displayPrice = localizedPrices[pkg.sku] || formatGbpFallback(pkg.price);
 
     return (
       <TouchableOpacity
@@ -821,6 +861,16 @@ const CoinStoreScreen = ({
           </View>
 
           <View style={styles.heroActions}>
+            <TouchableOpacity
+              style={[styles.heroActionButton, { marginBottom: 10 }]}
+              onPress={openConvertOverlay}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.heroActionInner, { backgroundColor: '#1A1A1E' }]}>
+                <Text style={styles.heroActionText}>Convert gems → coins</Text>
+              </View>
+            </TouchableOpacity>
             {ENABLE_WITHDRAWALS ? (
               <TouchableOpacity
                 style={[styles.heroActionButton, { marginBottom: 10 }]}
@@ -974,9 +1024,15 @@ const CoinStoreScreen = ({
 
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
-                    ? 'How many gems do you want to convert? (1 gem = 1 coin)'
+                    ? `${describeGemToCoinRate()}. Gift earnings already took the half when coins became gems. Cleared gems only (${gemAvailable.toLocaleString()} available).`
                     : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Prefer PayPal while Stripe Connect is in review.'}
                 </Text>
+
+                {overlayType === 'convert' && Number(overlayAmount) > 0 ? (
+                  <Text style={[styles.overlaySubtitle, { marginTop: 6 }]}>
+                    You receive ≈ {coinsFromGemsConvert(parseInt(String(overlayAmount || '0').replace(/[^0-9]/g, ''), 10) || 0).toLocaleString()} coins
+                  </Text>
+                ) : null}
 
                 {overlayType === 'withdraw' ? (
                   <View style={styles.withdrawMethodRow}>
