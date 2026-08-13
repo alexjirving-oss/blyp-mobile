@@ -31,10 +31,6 @@ export function planForYouWindow({
   const a = Number(activeIndex);
   const n = Math.max(0, Number(itemCount) || 0);
   const loadCenter = Number.isFinite(Number(loadIndex)) ? Number(loadIndex) : a;
-  const prev =
-    previousActiveIndex == null || !Number.isFinite(Number(previousActiveIndex))
-      ? null
-      : Number(previousActiveIndex);
 
   const warmIndexes = [];
   const slots = [];
@@ -49,7 +45,6 @@ export function planForYouWindow({
       feedMuted,
       paused,
     });
-    const seekToZero = role === 'active' && (prev === null || prev !== a);
     if (role === 'neighbor') warmIndexes.push(i);
     if (role === 'none' && !load) continue;
     slots.push({
@@ -58,7 +53,8 @@ export function planForYouWindow({
       shouldLoad: load,
       shouldPlay: flags.shouldPlay,
       isMuted: flags.isMuted,
-      seekToZero: !!seekToZero && role === 'active',
+      // Never restart a warm decode on land — unmute only.
+      seekToZero: false,
     });
   }
 
@@ -73,7 +69,7 @@ export function planForYouWindow({
 }
 
 /**
- * Promote index → active. Always seek-to-0 on the new active.
+ * Promote index → active. Do not seek — neighbor decode continues.
  */
 export function promoteActive(prevPlan, nextActiveIndex, opts = {}) {
   const prevActive = prevPlan?.activeIndex ?? null;

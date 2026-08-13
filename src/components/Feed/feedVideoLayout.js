@@ -11,4 +11,5 @@
  * bar, user pill, comment stream). Applied as a transform only — never changes
  * the reserved full-bleed cell size when natural aspect arrives.
  */
-export const FEED_VIDEO_VERTICAL_NUDGE_Y = -20;
+// Diagnostic: no optical nudge / resize. Player paints as decoded.
+export const FEED_VIDEO_VERTICAL_NUDGE_Y = 0;

@@ -25,17 +25,23 @@ export function roleForIndex(index, activeIndex) {
  * @param {number} index
  * @param {number} activeIndex
  * @param {number} [loadIndex] mid-swipe decode center (may lead active)
+ *
+ * Single center only — union(active±1, load±1) can request 4 cells and steal
+ * a live pool slot at ~2 swipes/s. Prefer loadIndex (leads during swipe).
  */
 export function shouldLoadCell(index, activeIndex, loadIndex = activeIndex) {
   const i = Number(index);
   const a = Number(activeIndex);
   const l = Number.isFinite(Number(loadIndex)) ? Number(loadIndex) : a;
   if (!Number.isFinite(i) || !Number.isFinite(a)) return false;
-  return Math.abs(i - a) <= FOR_YOU_WARM_RADIUS || Math.abs(i - l) <= FOR_YOU_WARM_RADIUS;
+  const center = Number.isFinite(l) ? l : a;
+  return Math.abs(i - center) <= FOR_YOU_WARM_RADIUS;
 }
 
 /**
- * Neighbor: prepare/buffer only — paused + muted (DESIGN §4). Active: play.
+ * Neighbor: prepare + park at t≈0 (do NOT advance). Active: audible play.
+ * Playing neighbors in JS caused ~300ms mid-clip flash then seek/snap on land.
+ * Native ShortsPool still primes one muted frame then pauses — promote = unmute+play.
  * @returns {{ shouldPlay: boolean, isMuted: boolean, role: string }}
  */
 export function playbackFlags({
@@ -50,7 +56,7 @@ export function playbackFlags({
     return { shouldPlay: false, isMuted: true, role };
   }
   if (role === 'neighbor') {
-    // Warm = bind+prepare via shouldLoad; do not play muted (wastes decode / drifts from t=0).
+    // Warm = prepared & paused at 0. Promote only flips play/mute — no seek snap.
     return { shouldPlay: false, isMuted: true, role };
   }
   const playing = !!cellActive && !paused;

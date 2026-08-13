@@ -1,21 +1,27 @@
 /**
  * For You / feed playback audio session.
- *
- * Live, speech-to-text, voice memos, and notify stings can leave the process in
- * PlayAndRecord / MODE_IN_COMMUNICATION (earpiece). Feed video must re-assert
- * loudspeaker media mode before unmuting the active clip.
- *
- * Also serializes "who owns audible playback" so preload neighbors cannot steal
- * Android audio focus with mute/pause spam.
+ * On claim: reclaim speaker (MODE_NORMAL is not enough — pin builtin SPEAKER).
+ * Do not touch the player.
  */
 
-import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
+import { reclaimMediaPlaybackRoute } from '../services/notifySound';
 
 let ownerToken = null;
 let modePromise = null;
+// Only a call / blur can steal the route. Re-asserting it on every swipe means a
+// setAudioModeAsync per cell, which cuts the audio of the clip already playing.
+let routeDirty = true;
 
 export function getFeedAudioOwner() {
   return ownerToken;
+}
+
+/**
+ * A call, a screen blur, or anything else that may have taken the voice route.
+ * The next For You claim re-pins the speaker instead of trusting the last one.
+ */
+export function markFeedAudioRouteDirty() {
+  routeDirty = true;
 }
 
 /**
@@ -27,8 +33,12 @@ export async function claimFeedAudio(token) {
   const id = token != null ? String(token) : '';
   if (!id) return false;
   ownerToken = id;
+  if (!routeDirty) return ownerToken === id;
   if (!modePromise) {
-    modePromise = ensureMediaPlaybackAudioMode({ background: false })
+    modePromise = (async () => {
+      await reclaimMediaPlaybackRoute();
+      routeDirty = false;
+    })()
       .catch(() => {})
       .finally(() => {
         modePromise = null;

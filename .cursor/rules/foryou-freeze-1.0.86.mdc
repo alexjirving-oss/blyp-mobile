@@ -1,0 +1,32 @@
+---
+description: HARD LOCK — For You frozen at 1.0.86 / 2026320003. No edits without Alex unlock.
+alwaysApply: true
+---
+
+# For You freeze lock (1.0.86)
+
+Alex accepted best-effort For You and moved on. **Frozen tip state: versionName `1.0.86`, versionCode `2026320003`, tag `foryou-freeze-1.0.86-2026320003`.**
+
+## Residual accepted
+
+- Occasional clip stretch (1–2 clips)
+- Not fully instant open/swipe
+- Do **not** “improve” player behavior without unlock
+
+## DO NOT EDIT (unless Alex says unlock For You)
+
+- `src/feed/**` (ForYou*, forYou*, `instant/**`, ladder, engine, audio, controller)
+- `src/components/Feed/**` (PremiumFeedVideo, feedVideoLayout, FeedCommentOverlay)
+- `src/services/feedAudioSession.js` and related feed audio session tests
+- `android/app/src/main/java/com/blyp/mobile/shorts/**` (ShortsPool, ShortsSurfaceView, ShortsViewManager)
+- `plugins/blyp-shorts-ios/**` shorts pool/surface
+- `__tests__/forYou*.js`, `__tests__/feedAudioSession.test.js`
+- Version freeze ledgers tied to this bake: do not bump away from 1.0.86 for For You “fixes”
+
+## HomeScreen
+
+Do **not** edit HomeScreen For You / FlatList feed wiring, active-index, player mount, or feed audio session hooks in `src/screens/HomeScreen.js` without unlock. Non–For You HomeScreen work only if Alex explicitly scopes it and it does not touch feed playback.
+
+## Unlock
+
+Only Alex: explicit phrase **unlock For You** (or equivalent clear unlock). Until then: no refactors, no stretch “fixes”, no instant latency experiments, no shorts native tweaks for For You.

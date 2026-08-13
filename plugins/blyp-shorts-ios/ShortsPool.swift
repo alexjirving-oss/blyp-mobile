@@ -19,7 +19,6 @@ final class ShortsPool: NSObject {
     var playing: Bool = false
     var role: String = "neighbor"
     var ready: Bool = false
-    var didSeekOnActivate: Bool = false
     var endObserver: NSObjectProtocol?
     var statusObservation: NSKeyValueObservation?
   }
@@ -90,15 +89,10 @@ final class ShortsPool: NSObject {
       if uriChanged {
         self.slots[idx].uri = uri
         self.slots[idx].ready = false
-        self.slots[idx].didSeekOnActivate = false
         self.replaceItem(idx: idx, uri: uri, player: player)
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
       }
       view.bindPlayerLayer(player)
-      // Active bind always parks at t=0 (promote / remount onto warm URI).
-      if self.slots[idx].role == "active" {
-        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-        self.slots[idx].didSeekOnActivate = true
-      }
       self.applyPlayback(idx)
       self.slots[idx].item?.preferredForwardBufferDuration =
         self.slots[idx].role == "active" ? 6 : 1.5
@@ -109,9 +103,6 @@ final class ShortsPool: NSObject {
     DispatchQueue.main.async {
       for i in 0..<self.slots.count where self.slots[i].view === view {
         self.slots[i].player?.seek(to: ms, toleranceBefore: .zero, toleranceAfter: .zero)
-        if CMTimeGetSeconds(ms) <= 0.001 && self.slots[i].role == "active" {
-          self.slots[i].didSeekOnActivate = true
-        }
         return
       }
     }
@@ -146,13 +137,6 @@ final class ShortsPool: NSObject {
     let slot = slots[idx]
     guard let player = slot.player else { return }
     let wantAudible = slot.playing && !slot.muted && slot.role == "active"
-    // Seek-to-0 on every activate (muted or unmuted) — TikTok settle bar.
-    if slot.role == "active" && slot.playing && !slot.didSeekOnActivate {
-      player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-      slots[idx].didSeekOnActivate = true
-    } else if slot.role != "active" {
-      slots[idx].didSeekOnActivate = false
-    }
     player.isMuted = slot.muted || !wantAudible
     if slot.playing {
       player.play()
@@ -199,11 +183,7 @@ final class ShortsPool: NSObject {
           if size.width > 0, size.height > 0 {
             view?.emitVideoSize(width: Int(size.width), height: Int(size.height))
           }
-          if self.slots[idx].role == "neighbor" {
-            player.pause()
-            player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-            player.isMuted = true
-          }
+          self.applyPlayback(idx)
         } else if item.status == .failed {
           view?.emitError(code: "AVPLAYER_FAILED", message: item.error?.localizedDescription ?? "playback_error")
         }

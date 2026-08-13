@@ -13,6 +13,11 @@ class ShortsViewManager : SimpleViewManager<ShortsSurfaceView>() {
     return ShortsSurfaceView(reactContext)
   }
 
+  override fun onAfterUpdateTransaction(view: ShortsSurfaceView) {
+    super.onAfterUpdateTransaction(view)
+    view.commitProps()
+  }
+
   @ReactProp(name = "uri")
   fun setUri(view: ShortsSurfaceView, uri: String?) {
     view.setSourceUri(uri)

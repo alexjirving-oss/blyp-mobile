@@ -27,6 +27,7 @@ const SCROLL_PX_PER_SEC = 28;
 export default function FeedCommentOverlay({
   postId,
   active = false,
+  warm = false,
   bottomInset = 96,
   onCountChange,
 }) {
@@ -34,12 +35,13 @@ export default function FeedCommentOverlay({
   const [comments, setComments] = useState([]);
   const translateY = useRef(new Animated.Value(0)).current;
   const animRef = useRef(null);
+  const listen = !!(active || warm);
 
   useEffect(() => {
-    if (!active || !postId || !db) {
-      setComments([]);
+    if (!listen || !postId || !db) {
       return undefined;
     }
+    setComments([]);
 
     let unsub = null;
     try {
@@ -82,7 +84,7 @@ export default function FeedCommentOverlay({
         /* ignore */
       }
     };
-  }, [active, postId, onCountChange]);
+  }, [listen, postId, onCountChange]);
 
   const loopItems = useMemo(() => buildLoopItems(comments, LOOP_CAP), [comments]);
 

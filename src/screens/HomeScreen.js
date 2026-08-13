@@ -22,8 +22,6 @@ import AudioTile from '../components/AudioTile';
 import { prefetchPostWindow } from '../utils/mediaPrefetch';
 import { mediaViewerParams } from '../utils/mediaViewerPlaylist';
 import { COLORS } from '../styles/theme';
-import AvatarRing from '../components/motion/AvatarRing';
-import { HEADER_ICON_COLOR } from '../components/HeaderContainer';
 import BlypHeaderFlow from '../components/BlypHeaderFlow';
 import FeedEmptyState from '../components/Feed/FeedEmptyState';
 import FeedCommentOverlay from '../components/Feed/FeedCommentOverlay';
@@ -32,6 +30,8 @@ import { FeedActionButton, FeedStatBadge } from '../components/Feed/FeedActionBu
 import PremiumFeedVideo from '../components/Feed/PremiumFeedVideo';
 import FeedTopStatPills from '../components/Feed/FeedTopStatPills';
 import HomeBasePanel from '../components/HomeBase/HomeBasePanel';
+import HomeNextPanel from '../components/HomeBase/HomeNextPanel';
+import { subscribeHomeEdition, setHomeEdition } from '../services/homeEditionService';
 import TopicFeedPanel from '../components/HomeBase/TopicFeedPanel';
 import SportPagePanel from '../components/HomeBase/SportPagePanel';
 import FollowingFeedPanel from '../components/HomeBase/FollowingFeedPanel';
@@ -42,6 +42,7 @@ import {
   getFirstEnabledPageKey,
   isTopicPageKey,
   topicIdFromKey,
+  getHomeRibbonPages,
 } from '../services/userPreferencesService';
 import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
 import { useTabReset } from '../utils/tabResetBus';
@@ -65,8 +66,12 @@ import {
   prefetchShortsUri,
   isShortsAvailable,
 } from '../feed';
-import { claimFeedAudio, releaseFeedAudio } from '../services/feedAudioSession';
-import { ensureMediaPlaybackAudioMode } from '../services/notifySound';
+import {
+  claimFeedAudio,
+  releaseFeedAudio,
+  markFeedAudioRouteDirty,
+} from '../services/feedAudioSession';
+import { invalidateMediaPlaybackAudioMode } from '../services/notifySound';
 import {
   getPendingOptimisticPosts,
   subscribePostUploads,
@@ -258,6 +263,35 @@ async function prepareForYouOrder(posts, opts = {}) {
   }
 }
 
+function likeCountFromPost(post) {
+  if (!post) return null;
+  if (Number.isFinite(Number(post.likeCount))) return Math.max(0, Math.trunc(Number(post.likeCount)));
+  if (Number.isFinite(Number(post.likes))) return Math.max(0, Math.trunc(Number(post.likes)));
+  if (Array.isArray(post.likedBy)) return post.likedBy.length;
+  return null;
+}
+
+function displayLikeCount(post, likeCounts) {
+  const id = post?.id;
+  const mapped = id != null ? likeCounts?.[id] : undefined;
+  if (mapped != null && Number.isFinite(Number(mapped))) return Number(mapped);
+  return likeCountFromPost(post) ?? 0;
+}
+
+function commentCountFromPost(post) {
+  if (!post) return null;
+  const raw =
+    post.commentCount ??
+    post.commentsCount ??
+    post.comment_count ??
+    post.numComments;
+  if (Number.isFinite(Number(raw))) return Math.max(0, Math.trunc(Number(raw)));
+  if (Array.isArray(post.comments)) return post.comments.length;
+  return null;
+}
+
+const SHOW_DETAILS_TOP = 58;
+
 function logForYouInventory(label, posts) {
   if (!__DEV__) return;
   try {
@@ -284,11 +318,15 @@ const HomeScreen = ({ navigation, route }) => {
   // Default unmuted (TikTok-style); neighbors stay silent via cellActive gate.
   const [feedAudioMuted, setFeedAudioMuted] = useState(false);
   const feedAudioMutedRef = useRef(false);
+  // False only while we re-assert loudspeaker mode after Call / blur.
+  const [feedAudioSessionReady, setFeedAudioSessionReady] = useState(true);
   const [commentCounts, setCommentCounts] = useState({});
   const [following, setFollowing] = useState({}); // keyed by creator userId
   const followingBusyRef = useRef(new Set());
   const [selectedTab, setSelectedTab] = useState('home');
   const selectedTabRef = useRef('home');
+  const [homeEdition, setHomeEditionState] = useState('next');
+  useEffect(() => subscribeHomeEdition(setHomeEditionState), []);
   const uidRef = useRef(null);
   const [prefs, setPrefs] = useState(null);
   const [randomPosts, setRandomPosts] = useState([]);
@@ -303,9 +341,9 @@ const HomeScreen = ({ navigation, route }) => {
     loadingRef.current = loading;
   }, [loading]);
   const [currentDiscoverIndex, setCurrentDiscoverIndex] = useState(0);
-  // Decode/prefetch center can lead the audible index during a swipe so next
-  // mounts before momentum ends. Audible play still uses currentDiscoverIndex.
-  const [discoverLoadIndex, setDiscoverLoadIndex] = useState(0);
+  // Prefetch center may lead during swipe (ref-only). Native decode window
+  // stays locked to currentDiscoverIndex so mid-swipe setState cannot remount
+  // ExoPlayers and freeze the Fold.
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [isTitleBarMinimized, setIsTitleBarMinimized] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -319,18 +357,58 @@ const HomeScreen = ({ navigation, route }) => {
   const [headerHeight, setHeaderHeight] = useState(0);
   const [descriptionVisibleIndex, setDescriptionVisibleIndex] = useState(null); // only after "Show details"
   const descriptionHideTimeout = useRef(null);
-  const [userPillLayout, setUserPillLayout] = useState({ width: 0, height: 0 });
   const [feedHeight, setFeedHeight] = useState(0);
   // feedHeight will be measured from the available content area (between header and bottom tabs)
   const flatListRef = useRef(null);
   const likePendingRef = useRef(new Set());
+  const seedLikeSnapshot = useCallback((posts) => {
+    if (!Array.isArray(posts) || posts.length === 0) return;
+    setLiked((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      posts.forEach((post) => {
+        if (!post?.id || likePendingRef.current.has(post.id)) return;
+        const isLiked = uid ? !!post.likedBy?.includes(uid) : false;
+        if (next[post.id] === isLiked) return;
+        next[post.id] = isLiked;
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+    setLikeCounts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      posts.forEach((post) => {
+        if (!post?.id || likePendingRef.current.has(post.id)) return;
+        const n = likeCountFromPost(post);
+        if (n == null) return;
+        if (next[post.id] === n) return;
+        next[post.id] = n;
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+    setCommentCounts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      posts.forEach((post) => {
+        if (!post?.id) return;
+        const n = commentCountFromPost(post);
+        if (n == null) return;
+        if (next[post.id] === n) return;
+        next[post.id] = n;
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [uid]);
   const commentScrollValue = useRef(new Animated.Value(0)).current;
   const currentDiscoverIndexRef = useRef(0);
   const discoverLoadIndexRef = useRef(0);
+  const lastForYouPrefetchAtRef = useRef(0);
   const feedScrollVelocityRef = useRef(0);
   const feedScrollSampleRef = useRef({ y: 0, t: 0 });
   const feedSettledRef = useRef(true);
-  const [feedSettled, setFeedSettled] = useState(true);
   const hasLoggedFirebaseAuthNotReadyRef = useRef(false);
 
   // For You pagination: cursor = last Firestore doc loaded (by date), used to
@@ -383,26 +461,44 @@ const HomeScreen = ({ navigation, route }) => {
     return undefined;
   }, [feedAudioMuted, selectedTab, isScreenFocused, currentDiscoverIndex]);
 
-  // One audible owner for For You: claim media loudspeaker mode when the active
-  // clip should play sound; release on leave / mute / pause / blur.
+  // One audible owner for For You: reclaim speaker once on enter; swipe only
+  // swaps the owner token (routeDirty latch skips setAudioMode).
+  const forYouSessionActiveRef = useRef(false);
   useEffect(() => {
     const postId = activeForYouPost?.id != null ? String(activeForYouPost.id) : '';
+    const onForYou = selectedTab === 'A' && isScreenFocused;
     const shouldOwn =
       !!postId
-      && selectedTab === 'A'
-      && isScreenFocused
+      && onForYou
       && !feedAudioMuted
       && pausedFeedId !== postId;
+
+    if (!onForYou) {
+      forYouSessionActiveRef.current = false;
+      if (postId) releaseFeedAudio(postId);
+      return undefined;
+    }
 
     if (!shouldOwn) {
       if (postId) releaseFeedAudio(postId);
       return undefined;
     }
 
+    const enteredForYou = !forYouSessionActiveRef.current;
+    forYouSessionActiveRef.current = true;
+    if (enteredForYou) {
+      // One reclaim per For You enter (tab or screen focus) — not per swipe.
+      invalidateMediaPlaybackAudioMode();
+      markFeedAudioRouteDirty();
+      setFeedAudioSessionReady(false);
+    }
+
     let cancelled = false;
     claimFeedAudio(postId).then((ok) => {
       if (cancelled || !ok) return;
-      ensureMediaPlaybackAudioMode({ background: false }).catch(() => {});
+      // Mode is applied inside claimFeedAudio (latched). Hold unmute until
+      // this resolves so setAudioModeAsync cannot kill an already-audible cell.
+      setFeedAudioSessionReady(true);
     });
     return () => {
       cancelled = true;
@@ -418,9 +514,15 @@ const HomeScreen = ({ navigation, route }) => {
 
 
   const enabledPages = useMemo(() => getEnabledPages(prefs), [prefs]);
+  const ribbonPages = useMemo(
+    () => getHomeRibbonPages(prefs?.pages || enabledPages),
+    [prefs, enabledPages],
+  );
   const firstEnabledPageKey = useMemo(() => getFirstEnabledPageKey(prefs), [prefs]);
   const enabledPagesRef = useRef(enabledPages);
+  const ribbonPagesRef = useRef(ribbonPages);
   useEffect(() => { enabledPagesRef.current = enabledPages; }, [enabledPages]);
+  useEffect(() => { ribbonPagesRef.current = ribbonPages; }, [ribbonPages]);
 
   const followingRef = useRef(new Set());
   // Local impression dedupe (not used for ordering).
@@ -543,11 +645,7 @@ const HomeScreen = ({ navigation, route }) => {
     forYouFocusPinIdRef.current = postId;
     forYouFocusPostRef.current = post;
     setSelectedTab('A');
-    // If For You is already showing with data, seek immediately.
-    requestAnimationFrame(() => {
-      applyPendingForYouFocus();
-    });
-  }, [applyPendingForYouFocus]);
+  }, []);
 
   // Tie the earn-your-reach session to this user (hashed server-side) and make sure
   // any queued post signals are flushed when the feed unmounts.
@@ -596,7 +694,9 @@ const HomeScreen = ({ navigation, route }) => {
     const userKey = uid || 'anon';
     const userChanged = landingUidRef.current !== userKey;
     const previousFirst = userChanged ? null : previousFirstPageRef.current;
-    const selectedStillEnabled = enabledPages.some((page) => page.key === selectedTab);
+    const selectedStillEnabled =
+      ribbonPages.some((page) => page.key === selectedTab) ||
+      enabledPages.some((page) => page.key === selectedTab);
 
     landingUidRef.current = userKey;
     previousFirstPageRef.current = firstEnabledPageKey;
@@ -608,7 +708,7 @@ const HomeScreen = ({ navigation, route }) => {
     ) {
       setSelectedTab(firstEnabledPageKey);
     }
-  }, [uid, prefs, enabledPages, firstEnabledPageKey, selectedTab]);
+  }, [uid, prefs, enabledPages, ribbonPages, firstEnabledPageKey, selectedTab]);
 
   // Double-tap the bottom Home button → first shown header page (never hard-coded).
   useTabReset('Home', () => {
@@ -634,7 +734,7 @@ const HomeScreen = ({ navigation, route }) => {
   // scrolling, while a decisive horizontal swipe over empty/vertical areas
   // flips to the adjacent header tab. Vertical feed scrolling is never claimed.
   const goToAdjacentTab = useCallback((dir) => {
-    const keys = (enabledPagesRef.current || []).map((p) => p.key);
+    const keys = (ribbonPagesRef.current || []).map((p) => p.key);
     const i = keys.indexOf(selectedTabRef.current);
     if (i < 0) return;
     const ni = i + dir;
@@ -779,12 +879,25 @@ const HomeScreen = ({ navigation, route }) => {
     currentDiscoverIndexRef.current = currentDiscoverIndex;
   }, [currentDiscoverIndex]);
 
-  // Keep decode center aligned when audible index jumps outside scroll (refresh / focus pin).
+  // Keep prefetch center aligned when audible index jumps (refresh / focus pin).
   useEffect(() => {
-    if (discoverLoadIndexRef.current === currentDiscoverIndex) return;
     discoverLoadIndexRef.current = currentDiscoverIndex;
-    setDiscoverLoadIndex(currentDiscoverIndex);
   }, [currentDiscoverIndex]);
+
+  const warmForYouOpenings = useCallback((center) => {
+    const list = randomPostsRef.current;
+    if (!Array.isArray(list) || !list.length || !isShortsAvailable()) return;
+    const c = Math.max(0, Math.min(list.length - 1, Number(center) || 0));
+    // Light cache warm only (±2 × 512KB). Full decode stays on settled ±1 pool.
+    for (let d = 0; d <= 2; d += 1) {
+      const idxs = d === 0 ? [c] : [c + d, c - d];
+      for (const i of idxs) {
+        if (i < 0 || i >= list.length) continue;
+        const playUri = resolvePlayableUri(list[i]).playUri;
+        if (playUri) prefetchShortsUri(playUri, 524_288).catch(() => {});
+      }
+    }
+  }, []);
 
   // Details stay off by default. "Show details" reveals them briefly, then hides again.
   const showDescriptionForIndex = useCallback((index) => {
@@ -985,6 +1098,7 @@ const HomeScreen = ({ navigation, route }) => {
                       );
                       setRandomPosts(provisional);
                       randomPostsRef.current = provisional;
+                      seedLikeSnapshot(provisional);
                       setCurrentIndex(0);
                       if (!forYouFocusPinIdRef.current && !pendingForYouFocusRef.current) {
                         setCurrentDiscoverIndex(0);
@@ -1037,6 +1151,7 @@ const HomeScreen = ({ navigation, route }) => {
                           : decision.list;
                         randomPostsRef.current = next;
                         setRandomPosts(next);
+                        seedLikeSnapshot(next);
                         logForYouInventory(
                           decision.mode === 'append' ? 'boot-append' : 'boot',
                           next,
@@ -1160,40 +1275,16 @@ const HomeScreen = ({ navigation, route }) => {
                   }
                 })();
               }
-              if (uid) {
-                // Don't overwrite a post whose like is mid-flight: a snapshot
-                // can arrive with pre-write data and make the heart/count snap
-                // back, which is the "inconsistent likes" the user saw.
-                setLiked((prev) => {
-                  const next = { ...prev };
-                  validPosts.forEach((post) => {
-                    if (likePendingRef.current.has(post.id)) return;
-                    next[post.id] = post.likedBy?.includes(uid) || false;
-                  });
-                  return next;
+              seedLikeSnapshot(validPosts);
+              setGiftCoinCounts((prev) => {
+                const next = { ...prev };
+                validPosts.forEach((post) => {
+                  const server = getPostGiftCoins(post);
+                  const local = Number(prev[post.id] || 0);
+                  next[post.id] = Math.max(server, local);
                 });
-                setLikeCounts((prev) => {
-                  const next = { ...prev };
-                  validPosts.forEach((post) => {
-                    if (likePendingRef.current.has(post.id)) return;
-                    next[post.id] = Number(
-                      post.likeCount ?? post.likes ?? post.likedBy?.length ?? 0
-                    );
-                  });
-                  return next;
-                });
-                setGiftCoinCounts((prev) => {
-                  const next = { ...prev };
-                  validPosts.forEach((post) => {
-                    const server = getPostGiftCoins(post);
-                    const local = Number(prev[post.id] || 0);
-                    // Keep the higher of server vs optimistic local so a gift
-                    // just sent doesn't briefly snap back to an older snapshot.
-                    next[post.id] = Math.max(server, local);
-                  });
-                  return next;
-                });
-              }
+                return next;
+              });
             },
             (error) => {
               console.warn('HOME: Error in randomPosts listener:', error?.message || String(error));
@@ -1225,6 +1316,7 @@ const HomeScreen = ({ navigation, route }) => {
     isScreenFocused,
     selectedTab,
     buildForYouList,
+    seedLikeSnapshot,
   ]);
 
   // Pull-to-refresh: re-fetch a wider candidate window, shuffle, reset cursors.
@@ -1272,6 +1364,7 @@ const HomeScreen = ({ navigation, route }) => {
         const shuffled = buildForYouList(ordered, forYouCycleRef.current);
         setRandomPosts(shuffled);
         randomPostsRef.current = shuffled;
+        seedLikeSnapshot(shuffled);
         setIsEmptyFeed(false);
         setCurrentDiscoverIndex(0);
         currentDiscoverIndexRef.current = 0;
@@ -1282,7 +1375,7 @@ const HomeScreen = ({ navigation, route }) => {
     } finally {
       setLoading(false);
     }
-  }, [buildForYouList]);
+  }, [buildForYouList, seedLikeSnapshot]);
 
   // Load the next (older) page of the For You feed and append it. Called as the
   // viewer nears the end of the list, which makes the feed effectively endless.
@@ -1308,27 +1401,8 @@ const HomeScreen = ({ navigation, route }) => {
       const vids = newPosts.filter(isPlayableVideoPost).filter((p) => !have.has(p.id));
       return vids.length ? [...prev, ...vids] : prev;
     });
-    if (uid) {
-      setLiked((prev) => {
-        const next = { ...prev };
-        newPosts.forEach((post) => {
-          if (likePendingRef.current.has(post.id)) return;
-          next[post.id] = post.likedBy?.includes(uid) || false;
-        });
-        return next;
-      });
-      setLikeCounts((prev) => {
-        const next = { ...prev };
-        newPosts.forEach((post) => {
-          if (likePendingRef.current.has(post.id)) return;
-          next[post.id] = Number(
-            post.likeCount ?? post.likes ?? post.likedBy?.length ?? 0
-          );
-        });
-        return next;
-      });
-    }
-  }, [uid, buildForYouList]);
+    seedLikeSnapshot(newPosts);
+  }, [seedLikeSnapshot, buildForYouList]);
 
   const loadMoreForYou = useCallback(async () => {
     if (loadingMoreRef.current) return;
@@ -1444,9 +1518,7 @@ const HomeScreen = ({ navigation, route }) => {
       (randomPosts || []).find((v) => v.id === postId) ||
       (filteredPosts || []).find((v) => v.id === postId);
     const wasLiked = !!liked[postId];
-    const prevLikeCount = Number(
-      likeCounts?.[postId] ?? post?.likeCount ?? post?.likes ?? post?.likedBy?.length ?? 0
-    );
+    const prevLikeCount = displayLikeCount(post, likeCounts);
     const nextLikeCount = Math.max(0, prevLikeCount + (wasLiked ? -1 : 1));
 
     // optimistic
@@ -1636,18 +1708,20 @@ const HomeScreen = ({ navigation, route }) => {
       feedScrollSampleRef.current = { y, t: now };
       if (feedSettledRef.current) {
         feedSettledRef.current = false;
-        setFeedSettled(false);
       }
       const maxIndex = Math.max(0, (randomPostsRef.current?.length || 0) - 1);
-      // Symmetric mid-swipe mount so reverse (±) warms like forward.
+      // Ref-only mid-swipe prefetch — never setState here (that remounted pool slots).
       const raw = Math.floor(y / feedHeight + 0.5);
       const loadIndex = Math.min(maxIndex, Math.max(0, raw));
       if (loadIndex !== discoverLoadIndexRef.current) {
         discoverLoadIndexRef.current = loadIndex;
-        setDiscoverLoadIndex(loadIndex);
+      }
+      if (now - lastForYouPrefetchAtRef.current > 180) {
+        lastForYouPrefetchAtRef.current = now;
+        warmForYouOpenings(loadIndex);
       }
     },
-    [feedHeight],
+    [feedHeight, warmForYouOpenings],
   );
 
   const handleDiscoverScrollEnd = useCallback(
@@ -1659,16 +1733,13 @@ const HomeScreen = ({ navigation, route }) => {
       feedScrollVelocityRef.current = 0;
       if (!feedSettledRef.current) {
         feedSettledRef.current = true;
-        setFeedSettled(true);
       }
       // Plain vertical paging feed: post index maps directly to the offset.
       const rawIndex = Math.round(y / feedHeight);
       const maxIndex = Math.max(0, (randomPosts?.length || 0) - 1);
       const nextIndex = Math.min(maxIndex, Math.max(0, rawIndex));
-      if (nextIndex !== discoverLoadIndexRef.current) {
-        discoverLoadIndexRef.current = nextIndex;
-        setDiscoverLoadIndex(nextIndex);
-      }
+      discoverLoadIndexRef.current = nextIndex;
+      warmForYouOpenings(nextIndex);
       if (nextIndex !== currentDiscoverIndexRef.current) {
         currentDiscoverIndexRef.current = nextIndex;
         setDescriptionVisibleIndex(null);
@@ -1689,7 +1760,7 @@ const HomeScreen = ({ navigation, route }) => {
         loadMoreForYou();
       }
     },
-    [feedHeight, randomPosts?.length, loadMoreForYou]
+    [feedHeight, randomPosts?.length, loadMoreForYou, warmForYouOpenings]
   );
 
   // Active item resolver for #4ME feed
@@ -1702,92 +1773,53 @@ const HomeScreen = ({ navigation, route }) => {
     return index === currentDiscoverIndex;
   };
 
-  // Disk / poster warm around the load center. Video warm is ForYouEngine ±1
-  // + BlypShorts (when linked); storm openingBytePrefetch is gone.
+  // Disk / poster warm around the settled active. Opening-byte warm is throttled
+  // from scroll (warmForYouOpenings) — never remount native players mid-swipe.
   useEffect(() => {
     const isRandomFeed = selectedTab === 'A';
     const list = isRandomFeed ? randomPosts : videos;
-    const current = isRandomFeed ? discoverLoadIndex : currentIndex;
+    const current = isRandomFeed ? currentDiscoverIndex : currentIndex;
     if (!list?.length) return;
-    prefetchPostWindow(list, current, { radius: 4, images: true });
-    if (isRandomFeed && isShortsAvailable()) {
-      for (let d = 0; d <= 2; d += 1) {
-        const idxs = d === 0 ? [current] : [current + d, current - d];
-        for (const i of idxs) {
-          if (i < 0 || i >= list.length) continue;
-          const playUri = resolvePlayableUri(list[i]).playUri;
-          if (playUri) prefetchShortsUri(playUri).catch(() => {});
-        }
-      }
-    }
-  }, [currentIndex, discoverLoadIndex, selectedTab, videos, randomPosts]);
+    prefetchPostWindow(list, current, { radius: 2, images: true });
+    if (isRandomFeed) warmForYouOpenings(current);
+  }, [currentIndex, currentDiscoverIndex, selectedTab, videos, randomPosts, warmForYouOpenings]);
 
   const renderRandomPostItem = useCallback(({ item, index }) => {
     const mediaItems = item.media || [{ url: fixStorageUrl(item.imageUrl || item.videoUrl), type: item.type }];
     const hasMultipleMedia = mediaItems.length > 1;
     const isActive = isScreenFocused && selectedTab === 'A' && index === currentDiscoverIndex;
     const cellActive = isDiscoverItemActive(index);
-    const cellMuted = feedAudioMuted || !cellActive;
+    const cellMuted = feedAudioMuted || !feedAudioSessionReady || !cellActive;
     const showFullDescription = isActive && descriptionVisibleIndex === index;
     const giftTotal = getPostGiftCoins(item);
     const viewTotal = getPostViewCount(item);
-    const pillTop = 12;
-    const pillLeft = 12;
-    const showDetailsTop = pillTop + (userPillLayout?.height || 0) + 10;
+    const showDetailsTop = SHOW_DETAILS_TOP;
+    // Decode window locked to settled active — mid-swipe loadIndex must not remount.
+    const commentsWarm = shouldLoadCell(index, currentDiscoverIndex, currentDiscoverIndex);
 
-    // Full-bleed premium player: cover for portrait, smart contain for wide.
+    // Diagnostic: no cover/contain / mediaDisplay framing.
     const cellHeight = feedHeight || screenHeight;
 
     return (
       <View style={[styles.videoContainer, { height: cellHeight }]}>
         <View style={styles.topMetaRow} pointerEvents="box-none">
-          <View
-            style={styles.userPillInRow}
-            pointerEvents="box-none"
-            onLayout={
-              isActive
-                ? (e) => {
-                  const { width, height } = e?.nativeEvent?.layout || {};
-                  if (!width || !height) return;
-                  setUserPillLayout((prev) => {
-                    if (prev.width === width && prev.height === height) return prev;
-                    return { width, height };
-                  });
-                }
-                : undefined
-            }
-          >
+          <View style={styles.userPillInRow} pointerEvents="box-none">
             <View style={styles.creatorPillRow} pointerEvents="box-none">
             <TouchableOpacity
-              style={[styles.creatorPill, isActive && styles.creatorPillActive]}
+              style={styles.creatorPill}
               activeOpacity={0.88}
               onPress={() => handleUserProfilePress(item.user, item)}
             >
-              {isActive ? (
-                <AvatarRing variant="brand" animated size={34} ringWidth={1.5}>
-                  <Image
-                    source={{
-                      uri:
-                        item.userPhotoURL ||
-                        item.user?.avatar ||
-                        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-                    }}
-                    style={styles.creatorAvatar}
-                    resizeMethod="resize"
-                  />
-                </AvatarRing>
-              ) : (
-                <Image
-                  source={{
-                    uri:
-                      item.userPhotoURL ||
-                      item.user?.avatar ||
-                      'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
-                  }}
-                  style={styles.creatorAvatar}
-                  resizeMethod="resize"
-                />
-              )}
+              <Image
+                source={{
+                  uri:
+                    item.userPhotoURL ||
+                    item.user?.avatar ||
+                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&crop=face',
+                }}
+                style={styles.creatorAvatar}
+                resizeMethod="resize"
+              />
               <View style={styles.creatorMeta}>
                 <Text style={styles.creatorHandle} allowFontScaling={false} numberOfLines={1}>
                   @{item.userDisplayName || item.user?.displayName || item.user?.username || item.username || 'user'}
@@ -1840,17 +1872,15 @@ const HomeScreen = ({ navigation, route }) => {
             const playback = resolvePlayableUri(item);
             const videoUri = playback.playUri || null;
             const fallbackUris = (playback.ladder || []).filter((u) => u && u !== videoUri);
-            const shouldLoad = shouldLoadCell(index, currentDiscoverIndex, discoverLoadIndex);
+            const shouldLoad = shouldLoadCell(index, currentDiscoverIndex, currentDiscoverIndex);
             const role = roleForIndex(index, currentDiscoverIndex);
             const flags = playbackFlags({
               index,
               activeIndex: currentDiscoverIndex,
               cellActive,
-              feedMuted: feedAudioMuted,
+              feedMuted: feedAudioMuted || !feedAudioSessionReady,
               paused: pausedFeedId === item.id,
             });
-            const cellSettled = feedSettled && cellActive;
-
             return isVideo ? (
               <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => onFeedVideoPress(item)}>
                 <PremiumFeedVideo
@@ -1861,12 +1891,12 @@ const HomeScreen = ({ navigation, route }) => {
                   shouldPlay={flags.shouldPlay}
                   shouldLoad={shouldLoad}
                   role={role}
-                  seekToZero={cellSettled}
+                  seekToZero={false}
                   paused={pausedFeedId === item.id}
                   isLooping
                   isMuted={flags.isMuted}
-                  audioOwnerId={cellActive ? String(item.id) : null}
-                  mediaDisplay={item.mediaDisplay || null}
+                  audioOwnerId={null}
+                  mediaDisplay={null}
                   onError={(e) => {
                     console.log('[FEED] Video error', { id: item.id, uri: videoUri, error: e });
                   }}
@@ -1919,6 +1949,7 @@ const HomeScreen = ({ navigation, route }) => {
         <FeedCommentOverlay
           postId={item.id}
           active={isActive}
+          warm={commentsWarm}
           bottomInset={forYouOverlayInset}
           onCountChange={(postId, count) => {
             setCommentCounts((prev) => {
@@ -1966,13 +1997,11 @@ const HomeScreen = ({ navigation, route }) => {
     isScreenFocused,
     selectedTab,
     currentDiscoverIndex,
-    discoverLoadIndex,
     descriptionVisibleIndex,
-    userPillLayout,
     feedHeight,
     pausedFeedId,
     feedAudioMuted,
-    feedSettled,
+    feedAudioSessionReady,
     following,
     uid,
     forYouOverlayInset,
@@ -1985,35 +2014,14 @@ const HomeScreen = ({ navigation, route }) => {
 
   const renderHeader = () => (
     <BlypHeaderFlow
-      tabs={enabledPages.map((p) => ({ key: p.key, label: p.label }))}
+      tabs={ribbonPages.map((p) => ({ key: p.key, label: p.label }))}
       matchHomePadding={true}
       activeKey={selectedTab}
       onTabChange={setSelectedTab}
       onMenuPress={() => setMenuVisible(true)}
-      searchLabel="blyp it"
-      onSearchPress={() => navigation.navigate('Blyp')}
-      rightAction={(
-        <View style={styles.headerRightRow}>
-          <TouchableOpacity
-            style={styles.hubHeaderBtn}
-            onPress={() => navigation.navigate('Hub')}
-            accessibilityRole="button"
-            accessibilityLabel="Open Social Hub"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Icon name="grid-outline" size={20} color={HEADER_ICON_COLOR} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerSearchPill}
-            onPress={() => navigation.navigate('Search')}
-            accessibilityRole="button"
-            accessibilityLabel="Search"
-          >
-            <Icon name="search" size={16} color={HEADER_ICON_COLOR} />
-            <Text style={styles.headerSearchPillText} allowFontScaling={false}>Search</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      onLogoPress={() => setSelectedTab('home')}
+      searchLabel="Search"
+      onSearchPress={() => navigation.navigate('Search')}
       onLayout={(e) => {
         const h = e.nativeEvent.layout.height;
         if (h && h !== headerHeight) setHeaderHeight(h);
@@ -2079,7 +2087,7 @@ const HomeScreen = ({ navigation, route }) => {
         <FeedActionButton
           onPress={() => handleLike(item.id)}
           active={!!liked[item.id]}
-          count={likeCounts?.[item.id] ?? item.likeCount ?? item.likes ?? item.likedBy?.length ?? 0}
+          count={displayLikeCount(item, likeCounts)}
         >
           <Icon name={liked[item.id] ? 'heart' : 'heart-outline'} size={24} color={COLORS.white} />
         </FeedActionButton>
@@ -2168,15 +2176,29 @@ const HomeScreen = ({ navigation, route }) => {
       case 'home':
         return (
           <ScreenErrorBoundary label="HomeBase" onReset={() => setSelectedTab('home')}>
-            <HomeBasePanel
-              navigation={navigation}
-              uid={uid}
-              interests={prefs?.interests || []}
-              pages={enabledPages}
-              onOpenPage={(key) => setSelectedTab(key)}
-              onOpenForYouPost={openForYouAtPost}
-              onEditPages={() => navigation.navigate('PagesEditor')}
-            />
+            {homeEdition === 'classic' ? (
+              <HomeBasePanel
+                navigation={navigation}
+                uid={uid}
+                interests={prefs?.interests || []}
+                pages={enabledPages}
+                edition={homeEdition}
+                onEditionChange={setHomeEdition}
+                onOpenPage={(key) => setSelectedTab(key)}
+                onOpenForYouPost={openForYouAtPost}
+                onEditPages={() => navigation.navigate('PagesEditor')}
+              />
+            ) : (
+              <HomeNextPanel
+                navigation={navigation}
+                uid={uid}
+                interests={prefs?.interests || []}
+                edition={homeEdition}
+                onEditionChange={setHomeEdition}
+                onOpenPage={(key) => setSelectedTab(key)}
+                onOpenForYouPost={openForYouAtPost}
+              />
+            )}
           </ScreenErrorBoundary>
         );
       case 'following':
@@ -2200,17 +2222,17 @@ const HomeScreen = ({ navigation, route }) => {
               showsVerticalScrollIndicator={false}
               refreshing={loading}
               onRefresh={loadRandomPosts}
-              scrollEventThrottle={16}
+              scrollEventThrottle={32}
               pagingEnabled
               snapToInterval={feedHeight}
               snapToAlignment="start"
               decelerationRate="fast"
               removeClippedSubviews={false}
-              maxToRenderPerBatch={4}
-              windowSize={7}
+              maxToRenderPerBatch={3}
+              windowSize={5}
               initialNumToRender={3}
-              updateCellsBatchingPeriod={16}
-              extraData={`${currentDiscoverIndex}:${discoverLoadIndex}:${feedAudioMuted ? 1 : 0}:${pausedFeedId || ''}:${feedSettled ? 1 : 0}`}
+              updateCellsBatchingPeriod={40}
+              extraData={`${currentDiscoverIndex}:${feedAudioMuted ? 1 : 0}:${feedAudioSessionReady ? 1 : 0}:${pausedFeedId || ''}`}
               getItemLayout={(data, index) => ({
                 length: feedHeight,
                 offset: feedHeight * index,
@@ -2478,30 +2500,6 @@ const HomeScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  headerRightRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  hubHeaderBtn: {
-    minHeight: 32,
-    minWidth: 32,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
-  },
-  headerSearchPill: {
-    minHeight: 32,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: COLORS.backgroundCard,
-    borderWidth: 1,
-    borderColor: COLORS.borderStrong,
-  },
-  headerSearchPillText: { color: HEADER_ICON_COLOR, fontSize: 12, fontWeight: '700', includeFontPadding: false },
   headerTop: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 16, marginBottom: 16 },
   menuButton: { padding: 8, position: 'absolute', left: 16 },
   headerBalances: { position: 'absolute', left: 56, height: '100%', justifyContent: 'center' },

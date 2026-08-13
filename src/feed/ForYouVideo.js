@@ -6,8 +6,9 @@ import { getShortsView, isShortsAvailable } from './ShortsNative';
 import {
   syncForYouAudioOwnership,
   releaseForYouAudio,
-  isForYouAudioOwner,
+  forYouNativeMuted,
 } from './forYouAudio';
+import { buildLadderKey, ladderFromKey } from './forYouLadder';
 
 /** Spinner only after this ms — avoids flash on fast first-frame reveals. */
 const SPINNER_DELAY_MS = 280;
@@ -19,6 +20,10 @@ const SPINNER_DELAY_MS = 280;
  * Layout contract: root is a fixed frame (caller sizes it). Poster + native
  * surface + spinner are absolute overlays — never change parent size on
  * videoSize / ready. Reveal first frame in-place over the poster.
+ *
+ * Critical: ladder resets only when URI *content* changes. Parent FlatList
+ * re-renders pass a fresh fallbackUris array every time; treating that as a
+ * new ladder was clearing ready and flashing poster→video twice per land.
  */
 export default function ForYouVideo({
   uri,
@@ -40,67 +45,37 @@ export default function ForYouVideo({
   const shortsOk = isShortsAvailable();
   const ShortsView = useMemo(() => (shortsOk ? getShortsView() : null), [shortsOk]);
 
-  const ladder = useMemo(() => {
-    const primary = typeof uri === 'string' && uri.trim() ? uri.trim() : null;
-    const extras = Array.isArray(fallbackUris)
-      ? fallbackUris.filter((u) => typeof u === 'string' && u.trim())
-      : [];
-    const out = [];
-    if (primary) out.push(primary);
-    for (const u of extras) {
-      if (!out.includes(u)) out.push(u);
-    }
-    return out;
-  }, [uri, fallbackUris]);
+  const ladderKey = buildLadderKey(uri, fallbackUris);
+  const ladder = useMemo(() => ladderFromKey(ladderKey), [ladderKey]);
 
   const [activeUri, setActiveUri] = useState(ladder[0] || null);
-  const [ready, setReady] = useState(false);
+  // Poster stays until first painted frame — STATE_READY alone is a black flash.
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const [failed, setFailed] = useState(false);
-  // -1 idle; >=0 seeks in place (no ShortsView remount).
+  // -1 idle; >=0 seeks in place (no ShortsView remount). Never used on promote.
   const [seekToMs, setSeekToMs] = useState(-1);
   const [showSpinner, setShowSpinner] = useState(false);
   const ownedRef = useRef(false);
   const ladderRef = useRef(ladder);
-  const wasActiveRef = useRef(false);
-  const seekPulseRef = useRef(false);
   ladderRef.current = ladder;
 
   useEffect(() => {
     setActiveUri(ladder[0] || null);
-    setReady(false);
+    setHasFirstFrame(false);
     setFailed(false);
     setShowSpinner(false);
     setSeekToMs(-1);
-  }, [ladder]);
-
-  // Seek-to-0 on become-active only (edge) — reuse native view, do not remount.
-  useEffect(() => {
-    const isActiveRole = role === 'active' && shouldPlay;
-    const becameActive = isActiveRole && !wasActiveRef.current;
-    const pulse = !!seekToZero && !seekPulseRef.current && isActiveRole;
-    if (becameActive || pulse) {
-      setSeekToMs(0);
-    }
-    wasActiveRef.current = isActiveRole;
-    seekPulseRef.current = !!seekToZero && isActiveRole;
-  }, [role, shouldPlay, seekToZero, activeUri]);
-
-  // Clear seek prop so the next edge can re-fire seekToMs=0.
-  useEffect(() => {
-    if (seekToMs < 0) return undefined;
-    const t = requestAnimationFrame(() => setSeekToMs(-1));
-    return () => cancelAnimationFrame(t);
-  }, [seekToMs]);
+  }, [ladderKey]);
 
   // Delayed spinner — absolute overlay, never shifts layout.
   useEffect(() => {
-    if (ready || failed || !shouldPlay || !shouldLoad || !activeUri) {
+    if (hasFirstFrame || failed || !shouldPlay || !shouldLoad || !activeUri) {
       setShowSpinner(false);
       return undefined;
     }
     const t = setTimeout(() => setShowSpinner(true), SPINNER_DELAY_MS);
     return () => clearTimeout(t);
-  }, [ready, failed, shouldPlay, shouldLoad, activeUri]);
+  }, [hasFirstFrame, failed, shouldPlay, shouldLoad, activeUri]);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,8 +107,7 @@ export default function ForYouVideo({
 
   const onNativeReady = useCallback(
     (e) => {
-      setReady(true);
-      setShowSpinner(false);
+      // Do NOT clear poster here — READY can fire before the first frame paints.
       onReady?.(e?.nativeEvent || e);
       onPlaybackStatusUpdate?.({ isLoaded: true, isPlaying: !!shouldPlay, positionMillis: 0 });
     },
@@ -142,7 +116,7 @@ export default function ForYouVideo({
 
   const onNativeFirstFrame = useCallback(
     (e) => {
-      setReady(true);
+      setHasFirstFrame(true);
       setShowSpinner(false);
       onReady?.(e?.nativeEvent || e);
     },
@@ -153,7 +127,7 @@ export default function ForYouVideo({
     (e) => {
       const next = nextPlayableUri(ladderRef.current, activeUri);
       if (next && next !== activeUri) {
-        setReady(false);
+        setHasFirstFrame(false);
         setShowSpinner(false);
         setActiveUri(next);
         return;
@@ -200,30 +174,31 @@ export default function ForYouVideo({
     );
   }
 
-  const audible =
-    shouldPlay &&
-    !isMuted &&
-    (!audioOwnerId || isForYouAudioOwner(audioOwnerId) || ownedRef.current);
+  // Mute follows the controller only. Gating on async claimFeedAudio left the
+  // active cell muted (ownedRef never re-rendered) or unmuted then remuted
+  // when setAudioModeAsync ran a second time.
+  const nativeMuted = forYouNativeMuted({ shouldPlay, isMuted });
 
   return (
     <View style={[styles.root, style]}>
-      {/* Poster stays until first frame so reveal never collapses the cell. */}
-      {!!poster && !ready && (
-        <Image source={{ uri: poster }} style={styles.layer} resizeMode="cover" />
-      )}
+      {/* Native under poster: TextureView alpha=0 punches black; poster-on-top
+          hides any pre-cover frame until onFirstFrame (1.0.85 opposite bug). */}
       <ShortsView
         style={styles.layer}
         uri={activeUri}
         role={role === 'neighbor' ? 'neighbor' : 'active'}
         playing={!!shouldPlay}
-        muted={!audible}
+        muted={nativeMuted}
         seekToMs={seekToMs}
-        resizeMode={resizeMode === 'contain' ? 'contain' : 'cover'}
+        resizeMode="cover"
         onReady={onNativeReady}
         onFirstFrame={onNativeFirstFrame}
         onVideoSize={onNativeSize}
         onError={onNativeError}
       />
+      {!!poster && !hasFirstFrame && (
+        <Image source={{ uri: poster }} style={styles.layer} resizeMode="cover" />
+      )}
       {showSpinner && (
         <View style={styles.spinner} pointerEvents="none">
           <ActivityIndicator color={COLORS.primary || '#00D2BE'} />

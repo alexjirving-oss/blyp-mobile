@@ -1,3 +1,8 @@
+jest.mock('../src/services/notifySound', () => ({
+  ensureMediaPlaybackAudioMode: jest.fn(async () => {}),
+  invalidateMediaPlaybackAudioMode: jest.fn(),
+}));
+
 const {
   roleForIndex,
   shouldLoadCell,
@@ -8,6 +13,7 @@ const {
   planForYouWindow,
   promoteActive,
 } = require('../src/feed/forYouPlayerController');
+const { forYouNativeMuted } = require('../src/feed/forYouAudio');
 
 describe('ForYouEngine roles', () => {
   it('marks active ±1 as neighbor within warm radius', () => {
@@ -18,13 +24,16 @@ describe('ForYouEngine roles', () => {
     expect(FOR_YOU_WARM_RADIUS).toBe(1);
   });
 
-  it('loads only warm window', () => {
+  it('loads only warm window around settled active (no mid-swipe remount center)', () => {
     expect(shouldLoadCell(5, 5, 5)).toBe(true);
     expect(shouldLoadCell(6, 5, 5)).toBe(true);
     expect(shouldLoadCell(8, 5, 5)).toBe(false);
+    // Single center still holds if a leading loadIndex is passed.
+    expect(shouldLoadCell(4, 5, 6)).toBe(false);
+    expect(shouldLoadCell(7, 5, 6)).toBe(true);
   });
 
-  it('neighbors stay paused+muted; active plays unmuted unless feed muted', () => {
+  it('neighbors park paused at 0; active plays unmuted unless feed muted', () => {
     const n = playbackFlags({
       index: 4,
       activeIndex: 5,
@@ -54,13 +63,30 @@ describe('forYouPlayerController', () => {
     expect(plan.warmIndexes).toEqual([1, 3]);
   });
 
-  it('seekToZero on promote to a new active index', () => {
+  it('does not seekToZero on promote — warm decode continues', () => {
     const first = planForYouWindow({ activeIndex: 0, itemCount: 4 });
     const next = promoteActive(first, 1, { itemCount: 4 });
     const active = next.slots.find((s) => s.role === 'active');
     expect(active.index).toBe(1);
-    expect(active.seekToZero).toBe(true);
+    expect(active.seekToZero).toBe(false);
     expect(active.shouldPlay).toBe(true);
+  });
+
+  it('native mute follows flags, not async audio ownership', () => {
+    expect(forYouNativeMuted({ shouldPlay: true, isMuted: false })).toBe(false);
+    expect(forYouNativeMuted({ shouldPlay: true, isMuted: true })).toBe(true);
+    expect(forYouNativeMuted({ shouldPlay: false, isMuted: false })).toBe(true);
+    const next = promoteActive(
+      planForYouWindow({ activeIndex: 0, itemCount: 4 }),
+      1,
+      { itemCount: 4, feedMuted: false },
+    );
+    const active = next.slots.find((s) => s.role === 'active');
+    expect(active.seekToZero).toBe(false);
+    expect(active.isMuted).toBe(false);
+    expect(forYouNativeMuted({ shouldPlay: active.shouldPlay, isMuted: active.isMuted })).toBe(
+      false,
+    );
   });
 
   it('does not mark seekToZero when active index unchanged', () => {

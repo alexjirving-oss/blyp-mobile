@@ -1,22 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Animated, Dimensions } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import ForYouVideo from '../../feed/ForYouVideo';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
-import { FEED_VIDEO_VERTICAL_NUDGE_Y } from './feedVideoLayout';
-
-const { width: FRAME_W, height: FRAME_H } = Dimensions.get('window');
-
 /**
  * PremiumFeedVideo — full-screen VOD playback chrome.
- *
- * Frame is always absolute-fill (TikTok-stable). Natural size / aspect never
- * changes parent layout — fit is handled inside ForYouVideo / BlypShorts via
- * cover matrix. For You always covers (no letterbox jump / isWide chrome mount).
- *
- * Cover / custom-fit frames apply FEED_VIDEO_VERTICAL_NUDGE_Y so the subject
- * sits optically between header chrome and the absolute tab bar / viewer footer.
+ * Diagnostic: no cover/contain, no mediaDisplay framing, no Y nudge.
  */
 export default function PremiumFeedVideo({
   uri,
@@ -44,13 +34,6 @@ export default function PremiumFeedVideo({
   const lastProgressEmitRef = useRef(0);
   const pauseOpacity = useRef(new Animated.Value(0)).current;
   const playing = shouldPlay && !paused;
-
-  // Zoom-out (0.5) through zoom-in (2.5) — must match VideoFramingSheet / postEditService.
-  const userScale = Math.min(2.5, Math.max(0.5, Number(mediaDisplay?.scale) || 1));
-  const offsetX = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetX) || 0));
-  const offsetY = Math.min(1, Math.max(-1, Number(mediaDisplay?.offsetY) || 0));
-  // For You feed path: always cover (TikTok). No contain letterbox / aspect chrome.
-  const resizeMode = 'cover';
 
   useEffect(() => {
     Animated.timing(pauseOpacity, {
@@ -87,45 +70,14 @@ export default function PremiumFeedVideo({
     [onProgress],
   );
 
-  const framingTransform = useMemo(() => {
-    if (!mediaDisplay) return null;
-    // Map normalized offsets (-1..1) to real screen travel so drag/nudge
-    // actually repositions the clip. Use |scale - 1| so zoom-out (<1) gets
-    // a usable pan range (sliding the smaller video within the frame).
-    const scaleDelta = Math.abs(userScale - 1);
-    const overflowX = Math.max(
-      FRAME_W * (userScale < 1 ? 0.4 : 0.28),
-      (FRAME_W * scaleDelta) / 2,
-    );
-    const overflowY = Math.max(
-      FRAME_H * (userScale < 1 ? 0.32 : 0.22),
-      (FRAME_H * scaleDelta) / 2,
-    );
-    const tx = offsetX * overflowX;
-    const ty = offsetY * overflowY;
-    if (userScale === 1 && tx === 0 && ty === 0 && !mediaDisplay?.fitMode) return null;
-    return [{ translateX: tx }, { translateY: ty }, { scale: userScale }];
-  }, [mediaDisplay, offsetX, offsetY, userScale]);
-
-  // Fixed host: optical nudge + creator framing via transform only (no layout).
-  const hostTransform = useMemo(() => {
-    const parts = [];
-    if (FEED_VIDEO_VERTICAL_NUDGE_Y) {
-      parts.push({ translateY: FEED_VIDEO_VERTICAL_NUDGE_Y });
-    }
-    if (framingTransform) parts.push(...framingTransform);
-    return parts.length ? parts : null;
-  }, [framingTransform]);
-
   return (
     <View style={[styles.root, style]}>
-      <View style={[styles.videoHost, hostTransform ? { transform: hostTransform } : null]}>
+      <View style={styles.videoHost}>
         <ForYouVideo
           uri={uri}
           fallbackUris={fallbackUris}
           poster={poster}
           style={StyleSheet.absoluteFill}
-          resizeMode={resizeMode}
           shouldPlay={playing}
           shouldLoad={shouldLoad}
           isMuted={isMuted}

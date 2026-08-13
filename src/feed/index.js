@@ -12,6 +12,7 @@ export {
   releaseForYouAudio,
   isForYouAudioOwner,
   getForYouAudioOwner,
+  forYouNativeMuted,
 } from './forYouAudio';
 export { isShortsAvailable, prefetchShortsUri, getShortsDiagnostics } from './ShortsNative';
 export { default as ForYouVideo } from './ForYouVideo';

@@ -1,4 +1,4 @@
-﻿# Blyp Android BUILT/CONSUMED versionCode ledger (one integer per line).
+# Blyp Android BUILT/CONSUMED versionCode ledger (one integer per line).
 # Any code listed here has already been built for upload and must NEVER be
 # reused. The release build (android/app/build.gradle) appends each built
 # code here automatically and refuses to build a code already present.
@@ -198,3 +198,23 @@
 2026319974
 2026319975
 2026319976
+2026319978
+2026319979
+2026319980
+2026319981
+2026319982
+2026319983
+2026319984
+2026319985
+2026319986
+2026319987
+2026319988
+2026319989
+2026319990
+2026319991
+2026319992
+2026319993
+2026319998
+2026319999
+2026320000
+2026320001

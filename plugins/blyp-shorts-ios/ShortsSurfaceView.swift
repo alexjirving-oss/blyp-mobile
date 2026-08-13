@@ -16,8 +16,8 @@ final class ShortsSurfaceView: UIView {
   override init(frame: CGRect) {
     super.init(frame: frame)
     backgroundColor = .black
-    playerLayer.videoGravity = .resizeAspect
-    playerLayer.opacity = 0
+    playerLayer.videoGravity = .resize
+    playerLayer.opacity = 1
     layer.addSublayer(playerLayer)
   }
 
@@ -30,26 +30,29 @@ final class ShortsSurfaceView: UIView {
     playerLayer.frame = bounds
   }
 
+  private var commitScheduled = false
+
   @objc func setUri(_ uri: NSString?) {
-    uriValue = (uri as String?)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let next = (uri as String?)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if next == uriValue { return }
+    uriValue = next
     hasFirstFrame = false
-    playerLayer.opacity = 0
-    rebind()
+    scheduleCommit()
   }
 
   @objc func setPlaying(_ playing: Bool) {
     playingFlag = playing
-    ShortsPool.shared.updatePlayback(view: self, playing: playingFlag, muted: mutedFlag, role: roleFlag)
+    scheduleCommit()
   }
 
   @objc func setMuted(_ muted: Bool) {
     mutedFlag = muted
-    ShortsPool.shared.updatePlayback(view: self, playing: playingFlag, muted: mutedFlag, role: roleFlag)
+    scheduleCommit()
   }
 
   @objc func setRole(_ role: NSString?) {
     roleFlag = (role as String?) == "active" ? "active" : "neighbor"
-    ShortsPool.shared.updatePlayback(view: self, playing: playingFlag, muted: mutedFlag, role: roleFlag)
+    scheduleCommit()
   }
 
   /// For You promote / remount — seek pool slot to ms (0 = opening).
@@ -67,7 +70,7 @@ final class ShortsSurfaceView: UIView {
   }
 
   func applyResizeMode(_ mode: String) {
-    playerLayer.videoGravity = .resizeAspect
+    playerLayer.videoGravity = .resize
   }
 
   func bindPlayerLayer(_ player: AVPlayer) {
@@ -76,6 +79,16 @@ final class ShortsSurfaceView: UIView {
 
   func unbindPlayerLayer() {
     playerLayer.player = nil
+  }
+
+  private func scheduleCommit() {
+    guard !commitScheduled else { return }
+    commitScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.commitScheduled = false
+      self.rebind()
+    }
   }
 
   private func rebind() {
@@ -89,7 +102,7 @@ final class ShortsSurfaceView: UIView {
       playing: playingFlag,
       muted: mutedFlag,
       role: roleFlag,
-      resizeMode: "contain"
+      resizeMode: "none"
     )
   }
 

@@ -2,6 +2,9 @@
  * For You–only audible ownership.
  * Does not touch LIVE / Agora session helpers.
  * Warm neighbors never claim; only the unmuted active cell owns audio.
+ *
+ * Native mute follows playbackFlags (isMuted / shouldPlay). Session claim only
+ * sets loudspeaker mode — it must never remute the active cell while waiting.
  */
 
 import {
@@ -10,6 +13,14 @@ import {
   isFeedAudioOwner,
   getFeedAudioOwner,
 } from '../services/feedAudioSession';
+
+/**
+ * Native `muted` for BlypShorts. Neighbors stay silent via isMuted; paused
+ * cells stay silent via !shouldPlay. Do not fold in async audio-session ownership.
+ */
+export function forYouNativeMuted({ shouldPlay, isMuted }) {
+  return !shouldPlay || !!isMuted;
+}
 
 /**
  * @param {{ audioOwnerId: string|null, shouldPlay: boolean, isMuted: boolean, shouldLoad: boolean }} opts

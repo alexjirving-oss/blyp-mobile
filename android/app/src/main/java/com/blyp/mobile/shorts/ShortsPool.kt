@@ -35,7 +35,8 @@ object ShortsPool {
   private const val TAG = "BlypShorts"
   const val POOL_SIZE = 3
   private const val CACHE_BYTES = 256L * 1024L * 1024L
-  private const val OPENING_DEFAULT_BYTES = 1_024L * 1024L
+  /** ~512KB opening warm — enough for first GOP without saturating IO. */
+  private const val OPENING_DEFAULT_BYTES = 512L * 1024L
 
   private val main = Handler(Looper.getMainLooper())
   private val io = Executors.newFixedThreadPool(3)
@@ -52,7 +53,8 @@ object ShortsPool {
     var playing: Boolean = false,
     var role: String = "neighbor",
     var ready: Boolean = false,
-    var didSeekOnActivate: Boolean = false,
+    /** Neighbor decoded one frame at t≈0 — promote can unmute+play with no wait. */
+    var firstFramePrimed: Boolean = false,
   )
 
   private val slots = Array(POOL_SIZE) { Slot() }
@@ -88,12 +90,15 @@ object ShortsPool {
     val trackSelector = DefaultTrackSelector(ctx).apply {
       setParameters(
         buildUponParameters()
-          .setMaxVideoSize(1280, 720)
+          // Fold decode budget: keep neighbors light (540p cap).
+          .setMaxVideoSize(960, 540)
           .setForceHighestSupportedBitrate(false),
       )
     }
     val loadControl = DefaultLoadControl.Builder()
-      .setBufferDurationsMs(1_200, 6_000, 200, 400)
+      // Short buffers — 3 concurrent players must not stall the UI thread.
+      // bufferForPlaybackMs kept low so a primed neighbor promotes instantly.
+      .setBufferDurationsMs(500, 2_000, 80, 250)
       .setPrioritizeTimeOverSizeThresholds(true)
       .build()
     val factory = cacheFactory ?: DefaultDataSource.Factory(ctx)
@@ -108,29 +113,51 @@ object ShortsPool {
     player.repeatMode = Player.REPEAT_MODE_ONE
     player.volume = 0f
     player.playWhenReady = false
+    try {
+      player.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
+    } catch (_: Throwable) {
+    }
     player.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_READY) {
           slot.ready = true
-          slot.view?.emitReady()
-          // Neighbor: park at t=0 after prime so audible swipe hears the opening.
-          if (slot.role == "neighbor" && slot.muted) {
+          // Repark only before first paint — never seek an already-playing active mid-clip.
+          if (!slot.firstFramePrimed) {
             try {
-              player.seekTo(0)
+              val pos = slot.player?.currentPosition ?: 0L
+              if (pos > 40L) {
+                slot.player?.seekTo(0)
+                Log.i(TAG, "ready-repark0 slot=$slotIndex wasPos=$pos")
+              }
             } catch (_: Throwable) {
             }
-            if (!slot.playing) player.playWhenReady = false
           }
+          slot.view?.emitReady()
+          applyPlayback(slotIndex)
         }
       }
 
       override fun onRenderedFirstFrame() {
+        slot.firstFramePrimed = true
         slot.view?.emitFirstFrame()
+        // Neighbor warm: park immediately after first paint so promote is unmute+play.
+        if (slot.role != "active") {
+          try {
+            slot.player?.playWhenReady = false
+            val pos = slot.player?.currentPosition ?: 0L
+            if (pos > 40L) {
+              slot.player?.seekTo(0)
+              Log.i(TAG, "neighbor-park0 slot=$slotIndex wasPos=$pos")
+            }
+          } catch (_: Throwable) {
+          }
+        }
       }
 
       override fun onVideoSizeChanged(videoSize: VideoSize) {
         if (videoSize.width > 0 && videoSize.height > 0) {
-          slot.view?.emitVideoSize(videoSize.width, videoSize.height)
+          // Apply cover matrix before first visible frame (TextureView ignores Exo crop mode).
+          slot.view?.onVideoSize(videoSize.width, videoSize.height)
         }
       }
 
@@ -149,6 +176,8 @@ object ShortsPool {
     for (i in slots.indices) if (slots[i].uri == null && slots[i].view == null) return i
     for (i in slots.indices) if (!slots[i].playing && slots[i].view == null) return i
     for (i in slots.indices) if (!slots[i].playing) return i
+    // Last resort: never steal the audible active slot while a neighbor exists.
+    for (i in slots.indices) if (slots[i].role != "active") return i
     return 0
   }
 
@@ -189,22 +218,23 @@ object ShortsPool {
 
       if (uriChanged) {
         slot.ready = false
-        slot.didSeekOnActivate = false
+        slot.firstFramePrimed = false
         slot.uri = uri
+        // Hold audible play until STATE_READY + parked at 0 (see applyPlayback / listener).
+        player.playWhenReady = false
         player.stop()
         player.clearMediaItems()
         player.setMediaItem(buildMediaItem(uri))
-        player.prepare()
-      }
-      attachSurface(idx, view)
-      // Active bind always parks at t=0 (promote / remount with same warm URI).
-      if (slot.role == "active") {
         try {
           player.seekTo(0)
-          slot.didSeekOnActivate = true
+          Log.i(TAG, "bind-seek0 slot=$idx uriChanged=1 held")
         } catch (_: Throwable) {
         }
+        player.prepare()
+      } else {
+        Log.i(TAG, "bind-reuse promote-seek=0 slot=$idx role=${slot.role} primed=${slot.firstFramePrimed}")
       }
+      attachSurface(idx, view)
       applyPlayback(idx)
     }
   }
@@ -214,10 +244,8 @@ object ShortsPool {
       for (i in slots.indices) {
         if (slots[i].view === view) {
           try {
+            Log.i(TAG, "promote-seek slot=$i ms=$ms")
             slots[i].player?.seekTo(ms.coerceAtLeast(0L))
-            if (ms <= 0L && slots[i].role == "active") {
-              slots[i].didSeekOnActivate = true
-            }
           } catch (_: Throwable) {
           }
           return@runOnMain
@@ -243,6 +271,19 @@ object ShortsPool {
     }
   }
 
+  /** Instant promote: same URI already decoding on this view — mute/role only. */
+  fun uriMatches(idx: Int, uri: String): Boolean {
+    if (idx < 0 || idx >= slots.size) return false
+    return slots[idx].uri == uri
+  }
+
+  fun hasBoundUri(view: ShortsSurfaceView, uri: String): Boolean {
+    for (i in slots.indices) {
+      if (slots[i].view === view && slots[i].uri == uri) return true
+    }
+    return false
+  }
+
   fun updatePlayback(view: ShortsSurfaceView, playing: Boolean, muted: Boolean, role: String) {
     runOnMain {
       for (i in slots.indices) {
@@ -250,6 +291,8 @@ object ShortsPool {
           slots[i].playing = playing
           slots[i].muted = muted
           slots[i].role = if (role == "active") "active" else "neighbor"
+          // Neighbor→active promote: unmute only — promote-seek=0.
+          Log.i(TAG, "promote-seek=0 slot=$i playing=$playing muted=$muted role=${slots[i].role}")
           applyPlayback(i)
           return@runOnMain
         }
@@ -261,17 +304,22 @@ object ShortsPool {
     val slot = slots[idx]
     val player = slot.player ?: return
     val wantAudible = slot.playing && !slot.muted && slot.role == "active"
-    // Seek-to-0 on every activate (muted or unmuted) — TikTok settle bar.
-    if (slot.role == "active" && slot.playing && !slot.didSeekOnActivate) {
-      try {
-        player.seekTo(0)
-      } catch (_: Throwable) {
-      }
-      slot.didSeekOnActivate = true
-    } else if (slot.role != "active") {
-      slot.didSeekOnActivate = false
-    }
     player.volume = if (slot.muted || !wantAudible) 0f else 1f
+    if (!slot.ready) {
+      // Hold until STATE_READY — prepare+play races paint ~300ms then seek snap.
+      player.playWhenReady = false
+      return
+    }
+    if (slot.role != "active") {
+      // Neighbor: muted decode until first frame, then park at 0 (surface ready).
+      if (!slot.firstFramePrimed) {
+        player.playWhenReady = true
+      } else {
+        player.playWhenReady = false
+      }
+      return
+    }
+    // Active: primed neighbor → instant; cold land waits for ready (above).
     player.playWhenReady = slot.playing
   }
 
@@ -382,6 +430,7 @@ object ShortsPool {
           "muted" to s.muted,
           "role" to s.role,
           "ready" to s.ready,
+          "firstFramePrimed" to s.firstFramePrimed,
         )
       },
     )

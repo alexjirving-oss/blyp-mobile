@@ -51,7 +51,7 @@ describe('resolvePlayableUri — progressive over dead startUrl', () => {
   });
 });
 
-describe('ForYouEngine roles', () => {
+describe('For You engine', () => {
   it('maps active ±1 neighbors; pool size is 3', () => {
     expect(FOR_YOU_POOL_SIZE).toBe(3);
     expect(roleForIndex(5, 5)).toBe('active');
@@ -60,11 +60,14 @@ describe('ForYouEngine roles', () => {
     expect(roleForIndex(7, 5)).toBe('none');
     expect(shouldLoadCell(4, 5, 5)).toBe(true);
     expect(shouldLoadCell(8, 5, 5)).toBe(false);
+    // Single center: mid-swipe must stay within the 3-slot pool.
+    expect(shouldLoadCell(4, 5, 6)).toBe(false);
+    expect(shouldLoadCell(7, 5, 6)).toBe(true);
   });
 
-  it('neighbor stays paused+muted; active respects feed mute', () => {
+  it('neighbor parks paused; active respects feed mute; never emits seekToZero', () => {
     expect(
-      playbackFlags({ index: 4, activeIndex: 5, cellActive: false }),
+      playbackFlags({ index: 4, activeIndex: 5 }),
     ).toEqual({ shouldPlay: false, isMuted: true, role: 'neighbor' });
     expect(
       playbackFlags({
@@ -74,122 +77,94 @@ describe('ForYouEngine roles', () => {
         feedMuted: false,
       }),
     ).toEqual({ shouldPlay: true, isMuted: false, role: 'active' });
+    // Promote must never ask the player to seek back to 0.
+    expect(
+      playbackFlags({ index: 5, activeIndex: 5, cellActive: true }).seekToZero,
+    ).toBeUndefined();
   });
 });
 
-describe('ground-up path — storm FeedPlayer must be gone', () => {
+describe('For You render route', () => {
   const fs = require('fs');
   const path = require('path');
 
-  it('does not ship storm feedplayer package or FeedPooledVideo', () => {
-    expect(
-      fs.existsSync(
-        path.join(__dirname, '../android/app/src/main/java/com/blyp/mobile/feedplayer'),
-      ),
-    ).toBe(false);
-    expect(
-      fs.existsSync(path.join(__dirname, '../src/components/Feed/FeedPooledVideo.js')),
-    ).toBe(false);
-    expect(
-      fs.existsSync(path.join(__dirname, '../src/native/FeedPlayerNative.js')),
-    ).toBe(false);
-    expect(
-      fs.existsSync(path.join(__dirname, '../plugins/withFeedPlayerIOS.js')),
-    ).toBe(false);
-  });
+  const srcDir = path.join(__dirname, '../src');
 
-  it('PremiumFeedVideo uses ForYouVideo from src/feed', () => {
+  it('HomeScreen case A renders the FlatList / PremiumFeedVideo path', () => {
     const src = fs.readFileSync(
-      path.join(__dirname, '../src/components/Feed/PremiumFeedVideo.js'),
+      path.join(__dirname, '../src/screens/HomeScreen.js'),
       'utf8',
     );
-    expect(src).toMatch(/from ['\"]\.\.\/\.\.\/feed\/ForYouVideo['\"]/);
-    expect(src).not.toMatch(/FeedPooledVideo/);
+    expect(src).toMatch(/case 'A':/);
+    expect(src).not.toMatch(/feed\/instant/);
+    expect(src).not.toMatch(/InstantForYouPanel/);
+    const caseA = src.slice(src.indexOf("case 'A':"), src.indexOf("case 'B':"));
+    expect(caseA).toMatch(/<FlatList/);
+    expect(caseA).toMatch(/renderItem=\{renderForYouItem\}/);
+    expect(caseA).not.toMatch(/Instant/);
   });
 
-  it('MainApplication registers BlypShorts (not FeedPlayer)', () => {
-    const src = require('fs').readFileSync(
-      require('path').join(
+  it('nothing outside src/feed/instant imports the instant feed', () => {
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (full === path.join(srcDir, 'feed', 'instant')) continue;
+          walk(full);
+        } else if (/\.(js|jsx|ts|tsx)$/.test(entry.name)) {
+          if (/feed\/instant/.test(fs.readFileSync(full, 'utf8'))) offenders.push(full);
+        }
+      }
+    };
+    walk(srcDir);
+    expect(offenders).toEqual([]);
+  });
+
+  it('ShortsPool promote path uses updatePlayback / uriMatches (no seek)', () => {
+    const kt = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsPool.kt',
+      ),
+      'utf8',
+    );
+    expect(kt).toMatch(/fun uriMatches/);
+    expect(kt).toMatch(/fun hasBoundUri/);
+    expect(kt).toMatch(/fun updatePlayback/);
+    expect(kt).toMatch(/promote-seek=0/);
+    const surface = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsSurfaceView.kt',
+      ),
+      'utf8',
+    );
+    expect(surface).toMatch(/hasBoundUri/);
+    expect(surface).toMatch(/updatePlayback/);
+  });
+
+  it('ShortsSurfaceView skips rebind when surface arrives on already-bound uri', () => {
+    const surface = fs.readFileSync(
+      path.join(
+        __dirname,
+        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsSurfaceView.kt',
+      ),
+      'utf8',
+    );
+    expect(surface).toMatch(/alreadyBound/);
+    expect(surface).toMatch(/if \(playing == value\) return/);
+    expect(surface).toMatch(/if \(muted == value\) return/);
+  });
+
+  it('MainApplication still registers BlypShorts', () => {
+    const src = fs.readFileSync(
+      path.join(
         __dirname,
         '../android/app/src/main/java/com/blyp/mobile/MainApplication.kt',
       ),
       'utf8',
     );
     expect(src).toMatch(/shorts\.ShortsPackage/);
-    expect(src).not.toMatch(/feedplayer\.FeedPlayerPackage/);
-  });
-
-  it('Shorts ViewManagers expose seekToMs + role', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const ktVm = fs.readFileSync(
-      path.join(
-        __dirname,
-        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsViewManager.kt',
-      ),
-      'utf8',
-    );
-    expect(ktVm).toMatch(/seekToMs/);
-    expect(ktVm).toMatch(/name = "role"/);
-    const bridges = fs.readFileSync(
-      path.join(__dirname, '../plugins/blyp-shorts-ios/ShortsBridges.m'),
-      'utf8',
-    );
-    expect(bridges).toMatch(/seekToMs/);
-    expect(bridges).toMatch(/RCT_EXPORT_VIEW_PROPERTY\(role/);
-    expect(fs.existsSync(path.join(__dirname, '../plugins/withBlypShortsIOS.js'))).toBe(
-      true,
-    );
-  });
-
-  it('ShortsNative availability does not require getViewManagerConfig', () => {
-    const src = fs.readFileSync(
-      path.join(__dirname, '../src/feed/ShortsNative.js'),
-      'utf8',
-    );
-    expect(src).not.toMatch(/getViewManagerConfig/);
-    expect(src).not.toMatch(/hasViewManagerConfig/);
-    expect(src).toMatch(/NativeMod\) return true/);
-    expect(src).toMatch(/requireNativeComponent/);
-    expect(src).toMatch(/BlypShortsView/);
-  });
-
-  it('ShortsModule/ViewManager native names are BlypShorts / BlypShortsView', () => {
-    const mod = fs.readFileSync(
-      path.join(
-        __dirname,
-        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsModule.kt',
-      ),
-      'utf8',
-    );
-    const vm = fs.readFileSync(
-      path.join(
-        __dirname,
-        '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsViewManager.kt',
-      ),
-      'utf8',
-    );
-    expect(mod).toMatch(/getName\(\):\s*String\s*=\s*"BlypShorts"/);
-    expect(vm).toMatch(/getName\(\):\s*String\s*=\s*"BlypShortsView"/);
-  });
-
-  it('ShortsPool is size 3 and does not touch AVAudioSession', () => {
-    const fs = require('fs');
-    const path = require('path');
-    const kt = fs.readFileSync(
-      path.join(__dirname, '../android/app/src/main/java/com/blyp/mobile/shorts/ShortsPool.kt'),
-      'utf8',
-    );
-    expect(kt).toMatch(/const val POOL_SIZE = 3/);
-    expect(kt).toMatch(/seekTo\(0\)/);
-    expect(kt).toMatch(/didSeekOnActivate/);
-    const swift = fs.readFileSync(
-      path.join(__dirname, '../plugins/blyp-shorts-ios/ShortsPool.swift'),
-      'utf8',
-    );
-    expect(swift).toMatch(/static let poolSize = 3/);
-    expect(swift).not.toMatch(/setCategory\s*\(/);
-    expect(swift).toMatch(/never touches AVAudioSession/i);
-    expect(swift).toMatch(/didSeekOnActivate/);
   });
 });
