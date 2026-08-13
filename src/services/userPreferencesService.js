@@ -74,6 +74,8 @@ const DEFAULT_PREFS = {
   /** Legacy one-shot field retained for stored-prefs compatibility; v2 keeps it null. */
   landingPageKey: null,
   recentSearches: [],
+  /** Ask Blyp TTS — read assistant replies aloud. Default ON. */
+  askBlypTtsEnabled: true,
   lastSeenActivityAt: 0,
   /** Product tour — healed via Firestore like onboarded so reinstall doesn't re-nag forever. */
   tourCompleted: false,
@@ -239,6 +241,8 @@ export function normalizePreferences(raw) {
     recentSearches: Array.isArray(raw.recentSearches)
       ? raw.recentSearches.filter((s) => typeof s === 'string').slice(0, MAX_RECENT_SEARCHES)
       : [],
+    // Default ON when missing (older stored prefs) — Speak replies aloud.
+    askBlypTtsEnabled: raw.askBlypTtsEnabled !== false,
     lastSeenActivityAt: Number(raw.lastSeenActivityAt) || 0,
     tourCompleted: !!raw.tourCompleted,
     tourStartedAt: tourStartedAt && tourStartedAt > 0 ? tourStartedAt : null,
@@ -480,6 +484,14 @@ export async function addRecentSearch(uid, queryText) {
   return persist(uid, next);
 }
 
+/** Persist Ask Blyp read-aloud toggle (default ON). */
+export async function setAskBlypTtsEnabled(uid, enabled) {
+  const prev = await getPreferences(uid);
+  const next = { ...prev, askBlypTtsEnabled: enabled !== false };
+  await persist(uid, next);
+  return next;
+}
+
 export async function clearRecentSearches(uid) {
   const prev = await getPreferences(uid);
   const next = { ...prev, recentSearches: [] };
@@ -570,6 +582,47 @@ export function getEnabledPages(prefs) {
   return pages.length ? pages : DEFAULT_PAGES;
 }
 
+/**
+ * Canonical Home header. These five always render, even when old AsyncStorage
+ * / PagesEditor prefs have `enabled: false` (Fold vs phone used to diverge).
+ * Hashtags stays optional. topic:* never appears on the ribbon.
+ */
+export const HOME_RIBBON_REQUIRED_KEYS = [
+  HOME_PAGE_KEY,
+  FOR_YOU_PAGE_KEY,
+  'following',
+  'B',
+  'C',
+];
+
+export function getHomeRibbonPages(pages) {
+  const incoming = Array.isArray(pages) ? pages : [];
+  const byKey = new Map();
+  for (const page of incoming) {
+    if (page && page.key) byKey.set(page.key, page);
+  }
+  const ribbon = HOME_RIBBON_REQUIRED_KEYS.map((key) => {
+    const def = DEFAULT_PAGES.find((page) => page.key === key);
+    const stored = byKey.get(key);
+    return {
+      key,
+      label: def?.label || stored?.label || key,
+      enabled: true,
+      fixed: !!def?.fixed,
+    };
+  });
+  const hashtags = byKey.get('D');
+  if (hashtags && hashtags.enabled !== false) {
+    const def = DEFAULT_PAGES.find((page) => page.key === 'D');
+    ribbon.push({
+      key: 'D',
+      label: def?.label || hashtags.label || 'Hashtags',
+      enabled: true,
+    });
+  }
+  return ribbon;
+}
+
 export function getFirstEnabledPageKey(prefs) {
   return getEnabledPages(prefs)[0]?.key || HOME_PAGE_KEY;
 }
@@ -605,6 +658,7 @@ export default {
   consumeLandingPageKey,
   addRecentSearch,
   clearRecentSearches,
+  setAskBlypTtsEnabled,
   setActivitySeen,
   markTourStarted,
   setTourCompleted,
@@ -613,6 +667,8 @@ export default {
   setLiveDashboard,
   isOnboarded,
   getEnabledPages,
+  HOME_RIBBON_REQUIRED_KEYS,
+  getHomeRibbonPages,
   getFirstEnabledPageKey,
   interestLabels,
 };

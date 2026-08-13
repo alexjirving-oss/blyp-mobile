@@ -3,6 +3,7 @@ import {
   DEFAULT_PAGES,
   PAGE_LAYOUT_VERSION,
   getEnabledPages,
+  getHomeRibbonPages,
   getFirstEnabledPageKey,
   migrateLegacyPageLayout,
   pagesWithInterestTopics,
@@ -77,6 +78,50 @@ describe('Home header page preferences', () => {
     expect(getEnabledPages(prefs).map((page) => page.key)).toEqual(
       expect.arrayContaining(['topic:music', 'home'])
     );
+  });
+
+  test('home ribbon keeps Home and drops topic chips without deleting prefs', () => {
+    const pages = pagesWithInterestTopics(DEFAULT_PAGES, ['football', 'news', 'f1', 'sport']);
+    const ribbon = getHomeRibbonPages(pages);
+
+    expect(ribbon.map((page) => page.key)).toEqual([
+      'home',
+      'A',
+      'following',
+      'B',
+      'C',
+      'D',
+    ]);
+    expect(ribbon.some((page) => page.key.startsWith('topic:'))).toBe(false);
+    expect(pages.some((page) => page.key === 'topic:football')).toBe(true);
+    expect(getEnabledPages({ pages }).some((page) => page.key === 'home')).toBe(true);
+  });
+
+  test('home ribbon keeps product tabs even when old prefs hid them', () => {
+    const pages = [
+      { key: 'home', label: 'Home', enabled: true },
+      { key: 'A', label: 'For You', enabled: true },
+      { key: 'following', label: 'Following', enabled: false },
+      { key: 'B', label: "What's Hot", enabled: false },
+      { key: 'C', label: 'Categories', enabled: false },
+      { key: 'D', label: 'Hashtags', enabled: false },
+      { key: 'topic:football', label: 'Football', enabled: true },
+    ];
+
+    expect(getHomeRibbonPages(pages).map((page) => page.key)).toEqual([
+      'home',
+      'A',
+      'following',
+      'B',
+      'C',
+    ]);
+    expect(getHomeRibbonPages(getEnabledPages({ pages })).map((page) => page.key)).toEqual([
+      'home',
+      'A',
+      'following',
+      'B',
+      'C',
+    ]);
   });
 
   test('setPages persists exact order and visibility to AsyncStorage', async () => {
