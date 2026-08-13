@@ -62,6 +62,8 @@ import {
 
   playGiftAudio,
 
+  ensureGiftAudioSession,
+
   TEAL,
 
   TEAL_LIGHT,
@@ -171,6 +173,8 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
   const glowPulse = useSharedValue(0.55);
 
   const skippedRef = useRef(false);
+
+  const unmutedRef = useRef(false);
 
   const impactFiredRef = useRef(false);
 
@@ -307,6 +311,7 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
     if (!entry || !motion || !film?.source) return undefined;
 
     skippedRef.current = false;
+    unmutedRef.current = false;
 
     finishedRef.current = false;
 
@@ -325,6 +330,8 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
     glowPulse.value = 0.55;
 
 
+
+    ensureGiftAudioSession();
 
     playGiftAudio(motion.audioKey);
 
@@ -431,15 +438,18 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
 
 
   const onPlaybackStatusUpdate = (status) => {
-
     if (!status?.isLoaded || skippedRef.current || finishedRef.current) return;
-
-    if (status.didJustFinish) {
-
-      enterGloryHold();
-
+    if (!unmutedRef.current && (status.isMuted || Number(status.volume) === 0)) {
+      unmutedRef.current = true;
+      try {
+        videoRef.current?.setStatusAsync?.({ isMuted: false, volume: 1.0 });
+      } catch {
+        // best-effort
+      }
     }
-
+    if (status.didJustFinish) {
+      enterGloryHold();
+    }
   };
 
 
@@ -600,9 +610,9 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
 
           isLooping={!loopOnce}
 
-          isMuted
+          isMuted={false}
 
-          volume={0}
+          volume={1}
 
           useNativeControls={false}
 

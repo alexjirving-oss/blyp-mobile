@@ -84,32 +84,10 @@ import {
   getNativeIVSPlayerView,
   getNativeIVSRealTimeView,
 } from '../live/ivs/native/views';
-
-const tileCoinStyles = StyleSheet.create({
-  badge: {
-    position: 'absolute',
-    backgroundColor: 'rgba(251,191,36,0.16)',
-    borderWidth: 1,
-    borderColor: 'rgba(251,191,36,0.55)',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 10,
-    zIndex: 40,
-  },
-  guestPos: { left: 6, bottom: 6 },
-  hostPos: { left: 12, top: 12 },
-  text: { color: '#FDE68A', fontSize: 11, fontWeight: '900', letterSpacing: 0.2 },
-});
-
-// Small "coins received this stream" badge rendered over the host + guest tiles.
-const TileCoinBadge = ({ coins, style }) => {
-  if (!coins || coins <= 0) return null;
-  return (
-    <View style={[tileCoinStyles.badge, style]} pointerEvents="none">
-      <Text style={tileCoinStyles.text} allowFontScaling={false}>{String(coins)}</Text>
-    </View>
-  );
-};
+import TileCoinBadge, {
+  coinsFromGiftTotals,
+  tileCoinPositions,
+} from './live/TileCoinBadge';
 
 const LiveStreamViewer = ({
   streamId,
@@ -1295,13 +1273,8 @@ const IVSLiveStreamViewer = ({
     // Keep a solid footer-colored band under the tiles so the area directly above
     // the comments overlay never shows the black hostStage background.
     const guestBottomStripHeight = guestTrayMode === 'hidden' ? 0 : 16;
-    // Coins gifted to a given user THIS stream (session tally from gift_event).
-    const coinsForUser = (userId) => {
-      if (!userId) return 0;
-      const t = giftTotalsByUser && giftTotalsByUser[userId];
-      const c = t ? Number(t.coins) : 0;
-      return c > 0 ? c : 0;
-    };
+    // Coins gifted to a given user THIS stream (session tally from gift_event / server snapshot).
+    const coinsForUser = (userId) => coinsFromGiftTotals(giftTotalsByUser, userId);
     // TikTok-style 1v1 battle: host | opponent side-by-side, no guest tray.
     if (battleMode) {
       const opponentStream = guestStreams[0] || null;
@@ -1337,7 +1310,7 @@ const IVSLiveStreamViewer = ({
                   <Text style={styles.placeholderText}>Waiting for host…</Text>
                 </View>
               )}
-              <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinStyles.hostPos} />
+              <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinPositions.host} />
             </View>
             <View style={styles.battlePane}>
               <View pointerEvents="none" style={styles.battleEdgeRight} />
@@ -1358,7 +1331,7 @@ const IVSLiveStreamViewer = ({
                   <Text style={styles.placeholderText}>Waiting for opponent…</Text>
                 </View>
               )}
-              <TileCoinBadge coins={coinsForUser(opponentUserId)} style={tileCoinStyles.guestPos} />
+              <TileCoinBadge coins={coinsForUser(opponentUserId)} style={tileCoinPositions.guest} />
             </View>
           </View>
           {guestMode && (
@@ -1414,7 +1387,7 @@ const IVSLiveStreamViewer = ({
               key={`viewer-compose-slot-${globalSlotId}`}
               style={composeSide ? styles.composeTileSide : styles.composeTileEqual}
             >
-              <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinStyles.guestPos} />
+              <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinPositions.guest} />
               {isSelfTile ? (
                 NativeIVSBroadcastView ? (
                   <View style={styles.tileVideoSurface}>
@@ -1493,7 +1466,7 @@ const IVSLiveStreamViewer = ({
               </View>
             )}
 
-            <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinStyles.hostPos} />
+            <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinPositions.host} />
 
             {guestMode && (
               <View style={styles.guestModeBanner}>
@@ -1658,7 +1631,7 @@ const IVSLiveStreamViewer = ({
                                 tileBaseStyle,
                               ]}
                             >
-                              <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinStyles.guestPos} />
+                              <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinPositions.guest} />
                               {isSelfTile ? (
                                 NativeIVSBroadcastView ? (
                                   <View style={styles.tileVideoSurface}>

@@ -59,6 +59,11 @@ import LiveStreamViewer from '../components/LiveStreamViewer';
 import CommentsModal from '../components/CommentsModal';
 import GiftSystem from '../components/GiftSystem';
 import LiveGiftOverlay from '../components/live/LiveGiftOverlay';
+import TileCoinBadge, {
+  coinsFromGiftTotals,
+  tileCoinPositions,
+} from '../components/live/TileCoinBadge';
+import { getEconomyStreamGiftTotals } from '../api/economyLiveApi';
 import BattleOverlay from '../components/Battles/BattleOverlay';
 import NetworkedArtillery from '../games/artillery/NetworkedArtillery';
 import MarbleRaceOverlay from '../components/live/MarbleRaceOverlay';
@@ -1611,6 +1616,80 @@ const LiveStreamScreen = (props) => {
       unsubscribe();
     };
   }, [isViewer, routeStreamId]);
+
+  // Hydrate session gift coin totals from server (late joiners / host refresh).
+  // Socket gift_event remains the live increment path; this is the authoritative snapshot.
+  useEffect(() => {
+    if (backend !== StreamingBackend.IVS) return undefined;
+    if (!isAuthenticated || !uid) return undefined;
+    const activeStreamId = isViewer ? routeStreamId : streamId;
+    if (!activeStreamId) return undefined;
+    if (!isViewer && !isStreaming) return undefined;
+
+    let cancelled = false;
+    const mergeTotals = (byUser) => {
+      if (!byUser || typeof byUser !== 'object') return;
+      setGiftTotalsByUser((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        Object.entries(byUser).forEach(([uidKey, row]) => {
+          const coins = Math.max(0, Number(row?.coins) || 0);
+          const count = Math.max(0, Number(row?.count) || 0);
+          const cur = next[uidKey] || { count: 0, coins: 0 };
+          const merged = {
+            count: Math.max(cur.count || 0, count),
+            coins: Math.max(cur.coins || 0, coins),
+          };
+          if (merged.count !== cur.count || merged.coins !== cur.coins) {
+            next[uidKey] = merged;
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      setSessionEngagementByUser((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        Object.entries(byUser).forEach(([uidKey, row]) => {
+          const coins = Math.max(0, Number(row?.coins) || 0);
+          const cur = next[uidKey] || { likes: 0, shares: 0, comments: 0, coinsSpent: 0, coinsReceived: 0 };
+          if (coins > (cur.coinsReceived || 0)) {
+            next[uidKey] = { ...cur, coinsReceived: coins };
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    const pull = async () => {
+      try {
+        const res = await getEconomyStreamGiftTotals(String(activeStreamId));
+        if (!cancelled && res?.byUser) mergeTotals(res.byUser);
+      } catch {
+        // Fallback: engagement redis may already have coinsReceived from gift bumps.
+        try {
+          const eng = await getLiveEngagementSession(String(activeStreamId));
+          if (cancelled || !eng?.byUser) return;
+          const mapped = {};
+          Object.entries(eng.byUser).forEach(([uidKey, row]) => {
+            const coins = Math.max(0, Number(row?.coinsReceived) || 0);
+            if (coins > 0) mapped[uidKey] = { coins, count: 0 };
+          });
+          mergeTotals(mapped);
+        } catch {
+          // non-fatal
+        }
+      }
+    };
+
+    pull();
+    const t = setInterval(pull, 12000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [backend, isAuthenticated, uid, isViewer, routeStreamId, streamId, isStreaming]);
 
   // IVS mode: subscribe to gift events via Socket.IO (authoritative live-service economy)
   useEffect(() => {
@@ -4205,6 +4284,10 @@ const LiveStreamScreen = (props) => {
                                       <Text style={styles.hostCameraOffText} allowFontScaling={false}>Camera off</Text>
                                     </View>
                                   ) : null}
+                                  <TileCoinBadge
+                                    coins={coinsFromGiftTotals(giftTotalsByUser, uid || hostUid)}
+                                    style={tileCoinPositions.host}
+                                  />
                                 </View>
                               </TapGestureHandler>
                             </View>
@@ -4251,6 +4334,13 @@ const LiveStreamScreen = (props) => {
                         </Text>
                       </View>
                     )}
+                    <TileCoinBadge
+                      coins={coinsFromGiftTotals(
+                        giftTotalsByUser,
+                        battleOpponentParticipant?.userId || null,
+                      )}
+                      style={tileCoinPositions.guest}
+                    />
                   </View>
                 ) : !activeBattleId &&
                   isStreaming &&
@@ -4335,6 +4425,10 @@ const LiveStreamScreen = (props) => {
                               <View pointerEvents="none" style={styles.ivsSlotNumberBadge}>
                                 <Text style={styles.ivsSlotNumberText}>{slotId}</Text>
                               </View>
+                              <TileCoinBadge
+                                coins={coinsFromGiftTotals(giftTotalsByUser, guestUserId)}
+                                style={tileCoinPositions.guest}
+                              />
                               {p && !p.isLocal ? (
                                 <TouchableOpacity
                                   style={StyleSheet.absoluteFill}
@@ -4580,6 +4674,11 @@ const LiveStreamScreen = (props) => {
                                         <Text style={styles.ivsSlotNumberText}>{slotId}</Text>
                                       </View>
                                     )}
+
+                                    <TileCoinBadge
+                                      coins={coinsFromGiftTotals(giftTotalsByUser, guestUserId)}
+                                      style={tileCoinPositions.guest}
+                                    />
 
                                     {/* Tiles are button-free: tapping a guest opens the
                                         shared Guest Control sheet to manage them. */}

@@ -34,6 +34,7 @@ import {
   getFxBudget,
   getTierConfig,
   playGiftAudio,
+  ensureGiftAudioSession,
   TEAL,
   TEAL_LIGHT,
   GOLD,
@@ -99,6 +100,9 @@ function buildAlphaHtml(videoUri, durationMs) {
   var c = document.getElementById('c');
   var gl = c.getContext('webgl', { alpha: true, premultipliedAlpha: false, antialias: false });
   var doneSent = false;
+  function tryUnmute() {
+    try { v.muted = false; v.volume = 1; } catch (e) {}
+  }
   var durationMs = ${Number(durationMs) || 3200};
 
   function post(type, payload) {
@@ -216,7 +220,7 @@ function buildAlphaHtml(videoUri, durationMs) {
 
   v.addEventListener('loadeddata', function () {
     post('ready', { w: v.videoWidth, h: v.videoHeight });
-    v.play().catch(function () {});
+    tryUnmute(); v.play().catch(function () {});
     requestAnimationFrame(draw);
   });
   v.addEventListener('ended', function () {
@@ -337,6 +341,7 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
     impactFlash.value = 0;
     glowPulse.value = 0.55;
 
+    ensureGiftAudioSession();
     playGiftAudio(motion.audioKey);
     chrome.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
     plaqueProg.value = withTiming(1, {

@@ -22,6 +22,9 @@ import {
 import { theme as blypTheme } from '../styles/blypTheme';
 import ReportModal from '../components/ReportModal';
 import GiftSystem from '../components/GiftSystem';
+import MessageGiftCinemaOverlay, {
+  giftEventFromChatMessage,
+} from '../components/live/MessageGiftCinemaOverlay';
 import { inspectText } from '../utils/contentFilter';
 
 /** WhatsApp-style read blue on outbound teal bubbles. */
@@ -123,7 +126,17 @@ const ChatScreen = ({ route, navigation }) => {
   const [hasOlder, setHasOlder] = useState(true);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [giftOpenSignal, setGiftOpenSignal] = useState(0);
+  const [cinemaGiftEvent, setCinemaGiftEvent] = useState(null);
+  const seenGiftMessageIdsRef = useRef(new Set());
+  const giftHistorySeededRef = useRef(false);
   const { user: authUser, uid } = useAuth();
+
+  // New thread → allow cinema for newly arriving gifts only (seed history once).
+  useEffect(() => {
+    seenGiftMessageIdsRef.current = new Set();
+    giftHistorySeededRef.current = false;
+    setCinemaGiftEvent(null);
+  }, [conversationId]);
 
   // Resolve the other participant's uid so we can show GENUINE presence
   // (users/{uid}.presence = { state, lastSeenAt }) instead of a hardcoded
@@ -544,6 +557,32 @@ const ChatScreen = ({ route, navigation }) => {
 
   const handleGiftSent = useCallback(async (gift) => {
     if (!conversationId || !uid) return;
+    // Sender sees the same cinema system as live / receiver.
+    try {
+      const event = giftEventFromChatMessage(
+        {
+          id: `local-send-${gift?.giftId || gift?.id || 'gift'}-${Date.now()}`,
+          giftId: gift?.giftId || gift?.id,
+          giftName: gift?.name,
+          giftEmoji: gift?.emoji,
+          coinCost: gift?.coinCost || gift?.cost,
+          senderId: uid,
+        },
+        {
+          sender: {
+            userId: uid,
+            handle: authUser?.displayName || authUser?.username || null,
+          },
+          receiver: {
+            userId: participantUid,
+            handle: user?.username || user?.name || null,
+          },
+        },
+      );
+      if (event) setCinemaGiftEvent(event);
+    } catch {
+      // cinema is best-effort
+    }
     try {
       const senderName = authUser?.displayName || authUser?.username || authUser?.email || 'Unknown';
       await conversationsMessagingService.sendGiftMessage(
@@ -557,7 +596,41 @@ const ChatScreen = ({ route, navigation }) => {
       // The economy transfer already succeeded; do not imply that it failed.
       console.warn('[CHAT] Gift sent but receipt message failed', error?.message || error);
     }
-  }, [authUser, conversationId, uid]);
+  }, [authUser, conversationId, participantUid, uid, user?.name, user?.username]);
+
+  // Receiver: play full cinema when a new inbound gift message arrives (not history).
+  useEffect(() => {
+    if (!uid || !Array.isArray(messages) || messages.length === 0) return;
+
+    if (!giftHistorySeededRef.current) {
+      messages.forEach((m) => {
+        if (m?.type === 'gift' && m?.id) seenGiftMessageIdsRef.current.add(String(m.id));
+      });
+      giftHistorySeededRef.current = true;
+      return;
+    }
+
+    for (let i = 0; i < messages.length; i += 1) {
+      const m = messages[i];
+      if (!m || m.type !== 'gift' || !m.id) continue;
+      const mid = String(m.id);
+      if (seenGiftMessageIdsRef.current.has(mid)) continue;
+      seenGiftMessageIdsRef.current.add(mid);
+      // Receiver only — sender already triggered cinema in handleGiftSent.
+      if (String(m.senderId) === String(uid)) continue;
+      const event = giftEventFromChatMessage(m, {
+        sender: { userId: m.senderId, handle: m.senderName || null },
+        receiver: {
+          userId: uid,
+          handle: authUser?.displayName || authUser?.username || null,
+        },
+      });
+      if (event) {
+        setCinemaGiftEvent(event);
+        break;
+      }
+    }
+  }, [messages, uid, authUser?.displayName, authUser?.username]);
 
   const renderBlypHeader = () => (
     <View style={styles.blypHeader}>
@@ -763,6 +836,9 @@ const ChatScreen = ({ route, navigation }) => {
           onGiftSent={handleGiftSent}
         />
       ) : null}
+      <MessageGiftCinemaOverlay
+        giftEvent={cinemaGiftEvent}
+      />
     </ScreenContainer>
   );
 };

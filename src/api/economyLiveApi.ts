@@ -471,6 +471,19 @@ export async function getEconomyStreamSummary(streamId: string): Promise<StreamS
   return await callEconomyBackend<StreamSummaryResponse>(`/economy/stream/${encodeURIComponent(streamId)}/summary`, 'GET');
 }
 
+export type StreamGiftTotalsResponse = {
+  streamId: string;
+  byUser: Record<string, { coins: number; count: number }>;
+};
+
+/** Authoritative per-recipient gift coin totals for the current live session. */
+export async function getEconomyStreamGiftTotals(streamId: string): Promise<StreamGiftTotalsResponse> {
+  return await callEconomyBackend<StreamGiftTotalsResponse>(
+    `/economy/stream/${encodeURIComponent(streamId)}/gift-totals`,
+    'GET',
+  );
+}
+
 export async function getCreatorInsights(
   period: CreatorInsightsPeriod = 'month'
 ): Promise<CreatorInsightsResponse> {

@@ -597,11 +597,33 @@ export function heroHoldMs(motion) {
  */
 const AUDIO_REGISTRY = Object.create(null);
 
+/** Ensure gift clip / SFX audio plays even when the phone silent switch is on. */
+export async function ensureGiftAudioSession() {
+  try {
+    // eslint-disable-next-line global-require
+    const { Audio } = require('expo-av');
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      allowsRecordingIOS: false,
+      staysActiveInBackground: false,
+      shouldDuckOthers: true,
+      playThroughEarpieceAndroid: false,
+    });
+  } catch {
+    // best-effort — gift video may still play unmuted via expo-av Video
+  }
+}
+
 export function registerGiftAudio(key, module) {
   if (key && module) AUDIO_REGISTRY[key] = module;
 }
 
 export async function playGiftAudio(audioKey) {
+  try {
+    await ensureGiftAudioSession();
+  } catch {
+    // continue
+  }
   if (!audioKey || !AUDIO_REGISTRY[audioKey]) return;
   try {
     // Lazy require expo-av only when an asset is registered
@@ -609,7 +631,8 @@ export async function playGiftAudio(audioKey) {
     const { Audio } = require('expo-av');
     const { sound } = await Audio.Sound.createAsync(AUDIO_REGISTRY[audioKey], {
       shouldPlay: true,
-      volume: 0.85,
+      volume: 1,
+      isMuted: false,
     });
     sound.setOnPlaybackStatusUpdate((st) => {
       if (st?.didJustFinish) {

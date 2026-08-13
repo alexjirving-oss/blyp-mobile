@@ -51,6 +51,7 @@ import {
   getPromotePricing,
   getSpotlightAvailability,
   getStreamSummary,
+  getStreamGiftTotals,
   getWallet,
   joinLiveGame,
   peekDailyReward,
@@ -337,6 +338,22 @@ router.get('/economy/stream/:streamId/summary', async (req: AuthedRequest, res) 
   }
 });
 
+router.get('/economy/stream/:streamId/gift-totals', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+
+    const streamId = typeof req.params?.streamId === 'string' ? req.params.streamId.trim() : '';
+    if (!streamId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+
+    const totals = await getStreamGiftTotals(streamId);
+    res.json(totals);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
 router.post('/gift/send', async (req: AuthedRequest, res) => {
   try {
     const userId = req.user?.sub;
@@ -346,6 +363,28 @@ router.post('/gift/send', async (req: AuthedRequest, res) => {
     if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
 
     const out = await sendGift(userId, parsed.data);
+
+    // Keep Redis session engagement in sync for guest-control / late joiners.
+    // Only on fresh sends — idempotent replays must not double-count.
+    if (out.kind === 'success' && out.response?.coinSpent > 0) {
+      try {
+        const { bumpEngagement } = await import('../games/frenemies/frenemiesRoomService');
+        const sid = String(out.response.streamId || '');
+        const recv = String(out.response.receiver?.userId || '');
+        const spent = Number(out.response.coinSpent) || 0;
+        if (sid && recv && spent > 0) {
+          await bumpEngagement(sid, recv, { coinsReceived: spent });
+        }
+        if (sid && userId && spent > 0) {
+          await bumpEngagement(sid, userId, { coinsSpent: spent });
+        }
+      } catch (engageErr: any) {
+        logger.warn(
+          { err: engageErr?.message || String(engageErr) },
+          '[economy] gift engagement bump failed (non-fatal)',
+        );
+      }
+    }
 
     // If replay, spec wants 409 IDEMPOTENT_REPLAY but same success payload.
     if (out.kind === 'replay') {

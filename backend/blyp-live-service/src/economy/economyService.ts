@@ -1595,6 +1595,47 @@ export async function getStreamSummary(userId: string, streamId: string) {
 }
 
 /**
+ * Authoritative per-recipient gift coin totals for a live session.
+ * Built from stream_earnings (coins) + gift_events (gift unit counts).
+ */
+export async function getStreamGiftTotals(streamId: string) {
+  const { db } = getEconomyInfra();
+  const sid = String(streamId || '').trim();
+  if (!sid) {
+    return { streamId: '', byUser: {} as Record<string, { coins: number; count: number }> };
+  }
+
+  const earningsRows = await db('stream_earnings')
+    .where({ stream_id: sid })
+    .select('creator_user_id', 'coins_received');
+
+  const countRows = await db('gift_events')
+    .where({ stream_id: sid })
+    .select('receiver_user_id')
+    .sum({ gift_count: 'quantity' })
+    .groupBy('receiver_user_id');
+
+  const byUser: Record<string, { coins: number; count: number }> = {};
+  for (const row of earningsRows || []) {
+    const uid = String((row as any).creator_user_id || '').trim();
+    if (!uid) continue;
+    byUser[uid] = {
+      coins: Number((row as any).coins_received ?? 0) || 0,
+      count: 0,
+    };
+  }
+  for (const row of countRows || []) {
+    const uid = String((row as any).receiver_user_id || '').trim();
+    if (!uid) continue;
+    const count = Number((row as any).gift_count ?? 0) || 0;
+    if (!byUser[uid]) byUser[uid] = { coins: 0, count: 0 };
+    byUser[uid].count = count;
+  }
+
+  return { streamId: sid, byUser };
+}
+
+/**
  * Live-room gift recipient guard. If `streamId` resolves to an active LIVE
  * session, the recipient MUST be the host or a guest on that stage — the server
  * no longer trusts the client to constrain recipients. Contexts with no live
