@@ -639,16 +639,18 @@ class BlypCoinService {
     }
   }
 
-  // Coin packages for purchase — website BASE only (1 coin = 1p). No app bonus.
+  // Coin packages for purchase — website BASE only (1 coin = 1p GBP). No app bonus.
   // `sku` MUST match Play Console product IDs (legacy names may include old totals).
   // Server `iapCatalog` grants the same base amounts; do not credit bonus here.
+  // `price` is display-before-Play fallback only (grant × £0.01). Prefer Play
+  // `formattedPrice` when Billing returns it — never ignore Play overlays.
   static getCoinPackages() {
     return [
       {
         id: 'small',
         sku: 'blyp.android.proof.coinpack.100',
         coins: 100,
-        price: 0.99,
+        price: 1.0,
         bonus: 0,
         popular: false,
         icon: '💰'
@@ -657,7 +659,7 @@ class BlypCoinService {
         id: 'medium',
         sku: 'blyp.android.coinpack.550',
         coins: 500,
-        price: 4.99,
+        price: 5.0,
         bonus: 0,
         popular: false,
         icon: '💎'
@@ -666,7 +668,7 @@ class BlypCoinService {
         id: 'large',
         sku: 'blyp.android.coinpack.1150',
         coins: 1000,
-        price: 9.99,
+        price: 10.0,
         bonus: 0,
         popular: true,
         icon: '💍'
@@ -675,7 +677,7 @@ class BlypCoinService {
         id: 'xlarge',
         sku: 'blyp.android.coinpack.2000',
         coins: 2000,
-        price: 14.99,
+        price: 20.0,
         bonus: 0,
         popular: false,
         icon: '🏆'
@@ -684,7 +686,7 @@ class BlypCoinService {
         id: 'mega',
         sku: 'blyp.android.coinpack.3000',
         coins: 2500,
-        price: 19.99,
+        price: 25.0,
         bonus: 0,
         popular: false,
         icon: '👑'
@@ -693,7 +695,7 @@ class BlypCoinService {
         id: 'ultimate',
         sku: 'blyp.android.coinpack.6500',
         coins: 5000,
-        price: 39.99,
+        price: 50.0,
         bonus: 0,
         popular: false,
         icon: '🔮'
@@ -702,7 +704,7 @@ class BlypCoinService {
         id: 'titan',
         sku: 'blyp.android.coinpack.10000',
         coins: 10000,
-        price: 69.99,
+        price: 100.0,
         bonus: 0,
         popular: false,
         icon: '🦁'
