@@ -13,6 +13,7 @@ import { admin, initFirebaseAdmin } from '../firebaseAdmin';
 import { applyCors } from '../http/cors';
 import { enqueueNotification } from '../notifications/outbox';
 import { sendToUser } from '../notifications/sender';
+import { getPushNotificationDecision } from '../notifications/userNotificationPreferences';
 
 initFirebaseAdmin();
 
@@ -23,6 +24,105 @@ function livekitConfig() {
     process.env.LIVEKIT_API_SECRET || functions.config()?.livekit?.api_secret || '',
   ).trim();
   return { url, apiKey, apiSecret };
+}
+
+async function mintForIdentity(identity: string, roomName: string) {
+  const { url, apiKey, apiSecret } = livekitConfig();
+  if (!url || !apiKey || !apiSecret) return null;
+  const at = new AccessToken(apiKey, apiSecret, {
+    identity,
+    ttl: '2h',
+    name: identity,
+  });
+  at.addGrant({
+    roomJoin: true,
+    room: roomName,
+    canPublish: true,
+    canSubscribe: true,
+    canPublishData: true,
+  });
+  return { token: await at.toJwt(), url, room: roomName };
+}
+
+async function pushIncomingCall(opts: {
+  calleeId: string;
+  callId: string;
+  callerId: string;
+  callerName: string;
+  conversationId?: string;
+  livekitUrl?: string;
+  livekitToken?: string;
+}) {
+  const payload = {
+    title: 'Incoming call',
+    body: `${opts.callerName} is calling…`,
+    collapseKey: `call:${opts.callId}`,
+    data: {
+      type: 'incoming_call',
+      callId: opts.callId,
+      callerId: opts.callerId,
+      callerName: opts.callerName,
+      conversationId: String(opts.conversationId || ''),
+      ...(opts.livekitUrl ? { livekitUrl: opts.livekitUrl } : {}),
+      ...(opts.livekitToken ? { livekitToken: opts.livekitToken } : {}),
+    },
+  };
+
+  // Direct FCM must honor the same prefs as the outbox dispatcher (master /
+  // category / per-person). Do not enqueue when prefs deny — retries must not
+  // resurrect a muted call alert.
+  try {
+    const db = admin.firestore();
+    const decision = await getPushNotificationDecision(db, {
+      userId: opts.calleeId,
+      type: 'call',
+      data: payload.data,
+    });
+    if (!decision.allowed) {
+      console.info(
+        '[calls] incoming call suppressed',
+        decision.reason,
+        opts.calleeId.slice(0, 8),
+      );
+      return;
+    }
+  } catch (prefErr: any) {
+    console.warn(
+      '[calls] preference check failed; refusing call push',
+      prefErr?.message || String(prefErr),
+    );
+    return;
+  }
+
+  try {
+    const sent = await sendToUser(opts.calleeId, payload);
+    if (sent.deviceCount === 0 || sent.successCount === 0) {
+      await enqueueNotification({
+        userId: opts.calleeId,
+        type: 'call',
+        title: payload.title,
+        body: payload.body,
+        dedupeKey: `call:${opts.callId}:${opts.calleeId}`,
+        collapseKey: payload.collapseKey,
+        data: payload.data,
+      });
+    }
+  } catch (e: any) {
+    console.warn('[calls] FCM failed; enqueue fallback', e?.message || String(e));
+    try {
+      await enqueueNotification({
+        userId: opts.calleeId,
+        type: 'call',
+        title: payload.title,
+        body: payload.body,
+        dedupeKey: `call:${opts.callId}:${opts.calleeId}`,
+        collapseKey: payload.collapseKey,
+        data: payload.data,
+      });
+    } catch (e2: any) {
+      console.warn('[calls] enqueue failed', e2?.message || String(e2));
+    }
+  }
 }
 
 async function verifyBearerUid(req: functions.https.Request): Promise<string | null> {
@@ -61,6 +161,11 @@ export const mintLiveKitToken = functions.https.onRequest(async (req, res) => {
 
   const { url, apiKey, apiSecret } = livekitConfig();
   if (!url || !apiKey || !apiSecret) {
+    console.error('[mintLiveKitToken] LIVEKIT_* missing', {
+      hasUrl: Boolean(url),
+      hasKey: Boolean(apiKey),
+      hasSecret: Boolean(apiSecret),
+    });
     res.status(503).json({ ok: false, reason: 'livekit-not-configured' });
     return;
   }
@@ -92,24 +197,33 @@ export const mintLiveKitToken = functions.https.onRequest(async (req, res) => {
     }
 
     const roomName = String(call.livekitRoom || callId);
-    const at = new AccessToken(apiKey, apiSecret, {
-      identity: uid,
-      ttl: '2h',
-      name: uid,
-    });
-    at.addGrant({
-      roomJoin: true,
-      room: roomName,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true,
-    });
-    const token = await at.toJwt();
+    const minted = await mintForIdentity(uid, roomName);
+    if (!minted) {
+      res.status(503).json({ ok: false, reason: 'livekit-not-configured' });
+      return;
+    }
+
+    const notifyCallee = req.body?.notifyCallee === true;
+    if (notifyCallee) {
+      const calleeId = String(call.calleeId || '').trim();
+      if (calleeId && calleeId !== uid) {
+        const calleeMint = await mintForIdentity(calleeId, roomName);
+        void pushIncomingCall({
+          calleeId,
+          callId,
+          callerId: String(call.callerId || uid),
+          callerName: String(call.callerName || '').trim() || 'Someone',
+          conversationId: String(call.conversationId || ''),
+          livekitUrl: calleeMint?.url,
+          livekitToken: calleeMint?.token,
+        });
+      }
+    }
 
     res.status(200).json({
       ok: true,
-      token,
-      url,
+      token: minted.token,
+      url: minted.url,
       room: roomName,
       identity: uid,
     });
@@ -136,49 +250,16 @@ export const onCallCreate = functions.firestore
     if (!callId || !callerId || !calleeId || callerId === calleeId) return null;
 
     const callerName = String(call.callerName || '').trim() || 'Someone';
-    const payload = {
-      title: 'Incoming call',
-      body: `${callerName} is calling…`,
-      collapseKey: `call:${callId}`,
-      data: {
-        type: 'incoming_call',
-        callId,
-        callerId,
-        callerName,
-        conversationId: String(call.conversationId || ''),
-      },
-    };
-
-    try {
-      // Latency-critical: send FCM directly. Outbox is for chat/marketing.
-      const sent = await sendToUser(calleeId, payload);
-      if (sent.deviceCount === 0 || sent.successCount === 0) {
-        // Fallback enqueue so a later dispatcher retry can still wake the device.
-        await enqueueNotification({
-          userId: calleeId,
-          type: 'call',
-          title: payload.title,
-          body: payload.body,
-          dedupeKey: `call:${callId}:${calleeId}`,
-          collapseKey: payload.collapseKey,
-          data: payload.data,
-        });
-      }
-    } catch (e: any) {
-      console.warn('[onCallCreate] direct FCM failed; enqueue fallback', e?.message || String(e));
-      try {
-        await enqueueNotification({
-          userId: calleeId,
-          type: 'call',
-          title: payload.title,
-          body: payload.body,
-          dedupeKey: `call:${callId}:${calleeId}`,
-          collapseKey: payload.collapseKey,
-          data: payload.data,
-        });
-      } catch (e2: any) {
-        console.warn('[onCallCreate] enqueue failed', e2?.message || String(e2));
-      }
-    }
+    const roomName = String(call.livekitRoom || callId);
+    const calleeMint = await mintForIdentity(calleeId, roomName);
+    await pushIncomingCall({
+      calleeId,
+      callId,
+      callerId,
+      callerName,
+      conversationId: String(call.conversationId || ''),
+      livekitUrl: calleeMint?.url,
+      livekitToken: calleeMint?.token,
+    });
     return null;
   });

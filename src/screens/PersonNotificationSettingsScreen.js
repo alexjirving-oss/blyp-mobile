@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Switch,
   TouchableOpacity,
   Alert,
   ActivityIndicator,
@@ -164,40 +163,50 @@ const PersonNotificationSettingsScreen = ({ navigation, route }) => {
         <>
           <Text style={[styles.sectionTitle, styles.sectionSpaced]}>Categories</Text>
           <Text style={styles.hint}>
-            Off = never from this person. On = always from them. Leave unset to follow global.
-            Tap a switch twice after On to clear back to "follow global" via long-press reset
-            below, or use Reset.
+            Choose Default (follow global), Always on, or Always off for this person.
           </Text>
           {CATEGORY_KEYS.map((key) => {
             const meta = CATEGORY_META[key] || { title: key, subtitle: '' };
             const explicit = typeof categories[key] === 'boolean';
-            const value = explicit ? categories[key] === true : false;
+            const state = !explicit ? 'default' : categories[key] === true ? 'on' : 'off';
             return (
               <View key={key} style={styles.row}>
                 <View style={styles.rowText}>
                   <Text style={styles.rowTitle}>{meta.title}</Text>
                   <Text style={styles.rowSubtitle}>
-                    {explicit
-                      ? value
-                        ? 'Always on for this person'
-                        : 'Always off for this person'
-                      : 'Follows your global setting'}
+                    {state === 'on'
+                      ? 'Always on for this person'
+                      : state === 'off'
+                        ? 'Always off for this person'
+                        : 'Follows your global setting'}
                   </Text>
                 </View>
                 {busy === key ? (
                   <ActivityIndicator color="#00A89E" />
                 ) : (
-                  <Switch
-                    value={value}
-                    disabled={busy != null}
-                    onValueChange={(next) => {
-                      // Cycle: unset → on → off → unset is awkward with Switch.
-                      // Simple: switch sets explicit true/false. Use Reset to clear.
-                      saveCategory(key, next);
-                    }}
-                    trackColor={{ false: '#141418', true: '#00A89E' }}
-                    thumbColor="#F5F5F7"
-                  />
+                  <View style={styles.triState}>
+                    {[
+                      { id: 'default', label: 'Default', value: null },
+                      { id: 'on', label: 'On', value: true },
+                      { id: 'off', label: 'Off', value: false },
+                    ].map((opt) => {
+                      const selected = state === opt.id;
+                      return (
+                        <TouchableOpacity
+                          key={opt.id}
+                          style={[styles.chip, selected && styles.chipOn]}
+                          disabled={busy != null}
+                          onPress={() => saveCategory(key, opt.value)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextOn]}>
+                            {opt.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 )}
               </View>
             );
@@ -272,6 +281,21 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, paddingRight: 8 },
   rowTitle: { color: '#F5F5F7', fontSize: 16, fontWeight: '600', marginBottom: 4 },
   rowSubtitle: { color: '#A1A1AA', fontSize: 13, lineHeight: 18 },
+  triState: { flexDirection: 'row', gap: 6, flexShrink: 0 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: '#0A0A0C',
+    borderWidth: 1,
+    borderColor: '#3F3F46',
+  },
+  chipOn: {
+    borderColor: '#00A89E',
+    backgroundColor: 'rgba(0,168,158,0.18)',
+  },
+  chipText: { color: '#A1A1AA', fontSize: 12, fontWeight: '600' },
+  chipTextOn: { color: '#F5F5F7' },
   radio: {
     width: 20,
     height: 20,

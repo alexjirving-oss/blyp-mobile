@@ -25,6 +25,15 @@ Per-person beats global categories. Master beats per-person.
 
 AsyncStorage mirrors global settings only (`@blyp/notificationSettings/{uid}`).
 
+### Firestore rules (deploy path)
+
+Production deploys **`firestore.wave0-live.rules`** (see `firebase.json` → `firestore.rules`), not `firestore.rules`.
+Keep `notificationSettings` / `notificationOverrides` blocks in sync in the wave0-live file, then:
+
+```powershell
+firebase deploy --only firestore:rules --project blyp-master
+```
+
 ## Categories
 
 | Key | Default | Covers |

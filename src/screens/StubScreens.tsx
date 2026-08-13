@@ -383,7 +383,9 @@ export const SettingsStub = ({ navigation }: any) => {
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Notification settings</Text>
-              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>Push permission for this device</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textMuted }]}>
+                Categories, people overrides, and device permission
+              </Text>
             </View>
           </TouchableOpacity>
 

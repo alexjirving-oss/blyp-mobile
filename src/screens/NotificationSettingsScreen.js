@@ -9,14 +9,18 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import Icon from '../components/Icon';
 import SettingsScreenShell from '../components/SettingsScreenShell';
 import { useAuth } from '../hooks/useCommon';
+import { db, firebaseEnabled } from '../config/firebase';
 import { registerForPush } from '../services/PushService';
 import {
   CATEGORY_META,
+  DEFAULT_CATEGORY_ENABLED,
 } from '../constants/notificationCategories';
 import {
   subscribeNotificationSettings,
@@ -39,6 +43,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
   const [busyPerm, setBusyPerm] = useState(false);
   const [settings, setSettings] = useState(null);
   const [overrides, setOverrides] = useState([]);
+  const [overrideLabels, setOverrideLabels] = useState({});
   const [busyKey, setBusyKey] = useState(null);
 
   const refreshPermission = useCallback(async () => {
@@ -56,6 +61,25 @@ const NotificationSettingsScreen = ({ navigation }) => {
     refreshPermission();
   }, [refreshPermission]);
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshPermission();
+    }, [refreshPermission]),
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshPermission();
+    });
+    return () => {
+      try {
+        sub?.remove?.();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [refreshPermission]);
+
   useEffect(() => {
     if (!uid) return undefined;
     const unsub = subscribeNotificationSettings(uid, setSettings);
@@ -67,6 +91,41 @@ const NotificationSettingsScreen = ({ navigation }) => {
     const unsub = subscribePersonOverridesList(uid, setOverrides);
     return unsub;
   }, [uid]);
+
+  const overrideRows = useMemo(
+    () => (overrides || []).filter((row) => row?.targetUid).slice(0, 40),
+    [overrides],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = overrideRows.map((row) => row.targetUid).filter(Boolean);
+    if (!firebaseEnabled || ids.length === 0) {
+      setOverrideLabels({});
+      return undefined;
+    }
+    (async () => {
+      const next = {};
+      await Promise.all(
+        ids.slice(0, 40).map(async (targetUid) => {
+          try {
+            const snap = await db.collection('userProfiles').doc(targetUid).get();
+            const data = snap?.exists ? snap.data() : null;
+            const handle = String(data?.username || data?.handle || '').replace(/^@/, '').trim();
+            const name = String(data?.displayName || data?.name || '').trim();
+            if (handle) next[targetUid] = `@${handle}`;
+            else if (name) next[targetUid] = name;
+          } catch {
+            /* leave unlabeled */
+          }
+        }),
+      );
+      if (!cancelled) setOverrideLabels(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [overrideRows]);
 
   const requestPermission = async () => {
     setBusyPerm(true);
@@ -126,13 +185,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
   };
 
   const pushMasterOn = settings?.pushEnabled !== false;
-  const categories = settings?.categories || {};
-
-  const overrideRows = useMemo(
-    () =>
-      (overrides || []).filter((row) => row?.targetUid).slice(0, 40),
-    [overrides],
-  );
+  const categories = settings?.categories || DEFAULT_CATEGORY_ENABLED;
 
   return (
     <SettingsScreenShell navigation={navigation} title="Notifications">
@@ -204,7 +257,9 @@ const NotificationSettingsScreen = ({ navigation }) => {
           {section.keys.map((key) => {
             const meta = CATEGORY_META[key] || { title: key, subtitle: '' };
             const enabled =
-              typeof categories[key] === 'boolean' ? categories[key] === true : true;
+              typeof categories[key] === 'boolean'
+                ? categories[key] === true
+                : DEFAULT_CATEGORY_ENABLED[key] === true;
             return (
               <View key={key} style={styles.row}>
                 <View style={styles.rowText}>
@@ -256,7 +311,7 @@ const NotificationSettingsScreen = ({ navigation }) => {
             <Icon name="person-outline" size={22} color="#A1A1AA" />
             <View style={styles.rowText}>
               <Text style={styles.actionText} numberOfLines={1}>
-                Custom · {row.targetUid.slice(0, 10)}…
+                {overrideLabels[row.targetUid] || `Custom · ${row.targetUid.slice(0, 10)}…`}
               </Text>
               <Text style={styles.rowSubtitle}>
                 {row.mode === 'everything'
