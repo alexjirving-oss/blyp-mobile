@@ -471,6 +471,14 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
             { gift_id: 'cheer_burst', name: 'Cheer Burst', coin_cost: 25, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💨', action: 'cheer_burst', motionTier: 'epic', motif: 'stadium_wave' } },
             { gift_id: 'lion_baby', name: 'Baby Lion', coin_cost: 1000, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🦁', motionTier: 'ultimate', motif: 'regal_drop', cinemaId: 'lion_baby', filmClip: true } },
             { gift_id: 'lion_big', name: 'Big Lion', coin_cost: 5000, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🦁', motionTier: 'ultimate', motif: 'orbital_launch', cinemaId: 'lion_big', filmClip: true } },
+            { gift_id: 'mad_hearts', name: 'Mad Hearts', coin_cost: 100, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💖', motionTier: 'mid', motif: 'pulse_bloom', cinemaId: 'mad_hearts', filmClip: true } },
+            { gift_id: 'mad_confetti', name: 'Mad Confetti', coin_cost: 100, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🎊', motionTier: 'mid', motif: 'stadium_wave', cinemaId: 'mad_confetti', filmClip: true } },
+            { gift_id: 'mad_rose', name: 'Mad Rose', coin_cost: 200, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🌹', motionTier: 'epic', motif: 'regal_drop', cinemaId: 'mad_rose', filmClip: true } },
+            { gift_id: 'mad_donut', name: 'Mad Donut', coin_cost: 200, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🍩', motionTier: 'epic', motif: 'pop_ack', cinemaId: 'mad_donut', filmClip: true } },
+            { gift_id: 'mad_thanks_gift', name: 'Thanks Gift', coin_cost: 300, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🎁', motionTier: 'epic', motif: 'pulse_bloom', cinemaId: 'mad_thanks_gift', filmClip: true } },
+            { gift_id: 'mad_thanks_likes', name: 'Thanks Likes', coin_cost: 300, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '👍', motionTier: 'epic', motif: 'pop_ack', cinemaId: 'mad_thanks_likes', filmClip: true } },
+            { gift_id: 'mad_thanks_share', name: 'Thanks Share', coin_cost: 500, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🔗', motionTier: 'legendary', motif: 'stadium_wave', cinemaId: 'mad_thanks_share', filmClip: true } },
+            { gift_id: 'mad_gift_avalanche', name: 'Gift Avalanche', coin_cost: 750, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🎁', motionTier: 'ultimate', motif: 'orbital_launch', cinemaId: 'mad_gift_avalanche', filmClip: true } },
           ])
           .onConflict('gift_id')
           .merge(['name', 'coin_cost', 'enabled', 'rarity', 'asset_json']);

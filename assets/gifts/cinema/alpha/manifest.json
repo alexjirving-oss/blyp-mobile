@@ -85,6 +85,102 @@
       "gloryMs": 1100,
       "composite": "opaque",
       "coinCost": 5000
+    },
+    "mad_hearts": {
+      "id": "mad_hearts",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_hearts.mp4",
+      "sourceNote": "Mad Scientist Hearts.webm",
+      "durationMs": 5042,
+      "impactAt": 0.3,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 100
+    },
+    "mad_confetti": {
+      "id": "mad_confetti",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_confetti.mp4",
+      "sourceNote": "Mad Scientist Confetti.webm",
+      "durationMs": 5042,
+      "impactAt": 0.28,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 100
+    },
+    "mad_rose": {
+      "id": "mad_rose",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_rose.mp4",
+      "sourceNote": "Mad Scientist Rose.webm",
+      "durationMs": 4467,
+      "impactAt": 0.35,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 200
+    },
+    "mad_donut": {
+      "id": "mad_donut",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_donut.mp4",
+      "sourceNote": "Mad Scientist Donut.webm",
+      "durationMs": 4967,
+      "impactAt": 0.32,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 200
+    },
+    "mad_thanks_gift": {
+      "id": "mad_thanks_gift",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_thanks_gift.mp4",
+      "sourceNote": "Mad Scientist Thanks for the gift.webm",
+      "durationMs": 5042,
+      "impactAt": 0.3,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 300
+    },
+    "mad_thanks_likes": {
+      "id": "mad_thanks_likes",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_thanks_likes.mp4",
+      "sourceNote": "Mad Scientist Thanks for the likes.webm",
+      "durationMs": 5042,
+      "impactAt": 0.3,
+      "gloryMs": 900,
+      "composite": "opaque",
+      "coinCost": 300
+    },
+    "mad_thanks_share": {
+      "id": "mad_thanks_share",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_thanks_share.mp4",
+      "sourceNote": "Mad Scientist Thanks for the Share.webm",
+      "durationMs": 5042,
+      "impactAt": 0.3,
+      "gloryMs": 950,
+      "composite": "opaque",
+      "coinCost": 500
+    },
+    "mad_gift_avalanche": {
+      "id": "mad_gift_avalanche",
+      "layout": "opaqueFullScene",
+      "fps": 24,
+      "darkKeyMp4": "assets/gifts/cinema/clips/mad_gift_avalanche.mp4",
+      "sourceNote": "Mad Scientist Gift Avalanche.webm",
+      "durationMs": 4700,
+      "impactAt": 0.34,
+      "gloryMs": 1000,
+      "composite": "opaque",
+      "coinCost": 750
     }
   }
 }
