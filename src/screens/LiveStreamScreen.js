@@ -109,7 +109,10 @@ import LiveReactionsHearts from '../components/live/LiveReactionsHearts';
 import LiveReactionTray from '../components/live/LiveReactionTray';
 import ReportModal from '../components/ReportModal';
 import { blockUser, loadBlockedUsers } from '../services/BlockService';
-import { inspectText } from '../utils/contentFilter';
+import { filterLiveChatBeforeSend } from '../services/safety/LiveChatNlp';
+import { useLiveSafetyScanner } from '../hooks/useLiveSafetyScanner';
+import SafetyGateModal from '../components/safety/SafetyGateModal';
+import { ensureSafetyGate } from '../services/safety/ensureSafetyGate';
 import { pickPublicLabel } from '../utils/publicLabel';
 // Live Service for Firestore registration
 import {
@@ -624,6 +627,8 @@ const LiveStreamScreen = (props) => {
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [liveReportVisible, setLiveReportVisible] = useState(false);
+  const [hostSafetyGateVisible, setHostSafetyGateVisible] = useState(false);
+  const hostSafetyContinueRef = useRef(null);
   const [giftOpenSignal, setGiftOpenSignal] = useState(0);
   // Guest roster (mirrored on the stream doc) + the currently selected gift
   // recipient. Defaults to the host; viewers/host can pick a guest instead so
@@ -643,6 +648,13 @@ const LiveStreamScreen = (props) => {
   const hostGuestPagerScrollRef = useRef(null);
   const hostPrevVisibleGuestCountRef = useRef(null);
   const [streamId, setStreamId] = useState(null);
+
+  // Trust & Safety: periodic frame-sample hook (provider or pending_review stub).
+  useLiveSafetyScanner({
+    enabled: isHost && isStreaming && !!streamId,
+    streamId,
+    hostUserId: uid,
+  });
 
   useEffect(() => {
     if (!commentsModalVisible) return;
@@ -1925,6 +1937,23 @@ const LiveStreamScreen = (props) => {
 
   const startStreaming = async () => {
     console.log('[LIVE][START_STREAMING_PRESSED] Button press detected!', { isHost, isStreaming, title });
+    try {
+      const { ok, evaluation } = await ensureSafetyGate(uid);
+      if (!ok) {
+        if (evaluation?.underage) {
+          Alert.alert('Age restriction', 'You must be 18+ to go live on Blyp.');
+          return;
+        }
+        hostSafetyContinueRef.current = () => {
+          startStreaming().catch(() => {});
+        };
+        setHostSafetyGateVisible(true);
+        return;
+      }
+    } catch (e) {
+      Alert.alert('Safety check', e?.message || 'Could not verify safety requirements.');
+      return;
+    }
     // Correlation id for this attempt
     goLiveAttemptIdRef.current = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setActiveAttemptId(goLiveAttemptIdRef.current);
@@ -2907,8 +2936,11 @@ const LiveStreamScreen = (props) => {
       return;
     }
 
-    // Safety filter: drop hate/abuse outright, mask soft profanity.
-    const { blocked, clean } = inspectText(raw);
+    // Safety filter: drop hate/abuse outright, mask soft profanity; audit flags.
+    const { blocked, clean } = await filterLiveChatBeforeSend(raw, {
+      streamId: activeStreamId,
+      userId: uid,
+    });
     if (blocked) {
       Alert.alert('Message not sent', 'That message goes against our Community Guidelines.');
       if (typeof textOverride !== 'string') setNewComment('');
@@ -3868,6 +3900,7 @@ const LiveStreamScreen = (props) => {
           hostPhotoUrl={resolvedHostPhotoUrl}
           viewCount={viewCount}
           heartCount={heartCount}
+          onPressReport={() => setLiveReportVisible(true)}
           onPressMore={openLiveSafetyMenu}
           onPressClose={goToSummary}
         />
@@ -3879,6 +3912,22 @@ const LiveStreamScreen = (props) => {
           targetId={routeStreamId || streamId}
           targetLabel="this live"
           reportedUserId={hostUid && hostUid !== uid ? hostUid : undefined}
+        />
+
+        <SafetyGateModal
+          visible={hostSafetyGateVisible}
+          uid={uid}
+          purpose="go_live"
+          onClose={() => {
+            setHostSafetyGateVisible(false);
+            hostSafetyContinueRef.current = null;
+          }}
+          onPassed={() => {
+            setHostSafetyGateVisible(false);
+            const cont = hostSafetyContinueRef.current;
+            hostSafetyContinueRef.current = null;
+            if (typeof cont === 'function') cont();
+          }}
         />
 
         <LiveReactionsHearts

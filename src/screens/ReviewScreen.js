@@ -77,6 +77,8 @@ async function persistLocalMediaAsset(asset) {
   }
 }
 import { COMPOSE_DRAFT_KEY } from '../components/CreatePostButton';
+import SafetyGateModal from '../components/safety/SafetyGateModal';
+import { ensureSafetyGate } from '../services/safety/ensureSafetyGate';
 // Caption orchestrator (smart-merge Option B)
 import { getPreviewCaption, freezeCaption } from '../../caption/orchestrator';
 import { preparePostMetadata } from '../../upload/preparePostMetadata';
@@ -199,6 +201,8 @@ const ReviewScreen = () => {
   const [isUploading, setIsUploading] = useState(false);
   // Human-readable publish stage shown on the blocking upload overlay.
   const [uploadStatusText, setUploadStatusText] = useState('Preparing your content…');
+  const [safetyGateVisible, setSafetyGateVisible] = useState(false);
+  const safetyGateContinueRef = useRef(null);
   // Track if Firebase Web API key appears suspended (auth error pattern)
   const [firebaseSuspended, setFirebaseSuspended] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -2495,6 +2499,24 @@ Write a natural, engaging caption with a catchy title (50 chars max). Return JSO
       return;
     }
 
+    try {
+      const { ok, evaluation } = await ensureSafetyGate(uid);
+      if (!ok) {
+        if (evaluation?.underage) {
+          Alert.alert('Age restriction', 'You must be 18+ to upload content on Blyp.');
+          return;
+        }
+        safetyGateContinueRef.current = () => {
+          handlePost().catch(() => {});
+        };
+        setSafetyGateVisible(true);
+        return;
+      }
+    } catch (e) {
+      Alert.alert('Safety check', e?.message || 'Could not verify safety requirements.');
+      return;
+    }
+
     if (__DEV__) {
       console.log('[POST][AUTH] DEV: skipping strict Firebase auth gate.');
     } else {
@@ -4212,6 +4234,21 @@ Write naturally with catchy title. Return JSON: {title, description, hashtags}.`
           </View>
         </View>
       </Modal>
+      <SafetyGateModal
+        visible={safetyGateVisible}
+        uid={uid}
+        purpose="upload"
+        onClose={() => {
+          setSafetyGateVisible(false);
+          safetyGateContinueRef.current = null;
+        }}
+        onPassed={() => {
+          setSafetyGateVisible(false);
+          const cont = safetyGateContinueRef.current;
+          safetyGateContinueRef.current = null;
+          if (typeof cont === 'function') cont();
+        }}
+      />
     </SafeAreaView>
   );
 };

@@ -25,6 +25,7 @@ export default function LiveViewerHeader({
   viewCount = 0,
   heartCount = 0,
   onPressMore,
+  onPressReport,
   onPressClose,
 }) {
   return (
@@ -89,6 +90,18 @@ export default function LiveViewerHeader({
               </Text>
             </View>
           </View>
+
+          {typeof onPressReport === 'function' ? (
+            <TouchableOpacity
+              style={[styles.iconBtn, styles.reportBtn]}
+              onPress={onPressReport}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              accessibilityLabel="Report live"
+              accessibilityRole="button"
+            >
+              <Icon name="flag" size={16} color="#fff" />
+            </TouchableOpacity>
+          ) : null}
 
           <TouchableOpacity
             style={styles.iconBtn}
@@ -257,6 +270,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,10,12,0.78)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+  },
+  reportBtn: {
+    backgroundColor: 'rgba(251,113,133,0.28)',
+    borderColor: 'rgba(251,113,133,0.45)',
   },
   closeBtn: {
     borderColor: 'rgba(0,210,190,0.42)',

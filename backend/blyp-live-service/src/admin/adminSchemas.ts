@@ -168,6 +168,10 @@ export const adminSetStreamingConfigSchema = z.object({
 
 export const adminForceEndLiveSchema = z.object({
     reason: z.string().trim().max(500).optional(),
+    /** Optional: also ban the stream host after force-end. */
+    banHost: z.coerce.boolean().optional(),
+    banReason: z.string().trim().max(500).optional(),
+    hostUserId: z.string().trim().min(1).max(128).optional(),
 });
 
 export const adminApproveTeamApplicationSchema = z.object({

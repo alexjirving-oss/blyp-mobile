@@ -8,6 +8,7 @@
 // block record is the source of truth a future server-side filter can enforce.
 
 import { db, auth } from '../config/firebase';
+import { appendSafetyAudit } from './safety/SafetyAuditLog';
 
 const cache = {
   uid: null,
@@ -30,6 +31,14 @@ export async function blockUser(targetUid) {
   if (!targetUid || targetUid === uid) return;
   await blocksCol(uid).doc(targetUid).set({ createdAt: Date.now() }, { merge: true });
   cache.set.add(targetUid);
+  try {
+    await appendSafetyAudit({
+      action: 'block_user',
+      targetType: 'user',
+      targetId: targetUid,
+      metadata: {},
+    });
+  } catch { /* non-fatal */ }
 }
 
 /** Unblock a user. Idempotent. */

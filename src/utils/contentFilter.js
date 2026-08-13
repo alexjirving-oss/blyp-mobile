@@ -16,6 +16,9 @@ const BLOCKED_PATTERNS = [
   /\bc[u\*]nts?\b/i,
   // Sexual solicitation of minors / obvious grooming markers
   /\b(child|teen|minor)\s*(porn|nudes?|sex)\b/i,
+  // Direct threats / self-harm solicitation (also covered by LiveChatNlp)
+  /\bkill\s*(yourself|urself)\b/i,
+  /\bkys\b/i,
 ];
 
 // Softer profanity we mask but allow through.

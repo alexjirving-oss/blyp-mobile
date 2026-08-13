@@ -190,6 +190,25 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Append-only Trust & Safety audit trail (client may create; never mutate/delete).
+    match /safetyAuditLogs/{docId} {
+      allow read: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid
+        && request.resource.data.action is string
+        && request.resource.data.createdAt is int;
+      allow update, delete: if false;
+    }
+
+    // Scanner / NLP flags (client create for live scanner; triage is admin-only).
+    match /moderationFlags/{docId} {
+      allow read: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.source is string
+        && request.resource.data.createdAt is int;
+      allow update, delete: if false;
+    }
+
     // Privacy lifecycle requests (export/deletion). Client create only; ops process offline.
     match /privacyRequests/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
@@ -272,6 +291,14 @@ service cloud.firestore {
             || request.resource.data.mode in ['custom', 'everything', 'nothing'])
           && (!('categories' in request.resource.data)
             || request.resource.data.categories is map);
+        allow delete: if isOwner(userId);
+      }
+
+      // User blocks — owner can write; others cannot read (privacy).
+      match /blocks/{targetUid} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.createdAt is int;
         allow delete: if isOwner(userId);
       }
     }

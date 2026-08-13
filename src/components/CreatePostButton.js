@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useState, useRef } from 'react';
 import Icon from './Icon';
 import { TouchableOpacity, StyleSheet, Modal, View, Text, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,6 +10,8 @@ import { requireAccount } from '../services/guestSessionService';
 import { COLORS, SHADOWS, SURFACE_DEPTH } from '../styles/theme';
 import PressableLift from './motion/PressableLift';
 import TourTarget from '../tour/TourTarget';
+import SafetyGateModal from './safety/SafetyGateModal';
+import { ensureSafetyGate } from '../services/safety/ensureSafetyGate';
 
 export const COMPOSE_DRAFT_KEY = 'blyp_compose_draft_v1';
 
@@ -17,6 +19,9 @@ const CreatePostButton = () => {
   const navigation = useNavigation();
   const [showMenu, setShowMenu] = useState(false);
   const [hasDraft, setHasDraft] = useState(false);
+  const [gateVisible, setGateVisible] = useState(false);
+  const [gatePurpose, setGatePurpose] = useState('create');
+  const pendingActionRef = useRef(null);
   const { uid, isAuthenticated, authReady } = useAuth();
   const streamingEnabled = isLiveStreamingEnabled();
   // Always offer Go Live in the Create sheet for signed-in hosts. Streaming kill-switch
@@ -59,6 +64,26 @@ const CreatePostButton = () => {
     return true;
   };
 
+  const runWithSafetyGate = async (purpose, action) => {
+    if (!ensureCanCreate(purpose === 'go_live' ? 'go live' : 'create a post')) return;
+    try {
+      const { ok, evaluation } = await ensureSafetyGate(uid);
+      if (ok) {
+        action();
+        return;
+      }
+      if (evaluation?.underage) {
+        Alert.alert('Age restriction', 'You must be 18+ to upload or go live on Blyp.');
+        return;
+      }
+      pendingActionRef.current = action;
+      setGatePurpose(purpose);
+      setGateVisible(true);
+    } catch (e) {
+      Alert.alert('Safety check', e?.message || 'Could not verify safety requirements. Try again.');
+    }
+  };
+
   const openCreateSheet = () => {
     if (requireAccount(navigation, 'post or go live')) return;
     setShowMenu(true);
@@ -70,9 +95,10 @@ const CreatePostButton = () => {
 
   const goReview = (params) => {
     setShowMenu(false);
-    if (!ensureCanCreate('create a post')) return;
-    console.log('[POST][ENTRY] Navigating to Review from create sheet', params);
-    navigation.navigate('Review', { entryPoint: 'plus_menu', ...params });
+    runWithSafetyGate('upload', () => {
+      console.log('[POST][ENTRY] Navigating to Review from create sheet', params);
+      navigation.navigate('Review', { entryPoint: 'plus_menu', ...params });
+    });
   };
 
   const handleResumeDraft = async () => {
@@ -85,13 +111,15 @@ const CreatePostButton = () => {
       }
       const draft = JSON.parse(raw);
       setShowMenu(false);
-      navigation.navigate('Review', {
-        entryPoint: 'resume_draft',
-        source: draft.source || 'draft',
-        media: draft.mediaItems || [],
-        type: draft.type || 'photos',
-        transcript: draft.caption || '',
-        resumeDraft: true,
+      runWithSafetyGate('upload', () => {
+        navigation.navigate('Review', {
+          entryPoint: 'resume_draft',
+          source: draft.source || 'draft',
+          media: draft.mediaItems || [],
+          type: draft.type || 'photos',
+          transcript: draft.caption || '',
+          resumeDraft: true,
+        });
       });
     } catch (e) {
       console.warn('[POST] resume draft failed', e?.message || e);
@@ -105,10 +133,11 @@ const CreatePostButton = () => {
       Alert.alert('Live streaming disabled', 'Live streaming is currently turned off for this build.');
       return;
     }
-    if (!ensureCanCreate('go live')) return;
-    navigation.navigate('LiveStreamScreen', {
-      mode: 'host',
-      source: 'CreatePostButton',
+    runWithSafetyGate('go_live', () => {
+      navigation.navigate('LiveStreamScreen', {
+        mode: 'host',
+        source: 'CreatePostButton',
+      });
     });
   };
 
@@ -116,6 +145,13 @@ const CreatePostButton = () => {
     if (option === 'live') {
       handleGoLive();
     }
+  };
+
+  const onGatePassed = () => {
+    setGateVisible(false);
+    const pending = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (typeof pending === 'function') pending();
   };
 
   return (
@@ -193,7 +229,7 @@ const CreatePostButton = () => {
                 onPress={() => goReview({ mode: 'video', source: 'camera' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Icon name="videocam" size={28} color="#67E8F9" />
+                    <Icon name="videocam" size={28} color="#00D2BE" />
                 </View>
                 <Text style={styles.postOptionText}>Video</Text>
               </TouchableOpacity>
@@ -203,7 +239,7 @@ const CreatePostButton = () => {
                 onPress={() => goReview({ mode: 'library', source: 'gallery' })}
               >
                 <View style={styles.postOptionIconContainer}>
-                  <Icon name="images" size={28} color="#A78BFA" />
+                    <Icon name="images" size={28} color="#A1A1AA" />
                 </View>
                 <Text style={styles.postOptionText}>Library</Text>
               </TouchableOpacity>
@@ -212,6 +248,17 @@ const CreatePostButton = () => {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <SafetyGateModal
+        visible={gateVisible}
+        uid={uid}
+        purpose={gatePurpose}
+        onClose={() => {
+          setGateVisible(false);
+          pendingActionRef.current = null;
+        }}
+        onPassed={onGatePassed}
+      />
     </>
   );
 };
@@ -220,26 +267,25 @@ const styles = StyleSheet.create({
   container: {
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: -22,
+    marginTop: -14,
   },
   button: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
   fab: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    ...SHADOWS.glow,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   fabSheen: {
     position: 'absolute',

@@ -4,6 +4,7 @@
 
 import { db, auth } from '../config/firebase';
 import EnterpriseAnalyticsService from './EnterpriseAnalyticsService';
+import { appendSafetyAudit } from './safety/SafetyAuditLog';
 
 class ReportingService {
   async reportContent({ targetType, targetId, reasonCode, details, surface }) {
@@ -23,6 +24,14 @@ class ReportingService {
       doc.surface = surface.trim().slice(0, 40);
     }
     const ref = await db.collection('reports').add(doc);
+    try {
+      await appendSafetyAudit({
+        action: 'report_create',
+        targetType,
+        targetId,
+        metadata: { reasonCode, surface: doc.surface || null, reportId: ref.id },
+      });
+    } catch {}
     try {
       EnterpriseAnalyticsService.trackError('report_stream', { // reuse trackError for visibility until specific event added
         type: 'report_filed',

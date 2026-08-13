@@ -10,6 +10,7 @@ import { creditCoinsAdmin, creditGemsAdminLaunchTest } from '../economy/economyS
 import {
     approveWithdrawal,
     listWithdrawals,
+    markWithdrawalPaidManual,
     rejectWithdrawal,
 } from '../economy/withdrawalService';
 import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
@@ -1479,7 +1480,9 @@ router.post('/admin/withdrawals/:withdrawalId/approve', requireAdmin, requirePer
                 status: out.status,
                 userId: out.userId,
                 amountGems: out.amountGems,
+                method: out.method || null,
                 stripeTransferId: out.stripeTransferId || null,
+                paypalPayoutBatchId: out.paypalPayoutBatchId || null,
             },
         }).catch((err) => {
             logger.warn({ err: err?.message || String(err) }, '[admin] withdrawal approve audit failed');
@@ -1490,6 +1493,40 @@ router.post('/admin/withdrawals/:withdrawalId/approve', requireAdmin, requirePer
         if (err.code === 'INTERNAL' || err.code === 'PROVIDER_ERROR') {
             logger.error({ detail: err.detail, code: err.code }, '[admin] withdrawal approve failed');
         }
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+    }
+});
+
+router.post('/admin/withdrawals/:withdrawalId/mark-paid-manual', requireAdmin, requirePermission('economy.withdraw.approve'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const withdrawalId = String(req.params?.withdrawalId || '').trim();
+        if (!withdrawalId) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+        const note = typeof req.body?.note === 'string' ? req.body.note : undefined;
+        const externalReference =
+            typeof req.body?.externalReference === 'string' ? req.body.externalReference : undefined;
+        const out = await markWithdrawalPaidManual(withdrawalId, actorUserId, { note, externalReference });
+        await writeAdminAudit({
+            actorUserId,
+            action: 'withdrawal_mark_paid_manual',
+            targetType: 'withdrawal',
+            targetId: withdrawalId,
+            metadata: {
+                status: out.status,
+                userId: out.userId,
+                amountGems: out.amountGems,
+                method: out.method || null,
+                note: note || null,
+                externalReference: externalReference || null,
+            },
+        }).catch((err) => {
+            logger.warn({ err: err?.message || String(err) }, '[admin] withdrawal mark-paid audit failed');
+        });
+        return res.json(out);
+    } catch (e: any) {
+        const err = toEconomyError(e);
         return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
     }
 });
@@ -1917,15 +1954,52 @@ router.post('/admin/live/:sessionId/force-end', requireAdmin, requirePermission(
         const { endFirestoreStream } = await import('./firestoreAdmin');
         const fsEnd = await endFirestoreStream(sessionId).catch(() => ({ ok: false as const, detail: 'fs_error' }));
 
+        let banResult: { ok: boolean; detail?: string } | null = null;
+        if (parsed.data.banHost) {
+            try {
+                let hostUserId = String(parsed.data.hostUserId || '').trim();
+                if (!hostUserId) {
+                    const [fsStream, dynamoSession] = await Promise.all([
+                        getFirestoreStream(sessionId).catch(() => null),
+                        getSessionById(sessionId).catch(() => null),
+                    ]);
+                    hostUserId = String(
+                        (fsStream as any)?.userId ||
+                        (fsStream as any)?.hostUid ||
+                        dynamoSession?.hostUserId ||
+                        '',
+                    ).trim();
+                }
+                if (hostUserId && isCanonicalSub(hostUserId)) {
+                    await banUserByAdmin({
+                        actorUserId,
+                        targetUserId: hostUserId,
+                        reason: parsed.data.banReason || parsed.data.reason || 'live_force_end_ban',
+                        bannedUntil: null,
+                    });
+                    banResult = { ok: true };
+                } else {
+                    banResult = { ok: false, detail: 'host_user_id_missing' };
+                }
+            } catch (banErr: any) {
+                banResult = { ok: false, detail: banErr?.message || String(banErr) };
+            }
+        }
+
         await writeAdminAudit({
             actorUserId,
             action: 'live_force_end',
             targetType: 'live_session',
             targetId: sessionId,
-            metadata: { reason: parsed.data.reason || null, firestoreEnded: fsEnd.ok },
+            metadata: {
+                reason: parsed.data.reason || null,
+                firestoreEnded: fsEnd.ok,
+                banHost: !!parsed.data.banHost,
+                banResult,
+            },
         }).catch(() => undefined);
 
-        return res.json({ ok: true, sessionId, firestoreEnded: fsEnd.ok });
+        return res.json({ ok: true, sessionId, firestoreEnded: fsEnd.ok, banResult });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e), sessionId: req.params?.sessionId }, '[admin] /admin/live/:sessionId/force-end failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail: e?.message || String(e) });

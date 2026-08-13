@@ -145,13 +145,16 @@ export default function Live() {
     }
     const reason = window.prompt("Force-end reason (audited):", "Trust & Safety / Live ops");
     if (reason === null) return;
-    if (!window.confirm(`Force-end stream ${streamId}? This ends the IVS session server-side.`)) return;
+    if (!window.confirm(`Force-end stream ${streamId}? This ends the session server-side.`)) return;
+    const banHost = window.confirm("Also ban the host account? (writes audit + ban)");
     setBusyId(streamId);
     try {
       await api.post(`/admin/live/${encodeURIComponent(streamId)}/force-end`, {
         reason: reason.trim() || undefined,
+        banHost: !!banHost,
+        banReason: banHost ? reason.trim() || "live_force_end_ban" : undefined,
       });
-      toast.push("Stream force-ended", "ok");
+      toast.push(banHost ? "Stream force-ended + host ban requested" : "Stream force-ended", "ok");
       res.reload();
     } catch (e) {
       toast.push(e instanceof ApiError ? e.message : String(e), "err");
