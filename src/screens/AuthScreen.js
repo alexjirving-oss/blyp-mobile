@@ -1,8 +1,7 @@
 import React, { useState, useRef } from 'react';
 import BlueScreen from '../ui/BlueScreen';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Icon from '../components/Icon';
 import { CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js';
 import { mapAuthError } from '../lib/auth/errors';
 import {
@@ -20,20 +19,7 @@ import { COLORS } from '../styles/theme';
 import awsconfig from '../aws-exports';
 import { userPool, clearCognitoSessions, refreshAuthNow } from '../hooks/useCommon';
 import { flushCognitoStorageWrites } from '../lib/auth/cognitoStorage';
-import {
-  finalizeSocialSession,
-  getSocialProviderSetupMessage,
-  isSocialAuthUiEnabled,
-  isSocialProviderEnabled,
-  isSocialProviderVisible,
-  listSocialProvidersForUi,
-  signInWithApple,
-  signInWithFacebook,
-  signInWithGoogle,
-  signInWithTikTok,
-} from '../services/socialAuthService';
 import { ensureUserProfile } from '../services/LiveService';
-import { enterGuestMode } from '../services/guestSessionService';
 import {
   claimPendingUsernameIfNeeded,
   clearPendingProfile,
@@ -42,45 +28,6 @@ import {
 } from '../services/usernameProfileService';
 
 const MIN_SIGNUP_AGE = 13;
-
-const SOCIAL_PROVIDER_META = {
-  Google: {
-    label: 'Continue with Google',
-    icon: 'logo-google',
-    iconColor: '#EA4335',
-    buttonStyleKey: 'socialButtonGoogle',
-    textStyleKey: 'socialButtonTextDark',
-  },
-  Facebook: {
-    label: 'Continue with Facebook',
-    icon: 'logo-facebook',
-    iconColor: '#1877F2',
-    buttonStyleKey: 'socialButtonFacebook',
-    textStyleKey: 'socialButtonText',
-  },
-  TikTok: {
-    label: 'Continue with TikTok',
-    icon: 'logo-tiktok',
-    iconColor: '#FE2C55',
-    buttonStyleKey: 'socialButtonTikTok',
-    textStyleKey: 'socialButtonText',
-    fallbackGlyph: '♪',
-  },
-  Apple: {
-    label: 'Continue with Apple',
-    icon: 'logo-apple',
-    iconColor: '#FFFFFF',
-    buttonStyleKey: 'socialButtonApple',
-    textStyleKey: 'socialButtonText',
-  },
-};
-
-const SOCIAL_SIGN_IN_HANDLERS = {
-  Google: signInWithGoogle,
-  Facebook: signInWithFacebook,
-  TikTok: signInWithTikTok,
-  Apple: signInWithApple,
-};
 
 // Parse a DD/MM/YYYY string and return { valid, age, iso } where age is whole years.
 function parseDob(input) {
@@ -116,14 +63,12 @@ const AuthScreen = () => {
   const [lastError, setLastError] = useState('');
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [resetMode, setResetMode] = useState(false);
-  const [guestConfirmVisible, setGuestConfirmVisible] = useState(false);
   const [resetCode, setResetCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [suggestReset, setSuggestReset] = useState(false);
   const [accountExists, setAccountExists] = useState(undefined); // undefined=unknown, true/false known
   const [lockoutDetected, setLockoutDetected] = useState(false);
-  const [isSocialAuthInProgress, setIsSocialAuthInProgress] = useState(false);
 
   // TODO[BLYP][UX]: Future onboarding polish:
   //  - Consider one-line tagline under logo
@@ -170,7 +115,7 @@ const AuthScreen = () => {
     setDob(formatted);
   };
 
-  // Unified success handler for any auth source (password, confirmed signup, social OAuth)
+  // Unified success handler for password login and confirmed signup
   const handleAuthSuccess = async (source, context = {}) => {
     try {
       console.log('[AUTH][SUCCESS]', source, {
@@ -610,88 +555,6 @@ const AuthScreen = () => {
     }
   };
 
-  const handleSocialSignInPress = async (provider, signIn) => {
-    if (isSigningIn || loading || isSocialAuthInProgress || Date.now() < cooldownUntil) {
-      console.log(`[AUTH][SOCIAL] Ignoring ${provider} tap while auth is busy or cooled down`);
-      return;
-    }
-
-    if (!isSocialProviderEnabled(provider)) {
-      const message = getSocialProviderSetupMessage(provider);
-      console.warn(`[AUTH][SOCIAL] ${provider} not ready`, message);
-      Alert.alert(`${provider} sign-in`, message);
-      return;
-    }
-
-    setIsSocialAuthInProgress(true);
-    console.log(`[AUTH][SOCIAL] Starting ${provider} Cognito sign-in at`, new Date().toISOString());
-
-    try {
-      await signIn();
-      const { cognitoUser } = await finalizeSocialSession();
-      await handleAuthSuccess(`social:${provider}`, { cognitoUser });
-    } catch (err) {
-      const canceled =
-        /cancel|dismiss|closed|user.?cancel/i.test(String(err?.message || err?.name || ''));
-      console.log(`[AUTH][SOCIAL] ${provider} sign-in error`, { message: err?.message, code: err?.code });
-      if (!canceled) {
-        Alert.alert(
-          `${provider} sign-in failed`,
-          err?.message || 'Please try again or use email.',
-        );
-      }
-    } finally {
-      setIsSocialAuthInProgress(false);
-    }
-  };
-
-  const socialProviders = isSocialAuthUiEnabled() ? listSocialProvidersForUi() : [];
-
-  const renderSocialButton = (provider) => {
-    if (!isSocialProviderVisible(provider)) return null;
-    const meta = SOCIAL_PROVIDER_META[provider] || {
-      label: `Continue with ${provider}`,
-      icon: 'person',
-      iconColor: '#e5e7eb',
-      buttonStyleKey: 'socialButton',
-      textStyleKey: 'socialButtonText',
-    };
-    const signIn = SOCIAL_SIGN_IN_HANDLERS[provider];
-    if (!signIn) return null;
-    const busy = isSocialAuthInProgress || isSigningIn || Date.now() < cooldownUntil;
-    return (
-      <TouchableOpacity
-        key={provider}
-        style={[
-          styles.socialButton,
-          styles[meta.buttonStyleKey],
-          busy && styles.socialButtonDisabled,
-        ]}
-        onPress={() => handleSocialSignInPress(provider, signIn)}
-        disabled={busy}
-        activeOpacity={busy ? 1 : 0.85}
-        accessibilityRole="button"
-        accessibilityLabel={meta.label}
-      >
-        <View style={styles.socialButtonInner}>
-          {provider === 'TikTok' ? (
-            <Text style={[styles.socialGlyph, { color: meta.iconColor }]} allowFontScaling={false}>
-              {meta.fallbackGlyph || '♪'}
-            </Text>
-          ) : (
-            <Icon name={meta.icon} size={20} color={meta.iconColor} />
-          )}
-          <Text
-            style={[styles.socialButtonText, styles[meta.textStyleKey]]}
-            allowFontScaling={false}
-          >
-            {meta.label}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
   const handleReset = async () => {
     setLoading(true);
     // Clear any previous error and reset confirmation state
@@ -729,21 +592,6 @@ const AuthScreen = () => {
             <Text style={styles.formTitle}>
               {isLogin ? 'Log In' : 'Create Account'}
             </Text>
-
-            {socialProviders.length > 0 && !needsConfirm && !resetMode && (
-              <>
-                <View style={styles.socialButtonsRow}>
-                  {socialProviders.map((provider) => renderSocialButton(provider))}
-                </View>
-                <View style={styles.socialDivider}>
-                  <View style={styles.socialDividerLine} />
-                  <Text style={styles.socialDividerText} allowFontScaling={false}>
-                    or use email
-                  </Text>
-                  <View style={styles.socialDividerLine} />
-                </View>
-              </>
-            )}
 
             {!isLogin && !needsConfirm && (
               <>
@@ -972,18 +820,6 @@ const AuthScreen = () => {
               </TouchableOpacity>
             )}
 
-            {!needsConfirm && !resetMode && (
-              <TouchableOpacity
-                style={styles.guestButton}
-                onPress={() => setGuestConfirmVisible(true)}
-                disabled={isSigningIn || loading}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.guestButtonText} allowFontScaling={false}>
-                  Continue as guest
-                </Text>
-              </TouchableOpacity>
-            )}
             {isLogin && !needsConfirm && !resetMode && (
               <TouchableOpacity
                 style={styles.toggleButton}
@@ -1120,95 +956,6 @@ const AuthScreen = () => {
             <ActivityIndicator size="large" color="#00D2BE" />
           </View>
         )}
-
-        <Modal
-          visible={guestConfirmVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setGuestConfirmVisible(false)}
-        >
-          <View style={styles.guestModalBackdrop}>
-            <View style={styles.guestModalCard}>
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.guestModalScroll}>
-                <Text style={styles.guestModalTitle} allowFontScaling={false}>Continue as guest?</Text>
-                <Text style={styles.guestModalSub} allowFontScaling={false}>
-                  You can browse as a guest, but most of Blyp stays locked. As a guest you can't:
-                </Text>
-
-                <View style={styles.guestLockList}>
-                  {[
-                    'Post or go live',
-                    'Like, comment, follow or message',
-                    'Send or receive gifts & coins',
-                    'Use Blyp AI (ask anything, captions & titles)',
-                    'Save your activity, history or interests',
-                  ].map((t) => (
-                    <View key={t} style={styles.guestLockRow}>
-                      <Icon name="close-circle" size={18} color="#F87171" />
-                      <Text style={styles.guestLockText} allowFontScaling={false}>{t}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.guestPerksBox}>
-                  <Text style={styles.guestPerksTitle} allowFontScaling={false}>
-                    Start a 30-day free trial and unlock everything:
-                  </Text>
-                  {[
-                    'Blyp AI — ask anything, AI captions, titles & hashtags',
-                    'Post, go live & build your audience',
-                    'Like, comment, follow & message anyone',
-                    'Send & receive gifts, earn creator coins',
-                    'Your own personalised home & saved history',
-                  ].map((t) => (
-                    <View key={t} style={styles.guestPerkRow}>
-                      <Icon name="checkmark-circle" size={18} color={COLORS.primary} />
-                      <Text style={styles.guestPerkText} allowFontScaling={false}>{t}</Text>
-                    </View>
-                  ))}
-                  <Text style={styles.guestPerksFinePrint} allowFontScaling={false}>
-                    £0 today — Google shows the renewal date and you can cancel any time before the trial ends and pay nothing.
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.guestTrialBtn}
-                  activeOpacity={0.9}
-                  onPress={() => {
-                    setGuestConfirmVisible(false);
-                    setResetMode(false);
-                    setNeedsConfirm(false);
-                    setIsLogin(false);
-                  }}
-                >
-                  <LinearGradient
-                    colors={[COLORS.primary, '#0AA2C0']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.guestTrialBtnGrad}
-                  >
-                    <Text style={styles.guestTrialBtnText} allowFontScaling={false}>
-                      Start my 30-day free trial
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.guestProceedBtn}
-                  activeOpacity={0.8}
-                  onPress={async () => {
-                    setGuestConfirmVisible(false);
-                    try { await enterGuestMode(); } catch { }
-                  }}
-                >
-                  <Text style={styles.guestProceedText} allowFontScaling={false}>
-                    Continue as guest anyway
-                  </Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
       </View>
     </BlueScreen>
   );
@@ -1296,125 +1043,6 @@ const styles = StyleSheet.create({
     color: '#00D2BE',
     fontWeight: '700',
   },
-  guestButton: {
-    marginTop: 16,
-    paddingVertical: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guestButtonText: {
-    color: '#e5e7eb',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  guestModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 22,
-  },
-  guestModalCard: {
-    width: '100%',
-    maxWidth: 420,
-    maxHeight: '86%',
-    backgroundColor: '#14141A',
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  guestModalScroll: {
-    padding: 22,
-  },
-  guestModalTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  guestModalSub: {
-    color: '#A1A1AA',
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  guestLockList: {
-    marginTop: 16,
-    gap: 10,
-  },
-  guestLockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  guestLockText: {
-    flex: 1,
-    color: '#D4D4D8',
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  guestPerksBox: {
-    marginTop: 20,
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,210,190,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,210,190,0.28)',
-    gap: 10,
-  },
-  guestPerksTitle: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  guestPerkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  guestPerkText: {
-    flex: 1,
-    color: '#E5E7EB',
-    fontSize: 14,
-    lineHeight: 19,
-  },
-  guestPerksFinePrint: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 6,
-  },
-  guestTrialBtn: {
-    marginTop: 22,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  guestTrialBtnGrad: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guestTrialBtnText: {
-    color: '#04121A',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  guestProceedBtn: {
-    marginTop: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  guestProceedText: {
-    color: '#9CA3AF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
   hintText: {
     color: '#71717A',
     fontSize: 12,
@@ -1438,73 +1066,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     zIndex: 999,
     elevation: 999,
-  },
-  socialDivider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    marginBottom: 18,
-  },
-  socialDividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  socialDividerText: {
-    marginHorizontal: 12,
-    color: '#71717A',
-    fontSize: 13,
-  },
-  socialButtonsRow: {
-    gap: 10,
-    marginBottom: 4,
-  },
-  socialButton: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: '#1C1C22',
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-  },
-  socialButtonGoogle: {
-    backgroundColor: '#F5F5F7',
-    borderColor: 'rgba(255,255,255,0.9)',
-  },
-  socialButtonFacebook: {
-    backgroundColor: '#121216',
-    borderColor: 'rgba(24,119,242,0.45)',
-  },
-  socialButtonTikTok: {
-    backgroundColor: '#121216',
-    borderColor: 'rgba(254,44,85,0.4)',
-  },
-  socialButtonApple: {
-    backgroundColor: '#000000',
-    borderColor: 'rgba(255,255,255,0.22)',
-  },
-  socialButtonInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  socialGlyph: {
-    fontSize: 18,
-    fontWeight: '800',
-    width: 20,
-    textAlign: 'center',
-  },
-  socialButtonDisabled: {
-    opacity: 0.6,
-  },
-  socialButtonText: {
-    color: '#e5e7eb',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  socialButtonTextDark: {
-    color: '#0A0A0C',
   },
   usernameInput: {
     marginBottom: 6,
