@@ -207,9 +207,22 @@ export function resolveForYouBootWidenApply({
 }
 
 /**
- * Shuffle feed candidates for a cold open / pull-refresh / rail rematch.
- * Light rule only: previous session's first N go after everything else when
- * the pool still has other clips (nothing elaborate).
+ * How many recently-seen / prior-head ids to push to the back of a shuffle.
+ * Scales with pool size so larger catalogs rotate harder than a fixed "3".
+ */
+export function varietyAvoidCount(poolSize, explicit) {
+  if (Number.isFinite(explicit) && explicit >= 0) return Math.trunc(explicit);
+  const n = Math.max(0, Number(poolSize) || 0);
+  if (n <= 1) return 0;
+  // Prefer ~65% of the pool as "already seen / prior head" when possible,
+  // but leave at least one clip eligible to lead.
+  return Math.min(Math.max(3, Math.floor(n * 0.65)), n - 1);
+}
+
+/**
+ * Shuffle feed candidates for a cold open / pull-refresh / rail rematch /
+ * page append. Prefer unseen (or less-recently-seen) clips before repeating
+ * the prior head / impression window.
  *
  * @param {any[]} posts
  * @param {{
@@ -227,16 +240,19 @@ export function shufflePostsVaried(posts, opts = {}) {
   }
 
   const random = typeof opts.random === 'function' ? opts.random : Math.random;
-  const avoidCount = Math.max(0, Number.isFinite(opts.avoidCount) ? opts.avoidCount : 3);
+  const avoidCount = varietyAvoidCount(list.length, opts.avoidCount);
   const rawAvoid = opts.avoidFirstIds instanceof Set
     ? [...opts.avoidFirstIds]
     : (opts.avoidFirstIds || getLastFeedHeadIds());
-  const avoid = new Set(
-    rawAvoid
-      .map((id) => String(id || ''))
-      .filter(Boolean)
-      .slice(0, avoidCount || undefined),
-  );
+  // Prefer the *most recent* impressions when the avoid window is smaller than
+  // the full seen history (slice from the end of an order array).
+  const normalizedAvoid = rawAvoid
+    .map((id) => String(id || ''))
+    .filter(Boolean);
+  const avoidSlice = avoidCount > 0
+    ? normalizedAvoid.slice(-avoidCount)
+    : [];
+  const avoid = new Set(avoidSlice);
 
   let ordered;
   if (avoid.size === 0) {
@@ -248,14 +264,40 @@ export function shufflePostsVaried(posts, opts = {}) {
       if (avoid.has(String(post.id))) recent.push(post);
       else fresh.push(post);
     }
-    // Tiny catalog: if every candidate was in the last head, just reshuffle.
+    // Tiny catalog: if every candidate was in the avoid window, just reshuffle
+    // so the next cycle is not an identical loop of the prior order.
     ordered = fresh.length === 0
       ? shuffleArray(list, random)
       : [...shuffleArray(fresh, random), ...shuffleArray(recent, random)];
   }
 
   if (opts.remember !== false) {
-    rememberFeedHead(ordered, avoidCount || 3);
+    rememberFeedHead(ordered, Math.min(3, avoidCount || 3));
   }
   return ordered;
+}
+
+/**
+ * After the unique corpus is exhausted, build a reshuffled continuation stamped
+ * with a new cycle so FlatList keys (`id__cycle`) differ from the prior pass.
+ * Prefer less-recently-seen clips at the front — never re-emit the same order.
+ *
+ * @param {any[]} posts
+ * @param {{
+ *   cycle?: number,
+ *   recentlySeenIds?: string[]|Set<string>,
+ *   random?: () => number,
+ * }} [opts]
+ */
+export function buildCycleContinuation(posts, opts = {}) {
+  const unique = dedupePostsById(posts);
+  if (!unique.length) return [];
+  const cycle = Number.isFinite(opts.cycle) ? Math.trunc(opts.cycle) : 0;
+  const ordered = shufflePostsVaried(unique, {
+    avoidFirstIds: opts.recentlySeenIds,
+    avoidCount: varietyAvoidCount(unique.length),
+    random: opts.random,
+    remember: true,
+  });
+  return stampFeedKeys(ordered, cycle);
 }

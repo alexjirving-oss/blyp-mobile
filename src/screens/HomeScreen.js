@@ -51,12 +51,14 @@ import { requireAccount } from '../services/guestSessionService';
 import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
 import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
 import {
+  buildCycleContinuation,
   dedupePostsById,
   ensureFocusPostInList,
   feedInventoryStats,
   resolveFeedVideoUri,
   resolveForYouBootWidenApply,
   shufflePostsVaried,
+  varietyAvoidCount,
 } from '../utils/forYouFeedList';
 import {
   resolvePlayableUri,
@@ -233,27 +235,35 @@ const getPostGiftCoins = (post) => {
 // How many posts we pull per Firestore page. Many rows are images/silent clips
 // filtered out for For You, so we over-fetch and keep paging until we have enough
 // playable videos. Boot/refresh uses a wider window so shuffle has a real pool.
-const FEED_PAGE_SIZE = 15;
-const FEED_BOOT_FETCH = 60;
-const FEED_GATHER_TARGET = 12;
-const FEED_PREFETCH_REMAINING = 4;
+const FEED_PAGE_SIZE = 30;
+const FEED_BOOT_FETCH = 120;
+const FEED_GATHER_TARGET = 20;
+const FEED_PREFETCH_REMAINING = 6;
+const FEED_PAGE_SAFETY = 48;
 
 const isValidFeedPost = (p) => isForYouFeedPost(p);
 
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /**
- * Simple For You order: drop suppressed accounts, then shuffle.
- * No follow-mix hydrate, promote fair-cap, score, or diversity pass.
+ * For You order: drop suppressed accounts, then shuffle with unseen / less-recent
+ * preference (avoidFirstIds). No Instant / framing / UI chrome changes.
  * @param {any[]} posts
- * @param {{ avoidCount?: number, remember?: boolean }} [opts]
+ * @param {{
+ *   avoidCount?: number,
+ *   remember?: boolean,
+ *   avoidFirstIds?: string[]|Set<string>,
+ * }} [opts]
  */
 async function prepareForYouOrder(posts, opts = {}) {
   const candidates = Array.isArray(posts) ? posts : [];
   if (!candidates.length) return [];
   const shuffleOpts = {
-    avoidCount: Number.isFinite(opts.avoidCount) ? opts.avoidCount : 3,
+    avoidCount: Number.isFinite(opts.avoidCount)
+      ? opts.avoidCount
+      : varietyAvoidCount(candidates.length),
     remember: opts.remember !== false,
+    avoidFirstIds: opts.avoidFirstIds,
   };
   try {
     const withAccount = await attachAccountFeedPriority(candidates);
@@ -424,8 +434,8 @@ const HomeScreen = ({ navigation, route }) => {
   const forYouAllCursorRef = useRef(null);
   const forYouAllHasMoreRef = useRef(true);
   const forYouShownIdsRef = useRef(new Set());
-  // When the corpus is exhausted we stop appending (hard id dedupe). Re-walking
-  // and re-stamping the same posts made scroll feel like endless repeats.
+  // Cycle bumps on pull-refresh and on corpus-exhausted reshuffle so FlatList
+  // keys (`id__cycle`) stay unique when the same clip reappears later.
   const forYouCycleRef = useRef(0);
   const randomPostsRef = useRef([]);
   // Home For You rail (and deep-links) ask to land on a specific post in the
@@ -525,9 +535,18 @@ const HomeScreen = ({ navigation, route }) => {
   useEffect(() => { ribbonPagesRef.current = ribbonPages; }, [ribbonPages]);
 
   const followingRef = useRef(new Set());
-  // Local impression dedupe (not used for ordering).
+  // Local impression history — used to prefer unseen / less-recently-seen clips.
   const forYouRecentlySeenIdsRef = useRef(new Set());
   const forYouRecentlySeenOrderRef = useRef([]);
+
+  const seenAvoidOpts = useCallback((poolSize, extra = {}) => {
+    const seenOrder = forYouRecentlySeenOrderRef.current || [];
+    return {
+      avoidFirstIds: seenOrder.length ? seenOrder : undefined,
+      avoidCount: varietyAvoidCount(poolSize, extra.avoidCount),
+      remember: extra.remember !== false,
+    };
+  }, []);
 
   /** Stamp + hard-dedupe + keep Home-rail focus post through list rebuilds. */
   const buildForYouList = useCallback((posts, cycle = forYouCycleRef.current) => {
@@ -1093,7 +1112,7 @@ const HomeScreen = ({ navigation, route }) => {
                       // Paint a shuffled first page immediately, then widen the
                       // pool with a one-shot boot fetch so reload has variety.
                       const provisional = buildForYouList(
-                        await prepareForYouOrder(validPosts),
+                        await prepareForYouOrder(validPosts, seenAvoidOpts(validPosts.length)),
                         cycle,
                       );
                       setRandomPosts(provisional);
@@ -1132,7 +1151,10 @@ const HomeScreen = ({ navigation, route }) => {
                         const provisionalHeadId = randomPostsRef.current?.[0]?.id != null
                           ? String(randomPostsRef.current[0].id)
                           : null;
-                        const ordered = await prepareForYouOrder(bootPosts);
+                        const ordered = await prepareForYouOrder(
+                          bootPosts,
+                          seenAvoidOpts(bootPosts.length),
+                        );
                         if (!mounted) return;
                         if (forYouFocusPinIdRef.current || pendingForYouFocusRef.current) return;
                         const shuffled = buildForYouList(ordered, cycle);
@@ -1360,7 +1382,10 @@ const HomeScreen = ({ navigation, route }) => {
         randomPostsRef.current = [];
         setIsEmptyFeed(true);
       } else {
-        const ordered = await prepareForYouOrder(fresh);
+        const ordered = await prepareForYouOrder(
+          fresh,
+          seenAvoidOpts(fresh.length),
+        );
         const shuffled = buildForYouList(ordered, forYouCycleRef.current);
         setRandomPosts(shuffled);
         randomPostsRef.current = shuffled;
@@ -1375,16 +1400,19 @@ const HomeScreen = ({ navigation, route }) => {
     } finally {
       setLoading(false);
     }
-  }, [buildForYouList, seedLikeSnapshot]);
+  }, [buildForYouList, seedLikeSnapshot, seenAvoidOpts]);
 
   // Load the next (older) page of the For You feed and append it. Called as the
   // viewer nears the end of the list, which makes the feed effectively endless.
   const appendFeedPosts = useCallback(async (newPosts) => {
     if (!newPosts.length) return;
     newPosts.forEach((p) => forYouShownIdsRef.current.add(p.id));
-    // Shuffle only the new page; do not re-order clips already on screen
-    // or overwrite the session head used by the next pull-to-refresh.
-    const ordered = await prepareForYouOrder(newPosts, { avoidCount: 0, remember: false });
+    // Shuffle only the new page; prefer less-recently-seen within the page.
+    // Do not re-order clips already on screen.
+    const ordered = await prepareForYouOrder(newPosts, {
+      ...seenAvoidOpts(newPosts.length, { remember: false }),
+      remember: false,
+    });
     const stamped = buildForYouList(ordered, forYouCycleRef.current);
     setRandomPosts((prev) => {
       const haveIds = new Set(
@@ -1402,7 +1430,7 @@ const HomeScreen = ({ navigation, route }) => {
       return vids.length ? [...prev, ...vids] : prev;
     });
     seedLikeSnapshot(newPosts);
-  }, [seedLikeSnapshot, buildForYouList]);
+  }, [seedLikeSnapshot, buildForYouList, seenAvoidOpts]);
 
   const loadMoreForYou = useCallback(async () => {
     if (loadingMoreRef.current) return;
@@ -1414,7 +1442,7 @@ const HomeScreen = ({ navigation, route }) => {
       let gathered = [];
       let safety = 0;
 
-      while (gathered.length < FEED_GATHER_TARGET && safety < 24) {
+      while (gathered.length < FEED_GATHER_TARGET && safety < FEED_PAGE_SAFETY) {
         safety += 1;
 
         if (forYouPhaseRef.current === 'date' && !forYouHasMoreRef.current) {
@@ -1422,17 +1450,12 @@ const HomeScreen = ({ navigation, route }) => {
         }
 
         if (forYouPhaseRef.current === 'date') {
-          const cursor = forYouCursorRef.current;
-          if (!cursor) {
-            forYouPhaseRef.current = 'all';
-            continue;
+          // Null cursor = re-scan newest page (catches uploads after a cycle wrap).
+          let q = db.collection('posts').orderBy('date', 'desc').limit(FEED_PAGE_SIZE);
+          if (forYouCursorRef.current) {
+            q = q.startAfter(forYouCursorRef.current);
           }
-          const snap = await db
-            .collection('posts')
-            .orderBy('date', 'desc')
-            .startAfter(cursor)
-            .limit(FEED_PAGE_SIZE)
-            .get();
+          const snap = await q.get();
           const docs = snap?.docs || [];
           if (docs.length > 0) forYouCursorRef.current = docs[docs.length - 1];
           forYouHasMoreRef.current = docs.length >= FEED_PAGE_SIZE;
@@ -1448,13 +1471,15 @@ const HomeScreen = ({ navigation, route }) => {
             .filter(isValidFeedPost);
           gathered = gathered.concat(olderPosts);
           if (!forYouHasMoreRef.current) forYouPhaseRef.current = 'all';
+          // Empty newest page with no cursor advance still means try phase 2.
+          if (!docs.length) {
+            forYouHasMoreRef.current = false;
+            forYouPhaseRef.current = 'all';
+          }
           continue;
         }
 
         // Phase 2 (all): posts without `date` + anything missed earlier.
-        if (!forYouAllHasMoreRef.current && !forYouCursorRef.current) {
-          break;
-        }
         if (!forYouAllHasMoreRef.current) break;
 
         let q = db.collection('posts').limit(FEED_PAGE_SIZE);
@@ -1474,6 +1499,10 @@ const HomeScreen = ({ navigation, route }) => {
           })
           .filter(isValidFeedPost);
         gathered = gathered.concat(fresh);
+        if (!docs.length) {
+          forYouAllHasMoreRef.current = false;
+          break;
+        }
       }
 
       if (gathered.length > 0) {
@@ -1483,9 +1512,32 @@ const HomeScreen = ({ navigation, route }) => {
         !forYouAllHasMoreRef.current &&
         (randomPostsRef.current || []).length > 0
       ) {
-        // Corpus exhausted. Do NOT re-append the same post ids — that made
-        // scroll feel like a broken loop of repeats when inventory is small.
-        logForYouInventory('exhausted', randomPostsRef.current);
+        // Corpus exhausted: reshuffle unique clips into a new cycle (new feedKeys)
+        // so scroll continues with a different order — prefer less-recently-seen.
+        forYouCycleRef.current += 1;
+        const cycle = forYouCycleRef.current;
+        const continuation = buildCycleContinuation(randomPostsRef.current, {
+          cycle,
+          recentlySeenIds: forYouRecentlySeenOrderRef.current,
+        });
+        if (continuation.length) {
+          const stamped = buildForYouList(continuation, cycle);
+          setRandomPosts((prev) => {
+            const next = [...(Array.isArray(prev) ? prev : []), ...stamped];
+            randomPostsRef.current = next;
+            logForYouInventory('cycle-reshuffle', next);
+            return next;
+          });
+          seedLikeSnapshot(continuation);
+        } else {
+          logForYouInventory('exhausted', randomPostsRef.current);
+        }
+        // Soft reopen date phase so brand-new uploads can still enter later.
+        forYouPhaseRef.current = 'date';
+        forYouCursorRef.current = null;
+        forYouHasMoreRef.current = true;
+        forYouAllCursorRef.current = null;
+        forYouAllHasMoreRef.current = true;
       }
     } catch (e) {
       console.warn('[HOME] loadMoreForYou failed:', e?.message || String(e));
@@ -1496,6 +1548,8 @@ const HomeScreen = ({ navigation, route }) => {
   }, [
     firebaseEnabled,
     appendFeedPosts,
+    buildForYouList,
+    seedLikeSnapshot,
   ]);
 
   // Keep the first screen full even when the opening Firestore page is mostly images.
@@ -2218,7 +2272,7 @@ const HomeScreen = ({ navigation, route }) => {
               ref={flatListRef}
               data={randomPosts}
               renderItem={renderForYouItem}
-              keyExtractor={(item) => String(item.id)}
+              keyExtractor={(item) => String(item.feedKey || item.id)}
               showsVerticalScrollIndicator={false}
               refreshing={loading}
               onRefresh={loadRandomPosts}

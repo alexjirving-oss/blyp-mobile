@@ -1,4 +1,5 @@
 const {
+  buildCycleContinuation,
   dedupePostsById,
   ensureFocusPostInList,
   feedInventoryStats,
@@ -9,6 +10,7 @@ const {
   shuffleArray,
   shufflePostsVaried,
   stampFeedKeys,
+  varietyAvoidCount,
 } = require('../src/utils/forYouFeedList');
 
 describe('forYouFeedList', () => {
@@ -120,6 +122,35 @@ describe('forYouFeedList', () => {
     const freshCount = posts.length - avoided.size;
     expect(second.slice(0, freshCount).every((p) => !avoided.has(p.id))).toBe(true);
     expect(second.slice(freshCount).every((p) => avoided.has(p.id))).toBe(true);
+  });
+
+  it('varietyAvoidCount scales with pool and leaves a lead slot', () => {
+    expect(varietyAvoidCount(1)).toBe(0);
+    expect(varietyAvoidCount(10)).toBe(6);
+    expect(varietyAvoidCount(10, 2)).toBe(2);
+  });
+
+  it('buildCycleContinuation reshuffles with new feedKeys and prefers unseen', () => {
+    resetLastFeedHeadIds();
+    const posts = [
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c' },
+      { id: 'd' },
+      { id: 'e' },
+      { id: 'f' },
+    ];
+    const random = () => 0;
+    // Last 3 of this window are avoided first (varietyAvoidCount(6) === 3).
+    const seen = ['a', 'b', 'c', 'd'];
+    const next = buildCycleContinuation(posts, {
+      cycle: 2,
+      recentlySeenIds: seen,
+      random,
+    });
+    expect(next.every((p) => String(p.feedKey).endsWith('__2'))).toBe(true);
+    expect(new Set(next.map((p) => p.id)).size).toBe(posts.length);
+    expect(next.slice(0, 3).map((p) => p.id).sort()).toEqual(['a', 'e', 'f']);
   });
 
   describe('resolveForYouBootWidenApply', () => {
