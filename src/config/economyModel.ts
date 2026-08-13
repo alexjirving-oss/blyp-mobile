@@ -55,12 +55,12 @@ function envFlag(name: string, defaultValue: boolean): boolean {
 // - ENABLE_PURCHASES: true if backend is ready, false if not
 // - ALLOW_SIMULATED_CLIENT_TOPUPS: false (no client-side credits without server validation)
 // - REQUIRE_SERVER_RECEIPT_VALIDATION: true (all purchases must be validated server-side)
-// - ENABLE_WITHDRAWALS: false (CTA hidden until explicitly enabled; backend kill-switch separate)
+// - ENABLE_WITHDRAWALS: true in release binaries (server kill-switch still authoritative)
 //
 // DEVELOPMENT MODE (with EXPO_PUBLIC_DEV_MODE=1):
 // - ALLOW_SIMULATED_CLIENT_TOPUPS: true (for testing without billing backend)
 // - REQUIRE_SERVER_RECEIPT_VALIDATION: false (for testing with mock tokens)
-// - ENABLE_WITHDRAWALS: false (still off unless EXPO_PUBLIC_ENABLE_WITHDRAWALS=1)
+// - ENABLE_WITHDRAWALS: true unless EXPO_PUBLIC_ENABLE_WITHDRAWALS=0
 //
 // ============================================================================
 
@@ -90,10 +90,11 @@ export function isClientEconomyMutationAllowed(): boolean {
   return CLIENT_ECONOMY_MUTATIONS_ENABLED;
 }
 
-// Withdrawals: production AAB defaults ON via app.config extra when Cloud Run
-// ENABLE_WITHDRAWALS=1 + live Stripe are set. Override with EXPO_PUBLIC_ENABLE_WITHDRAWALS=0.
+// Withdrawals CTA: default ON so Wallet never silently loses the button when
+// expo.extra fails to load. Hide only with EXPO_PUBLIC_ENABLE_WITHDRAWALS=0.
+// Server ENABLE_WITHDRAWALS + Stripe/PayPal rails remain the real kill-switch.
 // See docs/WITHDRAWALS_OPS.md.
-export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', false);
+export const ENABLE_WITHDRAWALS = envFlag('EXPO_PUBLIC_ENABLE_WITHDRAWALS', true);
 
 // Helper: determine unsafe simulation mode (client credits without server receipt)
 // In production, this should ALWAYS be false

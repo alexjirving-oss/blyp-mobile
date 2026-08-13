@@ -278,8 +278,21 @@ export const withdrawRequestSchema = z
   .object({
     amountGems: z.coerce.number().int().min(1),
     idempotencyKey: z.string().min(1).max(120),
+    /** Destination rail. Default stripe for backward compatibility. */
+    method: z.enum(['stripe', 'paypal']).optional().default('stripe'),
+    /** Required when method=paypal — creator's PayPal login email. */
+    paypalEmail: z.string().email().max(200).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((val, ctx) => {
+    if (val.method === 'paypal' && !val.paypalEmail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'paypalEmail required for PayPal withdrawals',
+        path: ['paypalEmail'],
+      });
+    }
+  });
 
 export const withdrawConnectOnboardSchema = z
   .object({

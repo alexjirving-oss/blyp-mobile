@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import type { Knex } from 'knex';
 import { getEconomyInfra } from './infra';
 import { EconomyError } from './economyErrors';
+import { planMatchdayPaidDebit } from './paidOnlyCoinDebit';
 import { emitMatchdayEvent } from '../realtime/realtimeBus';
 import type {
   MatchdayPredictionPlaceInput,
@@ -10,8 +11,8 @@ import type {
 } from './economySchemas';
 
 // Matchday Live is monetized through the existing BlypCoins wallet. Prediction
-// prizes pay out in BONUS_COIN by default (non-cashable) so the pari-mutuel pool
-// keeps the same low-risk posture as the existing live-games engine.
+// prizes pay out in spendable COIN (coin_balance) — same currency flip as other
+// live games (Option A / SAFE→COIN). Not GEM, not cashable withdrawal.
 
 function nowIso() {
   return new Date().toISOString();
@@ -38,7 +39,8 @@ async function ensureWalletRow(trx: Knex.Transaction, userId: string) {
   return row;
 }
 
-// Bonus-first debit, mirroring debitCoinsForPromotion. Returns balances after spend.
+// Paid-only debit (Option A / lock-3): Matchday settles in spendable COIN, so
+// bonus must not fund stakes (bonus → COIN farm).
 async function debitCoins(
   trx: Knex.Transaction,
   userId: string,
@@ -53,12 +55,8 @@ async function debitCoins(
   const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
   if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
 
-  const bonus = BigInt(wallet.bonus_coin_balance);
   const paid = BigInt(wallet.coin_balance);
-
-  const useBonus = bonus >= totalCostCoins ? totalCostCoins : bonus;
-  const usePaid = totalCostCoins - useBonus;
-  if (paid < usePaid) throw new EconomyError('INSUFFICIENT_FUNDS', 409, 'Insufficient funds');
+  const { usePaid } = planMatchdayPaidDebit(paid, totalCostCoins);
 
   if (usePaid > 0n) {
     await trx('ledger_entries').insert({
@@ -71,21 +69,7 @@ async function debitCoins(
       reference_type: referenceType,
       reference_id: referenceId,
       idempotency_key: `${idempotencyKey}:COIN`,
-      metadata: meta,
-    });
-  }
-  if (useBonus > 0n) {
-    await trx('ledger_entries').insert({
-      ledger_id: randomUUID(),
-      user_id: userId,
-      entry_type: entryType,
-      currency: 'BONUS_COIN',
-      amount: (-useBonus).toString(),
-      status: 'POSTED',
-      reference_type: referenceType,
-      reference_id: referenceId,
-      idempotency_key: `${idempotencyKey}:BONUS`,
-      metadata: meta,
+      metadata: { ...meta, paidOnly: true, payoutVersion: 2 },
     });
   }
 
@@ -93,7 +77,6 @@ async function debitCoins(
     .where({ user_id: userId })
     .update({
       coin_balance: (paid - usePaid).toString(),
-      bonus_coin_balance: (bonus - useBonus).toString(),
       lifetime_spend_coins: (BigInt(wallet.lifetime_spend_coins) + totalCostCoins).toString(),
       updated_at: trx.fn.now(),
     });
@@ -105,8 +88,8 @@ async function debitCoins(
   };
 }
 
-// Credit a refund/payout into BONUS_COIN (non-cashable, matches SAFE live-game mode).
-async function creditBonus(
+// Credit a refund/payout into spendable COIN (v2). Old BONUS rows use different keys.
+async function creditCoin(
   trx: Knex.Transaction,
   userId: string,
   amount: bigint,
@@ -117,6 +100,10 @@ async function creditBonus(
   meta: Record<string, any>
 ) {
   if (amount <= 0n) return;
+  const key = `${idempotencyKey}:v2:${userId}`;
+  const existing = await trx('ledger_entries').where({ idempotency_key: key }).first();
+  if (existing) return;
+
   await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
   const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
   if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
@@ -124,7 +111,7 @@ async function creditBonus(
   await trx('wallets')
     .where({ user_id: userId })
     .update({
-      bonus_coin_balance: (BigInt(wallet.bonus_coin_balance) + amount).toString(),
+      coin_balance: (BigInt(wallet.coin_balance) + amount).toString(),
       updated_at: trx.fn.now(),
     });
 
@@ -132,13 +119,13 @@ async function creditBonus(
     ledger_id: randomUUID(),
     user_id: userId,
     entry_type: entryType,
-    currency: 'BONUS_COIN',
+    currency: 'COIN',
     amount: amount.toString(),
     status: 'POSTED',
     reference_type: referenceType,
     reference_id: referenceId,
-    idempotency_key: `${idempotencyKey}:${userId}`,
-    metadata: meta,
+    idempotency_key: key,
+    metadata: { ...meta, payoutVersion: 2 },
   });
 }
 
@@ -427,7 +414,7 @@ export async function settleMatchdayPredictions(userId: string, input: MatchdayP
 
       if (voidAll || winning == null || winnerStakeTotal === 0n) {
         for (const p of preds) {
-          await creditBonus(
+          await creditCoin(
             trx,
             p.user_id,
             BigInt(p.stake_coins),
@@ -453,7 +440,7 @@ export async function settleMatchdayPredictions(userId: string, input: MatchdayP
         const isLast = i === winners.length - 1;
         const share = isLast ? pool - distributed : (pool * BigInt(p.stake_coins)) / winnerStakeTotal;
         distributed += share;
-        await creditBonus(
+        await creditCoin(
           trx,
           p.user_id,
           share,

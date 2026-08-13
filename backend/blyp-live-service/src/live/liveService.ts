@@ -827,9 +827,9 @@ export async function endLiveSession(sessionId: string): Promise<void> {
   // history/analytics; only the IVS stage resource is deleted.
   const session = await getSessionById(sessionId);
 
-  // Close/refund any in-progress duel first, then atomically convert every
-  // completed duel prize from live-only coins into 1:1 earned gems. Both calls
-  // are idempotent, so a retried live-end request cannot duplicate value.
+  // Close/refund any in-progress duel first. Legacy PENDING prizes (pre-v2)
+  // may still convert 1:1 to GEM; v2 awards already credited coin_balance and
+  // are skipped inside settleReactionDuelLiveCoins (no double GEM).
   await endDuel({
     sessionId,
     userId: session?.hostUserId || 'system:live-end',

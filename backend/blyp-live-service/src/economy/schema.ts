@@ -340,7 +340,8 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
 
         `CREATE TABLE IF NOT EXISTS payout_accounts (
           user_id text PRIMARY KEY,
-          stripe_account_id text NOT NULL UNIQUE,
+          stripe_account_id text UNIQUE,
+          paypal_email text,
           payouts_enabled boolean NOT NULL DEFAULT false,
           details_submitted boolean NOT NULL DEFAULT false,
           charges_enabled boolean NOT NULL DEFAULT false,
@@ -363,6 +364,9 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           reasons jsonb NOT NULL DEFAULT '[]'::jsonb,
           stripe_transfer_id text,
           stripe_account_id text,
+          payout_method text NOT NULL DEFAULT 'stripe',
+          paypal_email text,
+          paypal_payout_batch_id text,
           idempotency_key text NOT NULL,
           metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
           created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -373,6 +377,14 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
 
         `CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_user ON withdrawal_requests (user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status ON withdrawal_requests (status)`,
+
+        // PayPal withdraw path (independent of Stripe Connect).
+        // stripe_account_id becomes nullable so PayPal-only creators can cash out.
+        `ALTER TABLE payout_accounts ALTER COLUMN stripe_account_id DROP NOT NULL`,
+        `ALTER TABLE payout_accounts ADD COLUMN IF NOT EXISTS paypal_email text`,
+        `ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS payout_method text NOT NULL DEFAULT 'stripe'`,
+        `ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS paypal_email text`,
+        `ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS paypal_payout_batch_id text`,
 
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
@@ -457,6 +469,8 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
             { gift_id: 'rocket', name: 'Rocket', coin_cost: 100, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🚀', motionTier: 'ultimate', motif: 'orbital_launch' } },
             { gift_id: 'revive', name: 'Revive', coin_cost: 30, enabled: true, rarity: 'epic', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🛟', action: 'revive', motionTier: 'epic', motif: 'life_ring' } },
             { gift_id: 'cheer_burst', name: 'Cheer Burst', coin_cost: 25, enabled: true, rarity: 'rare', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '💨', action: 'cheer_burst', motionTier: 'epic', motif: 'stadium_wave' } },
+            { gift_id: 'lion_baby', name: 'Baby Lion', coin_cost: 1000, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🦁', motionTier: 'ultimate', motif: 'regal_drop', cinemaId: 'lion_baby', filmClip: true } },
+            { gift_id: 'lion_big', name: 'Big Lion', coin_cost: 5000, enabled: true, rarity: 'legendary', min_level: 0, cooldown_ms: 0, asset_json: { emoji: '🦁', motionTier: 'ultimate', motif: 'orbital_launch', cinemaId: 'lion_big', filmClip: true } },
           ])
           .onConflict('gift_id')
           .merge(['name', 'coin_cost', 'enabled', 'rarity', 'asset_json']);

@@ -48,14 +48,33 @@ const economyEnvSchema = z.object({
   WITHDRAW_GEM_MINOR_UNITS: z.coerce.number().int().min(1).optional(),
   /** Alias accepted for plan naming; same as WITHDRAW_GEM_MINOR_UNITS. */
   WITHDRAW_COIN_MINOR_UNITS: z.coerce.number().int().min(1).optional(),
-  /** Kill-switch. Also requires non-empty STRIPE_SECRET_KEY at runtime. Keep 0 until sk_live_. */
+  /**
+   * Kill-switch. Runtime also needs Stripe secret and/or PayPal client credentials
+   * so at least one settle rail can pay out. Keep 0 until a rail is ready.
+   */
   ENABLE_WITHDRAWALS: z.coerce.number().int().min(0).max(1).optional(),
   STRIPE_CONNECT_RETURN_URL: z.string().optional(),
   STRIPE_CONNECT_REFRESH_URL: z.string().optional(),
 
-  // Live Games (optional; disabled unless explicitly enabled)
+  /** PayPal REST app (Payouts). Optional — when set, creators can cash out without Connect. */
+  PAYPAL_CLIENT_ID: z.string().optional(),
+  PAYPAL_CLIENT_SECRET: z.string().optional(),
+  /** live | sandbox. Default live when unset. */
+  PAYPAL_MODE: z.string().optional(),
+
+  // Live Games (optional; disabled unless explicitly enabled).
+  // SAFE and CASHOUT both credit spendable COIN as of payout v2.
   ECONOMY_LIVE_GAMES_ENABLED: z.coerce.number().int().min(0).max(1).optional(),
   LIVE_GAMES_PAYOUT_MODE: z.enum(['SAFE', 'CASHOUT']).optional(),
+
+  // House-funded live-game prize mint caps (optional overrides)
+  HOUSE_GAME_PRIZE_MAX_PER_AWARD: z.coerce.number().int().min(1).optional(),
+  HOUSE_GAME_PRIZE_MAX_PER_USER_DAY: z.coerce.number().int().min(1).optional(),
+  HOUSE_GAME_PRIZE_MAX_PER_STREAM: z.coerce.number().int().min(1).optional(),
+  // Reaction Duel uses full 3× stake mint (separate from Frenemies 500/award).
+  HOUSE_GAME_PRIZE_RD_MAX_PER_AWARD: z.coerce.number().int().min(1).optional(),
+  HOUSE_GAME_PRIZE_RD_MAX_PER_USER_DAY: z.coerce.number().int().min(1).optional(),
+  HOUSE_GAME_PRIZE_RD_MAX_PER_STREAM: z.coerce.number().int().min(1).optional(),
 
   // Matchday Live (optional; write endpoints disabled unless explicitly enabled)
   ECONOMY_MATCHDAY_ENABLED: z.coerce.number().int().min(0).max(1).optional(),

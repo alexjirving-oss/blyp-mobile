@@ -52,7 +52,7 @@ const STEPS = [
   {
     n: '7',
     title: 'Host conducts',
-    body: 'The host taps Spin each round (unless Auto-continue is on). Opening the show does not auto-spin.',
+    body: 'The host taps Spin each round (unless Auto mode is on). Opening the show does not auto-spin. Auto mode auto-spins on an interval and fills/drops seats each round.',
   },
   {
     n: '8',
@@ -69,8 +69,8 @@ const STEPS = [
 export default function FrenemiesRulesSheet({
   visible,
   onClose,
-  throwCoins = 25,
-  soloCoins = 25,
+  throwCoins = 10,
+  soloCoins = 10,
   payer = 'host',
   isHost = false,
   autoContinue = false,
@@ -78,7 +78,7 @@ export default function FrenemiesRulesSheet({
 }) {
   const coinStep = `Throw reward ${throwCoins} · Solo challenge win ${soloCoins} · Paid by ${
     payer === 'house' ? 'House' : 'Host'
-  } (BONUS coins).`;
+  } (spendable coins).`;
 
   return (
     <Modal
@@ -145,7 +145,7 @@ export default function FrenemiesRulesSheet({
                   Spin · {spinSec}s default this show
                 </Text>
                 <Text style={styles.metaLine} allowFontScaling={false}>
-                  Auto-continue · {autoContinue ? 'ON' : 'OFF'}
+                  Auto mode · {autoContinue ? 'ON' : 'OFF'}
                 </Text>
                 {isHost ? (
                   <Text style={[styles.metaLine, { color: GOLD_SOFT }]} allowFontScaling={false}>

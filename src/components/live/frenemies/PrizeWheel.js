@@ -1,12 +1,11 @@
 /**
- * Frenemies prize wheel — 11 segments, right-side pointer, ease-out land
+ * Frenemies prize wheel — 11 segments, right-side pointer, smooth ease-out land
  * on the authoritative server slot (targetSlot / landedSlot).
  * Occupied slots paint guest photo (else initials) when roster is known.
  * Idle (ready) never rotates — only a soft outer glow pulse.
  *
- * Spin: Reanimated native rotation (60fps). Peg ticks are scheduled from the
- * easing curve (no Animated.addListener) so ticks stay consistent with angular
- * velocity without stalling the JS thread.
+ * Spin: one coherent Reanimated rotation (quartic ease-out). Peg ticks are
+ * scheduled from the easing curve so they decelerate t-t-t… with the wheel.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
@@ -105,28 +104,35 @@ export function landRotationForSlot(slot, maxSlots, extraSpins = 8) {
 }
 
 /**
- * Long high-speed phase then smooth ease-out.
- * First ~58% of time covers ~78% of travel; remaining time eases into the land.
+ * Single coherent quartic ease-out — fast start, continuous deceleration, soft land.
+ * No two-stage kink (that read as a jerky "gear change").
  * Worklet so Reanimated can drive native rotation without JS stutter.
  */
 export function easeWheelSpin(t) {
   'worklet';
   const x = Math.min(1, Math.max(0, t));
-  if (x <= 0.58) {
-    return (0.78 * x) / 0.58;
-  }
-  const u = (x - 0.58) / 0.42;
-  const eased = 1 - (1 - u) ** 3;
-  return 0.78 + 0.22 * eased;
+  const inv = 1 - x;
+  return 1 - inv * inv * inv * inv;
+}
+
+/** Forward land angle: always rotate clockwise from `fromDeg` with ≥ extraSpins turns. */
+export function forwardLandFrom(fromDeg, slot, maxSlots, extraSpins = 8) {
+  const park = landRotationForSlot(slot, maxSlots, 0);
+  const minTravel = Math.max(1, extraSpins) * 360;
+  let end = park;
+  // Lift park into the forward half-turn ahead of current angle.
+  while (end <= fromDeg) end += 360;
+  while (end - fromDeg < minTravel) end += 360;
+  return end;
 }
 
 function spinsForDuration(ms) {
   const s = Math.max(0, ms) / 1000;
-  // More revolutions + longer coast for a "keeps spinning fast" feel.
-  if (s <= 8) return 6;
-  if (s <= 20) return 10;
-  if (s <= 40) return 14;
-  return 18;
+  // Enough revolutions for a long coast; ticks naturally slow with ease-out.
+  if (s <= 8) return 5;
+  if (s <= 15) return 8;
+  if (s <= 25) return 11;
+  return 14;
 }
 
 function segUnderPointer(rotationDeg, maxSlots) {
@@ -137,18 +143,12 @@ function segUnderPointer(rotationDeg, maxSlots) {
 }
 
 /**
- * Inverse of easeWheelSpin for scheduling peg-pass ticks at wall-clock times.
+ * Analytic inverse of quartic ease-out: y = 1-(1-x)^4 → x = 1-(1-y)^(1/4).
+ * Used to schedule peg-pass ticks at wall-clock times that match angular velocity.
  */
 function invertEaseWheelSpin(y) {
   const target = Math.min(1, Math.max(0, y));
-  let lo = 0;
-  let hi = 1;
-  for (let i = 0; i < 28; i += 1) {
-    const mid = (lo + hi) / 2;
-    if (easeWheelSpin(mid) < target) lo = mid;
-    else hi = mid;
-  }
-  return (lo + hi) / 2;
+  return 1 - (1 - target) ** 0.25;
 }
 
 function initialsFor(name) {
@@ -355,12 +355,16 @@ export default function PrizeWheel({
   };
 
   // Rotation only while spinning — ready/idle stays parked (no auto-spin visual).
+  // Continuous: ease forward from the current parked angle (never snap through 0).
   useEffect(() => {
     clearTickTimers();
     if (phase !== 'spinning') {
       cancelAnimation(spinDeg);
-      const land = landRotationForSlot(slot || 1, maxSlots, 0);
-      spinDeg.value = land;
+      const park = landRotationForSlot(slot || 1, maxSlots, 0);
+      const cur = spinDeg.value;
+      // Nearest equivalent park so landing does not rewind visually.
+      const nearest = park + Math.round((cur - park) / 360) * 360;
+      spinDeg.value = nearest;
       return undefined;
     }
 
@@ -372,8 +376,21 @@ export default function PrizeWheel({
     const progress = elapsed / total;
 
     const extra = spinsForDuration(total);
-    const finalDeg = landRotationForSlot(targetSlot || slot || 1, maxSlots, extra);
-    const fromDeg = easeWheelSpin(progress) * finalDeg;
+    const target = targetSlot || slot || 1;
+    const cur = spinDeg.value;
+    let startDeg;
+    let finalDeg;
+    if (progress < 0.03) {
+      // Fresh spin: coast forward from wherever the wheel is parked.
+      startDeg = cur;
+      finalDeg = forwardLandFrom(cur, target, maxSlots, extra);
+    } else {
+      // Mid-spin join / effect re-entry: deterministic track for viewer sync.
+      finalDeg = landRotationForSlot(target, maxSlots, extra);
+      startDeg = finalDeg - extra * 360;
+    }
+    const travel = finalDeg - startDeg;
+    const fromDeg = startDeg + travel * easeWheelSpin(progress);
     spinDeg.value = fromDeg;
 
     schedulePegTicks(fromDeg, finalDeg, remaining, maxSlots);

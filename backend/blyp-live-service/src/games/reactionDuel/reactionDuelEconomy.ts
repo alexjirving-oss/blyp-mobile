@@ -4,6 +4,8 @@ import { getEconomyInfra } from '../../economy/infra';
 import { EconomyError } from '../../economy/economyErrors';
 import { ensureEconomySchema } from '../../economy/schema';
 import { getEconomyEnv } from '../../config/economyEnv';
+import { mintHouseGamePrize } from '../../economy/houseGamePrizeMint';
+import { planPaidOnlyCoinDebit } from '../../economy/paidOnlyCoinDebit';
 import {
   isValidReactionDuelStake,
   reactionDuelPrizeCoins,
@@ -19,26 +21,33 @@ export interface ReactionEntryDebitPlan extends ReactionWalletAmounts {
   bonusCoinCost: bigint;
 }
 
+/**
+ * Paid-only stake (lock-3). Bonus cannot fund entries that mint spendable COIN prizes.
+ * bonusCoinCost stays 0 for ledger/refund shape compatibility.
+ */
 export function planReactionEntryDebit(
   wallet: ReactionWalletAmounts,
   amount: bigint,
 ): ReactionEntryDebitPlan {
-  const bonusCoinCost =
-    wallet.bonusCoinBalance >= amount ? amount : wallet.bonusCoinBalance;
-  const paidCoinCost = amount - bonusCoinCost;
-  if (wallet.coinBalance < paidCoinCost) {
-    throw new EconomyError(
-      'INSUFFICIENT_FUNDS',
-      409,
-      `Reaction Duel requires ${amount.toString()} coins`,
-    );
-  }
+  const { usePaid } = planPaidOnlyCoinDebit(
+    wallet.coinBalance,
+    amount,
+    'paid coins for Reaction Duel',
+  );
   return {
-    paidCoinCost,
-    bonusCoinCost,
-    coinBalance: wallet.coinBalance - paidCoinCost,
-    bonusCoinBalance: wallet.bonusCoinBalance - bonusCoinCost,
+    paidCoinCost: usePaid,
+    bonusCoinCost: 0n,
+    coinBalance: wallet.coinBalance - usePaid,
+    bonusCoinBalance: wallet.bonusCoinBalance,
   };
+}
+
+/** Mint failure after lock → refund LOCKED stakes (never trap burned entries). */
+export function reactionPrizeMintFailureRecovery(): {
+  refundLockedEntries: true;
+  reason: 'prize_mint_failed';
+} {
+  return { refundLockedEntries: true, reason: 'prize_mint_failed' };
 }
 
 export function planReactionEntryRefund(
@@ -328,28 +337,29 @@ export function buildReactionDuelPrizeCredit(args: {
     entryType: 'REACTION_DUEL_PRIZE' as const,
     currency: 'COIN' as const,
     amount: prizeCoins,
-    status: 'PENDING' as const,
+    /** Immediate spendable wallet credit (v2) — not live-end GEM convert. */
+    status: 'POSTED' as const,
     referenceType: 'REACTION_DUEL' as const,
     referenceId: args.duelId,
-    idempotencyKey: `reaction-duel:${args.duelId}:prize`,
+    idempotencyKey: `reaction-duel:v2:${args.duelId}:prize`,
     metadata: {
       duelId: args.duelId,
       sessionId: args.sessionId,
       stakeCoins: args.stakeCoins,
       prizeCoins,
       reason: args.reason,
-      liveOnly: true,
-      convertsAtLiveEnd: true,
-      coinToGemCountRatio: '1:1',
-      gemCashoutValueRelativeToLiveCoin: 0.5,
+      liveOnly: false,
+      convertsAtLiveEnd: false,
+      walletCredited: true,
+      payoutVersion: 2,
     },
   };
 }
 
 /**
- * Records the winner's 3× prize as live-scoped COIN, not GEM. It intentionally
- * does not enter the spendable wallet: the live-end hook converts this exact
- * ledger amount 1:1 into earned gems, preventing spend-then-convert duplication.
+ * Credits the winner's 3× prize immediately to spendable coin_balance via
+ * capped house mint (anti-farm). Legacy PENDING + live-end GEM convert is not
+ * used for v2 awards.
  */
 export async function awardReactionDuelPrize(args: {
   duelId: string;
@@ -367,7 +377,8 @@ export async function awardReactionDuelPrize(args: {
     ...args,
   });
 
-  return db.transaction(async (trx) => {
+  // Validate locked stakes first (do not settle until mint succeeds / replays).
+  await db.transaction(async (trx) => {
     const entries = (await trx('reaction_duel_entries')
       .where({
         duel_id: args.duelId,
@@ -391,32 +402,36 @@ export async function awardReactionDuelPrize(args: {
         'Both Reaction Duel entries must lock the agreed stake',
       );
     }
+  });
 
-    const existing = await trx('ledger_entries')
-      .where({ idempotency_key: prizeCredit.idempotencyKey })
-      .first();
-    if (existing) {
-      return {
-        replay: true,
-        coinsCredited: Number(existing.amount),
-        currency: String(existing.currency),
-        liveOnly: true,
-      };
-    }
-
-    await trx('ledger_entries').insert({
-      ledger_id: randomUUID(),
-      user_id: prizeCredit.userId,
-      entry_type: prizeCredit.entryType,
-      currency: prizeCredit.currency,
-      amount: prizeCredit.amount.toString(),
-      status: prizeCredit.status,
-      reference_type: prizeCredit.referenceType,
-      reference_id: prizeCredit.referenceId,
-      idempotency_key: prizeCredit.idempotencyKey,
-      metadata: prizeCredit.metadata,
+  let minted: { coins: number; replay: boolean; currency: 'COIN' };
+  try {
+    minted = await mintHouseGamePrize({
+      winnerUserId: prizeCredit.userId,
+      amount: prizeCredit.amount,
+      idempotencyKey: prizeCredit.idempotencyKey,
+      game: 'reaction_duel',
+      sessionId: args.sessionId,
+      referenceType: 'REACTION_DUEL',
+      referenceId: args.duelId,
+      reason: args.reason,
     });
+  } catch (err) {
+    // Cap / infra failure after lock must not trap burned stakes.
+    const recovery = reactionPrizeMintFailureRecovery();
+    try {
+      await refundReactionDuelEntries({
+        duelId: args.duelId,
+        sessionId: args.sessionId,
+        reason: recovery.reason,
+      });
+    } catch {
+      // Prefer surfacing the mint failure; refund is best-effort if already SETTLED.
+    }
+    throw err;
+  }
 
+  await db.transaction(async (trx) => {
     await trx('reaction_duel_entries')
       .where({ duel_id: args.duelId, session_id: args.sessionId })
       .whereIn('status', ['LOCKED', 'SETTLED'])
@@ -425,14 +440,15 @@ export async function awardReactionDuelPrize(args: {
         settled_at: trx.fn.now(),
         updated_at: trx.fn.now(),
       });
-
-    return {
-      replay: false,
-      coinsCredited: prizeCredit.amount,
-      currency: prizeCredit.currency,
-      liveOnly: true,
-    };
   });
+
+  return {
+    replay: minted.replay,
+    coinsCredited: minted.coins,
+    currency: 'COIN' as const,
+    liveOnly: false,
+    walletCredited: true,
+  };
 }
 
 type ReactionPrizeLedgerRow = {
@@ -466,10 +482,18 @@ export function planReactionDuelGemSettlement(coins: bigint) {
   };
 }
 
+/** True only for legacy PENDING prizes that still convert at live end. */
+export function shouldConvertReactionPrizeToGems(meta: Record<string, unknown>): boolean {
+  if (meta.walletCredited === true) return false;
+  if (meta.convertsAtLiveEnd === false) return false;
+  if (Number(meta.payoutVersion) >= 2) return false;
+  return true;
+}
+
 /**
- * Converts every unsettled prize from one live session into earned GEM at 1:1
- * count. Production's normal pending-gem hold is retained. The transaction is
- * idempotent: each source coin row is marked CONVERTED with one unique GEM row.
+ * Legacy live-end GEM convert for pre-v2 PENDING prizes only.
+ * v2 awards already credit coin_balance and must never convert to GEM
+ * (guards: status POSTED, payoutVersion 2, convertsAtLiveEnd false).
  */
 export async function settleReactionDuelLiveCoins(args: { sessionId: string }) {
   const { db } = getEconomyInfra();
@@ -478,7 +502,7 @@ export async function settleReactionDuelLiveCoins(args: { sessionId: string }) {
   const gemStatus = env.PENDING_GEMS_HOLD_SECONDS > 0 ? 'PENDING' : 'POSTED';
 
   return db.transaction(async (trx) => {
-    const prizes = (await trx('ledger_entries')
+    const rawPrizes = (await trx('ledger_entries')
       .where({
         entry_type: 'REACTION_DUEL_PRIZE',
         currency: 'COIN',
@@ -489,12 +513,18 @@ export async function settleReactionDuelLiveCoins(args: { sessionId: string }) {
       .orderBy('created_at', 'asc')
       .forUpdate()) as ReactionPrizeLedgerRow[];
 
+    // Skip any row that was already wallet-credited or opted out of GEM convert.
+    const prizes = rawPrizes.filter((prize) =>
+      shouldConvertReactionPrizeToGems(ledgerMetadata(prize.metadata)),
+    );
+
     if (prizes.length === 0) {
       return {
         prizesConverted: 0,
         coinsConverted: 0,
         gemsCredited: 0,
         gemStatus,
+        skippedV2: rawPrizes.length - prizes.length,
       };
     }
 

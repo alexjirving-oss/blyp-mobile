@@ -157,7 +157,6 @@ export default function FrenemiesOverlay({
   const [tick, setTick] = useState(0);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [spinCue, setSpinCue] = useState(false);
   const [landFlash, setLandFlash] = useState(null);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [endRecap, setEndRecap] = useState(null);
@@ -165,7 +164,6 @@ export default function FrenemiesOverlay({
   const [showRulesTip, setShowRulesTip] = useState(false);
   const [topUpOpen, setTopUpOpen] = useState(false);
   const subRef = useRef(null);
-  const spinCueWindowRef = useRef(null);
   const tension = useRef(new Animated.Value(0)).current;
   const landAnim = useRef(new Animated.Value(0)).current;
   const prevPhaseRef = useRef(null);
@@ -254,8 +252,8 @@ export default function FrenemiesOverlay({
   const stats = event?.stats || {};
   const active = state?.active && phase && phase !== 'ended' && phase !== 'idle';
   const maxSlots = event?.maxSlots || MAX_GUEST_SLOTS;
-  const throwCoins = event?.throwCoins ?? settings.throwCoins ?? event?.houseCoins ?? 25;
-  const soloCoins = event?.soloCoins ?? settings.soloCoins ?? 25;
+  const throwCoins = event?.throwCoins ?? settings.throwCoins ?? event?.houseCoins ?? 10;
+  const soloCoins = event?.soloCoins ?? settings.soloCoins ?? 10;
   const spinMs = event?.spinMs || settings.spinMs || 15_000;
   const chooseMs = event?.chooseMs || settings.chooseMs || 20_000;
   const payer = state?.payer || (settings.housePays ? 'house' : 'host');
@@ -375,7 +373,7 @@ export default function FrenemiesOverlay({
   }, []);
 
   const doSpin = async () => {
-    if (spinCue || busy) return;
+    if (busy) return;
     const needed = preview?.needed ?? prizePreview;
     const hostFunded = payer === 'host' && needed > 0;
     if (hostFunded && preview && !preview.canSpin) {
@@ -387,17 +385,10 @@ export default function FrenemiesOverlay({
       return;
     }
 
+    // One coherent spin: call server immediately — PrizeWheel eases from park to land.
     const run = async () => {
-      const cueStart = Date.now();
-      spinCueWindowRef.current = {
-        start: new Date(cueStart).toISOString(),
-        end: new Date(cueStart + 1200).toISOString(),
-      };
-      setSpinCue(true);
-      setErr(null);
-      // 1.2s lock-in cue before server spin.
-      await new Promise((r) => setTimeout(r, 1200));
       setBusy(true);
+      setErr(null);
       try {
         const res = await frenemiesSpin(sessionId);
         applyEvent(res);
@@ -415,8 +406,6 @@ export default function FrenemiesOverlay({
         }
       } finally {
         setBusy(false);
-        setSpinCue(false);
-        spinCueWindowRef.current = null;
       }
     };
 
@@ -541,7 +530,7 @@ export default function FrenemiesOverlay({
 
   const phaseLabel = (() => {
     if (phase === 'ready') return 'Ready';
-    if (phase === 'spinning') return spinCue ? 'Locking in…' : 'Spinning';
+    if (phase === 'spinning') return 'Spinning';
     if (phase === 'choosing') return 'Throw';
     if (phase === 'challenge') return 'Challenge';
     if (phase === 'resolving') return 'Result';
@@ -755,153 +744,145 @@ export default function FrenemiesOverlay({
               )}
             </View>
 
-            {(phase === 'ready' || spinCue) ? (
-              <View style={styles.readyBlock}>
+            {(phase === 'ready' || phase === 'spinning') ? (
+              <Animated.View
+                style={[
+                  phase === 'spinning' ? styles.wheelBlock : styles.readyBlock,
+                  phase === 'spinning' ? { transform: [{ scale: tensionScale }] } : null,
+                ]}
+              >
                 <View style={styles.stageFrame}>
                   <PrizeWheel
-                    size={196}
+                    size={phase === 'spinning' ? 210 : 196}
                     maxSlots={maxSlots}
-                    phase={spinCue ? 'spinning' : 'ready'}
+                    phase={phase === 'spinning' ? 'spinning' : 'ready'}
                     roundId={state?.roundId || 'ready'}
-                    targetSlot={1}
-                    landedSlot={null}
-                    spinStartedAt={spinCue ? spinCueWindowRef.current?.start || null : null}
-                    spinEndsAt={spinCue ? spinCueWindowRef.current?.end || null : null}
+                    targetSlot={state?.targetSlot || 1}
+                    landedSlot={state?.landedSlot || null}
+                    spinStartedAt={state?.spinStartedAt || null}
+                    spinEndsAt={state?.spinEndsAt || null}
                     occupiedBySlot={occupiedBySlot}
                   />
                 </View>
-                <Text style={styles.readyTitle} allowFontScaling={false}>
-                  {spinCue ? 'Here we go…' : 'Ready when you are'}
-                </Text>
-                <Text style={styles.readyHint} allowFontScaling={false}>
-                  {payer === 'house'
-                    ? `House covers up to ${prizePreview} coins`
-                    : preview && !preview.canSpin
-                      ? `Need ${preview.needed} coins to cover prizes`
-                      : `Up to ${prizePreview} coins reserved at Spin`}
-                </Text>
-                {canConduct && !spinCue ? (
-                  needsTopUp ? (
-                    <TouchableOpacity
-                      style={styles.topUpBtn}
-                      onPress={openTopUp}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={styles.topUpBtnText} allowFontScaling={false}>
-                        Top up · need {preview.needed}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.spinBtn}
-                      onPress={doSpin}
-                      disabled={busy}
-                      activeOpacity={0.85}
-                    >
-                      {busy ? (
-                        <ActivityIndicator color={INK} />
-                      ) : (
-                        <Text style={styles.spinBtnText} allowFontScaling={false}>
-                          Spin · {spinTotalSecs}s
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  )
-                ) : null}
-                {!canConduct ? (
-                  <View style={styles.queueViewerBlock}>
-                    {isSeated ? (
-                      <Text style={styles.readyHint} allowFontScaling={false}>
-                        You are on stage · first spin is protected until your box hits
-                      </Text>
-                    ) : myQueuePos ? (
-                      <>
-                        <Text style={styles.readyHint} allowFontScaling={false}>
-                          In queue · #{myQueuePos} — fair fill after each round
-                        </Text>
+                {phase === 'ready' ? (
+                  <>
+                    <Text style={styles.readyTitle} allowFontScaling={false}>
+                      Ready when you are
+                    </Text>
+                    <Text style={styles.readyHint} allowFontScaling={false}>
+                      {payer === 'house'
+                        ? `House covers up to ${prizePreview} coins`
+                        : preview && !preview.canSpin
+                          ? `Need ${preview.needed} coins to cover prizes`
+                          : `Up to ${prizePreview} coins reserved at Spin`}
+                    </Text>
+                    {canConduct ? (
+                      needsTopUp ? (
                         <TouchableOpacity
-                          style={styles.queueLeaveBtn}
-                          onPress={leaveFrenemiesQueue}
-                          disabled={busy}
+                          style={styles.topUpBtn}
+                          onPress={openTopUp}
+                          activeOpacity={0.85}
                         >
-                          <Text style={styles.queueLeaveText} allowFontScaling={false}>
-                            Leave queue
+                          <Text style={styles.topUpBtnText} allowFontScaling={false}>
+                            Top up · need {preview.needed}
                           </Text>
                         </TouchableOpacity>
-                      </>
-                    ) : (
-                      <TouchableOpacity
-                        style={styles.queueJoinBtn}
-                        onPress={joinFrenemiesQueue}
-                        disabled={busy}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.queueJoinText} allowFontScaling={false}>
-                          Request to join · queue
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.spinBtn}
+                          onPress={doSpin}
+                          disabled={busy}
+                          activeOpacity={0.85}
+                        >
+                          {busy ? (
+                            <ActivityIndicator color={INK} />
+                          ) : (
+                            <Text style={styles.spinBtnText} allowFontScaling={false}>
+                              Spin · {spinTotalSecs}s
+                            </Text>
+                          )}
+                        </TouchableOpacity>
+                      )
+                    ) : null}
+                    {!canConduct ? (
+                      <View style={styles.queueViewerBlock}>
+                        {isSeated ? (
+                          <Text style={styles.readyHint} allowFontScaling={false}>
+                            You are on stage · first spin is protected until your box hits
+                          </Text>
+                        ) : myQueuePos ? (
+                          <>
+                            <Text style={styles.readyHint} allowFontScaling={false}>
+                              In queue · #{myQueuePos} — fair fill after each round
+                            </Text>
+                            <TouchableOpacity
+                              style={styles.queueLeaveBtn}
+                              onPress={leaveFrenemiesQueue}
+                              disabled={busy}
+                            >
+                              <Text style={styles.queueLeaveText} allowFontScaling={false}>
+                                Leave queue
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.queueJoinBtn}
+                            onPress={joinFrenemiesQueue}
+                            disabled={busy}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={styles.queueJoinText} allowFontScaling={false}>
+                              Request to join · queue
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ) : null}
+                    {canConduct && joinQueue.length ? (
+                      <View style={styles.queueHostBlock}>
+                        <Text style={styles.queueHostTitle} allowFontScaling={false}>
+                          Queue · {joinQueue.length}
                         </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                ) : null}
-                {canConduct && joinQueue.length ? (
-                  <View style={styles.queueHostBlock}>
-                    <Text style={styles.queueHostTitle} allowFontScaling={false}>
-                      Queue · {joinQueue.length}
-                    </Text>
-                    {joinQueue.slice(0, 5).map((q) => (
-                      <Text key={q.userId} style={styles.queueHostRow} numberOfLines={1} allowFontScaling={false}>
-                        #{q.position} {q.displayName || 'Guest'}
+                        {joinQueue.slice(0, 5).map((q) => (
+                          <Text key={q.userId} style={styles.queueHostRow} numberOfLines={1} allowFontScaling={false}>
+                            #{q.position} {q.displayName || 'Guest'}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+                  </>
+                ) : (
+                  <View style={styles.spinMeta}>
+                    <TimerRing
+                      endsAt={state.spinEndsAt}
+                      totalMs={spinMs}
+                      size={64}
+                      stroke={5}
+                      label="LEFT"
+                      tone={spinSecsLeft <= 5 ? 'rose' : 'gold'}
+                      nowTick={tick}
+                    />
+                    <View style={styles.spinCopy}>
+                      <Text style={styles.spinTitle} allowFontScaling={false}>
+                        {spinSecsLeft <= 5 ? 'Landing…' : 'Who’s next?'}
                       </Text>
-                    ))}
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            {phase === 'spinning' && !spinCue ? (
-              <Animated.View style={[styles.wheelBlock, { transform: [{ scale: tensionScale }] }]}>
-                <View style={styles.stageFrame}>
-                  <PrizeWheel
-                    size={210}
-                    maxSlots={maxSlots}
-                    phase={phase}
-                    roundId={state.roundId}
-                    targetSlot={state.targetSlot}
-                    landedSlot={state.landedSlot}
-                    spinStartedAt={state.spinStartedAt}
-                    spinEndsAt={state.spinEndsAt}
-                    occupiedBySlot={occupiedBySlot}
-                  />
-                </View>
-                <View style={styles.spinMeta}>
-                  <TimerRing
-                    endsAt={state.spinEndsAt}
-                    totalMs={spinMs}
-                    size={64}
-                    stroke={5}
-                    label="LEFT"
-                    tone={spinSecsLeft <= 5 ? 'rose' : 'gold'}
-                    nowTick={tick}
-                  />
-                  <View style={styles.spinCopy}>
-                    <Text style={styles.spinTitle} allowFontScaling={false}>
-                      {spinSecsLeft <= 5 ? 'Landing…' : 'Who’s next?'}
-                    </Text>
-                    <Text style={styles.spinHint} allowFontScaling={false}>
-                      {spinSecsLeft}s of {spinTotalSecs}s · boxes 1–{maxSlots}
-                    </Text>
-                    <View style={styles.tensionBar}>
-                      <View
-                        style={[
-                          styles.tensionFill,
-                          {
-                            width: `${Math.round((1 - spinSecsLeft / spinTotalSecs) * 100)}%`,
-                          },
-                        ]}
-                      />
+                      <Text style={styles.spinHint} allowFontScaling={false}>
+                        {spinSecsLeft}s of {spinTotalSecs}s · boxes 1–{maxSlots}
+                      </Text>
+                      <View style={styles.tensionBar}>
+                        <View
+                          style={[
+                            styles.tensionFill,
+                            {
+                              width: `${Math.round((1 - spinSecsLeft / spinTotalSecs) * 100)}%`,
+                            },
+                          ]}
+                        />
+                      </View>
                     </View>
                   </View>
-                </View>
+                )}
               </Animated.View>
             ) : null}
 
@@ -927,7 +908,7 @@ export default function FrenemiesOverlay({
                 </Text>
                 {lastResult?.coins > 0 && lastResult?.payer ? (
                   <Text style={styles.ledgerChip} allowFontScaling={false}>
-                    {lastResult.coins} BONUS · {lastResult.payer === 'house' ? 'House' : 'Host'}
+                    {lastResult.coins} COIN · {lastResult.payer === 'house' ? 'House' : 'Host'}
                   </Text>
                 ) : null}
               </View>

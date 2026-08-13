@@ -13,7 +13,7 @@ import { getAdminEnv } from '../../config/adminEnv';
 import { pickQuiz, pickPhrase } from './questions';
 import { EconomyError } from '../../economy/economyErrors';
 import {
-  getSpendableCoins,
+  getPaidCoins,
   holdHostPrize,
   releaseHostHold,
   settlePrizeAward,
@@ -524,6 +524,7 @@ async function awardAndResolve(
         awardAmount: args.awardAmount,
         roundId: room.state.roundId,
         reason: args.text,
+        sessionId: room.sessionId,
       });
       coins = settled.coins;
       payer = settled.payer;
@@ -942,7 +943,8 @@ export async function spinRound(args: {
 
     const maxPrize = maxPrizeForSettings(room.settings);
     if (!room.settings.housePays && maxPrize > 0) {
-      const bal = await getSpendableCoins(room.hostUserId);
+      // Option A: paid coin_balance only — bonus cannot fund the hold.
+      const bal = await getPaidCoins(room.hostUserId);
       if (bal < maxPrize) {
         const err: any = new Error('INSUFFICIENT_FUNDS');
         err.code = 'INSUFFICIENT_FUNDS';
@@ -1033,6 +1035,20 @@ export async function updateSettings(args: {
         stopTicks(args.sessionId);
       }
     } else if (room.state.phase === 'ready') {
+      // Owner walk-away: arm first auto-spin if none pending.
+      if (!room.state.nextSpinAt) {
+        room.state.nextSpinAt = new Date(
+          Date.now() + room.settings.autoContinueDelayMs,
+        ).toISOString();
+      }
+      ensureTicks(args.sessionId);
+    } else if (
+      room.state.phase === 'resolving' &&
+      !room.state.nextSpinAt
+    ) {
+      room.state.nextSpinAt = new Date(
+        Date.now() + room.settings.autoContinueDelayMs,
+      ).toISOString();
       ensureTicks(args.sessionId);
     }
     room.state.prizePreview = maxPrizeForSettings(room.settings);
@@ -1294,7 +1310,7 @@ export async function getHostPrizePreview(sessionId: string): Promise<{
   if (payer === 'house') {
     return { balance: 0, needed, canSpin: true, payer };
   }
-  const balance = await getSpendableCoins(room.hostUserId);
+  const balance = await getPaidCoins(room.hostUserId);
   return { balance, needed, canSpin: balance >= needed || needed === 0, payer };
 }
 

@@ -1,5 +1,5 @@
 /**
- * Creator earnings withdrawals (GEM → Stripe Connect Express).
+ * Creator earnings withdrawals (GEM → Stripe Connect Express and/or PayPal Payouts).
  * Purchased COIN balances are never cashable.
  */
 
@@ -24,6 +24,12 @@ import {
   humanizeConnectBlocker,
   type ConnectStatus,
 } from './connectStatus';
+import {
+  getPayPalReadiness,
+  isValidPaypalEmail,
+  paypalConfigured,
+  sendPaypalPayout,
+} from './paypalPayouts';
 
 export type { ConnectStatus } from './connectStatus';
 export { deriveConnectFlags } from './connectStatus';
@@ -226,18 +232,28 @@ export function getStripeReadiness(): {
 }
 
 /**
- * Kill-switch + Stripe gate. ENABLE_WITHDRAWALS=1 alone is not enough —
- * a missing/empty STRIPE_SECRET_KEY keeps cash-out closed so we never
- * accept requests we cannot settle.
+ * Kill-switch + settle-rail gate. ENABLE_WITHDRAWALS=1 alone is not enough —
+ * at least one of Stripe secret or PayPal client credentials must be present
+ * so we can settle (or queue for admin PayPal send when secrets exist).
  */
 export function withdrawalsEnabled(): boolean {
   const env = getEconomyEnv();
-  return Number(env.ENABLE_WITHDRAWALS || 0) === 1 && stripeSecretConfigured();
+  return (
+    Number(env.ENABLE_WITHDRAWALS || 0) === 1 &&
+    (stripeSecretConfigured() || paypalConfigured())
+  );
 }
 
 function assertWithdrawalsEnabled() {
-  if (Number(getEconomyEnv().ENABLE_WITHDRAWALS || 0) === 1 && !stripeSecretConfigured()) {
-    throw new EconomyError('STRIPE_NOT_CONFIGURED', 503, 'Stripe is not configured');
+  if (Number(getEconomyEnv().ENABLE_WITHDRAWALS || 0) !== 1) {
+    throw new EconomyError('WITHDRAWALS_DISABLED', 403, 'Withdrawals are disabled');
+  }
+  if (!stripeSecretConfigured() && !paypalConfigured()) {
+    throw new EconomyError(
+      'PAYOUT_RAIL_NOT_CONFIGURED',
+      503,
+      'No payout rail configured (Stripe or PayPal)',
+    );
   }
   if (!withdrawalsEnabled()) {
     throw new EconomyError('WITHDRAWALS_DISABLED', 403, 'Withdrawals are disabled');
@@ -409,18 +425,43 @@ export async function getWithdrawEligibility(
   assertWithdrawalsEnabled();
   // Always re-fetch Stripe Connect flags before deciding Connect vs withdraw UI.
   // Relying on stale payout_accounts rows (webhook lag) caused a Connect loop.
-  const connect = await getConnectStatus(userId);
+  const connect = stripeSecretConfigured()
+    ? await getConnectStatus(userId)
+    : deriveConnectFlags({
+        linked: false,
+        payoutsEnabled: false,
+        detailsSubmitted: false,
+        chargesEnabled: false,
+      });
   const bal = await computeWithdrawableGems(userId);
+  const { db } = getEconomyInfra();
+  const payoutRow = await db('payout_accounts').where({ user_id: userId }).first();
+  const savedPaypalEmail = String(payoutRow?.paypal_email || '').trim().toLowerCase() || null;
+  const paypalReady = paypalConfigured();
+  const paypalReadiness = getPayPalReadiness();
+
   const previewAmount = Math.max(P.MIN_PAYOUT_COINS, Math.min(bal.withdrawableGems, P.MIN_PAYOUT_COINS));
   const ctx = await buildContext(userId, previewAmount > 0 ? previewAmount : P.MIN_PAYOUT_COINS, claims);
-  const assessment = assessWithdrawal({
+  // Stripe eligibility probe (Connect KYC).
+  const stripeAssessment = assessWithdrawal({
     ...ctx,
-    // Eligibility probe: use min payout against current cashable balance.
+    amountCoins: Math.min(Math.max(bal.withdrawableGems, 0), P.MIN_PAYOUT_COINS) || P.MIN_PAYOUT_COINS,
+  });
+  // PayPal probe: treat a saved/valid PayPal email as the payout destination + KYC rail.
+  const paypalCtx: WithdrawalContext = {
+    ...ctx,
+    hasPayoutAccount: true,
+    kycStatus: 'verified',
+    payoutAccountAgeMs: Math.max(ctx.payoutAccountAgeMs, P.NEW_PAYOUT_ACCOUNT_HOLD_MS),
+  };
+  const paypalAssessment = assessWithdrawal({
+    ...paypalCtx,
     amountCoins: Math.min(Math.max(bal.withdrawableGems, 0), P.MIN_PAYOUT_COINS) || P.MIN_PAYOUT_COINS,
   });
 
   const fee = feeSplit(P.MIN_PAYOUT_COINS);
   const connectBlocker = humanizeConnectBlocker(connect);
+  const balanceOk = bal.withdrawableGems >= P.MIN_PAYOUT_COINS;
 
   return {
     enabled: true,
@@ -447,13 +488,27 @@ export async function getWithdrawEligibility(
     connect: {
       ...connect,
       blockerMessage: connectBlocker,
+      stripeAvailable: stripeSecretConfigured(),
     },
-    blockers: assessment.decision === 'deny' ? assessment.reasons : [],
-    reviewReasons: assessment.decision === 'review' ? assessment.reasons : [],
+    paypal: {
+      available: true, // request path always accepted when withdrawals enabled; settle needs credentials or manual
+      configured: paypalReady,
+      mode: paypalReadiness.mode,
+      note: paypalReadiness.note,
+      savedEmail: savedPaypalEmail,
+    },
+    methods: [
+      'paypal',
+      ...(stripeSecretConfigured() ? (['stripe'] as const) : []),
+    ],
+    blockers: stripeAssessment.decision === 'deny' ? stripeAssessment.reasons : [],
+    reviewReasons: stripeAssessment.decision === 'review' ? stripeAssessment.reasons : [],
     canRequest:
-      bal.withdrawableGems >= P.MIN_PAYOUT_COINS &&
-      assessment.decision !== 'deny' &&
+      balanceOk &&
+      stripeAssessment.decision !== 'deny' &&
       !!connect.payoutsEnabled,
+    canRequestPaypal:
+      balanceOk && paypalAssessment.decision !== 'deny',
     policyCopy: {
       coinsNotCashable: true,
       gemsFromGiftsCashable: true,
@@ -564,6 +619,18 @@ export async function getConnectStatus(userId: string): Promise<ConnectStatus> {
     });
   }
 
+  // PayPal-only deployments may still have legacy Connect rows — never call Stripe
+  // when the secret is absent.
+  if (!stripeSecretConfigured()) {
+    return deriveConnectFlags({
+      linked: true,
+      stripeAccountId: row.stripe_account_id,
+      payoutsEnabled: !!row.payouts_enabled,
+      detailsSubmitted: !!row.details_submitted,
+      chargesEnabled: !!row.charges_enabled,
+    });
+  }
+
   try {
     const stripe = getStripe();
     const account = await stripe.accounts.retrieve(row.stripe_account_id);
@@ -590,17 +657,30 @@ export async function getConnectStatus(userId: string): Promise<ConnectStatus> {
 
 export async function requestWithdrawal(
   userId: string,
-  input: { amountGems: number; idempotencyKey: string },
+  input: { amountGems: number; idempotencyKey: string; method?: 'stripe' | 'paypal'; paypalEmail?: string },
   claims: { emailVerified?: boolean } = {},
 ) {
   assertWithdrawalsEnabled();
   const amountGems = Math.floor(Number(input.amountGems));
   const idempotencyKey = String(input.idempotencyKey || '').trim();
+  const method = input.method === 'paypal' ? 'paypal' : 'stripe';
+  const paypalEmail = String(input.paypalEmail || '').trim().toLowerCase();
   if (!idempotencyKey) {
     throw new EconomyError('INVALID_INPUT', 400, 'idempotencyKey required');
   }
   if (!Number.isFinite(amountGems) || amountGems <= 0) {
     throw new EconomyError('INVALID_INPUT', 400, 'amountGems invalid');
+  }
+  if (method === 'paypal') {
+    if (!isValidPaypalEmail(paypalEmail)) {
+      throw new EconomyError('INVALID_INPUT', 400, 'Valid paypalEmail required');
+    }
+  } else if (!stripeSecretConfigured()) {
+    throw new EconomyError(
+      'STRIPE_NOT_CONFIGURED',
+      503,
+      'Stripe bank withdraw is unavailable — use PayPal',
+    );
   }
 
   const { db } = getEconomyInfra();
@@ -619,14 +699,26 @@ export async function requestWithdrawal(
         netMinor: Number(existing.net_minor),
         currency: existing.currency,
         reasons: existing.reasons,
+        method: existing.payout_method || 'stripe',
       },
     };
   }
 
-  // Refresh connect status before assessing KYC.
-  await getConnectStatus(userId).catch(() => undefined);
+  let stripeAccountId: string | null = null;
+  if (method === 'stripe') {
+    await getConnectStatus(userId).catch(() => undefined);
+  }
 
-  const ctx = await buildContext(userId, amountGems, claims);
+  const baseCtx = await buildContext(userId, amountGems, claims);
+  const ctx: WithdrawalContext =
+    method === 'paypal'
+      ? {
+          ...baseCtx,
+          hasPayoutAccount: true,
+          kycStatus: 'verified',
+          payoutAccountAgeMs: Math.max(baseCtx.payoutAccountAgeMs, P.NEW_PAYOUT_ACCOUNT_HOLD_MS),
+        }
+      : baseCtx;
   const assessment = assessWithdrawal(ctx);
   if (assessment.decision === 'deny') {
     throw new EconomyError('WITHDRAWAL_DENIED', 403, 'Withdrawal denied', {
@@ -635,15 +727,40 @@ export async function requestWithdrawal(
   }
 
   const splits = feeSplit(amountGems);
-  const payout = await db('payout_accounts').where({ user_id: userId }).first();
-  if (!payout?.stripe_account_id) {
-    throw new EconomyError('WITHDRAWAL_DENIED', 403, 'No payout account', {
-      reasons: ['NO_PAYOUT_ACCOUNT'],
-    });
+  if (method === 'stripe') {
+    const payout = await db('payout_accounts').where({ user_id: userId }).first();
+    if (!payout?.stripe_account_id) {
+      throw new EconomyError('WITHDRAWAL_DENIED', 403, 'No payout account', {
+        reasons: ['NO_PAYOUT_ACCOUNT'],
+      });
+    }
+    if (!payout.payouts_enabled) {
+      throw new EconomyError('WITHDRAWAL_DENIED', 403, 'Stripe payouts not enabled', {
+        reasons: ['KYC_NOT_VERIFIED'],
+      });
+    }
+    stripeAccountId = String(payout.stripe_account_id);
+  } else {
+    await db('payout_accounts')
+      .insert({
+        user_id: userId,
+        stripe_account_id: null,
+        paypal_email: paypalEmail,
+        payouts_enabled: false,
+        details_submitted: false,
+        charges_enabled: false,
+        updated_at: db.fn.now(),
+      })
+      .onConflict('user_id')
+      .merge({
+        paypal_email: paypalEmail,
+        updated_at: db.fn.now(),
+      });
   }
 
   const withdrawalId = randomUUID();
-  const status = assessment.requiresManualReview ? 'pending_review' : 'processing';
+  const status =
+    method === 'paypal' || assessment.requiresManualReview ? 'pending_review' : 'processing';
 
   await db.transaction(async (trx) => {
     const wallet = await ensureWalletRow(trx, userId);
@@ -671,7 +788,7 @@ export async function requestWithdrawal(
       reference_id: withdrawalId,
       idempotency_key: `withdraw-reserve:${userId}:${idempotencyKey}`,
       metadata: trx.raw('?::jsonb', [
-        JSON.stringify({ withdrawalId, status, reasons: assessment.reasons }),
+        JSON.stringify({ withdrawalId, status, reasons: assessment.reasons, method }),
       ]),
     });
 
@@ -687,10 +804,16 @@ export async function requestWithdrawal(
       currency: platformCurrency(),
       status,
       reasons: trx.raw('?::jsonb', [JSON.stringify(assessment.reasons)]),
-      stripe_account_id: payout.stripe_account_id,
+      stripe_account_id: stripeAccountId,
+      payout_method: method,
+      paypal_email: method === 'paypal' ? paypalEmail : null,
       idempotency_key: idempotencyKey,
       metadata: trx.raw('?::jsonb', [
-        JSON.stringify({ requiresManualReview: assessment.requiresManualReview }),
+        JSON.stringify({
+          requiresManualReview: method === 'paypal' ? true : assessment.requiresManualReview,
+          method,
+          paypalEmail: method === 'paypal' ? paypalEmail : undefined,
+        }),
       ]),
     });
   });
@@ -707,18 +830,18 @@ export async function requestWithdrawal(
         netMinor: splits.netMinor,
         currency: platformCurrency(),
         reasons: assessment.reasons,
+        method,
       },
     };
   }
 
-  // Auto path: Stripe transfer to connected account.
   try {
     const settled = await settleStripeTransfer({
       withdrawalId,
       userId,
       amountGems,
       netMinor: splits.netMinor,
-      stripeAccountId: payout.stripe_account_id,
+      stripeAccountId: stripeAccountId!,
       idempotencyKey,
     });
     return {
@@ -733,6 +856,7 @@ export async function requestWithdrawal(
         currency: platformCurrency(),
         stripeTransferId: settled.stripeTransferId,
         reasons: assessment.reasons,
+        method,
       },
     };
   } catch (e: any) {
@@ -879,6 +1003,9 @@ function mapWithdrawalRow(row: any) {
     currency: String(row.currency || platformCurrency()),
     status: String(row.status),
     reasons: row.reasons,
+    method: String(row.payout_method || row.metadata?.method || 'stripe'),
+    paypalEmail: row.paypal_email || row.metadata?.paypalEmail || null,
+    paypalPayoutBatchId: row.paypal_payout_batch_id || null,
     stripeAccountId: row.stripe_account_id || null,
     stripeTransferId: row.stripe_transfer_id || null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -908,7 +1035,7 @@ export async function listWithdrawals(opts: {
 }
 
 /**
- * Ops: approve a pending_review withdrawal and execute the Stripe transfer.
+ * Ops: approve a pending_review withdrawal and settle via Stripe or PayPal.
  * Gems were already reserved at request time.
  */
 export async function approveWithdrawal(withdrawalId: string, actorUserId: string) {
@@ -924,11 +1051,22 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
   if (String(row.status) !== 'pending_review') {
     throw new EconomyError('INVALID_STATE', 409, `Cannot approve status=${row.status}`);
   }
-  if (!row.stripe_account_id) {
-    throw new EconomyError('WITHDRAWAL_DENIED', 403, 'No payout account on request');
-  }
-  if (!stripeSecretConfigured()) {
-    throw new EconomyError('STRIPE_NOT_CONFIGURED', 503, 'Stripe is not configured');
+
+  const method =
+    String(row.payout_method || row.metadata?.method || 'stripe').toLowerCase() === 'paypal'
+      ? 'paypal'
+      : 'stripe';
+  const paypalEmail = String(row.paypal_email || row.metadata?.paypalEmail || '').trim().toLowerCase();
+
+  if (method === 'stripe') {
+    if (!row.stripe_account_id) {
+      throw new EconomyError('WITHDRAWAL_DENIED', 403, 'No payout account on request');
+    }
+    if (!stripeSecretConfigured()) {
+      throw new EconomyError('STRIPE_NOT_CONFIGURED', 503, 'Stripe is not configured');
+    }
+  } else if (!isValidPaypalEmail(paypalEmail)) {
+    throw new EconomyError('WITHDRAWAL_DENIED', 403, 'No PayPal email on request');
   }
 
   await db('withdrawal_requests')
@@ -940,6 +1078,7 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
         JSON.stringify({
           approvedBy: actorUserId,
           approvedAt: new Date().toISOString(),
+          method,
         }),
       ]),
     });
@@ -947,6 +1086,52 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
   const amountGems = Number(row.amount_gems);
   const netMinor = Number(row.net_minor);
   const idempotencyKey = String(row.idempotency_key);
+
+  if (method === 'paypal') {
+    try {
+      const settled = await settlePaypalTransfer({
+        withdrawalId: id,
+        userId: row.user_id,
+        amountGems,
+        netMinor,
+        paypalEmail,
+        currency: String(row.currency || platformCurrency()),
+        idempotencyKey: `approve:${idempotencyKey}`,
+        actorUserId,
+      });
+      const updated = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+      return {
+        ...mapWithdrawalRow(updated || row),
+        status: 'paid',
+        paypalPayoutBatchId: settled.batchId,
+      };
+    } catch (e: any) {
+      const detail = e instanceof EconomyError ? e.detail : null;
+      const msg = e?.message || String(e);
+      logger.error(
+        { err: msg, detail, withdrawalId: id },
+        '[withdraw] admin approve PayPal payout failed',
+      );
+      await db('withdrawal_requests')
+        .where({ withdrawal_id: id })
+        .update({
+          status: 'pending_review',
+          updated_at: db.fn.now(),
+          metadata: db.raw(`COALESCE(metadata, '{}'::jsonb) || ?::jsonb`, [
+            JSON.stringify({
+              lastApproveError: msg,
+              lastApproveErrorReason: detail?.reason || 'PAYPAL_PAYOUT_FAILED',
+              lastApproveAttemptAt: new Date().toISOString(),
+              lastApproveBy: actorUserId,
+              manualPaypalHint:
+                'If Payouts API is not enabled yet: send GBP via PayPal Business to paypalEmail, then POST /admin/withdrawals/:id/mark-paid-manual',
+            }),
+          ]),
+        });
+      if (e instanceof EconomyError) throw e;
+      throw new EconomyError('PROVIDER_ERROR', 502, msg);
+    }
+  }
 
   try {
     const settled = await settleStripeTransfer({
@@ -975,7 +1160,6 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
       },
       '[withdraw] admin approve transfer failed',
     );
-    // Return to pending_review so ops can retry after fixing Stripe; do NOT reverse gems yet.
     await db('withdrawal_requests')
       .where({ withdrawal_id: id })
       .update({
@@ -992,6 +1176,123 @@ export async function approveWithdrawal(withdrawalId: string, actorUserId: strin
       });
     throw stripeTransferProviderError(provider);
   }
+}
+
+/** Ops: mark a PayPal (or other) pending_review withdrawal paid after a manual send. */
+export async function markWithdrawalPaidManual(
+  withdrawalId: string,
+  actorUserId: string,
+  opts: { note?: string; externalReference?: string } = {},
+) {
+  const { db } = getEconomyInfra();
+  const id = String(withdrawalId || '').trim();
+  if (!id) throw new EconomyError('INVALID_INPUT', 400, 'withdrawalId required');
+  const row = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+  if (!row) throw new EconomyError('NOT_FOUND', 404, 'Withdrawal not found');
+  if (String(row.status) === 'paid') return mapWithdrawalRow(row);
+  if (String(row.status) !== 'pending_review' && String(row.status) !== 'processing') {
+    throw new EconomyError('INVALID_STATE', 409, `Cannot mark-paid status=${row.status}`);
+  }
+
+  await db('withdrawal_requests')
+    .where({ withdrawal_id: id })
+    .update({
+      status: 'paid',
+      settled_at: db.fn.now(),
+      updated_at: db.fn.now(),
+      metadata: db.raw(`COALESCE(metadata, '{}'::jsonb) || ?::jsonb`, [
+        JSON.stringify({
+          paidManually: true,
+          paidManuallyBy: actorUserId,
+          paidManuallyAt: new Date().toISOString(),
+          note: opts.note || null,
+          externalReference: opts.externalReference || null,
+        }),
+      ]),
+    });
+
+  await db('ledger_entries')
+    .insert({
+      ledger_id: randomUUID(),
+      user_id: row.user_id,
+      entry_type: 'WITHDRAWAL_SETTLEMENT',
+      currency: 'GEM',
+      amount: '0',
+      status: 'POSTED',
+      reference_type: 'WITHDRAWAL',
+      reference_id: id,
+      idempotency_key: `withdraw-settle-manual:${row.user_id}:${row.idempotency_key}`,
+      metadata: db.raw('?::jsonb', [
+        JSON.stringify({
+          method: row.payout_method || 'paypal',
+          manual: true,
+          netMinor: Number(row.net_minor),
+          externalReference: opts.externalReference || null,
+        }),
+      ]),
+    })
+    .onConflict('idempotency_key')
+    .ignore();
+
+  const updated = await db('withdrawal_requests').where({ withdrawal_id: id }).first();
+  return mapWithdrawalRow(updated || row);
+}
+
+async function settlePaypalTransfer(input: {
+  withdrawalId: string;
+  userId: string;
+  amountGems: number;
+  netMinor: number;
+  paypalEmail: string;
+  currency: string;
+  idempotencyKey: string;
+  actorUserId: string;
+}) {
+  const { db } = getEconomyInfra();
+  const payout = await sendPaypalPayout({
+    withdrawalId: input.withdrawalId,
+    paypalEmail: input.paypalEmail,
+    amountMinor: input.netMinor,
+    currency: input.currency,
+    note: `Blyp gems withdrawal ${input.withdrawalId}`,
+  });
+
+  await db('withdrawal_requests')
+    .where({ withdrawal_id: input.withdrawalId })
+    .update({
+      status: 'paid',
+      paypal_payout_batch_id: payout.batchId,
+      settled_at: db.fn.now(),
+      updated_at: db.fn.now(),
+      metadata: db.raw(`COALESCE(metadata, '{}'::jsonb) || ?::jsonb`, [
+        JSON.stringify({
+          paypalBatchStatus: payout.status,
+          paypalSettledBy: input.actorUserId,
+        }),
+      ]),
+    });
+
+  await db('ledger_entries').insert({
+    ledger_id: randomUUID(),
+    user_id: input.userId,
+    entry_type: 'WITHDRAWAL_SETTLEMENT',
+    currency: 'GEM',
+    amount: '0',
+    status: 'POSTED',
+    reference_type: 'WITHDRAWAL',
+    reference_id: input.withdrawalId,
+    idempotency_key: `withdraw-settle:${input.userId}:${input.idempotencyKey}`,
+    metadata: db.raw('?::jsonb', [
+      JSON.stringify({
+        method: 'paypal',
+        paypalPayoutBatchId: payout.batchId,
+        netMinor: input.netMinor,
+        paypalEmail: input.paypalEmail,
+      }),
+    ]),
+  });
+
+  return { batchId: payout.batchId, status: payout.status };
 }
 
 /** Ops: reject pending_review and restore reserved gems. */

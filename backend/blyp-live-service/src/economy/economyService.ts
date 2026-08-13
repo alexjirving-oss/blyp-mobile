@@ -29,10 +29,9 @@ import {
   isWithdrawLaunchTestUser,
   LAUNCH_TEST_GEM_CREDIT_CAP,
 } from './withdrawLaunchTest';
+import { planLiveGamePaidEntry } from './paidOnlyCoinDebit';
 
 // Agency commission from Blyp's platform half of gift face (coins → gems).
-// Creator already keeps 100% of CREATOR_SHARE_BPS (50%) — never deducted here.
-// standard = 10% of gift spend; growth = 15%. TODO(product): growth promotion thresholds.
 const MICRO_PER_GEM = 1_000_000n;
 const AGENCY_COMMISSION_STANDARD_BPS = 1000n;
 const AGENCY_COMMISSION_GROWTH_BPS = 1500n;
@@ -2736,13 +2735,9 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
     const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
     if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
 
-    const bonus = BigInt(wallet.bonus_coin_balance);
+    // SAFE/COIN payout: paid coin_balance only — bonus cannot fund the pool (lock-3).
     const paid = BigInt(wallet.coin_balance);
-
-    const useBonus = bonus >= fee ? fee : bonus;
-    const remaining = fee - useBonus;
-    const usePaid = remaining;
-    if (paid < usePaid) throw new EconomyError('INSUFFICIENT_FUNDS', 409, 'Insufficient funds');
+    const { usePaid } = planLiveGamePaidEntry(paid, fee);
 
     const entryId = randomUUID();
     await trx('live_game_entries').insert({
@@ -2751,7 +2746,7 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
       stream_id: streamId,
       user_id: userId,
       coin_cost: usePaid.toString(),
-      bonus_coin_cost: useBonus.toString(),
+      bonus_coin_cost: '0',
       idempotency_key: idempotencyKey,
       created_at: nowIso(),
     });
@@ -2767,21 +2762,7 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
         reference_type: 'LIVE_GAME',
         reference_id: game.game_id,
         idempotency_key: `${idempotencyKey}:COIN`,
-        metadata: { streamId, gameId: game.game_id },
-      });
-    }
-    if (useBonus > 0n) {
-      await trx('ledger_entries').insert({
-        ledger_id: randomUUID(),
-        user_id: userId,
-        entry_type: 'LIVE_GAME_ENTRY',
-        currency: 'BONUS_COIN',
-        amount: (-useBonus).toString(),
-        status: 'POSTED',
-        reference_type: 'LIVE_GAME',
-        reference_id: game.game_id,
-        idempotency_key: `${idempotencyKey}:BONUS`,
-        metadata: { streamId, gameId: game.game_id },
+        metadata: { streamId, gameId: game.game_id, paidOnly: true, payoutVersion: 2 },
       });
     }
 
@@ -2789,7 +2770,6 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
       .where({ user_id: userId })
       .update({
         coin_balance: (paid - usePaid).toString(),
-        bonus_coin_balance: (bonus - useBonus).toString(),
         lifetime_spend_coins: (BigInt(wallet.lifetime_spend_coins) + fee).toString(),
         updated_at: trx.fn.now(),
       });
@@ -2808,7 +2788,7 @@ export async function joinLiveGame(userId: string, input: { streamId: string; id
         streamId,
         entryId,
         coinSpent: Number(usePaid),
-        bonusCoinSpent: Number(useBonus),
+        bonusCoinSpent: 0,
         state: {
           gameId: game.game_id,
           streamId,
@@ -2829,8 +2809,10 @@ export async function finalizeLiveGame(hostUserId: string, input: { streamId: st
   const { db } = getEconomyInfra();
   const { streamId, winners, idempotencyKey } = input;
 
+  // SAFE and CASHOUT both pay spendable COIN (v2). BONUS_COIN path retired.
   const mode = String(process.env.LIVE_GAMES_PAYOUT_MODE || 'SAFE').toUpperCase();
-  const payoutCurrency = mode === 'CASHOUT' ? 'COIN' : 'BONUS_COIN';
+  const payoutCurrency = 'COIN' as const;
+  const ledgerNs = `${idempotencyKey}:v2`;
 
   const result = await db.transaction(async (trx) => {
     const settled = await trx('live_game_settlements').where({ host_user_id: hostUserId, idempotency_key: idempotencyKey }).first();
@@ -2871,13 +2853,10 @@ export async function finalizeLiveGame(hostUserId: string, input: { streamId: st
     if (!hostWallet) throw new EconomyError('INTERNAL', 500, 'Host wallet missing');
 
     const hostBeforeCoin = BigInt(hostWallet.coin_balance);
-    const hostBeforeBonus = BigInt(hostWallet.bonus_coin_balance);
-    const hostAfterCoin = payoutCurrency === 'COIN' ? hostBeforeCoin + hostShare : hostBeforeCoin;
-    const hostAfterBonus = payoutCurrency === 'BONUS_COIN' ? hostBeforeBonus + hostShare : hostBeforeBonus;
+    const hostAfterCoin = hostBeforeCoin + hostShare;
 
     await trx('wallets').where({ user_id: hostUserId }).update({
       coin_balance: hostAfterCoin.toString(),
-      bonus_coin_balance: hostAfterBonus.toString(),
       updated_at: trx.fn.now(),
     });
 
@@ -2890,8 +2869,8 @@ export async function finalizeLiveGame(hostUserId: string, input: { streamId: st
       status: 'POSTED',
       reference_type: 'LIVE_GAME',
       reference_id: game.game_id,
-      idempotency_key: `${idempotencyKey}:HOST`,
-      metadata: { streamId, gameId: game.game_id, role: 'host', mode },
+      idempotency_key: `${ledgerNs}:HOST`,
+      metadata: { streamId, gameId: game.game_id, role: 'host', mode, payoutVersion: 2 },
     });
 
     // credit winners
@@ -2907,12 +2886,9 @@ export async function finalizeLiveGame(hostUserId: string, input: { streamId: st
       if (!w) continue;
 
       const beforeCoin = BigInt(w.coin_balance);
-      const beforeBonus = BigInt(w.bonus_coin_balance);
-      const afterCoin = payoutCurrency === 'COIN' ? beforeCoin + payout : beforeCoin;
-      const afterBonus = payoutCurrency === 'BONUS_COIN' ? beforeBonus + payout : beforeBonus;
+      const afterCoin = beforeCoin + payout;
       await trx('wallets').where({ user_id: winnerId }).update({
         coin_balance: afterCoin.toString(),
-        bonus_coin_balance: afterBonus.toString(),
         updated_at: trx.fn.now(),
       });
       await trx('ledger_entries').insert({
@@ -2924,8 +2900,8 @@ export async function finalizeLiveGame(hostUserId: string, input: { streamId: st
         status: 'POSTED',
         reference_type: 'LIVE_GAME',
         reference_id: game.game_id,
-        idempotency_key: `${idempotencyKey}:WIN:${winnerId}`,
-        metadata: { streamId, gameId: game.game_id, role: 'winner', mode },
+        idempotency_key: `${ledgerNs}:WIN:${winnerId}`,
+        metadata: { streamId, gameId: game.game_id, role: 'winner', mode, payoutVersion: 2 },
       });
     }
 

@@ -827,16 +827,16 @@ export interface WithdrawConnectStatus {
 
 export interface WithdrawEligibility {
   enabled: boolean;
-  currency: string;
+  currency?: string;
   withdrawableGems: number;
-  gemAvailable: number;
-  gemPending: number;
-  purchasedCoinsNotCashable: number;
+  gemAvailable?: number;
+  gemPending?: number;
+  purchasedCoinsNotCashable?: number;
   minPayoutGems: number;
-  platformFeePercent: number;
-  gemMinorUnits: number;
-  fiatCurrency: string;
-  feePreviewMinPayout: {
+  platformFeePercent?: number;
+  gemMinorUnits?: number;
+  fiatCurrency?: string;
+  feePreviewMinPayout?: {
     amountGems: number;
     feeGems: number;
     netGems: number;
@@ -844,10 +844,24 @@ export interface WithdrawEligibility {
     feeMinor: number;
     netMinor: number;
   };
-  connect: WithdrawConnectStatus;
-  blockers: string[];
-  reviewReasons: string[];
-  canRequest: boolean;
+  canRequest?: boolean;
+  canRequestPaypal?: boolean;
+  methods?: Array<'paypal' | 'stripe'>;
+  paypal?: {
+    available?: boolean;
+    configured?: boolean;
+    mode?: string;
+    note?: string;
+    savedEmail?: string | null;
+  };
+  connect: WithdrawConnectStatus & {
+    blockerMessage?: string | null;
+    stripeAvailable?: boolean;
+  };
+  blockers?: string[];
+  reviewReasons?: string[];
+  policyCopy?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export async function getWithdrawEligibility(): Promise<WithdrawEligibility> {
@@ -874,6 +888,8 @@ export async function getWithdrawConnectStatus(): Promise<WithdrawConnectStatus>
 export async function requestWithdrawGems(input: {
   amountGems: number;
   idempotencyKey: string;
+  method?: 'stripe' | 'paypal';
+  paypalEmail?: string;
 }): Promise<{
   withdrawalId: string;
   status: string;
@@ -884,6 +900,7 @@ export async function requestWithdrawGems(input: {
   currency: string;
   reasons?: string[];
   stripeTransferId?: string;
+  method?: string;
 }> {
   return await callEconomyBackend('/withdraw/request', 'POST', input);
 }

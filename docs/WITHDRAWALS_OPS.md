@@ -1,6 +1,7 @@
 # Creator withdrawals (cash-out) — ops runbook
 
-Creator GEM earnings → Stripe Connect Express transfer. Purchased COIN and
+Creator GEM earnings → **PayPal Payouts** (works while Stripe Connect is in
+review) and/or **Stripe Connect Express** bank transfer. Purchased COIN and
 admin BONUS_COIN are never cashable.
 
 **Go-live checklist (new Stripe account):** `_agent/stripe-20260806/STRIPE_GO_LIVE.md`
@@ -9,36 +10,48 @@ admin BONUS_COIN are never cashable.
 
 | Knob | Prod today | Ready-to-enable target |
 |------|------------|------------------------|
-| `ENABLE_WITHDRAWALS` | `1` | Keep `1` only while live Stripe + payout funding are operational |
-| `STRIPE_SECRET_KEY` | Secret Manager `blyp-stripe-secret-key` (`sk_live_…`) | Preserve live key |
+| `ENABLE_WITHDRAWALS` | `1` | Keep `1` while Stripe and/or PayPal can settle |
+| `STRIPE_SECRET_KEY` | Secret Manager `blyp-stripe-secret-key` | Preserve live key |
 | `STRIPE_WEBHOOK_SECRET` | Secret Manager `blyp-stripe-webhook-secret` | Live Connect webhook signing secret |
+| `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` | Secret Manager `blyp-paypal-client-id` / `blyp-paypal-client-secret` | REST app with **Payouts** |
+| `PAYPAL_MODE` | `live` | `sandbox` only for QA |
 | `PENDING_GEMS_HOLD_SECONDS` | `604800` (7 days) | keep `604800` |
-| Client `EXPO_PUBLIC_ENABLE_WITHDRAWALS` | unset / false (CTA hidden) | `1` in EAS prod profile **after** backend flag |
+| Client `EXPO_PUBLIC_ENABLE_WITHDRAWALS` | `1` (CTA visible; default ON) | Keep `1`; set `0` only to hide CTA |
 | `ADMIN_ALLOWLIST_SUBS` | set — **preserve** | unchanged |
 | `WITHDRAW_TEST_SUBS` | Owner launch-test sub set | Preserve for controlled Owner testing |
-| `LIVE_MARBLE_RACE_ENABLED` | `1` — **preserve** | unchanged |
 
-Code refuses to treat withdrawals as enabled unless **both**
-`ENABLE_WITHDRAWALS=1` **and** a non-empty `STRIPE_SECRET_KEY` are present.
-Admin control plane reports `stripeKeyMode` (`test` / `live` / `absent`) without exposing secrets.
+Code enables cash-out when **`ENABLE_WITHDRAWALS=1`** and **at least one** of
+Stripe secret or PayPal client credentials is present. Admin control plane
+reports Stripe/PayPal readiness without exposing secrets.
 
-### Launch-test / Owner bypass (keep fraud rails)
+### Why the Withdraw button vanished (2026-08)
 
-For users in `WITHDRAW_TEST_SUBS`, `ADMIN_ALLOWLIST_SUBS`, or Owner bootstrap:
+Client gated the Wallet CTA on `EXPO_PUBLIC_ENABLE_WITHDRAWALS` with a **false
+default** when `expo.extra` failed to load in some tip/phonesigned builds. That
+hid **Withdraw earnings** even though Cloud Run had `ENABLE_WITHDRAWALS=1`.
+Fix: default the client flag **ON**, bake `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1`
+into `.env.production` / EAS, and open the withdraw sheet with **PayPal** as the
+default destination while Stripe Connect is still in review.
 
-- Softened: `ACCOUNT_TOO_NEW`, `NEW_PAYOUT_ACCOUNT`, and request-velocity denies
-  (`TOO_SOON_SINCE_LAST_REQUEST`, daily, weekly). This permits an immediate retry
-  after a failed provider attempt.
-- Still enforced: min 1000 gems, 0% platform fee, KYC/Connect, open-request lock,
-  chargebacks, fraud freeze/review, payout-value caps, and large-amount review.
-- Normal users retain all request-velocity fraud limits.
+## PayPal Business — what Alex enables
 
-Owner gem credit (audited `ADMIN_GEM_CREDIT` → `gem_available`):
+1. Log into **PayPal Business** (the account that will send creator payouts).
+2. **Developer Dashboard** → create / open a **REST API app** (Live).
+3. Enable product **Payouts** on that app (PayPal may require Business verification
+   / Payouts approval — until approved, use Admin → mark-paid-manual after a
+   manual PayPal send).
+4. Copy **Client ID** + **Secret** into Secret Manager (do not paste into chat):
+   - `blyp-paypal-client-id` → Cloud Run `PAYPAL_CLIENT_ID`
+   - `blyp-paypal-client-secret` → Cloud Run `PAYPAL_CLIENT_SECRET`
+5. Keep `PAYPAL_MODE=live` on Cloud Run.
+6. Fund the PayPal Business balance enough to cover gem payouts (£0.01/gem, 0% platform fee).
 
-```http
-POST /admin/users/:userId/credit-gems          # Owner + economy.credit
-POST /internal/economy/credit-launch-test-gems # x-internal-secret; helper tools/stripe/CREDIT_LAUNCH_TEST_GEMS.ps1
-```
+App flow: Wallet → **Withdraw earnings** → PayPal → enter PayPal email → submit
+→ `pending_review` → Admin **Approve** (calls Payouts API) or
+`POST /admin/withdrawals/:id/mark-paid-manual` after a manual send.
+
+Stripe bank remains available once Connect platform review clears; creators can
+still choose Bank (Stripe) when `payouts_enabled`.
 
 ## Env vars (Cloud Run `blyp-live-service`, us-central1)
 
@@ -46,6 +59,9 @@ POST /internal/economy/credit-launch-test-gems # x-internal-secret; helper tools
 ENABLE_WITHDRAWALS=1
 STRIPE_SECRET_KEY=<Secret Manager: blyp-stripe-secret-key>
 STRIPE_WEBHOOK_SECRET=<Secret Manager: blyp-stripe-webhook-secret>
+PAYPAL_CLIENT_ID=<Secret Manager: blyp-paypal-client-id>
+PAYPAL_CLIENT_SECRET=<Secret Manager: blyp-paypal-client-secret>
+PAYPAL_MODE=live
 STRIPE_PLATFORM_CURRENCY=GBP
 STRIPE_CONNECT_RETURN_URL=https://blyp.world/withdraw/connect-return
 STRIPE_CONNECT_REFRESH_URL=https://blyp.world/withdraw/connect-refresh
@@ -63,22 +79,32 @@ Subscribe: `account.updated`, `transfer.created`, `transfer.updated`, `transfer.
 
 1. Replace `blyp-stripe-secret-key` with **live** key (`sk_live_…`) that can create Express accounts + Transfers.
    - Helper: `.\tools\stripe\SET_STRIPE_LIVE_SECRETS.ps1`
-2. Enable Stripe Connect (Express + transfers).
+2. Enable Stripe Connect (Express + transfers). Finish platform questionnaire if Stripe still shows “in review”.
 3. Configure webhook signing secret in `blyp-stripe-webhook-secret` (same script).
-4. Confirm Admin → Economy shows Stripe secret **live** + webhook **yes**.
-5. Smoke webhook from Stripe Dashboard (expect 200).
-6. Set `ENABLE_WITHDRAWALS=1` only after live key verified:
+4. Confirm PayPal REST app has **Payouts** + secrets mapped (above).
+5. Confirm Admin → Economy shows Stripe secret **live** + webhook **yes**.
+6. Smoke webhook from Stripe Dashboard (expect 200).
+7. Set `ENABLE_WITHDRAWALS=1` only after at least one settle rail is ready:
    - Helper: `.\tools\stripe\ENABLE_WITHDRAWALS_IF_LIVE.ps1`
-7. Ship mobile with `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1`.
-8. Ops: Admin → Economy → pending review → Approve / Reject.
+8. Ship mobile with `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1` (default ON).
+9. Ops: Admin → Economy → pending review → Approve / Reject / mark-paid-manual.
 
 ## How to test
 
-1. Backend: `ENABLE_WITHDRAWALS=1`, `STRIPE_SECRET_KEY=sk_test_…` (hold can be `60` for QA only).
+1. Backend: `ENABLE_WITHDRAWALS=1`, PayPal credentials present (and/or Stripe).
 2. Gift flow → gems in `gem_pending` until hold → `gem_available`.
-3. App with `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1`: Coin Store → Withdraw → Stripe Express onboard.
-4. Request ≥ 1000 cleared gems. Large / new-payout / velocity → `pending_review`.
-5. Admin console → Economy → Approve (Stripe transfer) or Reject (gems restored).
+3. App: Coin Store / Profile Wallet → **Withdraw earnings** → PayPal email → ≥1000 gems.
+4. Admin console → Economy → Approve (PayPal Payouts or Stripe transfer) or mark-paid-manual.
+
+## Admin API
+
+```http
+GET  /admin/ops/control-plane          # stripeKeyMode, webhookConfigured (no secrets)
+GET  /admin/withdrawals?status=pending_review
+POST /admin/withdrawals/:withdrawalId/approve
+POST /admin/withdrawals/:withdrawalId/mark-paid-manual  { "note"?, "externalReference"? }
+POST /admin/withdrawals/:withdrawalId/reject   { "reason": "optional" }
+```
 
 ## `PROVIDER_ERROR`: insufficient Stripe platform balance
 
@@ -100,26 +126,13 @@ The API returns a safe `detail.reason` / `detail.userMessage` for the app and
 retains the exact Stripe provider message in structured logs and withdrawal
 metadata for operators.
 
-## Admin API
-
-```http
-GET  /admin/ops/control-plane          # stripeKeyMode, webhookConfigured (no secrets)
-GET  /admin/withdrawals?status=pending_review
-POST /admin/withdrawals/:withdrawalId/approve
-POST /admin/withdrawals/:withdrawalId/reject   { "reason": "optional" }
-```
-
 ## Deploy
 
 ```powershell
 gcloud run deploy blyp-live-service --source backend/blyp-live-service --region us-central1 --project blyp-master
 
 gcloud run services update blyp-live-service --region us-central1 --project blyp-master `
-  --update-env-vars "PENDING_GEMS_HOLD_SECONDS=604800,ENABLE_WITHDRAWALS=1,LIVE_MARBLE_RACE_ENABLED=1"
+  --update-env-vars "PENDING_GEMS_HOLD_SECONDS=604800,ENABLE_WITHDRAWALS=1,LIVE_MARBLE_RACE_ENABLED=1,PAYPAL_MODE=live"
 
 cd admin; npm ci; npm run build
-netlify deploy --prod --dir=dist --site f31b62f8-deae-4110-afb9-b6863900336c
 ```
-
-Keep `ENABLE_WITHDRAWALS=1` only while the live key, Connect, webhook, and
-platform payout funding are operational.

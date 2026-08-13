@@ -422,7 +422,7 @@ export default function ReactionDuelOverlay({
             />
             <Text style={styles.stakePreview} allowFontScaling={false}>
               {stakeValid
-                ? `${selectedPrize} coins in this live → ${selectedPrize} gems when live ends`
+                ? `${selectedPrize} spendable coins to the winner`
                 : `Enter a whole amount from ${minStakeCoins} to ${maxStakeCoins}`}
             </Text>
 
@@ -507,7 +507,7 @@ export default function ReactionDuelOverlay({
                   REACTION DUEL
                 </Text>
                 <Text style={styles.ruleLine} allowFontScaling={false}>
-                  {entryCoins} stake · {prizeCoins} live-coin prize · best of 5
+                  {entryCoins} stake · {prizeCoins} spendable-coin prize · best of 5
                 </Text>
               </View>
               {(isAdmin || isHost) && active ? (
@@ -599,9 +599,8 @@ export default function ReactionDuelOverlay({
                   </Text>
                 )}
                 <Text style={styles.safetyCopy} allowFontScaling={false}>
-                  Winner gets {prizeCoins} coins in this live → {prizeCoins} gems when
-                  live ends. Before both lock: full refund. After lock: disconnect
-                  forfeits.
+                  Winner gets {prizeCoins} spendable coins immediately. Before both
+                  lock: full refund. After lock: disconnect forfeits.
                 </Text>
               </View>
             ) : null}
@@ -760,7 +759,7 @@ export default function ReactionDuelOverlay({
                 {phase === 'ended' ? (
                   <View style={styles.prizePill}>
                     <Text style={styles.prizePillText} allowFontScaling={false}>
-                      {prizeCoins} coins in this live → {prizeCoins} gems at live end
+                      {prizeCoins} spendable coins credited now
                     </Text>
                   </View>
                 ) : null}

@@ -150,6 +150,9 @@ const CoinStoreScreen = ({
   const [overlayType, setOverlayType] = useState(null); // 'convert' | 'withdraw' | null
   const [overlayAmount, setOverlayAmount] = useState('');
   const [overlayError, setOverlayError] = useState('');
+  const [withdrawMethod, setWithdrawMethod] = useState('paypal'); // 'paypal' | 'stripe'
+  const [paypalEmail, setPaypalEmail] = useState('');
+  const [stripeReady, setStripeReady] = useState(false);
   const headerTopPadding = useMemo(() => {
     if (embedded) return 12;
     return Math.max(12, (insets?.top || 0) + 12);
@@ -208,9 +211,6 @@ const CoinStoreScreen = ({
       if (now - withdrawResumeAtRef.current < 2000) return;
       withdrawResumeAtRef.current = now;
     }
-    // Stripe Connect eligibility is checked only when the user taps Withdraw —
-    // never on Wallet mount / balance refresh. Force a live Connect status
-    // refresh first so Account Link return does not use stale DB flags.
     try {
       try {
         await getWithdrawConnectStatus();
@@ -219,84 +219,70 @@ const CoinStoreScreen = ({
       }
       const eligibility = await getWithdrawEligibility();
       const connect = eligibility?.connect || {};
-      const needsOnboarding =
-        typeof connect.needsOnboarding === 'boolean'
-          ? connect.needsOnboarding
-          : !connect.linked || (!connect.payoutsEnabled && !connect.detailsSubmitted);
+      const stripeOk = !!connect.payoutsEnabled && !connect.needsOnboarding;
+      setStripeReady(stripeOk);
+      const savedPaypal = String(eligibility?.paypal?.savedEmail || '').trim();
+      if (savedPaypal) setPaypalEmail(savedPaypal);
 
-      if (needsOnboarding) {
+      // Prefer PayPal while Stripe Connect is in review / not ready.
+      const preferPaypal = !stripeOk;
+      setWithdrawMethod(preferPaypal ? 'paypal' : 'stripe');
+      setOverlayType('withdraw');
+      setOverlayAmount(String(eligibility.minPayoutGems || 1000));
+      setOverlayError('');
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (/WITHDRAWALS_DISABLED|STRIPE_NOT_CONFIGURED|PAYOUT_RAIL_NOT_CONFIGURED|disabled/i.test(msg)) {
+        Alert.alert('Unavailable', 'Withdrawals are currently disabled on the server.');
+        return;
+      }
+      // Still open PayPal path if eligibility fails for Connect-only reasons.
+      setWithdrawMethod('paypal');
+      setStripeReady(false);
+      setOverlayType('withdraw');
+      setOverlayAmount('1000');
+      setOverlayError('');
+      Alert.alert(
+        'Withdraw',
+        'Stripe bank payout may be unavailable right now. You can still request a PayPal withdrawal.',
+      );
+    }
+  };
+
+  const startStripeOnboard = async () => {
+    try {
+      const link = await startWithdrawConnectOnboard({
+        returnUrl: 'https://blyp.world/withdraw/connect-return',
+        refreshUrl: 'https://blyp.world/withdraw/connect-refresh',
+      });
+      if (link?.alreadyComplete || !link?.url) {
+        openWithdrawOverlay();
+        return;
+      }
+      await Linking.openURL(link.url);
+    } catch (e) {
+      const msg = e?.message || String(e);
+      const code = e?.code || '';
+      const needsPlatformSetup =
+        code === 'STRIPE_CONNECT_SETUP_REQUIRED' ||
+        /STRIPE_CONNECT_SETUP_REQUIRED|platform profile|questionnaire|Connect setup/i.test(msg);
+      if (needsPlatformSetup) {
         Alert.alert(
-          'Connect payout account',
-          connect.blockerMessage ||
-            'Gems from gifts can be cashed out after Stripe onboarding. Purchased coins are never cashable. Min 1000 gems, no platform withdraw fee. Normal accounts have a clearance hold before gems are available.',
+          'Stripe Connect still in review',
+          'Blyp Stripe Connect is not ready for bank payouts yet. Use PayPal withdraw instead (no Connect needed). When Stripe clears review, bank withdraw will work here too.',
           [
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'Use PayPal', onPress: () => setWithdrawMethod('paypal') },
             {
-              text: 'Continue',
-              onPress: async () => {
-                try {
-                  const link = await startWithdrawConnectOnboard({
-                    // Stripe Account Links require HTTPS; blyp.world pages deep-link back to the app.
-                    returnUrl: 'https://blyp.world/withdraw/connect-return',
-                    refreshUrl: 'https://blyp.world/withdraw/connect-refresh',
-                  });
-                  if (link?.alreadyComplete || !link?.url) {
-                    // Account already ready — reopen withdraw without looping Stripe.
-                    openWithdrawOverlay();
-                    return;
-                  }
-                  await Linking.openURL(link.url);
-                } catch (e) {
-                  const msg = e?.message || String(e);
-                  const code = e?.code || '';
-                  const needsPlatformSetup =
-                    code === 'STRIPE_CONNECT_SETUP_REQUIRED' ||
-                    /STRIPE_CONNECT_SETUP_REQUIRED|platform profile|questionnaire|Connect setup/i.test(msg);
-                  if (needsPlatformSetup) {
-                    Alert.alert(
-                      'Stripe Connect setup required',
-                      'Withdrawals are blocked until the Blyp Stripe Connect platform profile is finished.\n\n1. Open Stripe Dashboard (Connect → Accounts overview)\n2. Complete the platform questionnaire\n3. Upload ID if Stripe asks\n4. Return here and tap Withdraw → Continue',
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Open Stripe',
-                          onPress: () => {
-                            Linking.openURL('https://dashboard.stripe.com/connect/accounts/overview').catch(() => {});
-                          },
-                        },
-                      ],
-                    );
-                    return;
-                  }
-                  Alert.alert('Connect failed', msg || 'Could not start Stripe onboarding');
-                }
+              text: 'Open Stripe',
+              onPress: () => {
+                Linking.openURL('https://dashboard.stripe.com/connect/accounts/overview').catch(() => {});
               },
             },
           ],
         );
         return;
       }
-
-      if (!connect.payoutsEnabled) {
-        Alert.alert(
-          'Payout account pending',
-          connect.blockerMessage ||
-            'Your Stripe payout account is linked, but payouts are not enabled yet. If Stripe is still verifying your details, wait and try again shortly.',
-          [{ text: 'OK' }],
-        );
-        return;
-      }
-
-      setOverlayType('withdraw');
-      setOverlayAmount(String(eligibility.minPayoutGems || 1000));
-      setOverlayError('');
-    } catch (e) {
-      const msg = e?.message || String(e);
-      if (/WITHDRAWALS_DISABLED|STRIPE_NOT_CONFIGURED|disabled/i.test(msg)) {
-        Alert.alert('Unavailable', 'Withdrawals are currently disabled on the server.');
-        return;
-      }
-      Alert.alert('Withdraw', msg);
+      Alert.alert('Connect failed', msg || 'Could not start Stripe onboarding');
     }
   };
 
@@ -482,21 +468,38 @@ const CoinStoreScreen = ({
         setOverlayError('You do not have that many gems.');
         return;
       }
+      if (withdrawMethod === 'paypal') {
+        const email = String(paypalEmail || '').trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          setOverlayError('Enter the PayPal email that should receive the payout.');
+          return;
+        }
+      } else if (!stripeReady) {
+        setOverlayError('Stripe bank payout is not ready. Choose PayPal, or finish Stripe Connect.');
+        return;
+      }
       try {
         setOverlayError('');
         const res = await requestWithdrawGems({
           amountGems: amount,
           idempotencyKey: makeIdempotencyKey('withdraw'),
+          method: withdrawMethod === 'paypal' ? 'paypal' : 'stripe',
+          ...(withdrawMethod === 'paypal'
+            ? { paypalEmail: String(paypalEmail || '').trim().toLowerCase() }
+            : {}),
         });
         closeOverlay();
         await refreshLiveWallet();
         const status = String(res?.status || '');
+        const viaPaypal = withdrawMethod === 'paypal';
         Alert.alert(
           'Withdrawal',
           status === 'paid'
             ? `Paid out ${res.netGems} gems (fee ${res.feeGems}).`
             : status === 'pending_review'
-              ? 'Submitted for review. Funds are reserved until approved.'
+              ? viaPaypal
+                ? 'PayPal withdrawal submitted. Blyp will send to your PayPal email after a quick review.'
+                : 'Submitted for review. Funds are reserved until approved.'
               : `Request ${status}.`,
         );
       } catch (e) {
@@ -864,7 +867,7 @@ const CoinStoreScreen = ({
                 {selectedTab === 'coins'
                   ? 'Buy coins to send gifts and unlock features. Purchased coins are spendable only — they cannot be withdrawn as cash.'
                   : ENABLE_WITHDRAWALS
-                    ? 'Gems are creator earnings from gifts (not purchased coins). After the normal clearance hold they can be withdrawn via Stripe. Minimum 1000 gems. No platform withdraw fee.'
+                    ? 'Gems are creator earnings from gifts (not purchased coins). After the normal clearance hold they can be withdrawn via PayPal (or Stripe bank when Connect clears). Minimum 1000 gems. No platform withdraw fee.'
                     : 'Gems are creator earnings from gifts. Cash-out is not available yet — balances are tracked for when withdrawals open.'
                 }
               </Text>
@@ -972,8 +975,77 @@ const CoinStoreScreen = ({
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
                     ? 'How many gems do you want to convert? (1 gem = 1 coin)'
-                    : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Normal users: gems clear after a hold period before withdraw.'}
+                    : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Prefer PayPal while Stripe Connect is in review.'}
                 </Text>
+
+                {overlayType === 'withdraw' ? (
+                  <View style={styles.withdrawMethodRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.withdrawMethodChip,
+                        withdrawMethod === 'paypal' && styles.withdrawMethodChipActive,
+                      ]}
+                      onPress={() => setWithdrawMethod('paypal')}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.withdrawMethodChipText,
+                          withdrawMethod === 'paypal' && styles.withdrawMethodChipTextActive,
+                        ]}
+                      >
+                        PayPal
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.withdrawMethodChip,
+                        withdrawMethod === 'stripe' && styles.withdrawMethodChipActive,
+                        !stripeReady && styles.withdrawMethodChipMuted,
+                      ]}
+                      onPress={() => {
+                        if (!stripeReady) {
+                          Alert.alert(
+                            'Stripe bank',
+                            'Stripe Connect is not ready for bank payouts yet (platform still in review). Use PayPal now, or continue Stripe onboarding for later.',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Open Stripe setup', onPress: () => { void startStripeOnboard(); } },
+                            ],
+                          );
+                          return;
+                        }
+                        setWithdrawMethod('stripe');
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text
+                        style={[
+                          styles.withdrawMethodChipText,
+                          withdrawMethod === 'stripe' && styles.withdrawMethodChipTextActive,
+                        ]}
+                      >
+                        {stripeReady ? 'Bank (Stripe)' : 'Bank (pending)'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
+                {overlayType === 'withdraw' && withdrawMethod === 'paypal' ? (
+                  <TextInput
+                    value={paypalEmail}
+                    onChangeText={(t) => {
+                      setPaypalEmail(t);
+                      if (overlayError) setOverlayError('');
+                    }}
+                    placeholder="PayPal email"
+                    placeholderTextColor="#A1A1AA"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.overlayInput, { marginBottom: 10 }]}
+                  />
+                ) : null}
 
                 <TextInput
                   value={overlayAmount}
@@ -1207,6 +1279,35 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
     textAlign: 'center',
+  },
+  withdrawMethodRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  withdrawMethodChip: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#27272E',
+    backgroundColor: '#141418',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  withdrawMethodChipActive: {
+    borderColor: '#67E8F9',
+    backgroundColor: '#0b1220',
+  },
+  withdrawMethodChipMuted: {
+    opacity: 0.72,
+  },
+  withdrawMethodChipText: {
+    color: '#A1A1AA',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  withdrawMethodChipTextActive: {
+    color: '#67E8F9',
   },
   overlayInput: {
     backgroundColor: '#141418',
