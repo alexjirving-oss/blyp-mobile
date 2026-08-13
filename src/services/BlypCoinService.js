@@ -672,6 +672,15 @@ class BlypCoinService {
         icon: '💍'
       },
       {
+        id: 'xlarge',
+        sku: 'blyp.android.coinpack.2000',
+        coins: 2000,
+        price: 14.99,
+        bonus: 0,
+        popular: false,
+        icon: '🏆'
+      },
+      {
         id: 'mega',
         sku: 'blyp.android.coinpack.3000',
         coins: 2500,
@@ -688,6 +697,15 @@ class BlypCoinService {
         bonus: 0,
         popular: false,
         icon: '🔮'
+      },
+      {
+        id: 'titan',
+        sku: 'blyp.android.coinpack.10000',
+        coins: 10000,
+        price: 69.99,
+        bonus: 0,
+        popular: false,
+        icon: '🦁'
       }
     ];
   }

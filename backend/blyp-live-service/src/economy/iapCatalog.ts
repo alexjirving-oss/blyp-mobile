@@ -30,8 +30,12 @@ export const ANDROID_IAP_CATALOG: ReadonlyArray<IapCatalogEntry> = Object.freeze
   { platform: 'ANDROID', sku: 'blyp.android.proof.coinpack.100', coinsGranted: 100, playTitle: '100 coins', label: '100 coins', priceUsd: 0.99 },
   { platform: 'ANDROID', sku: 'blyp.android.coinpack.550', coinsGranted: 500, playTitle: '500 coins', label: '500 coins', priceUsd: 4.99 },
   { platform: 'ANDROID', sku: 'blyp.android.coinpack.1150', coinsGranted: 1000, playTitle: '1000 coins', label: '1000 coins', priceUsd: 9.99 },
+  /** Mid pack between 1000 and 2500 grants (fills ladder gap for Baby Lion / mid gifts). */
+  { platform: 'ANDROID', sku: 'blyp.android.coinpack.2000', coinsGranted: 2000, playTitle: '2000 coins', label: '2000 coins', priceUsd: 14.99 },
   { platform: 'ANDROID', sku: 'blyp.android.coinpack.3000', coinsGranted: 2500, playTitle: '2500 coins', label: '2500 coins', priceUsd: 19.99 },
   { platform: 'ANDROID', sku: 'blyp.android.coinpack.6500', coinsGranted: 5000, playTitle: '5000 coins', label: '5000 coins', priceUsd: 39.99 },
+  /** Larger pack above 5000 (covers Big Lion + extras in one purchase). */
+  { platform: 'ANDROID', sku: 'blyp.android.coinpack.10000', coinsGranted: 10000, playTitle: '10000 coins', label: '10000 coins', priceUsd: 69.99 },
 ]);
 
 /** iOS App Store product IDs — mirror Android grants; create matching IAPs in App Store Connect. */
@@ -39,8 +43,10 @@ export const IOS_IAP_CATALOG: ReadonlyArray<IapCatalogEntry> = Object.freeze([
   { platform: 'IOS', sku: 'blyp.ios.proof.coinpack.100', coinsGranted: 100, playTitle: '100 coins', label: '100 coins', priceUsd: 0.99 },
   { platform: 'IOS', sku: 'blyp.ios.coinpack.550', coinsGranted: 500, playTitle: '500 coins', label: '500 coins', priceUsd: 4.99 },
   { platform: 'IOS', sku: 'blyp.ios.coinpack.1150', coinsGranted: 1000, playTitle: '1000 coins', label: '1000 coins', priceUsd: 9.99 },
+  { platform: 'IOS', sku: 'blyp.ios.coinpack.2000', coinsGranted: 2000, playTitle: '2000 coins', label: '2000 coins', priceUsd: 14.99 },
   { platform: 'IOS', sku: 'blyp.ios.coinpack.3000', coinsGranted: 2500, playTitle: '2500 coins', label: '2500 coins', priceUsd: 19.99 },
   { platform: 'IOS', sku: 'blyp.ios.coinpack.6500', coinsGranted: 5000, playTitle: '5000 coins', label: '5000 coins', priceUsd: 39.99 },
+  { platform: 'IOS', sku: 'blyp.ios.coinpack.10000', coinsGranted: 10000, playTitle: '10000 coins', label: '10000 coins', priceUsd: 69.99 },
 ]);
 
 export const IAP_CATALOG: ReadonlyArray<IapCatalogEntry> = Object.freeze([
