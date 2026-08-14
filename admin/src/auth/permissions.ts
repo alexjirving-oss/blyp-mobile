@@ -53,6 +53,17 @@ export const ROLE_DISPLAY: Record<AdminRole, string> = {
   analyst_readonly: "Analyst (readonly)",
 };
 
+/** UI blurbs for AccountMenu — Mel/admin retains economy.credit via backend RBAC. */
+export const ROLE_BLURB: Record<AdminRole, string> = {
+  owner: "Unrestricted console access — catastrophic actions, role grants, and system config.",
+  executive: "Executive oversight — broad ops without Owner-only nukes.",
+  admin: "Administrator (Mel) — bans, disputes, agents, and coin credit (economy.credit).",
+  trust_safety_lead: "Trust & Safety lead — reports, child-safety, and moderation lanes.",
+  moderator: "Moderator — content and report resolution within scope.",
+  support: "Support — people assistance, notes/messages. No coin credit.",
+  analyst_readonly: "Read-only dashboards and People list. No mutations.",
+};
+
 export interface AdminMe {
   ok: boolean;
   actorUserId: string;
@@ -62,6 +73,7 @@ export interface AdminMe {
   permissions: AdminPermission[];
   staffSource?: string;
   displayName?: string | null;
+  email?: string | null;
 }
 
 export function can(perms: readonly string[] | undefined | null, permission: AdminPermission): boolean {

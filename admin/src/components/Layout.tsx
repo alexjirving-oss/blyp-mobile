@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import AccountMenu from "./AccountMenu";
+import BlypWordmark from "./BlypWordmark";
 
 interface NavItem { to: string; label: string; icon: string; }
 
@@ -43,13 +45,8 @@ const NAV: { section: string; items: NavItem[] }[] = [
   },
 ];
 
-function shortActor(id?: string | null) {
-  if (!id) return "—";
-  return id.length > 14 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
-}
-
 export default function Layout() {
-  const { session, logout, me } = useAuth();
+  const { me } = useAuth();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [navOpen, setNavOpen] = useState(false);
@@ -81,9 +78,9 @@ export default function Layout() {
       {navOpen && <button type="button" className="nav-scrim" aria-label="Close menu" onClick={() => setNavOpen(false)} />}
 
       <aside className={`admin-sidebar${navOpen ? " open" : ""}`}>
-        <div className="row" style={{ gap: 10, padding: "4px 8px 18px" }}>
-          <span className="brand-mark">Blyp</span>
-          <span className="muted" style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.06em" }}>ADMIN</span>
+        <div className="admin-brand">
+          <BlypWordmark size="md" withTile />
+          <span className="blyp-admin-badge">Admin</span>
         </div>
 
         {NAV.map((group) => (
@@ -107,12 +104,26 @@ export default function Layout() {
         ))}
 
         <div className="sidebar-foot">
-          <div className="dim" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Session</div>
-          <div className="mono" style={{ fontSize: 11, marginTop: 4 }} title={session?.actorUserId}>
-            {shortActor(session?.actorUserId)}
+          <div className="dim" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Signed in</div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>
+            {me?.displayName || me?.email || "Operator"}
           </div>
-          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            {me?.roleDisplay || "Role…"} · allowlist + RBAC
+          <div style={{ marginTop: 8 }}>
+            <span
+              className={`tier-badge ${
+                me?.role === "owner"
+                  ? "tier-owner"
+                  : me?.role === "executive" || me?.role === "admin"
+                    ? "tier-admin"
+                    : me?.role === "trust_safety_lead" || me?.role === "moderator"
+                      ? "tier-lead"
+                      : me?.role === "support"
+                        ? "tier-support"
+                        : "tier-viewer"
+              }`}
+            >
+              {me?.roleDisplay || "…"}
+            </span>
           </div>
         </div>
       </aside>
@@ -131,19 +142,8 @@ export default function Layout() {
             />
             <button type="submit" className="btn tiny">Go</button>
           </form>
-          <div className="row" style={{ gap: 10, marginLeft: "auto" }}>
-            <span className="muted hide-sm" style={{ fontSize: 12 }} title={session?.actorUserId}>
-              {shortActor(session?.actorUserId)}
-            </span>
-            <button
-              className="btn ghost tiny"
-              onClick={() => {
-                logout();
-                navigate("/login");
-              }}
-            >
-              Logout
-            </button>
+          <div className="topbar-account">
+            <AccountMenu />
           </div>
         </header>
 

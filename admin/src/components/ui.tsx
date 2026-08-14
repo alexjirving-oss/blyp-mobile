@@ -4,7 +4,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <div className="row spread wrap" style={{ marginBottom: 18, gap: 12 }}>
       <div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>{title}</h1>
+        <h1 className="font-display" style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>{title}</h1>
         {subtitle && <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>{subtitle}</div>}
       </div>
       {actions && <div className="row wrap" style={{ gap: 8 }}>{actions}</div>}

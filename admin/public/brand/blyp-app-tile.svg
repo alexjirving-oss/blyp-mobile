@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="#0A0A0C"/>
+  <text x="145.45" y="589.99"
+    font-family="Arial Black, Arial, Helvetica, sans-serif"
+    font-weight="900"
+    font-size="309.02"
+    letter-spacing="-14.72"
+    fill="#F5F5F7">blyp</text>
+  <circle cx="830.80" cy="489.04" r="29.36" fill="#00D2BE"/>
+</svg>
