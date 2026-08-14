@@ -34,6 +34,7 @@ import {
   sweepStaleLiveDirectory,
 } from '../admin/firestoreAdmin';
 import { getSessionById } from '../live/liveSessionStore';
+import { battlesEnabled, battlesDisabledPayload } from '../battles/battlesFlags';
 
 const router = Router();
 
@@ -694,6 +695,7 @@ router.post('/live/guest/kick', async (req: AuthedRequest, res) => {
 // equal co-hosts: no request/approve dance.
 router.post('/live/battle/start', requireNotBanned, requireCanGoLive, async (req: AuthedRequest, res) => {
   try {
+    if (!battlesEnabled()) return res.status(404).json(battlesDisabledPayload());
     const userId = req.user?.sub || req.user?.username;
     if (!userId) return res.status(401).json({ error: 'User not found in token' });
     const { battleId, title, region } = req.body || {};
@@ -712,6 +714,7 @@ router.post('/live/battle/start', requireNotBanned, requireCanGoLive, async (req
 
 router.post('/live/battle/join', requireNotBanned, async (req: AuthedRequest, res) => {
   try {
+    if (!battlesEnabled()) return res.status(404).json(battlesDisabledPayload());
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'User not found in token' });
     const { sessionId, battleId } = req.body || {};

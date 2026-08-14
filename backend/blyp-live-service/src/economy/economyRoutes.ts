@@ -28,7 +28,7 @@ import {
   convertGemsToCoinsSchema,
   socialFollowSchema,
 } from './economySchemas';
-import { depositBattle, cancelRefundBattle, settleBattle } from './battleEscrowService';
+import { depositBattle } from './battleEscrowService';
 import {
   createBattleGiftPledge,
   cancelBattleGiftPledge,
@@ -475,6 +475,8 @@ router.post('/economy/live-games/finalize', async (req: AuthedRequest, res) => {
 
 router.post('/economy/battle/deposit', async (req: AuthedRequest, res) => {
   try {
+    const { battlesEnabled, battlesDisabledPayload } = await import('../battles/battlesFlags');
+    if (!battlesEnabled()) return res.status(404).json(battlesDisabledPayload());
     const userId = req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
     const parsed = battleDepositSchema.safeParse(req.body);
@@ -488,34 +490,19 @@ router.post('/economy/battle/deposit', async (req: AuthedRequest, res) => {
   }
 });
 
-router.post('/economy/battle/cancel-refund', async (req: AuthedRequest, res) => {
-  try {
-    const userId = req.user?.sub;
-    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
-    const parsed = battleCancelRefundSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
-    const out = await cancelRefundBattle(userId, parsed.data);
-    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
-    res.json(out.response);
-  } catch (e: any) {
-    const err = toEconomyError(e);
-    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
-  }
+/** Client settle/refund locked — coordinator owns settlement in-process. */
+router.post('/economy/battle/cancel-refund', async (_req: AuthedRequest, res) => {
+  return res.status(403).json({
+    error: 'Battle refunds are server-owned',
+    code: 'BATTLE_REFUND_LOCKED',
+  });
 });
 
-router.post('/economy/battle/settle', async (req: AuthedRequest, res) => {
-  try {
-    const userId = req.user?.sub;
-    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
-    const parsed = battleSettleSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
-    const out = await settleBattle(userId, parsed.data);
-    if (out.kind === 'replay') return res.status(409).json({ ...out.response, code: 'IDEMPOTENT_REPLAY' });
-    res.json(out.response);
-  } catch (e: any) {
-    const err = toEconomyError(e);
-    res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
-  }
+router.post('/economy/battle/settle', async (_req: AuthedRequest, res) => {
+  return res.status(403).json({
+    error: 'Battle settlement is server-owned',
+    code: 'BATTLE_SETTLE_LOCKED',
+  });
 });
 
 // ----------------------------------------------------------------------------

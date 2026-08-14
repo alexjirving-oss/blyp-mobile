@@ -2293,10 +2293,10 @@ router.get('/admin/games/disputes', requireAdmin, async (_req: AuthedRequest, re
             statuses: DISPUTE_STATUSES,
             marbleRaceEnabled: (plane as any)?.envReadOnly?.liveMarbleRaceEnabled ?? null,
             available: true,
-            settlementWired: false,
+            settlementWired: true,
             detail:
-                'Status workflow only. noted_freeze records ops intent — freeze/void/refund of battle/marble pots is not implemented. Do not settle pots from admin.',
-            note: 'Create disputes below; escalate settlement to engineering if pots must move.',
+                'Status workflow + admin battle escrow refund at POST /admin/battles/:battleId/refund. Marble pots still not admin-settled.',
+            note: 'Use battle refund for attendance-bond disputes; escalate other pot types to engineering.',
         });
     } catch (e: any) {
         return res.json({
@@ -2306,6 +2306,36 @@ router.get('/admin/games/disputes', requireAdmin, async (_req: AuthedRequest, re
             settlementWired: false,
             detail: e?.message || String(e),
         });
+    }
+});
+
+/** Admin refund of a staked battle attendance bond (pre-settlement). */
+router.post('/admin/battles/:battleId/refund', requireAdmin, requirePermission('economy.credit'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const battleId = String(req.params.battleId || '').trim();
+        if (!battleId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        const { getEconomyInfra } = await import('../economy/infra');
+        const { ensureEconomySchema } = await import('../economy/schema');
+        const { cancelRefundBattle } = await import('../economy/battleEscrowService');
+        const { db } = getEconomyInfra();
+        await ensureEconomySchema(db);
+        const row = await db('battle_escrows').where({ battle_id: battleId }).first();
+        if (!row) {
+            return res.status(404).json({ error: 'NOT_FOUND', code: 'NO_ESCROW' });
+        }
+        const actor = String(row.creator_uid || '').trim();
+        if (!actor) return res.status(500).json({ error: 'INTERNAL', code: 'MISSING_CREATOR' });
+        const idempotencyKey = String(req.body?.idempotencyKey || `admin-refund:${battleId}:${Date.now()}`).slice(0, 120);
+        const out = await cancelRefundBattle(actor, { battleId, idempotencyKey });
+        logger.info(
+            { battleId, adminSub: req.user?.sub, outcome: out?.response?.outcome || out?.kind },
+            '[admin] battle escrow refund',
+        );
+        return res.json({ ok: true, ...out.response, kind: out.kind });
+    } catch (e: any) {
+        const { toEconomyError } = await import('../economy/economyErrors');
+        const err = toEconomyError(e);
+        return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
     }
 });
 

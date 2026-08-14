@@ -10,6 +10,7 @@ import {
   registerBattle,
   voteBattle,
 } from '../battles/battleCoordinator';
+import { battlesEnabled, battlesDisabledPayload } from '../battles/battlesFlags';
 import { toEconomyError } from '../economy/economyErrors';
 import { requireNotBanned } from '../admin/banGuard';
 
@@ -35,6 +36,14 @@ const voteSchema = z.object({ side: z.enum(['A', 'B']) }).strict();
 
 router.use(cognitoJwtMiddleware);
 router.use(requireNotBanned);
+
+router.use((req, res, next) => {
+  if (!String(req.path || '').startsWith('/battles')) return next();
+  if (!battlesEnabled()) {
+    return res.status(404).json(battlesDisabledPayload());
+  }
+  return next();
+});
 
 function userId(req: AuthedRequest): string | null {
   return req.user?.sub || null;

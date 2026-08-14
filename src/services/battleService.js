@@ -511,91 +511,13 @@ export function topGiftersForSide(contributors, side, limit = 3) {
  * already in LIVE status with both sides joined. Match clock stays off until
  * Start match. No stake / no pending invite.
  */
-export async function challengeGuestInLive(host, guest, opts = {}) {
-  if (!firebaseEnabled || !db?.collection) return { ok: false, reason: 'unavailable' };
-  if (!host?.id || !guest?.id) return { ok: false, reason: 'missing_participants' };
-  if (host.id === guest.id) return { ok: false, reason: 'self' };
-
-  const liveStreamId = opts.liveStreamId || null;
-  const now = Date.now();
-  const durationSec = Math.max(60, Math.round(Number(opts.durationSec) || DEFAULT_DURATION_SEC));
-
-  // Adopt an existing open battle between these two on this stream, if any.
-  if (liveStreamId) {
-    try {
-      const snap = await db
-        .collection(BATTLES)
-        .where('liveStreamId', '==', liveStreamId)
-        .limit(12)
-        .get();
-      const open = (snap?.docs || [])
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .find((b) => {
-          if (![BATTLE_STATUS.PENDING, BATTLE_STATUS.SCHEDULED, BATTLE_STATUS.LIVE].includes(b.status)) {
-            return false;
-          }
-          if (b.liveStartedAt && b.status === BATTLE_STATUS.LIVE) return false;
-          const pair = new Set([b.creatorUid, b.opponentUid]);
-          return pair.has(host.id) && pair.has(guest.id);
-        });
-      if (open) {
-        await battleRef(open.id).update({
-          status: BATTLE_STATUS.LIVE,
-          creatorJoined: true,
-          opponentJoined: true,
-          liveStreamId,
-          durationSec: open.durationSec || durationSec,
-          updatedAt: now,
-          instantChallenge: true,
-        });
-        return { ok: true, id: open.id, battle: { ...open, status: BATTLE_STATUS.LIVE, liveStreamId }, adopted: true };
-      }
-    } catch {
-      /* fall through to create */
-    }
-  }
-
-  const id = newBattleId();
-  const hostName = host.displayName || host.username || host.name || 'Host';
-  const guestName = guest.displayName || guest.username || guest.name || 'Guest';
-  const battle = {
-    creatorUid: host.id,
-    creatorName: hostName,
-    creatorUsername: host.username || '',
-    creatorPhoto: host.photoURL || '',
-    opponentUid: guest.id,
-    opponentName: guestName,
-    opponentUsername: guest.username || '',
-    opponentPhoto: guest.photoURL || '',
-    participantsUids: [host.id, guest.id],
-    status: BATTLE_STATUS.LIVE,
-    title: String(opts.title || '').trim() || `${hostName} vs ${guestName}`,
-    scheduledStartAt: now,
-    durationSec,
-    depositMode: 'free',
-    stakeCoins: 0,
-    creatorPaid: false,
-    opponentPaid: false,
-    notifySupporters: false,
-    liveStreamId,
-    stageArn: opts.stageArn || null,
-    creatorJoined: true,
-    opponentJoined: true,
-    score: { creator: 0, opponent: 0 },
-    winnerUid: null,
-    settlement: null,
-    instantChallenge: true,
-    createdAt: now,
-    updatedAt: now,
+export async function challengeGuestInLive(_host, _guest, _opts = {}) {
+  // Prod hardening: instant guest challenges bypass battle_registry — hard off.
+  return {
+    ok: false,
+    reason: 'instant_guest_disabled',
+    code: 'INSTANT_GUEST_DISABLED',
   };
-
-  try {
-    await battleRef(id).set(battle);
-    return { ok: true, id, battle: { id, ...battle } };
-  } catch (e) {
-    console.warn('[battleService] challengeGuestInLive failed', e?.code || e?.message || e);
-    return { ok: false, reason: 'write_failed' };
-  }
 }
 
 /**
