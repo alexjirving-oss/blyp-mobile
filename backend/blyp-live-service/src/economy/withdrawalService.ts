@@ -14,7 +14,8 @@ import {
   stripeConnectSetupRequiredError,
 } from './economyErrors';
 import { getEconomyInfra } from './infra';
-import { getWallet } from './economyService';
+import { creditWebStripeCoins, getWallet } from './economyService';
+import { findWebCoinPack } from './webCoinCatalog';
 import { assessWithdrawal, type KycStatus, type WithdrawalContext } from './withdrawalGuard';
 import { WITHDRAWAL_POLICY as P } from './withdrawalPolicy';
 import { isWithdrawLaunchTestUser } from './withdrawLaunchTest';
@@ -1423,6 +1424,62 @@ export async function handleStripeWebhook(rawBody: Buffer, signature: string | u
         charges_enabled: !!account.charges_enabled,
         updated_at: db.fn.now(),
       });
+  }
+
+  // blyp.world Stripe Checkout → credit base + web +15% bonus coins (idempotent).
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const meta = session.metadata || {};
+    const source = String(meta.source || '').trim();
+    const packId = String(meta.packId || '').trim();
+    const userId = String(meta.userId || session.client_reference_id || '').trim();
+    const paid =
+      session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
+    if (source === 'blyp-world' && packId && userId && paid) {
+      if (!findWebCoinPack(packId)) {
+        logger.warn(
+          { packId, sessionId: session.id },
+          '[stripe-webhook] unknown web pack — skipped credit',
+        );
+      } else {
+        try {
+          const out = await creditWebStripeCoins({
+            userId,
+            packId,
+            stripeSessionId: session.id,
+          });
+          logger.info(
+            {
+              userId,
+              packId,
+              sessionId: session.id,
+              kind: out.kind,
+              granted: out.granted,
+              baseCoins: out.baseCoins,
+              bonusCoins: out.bonusCoins,
+            },
+            '[stripe-webhook] web coin pack credited',
+          );
+        } catch (e: any) {
+          logger.error(
+            { err: e?.message || String(e), userId, packId, sessionId: session.id },
+            '[stripe-webhook] web coin credit failed',
+          );
+          throw e;
+        }
+      }
+    } else if (source === 'blyp-world' || packId.startsWith('web.coinpack.')) {
+      logger.warn(
+        {
+          sessionId: session.id,
+          source: source || null,
+          packId: packId || null,
+          hasUserId: !!userId,
+          paymentStatus: session.payment_status,
+        },
+        '[stripe-webhook] blyp-world checkout completed but credit skipped (missing fields or unpaid)',
+      );
+    }
   }
 
   if (event.type === 'transfer.created' || event.type === 'transfer.updated') {

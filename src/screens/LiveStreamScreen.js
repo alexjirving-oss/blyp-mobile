@@ -2721,8 +2721,11 @@ const LiveStreamScreen = (props) => {
       startedAt: typeof streamStartTime === 'number' ? streamStartTime : Date.now(),
       likes: heartCount || 0,
       peakViewers: viewCount || 0,
+      role: isViewer ? 'viewer' : 'host',
+      mode: isViewer ? 'viewer' : 'host',
+      battleId: activeBattleId || routeBattleId || '',
     }),
-    [title, streamStartTime, heartCount, viewCount]
+    [title, streamStartTime, heartCount, viewCount, isViewer, routeBattleId, activeBattleId]
   );
 
   const stopStreaming = async () => {

@@ -36,6 +36,7 @@ import {
   GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
   GEM_TO_COIN_FACE_RATIO,
 } from './gemToCoinConvert';
+import { findWebCoinPack } from './webCoinCatalog';
 
 // Agency commission from Blyp's platform half of gift face (coins → gems).
 const MICRO_PER_GEM = 1_000_000n;
@@ -1465,6 +1466,152 @@ export async function creditSubscriptionCoins(
     // grant already happened, so report the current wallet as a replay.
     if (e?.code === '23505') {
       return { kind: 'replay', granted: 0, wallet: await readWallet(db) };
+    }
+    throw e;
+  }
+}
+
+/**
+ * Credit coins from a paid Stripe Checkout session (blyp.world web packs).
+ * Authoritative grant comes from webCoinCatalog (base + ~15% bonus) — never from
+ * client-supplied amounts. Idempotent per Stripe session id.
+ * App Play IAP stays base-only via verifyIapPurchaseAndGrant / iapCatalog.
+ */
+export async function creditWebStripeCoins(input: {
+  userId: string;
+  packId: string;
+  stripeSessionId: string;
+}): Promise<{
+  kind: 'ok' | 'replay';
+  granted: number;
+  baseCoins: number;
+  bonusCoins: number;
+  packId: string;
+  wallet: { coinBalance: number; bonusCoinBalance: number; gemAvailable: number; gemPending: number };
+}> {
+  const userId = String(input.userId || '').trim();
+  const packId = String(input.packId || '').trim();
+  const stripeSessionId = String(input.stripeSessionId || '').trim();
+  if (!userId) throw new EconomyError('INVALID_INPUT', 400, 'userId required');
+  if (!stripeSessionId) throw new EconomyError('INVALID_INPUT', 400, 'stripeSessionId required');
+
+  const pack = findWebCoinPack(packId);
+  if (!pack) {
+    throw new EconomyError('NOT_FOUND', 404, 'Unknown web coin pack', packId);
+  }
+
+  const idempotencyKey = `stripe:checkout:${stripeSessionId}`;
+  const { db } = getEconomyInfra();
+
+  const readWallet = async (q: any) => {
+    const w = await q('wallets').where({ user_id: userId }).first();
+    return {
+      coinBalance: Number(w?.coin_balance || 0),
+      bonusCoinBalance: Number(w?.bonus_coin_balance || 0),
+      gemAvailable: Number(w?.gem_available || 0),
+      gemPending: Number(w?.gem_pending || 0),
+    };
+  };
+
+  try {
+    return await db.transaction(async (trx) => {
+      await trx('wallets').insert({ user_id: userId }).onConflict('user_id').ignore();
+
+      const existingBySession = await trx('ledger_entries')
+        .where({ entry_type: 'COIN_PURCHASE' })
+        .whereRaw("metadata->>'stripeSessionId' = ?", [stripeSessionId])
+        .first();
+      if (existingBySession) {
+        if (String(existingBySession.user_id) !== userId) {
+          throw new EconomyError(
+            'VERIFICATION_FAILED',
+            409,
+            'Stripe session already redeemed',
+            'stripe_session_reused',
+          );
+        }
+        return {
+          kind: 'replay' as const,
+          granted: Number(existingBySession.amount || 0),
+          baseCoins: pack.baseCoins,
+          bonusCoins: pack.bonusCoins,
+          packId: pack.packId,
+          wallet: await readWallet(trx),
+        };
+      }
+
+      const existingKey = await trx('ledger_entries')
+        .where({ user_id: userId, idempotency_key: idempotencyKey, entry_type: 'COIN_PURCHASE' })
+        .first();
+      if (existingKey) {
+        return {
+          kind: 'replay' as const,
+          granted: Number(existingKey.amount || 0),
+          baseCoins: pack.baseCoins,
+          bonusCoins: pack.bonusCoins,
+          packId: pack.packId,
+          wallet: await readWallet(trx),
+        };
+      }
+
+      const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
+      if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+      const baseGrant = BigInt(pack.baseCoins);
+      const bonusGrant = BigInt(pack.bonusCoins);
+      const grant = baseGrant + bonusGrant;
+      if (grant !== BigInt(pack.coinsGranted)) {
+        throw new EconomyError('INTERNAL', 500, 'Web pack grant mismatch', pack.packId);
+      }
+
+      // Base → coin_balance; web perk → bonus_coin_balance (spendable = sum).
+      await trx('wallets')
+        .where({ user_id: userId })
+        .update({
+          coin_balance: (BigInt(wallet.coin_balance) + baseGrant).toString(),
+          bonus_coin_balance: (BigInt(wallet.bonus_coin_balance) + bonusGrant).toString(),
+          updated_at: trx.fn.now(),
+        });
+
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: userId,
+        entry_type: 'COIN_PURCHASE',
+        currency: 'COIN',
+        amount: grant.toString(),
+        status: 'POSTED',
+        reference_type: 'STRIPE',
+        reference_id: stripeSessionId,
+        idempotency_key: idempotencyKey,
+        metadata: {
+          platform: 'WEB',
+          source: 'blyp-world',
+          packId: pack.packId,
+          baseCoins: pack.baseCoins,
+          bonusCoins: pack.bonusCoins,
+          stripeSessionId,
+        },
+      });
+
+      return {
+        kind: 'ok' as const,
+        granted: pack.coinsGranted,
+        baseCoins: pack.baseCoins,
+        bonusCoins: pack.bonusCoins,
+        packId: pack.packId,
+        wallet: await readWallet(trx),
+      };
+    });
+  } catch (e: any) {
+    if (e?.code === '23505') {
+      return {
+        kind: 'replay',
+        granted: 0,
+        baseCoins: pack.baseCoins,
+        bonusCoins: pack.bonusCoins,
+        packId: pack.packId,
+        wallet: await readWallet(db),
+      };
     }
     throw e;
   }

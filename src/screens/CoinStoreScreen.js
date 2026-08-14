@@ -1025,7 +1025,7 @@ const CoinStoreScreen = ({
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
                     ? `${describeGemToCoinRate()}. Gift earnings already took the half when coins became gems. Cleared gems only (${gemAvailable.toLocaleString()} available).`
-                    : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Prefer PayPal while Stripe Connect is in review.'}
+                    : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Bank (Stripe) is primary when KYC clears; PayPal is the emergency backup.'}
                 </Text>
 
                 {overlayType === 'convert' && Number(overlayAmount) > 0 ? (
@@ -1050,7 +1050,7 @@ const CoinStoreScreen = ({
                           withdrawMethod === 'paypal' && styles.withdrawMethodChipTextActive,
                         ]}
                       >
-                        PayPal
+                        PayPal · backup
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -1062,8 +1062,8 @@ const CoinStoreScreen = ({
                       onPress={() => {
                         if (!stripeReady) {
                           Alert.alert(
-                            'Stripe bank',
-                            'Stripe Connect is not ready for bank payouts yet (platform still in review). Use PayPal now, or continue Stripe onboarding for later.',
+                            'Stripe bank (primary)',
+                            'Stripe Connect bank payout is the primary rail once KYC clears. Right now Connect is still verifying — use PayPal backup, or continue Stripe onboarding for later.',
                             [
                               { text: 'Cancel', style: 'cancel' },
                               { text: 'Open Stripe setup', onPress: () => { void startStripeOnboard(); } },
@@ -1081,7 +1081,7 @@ const CoinStoreScreen = ({
                           withdrawMethod === 'stripe' && styles.withdrawMethodChipTextActive,
                         ]}
                       >
-                        {stripeReady ? 'Bank (Stripe)' : 'Bank (pending)'}
+                        {stripeReady ? 'Bank · primary' : 'Bank · verifying'}
                       </Text>
                     </TouchableOpacity>
                   </View>

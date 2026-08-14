@@ -763,11 +763,23 @@ export default function ReactionDuelOverlay({
                     </Text>
                   </View>
                 ) : null}
+                {phase === 'ended' && state?.score ? (
+                  <Text style={styles.resultCopy} allowFontScaling={false}>
+                    Final score{' '}
+                    {Number(state.score?.[state.playerAUserId] ?? state.score?.a ?? state.roundsWonA ?? 0)}
+                    {' – '}
+                    {Number(state.score?.[state.playerBUserId] ?? state.score?.b ?? state.roundsWonB ?? 0)}
+                    {' · '}best of 5
+                  </Text>
+                ) : null}
                 <Text style={styles.resultCopy} allowFontScaling={false}>
                   {state.lastRound?.text ||
                     (phase === 'refunded'
-                      ? 'Both entries were refunded.'
-                      : 'Prize credited by the server.')}
+                      ? 'Both entries were refunded to spendable COIN.'
+                      : 'Prize is real spendable COIN. If gifted on live, creators still get half as gems.')}
+                </Text>
+                <Text style={[styles.resultCopy, { opacity: 0.85 }]} allowFontScaling={false}>
+                  Next: keep dueling, gift the room, or check Wallet for coin balance.
                 </Text>
                 <TouchableOpacity
                   style={styles.doneButton}

@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { creditSubscriptionCoins, purgeUserData, creditGemsAdminLaunchTest } from '../economy/economyService';
+import {
+  creditSubscriptionCoins,
+  creditWebStripeCoins,
+  purgeUserData,
+  creditGemsAdminLaunchTest,
+} from '../economy/economyService';
 import { toEconomyError } from '../economy/economyErrors';
 import { materializeRankingsSnapshots } from '../economy/rankingsService';
 import { applyBattleGiftPledges, refundBattleGiftPledges } from '../economy/battleGiftPledgeService';
@@ -99,6 +104,40 @@ router.post('/internal/subscription/credit-coins', requireInternalSecret, async 
     const err = toEconomyError(e);
     if (err.code === 'INTERNAL') {
       logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/subscription/credit-coins');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+const creditWebCoinsSchema = z
+  .object({
+    userId: z.string().min(1),
+    packId: z.string().min(1),
+    stripeSessionId: z.string().min(1),
+  })
+  .strict();
+
+/** Credit blyp.world Stripe Checkout packs (base + web +15% bonus). Idempotent per session. */
+router.post('/internal/economy/credit-web-coins', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = creditWebCoinsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await creditWebStripeCoins(parsed.data);
+    return res.json({
+      ok: true,
+      kind: out.kind,
+      granted: out.granted,
+      baseCoins: out.baseCoins,
+      bonusCoins: out.bonusCoins,
+      packId: out.packId,
+      wallet: out.wallet,
+    });
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/economy/credit-web-coins');
     }
     return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }
