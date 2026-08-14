@@ -249,6 +249,9 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
     // after an audio-session fight or concurrent remount (receiver path).
     kickPlayback();
     kickTimerRef.current = setTimeout(() => kickPlayback(), 60);
+    const kickTimers = [160, 320, 640].map((ms) =>
+      setTimeout(() => kickPlayback(), ms),
+    );
 
     // If ExoPlayer never advances, retry muted then dismiss instead of soft-lock.
     stallTimerRef.current = setTimeout(() => {
@@ -273,6 +276,7 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
       if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
       if (stallTimerRef.current) clearTimeout(stallTimerRef.current);
       if (kickTimerRef.current) clearTimeout(kickTimerRef.current);
+      kickTimers.forEach((t) => clearTimeout(t));
       cancelAnimation(chrome);
       cancelAnimation(plaqueProg);
       cancelAnimation(impactFlash);

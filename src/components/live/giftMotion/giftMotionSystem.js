@@ -722,24 +722,35 @@ export function registerGiftAudio(key, module) {
 /**
  * Cinema / hero gift audible cue. Under live IVS, prefer native voice-comm sting
  * so we never fight STREAM_MUSIC focus. Off-live uses expo-av media routing.
+ * Never fall through to expo-av Sound while Stage is live — that focus fight
+ * freezes muted ExoPlayer gift films on Fold receivers.
  */
 export async function playGiftCinemaAudio(motion) {
   ensureDefaultGiftAudioRegistered();
   const key = motion?.audioKey || 'gift_cinema';
+  let live = false;
+  try {
+    // eslint-disable-next-line global-require
+    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
+    live = !!isLiveAudioSessionActive();
+  } catch {
+    live = false;
+  }
   try {
     // eslint-disable-next-line global-require
     const { Platform } = require('react-native');
-    // eslint-disable-next-line global-require
-    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
-    if (Platform.OS === 'android' && isLiveAudioSessionActive()) {
+    if (Platform.OS === 'android') {
       // eslint-disable-next-line global-require
       const { playGiftSting } = require('../../../services/blypAudioRoute');
-      const ok = await playGiftSting(0.9);
+      // Native picks VOICE vs MEDIA attrs from AudioManager.mode — safe anytime.
+      const ok = await playGiftSting(0.95);
       if (ok) return;
+      if (live) return;
     }
   } catch {
-    // fall through to expo-av
+    if (live) return;
   }
+  if (live) return;
   await playGiftAudio(key);
 }
 

@@ -60,6 +60,18 @@ class BlypAudioRouteModule(reactContext: ReactApplicationContext) :
       }
       val vol = volume.toFloat().coerceIn(0.05f, 1f)
       player.setVolume(vol, vol)
+      // Fold receivers often leave STREAM_VOICE_CALL at 0 while media rocker is up —
+      // gift stings use voice attributes under IVS, so bump a silent call stream.
+      if (inComm) {
+        try {
+          val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+          val cur = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+          if (max > 0 && cur <= 0) {
+            am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, (max * 0.55f).toInt().coerceAtLeast(1), 0)
+          }
+        } catch (_: Exception) {
+        }
+      }
       var focusReq: AudioFocusRequest? = null
       // Transient duck only — never displace publish AUDIOFOCUS_GAIN ownership.
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
