@@ -37,20 +37,6 @@ import SportPagePanel from '../components/HomeBase/SportPagePanel';
 import FollowingFeedPanel from '../components/HomeBase/FollowingFeedPanel';
 import ScreenErrorBoundary from '../components/ScreenErrorBoundary';
 import {
-  subscribePreferences,
-  getEnabledPages,
-  getFirstEnabledPageKey,
-  isTopicPageKey,
-  topicIdFromKey,
-  getHomeRibbonPages,
-} from '../services/userPreferencesService';
-import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
-import { useTabReset } from '../utils/tabResetBus';
-import { subscribeTourSelect } from '../tour/tourBus';
-import { requireAccount } from '../services/guestSessionService';
-import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
-import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
-import {
   buildCycleContinuation,
   dedupePostsById,
   ensureFocusPostInList,
@@ -60,6 +46,22 @@ import {
   shufflePostsVaried,
   varietyAvoidCount,
 } from '../utils/forYouFeedList';
+import { prepareRankedFeed } from '../services/feedRankingService';
+import {
+  subscribePreferences,
+  getEnabledPages,
+  getFirstEnabledPageKey,
+  isTopicPageKey,
+  topicIdFromKey,
+  getHomeRibbonPages,
+  interestLabels,
+} from '../services/userPreferencesService';
+import { subscribeToFollowingList, followUser, unfollowUser } from '../utils/followUtils';
+import { useTabReset } from '../utils/tabResetBus';
+import { subscribeTourSelect } from '../tour/tourBus';
+import { requireAccount } from '../services/guestSessionService';
+import { filterBlocked, loadBlockedUsers } from '../services/BlockService';
+import { isForYouFeedPost, isVideoWithSoundPost } from '../utils/forYouFeedFilter';
 import {
   resolvePlayableUri,
   shouldLoadCell,
@@ -246,14 +248,8 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /**
- * For You order: drop suppressed accounts, then shuffle with unseen / less-recent
- * preference (avoidFirstIds). No Instant / framing / UI chrome changes.
- * @param {any[]} posts
- * @param {{
- *   avoidCount?: number,
- *   remember?: boolean,
- *   avoidFirstIds?: string[]|Set<string>,
- * }} [opts]
+ * For You order: rankPosts via prepareRankedFeed, then ~12% exploration mix.
+ * Fail-open to variety shuffle. Order/prefs only — no player/shorts thrash.
  */
 async function prepareForYouOrder(posts, opts = {}) {
   const candidates = Array.isArray(posts) ? posts : [];
@@ -265,11 +261,45 @@ async function prepareForYouOrder(posts, opts = {}) {
     remember: opts.remember !== false,
     avoidFirstIds: opts.avoidFirstIds,
   };
+  const explorationRate = Number.isFinite(opts.explorationRate) ? opts.explorationRate : 0.12;
   try {
-    const withAccount = await attachAccountFeedPriority(candidates);
-    return shufflePostsVaried(filterSuppressedAccounts(withAccount), shuffleOpts);
+    const ranked = await prepareRankedFeed(candidates, {
+      mode: 'rank',
+      fairCap: true,
+      getContext: opts.getContext,
+    });
+    if (!ranked?.length) {
+      return shufflePostsVaried(candidates, shuffleOpts);
+    }
+    const exploreN = Math.max(
+      0,
+      Math.min(ranked.length, Math.round(ranked.length * explorationRate)),
+    );
+    if (exploreN <= 0 || ranked.length < 4) return ranked;
+    const pool = shufflePostsVaried(ranked, { ...shuffleOpts, remember: false });
+    const out = ranked.slice();
+    for (let i = 0; i < exploreN; i += 1) {
+      const src = pool[i % pool.length];
+      if (!src?.id) continue;
+      const swapIdx = Math.min(
+        out.length - 1,
+        Math.max(1, Math.floor(((i + 1) / (exploreN + 1)) * out.length)),
+      );
+      const from = out.findIndex((p) => p?.id === src.id);
+      if (from >= 0 && from !== swapIdx) {
+        const tmp = out[swapIdx];
+        out[swapIdx] = out[from];
+        out[from] = tmp;
+      }
+    }
+    return out;
   } catch (_) {
-    return shufflePostsVaried(candidates, shuffleOpts);
+    try {
+      const withAccount = await attachAccountFeedPriority(candidates);
+      return shufflePostsVaried(filterSuppressedAccounts(withAccount), shuffleOpts);
+    } catch {
+      return shufflePostsVaried(candidates, shuffleOpts);
+    }
   }
 }
 
@@ -545,6 +575,8 @@ const HomeScreen = ({ navigation, route }) => {
   // Local impression history — used to prefer unseen / less-recently-seen clips.
   const forYouRecentlySeenIdsRef = useRef(new Set());
   const forYouRecentlySeenOrderRef = useRef([]);
+  const prefsRef = useRef(null);
+  prefsRef.current = prefs;
 
   const seenAvoidOpts = useCallback((poolSize, extra = {}) => {
     const seenOrder = forYouRecentlySeenOrderRef.current || [];
@@ -552,6 +584,18 @@ const HomeScreen = ({ navigation, route }) => {
       avoidFirstIds: seenOrder.length ? seenOrder : undefined,
       avoidCount: varietyAvoidCount(poolSize, extra.avoidCount),
       remember: extra.remember !== false,
+      explorationRate: 0.12,
+      getContext: () => {
+        const labels = interestLabels(prefsRef.current?.interests || []);
+        const terms = (labels || [])
+          .map((t) => String(t || '').trim().toLowerCase())
+          .filter(Boolean);
+        return {
+          terms,
+          following: followingRef.current || new Set(),
+          seenIds: forYouRecentlySeenIdsRef.current || new Set(),
+        };
+      },
     };
   }, []);
 

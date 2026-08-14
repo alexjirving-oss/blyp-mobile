@@ -487,15 +487,15 @@ const MediaViewerItem = ({
     closeOptions();
     const summary = reachSummary(actualPost);
     const base =
-      'Posts earn their reach on Blyp — this one was shown to you based on how well people who saw it reacted (watch-through, likes, shares), your follows and interests, plus a small random mix so good new content can break out. Paying never buys reach.';
+      'For You ranks clips by follows, your interests, engagement quality, freshness, and earn-your-reach — plus about 12% exploration so new creators can break through. Paying never buys the top slot.';
     let message = base;
     if (summary && summary.has) {
       const lines = [
         `This post is "${summary.label}" — shown to about ${summary.exposurePct}% of its potential audience.`,
         summary.headline + '.',
-        `It reached you because it earned a Blyp Score of ${summary.score} from genuine engagement, not because anyone paid.`,
+        `Blyp Score ${summary.score} from genuine engagement — not paid placement.`,
       ];
-      message = lines.join('\n\n');
+      message = `${base}\n\n${lines.join('\n\n')}`;
     }
     Alert.alert('Why am I seeing this?', message, [
       { text: 'Close', style: 'cancel' },
