@@ -4,16 +4,13 @@
  * until the full call-media session module lands.
  */
 
-/**
- * @param {string} callId
- * @param {{ role?: string, mintPromise?: Promise<unknown> }} [opts]
- */
-export async function prepareCallMedia(callId, opts = {}) {
-  const { mintPromise } = opts;
+export async function prepareCallMedia(callId, opts) {
+  opts = opts || {};
+  var mintPromise = opts.mintPromise;
   if (mintPromise && typeof mintPromise.then === 'function') {
     try {
       await mintPromise;
-    } catch {
+    } catch (e) {
       // warm path is best-effort
     }
   }
@@ -21,5 +18,5 @@ export async function prepareCallMedia(callId, opts = {}) {
 }
 
 export default {
-  prepareCallMedia,
+  prepareCallMedia: prepareCallMedia,
 };
