@@ -17,20 +17,25 @@ import com.facebook.react.bridge.ReactContext
  * Owns the operating-system audio route while an IVS live session is active.
  *
  * IVS audio attributes alone do not force an output device. In particular, creating or
- * publishing a Stage can put AudioManager back into MODE_IN_COMMUNICATION with the receiver
- * selected. This guard keeps the correct communication device selected for the full session
- * and repairs later route/mode changes made by IVS, expo-av, LiveKit, or an OEM audio policy.
+ * publishing a Stage — and especially when a remote guest joins — puts AudioManager into
+ * MODE_IN_COMMUNICATION with the **earpiece/receiver** selected (Samsung Fold default).
+ * That is the "host/guests sound quiet" bug: call-volume path on the wrong transducer.
+ *
+ * This guard keeps the built-in loudspeaker selected for the full session and repairs
+ * later route/mode changes made by IVS WebRTC peer connect, expo-av, LiveKit, or OEM policy.
  *
  * For PUBLISHING profiles it also:
  * - Prefers BT SCO / wired headset when present (IVS VIDEO_CHAT "any output should work");
  *   only forces the built-in speaker when no headset route exists.
  * - Holds voice-communication audio focus so expo-av media stings cannot steal the call path.
- * - Re-asserts StageAudioManager AEC on every force/watchdog tick (join-time configure can
- *   be cleared by SUBSCRIBE_ONLY / OEM / expo-av churn while the mic stays open).
+ * - Re-asserts StageAudioManager AEC on every force/watchdog tick.
  * - Binds Activity volume keys to STREAM_VOICE_CALL so OEMs (notably Samsung Fold) do not
  *   leave the rocker on STREAM_MUSIC while Stage plays on the communication path.
+ * - Burst-reasserts after guest join / remote audio / subscribe churn (IVS flips earpiece
+ *   *after* the participant-joined callback returns).
  *
- * PLAYBACK keeps media volume (viewer/HLS path).
+ * PLAYBACK keeps media volume (viewer/HLS path) but still pins builtin SPEAKER —
+ * Samsung clearCommunicationDevice() alone leaves TYPE_BUILTIN_EARPIECE.
  */
 internal class LiveLoudspeakerController(
     context: Context,
@@ -52,6 +57,7 @@ internal class LiveLoudspeakerController(
     private var lastSignature: String? = null
     private var publishFocusRequest: AudioFocusRequest? = null
     private var publishFocusHeld: Boolean = false
+    private var burstToken: Long = 0L
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { change ->
         // expo-av / OEM focus loss is repaired on the next watchdog tick via ensurePublishAudioFocus.
@@ -76,7 +82,10 @@ internal class LiveLoudspeakerController(
             val profile = activeProfile ?: return
             applyRoute(profile, "watchdog")
             if (activeProfile == profile) {
-                mainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS)
+                // Faster tick while earpiece is still selected — guest-join OEM races.
+                val interval =
+                    if (isEarpieceSelected()) WATCHDOG_EARPIECE_INTERVAL_MS else WATCHDOG_INTERVAL_MS
+                mainHandler.postDelayed(this, interval)
             }
         }
     }
@@ -90,24 +99,34 @@ internal class LiveLoudspeakerController(
             // delayed check catches that race; the continuing watchdog catches any later
             // expo-av/LiveKit/OEM reset for the entire live session.
             mainHandler.postDelayed(watchdog, INITIAL_REASSERT_DELAY_MS)
+            scheduleBurstReassert(reason)
         }
     }
 
     fun force(profile: Profile, reason: String) {
         runOnMain {
             applyRoute(profile, reason)
+            if (shouldBurstReassert(reason)) {
+                scheduleBurstReassert(reason)
+            }
         }
     }
 
     fun forceActive(reason: String) {
         runOnMain {
-            activeProfile?.let { applyRoute(it, reason) }
+            activeProfile?.let { profile ->
+                applyRoute(profile, reason)
+                if (shouldBurstReassert(reason)) {
+                    scheduleBurstReassert(reason)
+                }
+            }
         }
     }
 
     fun stop(reason: String) {
         runOnMain {
             activeProfile = null
+            burstToken += 1
             mainHandler.removeCallbacks(watchdog)
             try {
                 abandonPublishAudioFocus()
@@ -148,6 +167,39 @@ internal class LiveLoudspeakerController(
         }
     }
 
+    private fun shouldBurstReassert(reason: String): Boolean {
+        val r = reason.lowercase()
+        return r.contains("participant-joined") ||
+            r.contains("participant-left") ||
+            r.contains("remote-audio") ||
+            r.contains("remote-media") ||
+            r.contains("subscribe-state") ||
+            r.contains("publish-state") ||
+            r.contains("stage-join") ||
+            r.contains("streams-added") ||
+            r.contains("guest-") ||
+            r.contains("host-")
+    }
+
+    /**
+     * IVS / Samsung often flip communicationDevice back to EARPIECE *after* the join
+     * callback returns (WebRTC peer connect). Re-pin a few times on a short cadence.
+     */
+    private fun scheduleBurstReassert(reason: String) {
+        val token = ++burstToken
+        val delays = longArrayOf(120L, 350L, 750L, 1500L, 3000L)
+        for (delay in delays) {
+            mainHandler.postDelayed(
+                {
+                    if (token != burstToken) return@postDelayed
+                    val profile = activeProfile ?: return@postDelayed
+                    applyRoute(profile, "burst-$delay-$reason")
+                },
+                delay,
+            )
+        }
+    }
+
     private fun applyRoute(profile: Profile, reason: String) {
         try {
             val desiredMode =
@@ -172,26 +224,19 @@ internal class LiveLoudspeakerController(
                 communicationDevice = selection.deviceLabel
             } else {
                 abandonPublishAudioFocus()
-                // A lingering Bluetooth SCO route wins over isSpeakerphoneOn on older Android.
                 stopBluetoothScoIfNeeded()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    // MODE_NORMAL + no communication-device override ensures IVS Player/
-                    // subscribe-only Stage audio follows the loud media path.
-                    audioManager.clearCommunicationDevice()
-                    communicationDevice =
-                        audioManager.communicationDevice?.let { "${it.type}:${it.productName}" }
-                            ?: "none"
-                }
+                // Samsung: clearCommunicationDevice() alone leaves TYPE_BUILTIN_EARPIECE.
+                // Pin builtin SPEAKER explicitly so Stage/HLS subscribe is not quiet.
+                val pinned = pinBuiltinSpeaker(sandwich = false)
+                communicationDevice = currentCommDeviceLabel()
                 @Suppress("DEPRECATION")
                 run { audioManager.isSpeakerphoneOn = true }
-                routeChoice = "media-speaker"
+                routeChoice = if (pinned) "media-speaker-pinned" else "media-speaker"
             }
 
             // Watchdog/route churn can leave StageAudioManager without AEC after a prior
             // SUBSCRIBE_ONLY session or OEM/expo-av audio-policy reset. Re-assert on every
             // publishing force so loudspeaker output cannot re-enter the open mic.
-            // Does not fix two phones in the same physical room (air-path coupling).
-            // Note: setPreset cannot run while Stage/DeviceDiscovery are alive — AEC only.
             var aec = "n/a"
             var usage = "n/a"
             if (profile == Profile.PUBLISHING && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -211,6 +256,19 @@ internal class LiveLoudspeakerController(
                     aec = "failed:${aecError.message}"
                     Log.w(logTag, "[IVS_AUDIO_ROUTE] AEC reassert failed reason=$reason", aecError)
                 }
+            }
+
+            // Last-chance: if OEM still selected earpiece, sandwich-pin speaker.
+            if (isEarpieceSelected() && findHeadset(commDevices()) == null) {
+                Log.w(logTag, "[IVS_AUDIO_ROUTE] earpiece still selected after route; sandwich pin")
+                pinBuiltinSpeaker(sandwich = true)
+                if (profile == Profile.PUBLISHING && audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                }
+                @Suppress("DEPRECATION")
+                run { audioManager.isSpeakerphoneOn = true }
+                communicationDevice = currentCommDeviceLabel()
+                routeChoice = "$routeChoice+sandwich"
             }
 
             val volumeControlStream = bindVolumeControlStream(profile)
@@ -248,33 +306,37 @@ internal class LiveLoudspeakerController(
 
     private fun selectPublishingCommunicationDevice(): CommSelection {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val devices = audioManager.availableCommunicationDevices
+            val devices = commDevices()
             val bt = devices.firstOrNull { isBluetoothCommDevice(it.type) }
             val wired = devices.firstOrNull { isWiredCommDevice(it.type) }
-            val speaker = devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-            val chosen = bt ?: wired ?: speaker
-            if (chosen != null && audioManager.communicationDevice?.id != chosen.id) {
-                audioManager.setCommunicationDevice(chosen)
-            }
-            val usingSpeaker =
-                chosen == null || chosen.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-            if (usingSpeaker) {
-                stopBluetoothScoIfNeeded()
-                @Suppress("DEPRECATION")
-                run { audioManager.isSpeakerphoneOn = true }
-            } else {
-                // Headset owns both ends — forcing speakerphone fights SCO/AEC.
+            if (bt != null || wired != null) {
+                val chosen = bt ?: wired!!
+                try {
+                    audioManager.setCommunicationDevice(chosen)
+                } catch (_: Exception) {
+                }
                 @Suppress("DEPRECATION")
                 run { audioManager.isSpeakerphoneOn = false }
+                val deviceLabel = currentCommDeviceLabel()
+                val label = if (bt != null) "bt-headset" else "wired-headset"
+                return CommSelection(label, deviceLabel)
             }
-            val deviceLabel =
-                audioManager.communicationDevice?.let { "${it.type}:${it.productName}" } ?: "none"
-            val label = when {
-                bt != null && chosen?.id == bt.id -> "bt-headset"
-                wired != null && chosen?.id == wired.id -> "wired-headset"
-                else -> "builtin-speaker"
+
+            // No headset: NEVER leave MODE_IN_COMMUNICATION on the earpiece (Fold quiet path).
+            // clear → set SPEAKER → speakerphoneOn; sandwich if OEM snaps back to earpiece.
+            val pinned = pinBuiltinSpeaker(sandwich = true)
+            // Publishing must stay in communication mode after sandwich (pin may have
+            // toggled mode temporarily on Samsung).
+            if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                pinBuiltinSpeaker(sandwich = false)
             }
-            return CommSelection(label, deviceLabel)
+            @Suppress("DEPRECATION")
+            run { audioManager.isSpeakerphoneOn = true }
+            return CommSelection(
+                if (pinned) "builtin-speaker" else "builtin-speaker-unverified",
+                currentCommDeviceLabel(),
+            )
         }
 
         // Pre-S: prefer an already-active SCO headset; otherwise speakerphone.
@@ -288,6 +350,69 @@ internal class LiveLoudspeakerController(
         @Suppress("DEPRECATION")
         run { audioManager.isSpeakerphoneOn = true }
         return CommSelection("builtin-speaker-legacy", "legacy")
+    }
+
+    /**
+     * clearCommunicationDevice() then explicitly select the builtin speaker.
+     * Samsung Fold often ignores a bare setCommunicationDevice while mode is wrong, or
+     * snaps back to TYPE_BUILTIN_EARPIECE after guest WebRTC connect — sandwich helps.
+     */
+    private fun pinBuiltinSpeaker(sandwich: Boolean): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            @Suppress("DEPRECATION")
+            run { audioManager.isSpeakerphoneOn = true }
+            return true
+        }
+        val speakerDev = findBuiltinSpeaker(commDevices())
+        if (speakerDev == null) {
+            Log.w(logTag, "[IVS_AUDIO_ROUTE] no builtin speaker communication device")
+            @Suppress("DEPRECATION")
+            run { audioManager.isSpeakerphoneOn = true }
+            return false
+        }
+        try {
+            audioManager.clearCommunicationDevice()
+        } catch (_: Exception) {
+        }
+        val ok = try {
+            audioManager.setCommunicationDevice(speakerDev)
+        } catch (_: Exception) {
+            false
+        }
+        @Suppress("DEPRECATION")
+        run { audioManager.isSpeakerphoneOn = true }
+        if (!isEarpieceSelected()) {
+            Log.i(logTag, "[IVS_AUDIO_ROUTE] pin speaker ok=$ok comm=${currentCommDeviceLabel()}")
+            return true
+        }
+        if (!sandwich) {
+            Log.w(logTag, "[IVS_AUDIO_ROUTE] pin speaker still earpiece ok=$ok comm=${currentCommDeviceLabel()}")
+            return false
+        }
+        val restore = audioManager.mode
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        val sandwiched = try {
+            audioManager.setCommunicationDevice(speakerDev)
+        } catch (_: Exception) {
+            false
+        }
+        @Suppress("DEPRECATION")
+        run { audioManager.isSpeakerphoneOn = true }
+        Log.i(
+            logTag,
+            "[IVS_AUDIO_ROUTE] sandwich pin ok=$sandwiched comm=${currentCommDeviceLabel()}",
+        )
+        // Keep MODE_IN_COMMUNICATION when publishing; restore only for playback callers.
+        if (activeProfile != Profile.PUBLISHING) {
+            audioManager.mode = restore
+            try {
+                audioManager.setCommunicationDevice(speakerDev)
+            } catch (_: Exception) {
+            }
+            @Suppress("DEPRECATION")
+            run { audioManager.isSpeakerphoneOn = true }
+        }
+        return !isEarpieceSelected()
     }
 
     private fun isBluetoothCommDevice(type: Int): Boolean {
@@ -388,9 +513,51 @@ internal class LiveLoudspeakerController(
         }
     }
 
+    private fun commDevices(): List<AudioDeviceInfo> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return emptyList()
+        return try {
+            audioManager.availableCommunicationDevices
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun findBuiltinSpeaker(devices: List<AudioDeviceInfo>): AudioDeviceInfo? {
+        return devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            ?: devices.firstOrNull { it.type == TYPE_BUILTIN_SPEAKER_SAFE }
+    }
+
+    private fun findHeadset(devices: List<AudioDeviceInfo>): AudioDeviceInfo? {
+        return devices.firstOrNull {
+            isBluetoothCommDevice(it.type) || isWiredCommDevice(it.type)
+        }
+    }
+
+    private fun isEarpieceSelected(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        return try {
+            audioManager.communicationDevice?.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun currentCommDeviceLabel(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return "legacy"
+        return try {
+            audioManager.communicationDevice?.let { "${it.type}:${it.productName}" } ?: "none"
+        } catch (_: Exception) {
+            "err"
+        }
+    }
+
     private companion object {
         const val INITIAL_REASSERT_DELAY_MS = 250L
         const val WATCHDOG_INTERVAL_MS = 2_000L
+        /** While earpiece is stuck, hammer the route harder (Fold guest-join race). */
+        const val WATCHDOG_EARPIECE_INTERVAL_MS = 500L
         const val VOLUME_CONTROL_UNAVAILABLE = Int.MIN_VALUE
+        /** Some OEM builds report speaker as type 24. */
+        const val TYPE_BUILTIN_SPEAKER_SAFE = 24
     }
 }

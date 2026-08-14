@@ -1864,6 +1864,9 @@ class IVSBroadcastModule(
 
         override fun onParticipantLeft(stage: Stage, participant: ParticipantInfo) {
             Log.d(IVS_TAG, "[IVS_STAGE] Participant left: id=${participant.participantId}, local=${participant.isLocal}")
+            loudspeakerController.forceActive(
+                if (participant.isLocal) "local-participant-left" else "remote-participant-left"
+            )
             if (participant.isLocal) {
                 emit("IVS_HOST_LOCAL_LEFT", Arguments.createMap().apply {
                     putString("participantId", participant.participantId)
