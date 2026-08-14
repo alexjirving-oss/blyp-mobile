@@ -139,7 +139,7 @@ module.exports = () => {
     name: 'Blyp',
     slug: 'blyp-mobile',
     scheme: 'blyp',
-    version: '1.0.99',
+    version: '1.0.100',
     // default = unspecified MainActivity orientation so Fold unfold works;
     // camera/live screens lock portrait in JS (lockPortraitWhileFocused).
     orientation: 'default',
