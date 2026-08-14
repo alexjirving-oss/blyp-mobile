@@ -23,7 +23,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Redact-Id([string]$v) {
-  $t = ($v ?? "").Trim()
+  $t = if ($null -eq $v) { "" } else { "$v".Trim() }
   if ($t.Length -le 12) { return $t }
   return "$($t.Substring(0, 12))…$($t.Substring($t.Length - 4))"
 }
