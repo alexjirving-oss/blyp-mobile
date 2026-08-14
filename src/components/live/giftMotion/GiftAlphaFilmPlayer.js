@@ -35,6 +35,7 @@ import {
   getTierConfig,
   playGiftAudio,
   ensureGiftAudioSession,
+  releaseGiftAudioSession,
   TEAL,
   TEAL_LIGHT,
   GOLD,
@@ -218,10 +219,21 @@ function buildAlphaHtml(videoUri, durationMs) {
     requestAnimationFrame(draw);
   }
 
+  // Keep muted for the first play() — unmuted autoplay is rejected on Android
+  // WebView and leaves the canvas stuck on frame 0. Unmute after playing.
   v.addEventListener('loadeddata', function () {
     post('ready', { w: v.videoWidth, h: v.videoHeight });
-    tryUnmute(); v.play().catch(function () {});
+    v.muted = true;
+    v.play().then(function () {
+      tryUnmute();
+    }).catch(function () {
+      v.muted = true;
+      v.play().catch(function () { post('error', { why: 'play' }); });
+    });
     requestAnimationFrame(draw);
+  });
+  v.addEventListener('playing', function () {
+    tryUnmute();
   });
   v.addEventListener('ended', function () {
     if (doneSent) return;
@@ -251,6 +263,7 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
   const impactFiredRef = useRef(false);
   const aftershockFiredRef = useRef(false);
   const finishedRef = useRef(false);
+  const inGloryRef = useRef(false);
   const gloryTimerRef = useRef(null);
   const doneTimerRef = useRef(null);
   const impactTimerRef = useRef(null);
@@ -306,11 +319,13 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
     chrome.value = withTiming(0, { duration: 220 });
     plaqueProg.value = withTiming(0, { duration: 180 });
     impactFlash.value = withTiming(0, { duration: 120 });
+    void releaseGiftAudioSession();
     setTimeout(() => onDone?.(reason), 200);
   };
 
   const enterGloryHold = () => {
-    if (skippedRef.current || finishedRef.current || inGlory) return;
+    if (skippedRef.current || finishedRef.current || inGloryRef.current) return;
+    inGloryRef.current = true;
     setInGlory(true);
     plaqueProg.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
     gloryTimerRef.current = setTimeout(() => {
@@ -333,6 +348,7 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
 
     skippedRef.current = false;
     finishedRef.current = false;
+    inGloryRef.current = false;
     impactFiredRef.current = false;
     aftershockFiredRef.current = false;
     setInGlory(false);
@@ -388,6 +404,7 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
       cancelAnimation(plaqueProg);
       cancelAnimation(impactFlash);
       cancelAnimation(glowPulse);
+      void releaseGiftAudioSession();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry]);
@@ -396,11 +413,24 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
     try {
       const data = JSON.parse(event?.nativeEvent?.data || '{}');
       if (data.type === 'ended') enterGloryHold();
-      if (data.type === 'error') setLoadError(true);
+      if (data.type === 'error') {
+        // Prefer dark-key film fallback via parent — signal done with error so
+        // GiftCinematicPlayer can remount GiftFilmPlayer when available.
+        setLoadError(true);
+        if (!finishedRef.current) finish('error');
+      }
     } catch {
       // ignore
     }
   };
+
+  // Asset resolve failure → exit so cinema can fall back / dismiss.
+  useEffect(() => {
+    if (loadError && !finishedRef.current && !videoUri) {
+      finish('error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadError, videoUri]);
 
   const vignetteStyle = useAnimatedStyle(() => ({
     opacity: chrome.value * (tier.takeover === 'spotlight' ? 0.22 : 0.32),

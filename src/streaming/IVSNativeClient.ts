@@ -107,8 +107,13 @@ export class IVSNativeClient implements LiveStreamingClient {
     this.activeAudioPath = path;
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { setLiveStagePublishing } = require('../services/livePublishAudioGuard');
+      const {
+        setLiveStagePublishing,
+        setLiveAudioSessionActive,
+      } = require('../services/livePublishAudioGuard');
       setLiveStagePublishing(path === 'stage-publishing');
+      // Any live path: gift expo-av must not force MODE_NORMAL / duck Stage audio.
+      setLiveAudioSessionActive(path != null);
     } catch {
       // guard is best-effort; native watchdog still owns the route
     }

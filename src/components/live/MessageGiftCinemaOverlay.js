@@ -2,7 +2,7 @@
  * Full-screen cinema playback for DM / chat gifts.
  * Reuses LiveGiftOverlay so message gifts share live motion + film audio.
  */
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import LiveGiftOverlay from './LiveGiftOverlay';
 import { GIFT_MOTION, resolveMotion } from './giftMotion/giftMotionSystem';
@@ -54,12 +54,20 @@ export function giftEventFromChatMessage(message, { sender, receiver } = {}) {
   };
 }
 
-export default function MessageGiftCinemaOverlay({ giftEvent, style }) {
+export default function MessageGiftCinemaOverlay({ giftEvent, onComplete, style }) {
   const event = useMemo(() => giftEvent || null, [giftEvent]);
+  const handleHeroComplete = useCallback(() => {
+    try {
+      onComplete?.(event);
+    } catch {
+      // ignore
+    }
+  }, [event, onComplete]);
+
   if (!event) return null;
   return (
     <View style={[styles.root, style]} pointerEvents="box-none">
-      <LiveGiftOverlay giftEvent={event} />
+      <LiveGiftOverlay giftEvent={event} onHeroComplete={handleHeroComplete} />
     </View>
   );
 }

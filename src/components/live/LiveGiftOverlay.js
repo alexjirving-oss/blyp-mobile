@@ -93,7 +93,7 @@ function receiverLabel(receiver) {
 let UID = 0;
 const nextId = () => `${Date.now()}-${UID++}`;
 
-const LiveGiftOverlay = ({ giftEvent, style }) => {
+const LiveGiftOverlay = ({ giftEvent, style, onHeroComplete }) => {
   const budget = useMemo(() => getFxBudget(), []);
   const [banners, setBanners] = useState([]);
   const [floaters, setFloaters] = useState([]);
@@ -105,6 +105,11 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
   const processedRef = useRef(new Set());
   const bigGiftTimerRef = useRef(null);
   const bigGiftEntryRef = useRef(null);
+  /** Queue concurrent hero gifts — remounting Video/WebView mid-play freezes ExoPlayer. */
+  const heroQueueRef = useRef([]);
+  const dequeueHeroRef = useRef(null);
+  const onHeroCompleteRef = useRef(onHeroComplete);
+  onHeroCompleteRef.current = onHeroComplete;
   const edgeFlash = useRef(new Animated.Value(0)).current;
 
   bannersRef.current = banners;
@@ -126,9 +131,30 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
         // ignore
       }
     });
-    if (target.cinematicV2) {
+    const finishDismiss = () => {
       if (bigGiftEntryRef.current === target) bigGiftEntryRef.current = null;
       setBigGift(null);
+      // Play next queued cinema after a short unload gap.
+      const next = heroQueueRef.current.shift();
+      if (next) {
+        setTimeout(() => {
+          try {
+            dequeueHeroRef.current?.(next.gift, next.sender, next.receiver);
+          } catch {
+            // ignore
+          }
+        }, 120);
+        return;
+      }
+      // Only notify parent when the queue is drained (DM overlay can unmount).
+      try {
+        onHeroCompleteRef.current?.(target);
+      } catch {
+        // ignore
+      }
+    };
+    if (target.cinematicV2) {
+      finishDismiss();
       return;
     }
     Animated.parallel([
@@ -136,8 +162,7 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
       Animated.timing(target.scale, { toValue: 1.25, duration: 280, useNativeDriver: true }),
       Animated.timing(target.vignette, { toValue: 0, duration: 280, useNativeDriver: true }),
     ]).start(() => {
-      if (bigGiftEntryRef.current === target) bigGiftEntryRef.current = null;
-      setBigGift(null);
+      finishDismiss();
     });
   }, []);
 
@@ -291,6 +316,15 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
 
   const triggerHero = useCallback(
     (gift, sender, receiver) => {
+      // One cinema at a time — stacking remounts freeze expo-av / WebView players.
+      if (bigGiftEntryRef.current) {
+        heroQueueRef.current.push({ gift, sender, receiver });
+        if (heroQueueRef.current.length > 4) {
+          heroQueueRef.current = heroQueueRef.current.slice(-4);
+        }
+        return;
+      }
+
       if (bigGiftTimerRef.current) {
         clearTimeout(bigGiftTimerRef.current);
         bigGiftTimerRef.current = null;
@@ -437,8 +471,10 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
 
       bigGiftTimerRef.current = setTimeout(() => dismissBigGift(entry), holdMs);
     },
-    [budget.burstBig, budget.rings, dismissBigGift, spawnBurst]
+    [budget.burstBig, budget.rings, budget.skiaCinema, dismissBigGift, spawnBurst]
   );
+
+  dequeueHeroRef.current = triggerHero;
 
   useEffect(() => {
     if (!giftEvent) return;
@@ -550,6 +586,7 @@ const LiveGiftOverlay = ({ giftEvent, style }) => {
     return () => {
       Object.values(timersRef.current).forEach((t) => clearTimeout(t));
       timersRef.current = {};
+      heroQueueRef.current = [];
       if (bigGiftTimerRef.current) clearTimeout(bigGiftTimerRef.current);
     };
   }, []);

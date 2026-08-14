@@ -8,13 +8,14 @@
  * not Pixar EXR/USD. Skia fallback is deliberately "cheap" geometry.
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   Dimensions,
+  Platform,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -86,15 +87,42 @@ export default function GiftCinematicPlayer({ entry, onSkip, onDone }) {
   const motion = entry?.motion;
   const alpha = useMemo(() => resolveAlphaClip(motion), [motion]);
   const film = useMemo(() => resolveFilmClip(motion), [motion]);
+  // Android + live: alpha WebView + IVS dual-decode freezes; prefer film.
+  // iOS keeps soft-edge alpha when available; fall back to film on alpha error.
+  const preferFilm =
+    !!film?.source && (Platform.OS === 'android' || !alpha?.module);
+  const [useFilmFallback, setUseFilmFallback] = useState(preferFilm);
 
-  // Preferred: true soft-edge alpha (YYEVA RGB|A split → WebGL composite)
-  if (alpha?.module) {
+  useEffect(() => {
+    setUseFilmFallback(preferFilm);
+  }, [preferFilm, entry]);
+
+  const handleAlphaDone = (reason) => {
+    if (reason === 'error' && film?.source && !useFilmFallback) {
+      setUseFilmFallback(true);
+      return;
+    }
+    onDone?.(reason);
+  };
+
+  if (film?.source && useFilmFallback) {
     return (
-      <GiftAlphaFilmPlayer entry={entry} film={alpha} onSkip={onSkip} onDone={onDone} />
+      <GiftFilmPlayer entry={entry} film={film} onSkip={onSkip} onDone={onDone} />
     );
   }
 
-  // Interim: dark-key H.264 over live (screen-style composite)
+  // Preferred on iOS: true soft-edge alpha (YYEVA RGB|A split → WebGL composite)
+  if (alpha?.module) {
+    return (
+      <GiftAlphaFilmPlayer
+        entry={entry}
+        film={alpha}
+        onSkip={onSkip}
+        onDone={handleAlphaDone}
+      />
+    );
+  }
+
   if (film?.source) {
     return (
       <GiftFilmPlayer entry={entry} film={film} onSkip={onSkip} onDone={onDone} />

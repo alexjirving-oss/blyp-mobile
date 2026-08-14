@@ -597,20 +597,77 @@ export function heroHoldMs(motion) {
  */
 const AUDIO_REGISTRY = Object.create(null);
 
-/** Ensure gift clip / SFX audio plays even when the phone silent switch is on. */
+let giftAudioProfileApplied = false;
+
+/**
+ * Ensure gift clip / SFX audio plays even when the phone silent switch is on.
+ *
+ * NEVER call setAudioModeAsync / ensureMediaPlaybackAudioMode while ANY live
+ * path is active. On Android, playThroughEarpieceAndroid:false forces
+ * AudioManager.MODE_NORMAL and quiets IVS host/guest (VIDEO_CHAT / call volume).
+ * Gift Video/Sound still play at volume=1; LiveLoudspeakerController owns route.
+ */
 export async function ensureGiftAudioSession() {
   try {
     // eslint-disable-next-line global-require
-    const { Audio } = require('expo-av');
+    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
+    if (isLiveAudioSessionActive()) {
+      return;
+    }
+  } catch {
+    // guard optional
+  }
+  if (giftAudioProfileApplied) return;
+  try {
+    // Prefer the shared media reclaim path (deduped + interruption modes).
+    // eslint-disable-next-line global-require
+    const { ensureMediaPlaybackAudioMode } = require('../../../services/notifySound');
+    await ensureMediaPlaybackAudioMode({ background: false });
+    giftAudioProfileApplied = true;
+    return;
+  } catch {
+    // fall through to direct expo-av
+  }
+  try {
+    // eslint-disable-next-line global-require
+    const { Audio, InterruptionModeAndroid, InterruptionModeIOS } = require('expo-av');
     await Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
       allowsRecordingIOS: false,
       staysActiveInBackground: false,
-      shouldDuckOthers: true,
+      shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
     });
+    giftAudioProfileApplied = true;
   } catch {
     // best-effort — gift video may still play unmuted via expo-av Video
+  }
+}
+
+/**
+ * After a gift overlay ends: clear media-mode latch and re-assert IVS loudspeaker
+ * so Stage audio is not left in MODE_NORMAL / ducked call volume after gift focus.
+ */
+export async function releaseGiftAudioSession() {
+  giftAudioProfileApplied = false;
+  try {
+    // eslint-disable-next-line global-require
+    const { invalidateMediaPlaybackAudioMode } = require('../../../services/notifySound');
+    invalidateMediaPlaybackAudioMode();
+  } catch {
+    // optional
+  }
+  try {
+    // eslint-disable-next-line global-require
+    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
+    if (!isLiveAudioSessionActive()) return;
+    // eslint-disable-next-line global-require
+    const { getIVSNativeClient } = require('../../../streaming/IVSNativeClient');
+    await getIVSNativeClient().forceLiveLoudspeaker('gift-audio-release');
+  } catch {
+    // best-effort — native watchdog still reasserts every 2s
   }
 }
 
@@ -641,6 +698,7 @@ export async function playGiftAudio(audioKey) {
         } catch {
           // ignore
         }
+        void releaseGiftAudioSession();
       }
     });
   } catch {

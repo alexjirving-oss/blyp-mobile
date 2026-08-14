@@ -838,6 +838,7 @@ const ChatScreen = ({ route, navigation }) => {
       ) : null}
       <MessageGiftCinemaOverlay
         giftEvent={cinemaGiftEvent}
+        onComplete={() => setCinemaGiftEvent(null)}
       />
     </ScreenContainer>
   );
