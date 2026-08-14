@@ -12,6 +12,7 @@ import android.os.Looper
 import android.util.Log
 import com.amazonaws.ivs.broadcast.StageAudioManager
 import com.facebook.react.bridge.ReactContext
+import java.util.concurrent.Executor
 
 /**
  * Owns the operating-system audio route while an IVS live session is active.
@@ -33,6 +34,8 @@ import com.facebook.react.bridge.ReactContext
  *   leave the rocker on STREAM_MUSIC while Stage plays on the communication path.
  * - Burst-reasserts after guest join / remote audio / subscribe churn (IVS flips earpiece
  *   *after* the participant-joined callback returns).
+ * - Listens for communication-device changes (API 31+) so Fold OEM earpiece snaps are
+ *   repaired immediately, not only on the next watchdog tick.
  *
  * PLAYBACK keeps media volume (viewer/HLS path) but still pins builtin SPEAKER —
  * Samsung clearCommunicationDevice() alone leaves TYPE_BUILTIN_EARPIECE.
@@ -51,6 +54,7 @@ internal class LiveLoudspeakerController(
     private val audioManager =
         appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainExecutor = Executor { mainHandler.post(it) }
 
     @Volatile
     private var activeProfile: Profile? = null
@@ -58,6 +62,34 @@ internal class LiveLoudspeakerController(
     private var publishFocusRequest: AudioFocusRequest? = null
     private var publishFocusHeld: Boolean = false
     private var burstToken: Long = 0L
+    private var deviceListenerRegistered: Boolean = false
+
+    private val communicationDeviceListener =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            AudioManager.OnCommunicationDeviceChangedListener { device ->
+                val profile = activeProfile ?: return@OnCommunicationDeviceChangedListener
+                val type = device?.type
+                if (type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
+                    Log.w(
+                        logTag,
+                        "[IVS_AUDIO_ROUTE] OEM selected earpiece while live; re-pinning speaker",
+                    )
+                    applyRoute(profile, "comm-device-earpiece")
+                    scheduleBurstReassert("comm-device-earpiece")
+                } else if (type != null &&
+                    type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER &&
+                    type != TYPE_BUILTIN_SPEAKER_SAFE &&
+                    !isBluetoothCommDevice(type) &&
+                    !isWiredCommDevice(type)
+                ) {
+                    // Unknown non-speaker device while publishing — force speaker unless headset.
+                    Log.w(logTag, "[IVS_AUDIO_ROUTE] unexpected comm device type=$type; reassert")
+                    applyRoute(profile, "comm-device-unexpected-$type")
+                }
+            }
+        } else {
+            null
+        }
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { change ->
         // expo-av / OEM focus loss is repaired on the next watchdog tick via ensurePublishAudioFocus.
@@ -72,6 +104,7 @@ internal class LiveLoudspeakerController(
             mainHandler.post {
                 if (activeProfile == Profile.PUBLISHING) {
                     applyRoute(Profile.PUBLISHING, "audio-focus-loss-$change")
+                    scheduleBurstReassert("audio-focus-loss")
                 }
             }
         }
@@ -93,6 +126,7 @@ internal class LiveLoudspeakerController(
     fun start(profile: Profile, reason: String) {
         runOnMain {
             activeProfile = profile
+            registerCommunicationDeviceListener()
             mainHandler.removeCallbacks(watchdog)
             applyRoute(profile, reason)
             // IVS commonly updates AudioManager shortly after join/publish. The first
@@ -105,8 +139,17 @@ internal class LiveLoudspeakerController(
 
     fun force(profile: Profile, reason: String) {
         runOnMain {
+            // Keep owner profile aligned with JS force calls (guest join path).
+            if (activeProfile == null) {
+                activeProfile = profile
+                registerCommunicationDeviceListener()
+                mainHandler.removeCallbacks(watchdog)
+                mainHandler.postDelayed(watchdog, INITIAL_REASSERT_DELAY_MS)
+            } else if (activeProfile != profile) {
+                activeProfile = profile
+            }
             applyRoute(profile, reason)
-            if (shouldBurstReassert(reason)) {
+            if (shouldBurstReassert(reason) || isEarpieceSelected()) {
                 scheduleBurstReassert(reason)
             }
         }
@@ -116,7 +159,7 @@ internal class LiveLoudspeakerController(
         runOnMain {
             activeProfile?.let { profile ->
                 applyRoute(profile, reason)
-                if (shouldBurstReassert(reason)) {
+                if (shouldBurstReassert(reason) || isEarpieceSelected()) {
                     scheduleBurstReassert(reason)
                 }
             }
@@ -128,6 +171,7 @@ internal class LiveLoudspeakerController(
             activeProfile = null
             burstToken += 1
             mainHandler.removeCallbacks(watchdog)
+            unregisterCommunicationDeviceListener()
             try {
                 abandonPublishAudioFocus()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -176,18 +220,25 @@ internal class LiveLoudspeakerController(
             r.contains("subscribe-state") ||
             r.contains("publish-state") ||
             r.contains("stage-join") ||
+            r.contains("stage-state") ||
             r.contains("streams-added") ||
             r.contains("guest-") ||
-            r.contains("host-")
+            r.contains("host-") ||
+            r.contains("join-flow") ||
+            r.contains("comm-device") ||
+            r.contains("audio-focus") ||
+            r.contains("broadcast-state") ||
+            r.contains("earpiece")
     }
 
     /**
      * IVS / Samsung often flip communicationDevice back to EARPIECE *after* the join
-     * callback returns (WebRTC peer connect). Re-pin a few times on a short cadence.
+     * callback returns (WebRTC peer connect). Re-pin across a longer window — Fold 7
+     * has been observed to snap back past the previous 3s burst.
      */
     private fun scheduleBurstReassert(reason: String) {
         val token = ++burstToken
-        val delays = longArrayOf(120L, 350L, 750L, 1500L, 3000L)
+        val delays = longArrayOf(80L, 200L, 450L, 900L, 1600L, 3200L, 5500L, 9000L)
         for (delay in delays) {
             mainHandler.postDelayed(
                 {
@@ -197,6 +248,32 @@ internal class LiveLoudspeakerController(
                 },
                 delay,
             )
+        }
+    }
+
+    private fun registerCommunicationDeviceListener() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val listener = communicationDeviceListener ?: return
+        if (deviceListenerRegistered) return
+        try {
+            audioManager.addOnCommunicationDeviceChangedListener(mainExecutor, listener)
+            deviceListenerRegistered = true
+            Log.i(logTag, "[IVS_AUDIO_ROUTE] communication-device listener registered")
+        } catch (error: Throwable) {
+            Log.w(logTag, "[IVS_AUDIO_ROUTE] failed to register communication-device listener", error)
+        }
+    }
+
+    private fun unregisterCommunicationDeviceListener() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val listener = communicationDeviceListener ?: return
+        if (!deviceListenerRegistered) return
+        try {
+            audioManager.removeOnCommunicationDeviceChangedListener(listener)
+        } catch (error: Throwable) {
+            Log.w(logTag, "[IVS_AUDIO_ROUTE] failed to unregister communication-device listener", error)
+        } finally {
+            deviceListenerRegistered = false
         }
     }
 

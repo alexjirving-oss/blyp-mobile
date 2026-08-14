@@ -732,6 +732,12 @@ const IVSLiveStreamViewer = ({
 
       await Promise.race([startPromise, timeoutPromise]);
       await nativeClient.forceLiveLoudspeaker('guest-join-flow-complete');
+      // Fold OEM often snaps earpiece after WebRTC peer connect — reassert past join.
+      ;[400, 1200, 2800, 5000].forEach((ms) => {
+        setTimeout(() => {
+          void nativeClient.forceLiveLoudspeaker(`guest-join-reassert-${ms}`).catch(() => {});
+        }, ms);
+      });
 
       guestModeRef.current = true;
       setGuestMode(true);

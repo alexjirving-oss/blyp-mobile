@@ -239,6 +239,12 @@ export class IVSNativeClient implements LiveStreamingClient {
       this.broadcastEventEmitter.addListener('IVS_REMOTE_PARTICIPANT_JOINED', (data: any) => {
         console.log('[IVS_CLIENT] Remote participant joined:', data);
         this.reassertLiveLoudspeaker('remote-participant-joined');
+        // Fold often flips to earpiece after peer connect — keep reasserting.
+        ;[500, 1500, 3500].forEach((ms) => {
+          setTimeout(() => {
+            this.reassertLiveLoudspeaker(`remote-participant-joined-reassert-${ms}`);
+          }, ms);
+        });
         const participantId = data.participantId;
         const slotIndex = data.slotIndex;
 
