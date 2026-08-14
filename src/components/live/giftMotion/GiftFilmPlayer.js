@@ -29,9 +29,10 @@ import * as Haptics from 'expo-haptics';
 import {
   getFxBudget,
   getTierConfig,
-  playGiftCinemaAudio,
+  playGiftFilmSoundtrack,
   ensureGiftAudioSession,
   releaseGiftAudioSession,
+  mustMuteGiftFilm,
   TEAL,
   TEAL_LIGHT,
   GOLD,
@@ -115,17 +116,16 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
   const loopOnce = meta?.loopOnce !== false;
   // TikTok gifts are large center-stage overlays, not letterboxed cinema
   const stageScale = tier.takeover === 'spotlight' ? 0.88 : 1.0;
-  // Unmuted ExoPlayer requires STREAM_MUSIC focus. Under live IVS that fails and
-  // playWhenReady never latches — receiver sees a frozen poster. Clips are
-  // video-only; audible cue is playGiftCinemaAudio (native voice sting on live).
-  const filmMuted = true;
+  // Live Android: mute Video (avoids STREAM_MUSIC freeze) and play MP4 audio
+  // via native voice-comm MediaPlayer. Off-live: unmute for embedded soundtrack.
+  const filmMuted = mustMuteGiftFilm();
 
   const kickPlayback = () => {
     if (skippedRef.current || finishedRef.current) return;
     try {
       videoRef.current?.setStatusAsync?.({
         shouldPlay: true,
-        isMuted: true,
+        isMuted: filmMuted,
         volume: 1,
       });
     } catch {
@@ -209,9 +209,14 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
     impactFlash.value = 0;
     glowPulse.value = 0.55;
 
-    // Fire-and-forget: never block mount on audio mode (can hang under IVS).
-    ensureGiftAudioSession();
-    void playGiftCinemaAudio(motion);
+    // Live: native MP4 soundtrack (voice-comm). Off-live: unmute Video audio.
+    // Never Blyp jingle. Never block mount on audio mode under IVS.
+    if (filmMuted) {
+      void playGiftFilmSoundtrack(film.source);
+    } else {
+      void ensureGiftAudioSession();
+      void playGiftFilmSoundtrack(film.source);
+    }
 
     chrome.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
     plaqueProg.value = withTiming(1, {
@@ -245,13 +250,10 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
       }, Math.round(durationMs * Math.min(0.62, impactAt + 0.22)));
     }
 
-    // Immediate + short delayed kicks — shouldPlay alone can stick on frame 0
-    // after an audio-session fight or concurrent remount (receiver path).
+    // Bounded kicks only — avoid stacked setStatus thrash (app heaviness).
     kickPlayback();
-    kickTimerRef.current = setTimeout(() => kickPlayback(), 60);
-    const kickTimers = [160, 320, 640].map((ms) =>
-      setTimeout(() => kickPlayback(), ms),
-    );
+    kickTimerRef.current = setTimeout(() => kickPlayback(), 80);
+    const kickTimers = [220, 480].map((ms) => setTimeout(() => kickPlayback(), ms));
 
     // If ExoPlayer never advances, retry muted then dismiss instead of soft-lock.
     stallTimerRef.current = setTimeout(() => {

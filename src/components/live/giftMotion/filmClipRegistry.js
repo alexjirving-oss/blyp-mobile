@@ -65,6 +65,7 @@ export const FILM_CLIP_META = {
     impactAt: 0.32,
     loopOnce: true,
     composite: 'opaque',
+    hasEmbeddedAudio: true,
     storyBeat: 'Baby lion cub on a golden paw-print path at sunset.',
   },
   lion_big: {
@@ -75,6 +76,7 @@ export const FILM_CLIP_META = {
     impactAt: 0.42,
     loopOnce: true,
     composite: 'opaque',
+    hasEmbeddedAudio: true,
     storyBeat: 'Epic lion spirit rises through lightning and stone rupture.',
   },
   // Mad Scientist stream-alert pack (opaque H.264 from VP9 WEBM).

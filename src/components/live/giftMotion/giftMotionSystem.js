@@ -592,46 +592,18 @@ export function heroHoldMs(motion) {
 }
 
 /**
- * Audio hook — cinema MP4s are video-only; SFX comes from a registered sting.
- * Designers can drop richer mp3s later under assets/sounds/gifts/.
+ * Optional designer SFX registry (NOT blyp_notify). Cinema gifts use the MP4
+ * soundtrack via playGiftFilmSoundtrack — never the Blyp jingle on live.
  */
 const AUDIO_REGISTRY = Object.create(null);
 
 let giftAudioProfileApplied = false;
-let defaultGiftAudioRegistered = false;
-
-function ensureDefaultGiftAudioRegistered() {
-  if (defaultGiftAudioRegistered) return;
-  defaultGiftAudioRegistered = true;
-  try {
-    // Shared Blyp sting until per-gift authored SFX ships.
-    // eslint-disable-next-line global-require, import/no-unresolved
-    const sting = require('../../../../assets/sounds/blyp_notify.wav');
-    const keys = [
-      'gift_cinema',
-      'gift_heart',
-      'gift_pop',
-      'gift_clap',
-      'gift_fire',
-      'gift_star',
-      'gift_diamond',
-      'gift_cheer',
-      'gift_revive',
-      'gift_crown',
-      'gift_rocket',
-    ];
-    keys.forEach((k) => {
-      AUDIO_REGISTRY[k] = sting;
-    });
-  } catch {
-    // asset optional in some worktrees
-  }
-}
+let giftFilmSoundtrackToken = 0;
 
 /**
- * expo-av ExoPlayer refuses to start unmuted when IVS holds VOICE_COMMUNICATION
- * audio focus — receiver sees a frozen first frame. Always mute the film surface
- * under live; cinema MP4s are video-only anyway.
+ * Under live IVS, unmuted expo-av ExoPlayer fights STREAM_MUSIC vs
+ * VOICE_COMMUNICATION and freezes on frame 0. Mute the film surface; play the
+ * MP4 soundtrack via BlypAudioRoute.playGiftCinemaUri (voice-comm attrs).
  */
 export function mustMuteGiftFilm() {
   try {
@@ -643,13 +615,14 @@ export function mustMuteGiftFilm() {
   }
 }
 
+export function isLiveGiftAudioContext() {
+  return mustMuteGiftFilm();
+}
+
 /**
- * Ensure gift clip / SFX audio plays even when the phone silent switch is on.
- *
- * NEVER call setAudioModeAsync / ensureMediaPlaybackAudioMode while ANY live
- * path is active. On Android, playThroughEarpieceAndroid:false forces
- * AudioManager.MODE_NORMAL and quiets IVS host/guest (VIDEO_CHAT / call volume).
- * Live gift SFX uses BlypAudioRoute.playGiftSting (voice-comm attributes).
+ * Off-live only: media loudspeaker session for unmuted expo-av Video.
+ * NEVER call while live — playThroughEarpieceAndroid:false forces MODE_NORMAL
+ * and quiets IVS host/guest (earpiece / call volume).
  */
 export async function ensureGiftAudioSession() {
   try {
@@ -663,14 +636,13 @@ export async function ensureGiftAudioSession() {
   }
   if (giftAudioProfileApplied) return;
   try {
-    // Prefer the shared media reclaim path (deduped + interruption modes).
     // eslint-disable-next-line global-require
     const { ensureMediaPlaybackAudioMode } = require('../../../services/notifySound');
     await ensureMediaPlaybackAudioMode({ background: false });
     giftAudioProfileApplied = true;
     return;
   } catch {
-    // fall through to direct expo-av
+    // fall through
   }
   try {
     // eslint-disable-next-line global-require
@@ -686,16 +658,24 @@ export async function ensureGiftAudioSession() {
     });
     giftAudioProfileApplied = true;
   } catch {
-    // best-effort — film stays muted; SFX may still play via native sting
+    // best-effort
   }
 }
 
 /**
- * After a gift overlay ends: clear media-mode latch and re-assert IVS loudspeaker
- * so Stage audio is not left in MODE_NORMAL / ducked call volume after gift focus.
+ * After a gift overlay ends: stop native cinema soundtrack, clear media latch,
+ * re-assert IVS loudspeaker so Stage is not left ducked / earpiece.
  */
 export async function releaseGiftAudioSession() {
   giftAudioProfileApplied = false;
+  giftFilmSoundtrackToken += 1;
+  try {
+    // eslint-disable-next-line global-require
+    const { stopGiftCinema } = require('../../../services/blypAudioRoute');
+    await stopGiftCinema();
+  } catch {
+    // optional
+  }
   try {
     // eslint-disable-next-line global-require
     const { invalidateMediaPlaybackAudioMode } = require('../../../services/notifySound');
@@ -711,7 +691,7 @@ export async function releaseGiftAudioSession() {
     const { getIVSNativeClient } = require('../../../streaming/IVSNativeClient');
     await getIVSNativeClient().forceLiveLoudspeaker('gift-audio-release');
   } catch {
-    // best-effort — native watchdog still reasserts every 2s
+    // best-effort — native watchdog still reasserts
   }
 }
 
@@ -719,15 +699,67 @@ export function registerGiftAudio(key, module) {
   if (key && module) AUDIO_REGISTRY[key] = module;
 }
 
+async function resolveGiftSourceUri(sourceModule) {
+  if (!sourceModule && sourceModule !== 0) return null;
+  if (typeof sourceModule === 'string') return sourceModule;
+  try {
+    // eslint-disable-next-line global-require
+    const { Asset } = require('expo-asset');
+    const asset = Asset.fromModule(sourceModule);
+    if (!asset.localUri) {
+      await asset.downloadAsync();
+    }
+    return asset.localUri || asset.uri || null;
+  } catch {
+    try {
+      // eslint-disable-next-line global-require
+      const { Image } = require('react-native');
+      const resolved = Image.resolveAssetSource(sourceModule);
+      return resolved?.uri || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
- * Cinema / hero gift audible cue. Under live IVS, prefer native voice-comm sting
- * so we never fight STREAM_MUSIC focus. Off-live uses expo-av media routing.
- * Never fall through to expo-av Sound while Stage is live — that focus fight
- * freezes muted ExoPlayer gift films on Fold receivers.
+ * Play the cinema MP4's own soundtrack (“rah”), never blyp_notify.
+ * Live Android: muted Video + native MediaPlayer on voice-comm attrs.
+ * Off-live / iOS: unmuted Video carries the embedded audio (caller unmutes).
+ */
+export async function playGiftFilmSoundtrack(sourceModule) {
+  const token = ++giftFilmSoundtrackToken;
+  const live = isLiveGiftAudioContext();
+  // eslint-disable-next-line global-require
+  const { Platform } = require('react-native');
+
+  if (live && Platform.OS === 'android') {
+    const uri = await resolveGiftSourceUri(sourceModule);
+    if (!uri || token !== giftFilmSoundtrackToken) return false;
+    try {
+      // eslint-disable-next-line global-require
+      const { playGiftCinemaUri } = require('../../../services/blypAudioRoute');
+      return !!(await playGiftCinemaUri(uri, 1));
+    } catch {
+      return false;
+    }
+  }
+
+  if (!live) {
+    try {
+      await ensureGiftAudioSession();
+    } catch {
+      // continue — Video may still unmute
+    }
+  }
+  return !live;
+}
+
+/**
+ * Legacy hook for Skia / non-film heroes. On live: always silent (no jingle).
+ * Off-live: only plays designer-registered SFX (never auto-maps blyp_notify).
  */
 export async function playGiftCinemaAudio(motion) {
-  ensureDefaultGiftAudioRegistered();
-  const key = motion?.audioKey || 'gift_cinema';
   let live = false;
   try {
     // eslint-disable-next-line global-require
@@ -736,26 +768,20 @@ export async function playGiftCinemaAudio(motion) {
   } catch {
     live = false;
   }
-  try {
-    // eslint-disable-next-line global-require
-    const { Platform } = require('react-native');
-    if (Platform.OS === 'android') {
-      // eslint-disable-next-line global-require
-      const { playGiftSting } = require('../../../services/blypAudioRoute');
-      // Native picks VOICE vs MEDIA attrs from AudioManager.mode — safe anytime.
-      const ok = await playGiftSting(0.95);
-      if (ok) return;
-      if (live) return;
-    }
-  } catch {
-    if (live) return;
-  }
   if (live) return;
+  const key = motion?.audioKey;
+  if (!key || !AUDIO_REGISTRY[key]) return;
   await playGiftAudio(key);
 }
 
 export async function playGiftAudio(audioKey) {
-  ensureDefaultGiftAudioRegistered();
+  try {
+    // eslint-disable-next-line global-require
+    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
+    if (isLiveAudioSessionActive()) return;
+  } catch {
+    // continue
+  }
   try {
     await ensureGiftAudioSession();
   } catch {
@@ -764,7 +790,6 @@ export async function playGiftAudio(audioKey) {
   const key = audioKey || 'gift_cinema';
   if (!AUDIO_REGISTRY[key]) return;
   try {
-    // Lazy require expo-av only when an asset is registered
     // eslint-disable-next-line global-require
     const { Audio } = require('expo-av');
     const { sound } = await Audio.Sound.createAsync(AUDIO_REGISTRY[key], {

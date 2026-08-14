@@ -7,7 +7,6 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.util.Log
-import com.blyp.mobile.R
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -27,53 +26,59 @@ class BlypAudioRouteModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = "BlypAudioRoute"
 
+  /**
+   * Play cinema-gift MP4 soundtrack under live without yanking MODE_NORMAL.
+   * Video stays on muted expo-av; this MediaPlayer mixes on VOICE_COMMUNICATION
+   * (same stream as IVS) with transient duck only. Never plays blyp_notify.
+   */
   @ReactMethod
-  fun playGiftSting(volume: Double, promise: Promise) {
+  fun playGiftCinemaUri(uri: String, volume: Double, promise: Promise) {
     try {
+      val trimmed = uri.trim()
+      if (trimmed.isEmpty()) {
+        promise.resolve(false)
+        return
+      }
       val ctx = reactApplicationContext.applicationContext
       val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      stopGiftCinemaInternal(am)
+
       val inComm =
         am.mode == AudioManager.MODE_IN_COMMUNICATION || am.mode == AudioManager.MODE_IN_CALL
-      // Under live IVS (MODE_IN_COMMUNICATION), play on the voice stream so we do
-      // not request STREAM_MUSIC focus (that freezes unmuted expo-av gifts and
-      // can yank Stage out of VIDEO_CHAT). Off-live use media attributes.
       val attrs =
         if (inComm) {
           AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
             .build()
         } else {
           AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
             .build()
         }
-      val player = MediaPlayer.create(ctx, R.raw.blyp_notify)
-      if (player == null) {
-        promise.resolve(false)
-        return
-      }
-      try {
-        player.setAudioAttributes(attrs)
-      } catch (_: Exception) {
-      }
+
+      val player = MediaPlayer()
+      player.setAudioAttributes(attrs)
       val vol = volume.toFloat().coerceIn(0.05f, 1f)
       player.setVolume(vol, vol)
-      // Fold receivers often leave STREAM_VOICE_CALL at 0 while media rocker is up —
-      // gift stings use voice attributes under IVS, so bump a silent call stream.
+
       if (inComm) {
         try {
           val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
           val cur = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
           if (max > 0 && cur <= 0) {
-            am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, (max * 0.55f).toInt().coerceAtLeast(1), 0)
+            am.setStreamVolume(
+              AudioManager.STREAM_VOICE_CALL,
+              (max * 0.55f).toInt().coerceAtLeast(1),
+              0,
+            )
           }
         } catch (_: Exception) {
         }
       }
+
       var focusReq: AudioFocusRequest? = null
-      // Transient duck only — never displace publish AUDIOFOCUS_GAIN ownership.
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         try {
           focusReq =
@@ -82,39 +87,59 @@ class BlypAudioRouteModule(reactContext: ReactApplicationContext) :
               .setOnAudioFocusChangeListener { }
               .build()
           am.requestAudioFocus(focusReq!!)
+          giftCinemaFocusRequest = focusReq
         } catch (_: Exception) {
           focusReq = null
+          giftCinemaFocusRequest = null
         }
       }
+
+      player.setDataSource(ctx, android.net.Uri.parse(trimmed))
       player.setOnCompletionListener { mp ->
-        if (focusReq != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-          try {
-            am.abandonAudioFocusRequest(focusReq!!)
-          } catch (_: Exception) {
-          }
-        }
+        abandonGiftCinemaFocus(am)
         try {
           mp.release()
         } catch (_: Exception) {
         }
+        if (giftCinemaPlayer === mp) giftCinemaPlayer = null
       }
-      player.setOnErrorListener { mp, _, _ ->
-        if (focusReq != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-          try {
-            am.abandonAudioFocusRequest(focusReq!!)
-          } catch (_: Exception) {
-          }
-        }
+      player.setOnErrorListener { mp, what, extra ->
+        Log.w(TAG, "playGiftCinemaUri error what=$what extra=$extra")
+        abandonGiftCinemaFocus(am)
         try {
           mp.release()
         } catch (_: Exception) {
         }
+        if (giftCinemaPlayer === mp) giftCinemaPlayer = null
         true
       }
+      player.prepare()
+      giftCinemaPlayer = player
       player.start()
       promise.resolve(true)
     } catch (e: Exception) {
-      Log.w(TAG, "playGiftSting failed ${e.message}")
+      Log.w(TAG, "playGiftCinemaUri failed ${e.message}")
+      try {
+        val am =
+          reactApplicationContext.applicationContext
+            .getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        stopGiftCinemaInternal(am)
+      } catch (_: Exception) {
+      }
+      promise.resolve(false)
+    }
+  }
+
+  @ReactMethod
+  fun stopGiftCinema(promise: Promise) {
+    try {
+      val am =
+        reactApplicationContext.applicationContext
+          .getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      stopGiftCinemaInternal(am)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      Log.w(TAG, "stopGiftCinema failed ${e.message}")
       promise.resolve(false)
     }
   }
@@ -146,6 +171,39 @@ class BlypAudioRouteModule(reactContext: ReactApplicationContext) :
 
     @Volatile
     private var mediaFocusRequest: AudioFocusRequest? = null
+
+    @Volatile
+    private var giftCinemaPlayer: MediaPlayer? = null
+
+    @Volatile
+    private var giftCinemaFocusRequest: AudioFocusRequest? = null
+
+    private fun abandonGiftCinemaFocus(am: AudioManager) {
+      val req = giftCinemaFocusRequest
+      giftCinemaFocusRequest = null
+      if (req != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        try {
+          am.abandonAudioFocusRequest(req)
+        } catch (_: Exception) {
+        }
+      }
+    }
+
+    private fun stopGiftCinemaInternal(am: AudioManager) {
+      val player = giftCinemaPlayer
+      giftCinemaPlayer = null
+      if (player != null) {
+        try {
+          player.stop()
+        } catch (_: Exception) {
+        }
+        try {
+          player.release()
+        } catch (_: Exception) {
+        }
+      }
+      abandonGiftCinemaFocus(am)
+    }
 
     fun apply(context: Context, callMode: Boolean, speaker: Boolean): com.facebook.react.bridge.WritableMap {
       val am = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager

@@ -33,9 +33,10 @@ import * as Haptics from 'expo-haptics';
 import {
   getFxBudget,
   getTierConfig,
-  playGiftCinemaAudio,
+  playGiftFilmSoundtrack,
   ensureGiftAudioSession,
   releaseGiftAudioSession,
+  mustMuteGiftFilm,
   TEAL,
   TEAL_LIGHT,
   GOLD,
@@ -360,8 +361,14 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
     impactFlash.value = 0;
     glowPulse.value = 0.55;
 
-    ensureGiftAudioSession();
-    void playGiftCinemaAudio(motion);
+    // Prefer dark-key film soundtrack when available; never Blyp jingle on live.
+    const soundtrackSource = darkFallback?.source || alpha?.module;
+    if (mustMuteGiftFilm()) {
+      if (soundtrackSource) void playGiftFilmSoundtrack(soundtrackSource);
+    } else {
+      void ensureGiftAudioSession();
+      if (soundtrackSource) void playGiftFilmSoundtrack(soundtrackSource);
+    }
     chrome.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
     plaqueProg.value = withTiming(1, {
       duration: 380,
@@ -470,7 +477,7 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
   // If alpha failed to resolve/load, parent should have preferred dark-key path.
   // Still render chrome so we never soft-lock the live room.
     const html = videoUri
-    ? buildAlphaHtml(videoUri, durationMs, true)
+    ? buildAlphaHtml(videoUri, durationMs, mustMuteGiftFilm())
     : null;
   const stageH = tier.takeover === 'spotlight' ? SCREEN_H * 0.62 : SCREEN_H;
 
