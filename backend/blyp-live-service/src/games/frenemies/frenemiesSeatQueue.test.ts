@@ -5,12 +5,14 @@ import {
   isCooldownClear,
   isDropProtected,
   listThrowableOccupants,
+  listJumpKickTargets,
   markSurvivedWheelLand,
   markWheelHit,
   pickAutoDropTarget,
   recordDrop,
   emptySeatRoster,
   ensureSeatMeta,
+  consumeExtraLife,
   QueueEntry,
 } from './frenemiesSeatQueue';
 
@@ -84,6 +86,31 @@ describe('frenemies seat/queue rules', () => {
       roster,
     );
     assert.equal(pick?.userId, 'old');
+  });
+
+  it('consumes extra life once and excludes life holders from jump targets', () => {
+    const roster = emptySeatRoster();
+    ensureSeatMeta(roster, 'life', 'L', 1);
+    markWheelHit(roster, 'life');
+    roster.life.extraLives = 1;
+    ensureSeatMeta(roster, 'plain', 'P', 1);
+    markWheelHit(roster, 'plain');
+    assert.equal(consumeExtraLife(roster, 'life'), true);
+    assert.equal(roster.life.extraLives, 0);
+    assert.equal(consumeExtraLife(roster, 'life'), false);
+    roster.life.extraLives = 1;
+    const targets = listJumpKickTargets(
+      [
+        { userId: 'life', displayName: 'L', slotIndex: 1 },
+        { userId: 'plain', displayName: 'P', slotIndex: 2 },
+      ],
+      roster,
+      { hostUserId: 'host' },
+    );
+    assert.deepEqual(
+      targets.map((t) => t.userId),
+      ['plain'],
+    );
   });
 
   it('queue is FIFO and deduped', () => {

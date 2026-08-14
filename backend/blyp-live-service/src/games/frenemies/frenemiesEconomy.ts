@@ -311,3 +311,210 @@ export async function settlePrizeAward(args: {
 
   return { coins: capped, payer: 'host' };
 }
+
+/** Bonus-first then paid — viewer jump/life spends (not prize holds). */
+export function planViewerActionDebit(
+  paidBalance: bigint,
+  bonusBalance: bigint,
+  amount: bigint,
+): { usePaid: bigint; useBonus: bigint; coinBalance: bigint; bonusCoinBalance: bigint } {
+  if (amount <= 0n) {
+    return {
+      usePaid: 0n,
+      useBonus: 0n,
+      coinBalance: paidBalance,
+      bonusCoinBalance: bonusBalance,
+    };
+  }
+  if (paidBalance + bonusBalance < amount) {
+    throw new EconomyError('INSUFFICIENT_FUNDS', 409, 'Insufficient coins for Frenemies action');
+  }
+  const useBonus = bonusBalance >= amount ? amount : bonusBalance;
+  const usePaid = amount - useBonus;
+  return {
+    usePaid,
+    useBonus,
+    coinBalance: paidBalance - usePaid,
+    bonusCoinBalance: bonusBalance - useBonus,
+  };
+}
+
+export type ViewerActionDebitResult = {
+  replay: boolean;
+  coinDebited: number;
+  bonusDebited: number;
+  charged: number;
+};
+
+/** Idempotent viewer debit keyed by actionId (client UUID). */
+export async function debitViewerAction(args: {
+  userId: string;
+  amount: number;
+  sessionId: string;
+  actionId: string;
+  purpose: 'jump_kick' | 'extra_life';
+}): Promise<ViewerActionDebitResult> {
+  const amount = Math.max(0, Math.floor(Number(args.amount) || 0));
+  if (amount <= 0) {
+    return { replay: false, coinDebited: 0, bonusDebited: 0, charged: 0 };
+  }
+  const { db } = getEconomyInfra();
+  const coinKey = `frenemies:viewer:${args.actionId}:COIN`;
+  const bonusKey = `frenemies:viewer:${args.actionId}:BONUS`;
+
+  return db.transaction(async (trx) => {
+    const existingCoin = await trx('ledger_entries').where({ idempotency_key: coinKey }).first();
+    const existingBonus = await trx('ledger_entries').where({ idempotency_key: bonusKey }).first();
+    if (existingCoin || existingBonus) {
+      const meta = ((existingCoin || existingBonus)?.metadata || {}) as any;
+      return {
+        replay: true,
+        coinDebited: Number(meta.coinDebited || Math.abs(Number(existingCoin?.amount) || 0)),
+        bonusDebited: Number(meta.bonusDebited || Math.abs(Number(existingBonus?.amount) || 0)),
+        charged: amount,
+      };
+    }
+
+    await trx('wallets').insert({ user_id: args.userId }).onConflict('user_id').ignore();
+    const wallet = await trx('wallets').where({ user_id: args.userId }).forUpdate().first();
+    if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
+
+    const plan = planViewerActionDebit(
+      BigInt(wallet.coin_balance || 0),
+      BigInt(wallet.bonus_coin_balance || 0),
+      BigInt(amount),
+    );
+    const meta = {
+      sessionId: args.sessionId,
+      actionId: args.actionId,
+      purpose: args.purpose,
+      coinDebited: Number(plan.usePaid),
+      bonusDebited: Number(plan.useBonus),
+    };
+
+    if (plan.usePaid > 0n) {
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: args.userId,
+        entry_type: 'FRENEMIES_VIEWER_SPEND',
+        currency: 'COIN',
+        amount: (-plan.usePaid).toString(),
+        status: 'POSTED',
+        reference_type: 'FRENEMIES',
+        reference_id: args.actionId,
+        idempotency_key: coinKey,
+        metadata: meta,
+      });
+    }
+    if (plan.useBonus > 0n) {
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: args.userId,
+        entry_type: 'FRENEMIES_VIEWER_SPEND',
+        currency: 'BONUS_COIN',
+        amount: (-plan.useBonus).toString(),
+        status: 'POSTED',
+        reference_type: 'FRENEMIES',
+        reference_id: args.actionId,
+        idempotency_key: bonusKey,
+        metadata: meta,
+      });
+    }
+
+    await trx('wallets')
+      .where({ user_id: args.userId })
+      .update({
+        coin_balance: plan.coinBalance.toString(),
+        bonus_coin_balance: plan.bonusCoinBalance.toString(),
+        lifetime_spend_coins: (
+          BigInt(wallet.lifetime_spend_coins || 0) + BigInt(amount)
+        ).toString(),
+        updated_at: trx.fn.now(),
+      });
+
+    return {
+      replay: false,
+      coinDebited: Number(plan.usePaid),
+      bonusDebited: Number(plan.useBonus),
+      charged: amount,
+    };
+  });
+}
+
+export async function refundViewerAction(args: {
+  userId: string;
+  actionId: string;
+  coinDebited: number;
+  bonusDebited: number;
+  reason: string;
+}): Promise<void> {
+  const coinBack = Math.max(0, Math.floor(Number(args.coinDebited) || 0));
+  const bonusBack = Math.max(0, Math.floor(Number(args.bonusDebited) || 0));
+  if (coinBack <= 0 && bonusBack <= 0) return;
+  const { db } = getEconomyInfra();
+  const coinKey = `frenemies:viewer-refund:${args.actionId}:COIN`;
+  const bonusKey = `frenemies:viewer-refund:${args.actionId}:BONUS`;
+
+  await db.transaction(async (trx) => {
+    await trx('wallets').insert({ user_id: args.userId }).onConflict('user_id').ignore();
+    const wallet = await trx('wallets').where({ user_id: args.userId }).forUpdate().first();
+    if (!wallet) return;
+
+    let paid = BigInt(wallet.coin_balance || 0);
+    let bonus = BigInt(wallet.bonus_coin_balance || 0);
+    const meta = { actionId: args.actionId, reason: args.reason };
+
+    if (coinBack > 0) {
+      const existing = await trx('ledger_entries').where({ idempotency_key: coinKey }).first();
+      if (!existing) {
+        await trx('ledger_entries').insert({
+          ledger_id: randomUUID(),
+          user_id: args.userId,
+          entry_type: 'FRENEMIES_VIEWER_REFUND',
+          currency: 'COIN',
+          amount: String(coinBack),
+          status: 'POSTED',
+          reference_type: 'FRENEMIES',
+          reference_id: args.actionId,
+          idempotency_key: coinKey,
+          metadata: meta,
+        });
+        paid += BigInt(coinBack);
+      }
+    }
+    if (bonusBack > 0) {
+      const existing = await trx('ledger_entries').where({ idempotency_key: bonusKey }).first();
+      if (!existing) {
+        await trx('ledger_entries').insert({
+          ledger_id: randomUUID(),
+          user_id: args.userId,
+          entry_type: 'FRENEMIES_VIEWER_REFUND',
+          currency: 'BONUS_COIN',
+          amount: String(bonusBack),
+          status: 'POSTED',
+          reference_type: 'FRENEMIES',
+          reference_id: args.actionId,
+          idempotency_key: bonusKey,
+          metadata: meta,
+        });
+        bonus += BigInt(bonusBack);
+      }
+    }
+
+    await trx('wallets')
+      .where({ user_id: args.userId })
+      .update({
+        coin_balance: paid.toString(),
+        bonus_coin_balance: bonus.toString(),
+        updated_at: trx.fn.now(),
+      });
+  });
+}
+
+/** Spendable for viewer actions = paid + bonus. */
+export async function getViewerSpendableCoins(userId: string): Promise<number> {
+  const { db } = getEconomyInfra();
+  const wallet = await db('wallets').where({ user_id: userId }).first();
+  if (!wallet) return 0;
+  return Number(wallet.coin_balance || 0) + Number(wallet.bonus_coin_balance || 0);
+}

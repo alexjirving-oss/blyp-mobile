@@ -26,6 +26,8 @@ import {
   isFrenemiesAdmin,
   requestJoinQueue,
   leaveJoinQueue,
+  jumpKickTakeSeat,
+  buyExtraLife,
 } from '../games/frenemies/frenemiesRoomService';
 
 const router = Router();
@@ -106,10 +108,17 @@ function mapError(res: any, e: any) {
     BAD_TARGET: 400,
     TARGET_NOT_ON_STAGE: 409,
     TARGET_PROTECTED: 409,
+    TARGET_HAS_LIFE: 409,
     DROP_COOLDOWN: 409,
+    JUMP_COOLDOWN: 409,
     ALREADY_SEATED: 409,
     ALREADY_QUEUED: 409,
     HOST_CANNOT_QUEUE: 400,
+    HOST_CANNOT_JUMP: 400,
+    HOST_CANNOT_BUY_LIFE: 400,
+    NOT_SEATED: 409,
+    LIFE_AT_CAP: 409,
+    SEAT_FAILED: 500,
     GAME_NOT_FOUND: 404,
     GAME_BUSY: 409,
     NO_QUIZ: 409,
@@ -328,6 +337,65 @@ router.post('/live-game/frenemies/queue/leave', requireNotBanned, async (req: Au
     const room = await leaveJoinQueue({ sessionId: parsed.data.sessionId, userId });
     if (!room) return res.status(404).json({ error: 'GAME_NOT_FOUND', code: 'GAME_NOT_FOUND' });
     res.json(publicEvent(room, 'SNAPSHOT'));
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
+const jumpSchema = z.object({
+  sessionId: z.string().min(1),
+  targetUserId: z.string().min(1),
+  displayName: z.string().min(1).max(40).optional(),
+  photoUrl: z.string().max(500).optional().nullable(),
+  idempotencyKey: z.string().min(8).max(80),
+});
+
+router.post('/live-game/frenemies/queue/jump', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = jumpSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const out = await jumpKickTakeSeat({
+      sessionId: parsed.data.sessionId,
+      jumperUserId: userId,
+      targetUserId: parsed.data.targetUserId,
+      displayName: parsed.data.displayName,
+      photoUrl: parsed.data.photoUrl,
+      idempotencyKey: parsed.data.idempotencyKey,
+    });
+    res.json({
+      ...publicEvent(out.room, 'RESULT'),
+      charged: out.charged,
+      slotIndex: out.slotIndex,
+      victimUserId: out.victimUserId,
+    });
+  } catch (e: any) {
+    mapError(res, e);
+  }
+});
+
+const buyLifeSchema = z.object({
+  sessionId: z.string().min(1),
+  idempotencyKey: z.string().min(8).max(80),
+});
+
+router.post('/live-game/frenemies/life/buy', requireNotBanned, async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ error: 'UNAUTH', code: 'UNAUTH' });
+    const parsed = buyLifeSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+    const out = await buyExtraLife({
+      sessionId: parsed.data.sessionId,
+      userId,
+      idempotencyKey: parsed.data.idempotencyKey,
+    });
+    res.json({
+      ...publicEvent(out.room, 'SNAPSHOT'),
+      charged: out.charged,
+      extraLives: out.extraLives,
+    });
   } catch (e: any) {
     mapError(res, e);
   }

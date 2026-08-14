@@ -1594,6 +1594,34 @@ export async function frenemiesQueueLeave(sessionId: string): Promise<FrenemiesG
   return callLiveBackend<FrenemiesGameEvent>('/api/live-game/frenemies/queue/leave', 'POST', { sessionId });
 }
 
+export async function frenemiesQueueJump(
+  sessionId: string,
+  opts: {
+    targetUserId: string;
+    displayName?: string;
+    photoUrl?: string | null;
+    idempotencyKey: string;
+  }
+): Promise<FrenemiesGameEvent & { charged?: number; slotIndex?: number; victimUserId?: string }> {
+  return callLiveBackend('/api/live-game/frenemies/queue/jump', 'POST', {
+    sessionId,
+    targetUserId: opts.targetUserId,
+    idempotencyKey: opts.idempotencyKey,
+    ...(opts.displayName ? { displayName: opts.displayName } : {}),
+    ...(opts.photoUrl ? { photoUrl: opts.photoUrl } : {}),
+  });
+}
+
+export async function frenemiesBuyLife(
+  sessionId: string,
+  idempotencyKey: string
+): Promise<FrenemiesGameEvent & { charged?: number; extraLives?: number }> {
+  return callLiveBackend('/api/live-game/frenemies/life/buy', 'POST', {
+    sessionId,
+    idempotencyKey,
+  });
+}
+
 // ============================================================================
 // REACTION DUEL — paid, server-authoritative live skill game
 // ============================================================================

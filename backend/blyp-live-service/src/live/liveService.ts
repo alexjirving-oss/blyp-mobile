@@ -499,6 +499,65 @@ export async function inviteGuest(sessionId: string, guestUserId: string, reques
 }
 
 /**
+ * Frenemies paid jump: seat the jumper on a freed box without invite-accept.
+ * Puts them INVITED with preferred slot, then emits guest.invited { force:true }
+ * so the client auto-publishes (pay ≠ decline).
+ */
+export async function forceSeatGuest(args: {
+  sessionId: string;
+  guestUserId: string;
+  preferredSlot?: number;
+  reason?: string;
+}): Promise<{ slotIndex: number; stageArn: string }> {
+  const session = await getSessionById(args.sessionId);
+  if (!session || session.status !== 'LIVE') {
+    throw new Error('Live session not found or not live');
+  }
+  if (args.guestUserId === session.hostUserId) {
+    throw new Error('Host cannot be seated as a guest');
+  }
+
+  try {
+    await requestGuestSlot(args.sessionId, args.guestUserId, args.preferredSlot);
+  } catch (e: any) {
+    if (e?.code !== 'GUEST_SESSION_ACTIVE') {
+      // continue — hostInvite path can upsert
+    }
+  }
+
+  const allGuests = await expireStaleInvites(args.sessionId, await listGuestsStore(args.sessionId));
+  const used = collectUsedGuestSlots(allGuests, {
+    hostUserId: session.hostUserId,
+    isStale: isGuestStale,
+  });
+  // Victim was already force-kicked; their slot should be free. If preferred is
+  // still occupied (race), pickSlotIndex falls through to next free.
+  if (used.size >= MAX_GUEST_SLOTS) {
+    throw panelFull(`Guest panel is full (max ${MAX_GUEST_SLOTS} guests)`);
+  }
+  const preferred =
+    typeof args.preferredSlot === 'number' && args.preferredSlot >= 1
+      ? args.preferredSlot
+      : undefined;
+  const slotIndex = pickSlotIndex(used, preferred);
+
+  await hostInviteGuestStore(args.sessionId, args.guestUserId, slotIndex, nowIso());
+  emitRoomEvent(args.sessionId, {
+    type: 'guest.invited',
+    guestUserId: args.guestUserId,
+    slotIndex,
+    force: true,
+    reason: args.reason || 'frenemies_jump',
+  } as any);
+  emitRoomEvent(args.sessionId, {
+    type: 'frenemies.jump.seated',
+    guestUserId: args.guestUserId,
+    slotIndex,
+  } as any);
+  return { slotIndex, stageArn: session.stageArn };
+}
+
+/**
  * Host-initiated invite: the host picks a VIEWER (who never requested) and invites
  * them onto the stage. Creates the INVITED record + slot directly and pushes a
  * guest.invited event so the viewer's client can prompt them to accept.

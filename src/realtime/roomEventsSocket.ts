@@ -22,7 +22,9 @@ export type RoomEventType =
   | 'moderator.added'
   | 'moderator.removed'
   | 'viewer.joined'
-  | 'room.ended';
+  | 'room.ended'
+  | 'frenemies.jump.seated'
+  | 'frenemies.life.saved';
 
 export interface RoomEventPayload {
   id: string;
@@ -34,6 +36,8 @@ export interface RoomEventPayload {
   moderatorUserId?: string;
   viewerUserId?: string;
   displayName?: string;
+  force?: boolean;
+  reason?: string;
 }
 
 export interface RoomEventsSubscription {

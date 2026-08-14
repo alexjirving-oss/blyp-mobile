@@ -28,6 +28,10 @@ export interface SeatMeta {
   seatedAtRoundIndex: number;
   /** roundIndex when last dropped/kicked; null if never. */
   justDroppedRoundId: number | null;
+  /** Extra lives remaining this seat stint (0..MAX_EXTRA_LIVES). */
+  extraLives: number;
+  /** Last paid jump-kick timestamp (ms) for jumper rate-limit. */
+  lastJumpAtMs?: number;
 }
 
 export type SeatOccupantRef = { userId: string; displayName: string; slotIndex: number };
@@ -65,9 +69,59 @@ export function ensureSeatMeta(
     hasHadWheelHit: false,
     seatedAtRoundIndex: Math.max(0, roundIndex | 0),
     justDroppedRoundId: null,
+    extraLives: 0,
   };
   roster[userId] = meta;
   return meta;
+}
+
+/** Consume one extra life if present. Returns true when a life absorbed the kick. */
+export function consumeExtraLife(roster: SeatRoster, userId: string): boolean {
+  const m = roster[userId];
+  if (!m || !(m.extraLives > 0)) return false;
+  m.extraLives = Math.max(0, (m.extraLives | 0) - 1);
+  return true;
+}
+
+/**
+ * Paid jump targets: same as auto-drop eligibility plus no remaining extra life.
+ * Caller still re-validates LIVE / phase / cooldowns.
+ */
+export function pickJumpKickTarget(
+  occupants: SeatOccupantRef[],
+  roster: SeatRoster,
+  excludeUserIds: Set<string> = new Set(),
+): SeatOccupantRef | null {
+  const eligible = occupants.filter((o) => {
+    if (!o.userId || excludeUserIds.has(o.userId)) return false;
+    if (isDropProtected(roster, o.userId)) return false;
+    const lives = roster[o.userId]?.extraLives || 0;
+    return lives <= 0;
+  });
+  if (!eligible.length) return null;
+  eligible.sort((a, b) => {
+    const ra = roster[a.userId]?.seatedAtRoundIndex ?? 0;
+    const rb = roster[b.userId]?.seatedAtRoundIndex ?? 0;
+    if (ra !== rb) return ra - rb;
+    return a.slotIndex - b.slotIndex;
+  });
+  return eligible[0];
+}
+
+export function listJumpKickTargets(
+  occupants: SeatOccupantRef[],
+  roster: SeatRoster,
+  opts: { excludeUserIds?: Set<string>; hostUserId?: string | null } = {},
+): SeatOccupantRef[] {
+  const exclude = opts.excludeUserIds || new Set();
+  const host = opts.hostUserId || null;
+  return (occupants || []).filter((o) => {
+    if (!o?.userId) return false;
+    if (exclude.has(o.userId)) return false;
+    if (host && o.userId === host) return false;
+    if (isDropProtected(roster, o.userId)) return false;
+    return (roster[o.userId]?.extraLives || 0) <= 0;
+  });
 }
 
 /** Clear first-spin protection for one seated guest. */
@@ -126,9 +180,10 @@ export function recordDrop(
 ): void {
   const m = ensureSeatMeta(roster, userId, displayName, roundIndex);
   m.justDroppedRoundId = Math.max(0, roundIndex | 0);
-  // Next seat stint starts fresh for first-spin protection.
+  // Next seat stint starts fresh for first-spin protection + lives.
   m.hasHadWheelHit = false;
   m.seatedAtRoundIndex = roundIndex;
+  m.extraLives = 0;
 }
 
 export function enqueueJoin(
@@ -172,21 +227,34 @@ export function pickAutoDropTarget(
   return eligible[0];
 }
 
-export function publicSeatSnapshot(roster: SeatRoster, queue: QueueEntry[]) {
+export function publicSeatSnapshot(
+  roster: SeatRoster,
+  queue: QueueEntry[],
+  opts?: { maxExtraLives?: number; seatedUserIds?: Set<string> },
+) {
+  const maxLives = Math.max(0, opts?.maxExtraLives ?? 1);
+  const seated = opts?.seatedUserIds || null;
   return {
     seatMeta: Object.fromEntries(
-      Object.entries(roster || {}).map(([uid, m]) => [
-        uid,
-        {
-          userId: m.userId,
-          displayName: m.displayName,
-          hasHadWheelHit: !!m.hasHadWheelHit,
-          seatedAtRoundIndex: m.seatedAtRoundIndex,
-          justDroppedRoundId: m.justDroppedRoundId,
-          protected: m.hasHadWheelHit !== true,
-          cooldownUntilRound: m.justDroppedRoundId == null ? null : m.justDroppedRoundId + 1,
-        },
-      ]),
+      Object.entries(roster || {}).map(([uid, m]) => {
+        const extraLives = Math.max(0, Math.min(maxLives, m.extraLives | 0));
+        const isSeated = seated ? seated.has(uid) : true;
+        return [
+          uid,
+          {
+            userId: m.userId,
+            displayName: m.displayName,
+            hasHadWheelHit: !!m.hasHadWheelHit,
+            seatedAtRoundIndex: m.seatedAtRoundIndex,
+            justDroppedRoundId: m.justDroppedRoundId,
+            protected: m.hasHadWheelHit !== true,
+            cooldownUntilRound: m.justDroppedRoundId == null ? null : m.justDroppedRoundId + 1,
+            extraLives,
+            canBuyLife: isSeated && extraLives < maxLives,
+            lastJumpAtMs: m.lastJumpAtMs || null,
+          },
+        ];
+      }),
     ),
     queue: (queue || []).map((q, i) => ({
       ...q,
@@ -244,10 +312,19 @@ export async function settleSeatsAfterRound(args: {
   } else {
     const target = pickAutoDropTarget(args.occupants, roster);
     if (target) {
-      await forceKickQuiet(args.sessionId, target.userId);
-      recordDrop(roster, target.userId, target.displayName, roundIndex);
-      queue = dequeueUser(queue, target.userId);
-      droppedUserId = target.userId;
+      // Extra life absorbs auto-drop (does not count as this round's kick).
+      if (consumeExtraLife(roster, target.userId)) {
+        emitRoomEvent(args.sessionId, {
+          type: 'frenemies.life.saved',
+          guestUserId: target.userId,
+          reason: 'auto_drop',
+        } as any);
+      } else {
+        await forceKickQuiet(args.sessionId, target.userId);
+        recordDrop(roster, target.userId, target.displayName, roundIndex);
+        queue = dequeueUser(queue, target.userId);
+        droppedUserId = target.userId;
+      }
     }
   }
 

@@ -61,6 +61,16 @@ const STEPS = [
   },
   {
     n: '9',
+    title: 'Jump in · 50 coins',
+    body: 'Viewers can pay 50 coins (Ready phase only) to kick an eligible guest and take their box. You are forced onto stage — pay never means decline. First-spin protected guests and anyone with an extra life cannot be jumped.',
+  },
+  {
+    n: '10',
+    title: 'Extra life · 50 coins',
+    body: 'Seated guests can buy one extra life. It absorbs the next throw, auto-drop, or chooser timeout. Host moderation kick still removes you. Lives reset when you leave the stage.',
+  },
+  {
+    n: '11',
     title: 'First spin & cooldown',
     body: 'New seats are protected until the wheel lands once while they are on stage. Just-dropped players sit out at least one full round before they can return.',
   },

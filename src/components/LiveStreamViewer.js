@@ -444,7 +444,13 @@ const IVSLiveStreamViewer = ({
             if (!uid || evt.guestUserId !== uid) return;
             if (guestModeRef.current) return;
             if (guestRequestStatusRef.current === 'sending') return;
-            setHostInvite({ slotIndex: typeof evt.slotIndex === 'number' ? evt.slotIndex : null });
+            const slot = typeof evt.slotIndex === 'number' ? evt.slotIndex : null;
+            // Paid Frenemies jump / other force seats: auto-join (pay ≠ decline).
+            if (evt.force === true) {
+              setHostInvite({ slotIndex: slot, force: true });
+              return;
+            }
+            setHostInvite({ slotIndex: slot });
             return;
           }
 
@@ -517,8 +523,13 @@ const IVSLiveStreamViewer = ({
   }, [hostInvite, attemptStartGuestPublish, generateGuestSessionId]);
 
   // Surface the host invite as a native prompt with Accept / Not now.
+  // Forced seats (paid jump) skip the prompt and publish immediately.
   useEffect(() => {
     if (!hostInvite) return;
+    if (hostInvite.force) {
+      acceptHostInvite();
+      return;
+    }
     Alert.alert(
       'Invitation to join',
       'The host invited you to join the live as a guest.',

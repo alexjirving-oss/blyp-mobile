@@ -15,6 +15,12 @@ export const DEFAULT_COINS = 10;
 export const MAX_COINS = 500;
 export const DEFAULT_LIKES = 50;
 
+/** Viewer paid actions (jump-kick / extra life) — in-app coins, not IAP. */
+export const VIEWER_ACTION_COINS = 50;
+export const MAX_EXTRA_LIVES = 1;
+export const JUMP_COOLDOWN_MS = 30_000;
+export const JUMP_ALLOWED_PHASES = ['ready'] as const;
+
 const ENV_SPIN_MS = process.env.FRENEMIES_SPIN_MS
   ? Math.max(5_000, Number(process.env.FRENEMIES_SPIN_MS) || DEFAULT_SPIN_MS)
   : null;

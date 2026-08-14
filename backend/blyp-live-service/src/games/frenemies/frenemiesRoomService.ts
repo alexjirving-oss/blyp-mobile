@@ -17,6 +17,9 @@ import {
   holdHostPrize,
   releaseHostHold,
   settlePrizeAward,
+  debitViewerAction,
+  refundViewerAction,
+  getViewerSpendableCoins,
   type PrizeHold,
 } from './frenemiesEconomy';
 import {
@@ -28,6 +31,9 @@ import {
   DEFAULT_COINS,
   DEFAULT_LIKES,
   MAX_COINS,
+  VIEWER_ACTION_COINS,
+  MAX_EXTRA_LIVES,
+  JUMP_COOLDOWN_MS,
   defaultSettings,
   maxPrizeForSettings,
   nearestSpinMs,
@@ -41,9 +47,11 @@ import {
   isCooldownClear,
   isDropProtected,
   listThrowableOccupants,
+  listJumpKickTargets,
   markSurvivedWheelLand,
   publicSeatSnapshot,
   recordDrop,
+  consumeExtraLife,
   settleSeatsAfterRound,
   type QueueEntry,
   type SeatRoster,
@@ -314,7 +322,16 @@ export function publicEvent(
 ) {
   const s = room.settings;
   const stats = { ...room.stats, topWinners: buildTopWinners(room) };
-  const seats = publicSeatSnapshot(room.seatRoster || {}, room.joinQueue || []);
+  const occIds = new Set(
+    Object.keys(room.seatRoster || {}).filter((uid) => {
+      // Public snapshot uses roster; canBuyLife refined by callers that pass LIVE ids.
+      return true;
+    }),
+  );
+  const seats = publicSeatSnapshot(room.seatRoster || {}, room.joinQueue || [], {
+    maxExtraLives: MAX_EXTRA_LIVES,
+    seatedUserIds: occIds,
+  });
   return {
     game: 'frenemies' as const,
     sessionId: room.sessionId,
@@ -334,6 +351,9 @@ export function publicEvent(
     soloCoins: s.soloCoins,
     maxSlots: MAX_GUEST_SLOTS,
     maxCoins: MAX_COINS,
+    viewerActionCoins: VIEWER_ACTION_COINS,
+    maxExtraLives: MAX_EXTRA_LIVES,
+    jumpCooldownMs: JUMP_COOLDOWN_MS,
     spinOptionsMs: [...SPIN_OPTIONS_MS],
     isAdminHost: isFrenemiesAdmin(room.hostUserId) || isFrenemiesAdmin(room.startedByUserId),
     seatMeta: seats.seatMeta,
@@ -674,9 +694,23 @@ async function onChooseTimeout(room: FrenemiesRoom): Promise<void> {
     enterReady(room);
     return;
   }
+  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+  ensureSeatMeta(
+    room.seatRoster,
+    chooser,
+    room.state.chooserDisplayName || 'Chooser',
+    room.state.roundIndex || 0,
+  );
+  if (consumeExtraLife(room.seatRoster, chooser)) {
+    await awardAndResolve(room, {
+      kind: 'timeout_saved',
+      text: `${room.state.chooserDisplayName || 'Chooser'} burned an extra life and stayed on stage.`,
+      awardAmount: 0,
+    });
+    return;
+  }
   await forceKick(room.sessionId, chooser);
   room.droppedThisRoundUserId = chooser;
-  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
   recordDrop(
     room.seatRoster,
     chooser,
@@ -1149,12 +1183,27 @@ export async function throwGuest(args: {
       throw err;
     }
 
+    const amount = room.settings.throwCoins;
+    room.stats.throws += 1;
+
+    if (consumeExtraLife(room.seatRoster, args.targetUserId)) {
+      await awardAndResolve(room, {
+        kind: 'life_saved',
+        text: `${room.state.chooserDisplayName || 'Chooser'} threw at Box ${target.slotIndex} — extra life saved them! (+${amount} coins)`,
+        winnerUserId: args.chooserUserId,
+        winnerName: room.state.chooserDisplayName || 'Chooser',
+        awardAmount: amount,
+      });
+      await saveRoom(room);
+      ensureTicks(args.sessionId);
+      emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'RESULT'));
+      return room;
+    }
+
     await forceKick(args.sessionId, args.targetUserId);
     room.droppedThisRoundUserId = args.targetUserId;
     recordDrop(room.seatRoster, args.targetUserId, target.displayName, room.state.roundIndex || 0);
     room.joinQueue = dequeueUser(room.joinQueue || [], args.targetUserId);
-    const amount = room.settings.throwCoins;
-    room.stats.throws += 1;
     await awardAndResolve(room, {
       kind: 'throw',
       text: `${room.state.chooserDisplayName || 'Chooser'} threw out Box ${target.slotIndex} and earned ${amount} coins!`,
@@ -1412,6 +1461,291 @@ export async function leaveJoinQueue(args: {
     await saveRoom(room);
     emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'SNAPSHOT'));
     return room;
+  });
+}
+
+/**
+ * Pay 50 coins to kick an eligible seated guest and force onto their stage box.
+ * Force-seat (not invite-accept) so pay ≠ decline.
+ */
+export async function jumpKickTakeSeat(args: {
+  sessionId: string;
+  jumperUserId: string;
+  targetUserId: string;
+  displayName?: string;
+  photoUrl?: string | null;
+  idempotencyKey: string;
+}): Promise<{ room: FrenemiesRoom; charged: number; slotIndex: number; victimUserId: string }> {
+  const actionId = String(args.idempotencyKey || '').trim();
+  if (!actionId || actionId.length < 8) {
+    const err: any = new Error('INVALID_INPUT');
+    err.code = 'INVALID_INPUT';
+    throw err;
+  }
+  if (!args.targetUserId || args.targetUserId === args.jumperUserId) {
+    const err: any = new Error('BAD_TARGET');
+    err.code = 'BAD_TARGET';
+    throw err;
+  }
+
+  return withLock(args.sessionId, async () => {
+    const room = await loadRoom(args.sessionId);
+    if (!room || !room.state.active || room.state.phase === 'ended' || room.state.phase === 'idle') {
+      const err: any = new Error('GAME_NOT_FOUND');
+      err.code = 'GAME_NOT_FOUND';
+      throw err;
+    }
+    if (room.state.phase !== 'ready') {
+      const err: any = new Error('NOT_READY');
+      err.code = 'NOT_READY';
+      throw err;
+    }
+    if (args.jumperUserId === room.hostUserId) {
+      const err: any = new Error('HOST_CANNOT_JUMP');
+      err.code = 'HOST_CANNOT_JUMP';
+      throw err;
+    }
+
+    const occ = await liveOccupants(args.sessionId);
+    if (occ.some((o) => o.userId === args.jumperUserId)) {
+      const err: any = new Error('ALREADY_SEATED');
+      err.code = 'ALREADY_SEATED';
+      throw err;
+    }
+
+    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+    for (const o of occ) {
+      ensureSeatMeta(room.seatRoster, o.userId, o.displayName, room.state.roundIndex || 0);
+    }
+    ensureSeatMeta(
+      room.seatRoster,
+      args.jumperUserId,
+      args.displayName || 'Guest',
+      room.state.roundIndex || 0,
+    );
+
+    const jumperMeta = room.seatRoster[args.jumperUserId];
+    if (jumperMeta && !isCooldownClear(jumperMeta, room.state.roundIndex || 0)) {
+      const err: any = new Error('DROP_COOLDOWN');
+      err.code = 'DROP_COOLDOWN';
+      throw err;
+    }
+    const lastJump = jumperMeta?.lastJumpAtMs || 0;
+    if (lastJump && Date.now() - lastJump < JUMP_COOLDOWN_MS) {
+      const err: any = new Error('JUMP_COOLDOWN');
+      err.code = 'JUMP_COOLDOWN';
+      throw err;
+    }
+
+    const target = occ.find((o) => o.userId === args.targetUserId);
+    if (!target) {
+      const err: any = new Error('TARGET_NOT_ON_STAGE');
+      err.code = 'TARGET_NOT_ON_STAGE';
+      throw err;
+    }
+    if (args.targetUserId === room.hostUserId) {
+      const err: any = new Error('BAD_TARGET');
+      err.code = 'BAD_TARGET';
+      throw err;
+    }
+    if (isDropProtected(room.seatRoster, args.targetUserId)) {
+      const err: any = new Error('TARGET_PROTECTED');
+      err.code = 'TARGET_PROTECTED';
+      throw err;
+    }
+    if ((room.seatRoster[args.targetUserId]?.extraLives || 0) > 0) {
+      const err: any = new Error('TARGET_HAS_LIFE');
+      err.code = 'TARGET_HAS_LIFE';
+      throw err;
+    }
+
+    const eligible = listJumpKickTargets(occ, room.seatRoster, {
+      excludeUserIds: new Set([args.jumperUserId]),
+      hostUserId: room.hostUserId,
+    });
+    if (!eligible.some((e) => e.userId === args.targetUserId)) {
+      const err: any = new Error('BAD_TARGET');
+      err.code = 'BAD_TARGET';
+      throw err;
+    }
+
+    const spendable = await getViewerSpendableCoins(args.jumperUserId);
+    if (spendable < VIEWER_ACTION_COINS) {
+      const err: any = new Error('INSUFFICIENT_FUNDS');
+      err.code = 'INSUFFICIENT_FUNDS';
+      err.needed = VIEWER_ACTION_COINS;
+      err.balance = spendable;
+      throw err;
+    }
+
+    let debit: { coinDebited: number; bonusDebited: number; charged: number; replay: boolean };
+    try {
+      debit = await debitViewerAction({
+        userId: args.jumperUserId,
+        amount: VIEWER_ACTION_COINS,
+        sessionId: args.sessionId,
+        actionId,
+        purpose: 'jump_kick',
+      });
+    } catch (e: any) {
+      if (e instanceof EconomyError && e.code === 'INSUFFICIENT_FUNDS') {
+        const err: any = new Error('INSUFFICIENT_FUNDS');
+        err.code = 'INSUFFICIENT_FUNDS';
+        err.needed = VIEWER_ACTION_COINS;
+        throw err;
+      }
+      throw e;
+    }
+
+    await forceKick(args.sessionId, args.targetUserId);
+    recordDrop(room.seatRoster, args.targetUserId, target.displayName, room.state.roundIndex || 0);
+    room.joinQueue = dequeueUser(room.joinQueue || [], args.targetUserId);
+    room.joinQueue = dequeueUser(room.joinQueue || [], args.jumperUserId);
+
+    let seat: { slotIndex: number; stageArn: string };
+    try {
+      const { forceSeatGuest } = await import('../../live/liveService');
+      seat = await forceSeatGuest({
+        sessionId: args.sessionId,
+        guestUserId: args.jumperUserId,
+        preferredSlot: target.slotIndex,
+        reason: 'frenemies_jump',
+      });
+    } catch (e: any) {
+      await refundViewerAction({
+        userId: args.jumperUserId,
+        actionId,
+        coinDebited: debit.coinDebited,
+        bonusDebited: debit.bonusDebited,
+        reason: 'seat_failed',
+      });
+      const err: any = new Error('SEAT_FAILED');
+      err.code = 'SEAT_FAILED';
+      err.detail = e?.message || String(e);
+      throw err;
+    }
+
+    const jumper = ensureSeatMeta(
+      room.seatRoster,
+      args.jumperUserId,
+      args.displayName || 'Guest',
+      room.state.roundIndex || 0,
+    );
+    jumper.hasHadWheelHit = false;
+    jumper.seatedAtRoundIndex = room.state.roundIndex || 0;
+    jumper.extraLives = 0;
+    jumper.lastJumpAtMs = Date.now();
+    jumper.justDroppedRoundId = null;
+
+    room.state.lastResult = {
+      kind: 'jump_kick',
+      text: `${jumper.displayName} jumped in — kicked ${target.displayName} from Box ${seat.slotIndex} (${VIEWER_ACTION_COINS} coins).`,
+      kickedUserId: args.targetUserId,
+      coinUserId: args.jumperUserId,
+      coins: VIEWER_ACTION_COINS,
+      payer: null,
+    };
+    room.version += 1;
+    await saveRoom(room);
+    emitRoomEvent(args.sessionId, {
+      type: 'guest.kicked',
+      guestUserId: args.targetUserId,
+      reason: 'frenemies_jump',
+    } as any);
+    emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'RESULT'));
+    return {
+      room,
+      charged: debit.charged || VIEWER_ACTION_COINS,
+      slotIndex: seat.slotIndex,
+      victimUserId: args.targetUserId,
+    };
+  });
+}
+
+/** Pay 50 coins for one extra life while seated LIVE. */
+export async function buyExtraLife(args: {
+  sessionId: string;
+  userId: string;
+  idempotencyKey: string;
+}): Promise<{ room: FrenemiesRoom; charged: number; extraLives: number }> {
+  const actionId = String(args.idempotencyKey || '').trim();
+  if (!actionId || actionId.length < 8) {
+    const err: any = new Error('INVALID_INPUT');
+    err.code = 'INVALID_INPUT';
+    throw err;
+  }
+
+  return withLock(args.sessionId, async () => {
+    const room = await loadRoom(args.sessionId);
+    if (!room || !room.state.active || room.state.phase === 'ended' || room.state.phase === 'idle') {
+      const err: any = new Error('GAME_NOT_FOUND');
+      err.code = 'GAME_NOT_FOUND';
+      throw err;
+    }
+    if (args.userId === room.hostUserId) {
+      const err: any = new Error('HOST_CANNOT_BUY_LIFE');
+      err.code = 'HOST_CANNOT_BUY_LIFE';
+      throw err;
+    }
+
+    const occ = await liveOccupants(args.sessionId);
+    const seated = occ.find((o) => o.userId === args.userId);
+    if (!seated) {
+      const err: any = new Error('NOT_SEATED');
+      err.code = 'NOT_SEATED';
+      throw err;
+    }
+
+    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+    const meta = ensureSeatMeta(
+      room.seatRoster,
+      args.userId,
+      seated.displayName,
+      room.state.roundIndex || 0,
+    );
+    if ((meta.extraLives || 0) >= MAX_EXTRA_LIVES) {
+      const err: any = new Error('LIFE_AT_CAP');
+      err.code = 'LIFE_AT_CAP';
+      throw err;
+    }
+
+    const spendable = await getViewerSpendableCoins(args.userId);
+    if (spendable < VIEWER_ACTION_COINS) {
+      const err: any = new Error('INSUFFICIENT_FUNDS');
+      err.code = 'INSUFFICIENT_FUNDS';
+      err.needed = VIEWER_ACTION_COINS;
+      err.balance = spendable;
+      throw err;
+    }
+
+    let debit: { charged: number };
+    try {
+      debit = await debitViewerAction({
+        userId: args.userId,
+        amount: VIEWER_ACTION_COINS,
+        sessionId: args.sessionId,
+        actionId,
+        purpose: 'extra_life',
+      });
+    } catch (e: any) {
+      if (e instanceof EconomyError && e.code === 'INSUFFICIENT_FUNDS') {
+        const err: any = new Error('INSUFFICIENT_FUNDS');
+        err.code = 'INSUFFICIENT_FUNDS';
+        err.needed = VIEWER_ACTION_COINS;
+        throw err;
+      }
+      throw e;
+    }
+
+    meta.extraLives = Math.min(MAX_EXTRA_LIVES, (meta.extraLives || 0) + 1);
+    room.version += 1;
+    await saveRoom(room);
+    emitFrenemiesGameEvent(args.sessionId, publicEvent(room, 'SNAPSHOT'));
+    return {
+      room,
+      charged: debit.charged || VIEWER_ACTION_COINS,
+      extraLives: meta.extraLives,
+    };
   });
 }
 

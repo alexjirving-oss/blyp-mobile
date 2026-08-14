@@ -29,6 +29,8 @@ import {
   frenemiesGetPreview,
   frenemiesQueueJoin,
   frenemiesQueueLeave,
+  frenemiesQueueJump,
+  frenemiesBuyLife,
   MAX_GUEST_SLOTS,
 } from '../../api/ivsLiveApi';
 import { subscribeToFrenemiesGameEvents } from '../../realtime/frenemiesGameSocket';
@@ -542,8 +544,25 @@ export default function FrenemiesOverlay({
 
   const joinQueue = Array.isArray(event?.queue) ? event.queue : [];
   const seatMeta = event?.seatMeta || {};
+  const viewerActionCoins = Number(event?.viewerActionCoins) || 50;
   const isSeated = !!(currentUid && rosterByUser[currentUid]);
+  const myExtraLives = Number(seatMeta?.[currentUid]?.extraLives || 0);
+  const canBuyLife = isSeated && !canConduct && myExtraLives < 1;
   const myQueuePos = joinQueue.find((q) => q.userId === currentUid)?.position || null;
+
+  const jumpTargets = useMemo(() => {
+    if (canConduct || isSeated || phase !== 'ready') return [];
+    return (liveGuests || []).filter((g) => {
+      if (!g?.userId || g.userId === currentUid) return false;
+      const meta = seatMeta[g.userId] || {};
+      if (meta.protected === true || meta.hasHadWheelHit === false) return false;
+      if ((meta.extraLives || 0) > 0) return false;
+      return typeof g.slotIndex === 'number';
+    });
+  }, [canConduct, isSeated, phase, liveGuests, seatMeta, currentUid]);
+
+  const newIdemKey = () =>
+    `fk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
   const joinFrenemiesQueue = useCallback(async () => {
     if (!sessionId || !currentUid || busy) return;
@@ -583,6 +602,88 @@ export default function FrenemiesOverlay({
       setBusy(false);
     }
   }, [sessionId, busy]);
+
+  const doJumpKick = useCallback(
+    async (target) => {
+      if (!sessionId || !target?.userId || busy) return;
+      Alert.alert(
+        `Jump in · ${viewerActionCoins} coins`,
+        `Pay ${viewerActionCoins} coins to kick ${guestLabel(target) || 'this player'} (Box ${
+          target.slotIndex
+        }) and take their place on stage.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: `Pay ${viewerActionCoins}`,
+            style: 'destructive',
+            onPress: async () => {
+              setBusy(true);
+              setErr('');
+              try {
+                const res = await frenemiesQueueJump(sessionId, {
+                  targetUserId: target.userId,
+                  displayName: displayName || 'Guest',
+                  idempotencyKey: newIdemKey(),
+                });
+                if (res) setEvent(res);
+              } catch (e) {
+                const code = e?.code || e?.error;
+                if (code === 'INSUFFICIENT_FUNDS') {
+                  setTopUpOpen(true);
+                } else if (code === 'TARGET_PROTECTED' || code === 'TARGET_HAS_LIFE') {
+                  setErr('That player can’t be jumped right now.');
+                } else if (code === 'JUMP_COOLDOWN' || code === 'DROP_COOLDOWN') {
+                  setErr('Jump cooldown — try again shortly.');
+                } else if (code === 'NOT_READY') {
+                  setErr('Jump only between rounds (Ready).');
+                } else {
+                  setErr(e?.message || 'Jump failed');
+                }
+              } finally {
+                setBusy(false);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [sessionId, busy, viewerActionCoins, displayName],
+  );
+
+  const doBuyLife = useCallback(async () => {
+    if (!sessionId || busy || !canBuyLife) return;
+    Alert.alert(
+      `Extra life · ${viewerActionCoins} coins`,
+      `Pay ${viewerActionCoins} coins for 1 extra life — survives the next throw, auto-drop, or timeout kick. Host moderation still overrides.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: `Pay ${viewerActionCoins}`,
+          onPress: async () => {
+            setBusy(true);
+            setErr('');
+            try {
+              const res = await frenemiesBuyLife(sessionId, newIdemKey());
+              if (res) setEvent(res);
+            } catch (e) {
+              const code = e?.code || e?.error;
+              if (code === 'INSUFFICIENT_FUNDS') {
+                setTopUpOpen(true);
+              } else if (code === 'LIFE_AT_CAP') {
+                setErr('You already have an extra life.');
+              } else if (code === 'NOT_SEATED') {
+                setErr('Join the stage first to buy a life.');
+              } else {
+                setErr(e?.message || 'Could not buy life');
+              }
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [sessionId, busy, canBuyLife, viewerActionCoins]);
 
   const topBar = (
     <View>
@@ -807,9 +908,25 @@ export default function FrenemiesOverlay({
                     {!canConduct ? (
                       <View style={styles.queueViewerBlock}>
                         {isSeated ? (
-                          <Text style={styles.readyHint} allowFontScaling={false}>
-                            You are on stage · first spin is protected until the wheel lands
-                          </Text>
+                          <>
+                            <Text style={styles.readyHint} allowFontScaling={false}>
+                              {myExtraLives > 0
+                                ? 'On stage · 1 extra life ready'
+                                : 'You are on stage · first spin is protected until the wheel lands'}
+                            </Text>
+                            {canBuyLife ? (
+                              <TouchableOpacity
+                                style={styles.queueJoinBtn}
+                                onPress={doBuyLife}
+                                disabled={busy}
+                                activeOpacity={0.85}
+                              >
+                                <Text style={styles.queueJoinText} allowFontScaling={false}>
+                                  Extra life · {viewerActionCoins} coins
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </>
                         ) : myQueuePos ? (
                           <>
                             <Text style={styles.readyHint} allowFontScaling={false}>
@@ -824,18 +941,72 @@ export default function FrenemiesOverlay({
                                 Leave queue
                               </Text>
                             </TouchableOpacity>
+                            {jumpTargets.length ? (
+                              <TouchableOpacity
+                                style={[styles.queueJoinBtn, { marginTop: 8 }]}
+                                onPress={() => {
+                                  const labels = jumpTargets.map(
+                                    (t) =>
+                                      `Kick ${guestLabel(t) || 'Guest'} (Box ${t.slotIndex})`,
+                                  );
+                                  Alert.alert(
+                                    `Jump in · ${viewerActionCoins} coins`,
+                                    'Choose who to kick and take their box.',
+                                    [
+                                      { text: 'Cancel', style: 'cancel' },
+                                      ...jumpTargets.slice(0, 5).map((t, i) => ({
+                                        text: labels[i],
+                                        onPress: () => doJumpKick(t),
+                                      })),
+                                    ],
+                                  );
+                                }}
+                                disabled={busy}
+                                activeOpacity={0.85}
+                              >
+                                <Text style={styles.queueJoinText} allowFontScaling={false}>
+                                  Jump in · {viewerActionCoins} coins
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
                           </>
                         ) : (
-                          <TouchableOpacity
-                            style={styles.queueJoinBtn}
-                            onPress={joinFrenemiesQueue}
-                            disabled={busy}
-                            activeOpacity={0.85}
-                          >
-                            <Text style={styles.queueJoinText} allowFontScaling={false}>
-                              Request to join · queue
-                            </Text>
-                          </TouchableOpacity>
+                          <>
+                            <TouchableOpacity
+                              style={styles.queueJoinBtn}
+                              onPress={joinFrenemiesQueue}
+                              disabled={busy}
+                              activeOpacity={0.85}
+                            >
+                              <Text style={styles.queueJoinText} allowFontScaling={false}>
+                                Request to join · queue
+                              </Text>
+                            </TouchableOpacity>
+                            {jumpTargets.length ? (
+                              <TouchableOpacity
+                                style={[styles.queueJoinBtn, { marginTop: 8, backgroundColor: GOLD }]}
+                                onPress={() => {
+                                  Alert.alert(
+                                    `Jump in · ${viewerActionCoins} coins`,
+                                    'Choose who to kick and take their box.',
+                                    [
+                                      { text: 'Cancel', style: 'cancel' },
+                                      ...jumpTargets.slice(0, 5).map((t) => ({
+                                        text: `Kick ${guestLabel(t) || 'Guest'} (Box ${t.slotIndex})`,
+                                        onPress: () => doJumpKick(t),
+                                      })),
+                                    ],
+                                  );
+                                }}
+                                disabled={busy}
+                                activeOpacity={0.85}
+                              >
+                                <Text style={styles.queueJoinText} allowFontScaling={false}>
+                                  Jump in · {viewerActionCoins} coins
+                                </Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </>
                         )}
                       </View>
                     ) : null}
