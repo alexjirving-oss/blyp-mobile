@@ -155,6 +155,8 @@ export interface EconomyWallet {
   bonusCoinBalance: number;
   gemAvailable: number;
   gemPending: number;
+  /** available + pending — immediate convert total (withdraw still uses gemAvailable). */
+  gemConvertible?: number;
 }
 
 export interface EconomyCatalogGift {
@@ -934,6 +936,7 @@ export async function convertGemsToCoins(input: {
     bonusCoinBalance: number;
     gemAvailable: number;
     gemPending: number;
+    gemConvertible?: number;
   };
 }> {
   return await callEconomyBackend('/wallet/convert-gems', 'POST', input);

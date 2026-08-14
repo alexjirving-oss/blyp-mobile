@@ -202,7 +202,9 @@ const CoinStoreScreen = ({
       return;
     }
     setOverlayType('convert');
-    setOverlayAmount('');
+    // Prefill full convertible wallet (available + pending), not cleared-only.
+    const convertible = Math.max(0, Math.floor(Number(gemBalance) || 0));
+    setOverlayAmount(convertible > 0 ? String(convertible) : '');
     setOverlayError('');
   };
 
@@ -330,7 +332,10 @@ const CoinStoreScreen = ({
         const nextCoins = Number(wallet?.coinBalance || 0) + Number(wallet?.bonusCoinBalance || 0);
         const nextAvailable = Number(wallet?.gemAvailable || 0);
         const nextPending = Number(wallet?.gemPending || 0);
-        const nextGems = nextAvailable + nextPending;
+        const nextGems =
+          wallet?.gemConvertible != null && Number.isFinite(Number(wallet.gemConvertible))
+            ? Number(wallet.gemConvertible)
+            : nextAvailable + nextPending;
         if (Number.isFinite(nextCoins)) setBalance(nextCoins);
         if (Number.isFinite(nextGems)) setGemBalance(nextGems);
         if (Number.isFinite(nextAvailable)) setGemAvailable(nextAvailable);
@@ -359,6 +364,9 @@ const CoinStoreScreen = ({
     return subscribeWalletUpdated((snap) => {
       if (snap?.coins != null && Number.isFinite(snap.coins)) setBalance(snap.coins);
       if (snap?.gems != null && Number.isFinite(snap.gems)) setGemBalance(snap.gems);
+      if (snap?.gemAvailable != null && Number.isFinite(snap.gemAvailable)) {
+        setGemAvailable(snap.gemAvailable);
+      }
       if (uid && (snap?.coins != null || snap?.gems != null)) {
         void setWalletBalanceCache(uid, {
           coins: snap?.coins,
@@ -544,17 +552,27 @@ const CoinStoreScreen = ({
           const nextCoins = Number(wallet.coinBalance || 0) + Number(wallet.bonusCoinBalance || 0);
           const nextAvailable = Number(wallet.gemAvailable || 0);
           const nextPending = Number(wallet.gemPending || 0);
+          const nextConvertible =
+            wallet.gemConvertible != null
+              ? Number(wallet.gemConvertible)
+              : nextAvailable + nextPending;
           setBalance(nextCoins);
           setGemAvailable(nextAvailable);
-          setGemBalance(nextAvailable + nextPending);
+          setGemBalance(nextConvertible);
           emitWalletUpdated(wallet);
-        } else {
-          await refreshLiveWallet();
         }
-        Alert.alert(
-          'Converted',
-          `Converted ${Number(res?.gemsDebited || amount).toLocaleString()} gems → ${Number(res?.coinsCredited || 0).toLocaleString()} coins.\n${describeGemToCoinRate()}`,
-        );
+        // Always re-fetch so UI cannot stick on a stale cleared balance.
+        await refreshLiveWallet();
+        const debited = Number(res?.gemsDebited || 0);
+        const credited = Number(res?.coinsCredited || 0);
+        if (res?.kind === 'replay' && debited === 0) {
+          Alert.alert('Already converted', 'That convert request was already applied. Gem balance refreshed.');
+        } else {
+          Alert.alert(
+            'Converted',
+            `Converted ${(debited || amount).toLocaleString()} gems → ${(credited || 0).toLocaleString()} coins.\n${describeGemToCoinRate()}`,
+          );
+        }
       } catch (e) {
         const msg = String(e?.message || e?.detail || e || 'Convert failed');
         setOverlayError(msg);
@@ -1024,7 +1042,7 @@ const CoinStoreScreen = ({
 
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
-                    ? `${describeGemToCoinRate()}. Convert is immediate — all wallet gems (${gemBalance.toLocaleString()} available), including ones still clearing for cash-out. Gift earnings already took the half when coins became gems.`
+                    ? `${describeGemToCoinRate()}. Converts immediately from your full gem wallet (${gemBalance.toLocaleString()} convertible = cleared + pending). Withdraw still waits ~7 days on cleared gems only. Gift earnings already took the half when coins became gems.`
                     : `Cash out cleared gems only (${gemAvailable.toLocaleString()} withdrawable after ~7-day clear). Pending gems can convert to coins now, but not withdraw yet. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Bank (Stripe) primary when KYC clears; PayPal backup.`}
                 </Text>
 

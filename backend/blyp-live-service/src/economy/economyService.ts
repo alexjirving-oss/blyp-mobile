@@ -1162,22 +1162,35 @@ export async function getWallet(userId: string) {
     // Lazily settle matured pending gems: any PENDING gem earning older than the
     // hold window is promoted to available. This runs on read so creators see
     // their earnings unlock without needing a separate cron/worker.
+    // FIFO by created_at and only mark entries that fit under `release` — never
+    // POST an entire matured set when wallet.gem_pending is lower (e.g. after
+    // convert consumed pending without clearing every ledger row historically).
     const holdSeconds = Number(env.PENDING_GEMS_HOLD_SECONDS || 0);
     if (holdSeconds > 0 && BigInt(wallet.gem_pending || 0) > 0n) {
       const matured = await trx('ledger_entries')
         .where({ user_id: userId, currency: 'GEM', status: 'PENDING' })
         .andWhereRaw(`created_at <= NOW() - INTERVAL '${holdSeconds} seconds'`)
+        .orderBy('created_at', 'asc')
         .select('ledger_id', 'amount');
 
       if (matured.length > 0) {
-        let sum = 0n;
-        for (const e of matured) sum += BigInt(e.amount);
-        // Never release more than is actually pending (defensive clamp).
         const pending = BigInt(wallet.gem_pending || 0);
-        const release = sum > pending ? pending : sum;
-        if (release > 0n) {
+        let release = 0n;
+        const toPost: string[] = [];
+        for (const e of matured) {
+          if (release >= pending) break;
+          const amt = BigInt(e.amount || 0);
+          if (amt <= 0n) continue;
+          if (release + amt > pending) {
+            // Leave partial remainder pending; do not over-release.
+            break;
+          }
+          release += amt;
+          toPost.push(e.ledger_id);
+        }
+        if (release > 0n && toPost.length > 0) {
           await trx('ledger_entries')
-            .whereIn('ledger_id', matured.map((e: any) => e.ledger_id))
+            .whereIn('ledger_id', toPost)
             .update({ status: 'POSTED' });
           await trx('wallets')
             .where({ user_id: userId })
@@ -1195,11 +1208,15 @@ export async function getWallet(userId: string) {
     return wallet;
   });
 
+  const gemAvailable = Number(row.gem_available);
+  const gemPending = Number(row.gem_pending);
   return {
     coinBalance: Number(row.coin_balance),
     bonusCoinBalance: Number(row.bonus_coin_balance),
-    gemAvailable: Number(row.gem_available),
-    gemPending: Number(row.gem_pending),
+    gemAvailable,
+    gemPending,
+    /** Immediate convert total (available + pending). Withdraw still uses gemAvailable only. */
+    gemConvertible: gemAvailable + gemPending,
   };
 }
 
@@ -2550,9 +2567,10 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
 /**
  * Convert earned gems → spendable COIN (never cashable) immediately.
  * Rate: ceil(gems * 1.15) — 1:1 face + 15% bonus (gift half already applied coins→gems).
- * Convertible = gem_available + gem_pending (no 7-day hold). Debits pending first so
- * cleared gems remain for cash withdraw when possible. Open withdrawals already
- * deducted gem_available at WITHDRAWAL_RESERVE — do not subtract them again.
+ * Convertible = gem_available + gem_pending (no 7-day hold).
+ * Debits cleared available FIRST so /wallet gemAvailable drops immediately (prevents
+ * "still 501 available" double-convert). Then pending. When taking pending, FIFO-consume
+ * PENDING GIFT_EARN ledger rows (mark POSTED) so getWallet lazy-settle cannot re-credit them.
  * Cash withdraw stays cleared-only (gem_available) on the withdraw paths.
  */
 export async function convertGemsToCoins(
@@ -2565,7 +2583,13 @@ export async function convertGemsToCoins(
   rate: string;
   faceRatio: number;
   bonusMultiplier: number;
-  wallet: { coinBalance: number; bonusCoinBalance: number; gemAvailable: number; gemPending: number };
+  wallet: {
+    coinBalance: number;
+    bonusCoinBalance: number;
+    gemAvailable: number;
+    gemPending: number;
+    gemConvertible: number;
+  };
 }> {
   const { db } = getEconomyInfra();
   const gems = Math.floor(Number(input.amountGems || 0));
@@ -2588,12 +2612,84 @@ export async function convertGemsToCoins(
 
   const readWallet = async (q: any) => {
     const w = await q('wallets').where({ user_id: userId }).first();
+    const gemAvailable = Number(w?.gem_available || 0);
+    const gemPending = Number(w?.gem_pending || 0);
     return {
       coinBalance: Number(w?.coin_balance || 0),
       bonusCoinBalance: Number(w?.bonus_coin_balance || 0),
-      gemAvailable: Number(w?.gem_available || 0),
-      gemPending: Number(w?.gem_pending || 0),
+      gemAvailable,
+      gemPending,
+      gemConvertible: gemAvailable + gemPending,
     };
+  };
+
+  /** Mark PENDING GEM earn rows consumed so lazy settle cannot resurrect them. */
+  const consumePendingGemLedger = async (trx: any, amount: bigint, convertRefId: string) => {
+    if (amount <= 0n) return;
+    let remaining = amount;
+    const pendingRows = await trx('ledger_entries')
+      .where({ user_id: userId, currency: 'GEM', status: 'PENDING' })
+      .orderBy('created_at', 'asc')
+      .forUpdate();
+
+    for (const row of pendingRows) {
+      if (remaining <= 0n) break;
+      const rowAmt = BigInt(row.amount || 0);
+      if (rowAmt <= 0n) continue;
+      const prevMeta =
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? row.metadata
+          : {};
+
+      if (rowAmt <= remaining) {
+        await trx('ledger_entries')
+          .where({ ledger_id: row.ledger_id })
+          .update({
+            status: 'POSTED',
+            metadata: {
+              ...prevMeta,
+              convertedToCoins: true,
+              convertRefId,
+              convertedAmount: Number(rowAmt),
+            },
+          });
+        remaining -= rowAmt;
+        continue;
+      }
+
+      // Partial consume: shrink PENDING remainder; POST a converted slice.
+      const take = remaining;
+      const left = rowAmt - take;
+      await trx('ledger_entries')
+        .where({ ledger_id: row.ledger_id })
+        .update({
+          amount: left.toString(),
+          metadata: {
+            ...prevMeta,
+            convertPartialLeft: true,
+            lastConvertRefId: convertRefId,
+          },
+        });
+      await trx('ledger_entries').insert({
+        ledger_id: randomUUID(),
+        user_id: userId,
+        entry_type: row.entry_type || 'GIFT_EARN',
+        currency: 'GEM',
+        amount: take.toString(),
+        status: 'POSTED',
+        reference_type: row.reference_type || 'GEM_TO_COIN_CONVERT',
+        reference_id: row.reference_id || convertRefId,
+        idempotency_key: `${idempotencyKey}:PENDING_SLICE:${row.ledger_id}`,
+        metadata: {
+          ...prevMeta,
+          convertedToCoins: true,
+          convertRefId,
+          convertedAmount: Number(take),
+          splitFromLedgerId: row.ledger_id,
+        },
+      });
+      remaining = 0n;
+    }
   };
 
   try {
@@ -2641,9 +2737,9 @@ export async function convertGemsToCoins(
         );
       }
 
-      // Prefer pending so cleared gems stay available for cash withdraw.
-      const fromPending = gemsDelta <= gemPending ? gemsDelta : gemPending;
-      const fromAvailable = gemsDelta - fromPending;
+      // Available first — cleared balance must drop on convert (no sticky "501 available").
+      const fromAvailable = gemsDelta <= gemAvailable ? gemsDelta : gemAvailable;
+      const fromPending = gemsDelta - fromAvailable;
       const coinsDelta = BigInt(coinsCredited);
       const refId = randomUUID();
       const meta = {
@@ -2656,6 +2752,10 @@ export async function convertGemsToCoins(
         rate: describeGemToCoinRate(),
         originalIdempotencyKey: idempotencyKey,
       };
+
+      if (fromPending > 0n) {
+        await consumePendingGemLedger(trx, fromPending, refId);
+      }
 
       await trx('ledger_entries').insert({
         ledger_id: randomUUID(),
