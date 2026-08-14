@@ -12,14 +12,18 @@ const FOOTWORK_ID = 'cat_football_6lr0f';
 const STOCK_PROFILE_CATEGORIES = [
   { id: FOOTWORK_ID, label: 'Footwork', order: 0 },
   { id: 'cat_kids-stories_stock', label: 'Kids stories', order: 1 },
-  { id: 'cat_horror_stock', label: 'Horror', order: 2 },
-  { id: 'cat_art-cinema_stock', label: 'Art & cinema', order: 3 },
-  { id: 'cat_animals_stock', label: 'Animals', order: 4 },
-  { id: 'cat_biohacking_stock', label: 'Biohacking', order: 5 },
-  { id: 'cat_talking-objects_stock', label: 'Talking objects', order: 6 },
-  { id: 'cat_viral-shorts_stock', label: 'Viral shorts', order: 7 },
-  { id: 'cat_life-hacks_stock', label: 'Life hacks', order: 8 },
+  { id: 'cat_baby-podcast_stock', label: 'Baby podcast', order: 2 },
+  { id: 'cat_horror_stock', label: 'Horror', order: 3 },
+  { id: 'cat_art-cinema_stock', label: 'Art & cinema', order: 4 },
+  { id: 'cat_animals_stock', label: 'Animals', order: 5 },
+  { id: 'cat_biohacking_stock', label: 'Biohacking', order: 6 },
+  { id: 'cat_talking-objects_stock', label: 'Talking objects', order: 7 },
+  { id: 'cat_viral-shorts_stock', label: 'Viral shorts', order: 8 },
+  { id: 'cat_life-hacks_stock', label: 'Life hacks', order: 9 },
 ];
+
+/** Etsy: "300 AI Baby Comedy Reels | Pre-subtitled Podcast Bundle" → local andr/f4 */
+const BABY_PODCAST_ID = 'cat_baby-podcast_stock';
 
 const CREATOR_LABELS = {
   biohackingmegaboss: 'Biohacking',
@@ -53,21 +57,28 @@ function cleanSpaces(s) {
 
 /**
  * Fine pack key from local path + filename (not just top folder).
- * @returns {'footwork'|'kids'|'horror'|'animals'|'biohacking'|'talking_objects'|'cinema'|'life_hacks'|'viral'|'stock'}
+ * @returns {'footwork'|'kids'|'baby_podcast'|'horror'|'animals'|'biohacking'|'talking_objects'|'cinema'|'life_hacks'|'viral'|'stock'}
  */
 function detectStockKind(filePath) {
   const p = pathNorm(filePath).toLowerCase();
   const name = basenameNoExt(filePath).toLowerCase();
   const hay = `${p} ${name}`;
 
-  if (p.includes('/footwork') || p.includes('/football') || p.includes('/soccer') || /footwork|football|soccer|dribbl/.test(hay)) {
+  if (/(^|\/)(footwork|football|soccer)(\/|$)/.test(p) || /footwork|football|soccer|dribbl/.test(hay)) {
     return 'footwork';
   }
-  if (p.includes('/kids') || /kids|storytime|nursery|bedtime/.test(p)) return 'kids';
-  if (p.includes('/horror')) return 'horror';
+  // 300 AI Baby Podcast / Baby Comedy Reels pack (Drive → andr/f4)
   if (
-    p.includes('/ready') ||
-    p.includes('/animals') ||
+    /(^|\/)andr\/f4(\/|$)/.test(p) ||
+    /(^|\/)(baby-podcast|babypodcast|baby_podcast)(\/|$)/.test(p) ||
+    /baby\s*podcast|baby\s*comedy|ai\s*baby/.test(hay)
+  ) {
+    return 'baby_podcast';
+  }
+  if (/(^|\/)kids(\/|$)/.test(p) || /kids|storytime|nursery|bedtime/.test(p)) return 'kids';
+  if (/(^|\/)horror(\/|$)/.test(p)) return 'horror';
+  if (
+    /(^|\/)(ready|animals)(\/|$)/.test(p) ||
     /\b(babylion|lionlang|lion|tiger|leopard|wildlife|animal|puppy|kitten)\b/.test(hay)
   ) {
     return 'animals';
@@ -78,12 +89,12 @@ function detectStockKind(filePath) {
   if (/talking\s*object/.test(hay)) return 'talking_objects';
   if (/biohacking|explainingyourbody|saucyexplain|makehealthgreat|recepthydei/.test(hay)) return 'biohacking';
   if (/\blifehack\b|life\s*hack/.test(hay)) return 'life_hacks';
-  if (p.includes('/andr/f1') && /new\s*vids/.test(name)) return 'viral';
-  if (p.includes('/andr/f2') || p.includes('/andr/f4') || /ssstik\.io|^\d{10,}/.test(name)) return 'viral';
-  if (p.includes('/andr/f3')) return 'cinema';
-  if (p.includes('/andr/f1')) return 'biohacking';
-  if (p.includes('/andr') || p.includes('/cinema')) return 'cinema';
-  if (p.includes('/etsy')) return 'viral'; // local only if present; not required
+  if (/(^|\/)andr\/f1(\/|$)/.test(p) && /new\s*vids/.test(name)) return 'viral';
+  if (/(^|\/)andr\/f2(\/|$)/.test(p) || /ssstik\.io|^\d{10,}/.test(name)) return 'viral';
+  if (/(^|\/)andr\/f3(\/|$)/.test(p)) return 'cinema';
+  if (/(^|\/)andr\/f1(\/|$)/.test(p)) return 'biohacking';
+  if (/(^|\/)andr(\/|$)/.test(p) || /(^|\/)cinema(\/|$)/.test(p)) return 'cinema';
+  if (/(^|\/)etsy(\/|$)/.test(p)) return 'viral'; // local only if present; not required
   return 'stock';
 }
 
@@ -93,6 +104,8 @@ function categoryIdForKind(kind) {
       return FOOTWORK_ID;
     case 'kids':
       return 'cat_kids-stories_stock';
+    case 'baby_podcast':
+      return BABY_PODCAST_ID;
     case 'horror':
       return 'cat_horror_stock';
     case 'cinema':
@@ -126,6 +139,12 @@ function rankingMetaForKind(kind) {
         category: 'kids_stories',
         topic: 'kids_stories',
         hashtags: ['kids', 'stories', 'storytime', 'kids_stories', 'stock', 'foryou'],
+      };
+    case 'baby_podcast':
+      return {
+        category: 'entertainment',
+        topic: 'baby_podcast',
+        hashtags: ['babypodcast', 'babycomedy', 'podcast', 'reels', 'stock', 'foryou'],
       };
     case 'horror':
       return {
@@ -209,6 +228,10 @@ function buildStockCopy(filePath, kind) {
   if (kind === 'kids') {
     title = cleanSpaces(raw.replace(/\(\d+\)$/g, '').replace(/\(1\)$/g, '')).slice(0, 80);
     description = `${title} — kids storytime clip.`;
+  } else if (kind === 'baby_podcast') {
+    const num = raw.match(/(\d{4,})/)?.[1];
+    title = num ? `Baby podcast #${String(num).slice(-4)}` : 'Baby podcast reel';
+    description = 'AI baby comedy podcast reel.';
   } else if (kind === 'horror') {
     const num = raw.match(/\d+/)?.[0];
     title = num ? `Horror reel #${num}` : 'Horror reel';
@@ -264,11 +287,17 @@ function topicMetaForPath(filePath) {
   const copy = buildStockCopy(filePath, kind);
   return {
     kind,
-    stockPack: kind === 'cinema' || kind === 'biohacking' || kind === 'talking_objects' || kind === 'viral' || kind === 'life_hacks'
-      ? 'andr'
-      : kind === 'animals'
-        ? 'ready'
-        : kind,
+    stockPack:
+      kind === 'cinema' ||
+      kind === 'biohacking' ||
+      kind === 'talking_objects' ||
+      kind === 'viral' ||
+      kind === 'life_hacks' ||
+      kind === 'baby_podcast'
+        ? 'andr'
+        : kind === 'animals'
+          ? 'ready'
+          : kind,
     categoryId,
     ...ranking,
     ...copy,
@@ -278,6 +307,7 @@ function topicMetaForPath(filePath) {
 
 module.exports = {
   FOOTWORK_ID,
+  BABY_PODCAST_ID,
   STOCK_PROFILE_CATEGORIES,
   detectStockKind,
   categoryIdForKind,
