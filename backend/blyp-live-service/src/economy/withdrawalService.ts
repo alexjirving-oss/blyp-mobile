@@ -297,6 +297,9 @@ async function ensureWalletRow(trx: Knex.Transaction, userId: string) {
 
 /**
  * Withdrawable = cleared gem_available.
+ * Open withdrawals already debit gem_available at WITHDRAWAL_RESERVE — do not
+ * subtract pending request amounts again (that double-counted and understated
+ * convert/withdraw UI vs the wallet balance).
  * Self-funded purchased COIN is never included (gems come from gifts/earnings only).
  */
 export async function computeWithdrawableGems(userId: string): Promise<{
@@ -307,14 +310,7 @@ export async function computeWithdrawableGems(userId: string): Promise<{
   selfFundedCoins: number;
 }> {
   const wallet = await getWallet(userId);
-  const open = await getEconomyInfra()
-    .db('withdrawal_requests')
-    .where({ user_id: userId })
-    .whereIn('status', ['pending', 'pending_review', 'processing'])
-    .sum({ reserved: 'amount_gems' })
-    .first();
-  const reserved = Number(open?.reserved || 0);
-  const available = Math.max(0, Math.floor(wallet.gemAvailable) - Math.max(0, reserved));
+  const available = Math.max(0, Math.floor(wallet.gemAvailable));
   return {
     withdrawableGems: available,
     gemAvailable: wallet.gemAvailable,

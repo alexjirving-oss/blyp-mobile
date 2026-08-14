@@ -918,7 +918,7 @@ export async function requestWithdrawGems(input: {
   return await callEconomyBackend('/withdraw/request', 'POST', input);
 }
 
-/** Convert cleared gem_available → spendable COIN. Rate: ceil(gems * 1.15). */
+/** Convert earned gems (available+pending, immediate) → spendable COIN. Rate: ceil(gems * 1.15). */
 export async function convertGemsToCoins(input: {
   amountGems: number;
   idempotencyKey: string;

@@ -1,19 +1,9 @@
 ﻿{
   "site_name": "blyp-admin-console",
-  "deploy_id": "6a73ea8d831ba97572cc9705",
+  "site_id": "f31b62f8-deae-4110-afb9-b6863900336c",
   "production_url": "https://admin.blyp.world",
-  "deploy_url": "https://6a73ea8d831ba97572cc9705--blyp-admin-console.netlify.app",
-  "logs": "https://app.netlify.com/projects/blyp-admin-console/deploys/6a73ea8d831ba97572cc9705",
-  "backend_revision": "blyp-live-service-00141-v4v",
-  "backend_url": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
-  "prior_rbac_v1": {
-    "backend_revision": "blyp-live-service-00140-74q",
-    "deploy_id": "6a73e7abed852f4407ef19fa"
-  },
-  "prior_p1_p2": {
-    "backend_revision": "blyp-live-service-00139-gzh",
-    "deploy_id": "6a73e5586d56615daf858b0f"
-  },
-  "deployed_at": "2026-08-06",
-  "notes": "Deferred polish: auto-mod, mass-ban, DSAR export/purge, chargeback withdraw flags, dispute workflow. RBAC preserved. ENABLE_WITHDRAWALS left at 0."
+  "backend_revision": "blyp-live-service-00210-sv7",
+  "backend_url": "https://blyp-live-service-929105034040.us-central1.run.app",
+  "deployed_at": "2026-08-14",
+  "notes": "Gem convert: immediate available+pending; withdraw stays cleared-only (~7d). Fixed convert double-count of WITHDRAWAL_RESERVE."
 }

@@ -132,7 +132,7 @@ const CoinStoreScreen = ({
   const seedGems = Number.isFinite(Number(initialGems)) ? Number(initialGems) : 0;
   const [balance, setBalance] = useState(seedCoins);
   const [gemBalance, setGemBalance] = useState(seedGems);
-  /** Cleared gems only (excludes pending) — convert/withdraw debit this bucket. */
+  /** Cleared gems only (excludes pending) — cash withdraw debit this bucket. */
   const [gemAvailable, setGemAvailable] = useState(seedGems);
   const [loading, setLoading] = useState(false);
   const [balancesRefreshing, setBalancesRefreshing] = useState(false);
@@ -477,8 +477,12 @@ const CoinStoreScreen = ({
         setOverlayError('Withdrawals are currently disabled.');
         return;
       }
-      if (amount > gemBalance) {
-        setOverlayError('You do not have that many gems.');
+      if (amount > gemAvailable) {
+        setOverlayError(
+          gemAvailable < gemBalance
+            ? `Only ${gemAvailable.toLocaleString()} cleared gems can withdraw (pending still clearing ~7 days).`
+            : 'You do not have that many cleared gems.',
+        );
         return;
       }
       if (withdrawMethod === 'paypal') {
@@ -522,12 +526,8 @@ const CoinStoreScreen = ({
     }
 
     if (overlayType === 'convert') {
-      if (amount > gemAvailable) {
-        setOverlayError(
-          gemAvailable < gemBalance
-            ? `Only ${gemAvailable.toLocaleString()} cleared gems can convert (pending still clearing).`
-            : 'You do not have that many gems.',
-        );
+      if (amount > gemBalance) {
+        setOverlayError('You do not have that many gems to convert.');
         return;
       }
 
@@ -1024,8 +1024,8 @@ const CoinStoreScreen = ({
 
                 <Text style={styles.overlaySubtitle}>
                   {overlayType === 'convert'
-                    ? `${describeGemToCoinRate()}. Gift earnings already took the half when coins became gems. Cleared gems only (${gemAvailable.toLocaleString()} available).`
-                    : 'Cash out cleared gem earnings only. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Bank (Stripe) is primary when KYC clears; PayPal is the emergency backup.'}
+                    ? `${describeGemToCoinRate()}. Convert is immediate — all wallet gems (${gemBalance.toLocaleString()} available), including ones still clearing for cash-out. Gift earnings already took the half when coins became gems.`
+                    : `Cash out cleared gems only (${gemAvailable.toLocaleString()} withdrawable after ~7-day clear). Pending gems can convert to coins now, but not withdraw yet. Min 1000 gems. Coins are never cashable. No platform withdraw fee. Bank (Stripe) primary when KYC clears; PayPal backup.`}
                 </Text>
 
                 {overlayType === 'convert' && Number(overlayAmount) > 0 ? (

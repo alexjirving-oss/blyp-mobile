@@ -2548,10 +2548,12 @@ export async function creditCoinsAdmin(actorUserId: string, input: AdminCreditCo
 }
 
 /**
- * Convert cleared gem_available → spendable COIN (never cashable).
+ * Convert earned gems → spendable COIN (never cashable) immediately.
  * Rate: ceil(gems * 1.15) — 1:1 face + 15% bonus (gift half already applied coins→gems).
- * Debits only gem_available (not pending); fail-closed on insufficient / reserved.
- * Does not touch Stripe/PayPal withdraw rails.
+ * Convertible = gem_available + gem_pending (no 7-day hold). Debits pending first so
+ * cleared gems remain for cash withdraw when possible. Open withdrawals already
+ * deducted gem_available at WITHDRAWAL_RESERVE — do not subtract them again.
+ * Cash withdraw stays cleared-only (gem_available) on the withdraw paths.
  */
 export async function convertGemsToCoins(
   userId: string,
@@ -2618,32 +2620,36 @@ export async function convertGemsToCoins(
         };
       }
 
-      const open = await trx('withdrawal_requests')
-        .where({ user_id: userId })
-        .whereIn('status', ['pending', 'pending_review', 'processing'])
-        .sum({ reserved: 'amount_gems' })
-        .first();
-      const reserved = Math.max(0, Math.floor(Number(open?.reserved || 0)));
-
       const wallet = await trx('wallets').where({ user_id: userId }).forUpdate().first();
       if (!wallet) throw new EconomyError('INTERNAL', 500, 'Wallet missing');
 
       const gemAvailable = BigInt(wallet.gem_available || 0);
-      const withdrawable = gemAvailable - BigInt(reserved);
-      if (withdrawable < BigInt(gems)) {
+      const gemPending = BigInt(wallet.gem_pending || 0);
+      const convertible = gemAvailable + gemPending;
+      const gemsDelta = BigInt(gems);
+      if (convertible < gemsDelta) {
         throw new EconomyError(
           'INSUFFICIENT_FUNDS',
           409,
-          'Insufficient available gems',
-          { gemAvailable: Number(gemAvailable), reserved, requested: gems },
+          'Insufficient gems to convert',
+          {
+            gemAvailable: Number(gemAvailable),
+            gemPending: Number(gemPending),
+            convertible: Number(convertible),
+            requested: gems,
+          },
         );
       }
 
-      const gemsDelta = BigInt(gems);
+      // Prefer pending so cleared gems stay available for cash withdraw.
+      const fromPending = gemsDelta <= gemPending ? gemsDelta : gemPending;
+      const fromAvailable = gemsDelta - fromPending;
       const coinsDelta = BigInt(coinsCredited);
       const refId = randomUUID();
       const meta = {
         amountGems: gems,
+        fromPending: Number(fromPending),
+        fromAvailable: Number(fromAvailable),
         coinsCredited,
         faceRatio: GEM_TO_COIN_FACE_RATIO,
         bonusMultiplier: GEM_TO_COIN_CONVERT_BONUS_MULTIPLIER,
@@ -2680,7 +2686,8 @@ export async function convertGemsToCoins(
       await trx('wallets')
         .where({ user_id: userId })
         .update({
-          gem_available: (gemAvailable - gemsDelta).toString(),
+          gem_pending: (gemPending - fromPending).toString(),
+          gem_available: (gemAvailable - fromAvailable).toString(),
           coin_balance: (BigInt(wallet.coin_balance || 0) + coinsDelta).toString(),
           updated_at: trx.fn.now(),
         });
