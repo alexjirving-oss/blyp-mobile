@@ -1,6 +1,7 @@
 const {
   buildCycleContinuation,
   dedupePostsById,
+  demoteAvoidedPosts,
   ensureFocusPostInList,
   feedInventoryStats,
   getLastFeedHeadIds,
@@ -151,6 +152,17 @@ describe('forYouFeedList', () => {
     expect(next.every((p) => String(p.feedKey).endsWith('__2'))).toBe(true);
     expect(new Set(next.map((p) => p.id)).size).toBe(posts.length);
     expect(next.slice(0, 3).map((p) => p.id).sort()).toEqual(['a', 'e', 'f']);
+  });
+
+  it('demotes avoided ids off the head while preserving relative order', () => {
+    resetLastFeedHeadIds();
+    const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
+    const next = demoteAvoidedPosts(list, {
+      avoidFirstIds: ['a', 'b'],
+      avoidCount: 2,
+      remember: false,
+    });
+    expect(next.map((p) => p.id)).toEqual(['c', 'd', 'a', 'b']);
   });
 
   describe('resolveForYouBootWidenApply', () => {

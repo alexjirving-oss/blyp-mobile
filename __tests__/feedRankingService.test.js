@@ -158,6 +158,7 @@ describe('For You v1 ranking', () => {
       post('b1', { userId: 'creator-b', likeCount: 80 }),
       post('c1', { userId: 'creator-c', likeCount: 70 }),
       post('d1', { userId: 'creator-d', likeCount: 60 }),
+      post('e1', { userId: 'creator-e', likeCount: 50 }),
     ], [], new Set(), { now: NOW, fairCap: false });
 
     for (let i = 1; i < ranked.length; i += 1) {
@@ -166,7 +167,7 @@ describe('For You v1 ranking', () => {
     const firstA = ranked.findIndex((item) => item.userId === 'creator-a');
     const secondA = ranked.findIndex((item, idx) => idx > firstA && item.userId === 'creator-a');
     expect(firstA).toBe(0);
-    expect(secondA).toBeGreaterThanOrEqual(3);
+    expect(secondA).toBeGreaterThanOrEqual(4);
   });
 
   it('spaces shared hashtags when alternate topics are available', () => {
@@ -177,6 +178,62 @@ describe('For You v1 ranking', () => {
     ], [], new Set(), { now: NOW, fairCap: false });
 
     expect(ranked.map((item) => item.id)).toEqual(['g1', 's1', 'g2']);
+  });
+
+  it('breaks a kids-stories niche run when other clusters exist', () => {
+    const { topicClusterKey } = require('../src/services/feedRankingService');
+    const kids = [
+      post('k1', {
+        userId: 'k-a',
+        likeCount: 100,
+        hashtags: ['bedtime'],
+        caption: 'kids story night',
+      }),
+      post('k2', {
+        userId: 'k-b',
+        likeCount: 95,
+        hashtags: ['storytime'],
+        title: "children's story",
+      }),
+      post('k3', {
+        userId: 'k-c',
+        likeCount: 90,
+        category: 'Kids',
+        caption: 'nursery rhyme',
+      }),
+      post('k4', {
+        userId: 'k-d',
+        likeCount: 85,
+        hashtags: ['fairytale'],
+        caption: 'bedtime story',
+      }),
+    ];
+    const other = [
+      post('g1', { userId: 'g-a', likeCount: 40, hashtags: ['gaming'] }),
+      post('g2', { userId: 'g-b', likeCount: 38, hashtags: ['gaming'] }),
+      post('s1', { userId: 's-a', likeCount: 35, hashtags: ['sports'] }),
+      post('s2', { userId: 's-b', likeCount: 33, hashtags: ['sports'] }),
+      post('m1', { userId: 'm-a', likeCount: 30, hashtags: ['music'] }),
+      post('c1', { userId: 'c-a', likeCount: 28, hashtags: ['comedy'] }),
+    ];
+    expect(topicClusterKey(kids[0])).toBe('kids_stories');
+    expect(topicClusterKey(kids[1])).toBe('kids_stories');
+    expect(topicClusterKey(other[0])).toBe('gaming');
+
+    const ranked = rankPosts([...kids, ...other], [], new Set(), {
+      now: NOW,
+      fairCap: false,
+    });
+    const head = ranked.slice(0, 8);
+    const headClusters = head.map((item) => topicClusterKey(item));
+    const kidsInHead = headClusters.filter((c) => c === 'kids_stories').length;
+    expect(kidsInHead).toBeLessThanOrEqual(3);
+    expect(headClusters.some((c) => c !== 'kids_stories')).toBe(true);
+    // No 3-in-a-row kids-stories at the top of the feed.
+    for (let i = 0; i < headClusters.length - 2; i += 1) {
+      const run = headClusters.slice(i, i + 3);
+      expect(run.every((c) => c === 'kids_stories')).toBe(false);
+    }
   });
 
   it('prefers a creator gap and respects feed-tail recentOwners across pages', () => {

@@ -39,6 +39,7 @@ import ScreenErrorBoundary from '../components/ScreenErrorBoundary';
 import {
   buildCycleContinuation,
   dedupePostsById,
+  demoteAvoidedPosts,
   ensureFocusPostInList,
   feedInventoryStats,
   resolveFeedVideoUri,
@@ -47,6 +48,10 @@ import {
   varietyAvoidCount,
 } from '../utils/forYouFeedList';
 import { prepareRankedFeed } from '../services/feedRankingService';
+import {
+  loadForYouSeen,
+  recordForYouSeen,
+} from '../services/forYouSeenStore';
 import {
   subscribePreferences,
   getEnabledPages,
@@ -248,8 +253,9 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /**
- * For You order: rankPosts via prepareRankedFeed, then ~12% exploration mix.
- * Fail-open to variety shuffle. Order/prefs only — no player/shorts thrash.
+ * For You order: rankPosts via prepareRankedFeed, then ~12% exploration mix,
+ * then demote recently-seen off the head (cross-session variety). Fail-open
+ * to variety shuffle. Order/prefs only — no player/shorts thrash.
  */
 async function prepareForYouOrder(posts, opts = {}) {
   const candidates = Array.isArray(posts) ? posts : [];
@@ -262,6 +268,7 @@ async function prepareForYouOrder(posts, opts = {}) {
     avoidFirstIds: opts.avoidFirstIds,
   };
   const explorationRate = Number.isFinite(opts.explorationRate) ? opts.explorationRate : 0.12;
+  const finish = (ordered) => demoteAvoidedPosts(ordered, shuffleOpts);
   try {
     const ranked = await prepareRankedFeed(candidates, {
       mode: 'rank',
@@ -275,7 +282,7 @@ async function prepareForYouOrder(posts, opts = {}) {
       0,
       Math.min(ranked.length, Math.round(ranked.length * explorationRate)),
     );
-    if (exploreN <= 0 || ranked.length < 4) return ranked;
+    if (exploreN <= 0 || ranked.length < 4) return finish(ranked);
     const pool = shufflePostsVaried(ranked, { ...shuffleOpts, remember: false });
     const out = ranked.slice();
     for (let i = 0; i < exploreN; i += 1) {
@@ -292,7 +299,7 @@ async function prepareForYouOrder(posts, opts = {}) {
         out[from] = tmp;
       }
     }
-    return out;
+    return finish(out);
   } catch (_) {
     try {
       const withAccount = await attachAccountFeedPriority(candidates);
@@ -1103,6 +1110,13 @@ const HomeScreen = ({ navigation, route }) => {
       try {
         await ensureFirebaseAuthReady({ uid, timeoutMs: 12000 });
         if (!mounted) return;
+        // Cross-session seen history before first rank — avoid same head on reopen.
+        try {
+          const seen = await loadForYouSeen(uid);
+          if (!mounted) return;
+          forYouRecentlySeenOrderRef.current = seen.slice();
+          forYouRecentlySeenIdsRef.current = new Set(seen);
+        } catch (_) { /* fail-open */ }
         // Warm the block cache so blocked authors are filtered on the first snapshot.
         await loadBlockedUsers().catch(() => {});
         if (!mounted) return;
@@ -1786,6 +1800,7 @@ const HomeScreen = ({ navigation, route }) => {
           if (expired) forYouRecentlySeenIdsRef.current.delete(expired);
         }
       }
+      if (uidRef.current) recordForYouSeen(uidRef.current, p.id);
       const authorId = p.userId || p.uid || p.authorId;
       reportImpression(p.id, authorId);
       // What counts as a view: the post must have dwelled on screen (enforced by

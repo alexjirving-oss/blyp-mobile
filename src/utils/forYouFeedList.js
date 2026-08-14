@@ -220,6 +220,48 @@ export function varietyAvoidCount(poolSize, explicit) {
 }
 
 /**
+ * Keep ranked relative order, but push recently-seen / prior-head ids off the
+ * front so refresh / reopen does not restart on the same clips.
+ *
+ * @param {any[]} posts
+ * @param {{
+ *   avoidFirstIds?: string[]|Set<string>,
+ *   avoidCount?: number,
+ *   remember?: boolean,
+ * }} [opts]
+ */
+export function demoteAvoidedPosts(posts, opts = {}) {
+  const list = dedupePostsById(posts);
+  if (list.length <= 1) {
+    if (opts.remember !== false) rememberFeedHead(list, opts.avoidCount ?? 3);
+    return list;
+  }
+  const avoidCount = varietyAvoidCount(list.length, opts.avoidCount);
+  const rawAvoid = opts.avoidFirstIds instanceof Set
+    ? [...opts.avoidFirstIds]
+    : (opts.avoidFirstIds || getLastFeedHeadIds());
+  const avoidSlice = avoidCount > 0
+    ? rawAvoid.map((id) => String(id || '')).filter(Boolean).slice(-avoidCount)
+    : [];
+  const avoid = new Set(avoidSlice);
+  if (!avoid.size) {
+    if (opts.remember !== false) rememberFeedHead(list, Math.min(3, avoidCount || 3));
+    return list;
+  }
+  const fresh = [];
+  const recent = [];
+  for (const post of list) {
+    if (avoid.has(String(post.id))) recent.push(post);
+    else fresh.push(post);
+  }
+  const ordered = fresh.length ? [...fresh, ...recent] : list;
+  if (opts.remember !== false) {
+    rememberFeedHead(ordered, Math.min(3, avoidCount || 3));
+  }
+  return ordered;
+}
+
+/**
  * Shuffle feed candidates for a cold open / pull-refresh / rail rematch /
  * page append. Prefer unseen (or less-recently-seen) clips before repeating
  * the prior head / impression window.

@@ -172,16 +172,64 @@ export async function getForYouPosts(terms = [], followingIds = [], limit = 12) 
   }
 }
 
-/** Recent posts authored by people the user follows. */
+/** Recent posts authored by people the user follows.
+ * Queries each followed author (not a global newest-N scan) so quieter follows
+ * still appear — the old limit(150) global window only surfaced hot posters.
+ */
 export async function getFollowingPosts(ownerIds = [], limit = 40) {
   if (!firebaseEnabled || !db?.collection) return [];
-  const owners = new Set((ownerIds || []).filter(Boolean));
-  if (owners.size === 0) return [];
+  const owners = [...new Set((ownerIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (owners.length === 0) return [];
   try {
-    const snap = await db.collection('posts').orderBy('date', 'desc').limit(150).get();
-    const all = (snap?.docs || []).map((d) => ({ id: d.id, ...d.data() }));
-    const owned = all.filter((p) => owners.has(p.userId || p.uid || p.authorId));
-    return (await visiblePosts(owned)).slice(0, limit);
+    const want = Math.max(1, Number(limit) || 40);
+    const perOwner = Math.max(2, Math.min(8, Math.ceil(want / Math.min(owners.length, 8)) + 1));
+    const postTime = (p) => {
+      const raw = p?.date ?? p?.createdAt ?? p?.publishedAt ?? p?.timestamp;
+      if (raw?.toMillis) return raw.toMillis();
+      if (raw?.seconds != null) return Number(raw.seconds) * 1000;
+      if (raw instanceof Date) return raw.getTime();
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) return n < 10_000_000_000 ? n * 1000 : n;
+      const parsed = Date.parse(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const chunks = await Promise.all(
+      owners.map(async (ownerId) => {
+        try {
+          let docs = [];
+          try {
+            const snap = await db
+              .collection('posts')
+              .where('userId', '==', ownerId)
+              .orderBy('date', 'desc')
+              .limit(perOwner)
+              .get();
+            docs = snap?.docs || [];
+          } catch {
+            // Missing composite index / date field — unordered then client-sort.
+            const snap = await db
+              .collection('posts')
+              .where('userId', '==', ownerId)
+              .limit(Math.min(24, perOwner * 3))
+              .get();
+            docs = snap?.docs || [];
+          }
+          return (docs || []).map((d) => ({ id: d.id, ...d.data() }));
+        } catch (e) {
+          console.warn('[DISCOVERY] following owner query failed', ownerId, e?.message || String(e));
+          return [];
+        }
+      }),
+    );
+
+    const byId = new Map();
+    for (const post of chunks.flat()) {
+      if (!post?.id || byId.has(post.id)) continue;
+      byId.set(post.id, post);
+    }
+    const merged = [...byId.values()].sort((a, b) => postTime(b) - postTime(a));
+    return (await visiblePosts(merged)).slice(0, want);
   } catch (e) {
     console.warn('[DISCOVERY] following posts failed', e?.message || String(e));
     return [];

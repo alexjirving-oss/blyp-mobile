@@ -29,18 +29,26 @@ const FRESHNESS_HALF_LIFE_HOURS = 24;
 /** Alternate followed vs discovery sooner so the mix does not read as one rail. */
 const MAX_SOURCE_STREAK = 1;
 /** Prefer at least this many other creators between repeats from the same author. */
-const MIN_CREATOR_GAP = 3;
+const MIN_CREATOR_GAP = 4;
 /**
  * Freshness is a mild signal — keep well below follow (+26) and multi-tag affinity
  * (up to HASHTAG_MATCH_CAP) so the feed does not feel newest-first.
  */
 const FRESHNESS_SCALE = 14;
 /** Soft: prefer not to re-use a tag within this many prior posts. */
-const MIN_HASHTAG_GAP = 2;
+const MIN_HASHTAG_GAP = 4;
+/** Soft: prefer not to re-use the same topic cluster within this many prior posts. */
+const MIN_TOPIC_GAP = 3;
+/** In the last TOPIC_DENSITY_WINDOW picks, prefer ≤ this many from one cluster. */
+const TOPIC_DENSITY_WINDOW = 6;
+const MAX_TOPIC_IN_WINDOW = 2;
 const HASHTAG_MATCH_WEIGHT = 14;
 const HASHTAG_MATCH_CAP = 36;
 const TOPIC_MATCH_WEIGHT = 8;
 const TOPIC_MATCH_CAP = 24;
+/** Seen recently: strong enough to beat a single niche affinity stack. */
+const SEEN_PENALTY = -42;
+const UNSEEN_BONUS = 10;
 
 function finiteCount(...values) {
   return Math.max(
@@ -381,12 +389,68 @@ export function scorePost(post, context = {}) {
   score += reachAdjust(post);
   score += feedPriorityAdjust(post);
   score += promoteBoostAdjust(post);
-  score += seenIds.has(post?.id) ? -24 : 10;
+  score += seenIds.has(post?.id) ? SEEN_PENALTY : UNSEEN_BONUS;
   return score;
 }
 
 function postTagSet(post) {
   return new Set(extractPostHashtags(post));
+}
+
+/**
+ * Soft topic families for diversity spacing only — never a hard suppress list.
+ * Kids/stories content still ranks in; it just cannot dominate consecutive slots.
+ */
+const TOPIC_FAMILY_PATTERNS = [
+  {
+    key: 'kids_stories',
+    re: /\b(kids?|children|childrens|nursery|bedtime|fairy\s*tales?|story\s*time|storytime|bedtime\s*stor(?:y|ies)|kids?\s*stor(?:y|ies)|children'?s?\s*stor(?:y|ies))\b/i,
+  },
+  { key: 'gaming', re: /\b(gaming|gamer|gameplay|esports?|fortnite|minecraft|roblox)\b/i },
+  { key: 'sports', re: /\b(sports?|football|soccer|nba|nfl|f1|formula\s*1|cricket|tennis)\b/i },
+  { key: 'music', re: /\b(music|song|rap|hiphop|concert|dj)\b/i },
+  { key: 'comedy', re: /\b(comedy|funny|skit|meme|humor|humour)\b/i },
+  { key: 'food', re: /\b(food|recipe|cooking|bake|baking|restaurant)\b/i },
+];
+
+function mapTopicFamily(token) {
+  const t = normalizeTagToken(token);
+  if (!t) return '';
+  if (/^(kids?|children|childrens|nursery|bedtime|fairytale|fairytales|storytime|story|stories)$/.test(t)) {
+    return 'kids_stories';
+  }
+  if (/^(gaming|gamer|gameplay|esports?)$/.test(t)) return 'gaming';
+  if (/^(sports?|football|soccer|nba|nfl|f1|formula1|cricket|tennis)$/.test(t)) return 'sports';
+  if (/^(music|song|hiphop|rap|concert)$/.test(t)) return 'music';
+  if (/^(comedy|funny|skit|meme|humor|humour)$/.test(t)) return 'comedy';
+  if (/^(food|recipe|cooking|bake|baking)$/.test(t)) return 'food';
+  return t;
+}
+
+/**
+ * Stable topic cluster for diversity spacing (category / topic / hashtag / soft lexical).
+ * @param {any} post
+ * @returns {string}
+ */
+export function topicClusterKey(post) {
+  const explicit = normalizeTagToken(post?.category || post?.topic || post?.topicId || '');
+  if (explicit) {
+    const family = mapTopicFamily(explicit);
+    if (family) return family;
+  }
+  const tags = extractPostHashtags(post);
+  for (const tag of tags) {
+    const family = mapTopicFamily(tag);
+    if (family && family !== tag) return family;
+  }
+  const hay = [post?.title, post?.caption, post?.description, tags.join(' ')]
+    .filter(Boolean)
+    .join(' ');
+  for (const { key, re } of TOPIC_FAMILY_PATTERNS) {
+    if (re.test(hay)) return key;
+  }
+  if (tags[0]) return mapTopicFamily(tags[0]) || tags[0];
+  return 'untagged';
 }
 
 function tagsOverlapRecent(tags, recentTagWindows) {
@@ -399,11 +463,21 @@ function tagsOverlapRecent(tags, recentTagWindows) {
   return false;
 }
 
+function topicDensityExceeded(cluster, recentClusters, windowSize, maxInWindow) {
+  if (!cluster || cluster === 'untagged' || !recentClusters?.length) return false;
+  const slice = recentClusters.slice(-Math.max(1, windowSize));
+  let n = 0;
+  for (const c of slice) {
+    if (c === cluster) n += 1;
+  }
+  return n >= maxInWindow;
+}
+
 /**
- * Greedy creator / source / hashtag diversity.
+ * Greedy creator / source / hashtag / topic diversity.
  * Hard rule: never place the same creator back-to-back when another creator exists.
  * Soft rules: prefer MIN_CREATOR_GAP between same author; alternate followed/discovery;
- * prefer not stacking the same hashtag within MIN_HASHTAG_GAP prior posts.
+ * prefer not stacking the same hashtag / topic cluster; cap niche density in a window.
  * `recentOwners` seeds the lookback so appended pages do not restack the feed tail.
  */
 export function diversifyRanked(scored, following, opts = {}) {
@@ -415,15 +489,34 @@ export function diversifyRanked(scored, following, opts = {}) {
   const recentTagWindows = Array.isArray(opts.recentTagWindows)
     ? opts.recentTagWindows.map((set) => (set instanceof Set ? set : new Set(set || [])))
     : [];
+  const recentClusters = Array.isArray(opts.recentClusters)
+    ? opts.recentClusters.map((c) => String(c || '').trim()).filter(Boolean)
+    : [];
   let lastSource = '';
   let sourceStreak = 0;
   const minGap = Number.isFinite(opts.minCreatorGap) ? opts.minCreatorGap : MIN_CREATOR_GAP;
   const minTagGap = Number.isFinite(opts.minHashtagGap) ? opts.minHashtagGap : MIN_HASHTAG_GAP;
+  const minTopicGap = Number.isFinite(opts.minTopicGap) ? opts.minTopicGap : MIN_TOPIC_GAP;
+  const topicWindow = Number.isFinite(opts.topicDensityWindow)
+    ? opts.topicDensityWindow
+    : TOPIC_DENSITY_WINDOW;
+  const maxTopicInWindow = Number.isFinite(opts.maxTopicInWindow)
+    ? opts.maxTopicInWindow
+    : MAX_TOPIC_IN_WINDOW;
   const maxSourceStreak = Number.isFinite(opts.maxSourceStreak)
     ? opts.maxSourceStreak
     : MAX_SOURCE_STREAK;
 
   const sourceOk = (source) => !(source === lastSource && sourceStreak >= maxSourceStreak);
+  const topicOk = (cluster) => {
+    if (!cluster || cluster === 'untagged') return true;
+    const gapWindow = recentClusters.slice(-Math.max(1, minTopicGap));
+    if (gapWindow.includes(cluster)) return false;
+    if (topicDensityExceeded(cluster, recentClusters, topicWindow, maxTopicInWindow)) {
+      return false;
+    }
+    return true;
+  };
 
   while (remaining.length > 0) {
     const lastOwner = recentOwners.length ? recentOwners[recentOwners.length - 1] : '';
@@ -433,20 +526,36 @@ export function diversifyRanked(scored, following, opts = {}) {
     let pick = remaining.findIndex(({ p }) => {
       const owner = postOwner(p);
       const source = owner && following.has(owner) ? 'followed' : 'discovery';
+      const cluster = topicClusterKey(p);
       if (owner && gapWindow.includes(owner)) return false;
       if (!sourceOk(source)) return false;
       if (tagsOverlapRecent(postTagSet(p), tagWindow)) return false;
+      if (!topicOk(cluster)) return false;
       return true;
     });
-    // Prefer hashtag spacing over source alternation when both cannot be met.
+    // Prefer topic + hashtag spacing over source alternation when both cannot be met.
     if (pick < 0) {
       pick = remaining.findIndex(({ p }) => {
         const owner = postOwner(p);
         if (owner && gapWindow.includes(owner)) return false;
-        return !tagsOverlapRecent(postTagSet(p), tagWindow);
+        if (tagsOverlapRecent(postTagSet(p), tagWindow)) return false;
+        return topicOk(topicClusterKey(p));
       });
     }
-    // Soft fallback: keep creator gap + source mix; allow tag repeats.
+    // Soft: creator gap + topic density; allow hashtag repeats.
+    if (pick < 0) {
+      pick = remaining.findIndex(({ p }) => {
+        const owner = postOwner(p);
+        if (owner && gapWindow.includes(owner)) return false;
+        return topicOk(topicClusterKey(p));
+      });
+    }
+    // Soft: topic density only (allow creator gap / source / tag to slip).
+    // Keeps one niche from filling the head when any other cluster remains.
+    if (pick < 0) {
+      pick = remaining.findIndex(({ p }) => topicOk(topicClusterKey(p)));
+    }
+    // Soft fallback: keep creator gap + source mix; allow tag/topic repeats.
     if (pick < 0) {
       pick = remaining.findIndex(({ p }) => {
         const owner = postOwner(p);
@@ -478,6 +587,7 @@ export function diversifyRanked(scored, following, opts = {}) {
     lastSource = source;
     if (owner) recentOwners.push(owner);
     recentTagWindows.push(postTagSet(p));
+    recentClusters.push(topicClusterKey(p));
     result.push(p);
   }
   return result;
@@ -487,7 +597,7 @@ export function diversifyRanked(scored, following, opts = {}) {
  * @param {any[]} posts
  * @param {string[]} terms  lowercased interest terms
  * @param {Set<string>} following  ids the user follows
- * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number, recentOwners?: string[], minCreatorGap?: number, minHashtagGap?: number, maxSourceStreak?: number }} [opts]
+ * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number, recentOwners?: string[], recentClusters?: string[], minCreatorGap?: number, minHashtagGap?: number, minTopicGap?: number, topicDensityWindow?: number, maxTopicInWindow?: number, maxSourceStreak?: number }} [opts]
  */
 export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
@@ -504,8 +614,12 @@ export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
     .sort((a, b) => b.s - a.s || a.index - b.index);
   const diversityOpts = {
     recentOwners: opts.recentOwners,
+    recentClusters: opts.recentClusters,
     minCreatorGap: opts.minCreatorGap,
     minHashtagGap: opts.minHashtagGap,
+    minTopicGap: opts.minTopicGap,
+    topicDensityWindow: opts.topicDensityWindow,
+    maxTopicInWindow: opts.maxTopicInWindow,
     maxSourceStreak: opts.maxSourceStreak,
   };
   const ranked = diversifyRanked(scored, safeFollowing, diversityOpts);
@@ -582,8 +696,12 @@ export function shufflePostsByFeedPriority(posts, opts = {}) {
  *   seenIds?: Set<string>|string[],
  *   now?: number,
  *   recentOwners?: string[],
+ *   recentClusters?: string[],
  *   minCreatorGap?: number,
  *   minHashtagGap?: number,
+ *   minTopicGap?: number,
+ *   topicDensityWindow?: number,
+ *   maxTopicInWindow?: number,
  *   maxSourceStreak?: number,
  * }} opts
  */
@@ -595,8 +713,12 @@ export function resolveRankContext(opts = {}) {
     seenIds: live.seenIds ?? opts.seenIds,
     now: live.now ?? opts.now,
     recentOwners: live.recentOwners ?? opts.recentOwners,
+    recentClusters: live.recentClusters ?? opts.recentClusters,
     minCreatorGap: live.minCreatorGap ?? opts.minCreatorGap,
     minHashtagGap: live.minHashtagGap ?? opts.minHashtagGap,
+    minTopicGap: live.minTopicGap ?? opts.minTopicGap,
+    topicDensityWindow: live.topicDensityWindow ?? opts.topicDensityWindow,
+    maxTopicInWindow: live.maxTopicInWindow ?? opts.maxTopicInWindow,
     maxSourceStreak: live.maxSourceStreak ?? opts.maxSourceStreak,
   };
 }
@@ -673,8 +795,12 @@ export async function prepareRankedFeed(posts, opts = {}) {
         seenIds: ctx.seenIds,
         now: ctx.now,
         recentOwners: ctx.recentOwners,
+        recentClusters: ctx.recentClusters,
         minCreatorGap: ctx.minCreatorGap,
         minHashtagGap: ctx.minHashtagGap,
+        minTopicGap: ctx.minTopicGap,
+        topicDensityWindow: ctx.topicDensityWindow,
+        maxTopicInWindow: ctx.maxTopicInWindow,
         maxSourceStreak: ctx.maxSourceStreak,
       });
     }
@@ -688,8 +814,12 @@ export async function prepareRankedFeed(posts, opts = {}) {
         seenIds: ctx.seenIds,
         now: ctx.now,
         recentOwners: ctx.recentOwners,
+        recentClusters: ctx.recentClusters,
         minCreatorGap: ctx.minCreatorGap,
         minHashtagGap: ctx.minHashtagGap,
+        minTopicGap: ctx.minTopicGap,
+        topicDensityWindow: ctx.topicDensityWindow,
+        maxTopicInWindow: ctx.maxTopicInWindow,
         maxSourceStreak: ctx.maxSourceStreak,
       });
     }
@@ -704,6 +834,7 @@ export default {
   hashtagAffinityAdjust,
   extractPostHashtags,
   normalizeTagToken,
+  topicClusterKey,
   diversifyRanked,
   feedPriorityAdjust,
   postFeedPriorityAdjust,
