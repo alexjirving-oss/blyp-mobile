@@ -10,8 +10,10 @@
  * 2) Join requests enqueue FIFO (comment / guest CTA).
  * 3) Just-dropped cooldown: cannot reseat until a later roundIndex
  *    (sit out ≥ one full round).
- * 4) First-spin protection: cannot be auto-dropped or thrown until their
- *    wheel slot has landed at least once (hasHadWheelHit).
+ * 4) First-spin protection: cannot be auto-dropped or thrown until they have
+ *    survived a wheel land while seated (hasHadWheelHit). Cleared for every
+ *    on-stage guest when the spin lands — not only the landed box — otherwise
+ *    throw targets stay empty forever (chooser cannot target self).
  */
 import { logger } from '../../config/logger';
 import { emitRoomEvent } from '../../realtime/realtimeBus';
@@ -20,13 +22,15 @@ import { MAX_GUEST_SLOTS } from '../../live/guestSlotAllocator';
 export interface SeatMeta {
   userId: string;
   displayName: string;
-  /** True after this player's box number has landed on the wheel ≥ once. */
+  /** True after surviving ≥1 wheel land while seated this stint. */
   hasHadWheelHit: boolean;
   /** roundIndex when they were first seated this stint. */
   seatedAtRoundIndex: number;
   /** roundIndex when last dropped/kicked; null if never. */
   justDroppedRoundId: number | null;
 }
+
+export type SeatOccupantRef = { userId: string; displayName: string; slotIndex: number };
 
 export interface QueueEntry {
   userId: string;
@@ -66,18 +70,43 @@ export function ensureSeatMeta(
   return meta;
 }
 
-/** Mark wheel-hit protection cleared when their box lands. */
+/** Clear first-spin protection for one seated guest. */
 export function markWheelHit(roster: SeatRoster, userId: string | null | undefined): void {
   if (!userId) return;
   const m = roster[userId];
   if (m) m.hasHadWheelHit = true;
 }
 
+/** Clear first-spin for everyone who was on stage when the wheel landed. */
+export function markSurvivedWheelLand(roster: SeatRoster, userIds: Iterable<string>): void {
+  for (const userId of userIds) {
+    markWheelHit(roster, userId);
+  }
+}
+
 export function isDropProtected(roster: SeatRoster, userId: string): boolean {
   const m = roster[userId];
-  // Unknown / first join → protected until a wheel hit is recorded.
+  // Unknown / first join → protected until they survive a wheel land.
   if (!m) return true;
   return m.hasHadWheelHit !== true;
+}
+
+/**
+ * Guests the chooser may throw: on-stage, not self, not host, not first-spin protected.
+ */
+export function listThrowableOccupants(
+  occupants: SeatOccupantRef[],
+  roster: SeatRoster,
+  opts: { chooserUserId: string; hostUserId?: string | null },
+): SeatOccupantRef[] {
+  const chooser = opts.chooserUserId;
+  const host = opts.hostUserId || null;
+  return (occupants || []).filter((o) => {
+    if (!o?.userId) return false;
+    if (o.userId === chooser) return false;
+    if (host && o.userId === host) return false;
+    return !isDropProtected(roster, o.userId);
+  });
 }
 
 /** Eligible to rejoin queue→seat after sitting out ≥ one full round. */
@@ -125,10 +154,10 @@ export function dequeueUser(queue: QueueEntry[], userId: string): QueueEntry[] {
  * Never picks first-spin-protected players.
  */
 export function pickAutoDropTarget(
-  occupants: { userId: string; displayName: string; slotIndex: number }[],
+  occupants: SeatOccupantRef[],
   roster: SeatRoster,
   excludeUserIds: Set<string> = new Set(),
-): { userId: string; displayName: string; slotIndex: number } | null {
+): SeatOccupantRef | null {
   const eligible = occupants.filter((o) => {
     if (!o.userId || excludeUserIds.has(o.userId)) return false;
     return !isDropProtected(roster, o.userId);

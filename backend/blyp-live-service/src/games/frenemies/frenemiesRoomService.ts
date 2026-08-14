@@ -40,7 +40,8 @@ import {
   ensureSeatMeta,
   isCooldownClear,
   isDropProtected,
-  markWheelHit,
+  listThrowableOccupants,
+  markSurvivedWheelLand,
   publicSeatSnapshot,
   recordDrop,
   settleSeatsAfterRound,
@@ -366,19 +367,18 @@ function ensureTicks(sessionId: string) {
 async function liveOccupants(sessionId: string): Promise<SlotOccupant[]> {
   const guests = await listGuests(sessionId);
   return guests
-    .filter(
-      (g) =>
-        g.state === 'LIVE' &&
-        typeof g.slotIndex === 'number' &&
-        g.slotIndex >= 1 &&
-        g.slotIndex <= MAX_GUEST_SLOTS,
-    )
+    .filter((g) => {
+      if (g.state !== 'LIVE') return false;
+      const slot = Number((g as any).slotIndex);
+      return Number.isFinite(slot) && slot >= 1 && slot <= MAX_GUEST_SLOTS;
+    })
     .map((g) => {
+      const slotIndex = Number((g as any).slotIndex);
       const anyName = (g as any)?.displayName || (g as any)?.name || (g as any)?.username;
       return {
         userId: g.userId,
-        displayName: typeof anyName === 'string' && anyName.trim() ? anyName.trim() : `Box ${g.slotIndex}`,
-        slotIndex: g.slotIndex as number,
+        displayName: typeof anyName === 'string' && anyName.trim() ? anyName.trim() : `Box ${slotIndex}`,
+        slotIndex,
       };
     });
 }
@@ -579,11 +579,19 @@ async function resolveSpinLand(room: FrenemiesRoom): Promise<void> {
   room.state.landedOccupied = !!atSlot;
   room.state.spinEndsAt = nowIso();
 
+  if (!room.seatRoster) room.seatRoster = emptySeatRoster();
+  for (const o of occ) {
+    ensureSeatMeta(room.seatRoster, o.userId, o.displayName, room.state.roundIndex || 0);
+  }
+  // Surviving this land clears first-spin for every on-stage guest. Marking only
+  // the landed box left peers permanently protected, so choosers always saw
+  // "no guests to throw" despite LIVE seats.
+  markSurvivedWheelLand(
+    room.seatRoster,
+    occ.map((o) => o.userId),
+  );
+
   if (atSlot) {
-    if (!room.seatRoster) room.seatRoster = emptySeatRoster();
-    ensureSeatMeta(room.seatRoster, atSlot.userId, atSlot.displayName, room.state.roundIndex || 0);
-    // First-spin protection clears when their number comes up.
-    markWheelHit(room.seatRoster, atSlot.userId);
     enterChoosing(room, atSlot.userId, atSlot.displayName);
     return;
   }
@@ -637,10 +645,13 @@ async function afterChooserReady(room: FrenemiesRoom, userId: string, displayNam
   for (const o of occ) {
     ensureSeatMeta(room.seatRoster, o.userId, o.displayName, room.state.roundIndex || 0);
   }
-  // Only guests who already had a wheel hit can be thrown (first-spin protection).
-  const throwable = occ.filter(
-    (o) => o.userId !== userId && !isDropProtected(room.seatRoster, o.userId),
-  );
+  // Empty-box challenge: land already cleared first-spin for guests who were
+  // seated at resolve time. Only peers who are still protected (joined mid-
+  // challenge) or self/host are excluded.
+  const throwable = listThrowableOccupants(occ, room.seatRoster, {
+    chooserUserId: userId,
+    hostUserId: room.hostUserId,
+  });
   if (throwable.length === 0) {
     const amount = room.settings.soloCoins;
     await awardAndResolve(room, {
@@ -1124,9 +1135,14 @@ export async function throwGuest(args: {
       err.code = 'TARGET_NOT_ON_STAGE';
       throw err;
     }
+    if (args.targetUserId === room.hostUserId) {
+      const err: any = new Error('BAD_TARGET');
+      err.code = 'BAD_TARGET';
+      throw err;
+    }
     if (!room.seatRoster) room.seatRoster = emptySeatRoster();
     ensureSeatMeta(room.seatRoster, target.userId, target.displayName, room.state.roundIndex || 0);
-    // First-spin protection: cannot throw someone whose box has never landed.
+    // First-spin protection: cannot throw someone who has not survived a land.
     if (isDropProtected(room.seatRoster, target.userId)) {
       const err: any = new Error('TARGET_PROTECTED');
       err.code = 'TARGET_PROTECTED';

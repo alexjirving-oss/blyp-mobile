@@ -808,7 +808,7 @@ export default function FrenemiesOverlay({
                       <View style={styles.queueViewerBlock}>
                         {isSeated ? (
                           <Text style={styles.readyHint} allowFontScaling={false}>
-                            You are on stage · first spin is protected until your box hits
+                            You are on stage · first spin is protected until the wheel lands
                           </Text>
                         ) : myQueuePos ? (
                           <>

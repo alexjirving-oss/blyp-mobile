@@ -62,7 +62,7 @@ const STEPS = [
   {
     n: '9',
     title: 'First spin & cooldown',
-    body: 'New seats are protected until their box number hits once. Just-dropped players sit out at least one full round before they can return.',
+    body: 'New seats are protected until the wheel lands once while they are on stage. Just-dropped players sit out at least one full round before they can return.',
   },
 ];
 

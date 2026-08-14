@@ -4,6 +4,8 @@ import {
   enqueueJoin,
   isCooldownClear,
   isDropProtected,
+  listThrowableOccupants,
+  markSurvivedWheelLand,
   markWheelHit,
   pickAutoDropTarget,
   recordDrop,
@@ -13,12 +15,47 @@ import {
 } from './frenemiesSeatQueue';
 
 describe('frenemies seat/queue rules', () => {
-  it('protects first-spin until wheel hit', () => {
+  it('protects first-spin until wheel land survived', () => {
     const roster = emptySeatRoster();
     ensureSeatMeta(roster, 'u1', 'A', 1);
     assert.equal(isDropProtected(roster, 'u1'), true);
     markWheelHit(roster, 'u1');
     assert.equal(isDropProtected(roster, 'u1'), false);
+  });
+
+  it('clears first-spin for all on-stage guests after a land', () => {
+    const roster = emptySeatRoster();
+    ensureSeatMeta(roster, 'a', 'A', 1);
+    ensureSeatMeta(roster, 'b', 'B', 1);
+    ensureSeatMeta(roster, 'c', 'C', 1);
+    markSurvivedWheelLand(roster, ['a', 'b', 'c']);
+    assert.equal(isDropProtected(roster, 'a'), false);
+    assert.equal(isDropProtected(roster, 'b'), false);
+    assert.equal(isDropProtected(roster, 'c'), false);
+  });
+
+  it('lists throwable peers after land (not self/host/protected)', () => {
+    const roster = emptySeatRoster();
+    ensureSeatMeta(roster, 'chooser', 'Chooser', 1);
+    ensureSeatMeta(roster, 'peer', 'Peer', 1);
+    ensureSeatMeta(roster, 'newbie', 'Newbie', 2);
+    ensureSeatMeta(roster, 'host', 'Host', 1);
+    markSurvivedWheelLand(roster, ['chooser', 'peer', 'host']);
+    // newbie joined after land — still protected
+    const occ = [
+      { userId: 'chooser', displayName: 'Chooser', slotIndex: 1 },
+      { userId: 'peer', displayName: 'Peer', slotIndex: 2 },
+      { userId: 'newbie', displayName: 'Newbie', slotIndex: 3 },
+      { userId: 'host', displayName: 'Host', slotIndex: 4 },
+    ];
+    const throwable = listThrowableOccupants(occ, roster, {
+      chooserUserId: 'chooser',
+      hostUserId: 'host',
+    });
+    assert.deepEqual(
+      throwable.map((t) => t.userId),
+      ['peer'],
+    );
   });
 
   it('enforces just-dropped cooldown for one full round', () => {
