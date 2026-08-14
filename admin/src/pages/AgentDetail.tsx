@@ -207,7 +207,7 @@ export default function AgentDetail() {
       <InfoNote>
         Posting stays hard-off. Comments: <code>suggest_only</code> needs approve;
         <code> auto_with_limits</code> can auto-send only when global force suggest_only is off, under daily/hourly caps.
-        Mel/admin can manage settings — never coin credit.
+        Mel/admin can manage settings; coin credit is on People → person → Wallet.
       </InfoNote>
 
       {err && (

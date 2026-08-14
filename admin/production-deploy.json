@@ -2,8 +2,13 @@
   "site_name": "blyp-admin-console",
   "site_id": "f31b62f8-deae-4110-afb9-b6863900336c",
   "production_url": "https://admin.blyp.world",
+  "deploy_id": "6a7f5d9edcc80713d90490a3",
+  "unique_deploy_url": "https://6a7f5d9edcc80713d90490a3--blyp-admin-console.netlify.app",
+  "asset_index": "index-BbkAL4WY.js",
+  "git_branch": "feat/full-tip-package-20260809",
+  "git_sha": "4345a674234b79f925a62f1d3c26f4e4519ed7b6",
   "backend_revision": "blyp-live-service-00210-sv7",
   "backend_url": "https://blyp-live-service-929105034040.us-central1.run.app",
   "deployed_at": "2026-08-14",
-  "notes": "Gem convert: immediate available+pending; withdraw stays cleared-only (~7d). Fixed convert double-count of WITHDRAWAL_RESERVE."
+  "notes": "Tip admin refresh. Mel admin role retains economy.credit (working-tree RBAC on Cloud Run 00209/00210). Prior Mel deploy 6a7f47bec278572b6edb6211 was already tip dist, not Blyp26 Aug3 ancient UI."
 }

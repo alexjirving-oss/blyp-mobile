@@ -10,7 +10,7 @@ Boss + Mel oversight on **https://admin.blyp.world/agents**. Default mode **`sug
 | Boss/Mel approve → write comment to Firestore | **Live** — approve path + `agent-execute` retry cron |
 | Per-user settings / phrase bank / force pause | **Live** — `/agents/:userId` |
 | Directory + pending queue + executed log + activity | **Live** — `/agents` |
-| Mel (`admin` role) mutate agents | **Live** — `agents.oversight` (no `economy.credit`) |
+| Mel (`admin` role) mutate agents | **Live** — `agents.oversight` (+ audited `economy.credit` for bonus coins) |
 | `auto_with_limits` comment auto-send | **Live but gated** — only when global `forceSuggestOnly=false`, daily cap + ≤3/hour |
 | Auto-post / create posts | **Hard-off** |
 | Gifts / wallet / coin actions | **Never** |
@@ -71,10 +71,11 @@ POST /internal/cron/agent-execute
 - `targetId=demo` or missing → mark executed with skip (no Firestore write)
 - Posts / gifts never execute
 
-## Mel permissions (sensible, no financial)
+## Mel permissions
 
 - **Has** `agents.oversight`: settings, phrases, approve/reject, global pause / forceSuggestOnly
-- **Does not have** `economy.credit` (owner-only coin/gem gifting)
+- **Has** `economy.credit`: dashboard bonus-coin credit (audited `ADMIN_CREDIT`; soft-capped vs Owner)
+- **Does not have** launch-test gem credit / `staff.manage` / withdraw approve (Owner-only)
 
 Staff surface is admin.blyp.world (no separate creator self-serve yet). Boss does not need to impersonate — manage via `/agents/:userId`.
 

@@ -587,9 +587,9 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, requirePermission
 
 /**
  * Credit bonus coins from the admin dashboard.
- * Auth: ADMIN_ALLOWLIST + requirePermission('economy.credit') — owner role only
- * (stripped from default admin / Mel). Soft cap still applies if credit is ever
- * re-granted to a non-owner role. Reuses economy creditCoinsAdmin ledger path.
+ * Auth: ADMIN_ALLOWLIST + requirePermission('economy.credit') — Owner + Admin (Mel).
+ * Non-owner soft-capped at ADMIN_CREDIT_SOFT_CAP per request. Reuses economy
+ * creditCoinsAdmin ledger path (ADMIN_CREDIT / BONUS_COIN, audited).
  * Separate /economy/admin/credit-coins still needs ECONOMY_ADMIN_CREDIT_ENABLED
  * + ECONOMY_ADMIN_ALLOWLIST_SUBS for non-dashboard callers.
  */

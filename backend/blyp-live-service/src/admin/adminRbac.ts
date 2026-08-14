@@ -104,9 +104,12 @@ const ROLE_PERMISSIONS: Record<AdminRole, PermSet> = {
     'appeals.resolve',
     'users.message',
   ),
-  // Mel (admin): ops + fraud + withdraw reject + agent oversight — never coin/gem credit (owner-only).
+  // Mel (admin): ops + fraud + withdraw reject + agent oversight + bonus coin credit.
+  // Coin credit uses the same audited ADMIN_CREDIT path as Owner; soft-capped per request
+  // (ADMIN_CREDIT_SOFT_CAP). Launch-test gem credit and staff.manage stay Owner-only.
   admin: set(
     'kill.soft.write',
+    'economy.credit',
     'economy.withdraw.reject',
     'users.ban',
     'users.unban',

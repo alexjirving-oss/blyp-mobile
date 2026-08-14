@@ -32,8 +32,8 @@ npm run dev
 
 | Action | How | Auth |
 |--------|-----|------|
-| Dashboard coin credit | Person detail → Wallet → `POST /admin/users/:id/credit-coins` | Allowlist + RBAC `economy.credit` (**owner** only; stripped from `admin` / Mel). Credits **BONUS_COIN** (non-withdrawable). |
-| Agent oversight | `/agents` + `/agents/:userId` — propose/approve/execute comments | `agents.oversight` (**owner** + **admin**/Mel). No financial powers. |
+| Dashboard coin credit | Person detail → Wallet → `POST /admin/users/:id/credit-coins` | Allowlist + RBAC `economy.credit` (Owner + Administrator/Mel; non-owner soft-capped). Credits **BONUS_COIN** (non-withdrawable). |
+| Agent oversight | `/agents` + `/agents/:userId` — propose/approve/execute comments | `agents.oversight` (**owner** + **admin**/Mel). |
 | Withdrawal settle | Economy → pending review → Approve/Reject | `ADMIN_ALLOWLIST_SUBS`; Approve needs Stripe secrets |
 | Direct economy credit | `POST /economy/admin/credit-coins` | `ECONOMY_ADMIN_CREDIT_ENABLED=1` **and** `ECONOMY_ADMIN_ALLOWLIST_SUBS` |
 | In-app (mobile) admin | Person detail → Role `admin`/`manager` → Save capabilities | Syncs Firestore `users/{cognitoSub}` (`roles` + `isAdmin`) via Admin SDK |

@@ -562,7 +562,7 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
       <div className="card stack">
         <h3 className="panel-title">Wallet · add bonus coins</h3>
         <InfoNote>
-          Coin credit is Owner-only (<code>economy.credit</code>). Balances and ledger remain on User 360 / Economy.
+          Coin credit requires <code>economy.credit</code> (Owner or Administrator). Balances and ledger remain on User 360 / Economy.
         </InfoNote>
       </div>
     );
