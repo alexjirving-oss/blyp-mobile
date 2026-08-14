@@ -1,0 +1,88 @@
+---
+description: Strict pre-Play / tip bake feature gate — do not ship incomplete builds
+alwaysApply: true
+---
+
+# Play / tip bake feature gate
+
+**Hard gate:** Do not tip-bake or Play-upload until A–D pass for the ship under test. Inventory baseline: tip **1.0.102** / VC **2026325102** (Frenemies jump/life, battles harden, For You `rankPosts`, live-service **00213**, Mel admin RBAC). Update revision notes per ship; do not drop surfaces silently.
+
+**Standing:** No bake / Play / upload unless Alex confirms first — **except** when he already said bake / Play / upload / build and upload. Do not re-ask the same authorization. Never half-cake.
+
+Tip SoT: `C:\Users\Alex\Blyp26-frenemies-ea-v1` (`feat/full-tip-package-20260809`). Admin SoT: tip `admin/` → `https://admin.blyp.world` (not bare eas-modern alone).
+
+## A — Always in client AAB
+
+Must be present / wired in the Play-signed binary (not stubs, not missing exports):
+
+- Auth: Cognito + Amplify social, age gate, How Blyp Works / terms
+- Home hub + ribbons (`getHomeRibbonPages` / Home Next rails)
+- For You: `src/feed/**` + Shorts pool + `prepareRankedFeed` / `rankPosts` + Why copy + feed audio reclaim
+- Create / camera / post preview / comments / search / profile / Stage (EditStage + StageView)
+- LIVE: Go Live + streaming kill-switch (`StreamingFeatureFlag` / `CreatePostButton`); IVS guest publish; Fold/loudspeaker on guest join (not earpiece)
+- Live games (prod eas flags ON): Frenemies (wheel/queue/settings/rules + paid jump-kick + extra life), Reaction Duel, Marble Race; Artillery ON in eas
+- Battles: create/detail/leaderboard/diary + APIs aligned to locked settle
+- Gifts: cinema ladder (incl. Mad Scientist) + **receiver** film (not frozen poster) + voice sting; DM cinema where shipped
+- Wallet / IAP: Coin store, BuyCoins, Play `formattedPrice`, pending recover; SKUs/grants = tip `iapCatalog` + `BlypCoinService` (100/500/1000/**2000**/2500/5000/**10000**)
+- Convert gems → coins UI → live-service convert (available+pending)
+- Messenger / calls / FCM prefs (call ringtone FGS in release)
+- SafetyGate (host create) + moderation hooks for in-app admin
+- Withdrawals UI only if `EXPO_PUBLIC_ENABLE_WITHDRAWALS=1` (server still kill-switch)
+- Firebase real config baked (not stub / not `EXPO_PUBLIC_DISABLE_FIREBASE`)
+- Release signing via canonical path only (`BUILD_RELEASE_CANDIDATE.ps1`)
+
+## B — Must deploy with that build
+
+Do **not** call the ship complete if AAB is new but backends lag:
+
+| Surface | Must be live |
+|--------|----------------|
+| Cloud Run `blyp-live-service` | Same tip revision as client (1.0.102 → **00213**). Client URL SoT: `https://blyp-live-service-innn3d7yqq-uc.a.run.app` — `/health` 200 |
+| Live-service features | Frenemies jump_kick + extra_life; battles settle lock + `LIVE_BATTLES_ENABLED`; gems convert debit; gift/economy grants; Mel `economy.credit` RBAC |
+| Cloud Functions `us-central1-blyp-master` | Search, Firebase bridge, FCM / call wake, notification prefs |
+| Netlify admin | Tip `admin/` + eas-modern restyle + Mel credit → `admin.blyp.world` (record `admin/production-deploy.json`) |
+| Play Console | Android SKUs active; titles/grants = catalog; internal track for test |
+| Cognito | Pool `eu-west-2_ITX07Zvnt`; `ADMIN_ALLOWLIST_SUBS` on Cloud Run |
+| blyp.world / Stripe (if claiming web packs / withdraw) | Webhook + Connect; secrets on Run; web packs ≠ app IAP (+15% web-only) |
+| Firestore / FCM | Blocks, safety audit, push as claimed for the bake |
+
+## C — Pre-flight checks
+
+1. Tip worktree; clean `git status`; named branch (not detached junk).
+2. `app.config.js` version == gradle `versionName`; `versionCode` **not** in `tools/release/built_versioncodes.txt`.
+3. `powershell -File tools/release/RUN_PRE_RELEASE_REGRESSION_GATE.ps1 -ExpectedVersionCode <VC>` → `RESULT=PASS` (clean tree, streaming ON, no loopback live/API URLs, purchases not disabled, `USE_LIVE_SERVICE_WALLET=true`, signing env present, no stale mutable `app-release.aab`).
+4. Bake only: `BUILD_RELEASE_CANDIDATE.ps1 -ExpectedVersionCode <VC>` (`BLYP_CANONICAL_RELEASE=1`, matching `BLYP_EXPECTED_VERSION_CODE`).
+5. `.env.production` + `eas.json` `build.production.env`: streaming ON, live URL non-localhost, purchases enabled, live-service wallet, game flags as intended, Firebase key present.
+6. Client SKUs == `backend/.../iapCatalog.ts` ANDROID grants (incl. 2000 & 10000).
+7. Admin deploy source = tip `admin/` (restyle + Mel), not orphan eas-modern-only.
+8. Post-bake: frozen AAB under `diagnostics/release_aab/CANONICAL_PLAY_AAB_*/app-release.aab`; bundletool manifest VC/VN match; SHA-256 + size in packet.
+9. `GET <LIVE_SERVICE_URL>/health` 200; revision matches ship; admin tip chrome + Mel credit.
+10. Billing proof = Play internal install only (never debug-signed adb).
+11. Spot-check on Play build: For You swipe/audio; Go Live + guest loudspeaker; Frenemies spin/queue/jump/life; send+**receive** gift cinema; convert gems; one Play purchase; SafetyGate host create.
+12. Upload only when asked: `npm run play:upload` (internal) → report Play URL, VC, VN, track.
+
+## D — Never ship
+
+- Debug-signed / `BLYP_ALLOW_DEBUG_SIGNED_RELEASE` as Play or IAP “proof”
+- Dirty / mixed / non-tip tree as the Play client
+- Tip-old admin without restyle, or eas-modern admin without Mel/tip RBAC
+- Client ahead of live-service for Frenemies paid actions, convert, battles settle, gifts
+- Loopback live/API URLs; `DISABLE_PURCHASES=true`; wallet not on live-service
+- Firebase stub / missing baked key; reused `versionCode`; non-canonical AAB rails
+- Half-cake as the declared Play build; unlock-freezes churn without Alex unlock
+- Local GBP lock overriding Play `formattedPrice`; oversell titles vs grants
+- Declaring convert/gifts/Fold audio fixed from UI-only without server/receiver proof
+
+## E — Sign-off (short)
+
+```text
+BLYP PLAY SIGN-OFF
+worktree: C:\Users\Alex\Blyp26-frenemies-ea-v1 | branch: ________ | commit: ________
+VN/VC: ________ / ________ | AAB: diagnostics/release_aab/CANONICAL_PLAY_AAB_****/app-release.aab
+SHA-256: ________ | gate packet: ________ PASS | canonical bake: PASS
+live-service: URL ________ rev ________ /health PASS | Functions PASS
+admin.blyp.world tip+restyle+Mel: PASS | Play SKUs vs iapCatalog: PASS
+matrix: FY [ ] Live+loudspeaker [ ] Frenemies [ ] gift rx [ ] convert [ ] IAP [ ] SafetyGate [ ]
+upload: internal|not yet | Play: ________ | NEVER-SHIP: PASS
+RESULT: READY / BLOCKED — ________
+```
