@@ -8,6 +8,7 @@
  */
 
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { applyMediaSpeaker } from './blypAudioRoute';
 import { isLiveStagePublishing } from './livePublishAudioGuard';
 
 const BLYP_NOTIFY = require('../../assets/sounds/blyp_notify.wav');
@@ -16,6 +17,26 @@ const BLYP_NOTIFY = require('../../assets/sounds/blyp_notify.wav');
 export const RING_GAP_MS = 2000;
 
 let ringModeActive = false;
+/** 'media' | 'ring' | null — skip redundant setAudioModeAsync (kills ExoPlayer audio). */
+let appliedAudioProfile = null;
+
+export function invalidateMediaPlaybackAudioMode() {
+  appliedAudioProfile = null;
+}
+
+/**
+ * For You / post-call reclaim. expo-av MODE_NORMAL is not enough: Samsung
+ * keeps TYPE_BUILTIN_EARPIECE after clearCommunicationDevice(). Native
+ * applyMediaSpeaker pins builtin SPEAKER and displaces VOICE_COMMUNICATION.
+ */
+export async function reclaimMediaPlaybackRoute() {
+  if (isLiveStagePublishing()) {
+    return null;
+  }
+  invalidateMediaPlaybackAudioMode();
+  await ensureMediaPlaybackAudioMode({ background: false });
+  return applyMediaSpeaker();
+}
 
 /**
  * Force media / loudspeaker playback (not PlayAndRecord / MODE_IN_COMMUNICATION).
@@ -26,6 +47,10 @@ let ringModeActive = false;
 export async function ensureMediaPlaybackAudioMode({ background = false } = {}) {
   // Never steal IVS VIDEO_CHAT / call-volume while host/guest mic is open.
   if (isLiveStagePublishing()) {
+    return;
+  }
+  const profile = background ? 'ring' : 'media';
+  if (appliedAudioProfile === profile) {
     return;
   }
   try {
@@ -44,6 +69,7 @@ export async function ensureMediaPlaybackAudioMode({ background = false } = {}) 
       interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
     });
     ringModeActive = !!background;
+    appliedAudioProfile = profile;
   } catch {
     // Best-effort — still try to play.
   }
@@ -139,6 +165,7 @@ export async function stopBlypNotify(sound) {
   }
   // Restore foreground-only media mode so feed video cannot keep playing on Home.
   await setNotifyAudioMode({ background: false });
+  await applyMediaSpeaker();
 }
 
 export const BLYP_NOTIFY_ASSET = BLYP_NOTIFY;
@@ -147,6 +174,8 @@ export default {
   playBlypNotify,
   stopBlypNotify,
   ensureMediaPlaybackAudioMode,
+  invalidateMediaPlaybackAudioMode,
+  reclaimMediaPlaybackRoute,
   BLYP_NOTIFY_ASSET,
   RING_GAP_MS,
 };

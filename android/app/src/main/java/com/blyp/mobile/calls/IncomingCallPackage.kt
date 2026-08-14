@@ -7,7 +7,7 @@ import com.facebook.react.uimanager.ViewManager
 
 class IncomingCallPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-    return listOf(IncomingCallModule(reactContext))
+    return listOf(IncomingCallModule(reactContext), BlypAudioRouteModule(reactContext))
   }
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {

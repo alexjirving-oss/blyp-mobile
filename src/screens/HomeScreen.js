@@ -498,7 +498,14 @@ const HomeScreen = ({ navigation, route }) => {
     forYouSessionActiveRef.current = true;
     if (enteredForYou) {
       // One reclaim per For You enter (tab or screen focus) — not per swipe.
-      invalidateMediaPlaybackAudioMode();
+      // Guard: tip 1.0.94 crashed MainTabs when this export was missing from notifySound.
+      try {
+        if (typeof invalidateMediaPlaybackAudioMode === 'function') {
+          invalidateMediaPlaybackAudioMode();
+        }
+      } catch {
+        /* non-fatal */
+      }
       markFeedAudioRouteDirty();
       setFeedAudioSessionReady(false);
     }
