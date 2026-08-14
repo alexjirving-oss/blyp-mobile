@@ -9,7 +9,7 @@
 
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import { applyMediaSpeaker } from './blypAudioRoute';
-import { isLiveStagePublishing } from './livePublishAudioGuard';
+import { isLiveAudioSessionActive, isLiveStagePublishing } from './livePublishAudioGuard';
 
 const BLYP_NOTIFY = require('../../assets/sounds/blyp_notify.wav');
 
@@ -30,7 +30,8 @@ export function invalidateMediaPlaybackAudioMode() {
  * applyMediaSpeaker pins builtin SPEAKER and displaces VOICE_COMMUNICATION.
  */
 export async function reclaimMediaPlaybackRoute() {
-  if (isLiveStagePublishing()) {
+  // Never steal IVS Stage/Player route while any live path is active.
+  if (isLiveAudioSessionActive() || isLiveStagePublishing()) {
     return null;
   }
   invalidateMediaPlaybackAudioMode();
@@ -45,8 +46,9 @@ export async function reclaimMediaPlaybackRoute() {
  * @param {{ background?: boolean }} [opts]
  */
 export async function ensureMediaPlaybackAudioMode({ background = false } = {}) {
-  // Never steal IVS VIDEO_CHAT / call-volume while host/guest mic is open.
-  if (isLiveStagePublishing()) {
+  // Never steal IVS VIDEO_CHAT / call-volume / Stage playback while live is open.
+  // playThroughEarpieceAndroid:false → AudioManager.MODE_NORMAL (Fold quiet stage).
+  if (isLiveAudioSessionActive() || isLiveStagePublishing()) {
     return;
   }
   const profile = background ? 'ring' : 'media';
