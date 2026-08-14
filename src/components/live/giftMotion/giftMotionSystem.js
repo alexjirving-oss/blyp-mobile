@@ -592,12 +592,56 @@ export function heroHoldMs(motion) {
 }
 
 /**
- * Audio hook — gated. Plays only if a mapped module exists.
- * Designers can drop mp3s later under assets/sounds/gifts/.
+ * Audio hook — cinema MP4s are video-only; SFX comes from a registered sting.
+ * Designers can drop richer mp3s later under assets/sounds/gifts/.
  */
 const AUDIO_REGISTRY = Object.create(null);
 
 let giftAudioProfileApplied = false;
+let defaultGiftAudioRegistered = false;
+
+function ensureDefaultGiftAudioRegistered() {
+  if (defaultGiftAudioRegistered) return;
+  defaultGiftAudioRegistered = true;
+  try {
+    // Shared Blyp sting until per-gift authored SFX ships.
+    // eslint-disable-next-line global-require, import/no-unresolved
+    const sting = require('../../../../assets/sounds/blyp_notify.wav');
+    const keys = [
+      'gift_cinema',
+      'gift_heart',
+      'gift_pop',
+      'gift_clap',
+      'gift_fire',
+      'gift_star',
+      'gift_diamond',
+      'gift_cheer',
+      'gift_revive',
+      'gift_crown',
+      'gift_rocket',
+    ];
+    keys.forEach((k) => {
+      AUDIO_REGISTRY[k] = sting;
+    });
+  } catch {
+    // asset optional in some worktrees
+  }
+}
+
+/**
+ * expo-av ExoPlayer refuses to start unmuted when IVS holds VOICE_COMMUNICATION
+ * audio focus — receiver sees a frozen first frame. Always mute the film surface
+ * under live; cinema MP4s are video-only anyway.
+ */
+export function mustMuteGiftFilm() {
+  try {
+    // eslint-disable-next-line global-require
+    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
+    return !!isLiveAudioSessionActive();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Ensure gift clip / SFX audio plays even when the phone silent switch is on.
@@ -605,7 +649,7 @@ let giftAudioProfileApplied = false;
  * NEVER call setAudioModeAsync / ensureMediaPlaybackAudioMode while ANY live
  * path is active. On Android, playThroughEarpieceAndroid:false forces
  * AudioManager.MODE_NORMAL and quiets IVS host/guest (VIDEO_CHAT / call volume).
- * Gift Video/Sound still play at volume=1; LiveLoudspeakerController owns route.
+ * Live gift SFX uses BlypAudioRoute.playGiftSting (voice-comm attributes).
  */
 export async function ensureGiftAudioSession() {
   try {
@@ -642,7 +686,7 @@ export async function ensureGiftAudioSession() {
     });
     giftAudioProfileApplied = true;
   } catch {
-    // best-effort — gift video may still play unmuted via expo-av Video
+    // best-effort — film stays muted; SFX may still play via native sting
   }
 }
 
@@ -675,18 +719,44 @@ export function registerGiftAudio(key, module) {
   if (key && module) AUDIO_REGISTRY[key] = module;
 }
 
+/**
+ * Cinema / hero gift audible cue. Under live IVS, prefer native voice-comm sting
+ * so we never fight STREAM_MUSIC focus. Off-live uses expo-av media routing.
+ */
+export async function playGiftCinemaAudio(motion) {
+  ensureDefaultGiftAudioRegistered();
+  const key = motion?.audioKey || 'gift_cinema';
+  try {
+    // eslint-disable-next-line global-require
+    const { Platform } = require('react-native');
+    // eslint-disable-next-line global-require
+    const { isLiveAudioSessionActive } = require('../../../services/livePublishAudioGuard');
+    if (Platform.OS === 'android' && isLiveAudioSessionActive()) {
+      // eslint-disable-next-line global-require
+      const { playGiftSting } = require('../../../services/blypAudioRoute');
+      const ok = await playGiftSting(0.9);
+      if (ok) return;
+    }
+  } catch {
+    // fall through to expo-av
+  }
+  await playGiftAudio(key);
+}
+
 export async function playGiftAudio(audioKey) {
+  ensureDefaultGiftAudioRegistered();
   try {
     await ensureGiftAudioSession();
   } catch {
     // continue
   }
-  if (!audioKey || !AUDIO_REGISTRY[audioKey]) return;
+  const key = audioKey || 'gift_cinema';
+  if (!AUDIO_REGISTRY[key]) return;
   try {
     // Lazy require expo-av only when an asset is registered
     // eslint-disable-next-line global-require
     const { Audio } = require('expo-av');
-    const { sound } = await Audio.Sound.createAsync(AUDIO_REGISTRY[audioKey], {
+    const { sound } = await Audio.Sound.createAsync(AUDIO_REGISTRY[key], {
       shouldPlay: true,
       volume: 1,
       isMuted: false,

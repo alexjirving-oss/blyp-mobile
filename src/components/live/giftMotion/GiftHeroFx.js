@@ -19,7 +19,7 @@ import {
   getFxBudget,
   getTierConfig,
   heroHoldMs,
-  playGiftAudio,
+  playGiftCinemaAudio,
   TEAL,
   TEAL_LIGHT,
   GOLD,
@@ -233,7 +233,7 @@ export default function GiftHeroFx({ entry, onSkip }) {
     motifProg.setValue(0);
     shake.setValue(0);
 
-    playGiftAudio(motion?.audioKey);
+    void playGiftCinemaAudio(motion);
 
     const loops = entry.loops || [];
     const intensity = Math.max(0.35, Math.min(1, (Number(motion?.coinCost) || 25) / 100));

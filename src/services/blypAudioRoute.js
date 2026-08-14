@@ -16,6 +16,17 @@ export async function applyMediaSpeaker() {
   }
 }
 
+/** Short gift cinema sting; voice-comm attrs while live so IVS focus is not stolen. */
+export async function playGiftSting(volume = 0.9) {
+  if (Platform.OS !== 'android' || !Native?.playGiftSting) return false;
+  try {
+    return !!(await Native.playGiftSting(volume));
+  } catch (e) {
+    console.warn('[BlypAudio] gift sting failed', e?.message || String(e));
+    return false;
+  }
+}
+
 export async function applyCallSpeaker() {
   if (Platform.OS !== 'android' || !Native?.applyCallSpeaker) return null;
   try {
@@ -50,4 +61,5 @@ export default {
   applyCallSpeaker,
   applyCallEarpiece,
   snapshotAudioRoute,
+  playGiftSting,
 };

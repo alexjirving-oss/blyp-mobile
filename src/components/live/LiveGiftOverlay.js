@@ -601,6 +601,7 @@ const LiveGiftOverlay = ({ giftEvent, style, onHeroComplete }) => {
 
       {bigGift?.cinematicV2 ? (
         <GiftCinematicPlayer
+          key={`cinema-${bigGift?.motion?.giftId || 'gift'}-${bigGift?.size || 0}`}
           entry={bigGift}
           onSkip={() => dismissBigGift(bigGift)}
           onDone={() => dismissBigGift(bigGift)}

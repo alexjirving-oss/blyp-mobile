@@ -31,7 +31,7 @@ import {
   cinemaHoldMs,
   getFxBudget,
   getTierConfig,
-  playGiftAudio,
+  playGiftCinemaAudio,
   TEAL,
   TEAL_LIGHT,
   GOLD,
@@ -107,7 +107,13 @@ export default function GiftCinematicPlayer({ entry, onSkip, onDone }) {
 
   if (film?.source && useFilmFallback) {
     return (
-      <GiftFilmPlayer entry={entry} film={film} onSkip={onSkip} onDone={onDone} />
+      <GiftFilmPlayer
+        key={`film-${motion?.giftId || motion?.cinemaId || 'gift'}`}
+        entry={entry}
+        film={film}
+        onSkip={onSkip}
+        onDone={onDone}
+      />
     );
   }
 
@@ -182,7 +188,7 @@ function GiftSkiaCinemaFallback({ entry, onSkip, onDone }) {
     progress.value = 0;
     chrome.value = 0;
 
-    playGiftAudio(motion.audioKey);
+    void playGiftCinemaAudio(motion);
 
     chrome.value = withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) });
     progress.value = withTiming(

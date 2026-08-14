@@ -279,7 +279,7 @@ export const conversationsMessagingService = {
     return this.sendStructuredMessage(db, conversationId, senderId, senderName, {
       text: `${emoji} Sent ${giftName}`,
       type: 'gift',
-      giftId: String(gift?.giftId || ''),
+      giftId: String(gift?.giftId || gift?.id || ''),
       giftName,
       giftEmoji: emoji,
       coinCost,

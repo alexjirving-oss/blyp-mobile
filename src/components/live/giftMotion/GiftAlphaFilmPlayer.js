@@ -33,7 +33,7 @@ import * as Haptics from 'expo-haptics';
 import {
   getFxBudget,
   getTierConfig,
-  playGiftAudio,
+  playGiftCinemaAudio,
   ensureGiftAudioSession,
   releaseGiftAudioSession,
   TEAL,
@@ -78,9 +78,10 @@ function fireAftershock() {
   }
 }
 
-function buildAlphaHtml(videoUri, durationMs) {
+function buildAlphaHtml(videoUri, durationMs, keepMuted) {
   // YYEVA layout: left = RGB, right = grayscale alpha. WebGL recombines to RGBA.
   const safeUri = String(videoUri || '').replace(/\\/g, '/').replace(/'/g, '%27');
+  const allowUnmute = keepMuted ? 'false' : 'true';
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -101,7 +102,9 @@ function buildAlphaHtml(videoUri, durationMs) {
   var c = document.getElementById('c');
   var gl = c.getContext('webgl', { alpha: true, premultipliedAlpha: false, antialias: false });
   var doneSent = false;
+  var allowUnmute = ${allowUnmute};
   function tryUnmute() {
+    if (!allowUnmute) return;
     try { v.muted = false; v.volume = 1; } catch (e) {}
   }
   var durationMs = ${Number(durationMs) || 3200};
@@ -358,7 +361,7 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
     glowPulse.value = 0.55;
 
     ensureGiftAudioSession();
-    playGiftAudio(motion.audioKey);
+    void playGiftCinemaAudio(motion);
     chrome.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
     plaqueProg.value = withTiming(1, {
       duration: 380,
@@ -466,7 +469,9 @@ export default function GiftAlphaFilmPlayer({ entry, onSkip, onDone, film: filmP
 
   // If alpha failed to resolve/load, parent should have preferred dark-key path.
   // Still render chrome so we never soft-lock the live room.
-  const html = videoUri ? buildAlphaHtml(videoUri, durationMs) : null;
+    const html = videoUri
+    ? buildAlphaHtml(videoUri, durationMs, true)
+    : null;
   const stageH = tier.takeover === 'spotlight' ? SCREEN_H * 0.62 : SCREEN_H;
 
   return (

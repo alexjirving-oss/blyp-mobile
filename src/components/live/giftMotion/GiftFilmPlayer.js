@@ -29,7 +29,7 @@ import * as Haptics from 'expo-haptics';
 import {
   getFxBudget,
   getTierConfig,
-  playGiftAudio,
+  playGiftCinemaAudio,
   ensureGiftAudioSession,
   releaseGiftAudioSession,
   TEAL,
@@ -99,6 +99,7 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
   const stallTimerRef = useRef(null);
   const kickTimerRef = useRef(null);
   const lastPosRef = useRef(0);
+  const nudgeCountRef = useRef(0);
   const [inGlory, setInGlory] = useState(false);
 
   const motion = entry?.motion;
@@ -114,6 +115,27 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
   const loopOnce = meta?.loopOnce !== false;
   // TikTok gifts are large center-stage overlays, not letterboxed cinema
   const stageScale = tier.takeover === 'spotlight' ? 0.88 : 1.0;
+  // Unmuted ExoPlayer requires STREAM_MUSIC focus. Under live IVS that fails and
+  // playWhenReady never latches — receiver sees a frozen poster. Clips are
+  // video-only; audible cue is playGiftCinemaAudio (native voice sting on live).
+  const filmMuted = true;
+
+  const kickPlayback = () => {
+    if (skippedRef.current || finishedRef.current) return;
+    try {
+      videoRef.current?.setStatusAsync?.({
+        shouldPlay: true,
+        isMuted: true,
+        volume: 1,
+      });
+    } catch {
+      try {
+        videoRef.current?.playAsync?.();
+      } catch {
+        // ignore
+      }
+    }
+  };
 
   const finish = (reason) => {
     if (finishedRef.current) return;
@@ -180,6 +202,7 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
     impactFiredRef.current = false;
     aftershockFiredRef.current = false;
     lastPosRef.current = 0;
+    nudgeCountRef.current = 0;
     setInGlory(false);
     chrome.value = 0;
     plaqueProg.value = 0;
@@ -188,7 +211,7 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
 
     // Fire-and-forget: never block mount on audio mode (can hang under IVS).
     ensureGiftAudioSession();
-    playGiftAudio(motion.audioKey);
+    void playGiftCinemaAudio(motion);
 
     chrome.value = withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) });
     plaqueProg.value = withTiming(1, {
@@ -222,32 +245,22 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
       }, Math.round(durationMs * Math.min(0.62, impactAt + 0.22)));
     }
 
-    // Kick playback once after mount — shouldPlay alone can stick on frame 0
-    // after an audio-session fight or concurrent remount.
-    kickTimerRef.current = setTimeout(() => {
-      if (skippedRef.current || finishedRef.current) return;
-      try {
-        videoRef.current?.playAsync?.();
-      } catch {
-        // ignore
-      }
-    }, 180);
+    // Immediate + short delayed kicks — shouldPlay alone can stick on frame 0
+    // after an audio-session fight or concurrent remount (receiver path).
+    kickPlayback();
+    kickTimerRef.current = setTimeout(() => kickPlayback(), 60);
 
-    // If ExoPlayer never advances, dismiss instead of soft-locking the room.
+    // If ExoPlayer never advances, retry muted then dismiss instead of soft-lock.
     stallTimerRef.current = setTimeout(() => {
       if (skippedRef.current || finishedRef.current || inGloryRef.current) return;
       if (lastPosRef.current < 80) {
-        try {
-          videoRef.current?.playAsync?.();
-        } catch {
-          // ignore
-        }
+        kickPlayback();
         setTimeout(() => {
           if (skippedRef.current || finishedRef.current || inGloryRef.current) return;
           if (lastPosRef.current < 80) finish('stall');
         }, 900);
       }
-    }, 1600);
+    }, 1200);
 
     doneTimerRef.current = setTimeout(() => {
       if (!skippedRef.current && !finishedRef.current) finish('timeout');
@@ -278,8 +291,18 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
     if (!status?.isLoaded || skippedRef.current || finishedRef.current) return;
     const pos = Number(status.positionMillis) || 0;
     if (pos > lastPosRef.current) lastPosRef.current = pos;
-    // Do NOT call setStatusAsync here — mid-playback mute flips stall ExoPlayer
-    // on Android (especially under live IVS audio focus). Props already unmute.
+    // Do NOT flip mute mid-playback — that stalls ExoPlayer under IVS focus.
+    // Bounded nudge if loaded but stuck near frame 0 (receiver focus race).
+    if (
+      status.shouldPlay &&
+      !status.isPlaying &&
+      !status.isBuffering &&
+      pos < 40 &&
+      nudgeCountRef.current < 4
+    ) {
+      nudgeCountRef.current += 1;
+      kickPlayback();
+    }
     if (status.didJustFinish) {
       enterGloryHold();
     }
@@ -366,10 +389,12 @@ export default function GiftFilmPlayer({ entry, onSkip, onDone, film: filmProp }
           resizeMode={ResizeMode.COVER}
           shouldPlay
           isLooping={!loopOnce}
-          isMuted={false}
+          isMuted={filmMuted}
           volume={1}
-          progressUpdateIntervalMillis={100}
+          progressUpdateIntervalMillis={80}
           useNativeControls={false}
+          onLoad={() => kickPlayback()}
+          onReadyForDisplay={() => kickPlayback()}
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
           onError={() => {
             if (!finishedRef.current) finish('error');

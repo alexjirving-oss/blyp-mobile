@@ -7,11 +7,13 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 import android.util.Log
+import com.blyp.mobile.R
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableNativeMap
+import android.media.MediaPlayer
 
 /**
  * Call-only audio route. For You must never import this for playback.
@@ -24,6 +26,86 @@ class BlypAudioRouteModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
 
   override fun getName(): String = "BlypAudioRoute"
+
+  @ReactMethod
+  fun playGiftSting(volume: Double, promise: Promise) {
+    try {
+      val ctx = reactApplicationContext.applicationContext
+      val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      val inComm =
+        am.mode == AudioManager.MODE_IN_COMMUNICATION || am.mode == AudioManager.MODE_IN_CALL
+      // Under live IVS (MODE_IN_COMMUNICATION), play on the voice stream so we do
+      // not request STREAM_MUSIC focus (that freezes unmuted expo-av gifts and
+      // can yank Stage out of VIDEO_CHAT). Off-live use media attributes.
+      val attrs =
+        if (inComm) {
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        } else {
+          AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        }
+      val player = MediaPlayer.create(ctx, R.raw.blyp_notify)
+      if (player == null) {
+        promise.resolve(false)
+        return
+      }
+      try {
+        player.setAudioAttributes(attrs)
+      } catch (_: Exception) {
+      }
+      val vol = volume.toFloat().coerceIn(0.05f, 1f)
+      player.setVolume(vol, vol)
+      var focusReq: AudioFocusRequest? = null
+      // Transient duck only — never displace publish AUDIOFOCUS_GAIN ownership.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        try {
+          focusReq =
+            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+              .setAudioAttributes(attrs)
+              .setOnAudioFocusChangeListener { }
+              .build()
+          am.requestAudioFocus(focusReq!!)
+        } catch (_: Exception) {
+          focusReq = null
+        }
+      }
+      player.setOnCompletionListener { mp ->
+        if (focusReq != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          try {
+            am.abandonAudioFocusRequest(focusReq!!)
+          } catch (_: Exception) {
+          }
+        }
+        try {
+          mp.release()
+        } catch (_: Exception) {
+        }
+      }
+      player.setOnErrorListener { mp, _, _ ->
+        if (focusReq != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          try {
+            am.abandonAudioFocusRequest(focusReq!!)
+          } catch (_: Exception) {
+          }
+        }
+        try {
+          mp.release()
+        } catch (_: Exception) {
+        }
+        true
+      }
+      player.start()
+      promise.resolve(true)
+    } catch (e: Exception) {
+      Log.w(TAG, "playGiftSting failed ${e.message}")
+      promise.resolve(false)
+    }
+  }
 
   @ReactMethod
   fun applyMediaSpeaker(promise: Promise) {
