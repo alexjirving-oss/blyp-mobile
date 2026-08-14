@@ -47,6 +47,16 @@ console.log('[BLYP][APP] PRELUDE?', global.BLYP_PRELUDE);
 // ============================================================================
 import './src/config/amplify';
 
+// LiveKit WebRTC globals (audio calls). Safe no-op if native module not yet linked.
+try {
+  // eslint-disable-next-line global-require
+  const { registerLiveKitGlobals } = require('./src/runtime/registerLiveKitGlobals');
+  registerLiveKitGlobals();
+} catch {
+  // Native LiveKit not in this binary yet — CallScreen will surface a clear error.
+}
+
+
 // Note: Other startup side-effects (pre-auth cleanup, Sentry, flags)
 // are deferred until after runtime is ready to avoid early WebSocket/runtime issues.
 
@@ -1016,7 +1026,19 @@ function AppInner() {
                 otherUser: { id: data.senderId, displayName: data.senderName, username: data.senderName },
               });
             } else if ((data.type === 'incoming_call' || data.type === 'call') && data.callId) {
-              // Calling is Coming Soon — do not open Call UI from push.
+              try {
+                // eslint-disable-next-line global-require
+                const { showIncomingCallNative } = require('./src/services/incomingCallNative');
+                showIncomingCallNative(data.callId, data.callerName || 'Incoming call');
+              } catch {
+                // ignore
+              }
+              routeWhenReady('Call', {
+                callId: data.callId,
+                role: 'callee',
+                peerName: data.callerName || 'Incoming call',
+                callerId: data.callerId,
+              });
             } else if (data.type === 'team') {
               // Team join request/decision/group message → open My Team.
               routeWhenReady('MyTeam');
@@ -1031,6 +1053,62 @@ function AppInner() {
   }, [uid]);
 
   // ============================================================================
+  // Foreground incoming-call watcher (Firestore ringing docs where we are callee).
+  useEffect(() => {
+    const fbUid = firebaseAuth?.currentUser?.uid || uid || null;
+    if (!fbUid) return undefined;
+    let unsub = () => {};
+    // Dedup: Firestore snapshots re-fire often; re-navigating / re-ringing
+    // every tick made CallScreen feel laggy and buggy.
+    const handledCallIds = new Set();
+    const openCall = (params, tries = 0) => {
+      try {
+        if (navigationRef?.isReady?.()) {
+          const state = navigationRef.getRootState?.();
+          const routes = state?.routes || [];
+          const top = routes[routes.length - 1];
+          if (top?.name === 'Call' && top?.params?.callId === params.callId) return;
+          const already = routes.some(
+            (r) => r?.name === 'Call' && r?.params?.callId === params.callId,
+          );
+          if (already) return;
+          navigationRef.navigate('Call', params);
+          return;
+        }
+      } catch { }
+      if (tries < 40) setTimeout(() => openCall(params, tries + 1), 400);
+    };
+    try {
+      // eslint-disable-next-line global-require
+      const callService = require('./src/services/callService');
+      unsub = callService.subscribeToIncomingCalls(fbUid, (incoming) => {
+        const first = Array.isArray(incoming) && incoming.length ? incoming[0] : null;
+        if (!first?.id) return;
+        if (handledCallIds.has(first.id)) return;
+        handledCallIds.add(first.id);
+        try {
+          // eslint-disable-next-line global-require
+          const { showIncomingCallNative } = require('./src/services/incomingCallNative');
+          showIncomingCallNative(first.id, first.callerName || 'Incoming call');
+        } catch {
+          // ignore
+        }
+        openCall({
+          callId: first.id,
+          role: 'callee',
+          peerName: first.callerName || 'Incoming call',
+          peerAvatar: null,
+          callerId: first.callerId,
+        });
+      });
+    } catch {
+      // ignore
+    }
+    return () => { try { unsub(); } catch { } };
+  }, [uid]);
+
+  // ============================================================================
+
   // Presence heartbeat (powers "notify me when <person> is next on the app").
   // Stamps users/{uid}.presence on foreground/background. Fully guarded.
   // ============================================================================
