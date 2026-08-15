@@ -41,13 +41,15 @@ function statusBadge(user: AdminUserRow) {
 export default function People() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [query, setQuery] = useState(() => params.get("q") || "");
+  const urlQuery = params.get("q") || "";
+  const [query, setQuery] = useState(urlQuery);
+  const [prevUrlQuery, setPrevUrlQuery] = useState(urlQuery);
   const [offset, setOffset] = useState(0);
 
-  useEffect(() => {
-    const next = params.get("q") || "";
-    setQuery(next);
-  }, [params]);
+  if (urlQuery !== prevUrlQuery) {
+    setPrevUrlQuery(urlQuery);
+    setQuery(urlQuery);
+  }
   const q = useDebounced(query, 350);
   const [activeQuery, setActiveQuery] = useState(q);
   const effectiveOffset = activeQuery === q ? offset : 0;

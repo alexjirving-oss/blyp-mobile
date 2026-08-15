@@ -39,11 +39,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (session) {
-      void refreshMe();
-    } else {
-      setMe(null);
-    }
+    let cancelled = false;
+    void (async () => {
+      // Defer so the effect body does not synchronously set state (same as useAsync).
+      await Promise.resolve();
+      if (cancelled) return;
+      if (session) {
+        await refreshMe();
+      } else {
+        setMe(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [session, refreshMe]);
 
   const permissions = me?.permissions || [];
@@ -78,5 +87,3 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
-export { useAuth } from "./useAuth";

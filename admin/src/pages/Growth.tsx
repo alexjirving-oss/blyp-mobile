@@ -8,6 +8,30 @@ import { PageHeader, StatCard, Spinner, ErrorNote, EmptyState, InfoNote, WarnNot
 import { useToast } from "../components/Toast";
 import type { AnalyticsResponse, PromoteResponse } from "../types";
 
+type AmbassadorTeam = { teamId: string; name: string; memberCount: number };
+type AmbassadorsResponse = {
+  note?: string;
+  teams?: { total?: number; items?: AmbassadorTeam[] };
+  roomAmbassadors?: { available?: boolean };
+  clubs?: { available?: boolean };
+};
+
+type DisputeItem = {
+  disputeId: string;
+  surface: string;
+  referenceId: string;
+  summary: string;
+  status: string;
+};
+type DisputesResponse = {
+  detail?: string;
+  note?: string;
+  marbleRaceEnabled?: boolean | null;
+  total?: number;
+  items?: DisputeItem[];
+  statuses?: string[];
+};
+
 /** Lightweight SVG area chart — avoids recharts/lodash CJS interop crash under Vite 8. */
 function Chart({ data, color, label }: { data: Array<{ date: string; count: number }>; color: string; label: string }) {
   const gradId = `g-${label.replace(/[^a-zA-Z0-9_-]/g, "")}`;
@@ -89,8 +113,8 @@ export default function Growth() {
   const canFeed = can("growth.feed_priority");
   const res = useAsync<AnalyticsResponse>(() => api.get<AnalyticsResponse>("/admin/analytics"), []);
   const promote = useAsync<PromoteResponse>(() => api.get<PromoteResponse>("/admin/promote?status=all&limit=40"), []);
-  const ambassadors = useAsync<any>(() => api.get("/admin/growth/ambassadors"), []);
-  const disputes = useAsync<any>(() => api.get("/admin/games/disputes"), []);
+  const ambassadors = useAsync<AmbassadorsResponse>(() => api.get("/admin/growth/ambassadors"), []);
+  const disputes = useAsync<DisputesResponse>(() => api.get("/admin/games/disputes"), []);
   const canDispute = can("reports.resolve");
   const [rankBusy, setRankBusy] = useState(false);
   const [rankNote, setRankNote] = useState<string | null>(null);
@@ -248,7 +272,7 @@ export default function Growth() {
                     Teams loaded: {ambassadors.data.teams?.total ?? 0}. Room ambassadors: {ambassadors.data.roomAmbassadors?.available ? "yes" : "not wired"}.
                     Clubs: {ambassadors.data.clubs?.available ? "yes" : "not wired"}.
                   </p>
-                  {(ambassadors.data.teams?.items || []).slice(0, 8).map((t: any) => (
+                  {(ambassadors.data.teams?.items || []).slice(0, 8).map((t) => (
                     <div key={t.teamId} className="row spread" style={{ fontSize: 13, padding: "4px 0", borderTop: "1px solid var(--border)" }}>
                       <span>{t.name}</span>
                       <span className="dim">{fmtNum(t.memberCount)} members</span>
@@ -308,7 +332,7 @@ export default function Growth() {
                       </button>
                     </div>
                   )}
-                  {(disputes.data.items || []).slice(0, 12).map((item: any) => (
+                  {(disputes.data.items || []).slice(0, 12).map((item) => (
                     <div key={item.disputeId} className="row spread" style={{ fontSize: 12, padding: "6px 0", borderTop: "1px solid var(--border)" }}>
                       <div>
                         <strong>{item.surface}</strong> · {item.referenceId}

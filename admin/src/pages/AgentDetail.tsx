@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAsync } from "../lib/useAsync";
@@ -82,9 +82,10 @@ export default function AgentDetail() {
   const [quietEnd, setQuietEnd] = useState("");
   const [phraseText, setPhraseText] = useState("");
   const [phraseKind, setPhraseKind] = useState<"allow" | "deny">("allow");
+  const [hydratedFrom, setHydratedFrom] = useState<AgentSettings | null>(null);
 
-  useEffect(() => {
-    if (!s) return;
+  if (s && s !== hydratedFrom) {
+    setHydratedFrom(s);
     setEnabled(s.enabled);
     setMode(s.mode || "suggest_only");
     setAllowComment(s.allowComment !== false);
@@ -93,7 +94,7 @@ export default function AgentDetail() {
     setTopicsAvoid(s.topicsAvoid || "");
     setQuietStart(s.quietHoursStart != null ? String(s.quietHoursStart) : "");
     setQuietEnd(s.quietHoursEnd != null ? String(s.quietHoursEnd) : "");
-  }, [s]);
+  }
 
   const reload = () => {
     setErr(null);

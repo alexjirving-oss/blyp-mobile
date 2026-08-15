@@ -31,6 +31,13 @@ type DsarItem = {
   hasExportPackage?: boolean;
 };
 
+type MassBanPreview = { wouldBan: number; skipped: number };
+type MassBanResult = { ok: boolean };
+type MassBanResponse = {
+  preview?: MassBanPreview;
+  results?: MassBanResult[];
+};
+
 export default function Access() {
   const { session, me, role, can, refreshMe } = useAuth();
   const toast = useToast();
@@ -59,7 +66,7 @@ export default function Access() {
   const [dsarNotes, setDsarNotes] = useState("");
   const [massBanText, setMassBanText] = useState("");
   const [massBanReason, setMassBanReason] = useState("");
-  const [massPreview, setMassPreview] = useState<any>(null);
+  const [massPreview, setMassPreview] = useState<MassBanResponse | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function exportCsv() {
@@ -195,7 +202,7 @@ export default function Access() {
       .filter(Boolean);
     setBusy(true);
     try {
-      const out = await api.post<any>("/admin/users/mass-ban", {
+      const out = await api.post<MassBanResponse>("/admin/users/mass-ban", {
         userIds,
         reason: massBanReason.trim() || "mass ban",
         dryRun: true,
@@ -223,7 +230,7 @@ export default function Access() {
     }
     setBusy(true);
     try {
-      const out = await api.post<any>("/admin/users/mass-ban", {
+      const out = await api.post<MassBanResponse>("/admin/users/mass-ban", {
         userIds,
         reason: massBanReason.trim(),
         dryRun: false,
@@ -381,7 +388,7 @@ export default function Access() {
           {massPreview?.preview && (
             <p className="dim" style={{ fontSize: 12 }}>
               Preview: wouldBan={massPreview.preview.wouldBan} skipped={massPreview.preview.skipped}
-              {massPreview.results ? ` · executed=${massPreview.results.filter((x: any) => x.ok).length}` : ""}
+              {massPreview.results ? ` · executed=${massPreview.results.filter((x) => x.ok).length}` : ""}
             </p>
           )}
         </div>

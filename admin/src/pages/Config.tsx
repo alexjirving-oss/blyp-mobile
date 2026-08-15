@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 import { useAsync } from "../lib/useAsync";
@@ -292,15 +292,16 @@ function VersionPolicy() {
   const [storeUrl, setStoreUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [hydratedFrom, setHydratedFrom] = useState<AppVersionPolicy | null>(null);
 
-  useEffect(() => {
-    const p = res.data?.policy;
-    if (!p) return;
+  const p = res.data?.policy;
+  if (p && p !== hydratedFrom) {
+    setHydratedFrom(p);
     setEnabled(Boolean(p.enabled));
     setMinCode(p.minimumAndroidVersionCode != null ? String(p.minimumAndroidVersionCode) : "");
     setMessage(p.message || "");
     setStoreUrl(p.storeUrl || "");
-  }, [res.data]);
+  }
 
   async function save() {
     if (!canVersion) {
@@ -358,27 +359,37 @@ function VersionPolicy() {
   );
 }
 
+type AutoModPolicy = {
+  autoHideThreshold?: number;
+  criticalHideReporters?: number;
+  seriousHideReports?: number;
+  visionFailClosed?: boolean;
+  notes?: string | null;
+  liveEffect?: { cloudFunctions?: string };
+};
+
 function AutoModPolicyEditor() {
   const toast = useToast();
   const { can } = useAuth();
   const canWrite = can("config.flags.write");
-  const res = useAsync<{ policy: any }>(() => api.get("/admin/config/auto-mod"), []);
+  const res = useAsync<{ policy: AutoModPolicy }>(() => api.get("/admin/config/auto-mod"), []);
   const [autoHide, setAutoHide] = useState("3");
   const [critical, setCritical] = useState("2");
   const [serious, setSerious] = useState("2");
   const [visionFail, setVisionFail] = useState(true);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hydratedFrom, setHydratedFrom] = useState<AutoModPolicy | null>(null);
 
-  useEffect(() => {
-    const p = res.data?.policy;
-    if (!p) return;
+  const p = res.data?.policy;
+  if (p && p !== hydratedFrom) {
+    setHydratedFrom(p);
     setAutoHide(String(p.autoHideThreshold ?? 3));
     setCritical(String(p.criticalHideReporters ?? 2));
     setSerious(String(p.seriousHideReports ?? 2));
     setVisionFail(p.visionFailClosed !== false);
     setNotes(p.notes || "");
-  }, [res.data]);
+  }
 
   async function save() {
     if (!canWrite) {
