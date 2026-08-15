@@ -20,6 +20,11 @@ const STOCK_PROFILE_CATEGORIES = [
   { id: 'cat_talking-objects_stock', label: 'Talking objects', order: 7 },
   { id: 'cat_viral-shorts_stock', label: 'Viral shorts', order: 8 },
   { id: 'cat_life-hacks_stock', label: 'Life hacks', order: 9 },
+  // Etsy paid packs (PDF / folder titles) — distinct from Viral shorts dump
+  { id: 'cat_mega-reels_stock', label: 'Mega reels', order: 10 }, // 5400-Videos-Delivery / EDH 5,400
+  { id: 'cat_fraceless_stock', label: 'Fraceless', order: 11 }, // motivational minimalist reels
+  { id: 'cat_satirixy_stock', label: 'Satirixy', order: 12 }, // Satirixy satisfying bundles
+  { id: 'cat_gaming-reels_stock', label: 'Gaming reels', order: 13 }, // Delizen Gaming Reels Bundle
 ];
 
 /** Etsy: "300 AI Baby Comedy Reels | Pre-subtitled Podcast Bundle" → local andr/f4 */
@@ -57,7 +62,7 @@ function cleanSpaces(s) {
 
 /**
  * Fine pack key from local path + filename (not just top folder).
- * @returns {'footwork'|'kids'|'baby_podcast'|'horror'|'animals'|'biohacking'|'talking_objects'|'cinema'|'life_hacks'|'viral'|'stock'}
+ * @returns {'footwork'|'kids'|'baby_podcast'|'horror'|'animals'|'biohacking'|'talking_objects'|'cinema'|'life_hacks'|'viral'|'mega_reels'|'fraceless'|'satirixy'|'gaming_reels'|'stock'}
  */
 function detectStockKind(filePath) {
   const p = pathNorm(filePath).toLowerCase();
@@ -84,6 +89,12 @@ function detectStockKind(filePath) {
     return 'animals';
   }
 
+  // Etsy paid packs (path-first; before generic etsy→viral)
+  if (/(^|\/)etsy\/(5400|5400videos|megabundles)(\/|$)/.test(p)) return 'mega_reels';
+  if (/(^|\/)etsy\/fraceless(\/|$)/.test(p)) return 'fraceless';
+  if (/(^|\/)etsy\/satirixy(\/|$)/.test(p)) return 'satirixy';
+  if (/(^|\/)etsy\/delizen(\/|$)/.test(p)) return 'gaming_reels';
+
   // andr / cinema / health packs on disk
   if (/studio\s*nayra|nayra-0101/.test(hay)) return 'cinema';
   if (/talking\s*object/.test(hay)) return 'talking_objects';
@@ -94,7 +105,8 @@ function detectStockKind(filePath) {
   if (/(^|\/)andr\/f3(\/|$)/.test(p)) return 'cinema';
   if (/(^|\/)andr\/f1(\/|$)/.test(p)) return 'biohacking';
   if (/(^|\/)andr(\/|$)/.test(p) || /(^|\/)cinema(\/|$)/.test(p)) return 'cinema';
-  if (/(^|\/)etsy(\/|$)/.test(p)) return 'viral'; // local only if present; not required
+  // Unknown etsy subfolder → leave uncategorized rather than Viral dump
+  if (/(^|\/)etsy(\/|$)/.test(p)) return 'stock';
   return 'stock';
 }
 
@@ -120,6 +132,14 @@ function categoryIdForKind(kind) {
       return 'cat_viral-shorts_stock';
     case 'life_hacks':
       return 'cat_life-hacks_stock';
+    case 'mega_reels':
+      return 'cat_mega-reels_stock';
+    case 'fraceless':
+      return 'cat_fraceless_stock';
+    case 'satirixy':
+      return 'cat_satirixy_stock';
+    case 'gaming_reels':
+      return 'cat_gaming-reels_stock';
     default:
       return null;
   }
@@ -187,6 +207,30 @@ function rankingMetaForKind(kind) {
         category: 'lifestyle',
         topic: 'lifehacks',
         hashtags: ['lifehacks', 'tips', 'stock', 'foryou'],
+      };
+    case 'mega_reels':
+      return {
+        category: 'entertainment',
+        topic: 'mega_reels',
+        hashtags: ['megareels', 'faceless', 'reels', 'stock', 'foryou'],
+      };
+    case 'fraceless':
+      return {
+        category: 'lifestyle',
+        topic: 'fraceless',
+        hashtags: ['fraceless', 'motivational', 'minimalist', 'reels', 'stock', 'foryou'],
+      };
+    case 'satirixy':
+      return {
+        category: 'entertainment',
+        topic: 'satirixy',
+        hashtags: ['satirixy', 'satisfying', 'asmr', 'reels', 'stock', 'foryou'],
+      };
+    case 'gaming_reels':
+      return {
+        category: 'gaming',
+        topic: 'gaming_reels',
+        hashtags: ['delizen', 'gaming', 'gamer', 'reels', 'stock', 'foryou'],
       };
     default:
       return {
@@ -269,6 +313,31 @@ function buildStockCopy(filePath, kind) {
     const num = raw.match(/(\d{4,})/)?.[1];
     title = creator && creator !== 'Short clip' ? `${creator} short` : num ? `Viral short #${String(num).slice(-4)}` : 'Viral short';
     description = 'Short-form stock clip.';
+  } else if (kind === 'mega_reels') {
+    const num = raw.match(/(\d{3,})/)?.[1];
+    title = num ? `Mega reel #${String(num).slice(-4)}` : 'Mega reel';
+    description = 'EDH 5,400 faceless mega reel.';
+  } else if (kind === 'fraceless') {
+    const num = raw.match(/(\d{1,4})/)?.[1];
+    title = num ? `Fraceless #${num}` : 'Fraceless reel';
+    description = 'Motivational minimalist faceless reel.';
+  } else if (kind === 'satirixy') {
+    const num = raw.match(/(\d{4,})/)?.[1];
+    title = num ? `Satirixy #${String(num).slice(-4)}` : cleanSpaces(raw).slice(0, 80) || 'Satirixy reel';
+    description = 'Satirixy satisfying short.';
+  } else if (kind === 'gaming_reels') {
+    const p = pathNorm(filePath).toLowerCase();
+    let niche = 'Gaming';
+    if (/action\s*adventure/.test(p)) niche = 'Action Adventure';
+    else if (/3d\s*action\s*quiz/.test(p)) niche = '3D Action Quiz';
+    else if (/racing/.test(p)) niche = 'Racing';
+    else if (/sandbox/.test(p)) niche = '3D Sandbox';
+    else if (/endless/.test(p)) niche = 'Endless Runner';
+    else if (/shooting/.test(p)) niche = 'Shooting';
+    else if (/rpg/.test(p)) niche = 'Action RPG';
+    const num = raw.match(/(\d{3,})/)?.[1];
+    title = num ? `${niche} #${String(num).slice(-4)}` : `${niche} reel`;
+    description = `Delizen gaming reel — ${niche}.`;
   } else {
     const cleaned = cleanSpaces(raw.replace(/\d{10,}/g, '').replace(/_+/g, ' '));
     title = (cleaned.length >= 4 ? cleaned : creator || 'Stock clip').slice(0, 80);
@@ -285,6 +354,7 @@ function topicMetaForPath(filePath) {
   const categoryId = categoryIdForKind(kind);
   const ranking = rankingMetaForKind(kind);
   const copy = buildStockCopy(filePath, kind);
+  const etsyKinds = new Set(['mega_reels', 'fraceless', 'satirixy', 'gaming_reels']);
   return {
     kind,
     stockPack:
@@ -297,7 +367,9 @@ function topicMetaForPath(filePath) {
         ? 'andr'
         : kind === 'animals'
           ? 'ready'
-          : kind,
+          : etsyKinds.has(kind)
+            ? 'etsy'
+            : kind,
     categoryId,
     ...ranking,
     ...copy,
