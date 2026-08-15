@@ -6,6 +6,11 @@ import { verifyCognitoJwt } from '../auth/verifyCognitoJwt';
 import { logger } from '../config/logger';
 import { setSocketIo } from './realtimeBus';
 import { sanitizeBearerAuthorization, sanitizeHeaderValue } from '../utils/headerSanitize';
+import {
+  isGrid9Enabled,
+  registerGrid9Socket,
+} from '../games/grid9/grid9Socket';
+import { startGrid9GameLoop } from '../games/grid9/grid9GameLoop';
 
 export type SocketServer = {
   io: Server;
@@ -97,6 +102,7 @@ export function createSocketServer(server: HttpServer): SocketServer {
   io.on('connection', (socket) => {
     const userId = socket.data.userId as string | undefined;
     logger.info({ userId, socketId: socket.id }, '[socket] connected');
+    registerGrid9Socket(io, socket);
 
     socket.on('join', (payload: any) => {
       const streamId = payload?.streamId as string | undefined;
@@ -116,6 +122,12 @@ export function createSocketServer(server: HttpServer): SocketServer {
   });
 
   setSocketIo(io);
+  startGrid9GameLoop(io);
+  if (isGrid9Enabled()) {
+    logger.info('[grid9] authoritative game loop enabled');
+  } else {
+    logger.info('[grid9] recovery loop active; new matchmaking disabled');
+  }
 
   return { io };
 }

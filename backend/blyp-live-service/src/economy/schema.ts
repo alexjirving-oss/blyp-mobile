@@ -193,6 +193,22 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
           PRIMARY KEY (duel_id, user_id)
         )`,
 
+        `CREATE TABLE IF NOT EXISTS grid9_wallet_reservations (
+          reservation_id text PRIMARY KEY,
+          match_id text NOT NULL,
+          user_id text NOT NULL,
+          intent_id text NOT NULL,
+          amount_coins bigint NOT NULL,
+          captured_coins bigint NOT NULL DEFAULT 0,
+          released_coins bigint NOT NULL DEFAULT 0,
+          status text NOT NULL DEFAULT 'PENDING',
+          platform_ledger_entry_id text,
+          redis_applied_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (match_id, user_id, intent_id)
+        )`,
+
         `CREATE TABLE IF NOT EXISTS matchday_entitlements (
           entitlement_id text PRIMARY KEY,
           user_id text NOT NULL,
@@ -426,6 +442,8 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_live_game_entries_user_id ON live_game_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_reaction_duel_entries_session ON reaction_duel_entries (session_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_reaction_duel_entries_user ON reaction_duel_entries (user_id, created_at DESC)`,
+        `CREATE INDEX IF NOT EXISTS idx_grid9_reservations_match ON grid9_wallet_reservations (match_id, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_grid9_reservations_pending_redis ON grid9_wallet_reservations (redis_applied_at, status)`,
         `CREATE INDEX IF NOT EXISTS idx_matchday_entitlements_user ON matchday_entitlements (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_matchday_predictions_event ON matchday_predictions (event_id)`,
         `CREATE INDEX IF NOT EXISTS idx_matchday_predictions_user ON matchday_predictions (user_id)`,

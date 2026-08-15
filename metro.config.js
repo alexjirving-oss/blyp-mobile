@@ -1,6 +1,7 @@
 // Minimal Metro config for Expo/React Native bundling
 const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
+const { withNativeWind } = require('nativewind/metro');
 const metroResolver = require('metro-resolver');
 
 const config = getDefaultConfig(__dirname);
@@ -80,4 +81,7 @@ config.serializer = Object.assign({}, baseSerializer, {
   },
 });
 
-module.exports = config;
+module.exports = withNativeWind(config, {
+  input: './src/games/grid9/grid9.css',
+  disableTypeScriptGeneration: true,
+});

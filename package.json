@@ -109,6 +109,7 @@
     "firebase": "^12.5.0",
     "livekit-client": "^2.21.0",
     "lucide-react-native": "^0.552.0",
+    "nativewind": "^4.1.23",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
@@ -168,6 +169,7 @@
     "react-test-renderer": "19.1.0",
     "sharp": "^0.33.5",
     "source-map-explorer": "^2.5.3",
+    "tailwindcss": "^3.4.17",
     "typescript": "~5.9.3",
     "webdriverio": "^9.24.0"
   },

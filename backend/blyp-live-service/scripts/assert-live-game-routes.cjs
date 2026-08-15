@@ -16,6 +16,10 @@ const required = [
   'src/routes/marbleRoutes.ts',
   'src/routes/battleRoutes.ts',
   'src/routes/reactionDuelRoutes.ts',
+  'src/games/grid9/grid9AtomicScript.ts',
+  'src/games/grid9/grid9Engine.ts',
+  'src/games/grid9/grid9GameLoop.ts',
+  'src/games/grid9/grid9Socket.ts',
 ];
 
 const missing = required.filter((rel) => !fs.existsSync(path.join(root, rel)));
@@ -29,6 +33,14 @@ const indexSrc = fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8');
 for (const needle of ['frenemiesRoutes', 'roomsRoutes', 'gameRoutes', 'marbleRoutes']) {
   if (!indexSrc.includes(needle)) {
     console.error(`[assert-live-game-routes] src/index.ts does not mount ${needle}`);
+    process.exit(1);
+  }
+}
+
+const socketSrc = fs.readFileSync(path.join(root, 'src/realtime/socketServer.ts'), 'utf8');
+for (const needle of ['registerGrid9Socket', 'startGrid9GameLoop']) {
+  if (!socketSrc.includes(needle)) {
+    console.error(`[assert-live-game-routes] socketServer.ts does not wire ${needle}`);
     process.exit(1);
   }
 }
