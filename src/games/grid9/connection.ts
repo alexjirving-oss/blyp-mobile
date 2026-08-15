@@ -27,6 +27,8 @@ import {
 } from './store';
 
 const WELCOME_TIMEOUT_MS = 12_000;
+/** Matches live-service / contract tests; client auto-queue uses this region. */
+const GRID9_DEFAULT_QUEUE_REGION = 'eu-west-2';
 
 export class Grid9NotReadyError extends Error {
   constructor(message = 'Grid 9 socket is not ready') {
@@ -41,6 +43,7 @@ export class Grid9Connection {
   private closed = true;
   private snapshotInFlight = false;
   private joinInFlight: string | null = null;
+  private queueJoinInFlight = false;
   private welcomeWaiters: Array<{
     resolve: () => void;
     reject: (error: Error) => void;
@@ -68,6 +71,7 @@ export class Grid9Connection {
     this.rejectWelcomeWaiters(new Error('Grid 9 connection closed'));
     this.snapshotInFlight = false;
     this.joinInFlight = null;
+    this.queueJoinInFlight = false;
     if (this.unsubscribeChannel) {
       this.unsubscribeChannel();
       this.unsubscribeChannel = null;
@@ -251,6 +255,7 @@ export class Grid9Connection {
       if (this.closed) return;
       this.snapshotInFlight = false;
       this.joinInFlight = null;
+      this.queueJoinInFlight = false;
       patchGrid9Session({
         connectionStatus: 'reconnecting',
         connectionSessionId: null,
@@ -276,14 +281,50 @@ export class Grid9Connection {
     if (event.type === 'WELCOME') {
       this.resolveWelcomeWaiters();
     }
+    if (event.type === 'QUEUE_STATUS') {
+      this.queueJoinInFlight = false;
+    }
     if (event.type === 'STATE_SNAPSHOT') {
       this.snapshotInFlight = false;
       this.joinInFlight = null;
     }
     if (event.type === 'INTENT_REJECTED') {
       this.joinInFlight = null;
+      this.queueJoinInFlight = false;
     }
     this.handleEffects(applied.effects);
+    if (event.type === 'WELCOME') {
+      // After snapshot/join effects: only auto-queue when not resuming a match.
+      this.maybeAutoQueueJoinAfterWelcome();
+    }
+  }
+
+  /**
+   * Leave STANDBY: after WELCOME assigns connectionSessionId, join the region
+   * queue once. Skip if already queued / assigned / in a match (reconnect resume
+   * uses REQUEST_SNAPSHOT via handleEffects instead).
+   */
+  private maybeAutoQueueJoinAfterWelcome(): void {
+    if (this.closed || this.queueJoinInFlight) return;
+    const session = getGrid9Session();
+    if (!session.connectionSessionId) return;
+    if (session.matchId || session.assignment || session.match) return;
+    const queueStatus = session.queue?.status;
+    if (queueStatus === 'queued' || queueStatus === 'matching' || queueStatus === 'assigned') {
+      return;
+    }
+    try {
+      this.queueJoinInFlight = true;
+      this.sendQueueJoinIntent({
+        region: GRID9_DEFAULT_QUEUE_REGION,
+        sponsorPassId: null,
+      });
+    } catch (error) {
+      this.queueJoinInFlight = false;
+      patchGrid9Session({
+        lastError: error instanceof Error ? error.message : 'Grid 9 auto queue join failed',
+      });
+    }
   }
 
   private handleEffects(effects: Grid9ApplyEffects): void {
