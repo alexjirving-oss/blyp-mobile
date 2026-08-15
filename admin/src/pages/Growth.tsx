@@ -359,7 +359,7 @@ export default function Growth() {
                               }
                             }}
                           >
-                            {(disputes.data.statuses || ["open", "investigating", "noted_freeze", "resolved", "closed"]).map((s: string) => (
+                            {(disputes.data?.statuses || ["open", "investigating", "noted_freeze", "resolved", "closed"]).map((s: string) => (
                               <option key={s} value={s}>{s}</option>
                             ))}
                           </select>
