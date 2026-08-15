@@ -39,6 +39,9 @@ const WATCH = hasFlag('watch');
 const WATCH_MS = Number(arg('watch-ms', '20000')) || 20000;
 const DRY = hasFlag('dry-run');
 const SKIP_NORMALIZE = hasFlag('skip-normalize');
+const SKIP_PROFILE_CATEGORIES = hasFlag('skip-profile-categories');
+const SOURCE_PLATFORM = arg('source-platform', 'local-stock');
+const IMPORTED_VIA = arg('imported-via', 'upload_local_stock_posts_v2');
 const PROJECT_ID = process.env.PROJECT_ID || 'blyp-master';
 const STORAGE_BUCKET = process.env.STORAGE_BUCKET || 'blyp-master.firebasestorage.app';
 const MANIFEST = arg('manifest', path.join(ROOT || '.', '_upload_manifest.json'));
@@ -61,7 +64,8 @@ const db = admin.firestore();
 const bucket = admin.storage().bucket();
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.m4v', '.mkv']);
-const SKIP_DIR_PARTS = new Set(['_converted', 'node_modules', '.git', 'ChromeCookies_copy', '_ytdlp_test']);
+// `tiktok` = creator TikTok→Blyp imports (separate --uid uploads); never stock-owner walk.
+const SKIP_DIR_PARTS = new Set(['_converted', 'node_modules', '.git', 'ChromeCookies_copy', '_ytdlp_test', 'tiktok']);
 
 function loadManifest() {
   try {
@@ -293,15 +297,37 @@ async function uploadOne(owner, item, manifest) {
     );
   }
 
-  const tags = Array.from(new Set([...(meta.hashtags || []), meta.kind, 'stock', 'foryou'].filter(Boolean)));
+  const isCreatorImport = SOURCE_PLATFORM === 'tiktok' || SOURCE_PLATFORM === 'youtube';
+  const metaTitle = (() => {
+    // Prefer adjacent yt-dlp .info.json title when present.
+    try {
+      const infoPath = item.path.replace(/\.[^.]+$/, '') + '.info.json';
+      if (fs.existsSync(infoPath)) {
+        const j = JSON.parse(fs.readFileSync(infoPath, 'utf8'));
+        const t = String(j.title || j.fulltitle || j.description || '').trim();
+        if (t) return t.slice(0, 120);
+      }
+    } catch { /* fall through */ }
+    return meta.title;
+  })();
+  const tags = Array.from(
+    new Set(
+      [
+        ...(meta.hashtags || []),
+        isCreatorImport ? SOURCE_PLATFORM : meta.kind,
+        isCreatorImport ? 'import' : 'stock',
+        'foryou',
+      ].filter(Boolean),
+    ),
+  );
   const ref = await db.collection('posts').add({
     userId: owner.uid,
     username: owner.username,
     userDisplayName: owner.displayName,
     userPhotoURL: owner.photoURL,
     user: { username: owner.handle, avatar: owner.photoURL },
-    title: meta.title,
-    caption: meta.caption,
+    title: metaTitle,
+    caption: metaTitle,
     description: meta.description,
     transcript: meta.transcript,
     tags,
@@ -330,10 +356,10 @@ async function uploadOne(owner, item, manifest) {
     shares: 0,
     viewCount: 0,
     views: 0,
-    sourcePlatform: 'local-stock',
-    importedVia: 'upload_local_stock_posts_v2',
-    stockPack: meta.stockPack,
-    stockKind: meta.kind,
+    sourcePlatform: SOURCE_PLATFORM,
+    importedVia: IMPORTED_VIA,
+    stockPack: isCreatorImport ? null : meta.stockPack,
+    stockKind: isCreatorImport ? null : meta.kind,
     stockPath: path.relative(ROOT, item.path),
     stockHash: hash,
     stockProbe: probe || null,
@@ -406,8 +432,12 @@ async function main() {
   const owner = await loadOwner(UID);
   console.log(`[stock-upload] owner=${owner.email || owner.uid} username=${owner.username}`);
   console.log(`[stock-upload] dir=${ROOT} manifest=${MANIFEST}`);
-  await ensureProfileCategories(UID);
-  console.log(`[stock-upload] profileCategories=${STOCK_PROFILE_CATEGORIES.length} shelves`);
+  if (!SKIP_PROFILE_CATEGORIES) {
+    await ensureProfileCategories(UID);
+    console.log(`[stock-upload] profileCategories=${STOCK_PROFILE_CATEGORIES.length} shelves`);
+  } else {
+    console.log('[stock-upload] skip-profile-categories=1');
+  }
   const manifest = loadManifest();
 
   let totalOk = 0; let totalFail = 0; const allSamples = [];
