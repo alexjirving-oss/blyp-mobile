@@ -142,6 +142,11 @@ import GlobalPostUploadProgress from './src/components/GlobalPostUploadProgress'
 import ProfileCompletionGate from './src/components/ProfileCompletionGate';
 // Lazy screens (defer heavy modules until navigated)
 const ArtilleryGameScreen = React.lazy(() => import('./src/games/artillery/ArtilleryGameScreen'));
+const Grid9ArenaScreen = React.lazy(() =>
+  import('./src/games/grid9/Grid9ArenaScreen').then((mod) => ({
+    default: mod.Grid9ArenaScreen,
+  }))
+);
 const CameraScreen = React.lazy(() => import('./src/screens/CameraScreen'));
 const ReviewScreen = React.lazy(() => import('./src/screens/ReviewScreen'));
 const VoiceMemoScreen = React.lazy(() => import('./src/screens/VoiceMemoScreen'));
@@ -612,6 +617,11 @@ function AppStack() {
       <Stack.Screen name="ArtilleryGame" children={(navProps) => (
         <Suspense fallback={null}>
           <ArtilleryGameScreen {...navProps} />
+        </Suspense>
+      )} />
+      <Stack.Screen name="Grid9Arena" children={(navProps) => (
+        <Suspense fallback={null}>
+          <Grid9ArenaScreen {...navProps} />
         </Suspense>
       )} />
       <Stack.Screen name="Camera" children={() => (

@@ -129,6 +129,15 @@ module.exports = () => {
       if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
       return '1';
     })(),
+    // Grid 9: ON only when explicitly set (same bake pattern as Artillery).
+    EXPO_PUBLIC_LIVE_GRID9_ENABLED: (() => {
+      const raw = String(process.env.EXPO_PUBLIC_LIVE_GRID9_ENABLED || '')
+        .trim()
+        .toLowerCase();
+      if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return '0';
+      if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on') return '1';
+      return '0';
+    })(),
     features: {
       manifestEnabled: process.env.EXPO_PUBLIC_MANIFEST_ENABLED === '1' || false,
     },

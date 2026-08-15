@@ -13,6 +13,7 @@ import {
   isMarbleRaceEnabled,
   isReactionDuelEnabled,
 } from '../../config/LiveGamesFlags';
+import { isGrid9Enabled } from '../../config/Grid9Flags';
 import FrenemiesRulesSheet from '../live/frenemies/FrenemiesRulesSheet';
 import FrenemiesWheelGlyph from '../live/frenemies/FrenemiesWheelGlyph';
 
@@ -20,6 +21,7 @@ const MARBLE_ENABLED = isMarbleRaceEnabled();
 const ARTILLERY_ENABLED = isArtilleryEnabled();
 const FRENEMIES_ENABLED = isFrenemiesEnabled();
 const REACTION_DUEL_ENABLED = isReactionDuelEnabled();
+const GRID9_ENABLED = isGrid9Enabled();
 
 const TEAL = '#00D2BE';
 const GOLD = '#F5C542';
@@ -151,6 +153,14 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
     onSelectChatTab?.('battles');
   };
 
+  const openGrid9 = () => {
+    try {
+      navigation?.navigate?.('Grid9Arena');
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.lead}>
@@ -242,6 +252,29 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
         ]}
         ctaLabel="Open Battle HQ"
         onCta={openBattles}
+      />
+
+      <GameCard
+        icon="grid"
+        title="Grid 9"
+        badge={GRID9_ENABLED ? 'Arena open' : 'Coming soon'}
+        body={
+          GRID9_ENABLED
+            ? 'Nine-slot arena — queue, weapons, shields, and jackpot. Open the arena from Games when the flag is on.'
+            : 'Grid 9 will appear here once EXPO_PUBLIC_LIVE_GRID9_ENABLED is on in this build.'
+        }
+        steps={
+          GRID9_ENABLED
+            ? [
+                'Tap Open Grid 9 Arena below.',
+                'Join the queue when the arena connects.',
+                'Play your turn — weapons, shields, and mercenary funding are in-match.',
+              ]
+            : null
+        }
+        ctaLabel={GRID9_ENABLED ? 'Open Grid 9 Arena' : null}
+        onCta={GRID9_ENABLED ? openGrid9 : null}
+        muted={!GRID9_ENABLED}
       />
 
       <View style={styles.lobbyCard}>
