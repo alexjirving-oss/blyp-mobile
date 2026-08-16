@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { SurfaceShell } from "@/components/SurfaceShell";
 
-export const metadata: Metadata = { title: "Following" };
+export const metadata: Metadata = {
+  title: "Following",
+  robots: { index: false, follow: false },
+};
 
 export default function FollowingPage() {
   return (

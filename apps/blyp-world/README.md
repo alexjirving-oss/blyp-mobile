@@ -2,7 +2,15 @@
 
 Day-one web product: For You, `/v/[id]`, Cognito login, Stage `/u/[username]`, LIVE directory/watch, Stripe coin top-up, **LIVE Studio** (`/live/studio`) with IVS Real-Time Web Broadcast host publish + guest accept.
 
-**Live deploy:** https://blyp.world (Netlify site `blyp-world-app`)
+## Live deploy
+
+https://blyp.world (Netlify site `blyp-world-app`)
+
+## SEO / Google presence
+
+See **[GOOGLE_PRESENCE_CHECKLIST.md](./GOOGLE_PRESENCE_CHECKLIST.md)** for Search Console, Play listing, and Business Profile steps.
+
+On-site: `/about/`, `/download/`, `robots.txt`, `sitemap.xml`, Organization JSON-LD.
 
 ## Dev
 
