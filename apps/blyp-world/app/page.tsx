@@ -36,8 +36,8 @@ export default function HomePage() {
           Watch. Live. Gift.
         </h1>
         <p className="mt-6 max-w-md text-lg leading-relaxed text-[var(--blyp-muted)]">
-          Blyp is a short-video and live-streaming product — For You, LIVE,
-          Stage, and coins — on the web at blyp.world and on Google Play.
+          A full web product — For You, LIVE, Stage, and coins — not a download
+          funnel wearing a homepage.
         </p>
         <div className="mt-10 flex flex-wrap items-center gap-4">
           <Link
@@ -52,28 +52,28 @@ export default function HomePage() {
           >
             LIVE
           </Link>
+        </div>
+        <p className="mt-8 max-w-lg text-sm text-[var(--blyp-muted)]">
+          <Link href="/about/" className="text-[var(--blyp-teal)] underline-offset-2 hover:underline">
+            About
+          </Link>
+          {" · "}
+          <Link href="/download/" className="text-[var(--blyp-teal)] underline-offset-2 hover:underline">
+            Get the app
+          </Link>
+          {" · "}
           <a
             href={PLAY_STORE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-full border border-[var(--blyp-line)] px-7 py-3.5 text-base font-semibold text-[var(--blyp-fog)] transition hover:border-[var(--blyp-teal)]"
+            className="text-[var(--blyp-teal)] underline-offset-2 hover:underline"
           >
-            Get the app
+            Google Play
           </a>
-        </div>
-        <p className="mt-8 max-w-lg text-sm text-[var(--blyp-muted)]">
-          New here?{" "}
-          <Link href="/about/" className="text-[var(--blyp-teal)] underline-offset-2 hover:underline">
-            About Blyp
-          </Link>
-          {" · "}
-          <Link href="/download/" className="text-[var(--blyp-teal)] underline-offset-2 hover:underline">
-            Download
-          </Link>
           {" · "}
           <a
             href={`mailto:${CONTACT_EMAIL}`}
-            className="text-[var(--blyp-teal)] underline-offset-2 hover:underline"
+            className="underline-offset-2 hover:underline"
           >
             {CONTACT_EMAIL}
           </a>

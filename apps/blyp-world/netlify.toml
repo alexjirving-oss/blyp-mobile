@@ -27,6 +27,12 @@
   force = true
 
 [[redirects]]
+  from = "/live/blyp-studio"
+  to = "/live/blyp-studio/"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/live/:id"
   to = "/live/_/"
   status = 200

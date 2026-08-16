@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import { SoftGateModal } from "./SoftGateModal";
@@ -20,8 +21,43 @@ const FOOTER = [
   { href: "/foryou/", label: "For You" },
 ] as const;
 
+/** Full-viewport operator UIs — no site header/footer (auth still available). */
+function isBareStudioPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/live/blyp-studio") ||
+    pathname.startsWith("/live/studio")
+  );
+}
+
+/**
+ * Immersive product surfaces sized to `100dvh - header`.
+ * Marketing footer must NOT appear here or the viewport math breaks.
+ */
+function isImmersivePath(pathname: string): boolean {
+  if (pathname.startsWith("/foryou")) return true;
+  if (pathname.startsWith("/v/")) return true;
+  // Watch a session: /live/:id — not directory /live/
+  if (/^\/live\/[^/]+/.test(pathname) && !isBareStudioPath(pathname)) {
+    return true;
+  }
+  return false;
+}
+
 function ChromeInner({ children }: { children: ReactNode }) {
   const { session, logout } = useAuth();
+  const pathname = usePathname() || "/";
+  const bare = isBareStudioPath(pathname);
+  const immersive = !bare && isImmersivePath(pathname);
+  const showFooter = !bare && !immersive;
+
+  if (bare) {
+    return (
+      <>
+        {children}
+        <SoftGateModal />
+      </>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col text-[var(--blyp-fog)]">
@@ -82,53 +118,55 @@ function ChromeInner({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="flex-1">{children}</main>
-      <footer className="border-t border-[var(--blyp-line)] py-10">
-        <div className="mx-auto flex max-w-[1200px] flex-col gap-6 px-5 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="font-display text-lg font-bold tracking-tight">
-              Blyp
-              <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--blyp-teal)] align-middle" />
-            </p>
-            <p className="mt-2 max-w-xs text-sm text-[var(--blyp-muted)]">
-              Short video, LIVE, and coins — on the web and on Google Play.
-            </p>
-          </div>
-          <nav
-            className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-[var(--blyp-muted)]"
-            aria-label="Footer"
-          >
-            {FOOTER.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
+      {showFooter ? (
+        <footer className="border-t border-[var(--blyp-line)] py-10">
+          <div className="mx-auto flex max-w-[1200px] flex-col gap-6 px-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="font-display text-lg font-bold tracking-tight">
+                Blyp
+                <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--blyp-teal)] align-middle" />
+              </p>
+              <p className="mt-2 max-w-xs text-sm text-[var(--blyp-muted)]">
+                Short video, LIVE, and coins — on the web and on Google Play.
+              </p>
+            </div>
+            <nav
+              className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-[var(--blyp-muted)]"
+              aria-label="Footer"
+            >
+              {FOOTER.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="hover:text-[var(--blyp-fog)]"
+                >
+                  {item.label}
+                </Link>
+              ))}
+              <a
+                href={PLAY_STORE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="hover:text-[var(--blyp-fog)]"
               >
-                {item.label}
-              </Link>
-            ))}
-            <a
-              href={PLAY_STORE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-[var(--blyp-fog)]"
-            >
-              Google Play
+                Google Play
+              </a>
+              <a
+                href={`mailto:${CONTACT_EMAIL}`}
+                className="hover:text-[var(--blyp-fog)]"
+              >
+                Contact
+              </a>
+            </nav>
+          </div>
+          <p className="mx-auto mt-8 max-w-[1200px] px-5 text-xs text-[var(--blyp-muted)]">
+            © {new Date().getFullYear()} Blyp · Spelled B-L-Y-P ·{" "}
+            <a href="https://blyp.world/" className="hover:text-[var(--blyp-fog)]">
+              blyp.world
             </a>
-            <a
-              href={`mailto:${CONTACT_EMAIL}`}
-              className="hover:text-[var(--blyp-fog)]"
-            >
-              Contact
-            </a>
-          </nav>
-        </div>
-        <p className="mx-auto mt-8 max-w-[1200px] px-5 text-xs text-[var(--blyp-muted)]">
-          © {new Date().getFullYear()} Blyp · Spelled B-L-Y-P ·{" "}
-          <a href="https://blyp.world/" className="hover:text-[var(--blyp-fog)]">
-            blyp.world
-          </a>
-        </p>
-      </footer>
+          </p>
+        </footer>
+      ) : null}
       <SoftGateModal />
     </div>
   );

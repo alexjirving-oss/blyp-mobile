@@ -13,7 +13,7 @@ import {
 export const metadata: Metadata = {
   title: "About Blyp",
   description:
-    "What Blyp is: a short-video and LIVE social product on blyp.world and Google Play. Brand spelling Blyp (B-L-Y-P), company contacts, and how to get the app.",
+    "What Blyp is: short video, LIVE, Stage, and coins on blyp.world and Google Play.",
   alternates: { canonical: "/about/" },
   openGraph: {
     title: "About Blyp",
@@ -34,11 +34,11 @@ const FAQ = [
   },
   {
     q: "Is Blyp only an app?",
-    a: "No. Blyp runs as a full web product at blyp.world and as a mobile app on Google Play. Reach is earned, not bought.",
+    a: "No. Blyp runs as a full web product at blyp.world and as a mobile app on Google Play.",
   },
   {
     q: "Where can I download Blyp?",
-    a: "Android: Google Play (com.blyp.mobile). Or open https://blyp.world/download/ for the current store link.",
+    a: "Android: Google Play (com.blyp.mobile). Or open https://blyp.world/download/ for the store link.",
   },
 ] as const;
 
@@ -70,106 +70,63 @@ export default function AboutPage() {
         Blyp
       </h1>
       <p className="mt-4 text-lg leading-relaxed text-[var(--blyp-muted)]">
-        Blyp (B-L-Y-P) is a live-first social product: short video, LIVE
-        streaming, Stage creator pages, and coins — on{" "}
+        Short video, LIVE streaming, Stage pages, and coins — on{" "}
         <strong className="font-semibold text-[var(--blyp-fog)]">blyp.world</strong>{" "}
-        and on Google Play.
+        and Google Play. Reach is earned, not bought.
       </p>
 
       <section className="mt-12 space-y-4">
         <h2 className="font-display text-xl font-bold text-[var(--blyp-fog)]">
-          What we make
+          Product
         </h2>
         <ul className="list-disc space-y-2 pl-5 text-[var(--blyp-muted)]">
           <li>
             <Link href="/foryou/" className="text-[var(--blyp-teal)] hover:underline">
               For You
             </Link>{" "}
-            — watch short video without an account.
+            — watch without an account.
           </li>
           <li>
             <Link href="/live/" className="text-[var(--blyp-teal)] hover:underline">
               LIVE
             </Link>{" "}
-            — real sessions, gifts, and creator tools.
+            — real sessions and gifts.
           </li>
-          <li>
-            Stage pages for creators, plus coins on web and in-app.
-          </li>
+          <li>Stage pages and coins on web and in-app.</li>
         </ul>
       </section>
 
-      <section className="mt-12 space-y-4">
+      <section className="mt-12 space-y-3 text-sm text-[var(--blyp-muted)]">
         <h2 className="font-display text-xl font-bold text-[var(--blyp-fog)]">
-          Company & contact
+          Contact
         </h2>
-        <p className="text-[var(--blyp-muted)]">
-          Blyp operates primarily online (no public walk-in storefront). Use
-          these contacts for brand and product inquiries:
+        <p>
+          <a href={`mailto:${CONTACT_EMAIL}`} className="text-[var(--blyp-teal)] hover:underline">
+            {CONTACT_EMAIL}
+          </a>
+          {" · "}
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="text-[var(--blyp-teal)] hover:underline">
+            {SUPPORT_EMAIL}
+          </a>
+          {" · "}
+          <a href={`mailto:${PRIVACY_EMAIL}`} className="text-[var(--blyp-teal)] hover:underline">
+            {PRIVACY_EMAIL}
+          </a>
         </p>
-        <dl className="space-y-3 text-sm text-[var(--blyp-muted)]">
-          <div>
-            <dt className="font-semibold text-[var(--blyp-fog)]">Brand name</dt>
-            <dd>Blyp (B-L-Y-P)</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-[var(--blyp-fog)]">Website</dt>
-            <dd>
-              <a href={SITE_URL} className="text-[var(--blyp-teal)] hover:underline">
-                {SITE_URL}
-              </a>
-            </dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-[var(--blyp-fog)]">General</dt>
-            <dd>
-              <a
-                href={`mailto:${CONTACT_EMAIL}`}
-                className="text-[var(--blyp-teal)] hover:underline"
-              >
-                {CONTACT_EMAIL}
-              </a>
-            </dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-[var(--blyp-fog)]">Support</dt>
-            <dd>
-              <a
-                href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-[var(--blyp-teal)] hover:underline"
-              >
-                {SUPPORT_EMAIL}
-              </a>
-            </dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-[var(--blyp-fog)]">Privacy</dt>
-            <dd>
-              <a
-                href={`mailto:${PRIVACY_EMAIL}`}
-                className="text-[var(--blyp-teal)] hover:underline"
-              >
-                {PRIVACY_EMAIL}
-              </a>
-            </dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-[var(--blyp-fog)]">Android app</dt>
-            <dd>
-              <a
-                href={PLAY_STORE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[var(--blyp-teal)] hover:underline"
-              >
-                Google Play — com.blyp.mobile
-              </a>
-            </dd>
-          </div>
-        </dl>
+        <p>
+          Spelled B-L-Y-P · Android{" "}
+          <a
+            href={PLAY_STORE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--blyp-teal)] hover:underline"
+          >
+            com.blyp.mobile
+          </a>
+        </p>
       </section>
 
-      <section className="mt-12 space-y-6">
+      <section className="mt-12 space-y-5">
         <h2 className="font-display text-xl font-bold text-[var(--blyp-fog)]">
           FAQ
         </h2>
@@ -181,12 +138,18 @@ export default function AboutPage() {
         ))}
       </section>
 
-      <p className="mt-14">
+      <p className="mt-14 flex flex-wrap gap-4">
         <Link
-          href="/download/"
+          href="/foryou/"
           className="inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-semibold text-[var(--blyp-ink)] transition hover:bg-[var(--blyp-teal-deep)] hover:text-[var(--blyp-fog)]"
         >
-          Get Blyp on Google Play
+          Open For You
+        </Link>
+        <Link
+          href="/download/"
+          className="inline-flex rounded-full border border-[var(--blyp-line)] px-6 py-3 text-sm font-semibold text-[var(--blyp-fog)] transition hover:border-[var(--blyp-teal)]"
+        >
+          Download
         </Link>
       </p>
     </article>
