@@ -7,6 +7,7 @@
  * Fail-soft: load/play errors are swallowed. Respects module mute + iOS silent switch via mode.
  */
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { isGrid9LiveKitAudioActive } from './grid9LiveKitAudio';
 
 export type Grid9AudioCue =
   | 'arena_live'
@@ -53,6 +54,9 @@ export function isGrid9AudioMuted(): boolean {
 }
 
 async function ensurePlaybackMode(): Promise<void> {
+  // playThroughEarpieceAndroid:false forces MODE_NORMAL and can leave Fold
+  // on the earpiece while LiveKit is in MODE_IN_COMMUNICATION.
+  if (isGrid9LiveKitAudioActive()) return;
   if (modeReady) return;
   try {
     await Audio.setAudioModeAsync({

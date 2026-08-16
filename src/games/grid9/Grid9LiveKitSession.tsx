@@ -5,6 +5,12 @@ import {
   type Grid9LiveKitCreds,
 } from './grid9LiveKitToken';
 import { requestCameraAndAudioPermission } from '../../utils/permissions';
+import {
+  burstGrid9Loudspeaker,
+  configureGrid9LiveKitAudio,
+  startGrid9LoudspeakerGuard,
+  stopGrid9LoudspeakerGuard,
+} from './grid9LiveKitAudio';
 import { Text, View } from './nw';
 
 /**
@@ -94,18 +100,12 @@ export function Grid9LiveKitSession({
         const lk = require('@livekit/react-native');
         // eslint-disable-next-line global-require
         const client = require('livekit-client');
-        try {
-          await lk.AudioSession?.configureAudio?.({
-            android: {
-              preferredOutputList: ['speaker', 'bluetooth', 'headset', 'earpiece'],
-            },
-            ios: { defaultOutput: 'speaker' },
-          });
-          await lk.AudioSession?.startAudioSession?.();
-        } catch {
-          /* soft */
+        await configureGrid9LiveKitAudio(lk);
+        if (cancelled) {
+          await stopGrid9LoudspeakerGuard(lk);
+          return;
         }
-        if (cancelled) return;
+        startGrid9LoudspeakerGuard(lk);
         setMods({
           LiveKitRoom: lk.LiveKitRoom,
           VideoTrack: lk.VideoTrack,
@@ -124,9 +124,9 @@ export function Grid9LiveKitSession({
       try {
         // eslint-disable-next-line global-require
         const lk = require('@livekit/react-native');
-        lk.AudioSession?.stopAudioSession?.();
+        void stopGrid9LoudspeakerGuard(lk);
       } catch {
-        /* soft */
+        void stopGrid9LoudspeakerGuard();
       }
     };
   }, [creds, onStatus]);
@@ -159,6 +159,7 @@ export function Grid9LiveKitSession({
         audio={shouldPublish}
         video={shouldPublish}
         options={{ adaptiveStream: true, dynacast: true, autoSubscribe: true }}
+        onConnected={() => burstGrid9Loudspeaker()}
         onError={() => onStatus?.('room-error')}
       >
         <Grid9LiveKitSpotlightVideo
