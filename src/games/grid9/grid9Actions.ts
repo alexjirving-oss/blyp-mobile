@@ -16,12 +16,39 @@ export function resolveGrid9DrawerMode(input: {
   spotlightSlotIndex: number | null;
 }): Grid9DrawerMode {
   if (input.targeting) return 'targeting';
-  if (!input.localPlayer || input.localSlotIndex == null) return 'idle';
-  if (isGrid9SlotEliminated(input.localPlayer) || input.localPlayer.mode === 'sabotage') {
-    return input.phase === 'combat' ? 'proxy_war' : 'idle';
+  if (!input.localPlayer || input.localSlotIndex == null) {
+    // In an active match without a resolved seat, stay waiting — not idle STANDBY.
+    if (
+      input.phase === 'combat' ||
+      input.phase === 'roulette' ||
+      input.phase === 'lobby_waiting' ||
+      input.phase === 'countdown' ||
+      input.phase === 'private_lobby'
+    ) {
+      return 'waiting';
+    }
+    return 'idle';
   }
-  if (input.phase !== 'combat' || input.localPlayer.status !== 'alive') return 'waiting';
-  if (input.spotlightSlotIndex === input.localSlotIndex) return 'my_turn';
+  if (isGrid9SlotEliminated(input.localPlayer) || input.localPlayer.mode === 'sabotage') {
+    return input.phase === 'combat' || input.phase === 'roulette' ? 'proxy_war' : 'idle';
+  }
+  if (input.localPlayer.status !== 'alive') return 'waiting';
+  // Open weapons when the roulette-active / combat spotlight seat is ours.
+  if (
+    input.spotlightSlotIndex === input.localSlotIndex &&
+    (input.phase === 'combat' || input.phase === 'roulette')
+  ) {
+    return 'my_turn';
+  }
+  if (
+    input.phase === 'combat' ||
+    input.phase === 'roulette' ||
+    input.phase === 'lobby_waiting' ||
+    input.phase === 'countdown' ||
+    input.phase === 'private_lobby'
+  ) {
+    return 'waiting';
+  }
   return 'waiting';
 }
 

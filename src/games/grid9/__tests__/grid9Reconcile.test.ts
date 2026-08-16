@@ -420,6 +420,50 @@ describe('Grid 9 sequence reconciliation', () => {
     expect(applied.session.assignment).toBeNull();
   });
 
+  it('clears assignment and match on PRIVATE_ROOM_STATUS left', () => {
+    const session = {
+      ...createEmptyGrid9Session(),
+      matchId: 'match-1',
+      assignment: {
+        assignmentId: 'a1',
+        matchId: 'match-1',
+        liveSessionId: 'live-1',
+        slotIndex: 0 as const,
+        assignmentToken: 'tok',
+        assignmentExpiresAt: '2099-01-01T00:00:00.000Z',
+      },
+      match: publicState(),
+      lastSeenStateVersion: 4,
+      lastSeenSequence: 4,
+    };
+    const left = {
+      protocol: 'grid9.ws' as const,
+      protocolVersion: 2 as const,
+      direction: 'server_to_client' as const,
+      routing: 'private' as const,
+      type: 'PRIVATE_ROOM_STATUS' as const,
+      messageId: 'msg-left',
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAA',
+      sentAt: '2026-08-15T00:00:00.000Z',
+      connectionSessionId: 'conn-1',
+      matchId: 'match-1',
+      sequence: null,
+      stateVersion: 5,
+      causationIntentId: 'intent-leave',
+      payload: {
+        status: 'left' as const,
+        matchId: 'match-1',
+        roomCode: '',
+        ownerUserId: '',
+        slotIndex: null,
+      },
+    };
+    const applied = applyGrid9ServerEvent(session, left as any);
+    expect(applied.session.matchId).toBeNull();
+    expect(applied.session.assignment).toBeNull();
+    expect(applied.session.match).toBeNull();
+  });
+
   it('accepts protocolVersion 2 on the wire and rejects v1', () => {
     const welcome = {
       protocol: 'grid9.ws',

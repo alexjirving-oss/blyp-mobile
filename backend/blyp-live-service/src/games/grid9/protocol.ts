@@ -32,6 +32,7 @@ export type Grid9ClientIntentType =
   | 'SEND_ARSENAL_GIFT'
   | 'BUY_INVENTORY_ITEM'
   | 'REQUEST_SNAPSHOT'
+  | 'MATCH_LEAVE'
   | 'PING';
 
 export type Grid9ServerEventType =
@@ -215,6 +216,10 @@ export interface Grid9ChangeSettingsPayload {
   settings: Record<string, unknown>;
 }
 
+export interface Grid9MatchLeavePayload {
+  reason?: 'user' | 'navigation' | null;
+}
+
 export type Grid9QueueJoinIntent = Grid9ConnectionIntentEnvelope<
   'QUEUE_JOIN',
   Grid9QueueJoinPayload
@@ -227,6 +232,20 @@ export type Grid9MatchJoinIntent = Grid9MatchAdmissionIntentEnvelope<
   'MATCH_JOIN',
   Grid9MatchJoinPayload
 >;
+export type Grid9MatchLeaveIntent = {
+  protocol: 'grid9.ws';
+  protocolVersion: 2;
+  direction: 'client_to_server';
+  connectionSessionId: string;
+  messageId: string;
+  intentId: string;
+  nonce: string;
+  sentAt: string;
+  type: 'MATCH_LEAVE';
+  matchId: string;
+  expectedStateVersion: number | null;
+  payload: Grid9MatchLeavePayload;
+};
 export type Grid9ReserveCoinsIntent = Grid9MatchCommandEnvelope<
   'RESERVE_COINS',
   Grid9ReserveCoinsPayload
@@ -281,6 +300,7 @@ export type Grid9ClientIntent =
   | Grid9QueueJoinIntent
   | Grid9QueueLeaveIntent
   | Grid9MatchJoinIntent
+  | Grid9MatchLeaveIntent
   | Grid9PrivateRoomCreateIntent
   | Grid9PrivateRoomJoinIntent
   | Grid9StartPrivateMatchIntent
@@ -304,7 +324,7 @@ export interface Grid9WelcomePayload {
 }
 
 export interface Grid9PrivateRoomStatusPayload {
-  status: 'created' | 'joined' | 'started' | 'kicked' | 'closed';
+  status: 'created' | 'joined' | 'started' | 'kicked' | 'closed' | 'left';
   matchId: string;
   roomCode: string;
   ownerUserId: string;

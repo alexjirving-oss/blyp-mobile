@@ -21,6 +21,7 @@ import {
   enqueueGrid9Player,
   leaveGrid9Queue,
 } from './grid9Matchmaker';
+import { leaveGrid9Match } from './grid9Leave';
 import {
   buyGrid9InventoryItem,
   fireGrid9Weapon,
@@ -441,6 +442,17 @@ async function handleGrid9Intent(args: {
         payload,
       }),
     );
+  } else if (intent.type === 'MATCH_LEAVE') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await leaveGrid9Match({
+      io,
+      socket,
+      identity,
+      connectionSessionId,
+      matchId: intent.matchId,
+      expectedStateVersion: intent.expectedStateVersion,
+      intentId: intent.intentId,
+    });
   } else if (intent.type === 'MATCH_JOIN') {
     await joinGrid9Match({
       io,

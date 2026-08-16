@@ -22,6 +22,8 @@ export const GRID9_ROULETTE_DURATION_MS = 3_500 as const;
 export const GRID9_TURN_DURATION_MS = 30_000 as const;
 /** Active seat highlight matches the 30s action window in v2. */
 export const GRID9_SPOTLIGHT_DURATION_MS = 30_000 as const;
+/** Sentinel spotlight auto-act ceiling — do not wait for client intents. */
+export const GRID9_SENTINEL_MAX_REACTION_MS = 1_500 as const;
 export const GRID9_MAX_MATCH_DURATION_MS = 15 * 60 * 1_000;
 
 export const GRID9_HOUSE_SEED_COINS = 100 as const;

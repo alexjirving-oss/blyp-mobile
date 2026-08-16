@@ -2,6 +2,7 @@ import { createHash, createHmac, randomUUID } from 'crypto';
 import {
   GRID9_MAX_HEALTH,
   GRID9_MAX_SHIELD_POINTS,
+  GRID9_SENTINEL_MAX_REACTION_MS,
   type Grid9SlotIndex,
 } from './constants';
 import type {
@@ -10,8 +11,8 @@ import type {
   Grid9SentinelPlayer,
 } from './players';
 import type { Grid9GameState } from './state';
-import type { Grid9WeaponId } from './catalog';
-import { GRID9_WEAPON_CATALOG } from './catalog';
+import type { Grid9ShieldId, Grid9WeaponId } from './catalog';
+import { GRID9_SHIELD_CATALOG, GRID9_WEAPON_CATALOG } from './catalog';
 
 type SentinelTemplate = {
   characterId: string;
@@ -138,6 +139,14 @@ function effectiveHealth(player: Grid9Player): number {
   return player.health + player.shieldPoints;
 }
 
+function isWeaponId(id: string): id is Grid9WeaponId {
+  return Object.prototype.hasOwnProperty.call(GRID9_WEAPON_CATALOG, id);
+}
+
+function isShieldId(id: string): id is Grid9ShieldId {
+  return Object.prototype.hasOwnProperty.call(GRID9_SHIELD_CATALOG, id);
+}
+
 export function createGrid9Sentinel(
   matchId: string,
   slotIndex: Grid9SlotIndex,
@@ -254,38 +263,192 @@ function orderedTargets(
   ];
 }
 
-export interface Grid9SentinelDecision {
-  weaponId: Grid9WeaponId;
-  targetSlotIndex: Grid9SlotIndex;
+export type Grid9SentinelPaymentKind =
+  | 'inventory'
+  | 'free_drop'
+  | 'mercenary_bankroll';
+
+export type Grid9SentinelDecision =
+  | {
+      kind: 'weapon';
+      weaponId: Grid9WeaponId;
+      targetSlotIndex: Grid9SlotIndex;
+      payment: Grid9SentinelPaymentKind;
+    }
+  | {
+      kind: 'shield';
+      shieldId: Grid9ShieldId;
+      payment: Grid9SentinelPaymentKind;
+    };
+
+function pickBankrollWeapon(bankrollCoins: number, aggressionBps: number): Grid9WeaponId | null {
+  if (
+    aggressionBps >= 7600 &&
+    bankrollCoins >= GRID9_WEAPON_CATALOG.mega_bomb.costCoins
+  ) {
+    return 'mega_bomb';
+  }
+  if (
+    aggressionBps >= 6000 &&
+    bankrollCoins >= GRID9_WEAPON_CATALOG.fireball.costCoins
+  ) {
+    return 'fireball';
+  }
+  if (bankrollCoins >= GRID9_WEAPON_CATALOG.arrow.costCoins) {
+    return 'arrow';
+  }
+  return null;
 }
 
+function chooseWeaponOption(
+  state: Grid9GameState,
+  sentinel: Grid9SentinelPlayer,
+): Extract<Grid9SentinelDecision, { kind: 'weapon' }> | null {
+  const target = orderedTargets(state, sentinel)[0];
+  if (!target) return null;
+
+  if (
+    state.turn?.freeDropEquipped &&
+    state.turn.freeDropItemId &&
+    isWeaponId(state.turn.freeDropItemId)
+  ) {
+    return {
+      kind: 'weapon',
+      weaponId: state.turn.freeDropItemId,
+      targetSlotIndex: target.slotIndex,
+      payment: 'free_drop',
+    };
+  }
+
+  const inventoryWeapon = sentinel.inventory.find(isWeaponId);
+  if (inventoryWeapon) {
+    return {
+      kind: 'weapon',
+      weaponId: inventoryWeapon,
+      targetSlotIndex: target.slotIndex,
+      payment: 'inventory',
+    };
+  }
+
+  const bankrollWeapon = pickBankrollWeapon(
+    sentinel.mercenaryBankrollCoins,
+    sentinel.ai.aggressionBps,
+  );
+  if (bankrollWeapon) {
+    return {
+      kind: 'weapon',
+      weaponId: bankrollWeapon,
+      targetSlotIndex: target.slotIndex,
+      payment: 'mercenary_bankroll',
+    };
+  }
+
+  return null;
+}
+
+function chooseShieldOption(
+  state: Grid9GameState,
+  sentinel: Grid9SentinelPlayer,
+): Extract<Grid9SentinelDecision, { kind: 'shield' }> | null {
+  if (
+    state.turn?.freeDropEquipped &&
+    state.turn.freeDropItemId &&
+    isShieldId(state.turn.freeDropItemId)
+  ) {
+    return {
+      kind: 'shield',
+      shieldId: state.turn.freeDropItemId,
+      payment: 'free_drop',
+    };
+  }
+
+  const inventoryShield = sentinel.inventory.find(isShieldId);
+  if (inventoryShield) {
+    return {
+      kind: 'shield',
+      shieldId: inventoryShield,
+      payment: 'inventory',
+    };
+  }
+
+  if (
+    sentinel.mercenaryBankrollCoins >= GRID9_SHIELD_CATALOG.basic_shield.costCoins
+  ) {
+    return {
+      kind: 'shield',
+      shieldId: 'basic_shield',
+      payment: 'mercenary_bankroll',
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Server-side bot decision for a sentinel spotlight seat.
+ * Prefers inventory / free-drop so bots act without waiting for client intents
+ * or mercenary funding. Returns null → caller auto-shields / passes.
+ */
 export function chooseGrid9SentinelDecision(
   state: Grid9GameState,
   sentinel: Grid9SentinelPlayer,
 ): Grid9SentinelDecision | null {
+  if (state.phase !== 'combat' || sentinel.status !== 'alive' || !state.turn) {
+    return null;
+  }
+  if (state.turn.spotlightSlotIndex !== sentinel.slotIndex) {
+    return null;
+  }
   if (
-    state.phase !== 'combat' ||
-    sentinel.status !== 'alive' ||
-    sentinel.mercenaryBankrollCoins < GRID9_WEAPON_CATALOG.arrow.costCoins
+    state.turn.attacksUsedThisTurn >= 1 &&
+    state.turn.defensesUsedThisTurn >= 1
   ) {
     return null;
   }
 
-  let weaponId: Grid9WeaponId = 'arrow';
-  if (
-    sentinel.ai.aggressionBps >= 7600 &&
-    sentinel.mercenaryBankrollCoins >=
-      GRID9_WEAPON_CATALOG.mega_bomb.costCoins
-  ) {
-    weaponId = 'mega_bomb';
-  } else if (
-    sentinel.ai.aggressionBps >= 6000 &&
-    sentinel.mercenaryBankrollCoins >=
-      GRID9_WEAPON_CATALOG.fireball.costCoins
-  ) {
-    weaponId = 'fireball';
+  const preferShield =
+    sentinel.health <= sentinel.ai.shieldBelowHealth &&
+    state.turn.defensesUsedThisTurn < 1;
+
+  if (preferShield) {
+    const shield = chooseShieldOption(state, sentinel);
+    if (shield) return shield;
   }
 
-  const target = orderedTargets(state, sentinel)[0];
-  return target ? { weaponId, targetSlotIndex: target.slotIndex } : null;
+  if (state.turn.attacksUsedThisTurn < 1) {
+    const weapon = chooseWeaponOption(state, sentinel);
+    if (weapon) return weapon;
+  }
+
+  if (state.turn.defensesUsedThisTurn < 1) {
+    const shield = chooseShieldOption(state, sentinel);
+    if (shield) return shield;
+  }
+
+  return null;
+}
+
+/** Deterministic reaction delay for sentinel spotlight, capped ~1.5s. */
+export function grid9SentinelReactionMs(sentinel: Grid9SentinelPlayer): number {
+  const mid = Math.floor(
+    (sentinel.ai.minimumReactionMs + sentinel.ai.maximumReactionMs) / 2,
+  );
+  return Math.min(
+    GRID9_SENTINEL_MAX_REACTION_MS,
+    Math.max(500, Math.min(mid, GRID9_SENTINEL_MAX_REACTION_MS)),
+  );
+}
+
+/** Combat turn timer due-at: early for sentinels, full 30s for humans. */
+export function grid9CombatTimerDueAtMs(state: Grid9GameState): number | null {
+  if (state.phase !== 'combat' || !state.turn) return null;
+  const endsAt = Date.parse(state.turn.endsAt);
+  const spotlight = state.players[state.turn.spotlightSlotIndex];
+  if (!spotlight || spotlight.kind !== 'sentinel' || spotlight.status !== 'alive') {
+    return endsAt;
+  }
+  if (state.turn.autoResolved) return endsAt;
+  const startedAt = Date.parse(state.turn.startedAt);
+  const early = startedAt + grid9SentinelReactionMs(spotlight);
+  return Math.min(endsAt, early);
 }

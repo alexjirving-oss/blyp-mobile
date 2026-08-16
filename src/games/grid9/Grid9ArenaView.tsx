@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import './grid9.css';
 import { GRID9_DEFAULT_MERCENARY_FUND_COINS, type Grid9ArsenalItem } from './catalog';
@@ -8,6 +9,7 @@ import { Grid9Board } from './Grid9Board';
 import { Grid9EntryPortal } from './Grid9EntryPortal';
 import { Grid9Header } from './Grid9Header';
 import { Grid9SideRail } from './Grid9SideRail';
+import { Grid9SpotlightStage } from './Grid9SpotlightStage';
 import { Grid9VictoryModal } from './Grid9VictoryModal';
 import { Grid9WeaponsGalleryModal } from './Grid9WeaponsGalleryModal';
 import {
@@ -27,6 +29,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     match,
     session,
     connectionStatus,
+    leaveArena,
     sendQueueJoinIntent,
     sendFireWeaponIntent,
     sendPurchaseShieldIntent,
@@ -35,6 +38,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     sendPrivateRoomJoinIntent,
     sendStartPrivateMatchIntent,
   } = useGrid9();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [entered, setEntered] = useState(spectate);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -42,6 +46,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const [selection, setSelection] = useState<Grid9ArsenalSelection | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [victoryDismissed, setVictoryDismissed] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   const localSlotIndex = session.assignment?.slotIndex ?? null;
   const activeSlotIndex =
@@ -54,6 +59,10 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     localSlotIndex == null
       ? null
       : match?.players.find((player) => player.slotIndex === localSlotIndex) ?? null;
+  const spotlightPlayer =
+    activeSlotIndex == null
+      ? null
+      : match?.players.find((player) => player.slotIndex === activeSlotIndex) ?? null;
   const availableCoins = Number(session.escrow?.availableCoins ?? 0);
   const targeting = selection != null;
 
@@ -89,6 +98,21 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   useEffect(() => {
     if (spectate && match) setEntered(true);
   }, [spectate, match]);
+
+  const onLeave = useCallback(async () => {
+    if (leaving) return;
+    setLeaving(true);
+    try {
+      await leaveArena('user');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Leave failed');
+    } finally {
+      setLeaving(false);
+      if (navigation.canGoBack()) {
+        navigation.goBack();
+      }
+    }
+  }, [leaveArena, leaving, navigation]);
 
   const targetableSlotIndices = useMemo(() => {
     const intent =
@@ -156,7 +180,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
 
   if (!entered && !match && !spectate) {
     return (
-      <View className="flex-1 bg-slate-950" style={{ paddingTop: insets.top }}>
+      <View className="flex-1 bg-blyp-ink" style={{ paddingTop: insets.top }}>
         <Grid9EntryPortal
           connectionStatus={connectionStatus}
           lastError={session.lastError}
@@ -194,14 +218,14 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
 
   if (spectate && !match) {
     return (
-      <View className="flex-1 items-center justify-center bg-slate-950 px-8" style={{ paddingTop: insets.top }}>
-        <Text className="text-[11px] font-black uppercase tracking-[3px] text-slate-500">
+      <View className="flex-1 items-center justify-center bg-blyp-ink px-8" style={{ paddingTop: insets.top }}>
+        <Text className="text-[11px] font-black uppercase tracking-[3px] text-blyp-faint">
           Spectating
         </Text>
-        <Text className="mt-3 text-center text-base font-extrabold text-cyan-300">
+        <Text className="mt-3 text-center text-base font-extrabold text-blyp-primary">
           Joining as audience…
         </Text>
-        <Text className="mt-2 text-center text-xs font-semibold text-slate-400">
+        <Text className="mt-2 text-center text-xs font-semibold text-blyp-muted">
           {session.lastError || connectionStatus}
         </Text>
       </View>
@@ -215,20 +239,26 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const showVictory = match?.phase === 'completed' && !victoryDismissed;
 
   return (
-    <View className="flex-1 bg-slate-950" style={{ paddingTop: insets.top }}>
-      <Grid9Header match={match} connectionStatus={connectionStatus} nowMs={nowMs} />
+    <View className="flex-1 bg-blyp-ink" style={{ paddingTop: insets.top }}>
+      <Grid9Header
+        match={match}
+        connectionStatus={connectionStatus}
+        nowMs={nowMs}
+        onLeave={onLeave}
+        leaving={leaving}
+      />
       <Grid9ArrivalTicker match={match} />
       <Grid9SideRail match={match} />
       {match?.phase === 'private_lobby' ? (
         <View className="px-4 pb-2">
-          <View className="rounded-2xl border border-amber-400/40 bg-slate-900 px-3 py-3">
-            <Text className="text-center text-[10px] font-bold uppercase tracking-[2px] text-slate-400">
+          <View className="rounded-2xl border border-blyp-primary/40 bg-blyp-card px-3 py-3">
+            <Text className="text-center text-[10px] font-bold uppercase tracking-[2px] text-blyp-muted">
               Private lobby · code {match.roomCode ?? '······'}
             </Text>
             {match.ownerPublicProfileId &&
             localPlayer?.publicProfileId === match.ownerPublicProfileId ? (
               <TouchableOpacity
-                className="mt-2 items-center rounded-xl border border-amber-400 bg-amber-400 py-2.5"
+                className="mt-2 items-center rounded-xl border border-blyp-primary bg-blyp-primary py-2.5"
                 activeOpacity={0.85}
                 onPress={() => {
                   try {
@@ -238,18 +268,19 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
                   }
                 }}
               >
-                <Text className="text-xs font-black uppercase tracking-[1px] text-slate-950">
+                <Text className="text-xs font-black uppercase tracking-[1px] text-blyp-ink">
                   Host start match
                 </Text>
               </TouchableOpacity>
             ) : (
-              <Text className="mt-2 text-center text-[11px] font-semibold text-slate-500">
+              <Text className="mt-2 text-center text-[11px] font-semibold text-blyp-faint">
                 Waiting for host to start
               </Text>
             )}
           </View>
         </View>
       ) : null}
+      <Grid9SpotlightStage player={spotlightPlayer} />
       <Grid9Board
         players={match?.players}
         spotlightSlotIndex={activeSlotIndex}

@@ -1,20 +1,31 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  GRID9_SENTINEL_MAX_REACTION_MS,
+} from './constants';
+import {
   applyGrid9ArsenalGift,
   applyGrid9InventoryBuy,
   applyGrid9MercenaryFunding,
   applyGrid9Weapon,
+  advanceGrid9Turn,
   beginGrid9Combat,
   createGrid9Match,
   kickGrid9SeatToAudience,
   landGrid9Roulette,
+  leaveGrid9SeatAsCombatant,
   resolveGrid9Actor,
   startGrid9Roulette,
 } from './grid9Engine';
+import { timerOutboxForState } from './grid9MatchService';
+import {
+  chooseGrid9SentinelDecision,
+  grid9CombatTimerDueAtMs,
+  grid9SentinelReactionMs,
+} from './grid9Sentinels';
 import { toGrid9PublicGameState } from './grid9Projection';
 import { parseGrid9GameState } from './schemas';
-
+import type { Grid9SentinelPlayer } from './players';
 const alex = {
   userId: '26522274-e001-70aa-51b6-bcbbdffc43bb',
   publicProfileId: 'alex',
@@ -332,5 +343,85 @@ describe('Grid 9 authoritative engine', () => {
     const kicked = kickGrid9SeatToAudience(lobby, alex.userId, 'guest-1');
     assert.equal(kicked.state.players[guest.slotIndex].kind, 'sentinel');
     assert.equal(kicked.state.audienceCount, beforeAudience + 1);
+  });
+
+  it('leave seat replaces combatant with sentinel without bumping audience', () => {
+    const state = combatState();
+    const beforeAudience = state.audienceCount;
+    const left = leaveGrid9SeatAsCombatant(state, alex.userId);
+    assert.equal(left.state.players[0].kind, 'sentinel');
+    assert.equal(left.state.audienceCount, beforeAudience);
+    assert.equal(left.kickedSlotIndex, 0);
+  });
+
+  it('sentinel spotlight chooses inventory attack and advances turn', () => {
+    const t0 = Date.parse('2026-08-15T04:00:00.000Z');
+    let state = createGrid9Match({
+      matchId: 'sentinel-auto-1',
+      liveSessionId: 'sentinel-live-1',
+      region: 'eu-west-2',
+      humans: [{ ...alex, queueTicketId: 'ticket-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    state = startGrid9Roulette(state, t0);
+    assert.ok(state.roulette);
+    const sentinelSlot = state.players.find((player) => player.kind === 'sentinel')!
+      .slotIndex;
+    state.roulette.selectedSlotIndex = sentinelSlot;
+    state = landGrid9Roulette(state, t0 + 3_500);
+    assert.equal(state.phase, 'combat');
+    assert.equal(state.turn?.spotlightSlotIndex, sentinelSlot);
+
+    const sentinel = state.players[sentinelSlot] as Grid9SentinelPlayer;
+    assert.equal(sentinel.kind, 'sentinel');
+    const reactionMs = grid9SentinelReactionMs(sentinel);
+    assert.ok(reactionMs <= GRID9_SENTINEL_MAX_REACTION_MS);
+    const dueMs = grid9CombatTimerDueAtMs(state)!;
+    assert.ok(dueMs - Date.parse(state.turn!.startedAt) <= GRID9_SENTINEL_MAX_REACTION_MS);
+    const timer = timerOutboxForState(state);
+    assert.equal(timer?.reason, 'turn_end');
+    assert.ok(
+      Date.parse(timer!.dueAt) - Date.parse(state.turn!.startedAt) <=
+        GRID9_SENTINEL_MAX_REACTION_MS,
+    );
+
+    const decision = chooseGrid9SentinelDecision(state, sentinel);
+    assert.ok(decision, 'sentinel must decide without client intents');
+    assert.equal(decision!.kind, 'weapon');
+    if (decision!.kind !== 'weapon') throw new Error('expected weapon');
+
+    const resolution = applyGrid9Weapon({
+      state,
+      actor: {
+        kind: 'sentinel',
+        sentinelId: sentinel.sentinelId,
+        displayName: sentinel.displayName,
+      },
+      sourceSlotIndex: sentinelSlot,
+      weaponId: decision.weaponId,
+      targetSlotIndex: decision.targetSlotIndex,
+      intentId: null,
+      serverOperationId: `auto-sentinel-${state.turn!.turnNumber}`,
+      ledgerEntryId: 'ledger-sentinel-auto',
+      payment:
+        decision.payment === 'mercenary_bankroll'
+          ? {
+              kind: 'mercenary_bankroll' as const,
+              sourceSlotIndex: sentinelSlot,
+            }
+          : { kind: decision.payment },
+      nowMs: Date.parse(state.turn!.startedAt) + reactionMs,
+    });
+    assert.equal(resolution.state.turn?.attacksUsedThisTurn, 1);
+    assert.equal(resolution.state.lastAction?.kind, 'weapon');
+
+    const advanced = advanceGrid9Turn(
+      resolution.state,
+      Date.parse(resolution.state.turn!.endsAt),
+    );
+    assert.ok(
+      advanced.phase === 'roulette' || advanced.phase === 'completed',
+      `expected roulette/completed after sentinel act, got ${advanced.phase}`,
+    );
   });
 });

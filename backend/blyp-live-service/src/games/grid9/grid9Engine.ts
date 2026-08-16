@@ -986,7 +986,7 @@ export function applyGrid9Weapon(args: {
     });
   }
   if (
-    args.actor.kind === 'human_player' &&
+    (args.actor.kind === 'human_player' || args.actor.kind === 'sentinel') &&
     args.state.turn &&
     args.sourceSlotIndex === args.state.turn.spotlightSlotIndex &&
     args.state.turn.attacksUsedThisTurn >= 1
@@ -1111,7 +1111,7 @@ export function applyGrid9Weapon(args: {
   if (
     state.turn &&
     args.sourceSlotIndex === state.turn.spotlightSlotIndex &&
-    args.actor.kind === 'human_player'
+    (args.actor.kind === 'human_player' || args.actor.kind === 'sentinel')
   ) {
     state.turn.attacksUsedThisTurn += 1;
   }
@@ -1291,7 +1291,7 @@ export function applyGrid9Shield(args: {
     throw new Grid9Error('COOLDOWN_ACTIVE', 'Shield is cooling down');
   }
   if (
-    args.actor.kind === 'human_player' &&
+    (args.actor.kind === 'human_player' || args.actor.kind === 'sentinel') &&
     args.state.turn &&
     args.sourceSlotIndex === args.state.turn.spotlightSlotIndex &&
     args.state.turn.defensesUsedThisTurn >= 1
@@ -1355,7 +1355,7 @@ export function applyGrid9Shield(args: {
   if (
     state.turn &&
     args.sourceSlotIndex === state.turn.spotlightSlotIndex &&
-    args.actor.kind === 'human_player'
+    (args.actor.kind === 'human_player' || args.actor.kind === 'sentinel')
   ) {
     state.turn.defensesUsedThisTurn += 1;
   }
@@ -1682,12 +1682,36 @@ export function kickGrid9SeatToAudience(
   ) {
     throw new Grid9Error('MATCH_NOT_ACTIVE', 'Cannot kick in this phase');
   }
+  return leaveGrid9SeatAsCombatant(current, targetUserId, nowMs, {
+    bumpAudience: true,
+  });
+}
+
+/**
+ * Self-leave (or host kick after auth): replace seated human with Sentinel.
+ * Self-leave does not bump audience — leaver exits the match entirely.
+ * Host kick sets bumpAudience so the kicked user becomes audience.
+ */
+export function leaveGrid9SeatAsCombatant(
+  current: Grid9GameState,
+  userId: string,
+  nowMs = Date.now(),
+  options?: { bumpAudience?: boolean },
+): Grid9KickResolution {
+  if (
+    current.phase === 'initializing' ||
+    current.phase === 'settling' ||
+    current.phase === 'completed' ||
+    current.phase === 'cancelled'
+  ) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Cannot leave seat in this phase');
+  }
   const human = current.players.find(
     (player): player is Grid9HumanPlayer =>
-      player.kind === 'human' && player.userId === targetUserId,
+      player.kind === 'human' && player.userId === userId,
   );
   if (!human) {
-    throw new Grid9Error('NOT_ELIGIBLE', 'Target is not a seated combatant', {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Not a seated combatant', {
       stateVersion: current.authority.stateVersion,
     });
   }
@@ -1701,11 +1725,54 @@ export function kickGrid9SeatToAudience(
     human.slotIndex,
     now,
   );
-  state.audienceCount = Math.max(0, state.audienceCount + 1);
+  if (options?.bumpAudience) {
+    state.audienceCount = Math.max(0, state.audienceCount + 1);
+  }
   return {
     state: mutationDone(state, current, now, 1),
     kickedSlotIndex: human.slotIndex,
-    targetUserId,
+    targetUserId: userId,
     wasSpotlight: Boolean(wasSpotlight),
   };
+}
+
+/**
+ * Fail-closed: private lobby host leave cancels the room (no host transfer).
+ */
+export function cancelGrid9PrivateLobby(
+  current: Grid9GameState,
+  hostUserId: string,
+  nowMs = Date.now(),
+): Grid9GameState {
+  if (current.phase !== 'private_lobby') {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Not a private lobby');
+  }
+  if (!current.ownerUserId || current.ownerUserId !== hostUserId) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Only the host can cancel the lobby');
+  }
+  const state = cloneState(current);
+  const now = iso(nowMs);
+  state.phase = 'cancelled';
+  state.phaseStartedAt = now;
+  state.phaseEndsAt = null;
+  state.turn = null;
+  state.roulette = null;
+  state.outcome = {
+    reason: 'system_cancelled',
+    winnerSlotIndex: null,
+    winnerKind: null,
+    winnerUserId: null,
+    winnerSentinelId: null,
+    jackpotCoins: state.jackpot.currentCoins,
+    sponsorPass: null,
+    entropyReveal: state.authority.entropySeed,
+    concludedAt: now,
+  };
+  state.authority.nextTurnAt = null;
+  state.jackpot.status = 'rollover_pending';
+  state.settlement.status = 'pending';
+  state.settlement.settlementId = randomUUID();
+  state.settlement.winnerPayoutCoins = 0;
+  state.settlement.rolloverCoins = state.jackpot.currentCoins;
+  return mutationDone(state, current, now, 1);
 }

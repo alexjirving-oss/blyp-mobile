@@ -4,6 +4,7 @@ export type Grid9ClientIntentType =
   | 'QUEUE_JOIN'
   | 'QUEUE_LEAVE'
   | 'MATCH_JOIN'
+  | 'MATCH_LEAVE'
   | 'PRIVATE_ROOM_CREATE'
   | 'PRIVATE_ROOM_JOIN'
   | 'START_PRIVATE_MATCH'
@@ -136,6 +137,10 @@ export interface Grid9MatchJoinPayload {
   assignmentToken: string;
 }
 
+export interface Grid9MatchLeavePayload {
+  reason?: 'user' | 'navigation' | null;
+}
+
 export interface Grid9ReserveCoinsPayload {
   amountCoins: number;
 }
@@ -199,6 +204,20 @@ export type Grid9MatchJoinIntent = Grid9MatchAdmissionIntentEnvelope<
   'MATCH_JOIN',
   Grid9MatchJoinPayload
 >;
+export type Grid9MatchLeaveIntent = {
+  protocol: 'grid9.ws';
+  protocolVersion: 2;
+  direction: 'client_to_server';
+  connectionSessionId: string;
+  messageId: string;
+  intentId: string;
+  nonce: string;
+  sentAt: string;
+  type: 'MATCH_LEAVE';
+  matchId: string;
+  expectedStateVersion: number | null;
+  payload: Grid9MatchLeavePayload;
+};
 export type Grid9PrivateRoomCreateIntent = Grid9ConnectionIntentEnvelope<
   'PRIVATE_ROOM_CREATE',
   Grid9PrivateRoomCreatePayload
@@ -245,6 +264,7 @@ export type Grid9ClientIntent =
   | Grid9QueueJoinIntent
   | Grid9QueueLeaveIntent
   | Grid9MatchJoinIntent
+  | Grid9MatchLeaveIntent
   | Grid9PrivateRoomCreateIntent
   | Grid9PrivateRoomJoinIntent
   | Grid9StartPrivateMatchIntent
@@ -266,7 +286,7 @@ export interface Grid9WelcomePayload {
 }
 
 export interface Grid9PrivateRoomStatusPayload {
-  status: 'created' | 'joined' | 'started' | 'kicked' | 'closed';
+  status: 'created' | 'joined' | 'started' | 'kicked' | 'closed' | 'left';
   matchId: string;
   roomCode: string;
   ownerUserId: string;
@@ -329,6 +349,24 @@ export interface Grid9PublicPlayer {
   publicProfileId?: string;
   sentinelId?: string;
   connectionState: Grid9HumanConnectionState | 'not_applicable';
+  /** Optional public feed ref from live-service projection (may lack playback URL). */
+  feed?:
+    | {
+        kind: 'human_live';
+        provider?: 'ivs' | 'livekit' | string;
+        streamId?: string;
+        participantId?: string;
+        playbackUrl?: string | null;
+        hlsUrl?: string | null;
+        streamUrl?: string | null;
+        url?: string | null;
+      }
+    | {
+        kind: 'sentinel_render';
+        characterId?: string;
+        animationSeed?: number;
+      }
+    | Record<string, unknown>;
 }
 
 export interface Grid9TurnState {

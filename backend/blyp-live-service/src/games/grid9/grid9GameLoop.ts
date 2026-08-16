@@ -3,6 +3,7 @@ import type { Server } from 'socket.io';
 import { getEconomyInfra } from '../../economy/infra';
 import { logger } from '../../config/logger';
 import {
+  GRID9_SHIELD_CATALOG,
   GRID9_WEAPON_CATALOG,
   type Grid9WeaponId,
 } from './catalog';
@@ -10,6 +11,7 @@ import { grid9CanonicalOperationHash } from './canonical';
 import {
   advanceGrid9Turn,
   applyGrid9MicroDrop,
+  applyGrid9Shield,
   applyGrid9Weapon,
   landGrid9Roulette,
   startGrid9Roulette,
@@ -345,40 +347,268 @@ async function processAutomatedPurchase(
 ): Promise<Grid9GameState> {
   if (!state.turn) return state;
   const source = state.players[state.turn.spotlightSlotIndex];
-  if (
-    source.status !== 'alive' ||
-    source.mercenaryBankrollCoins < GRID9_WEAPON_CATALOG.arrow.costCoins
-  ) {
+  if (source.status !== 'alive') {
     return state;
   }
-  const decision =
-    source.kind === 'sentinel'
-      ? chooseGrid9SentinelDecision(state, source as Grid9SentinelPlayer)
-      : (() => {
-          const target = lowestEffectiveHealthTarget(state, source);
-          const weaponId = chooseProxyWeapon(
-            source.mercenaryBankrollCoins,
-          );
-          return target && weaponId
-            ? { targetSlotIndex: target.slotIndex, weaponId }
-            : null;
-        })();
-  if (!decision) return state;
 
-  const operationId = `auto-${state.matchId}-${state.turn.turnNumber}-${source.slotIndex}`;
-  const actor: Grid9ActionActor =
-    source.kind === 'sentinel'
-      ? {
-          kind: 'sentinel',
-          sentinelId: source.sentinelId,
-          displayName: source.displayName,
-        }
-      : {
-          kind: 'mercenary_proxy',
+  if (source.kind === 'sentinel') {
+    const decision = chooseGrid9SentinelDecision(
+      state,
+      source as Grid9SentinelPlayer,
+    );
+    if (!decision) return state;
+
+    const operationId = `auto-${state.matchId}-${state.turn.turnNumber}-${source.slotIndex}`;
+    const actor: Grid9ActionActor = {
+      kind: 'sentinel',
+      sentinelId: source.sentinelId,
+      displayName: source.displayName,
+    };
+    const ledgerEntryId = randomUUID();
+
+    if (decision.kind === 'shield') {
+      const payment =
+        decision.payment === 'mercenary_bankroll'
+          ? {
+              kind: 'mercenary_bankroll' as const,
+              sourceSlotIndex: source.slotIndex,
+            }
+          : { kind: decision.payment };
+      const resolution = applyGrid9Shield({
+        state,
+        actor,
+        sourceSlotIndex: source.slotIndex,
+        shieldId: decision.shieldId,
+        beneficiarySlotIndex: source.slotIndex,
+        intentId: null,
+        serverOperationId: operationId,
+        ledgerEntryId,
+        payment,
+      });
+      const shield = GRID9_SHIELD_CATALOG[decision.shieldId];
+      const isFree =
+        decision.payment === 'inventory' || decision.payment === 'free_drop';
+      const operationHash = grid9CanonicalOperationHash({
+        matchId: state.matchId,
+        operationId,
+        kind: 'sentinel_purchase',
+        payload: decision,
+      });
+      const ledger: Grid9LedgerEntry | null = isFree
+        ? null
+        : {
+            schemaVersion: 1,
+            entryId: ledgerEntryId,
+            intentId: null,
+            matchId: state.matchId,
+            kind: 'shield_purchase',
+            actorUserId: null,
+            beneficiaryUserId: null,
+            sourceSlotIndex: source.slotIndex,
+            targetSlotIndex: source.slotIndex,
+            itemId: decision.shieldId,
+            fundingSource: 'mercenary_bankroll',
+            fundingBreakdown: {
+              platformReservationCoins: 0,
+              microDropCoins: 0,
+              mercenaryBankrollCoins: shield.costCoins,
+              jackpotPoolCoins: 0,
+            },
+            serverOperationId: operationId,
+            canonicalPayloadHash: operationHash,
+            debitCoins: shield.costCoins,
+            creditCoins: 0,
+            jackpotDeltaCoins: shield.jackpotContributionCoins,
+            escrowBalanceBefore: null,
+            escrowBalanceAfter: null,
+            stateVersionBefore: state.authority.stateVersion,
+            stateVersionAfter: resolution.state.authority.stateVersion,
+            createdAt: resolution.state.lastAction!.committedAt,
+          };
+      const receipt: Grid9PublicPurchaseReceipt = {
+        entryId: ledgerEntryId,
+        intentId: null,
+        serverOperationId: operationId,
+        itemId: decision.shieldId,
+        debitCoins: isFree ? 0 : shield.costCoins,
+        jackpotContributionCoins: isFree ? 0 : shield.jackpotContributionCoins,
+        stateVersion: resolution.state.authority.stateVersion,
+        committedAt: resolution.state.lastAction!.committedAt,
+      };
+      const event = createGrid9RoomEvent({
+        type: 'SHIELD_RESOLVED',
+        matchId: state.matchId,
+        sequence: state.authority.eventSequence + 1,
+        stateVersion: resolution.state.authority.stateVersion,
+        causationIntentId: null,
+        payload: {
+          actor: resolution.state.lastAction!.actor,
           sourceSlotIndex: source.slotIndex,
+          beneficiarySlotIndex: source.slotIndex,
+          shieldId: decision.shieldId,
+          shieldBefore: resolution.shieldBefore,
+          shieldAfter: resolution.shieldAfter,
+          receipt,
+          jackpotCoins: resolution.state.jackpot.currentCoins,
+          inventoryAfter: resolution.inventoryAfter,
+        },
+      });
+      const committed = await commitGrid9ServerMutation({
+        currentState: state,
+        nextState: resolution.state,
+        operationReceipt: newGrid9ServerOperationReceipt({
+          matchId: state.matchId,
           operationId,
-          displayName: `${source.displayName}'s proxy`,
+          kind: 'sentinel_purchase',
+          canonicalOperationHash: operationHash,
+          stateVersion: resolution.state.authority.stateVersion,
+          ledgerEntryId: ledger?.entryId ?? null,
+          result: event.payload,
+          recordedAt: event.sentAt,
+        }),
+        ledger,
+        timerOutbox: timerOutboxForState(resolution.state),
+      });
+      if (committed.status === 'committed') {
+        emitGrid9Room(io, state.matchId, event);
+        await scheduleGrid9Timers(resolution.state);
+      }
+      return resolution.state;
+    }
+
+    const payment =
+      decision.payment === 'mercenary_bankroll'
+        ? {
+            kind: 'mercenary_bankroll' as const,
+            sourceSlotIndex: source.slotIndex,
+          }
+        : { kind: decision.payment };
+    const resolution = applyGrid9Weapon({
+      state,
+      actor,
+      sourceSlotIndex: source.slotIndex,
+      weaponId: decision.weaponId,
+      targetSlotIndex: decision.targetSlotIndex,
+      intentId: null,
+      serverOperationId: operationId,
+      ledgerEntryId,
+      payment,
+    });
+    const weapon = GRID9_WEAPON_CATALOG[decision.weaponId];
+    const isFree =
+      decision.payment === 'inventory' || decision.payment === 'free_drop';
+    const operationHash = grid9CanonicalOperationHash({
+      matchId: state.matchId,
+      operationId,
+      kind: 'sentinel_purchase',
+      payload: decision,
+    });
+    const ledger: Grid9LedgerEntry | null = isFree
+      ? null
+      : {
+          schemaVersion: 1,
+          entryId: ledgerEntryId,
+          intentId: null,
+          matchId: state.matchId,
+          kind: 'weapon_purchase',
+          actorUserId: null,
+          beneficiaryUserId: null,
+          sourceSlotIndex: source.slotIndex,
+          targetSlotIndex: decision.targetSlotIndex,
+          itemId: decision.weaponId,
+          fundingSource: 'mercenary_bankroll',
+          fundingBreakdown: {
+            platformReservationCoins: 0,
+            microDropCoins: 0,
+            mercenaryBankrollCoins: weapon.costCoins,
+            jackpotPoolCoins: 0,
+          },
+          serverOperationId: operationId,
+          canonicalPayloadHash: operationHash,
+          debitCoins: weapon.costCoins,
+          creditCoins: 0,
+          jackpotDeltaCoins: weapon.jackpotContributionCoins,
+          escrowBalanceBefore: null,
+          escrowBalanceAfter: null,
+          stateVersionBefore: state.authority.stateVersion,
+          stateVersionAfter: resolution.state.authority.stateVersion,
+          createdAt: resolution.state.lastAction!.committedAt,
         };
+    const receipt: Grid9PublicPurchaseReceipt = {
+      entryId: ledgerEntryId,
+      intentId: null,
+      serverOperationId: operationId,
+      itemId: decision.weaponId,
+      debitCoins: isFree ? 0 : weapon.costCoins,
+      jackpotContributionCoins: isFree ? 0 : weapon.jackpotContributionCoins,
+      stateVersion: resolution.state.authority.stateVersion,
+      committedAt: resolution.state.lastAction!.committedAt,
+    };
+    const event = createGrid9RoomEvent({
+      type: 'WEAPON_RESOLVED',
+      matchId: state.matchId,
+      sequence: state.authority.eventSequence + 1,
+      stateVersion: resolution.state.authority.stateVersion,
+      causationIntentId: null,
+      payload: {
+        actor: resolution.state.lastAction!.actor,
+        sourceSlotIndex: source.slotIndex,
+        targetSlotIndex: decision.targetSlotIndex,
+        weaponId: decision.weaponId,
+        damage: resolution.damage,
+        receipt,
+        jackpotCoins: resolution.state.jackpot.currentCoins,
+        inventoryAfter: resolution.inventoryAfter,
+      },
+    });
+    const committed = await commitGrid9ServerMutation({
+      currentState: state,
+      nextState: resolution.state,
+      operationReceipt: newGrid9ServerOperationReceipt({
+        matchId: state.matchId,
+        operationId,
+        kind: 'sentinel_purchase',
+        canonicalOperationHash: operationHash,
+        stateVersion: resolution.state.authority.stateVersion,
+        ledgerEntryId: ledger?.entryId ?? null,
+        result: event.payload,
+        recordedAt: event.sentAt,
+      }),
+      ledger,
+      timerOutbox: timerOutboxForState(resolution.state),
+    });
+    if (committed.status === 'committed') {
+      emitGrid9Room(io, state.matchId, event);
+      if (resolution.state.outcome) {
+        emitGrid9Room(
+          io,
+          state.matchId,
+          completionEvent(
+            resolution.state,
+            resolution.state.authority.eventSequence,
+          ),
+        );
+      }
+      await scheduleGrid9Timers(resolution.state);
+    }
+    return resolution.state;
+  }
+
+  if (source.mercenaryBankrollCoins < GRID9_WEAPON_CATALOG.arrow.costCoins) {
+    return state;
+  }
+  const target = lowestEffectiveHealthTarget(state, source);
+  const weaponId = chooseProxyWeapon(source.mercenaryBankrollCoins);
+  if (!target || !weaponId) return state;
+
+  const decision = { targetSlotIndex: target.slotIndex, weaponId };
+  const operationId = `auto-${state.matchId}-${state.turn.turnNumber}-${source.slotIndex}`;
+  const actor: Grid9ActionActor = {
+    kind: 'mercenary_proxy',
+    sourceSlotIndex: source.slotIndex,
+    operationId,
+    displayName: `${source.displayName}'s proxy`,
+  };
   const ledgerEntryId = randomUUID();
   const resolution = applyGrid9Weapon({
     state,
@@ -398,7 +628,7 @@ async function processAutomatedPurchase(
   const operationHash = grid9CanonicalOperationHash({
     matchId: state.matchId,
     operationId,
-    kind: source.kind === 'sentinel' ? 'sentinel_purchase' : 'proxy_purchase',
+    kind: 'proxy_purchase',
     payload: decision,
   });
   const ledger: Grid9LedgerEntry = {
@@ -463,10 +693,7 @@ async function processAutomatedPurchase(
     operationReceipt: newGrid9ServerOperationReceipt({
       matchId: state.matchId,
       operationId,
-      kind:
-        source.kind === 'sentinel'
-          ? 'sentinel_purchase'
-          : 'proxy_purchase',
+      kind: 'proxy_purchase',
       canonicalOperationHash: operationHash,
       stateVersion: resolution.state.authority.stateVersion,
       ledgerEntryId,
@@ -495,7 +722,19 @@ async function processAutomatedPurchase(
 
 async function processTurnEnd(io: Server, initial: Grid9GameState): Promise<void> {
   if (initial.phase !== 'combat' || !initial.turn) return;
-  let state = await processAutomatedPurchase(io, initial);
+  let state = initial;
+  try {
+    state = await processAutomatedPurchase(io, initial);
+  } catch (error: any) {
+    logger.warn(
+      {
+        matchId: initial.matchId,
+        err: error?.message || String(error),
+      },
+      '[grid9] automated purchase failed; forcing turn advance',
+    );
+    state = await readGrid9State(initial.matchId);
+  }
   if (state.phase === 'completed') {
     await settleGrid9Match(io, state);
     return;

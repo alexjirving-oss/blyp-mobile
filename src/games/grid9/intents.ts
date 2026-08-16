@@ -79,6 +79,23 @@ export function buildQueueLeaveIntent(
   };
 }
 
+export function buildMatchLeaveIntent(
+  session: Grid9IntentSessionFields,
+  input: {
+    matchId: string;
+    expectedStateVersion: number | null;
+    reason?: 'user' | 'navigation' | null;
+  },
+): import('./protocol').Grid9MatchLeaveIntent {
+  return {
+    ...envelopeBase(session),
+    type: 'MATCH_LEAVE',
+    matchId: input.matchId,
+    expectedStateVersion: input.expectedStateVersion,
+    payload: { reason: input.reason ?? 'user' },
+  };
+}
+
 export function buildMatchJoinIntent(
   session: Grid9IntentSessionFields,
   payload: { matchId: string; region: string; assignmentId: string; assignmentToken: string },

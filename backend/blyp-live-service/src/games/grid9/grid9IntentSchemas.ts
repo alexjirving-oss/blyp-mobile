@@ -238,10 +238,25 @@ const changeSettings = z
   })
   .strict();
 
+const matchLeave = z
+  .object({
+    ...common,
+    type: z.literal('MATCH_LEAVE'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative().nullable(),
+    payload: z
+      .object({
+        reason: z.enum(['user', 'navigation']).nullable().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const grid9ClientIntentSchema = z.discriminatedUnion('type', [
   queueJoin,
   queueLeave,
   matchJoin,
+  matchLeave,
   privateRoomCreate,
   privateRoomJoin,
   startPrivateMatch,

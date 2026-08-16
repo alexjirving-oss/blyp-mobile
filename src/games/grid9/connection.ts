@@ -10,6 +10,7 @@ import {
   buildFireWeaponIntent,
   buildFundMercenaryIntent,
   buildMatchJoinIntent,
+  buildMatchLeaveIntent,
   buildPingIntent,
   buildPrivateRoomCreateIntent,
   buildPrivateRoomJoinIntent,
@@ -131,6 +132,44 @@ export class Grid9Connection {
     return this.emitBuilt(
       buildQueueLeaveIntent(this.requireSession(), { region, ticketId }),
     );
+  }
+
+  sendMatchLeaveIntent(input?: { matchId?: string; reason?: 'user' | 'navigation' }): string {
+    const session = getGrid9Session();
+    const matchId = input?.matchId ?? session.matchId ?? session.assignment?.matchId;
+    if (!matchId) {
+      throw new Grid9NotReadyError('Grid 9 match leave needs a matchId');
+    }
+    return this.emitBuilt(
+      buildMatchLeaveIntent(this.requireSession(), {
+        matchId,
+        expectedStateVersion: session.lastSeenStateVersion,
+        reason: input?.reason ?? 'user',
+      }),
+    );
+  }
+
+  /**
+   * Best-effort leave: MATCH_LEAVE and/or QUEUE_LEAVE, then reset local session.
+   * Does not throw if already left / not queued.
+   */
+  async leaveArena(reason: 'user' | 'navigation' = 'user'): Promise<void> {
+    const session = getGrid9Session();
+    try {
+      if (session.matchId || session.assignment?.matchId) {
+        this.sendMatchLeaveIntent({ reason });
+      }
+    } catch {
+      /* already clear */
+    }
+    try {
+      if (session.queue?.entry?.ticketId) {
+        this.sendQueueLeaveIntent();
+      }
+    } catch {
+      /* already clear */
+    }
+    resetGrid9Session();
   }
 
   sendMatchJoinIntent(input?: {

@@ -43,14 +43,14 @@ export function Grid9ArenaScreen() {
 
   if (!enabled) {
     return (
-      <View className="flex-1 items-center justify-center bg-slate-950 px-8">
-        <Text className="text-[11px] font-black uppercase tracking-[3px] text-slate-500">
+      <View className="flex-1 items-center justify-center bg-blyp-ink px-8">
+        <Text className="text-[11px] font-black uppercase tracking-[3px] text-blyp-faint">
           Grid 9
         </Text>
-        <Text className="mt-3 text-center text-base font-extrabold text-amber-400">
+        <Text className="mt-3 text-center text-base font-extrabold text-blyp-primary">
           Arena locked
         </Text>
-        <Text className="mt-2 text-center text-xs font-semibold text-slate-400">
+        <Text className="mt-2 text-center text-xs font-semibold text-blyp-muted">
           Enable EXPO_PUBLIC_LIVE_GRID9_ENABLED to mount the match.
         </Text>
       </View>

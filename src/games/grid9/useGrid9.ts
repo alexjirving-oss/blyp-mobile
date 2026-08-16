@@ -13,6 +13,7 @@ export interface Grid9HookValue {
   disconnect: () => void;
   sendQueueJoinIntent: (input: { region: string; sponsorPassId?: string | null }) => string;
   sendQueueLeaveIntent: (input?: { region?: string; ticketId?: string }) => string;
+  leaveArena: (reason?: 'user' | 'navigation') => Promise<void>;
   sendMatchJoinIntent: (input?: {
     matchId?: string;
     region?: string;
@@ -55,6 +56,10 @@ export function useGrid9(): Grid9HookValue {
   );
   const sendQueueLeaveIntent = useCallback(
     (input?: { region?: string; ticketId?: string }) => connection.sendQueueLeaveIntent(input),
+    [connection],
+  );
+  const leaveArena = useCallback(
+    (reason: 'user' | 'navigation' = 'user') => connection.leaveArena(reason),
     [connection],
   );
   const sendMatchJoinIntent = useCallback(
@@ -115,6 +120,7 @@ export function useGrid9(): Grid9HookValue {
       disconnect,
       sendQueueJoinIntent,
       sendQueueLeaveIntent,
+      leaveArena,
       sendMatchJoinIntent,
       sendReserveCoinsIntent,
       sendFireWeaponIntent,
@@ -133,6 +139,7 @@ export function useGrid9(): Grid9HookValue {
       disconnect,
       sendQueueJoinIntent,
       sendQueueLeaveIntent,
+      leaveArena,
       sendMatchJoinIntent,
       sendReserveCoinsIntent,
       sendFireWeaponIntent,

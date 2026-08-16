@@ -311,6 +311,23 @@ function applyPrivateEvent(
   }
   if (event.type === 'PRIVATE_ROOM_STATUS') {
     const kicked = event.payload.status === 'kicked';
+    const left = event.payload.status === 'left' || event.payload.status === 'closed';
+    if (left) {
+      return {
+        session: {
+          ...session,
+          matchId: null,
+          assignment: null,
+          match: null,
+          queue: null,
+          escrow: null,
+          lastSeenStateVersion: null,
+          lastSeenSequence: null,
+          lastError: null,
+        },
+        effects,
+      };
+    }
     return {
       session: {
         ...session,

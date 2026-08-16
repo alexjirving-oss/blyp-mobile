@@ -83,7 +83,7 @@ export function Grid9Board({
                       bottom: 0,
                       left: 0,
                       borderWidth: 3,
-                      borderColor: '#fbbf24',
+                      borderColor: '#00D2BE',
                       borderRadius: 18,
                       zIndex: 2,
                     }}

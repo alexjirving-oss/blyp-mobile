@@ -54,33 +54,33 @@ export function Grid9VictoryModal({
 
   return (
     <View className="absolute inset-0 z-50 items-center justify-center bg-black/80 px-6">
-      <View className="w-full max-w-sm rounded-3xl border-2 border-amber-400 bg-slate-950 px-5 py-6">
-        <Text className="text-center text-[11px] font-black uppercase tracking-[3px] text-amber-400">
+      <View className="w-full max-w-sm rounded-3xl border-2 border-blyp-primary bg-blyp-ink px-5 py-6">
+        <Text className="text-center text-[11px] font-black uppercase tracking-[3px] text-blyp-primary">
           YOU WON
         </Text>
-        <Text className="mt-3 text-center text-2xl font-black text-slate-50">
+        <Text className="mt-3 text-center text-2xl font-black text-blyp-text">
           {winnerName ? `${winnerName} wins` : 'Arena settled'}
         </Text>
-        <Text className="mt-2 text-center text-sm font-extrabold text-amber-300">
+        <Text className="mt-2 text-center text-sm font-extrabold text-blyp-primaryLight">
           Jackpot · {formatGrid9Coins(jackpotCoins)} coins
         </Text>
-        <Text className="mt-4 text-center text-[11px] font-semibold text-slate-400">
+        <Text className="mt-4 text-center text-[11px] font-semibold text-blyp-muted">
           Winner credited {formatGrid9Coins(wonTokens)} Tokens (50%). Instant converts
           Tokens→coins at 1:1 + 15% bonus.
         </Text>
         <TouchableOpacity
-          className="mt-4 items-center rounded-2xl border border-amber-500/60 bg-slate-900 py-3"
+          className="mt-4 items-center rounded-2xl border border-blyp-primary/60 bg-blyp-card py-3"
           disabled
         >
-          <Text className="text-xs font-black uppercase tracking-[1px] text-amber-200">
+          <Text className="text-xs font-black uppercase tracking-[1px] text-blyp-primaryLight">
             Tokens · {formatGrid9Coins(wonTokens)} @ 50%
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          className={`mt-2 items-center rounded-2xl border-2 border-amber-400 py-3 ${
+          className={`mt-2 items-center rounded-2xl border-2 border-blyp-primary py-3 ${
             isWinner && liveServiceBaseUrl && accessToken
-              ? 'bg-amber-400'
-              : 'bg-slate-900 opacity-50'
+              ? 'bg-blyp-primary'
+              : 'bg-blyp-card opacity-50'
           }`}
           activeOpacity={0.85}
           disabled={
@@ -93,8 +93,8 @@ export function Grid9VictoryModal({
           <Text
             className={`text-xs font-black uppercase tracking-[1px] ${
               isWinner && liveServiceBaseUrl && accessToken
-                ? 'text-slate-950'
-                : 'text-slate-400'
+                ? 'text-blyp-ink'
+                : 'text-blyp-muted'
             }`}
           >
             {converting
@@ -103,16 +103,16 @@ export function Grid9VictoryModal({
           </Text>
         </TouchableOpacity>
         {convertNote ? (
-          <Text className="mt-2 text-center text-[11px] font-semibold text-slate-300">
+          <Text className="mt-2 text-center text-[11px] font-semibold text-blyp-muted">
             {convertNote}
           </Text>
         ) : null}
         <TouchableOpacity
-          className="mt-3 items-center rounded-2xl border-2 border-amber-400 bg-amber-400 py-3"
+          className="mt-3 items-center rounded-2xl border-2 border-blyp-primary bg-blyp-primary py-3"
           activeOpacity={0.85}
           onPress={onClose}
         >
-          <Text className="text-xs font-black uppercase tracking-[1px] text-slate-950">
+          <Text className="text-xs font-black uppercase tracking-[1px] text-blyp-ink">
             Continue
           </Text>
         </TouchableOpacity>

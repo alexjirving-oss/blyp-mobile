@@ -15,6 +15,7 @@ import {
   resolveGrid9ItemFunding,
   type Grid9Identity,
 } from './grid9Engine';
+import { grid9CombatTimerDueAtMs } from './grid9Sentinels';
 import {
   commitGrid9PaidMutation,
   consumeGrid9ReplayNonce,
@@ -172,11 +173,13 @@ export function timerOutboxForState(
     };
   }
   if (state.phase === 'combat' && state.turn) {
+    const dueMs =
+      grid9CombatTimerDueAtMs(state) ?? Date.parse(state.turn.endsAt);
     return {
       schemaVersion: 1,
       matchId: state.matchId,
       stateVersion: state.authority.stateVersion,
-      dueAt: state.turn.endsAt,
+      dueAt: new Date(dueMs).toISOString(),
       reason: 'turn_end',
       projectedAt: null,
     };
