@@ -95,6 +95,16 @@ const fireWeapon = z
   })
   .strict();
 
+const selectTarget = z
+  .object({
+    ...common,
+    type: z.literal('SELECT_TARGET'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ targetSlotIndex: slotIndex }).strict(),
+  })
+  .strict();
+
 const purchaseShield = z
   .object({
     ...common,
@@ -287,6 +297,7 @@ export const grid9ClientIntentSchema = z.discriminatedUnion('type', [
   changeSettings,
   reserveCoins,
   fireWeapon,
+  selectTarget,
   purchaseShield,
   fundMercenary,
   sendArsenalGift,

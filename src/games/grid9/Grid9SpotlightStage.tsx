@@ -8,6 +8,8 @@ import {
 } from './grid9Format';
 import { GRID9_THEME } from './grid9Theme';
 import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
+import { grid9HumanCamIdentities } from './grid9CamIdentity';
+import { Grid9JackpotPot } from './Grid9JackpotPot';
 import { Grid9SeatCamera } from './Grid9LiveKitRoom';
 import { grid9SentinelPortrait } from './grid9SentinelPortraits';
 import { View as RnView } from 'react-native';
@@ -124,16 +126,8 @@ export function Grid9SpotlightStage({
   onOriginMeasured?: (point: Grid9VfxPoint | null) => void;
 }) {
   const feed = (player as { feed?: FeedLike } | null)?.feed ?? null;
-  const participantId = useMemo(() => {
-    if (!player || player.kind !== 'human') return null;
-    if (typeof feed?.participantId === 'string' && feed.participantId.trim()) {
-      return feed.participantId.trim();
-    }
-    // Token mint uses userId when feed.participantId missing — never publicProfileId.
-    const userId = (player as { userId?: string }).userId;
-    if (typeof userId === 'string' && userId.trim()) return userId.trim();
-    return null;
-  }, [feed?.participantId, player]);
+  const camIdentities = useMemo(() => grid9HumanCamIdentities(player), [player]);
+  const participantId = camIdentities[0] ?? null;
 
   const portrait = grid9SentinelPortrait(
     typeof feed?.characterId === 'string' ? feed.characterId : null,
@@ -171,22 +165,7 @@ export function Grid9SpotlightStage({
   };
 
   return (
-    <View className="mb-1 px-3">
-      {/* FOCAL jackpot — primary arena signal above the stage */}
-      <View className="mb-1.5 items-center rounded-2xl border-2 border-amber-400/70 bg-amber-400/15 px-3 py-2">
-        <Text className="text-[9px] font-black uppercase tracking-[3px] text-amber-200">
-          {isNewMatchPot ? 'New match pot' : 'Jackpot'}
-        </Text>
-        <Text className="mt-0.5 text-[28px] font-black leading-8 text-amber-300">
-          {formatGrid9Coins(jackpotCoins ?? 0)}
-        </Text>
-        {isNewMatchPot ? (
-          <Text className="mt-0.5 text-center text-[9px] font-semibold text-amber-100/80">
-            House seed {formatGrid9Coins(houseSeedCoins)} · grows with fees & gifts
-          </Text>
-        ) : null}
-      </View>
-
+    <View className="mb-1 px-2">
       <View className="flex-row">
       <RnView
         ref={stageRef}
@@ -250,9 +229,13 @@ export function Grid9SpotlightStage({
             <View className="absolute inset-0">
               <HumanPendingCard player={player} note="LIVE FEED PENDING" />
             </View>
-            <Grid9SeatCamera participantId={participantId} />
+            <Grid9SeatCamera participantId={participantId} identities={camIdentities} />
           </View>
         )}
+
+        <View className="absolute right-1.5 top-8 z-20" pointerEvents="none">
+          <Grid9JackpotPot coins={jackpotCoins ?? 0} isSeed={isNewMatchPot} />
+        </View>
 
         {/* Bottom identity + GIFT / SP / HP on stage */}
         {player ? (
@@ -299,14 +282,6 @@ export function Grid9SpotlightStage({
             {nextSpotlightMs != null && nextSpotlightMs >= 0
               ? formatGrid9Countdown(nextSpotlightMs)
               : '—:—'}
-          </Text>
-        </View>
-        <View className="rounded-xl border border-amber-400/40 bg-blyp-card px-2 py-2">
-          <Text className="text-[7px] font-bold uppercase tracking-[1px] text-blyp-faint">
-            Pot chip
-          </Text>
-          <Text className="mt-0.5 text-[12px] font-black text-amber-300">
-            ⚡ {formatGrid9Coins(jackpotCoins ?? 0)}
           </Text>
         </View>
       </View>

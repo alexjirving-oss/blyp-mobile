@@ -29,6 +29,7 @@ export type Grid9ClientIntentType =
   | 'CHANGE_SETTINGS'
   | 'RESERVE_COINS'
   | 'FIRE_WEAPON'
+  | 'SELECT_TARGET'
   | 'PURCHASE_SHIELD'
   | 'FUND_MERCENARY'
   | 'SEND_ARSENAL_GIFT'
@@ -168,6 +169,10 @@ export interface Grid9FireWeaponPayload {
   targetSlotIndex: Grid9SlotIndex;
 }
 
+export interface Grid9SelectTargetPayload {
+  targetSlotIndex: Grid9SlotIndex;
+}
+
 export interface Grid9PurchaseShieldPayload {
   shieldId: Grid9ShieldId;
   beneficiarySlotIndex: Grid9SlotIndex;
@@ -268,6 +273,10 @@ export type Grid9FireWeaponIntent = Grid9MatchCommandEnvelope<
   'FIRE_WEAPON',
   Grid9FireWeaponPayload
 >;
+export type Grid9SelectTargetIntent = Grid9MatchCommandEnvelope<
+  'SELECT_TARGET',
+  Grid9SelectTargetPayload
+>;
 export type Grid9PurchaseShieldIntent = Grid9MatchCommandEnvelope<
   'PURCHASE_SHIELD',
   Grid9PurchaseShieldPayload
@@ -332,6 +341,7 @@ export type Grid9ClientIntent =
   | Grid9ChangeSettingsIntent
   | Grid9ReserveCoinsIntent
   | Grid9FireWeaponIntent
+  | Grid9SelectTargetIntent
   | Grid9PurchaseShieldIntent
   | Grid9FundMercenaryIntent
   | Grid9SendArsenalGiftIntent

@@ -30,6 +30,13 @@ describe('Grid 9 Phase 2 backend contracts', () => {
       payload: { weaponId: 'arrow', targetSlotIndex: 4 },
     };
     assert.equal(parseGrid9ClientIntent(intent).type, 'FIRE_WEAPON');
+    const selectTarget = {
+      ...intent,
+      type: 'SELECT_TARGET' as const,
+      intentId: 'intent-select',
+      payload: { targetSlotIndex: 4 },
+    };
+    assert.equal(parseGrid9ClientIntent(selectTarget).type, 'SELECT_TARGET');
     assert.throws(
       () => parseGrid9ClientIntent({ ...intent, matchId: null }),
       /Expected string/,

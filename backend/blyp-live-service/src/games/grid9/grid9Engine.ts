@@ -177,6 +177,49 @@ function requireActiveCombatantTurn(
   }
 }
 
+/** Spotlight combatant locks a seat; room sees it on the next TURN_TICK. */
+export function applyGrid9SelectTarget(args: {
+  state: Grid9GameState;
+  actor: Grid9ActionActor;
+  sourceSlotIndex: Grid9SlotIndex | null;
+  targetSlotIndex: Grid9SlotIndex;
+  nowMs?: number;
+}): Grid9GameState {
+  const nowMs = args.nowMs ?? Date.now();
+  const now = iso(nowMs);
+  requireCombat(args.state);
+  requireActorEligible(args.state, args.actor);
+  requireActiveCombatantTurn(args.state, args.actor, args.sourceSlotIndex);
+  const turn = args.state.turn;
+  if (!turn) {
+    throw new Grid9Error('INTERNAL_ERROR', 'Grid 9 turn is missing');
+  }
+  if (
+    turn.attacksUsedThisTurn >= 1 ||
+    turn.defensesUsedThisTurn >= 1 ||
+    turn.autoResolved
+  ) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'This go has already been spent', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  const target = args.state.players[args.targetSlotIndex];
+  if (!target || target.status !== 'alive') {
+    throw new Grid9Error('TARGET_NOT_ALIVE', 'Target box is eliminated', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  if (turn.pendingTargetSlotIndex === args.targetSlotIndex) {
+    return args.state;
+  }
+  const state = cloneState(args.state);
+  state.turn = {
+    ...state.turn!,
+    pendingTargetSlotIndex: args.targetSlotIndex,
+  };
+  return mutationDone(state, args.state, now, 1);
+}
+
 /**
  * Inventory overflow policy (locked): FIFO drop oldest when at capacity.
  * Gifted/bought items always land; oldest stock is discarded.
@@ -899,6 +942,7 @@ export function landGrid9Roulette(
     freeDropItemId: drop.itemId,
     freeDropEquipped,
     autoResolved: false,
+    pendingTargetSlotIndex: null,
   };
   state.authority.nextTurnAt = state.turn.endsAt;
   return mutationDone(state, current, now, 1);

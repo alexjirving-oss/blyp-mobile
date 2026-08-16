@@ -395,6 +395,7 @@ export const grid9GameStateSchema = z
           .nullable(),
         freeDropEquipped: z.boolean(),
         autoResolved: z.boolean(),
+        pendingTargetSlotIndex: slotIndex.nullable().optional(),
       })
       .nullable(),
     roulette: z

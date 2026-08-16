@@ -11,6 +11,7 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 export type Grid9AudioCue =
   | 'arena_live'
   | 'roulette_spin'
+  | 'roulette_tick'
   | 'spotlight_select'
   | 'your_go'
   | 'turn_end'
@@ -26,6 +27,7 @@ export type Grid9AudioCue =
 const REGISTRY: Record<Grid9AudioCue, number> = {
   arena_live: require('./assets/audio/arena_live.wav'),
   roulette_spin: require('./assets/audio/roulette_spin.wav'),
+  roulette_tick: require('./assets/audio/roulette_tick.wav'),
   spotlight_select: require('./assets/audio/spotlight_select.wav'),
   your_go: require('./assets/audio/your_go.wav'),
   turn_end: require('./assets/audio/turn_end.wav'),
@@ -92,6 +94,11 @@ export async function playGrid9Cue(
   } catch {
     /* soft — missing asset / AV session */
   }
+}
+
+/** Short audible beep for each roulette highlight tick. */
+export function playRouletteTick(): Promise<void> {
+  return playGrid9Cue('roulette_tick', { volume: 1 });
 }
 
 export function cueForWeaponVfx(kind: 'projectile' | 'shield' | 'heal', weaponId?: string): {

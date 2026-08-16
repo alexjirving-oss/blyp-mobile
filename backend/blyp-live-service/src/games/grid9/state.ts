@@ -84,6 +84,8 @@ export interface Grid9TurnState {
   freeDropItemId: Grid9WeaponId | Grid9ShieldId | null;
   freeDropEquipped: boolean;
   autoResolved: boolean;
+  /** Spotlight combatant's locked seat; broadcast on TURN_TICK. */
+  pendingTargetSlotIndex?: Grid9SlotIndex | null;
 }
 
 export interface Grid9RouletteState {

@@ -16,6 +16,7 @@ import type {
   Grid9ClientIntent,
   Grid9FireWeaponIntent,
   Grid9FundMercenaryIntent,
+  Grid9SelectTargetIntent,
   Grid9MatchJoinIntent,
   Grid9PingIntent,
   Grid9PrivateRoomCreateIntent,
@@ -154,6 +155,28 @@ export function buildFireWeaponIntent(
     expectedStateVersion: payload.expectedStateVersion,
     payload: {
       weaponId: payload.weaponId,
+      targetSlotIndex: payload.targetSlotIndex,
+    },
+  };
+}
+
+export function buildSelectTargetIntent(
+  session: Grid9IntentSessionFields,
+  payload: {
+    matchId: string;
+    expectedStateVersion: number;
+    targetSlotIndex: Grid9SlotIndex | number;
+  },
+): Grid9SelectTargetIntent {
+  if (!isGrid9SlotIndex(payload.targetSlotIndex)) {
+    throw new Error('Grid 9 target slot is out of range');
+  }
+  return {
+    ...envelopeBase(session),
+    type: 'SELECT_TARGET',
+    matchId: payload.matchId,
+    expectedStateVersion: payload.expectedStateVersion,
+    payload: {
       targetSlotIndex: payload.targetSlotIndex,
     },
   };

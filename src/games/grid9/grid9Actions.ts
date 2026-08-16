@@ -17,6 +17,8 @@ export function resolveGrid9DrawerMode(input: {
   localPlayer: Grid9PublicPlayer | null;
   localSlotIndex: number | null;
   spotlightSlotIndex: number | null;
+  turnActed?: boolean;
+  pendingTarget?: boolean;
 }): Grid9DrawerMode {
   if (input.targeting) return 'targeting';
   if (!input.localPlayer || input.localSlotIndex == null) {
@@ -36,10 +38,12 @@ export function resolveGrid9DrawerMode(input: {
     return input.phase === 'combat' || input.phase === 'roulette' ? 'proxy_war' : 'idle';
   }
   if (input.localPlayer.status !== 'alive') return 'waiting';
-  // Open weapons when the roulette-active / combat spotlight seat is ours.
+  // Gallery only after a target is locked on our combat go — not during roulette.
   if (
+    !input.turnActed &&
+    input.pendingTarget &&
     input.spotlightSlotIndex === input.localSlotIndex &&
-    (input.phase === 'combat' || input.phase === 'roulette')
+    input.phase === 'combat'
   ) {
     return 'my_turn';
   }

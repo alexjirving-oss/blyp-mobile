@@ -9,18 +9,12 @@ import {
 } from './grid9Format';
 import { GRID9_THEME } from './grid9Theme';
 import { grid9SentinelPortrait } from './grid9SentinelPortraits';
+import { grid9HumanCamIdentities } from './grid9CamIdentity';
 import { Grid9SeatCamera } from './Grid9LiveKitRoom';
 import { Image, Text, TouchableOpacity, View } from './nw';
 
 function humanParticipantId(player: Grid9PublicPlayer | null): string | null {
-  if (!player || player.kind !== 'human') return null;
-  const feed = player.feed as { participantId?: string } | undefined;
-  if (typeof feed?.participantId === 'string' && feed.participantId.trim()) {
-    return feed.participantId.trim();
-  }
-  const userId = (player as { userId?: string }).userId;
-  if (typeof userId === 'string' && userId.trim()) return userId.trim();
-  return null;
+  return grid9HumanCamIdentities(player)[0] ?? null;
 }
 
 function sentinelCharacterId(player: Grid9PublicPlayer | null): string | null {
@@ -42,6 +36,7 @@ export function Grid9Slot({
   spotlighted,
   isLocal,
   targetable = false,
+  lockedTarget = false,
   rouletteHighlight = false,
   onPress,
 }: {
@@ -50,6 +45,7 @@ export function Grid9Slot({
   spotlighted: boolean;
   isLocal: boolean;
   targetable?: boolean;
+  lockedTarget?: boolean;
   /** Dramatic roulette highlight (slowing spin). */
   rouletteHighlight?: boolean;
   onPress?: () => void;
@@ -80,12 +76,15 @@ export function Grid9Slot({
   const healthLow = ratio <= 0.3;
   const hp = Math.max(0, Math.floor(player?.health ?? 0));
   const giftCoins = Math.max(0, Math.floor(player?.mercenaryBankrollCoins ?? 0));
-  const participantId = humanParticipantId(player);
+  const camIdentities = grid9HumanCamIdentities(player);
+  const participantId = camIdentities[0] ?? humanParticipantId(player);
   const characterId = sentinelCharacterId(player);
   const portrait = grid9SentinelPortrait(characterId);
   const [portraitFailed, setPortraitFailed] = useState(false);
 
-  const frameClass = targetable
+  const frameClass = lockedTarget
+    ? 'border-2 border-amber-400'
+    : targetable
     ? 'border-2 border-red-500'
     : spotlighted || rouletteHighlight
       ? 'border-2 border-blyp-primary'
@@ -96,7 +95,7 @@ export function Grid9Slot({
       {/* Full-bleed media plane */}
       {player?.kind === 'human' ? (
         <View className="absolute inset-0 bg-blyp-surface">
-          <Grid9SeatCamera participantId={participantId} />
+          <Grid9SeatCamera participantId={participantId} identities={camIdentities} />
           {!participantId ? (
             <View className="absolute inset-0 items-center justify-center bg-blyp-ink/70">
               <Text className="text-[10px] font-black text-blyp-muted">CAM</Text>

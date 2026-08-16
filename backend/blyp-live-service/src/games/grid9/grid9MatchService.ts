@@ -1,14 +1,16 @@
 import { randomUUID } from 'crypto';
+import type { Server } from 'socket.io';
 import {
   GRID9_ARSENAL_CATALOG,
   GRID9_SHIELD_CATALOG,
   GRID9_WEAPON_CATALOG,
 } from './catalog';
-import { grid9CanonicalIntentHash } from './canonical';
+import { grid9CanonicalIntentHash, grid9CanonicalOperationHash } from './canonical';
 import {
   applyGrid9ArsenalGift,
   applyGrid9InventoryBuy,
   applyGrid9MercenaryFunding,
+  applyGrid9SelectTarget,
   applyGrid9Shield,
   applyGrid9Weapon,
   resolveGrid9Actor,
@@ -18,8 +20,10 @@ import {
 import { grid9CombatTimerDueAtMs } from './grid9Sentinels';
 import {
   commitGrid9PaidMutation,
+  commitGrid9ServerMutation,
   consumeGrid9ReplayNonce,
   emptyGrid9Escrow,
+  newGrid9ServerOperationReceipt,
   readGrid9Aggregate,
   readGrid9IntentReceipt,
   readGrid9State,
@@ -34,6 +38,7 @@ import {
 } from './ledger';
 import {
   createGrid9RoomEvent,
+  emitGrid9Room,
 } from './grid9Broadcast';
 import type {
   Grid9BuyInventoryItemIntent,
@@ -42,6 +47,7 @@ import type {
   Grid9FundMercenaryIntent,
   Grid9PurchaseShieldIntent,
   Grid9RoomServerEvent,
+  Grid9SelectTargetIntent,
   Grid9SendArsenalGiftIntent,
 } from './protocol';
 import type { Grid9TimerOutboxRecord } from './redisKeys';
@@ -931,4 +937,67 @@ export async function buyGrid9InventoryItem(args: {
     roomEvents: committed.status === 'committed' ? [actionEvent] : [],
     state: resolution.state,
   };
+}
+
+/** Spotlight combatant locks a seat; room overlay follows TURN_TICK.turn. */
+export async function selectGrid9Target(args: {
+  io: Server;
+  identity: Grid9Identity;
+  intent: Grid9SelectTargetIntent;
+}): Promise<void> {
+  const state = await readGrid9State(args.intent.matchId);
+  requireExpectedVersion(state, args.intent.expectedStateVersion);
+  const { actor, sourceSlotIndex } = resolveGrid9Actor(state, args.identity);
+  const next = applyGrid9SelectTarget({
+    state,
+    actor,
+    sourceSlotIndex,
+    targetSlotIndex: args.intent.payload.targetSlotIndex,
+  });
+  if (next.authority.stateVersion === state.authority.stateVersion) {
+    return;
+  }
+  const publicState = toGrid9PublicGameState(next);
+  const remainingMs = Math.max(
+    0,
+    Date.parse(next.turn?.endsAt ?? '') - Date.now(),
+  );
+  const roomEvent = createGrid9RoomEvent({
+    type: 'TURN_TICK',
+    matchId: state.matchId,
+    sequence: next.authority.eventSequence,
+    stateVersion: next.authority.stateVersion,
+    causationIntentId: args.intent.intentId,
+    payload: {
+      turn: publicState.turn!,
+      remainingMs: Number.isFinite(remainingMs) ? remainingMs : 0,
+    },
+  });
+  const operationId = `select-target-${args.intent.intentId}`;
+  const result = await commitGrid9ServerMutation({
+    currentState: state,
+    nextState: next,
+    operationReceipt: newGrid9ServerOperationReceipt({
+      matchId: state.matchId,
+      operationId,
+      kind: 'turn_advance',
+      canonicalOperationHash: grid9CanonicalOperationHash({
+        matchId: state.matchId,
+        operationId,
+        kind: 'turn_advance',
+        payload: {
+          intentId: args.intent.intentId,
+          intent: 'SELECT_TARGET',
+          targetSlotIndex: args.intent.payload.targetSlotIndex,
+        },
+      }),
+      stateVersion: next.authority.stateVersion,
+      result: roomEvent.payload,
+      recordedAt: roomEvent.sentAt,
+    }),
+    timerOutbox: timerOutboxForState(next),
+  });
+  if (result.status === 'committed') {
+    emitGrid9Room(args.io, state.matchId, roomEvent);
+  }
 }

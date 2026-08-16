@@ -8,6 +8,7 @@ import {
   applyGrid9ArsenalGift,
   applyGrid9InventoryBuy,
   applyGrid9MercenaryFunding,
+  applyGrid9SelectTarget,
   applyGrid9Shield,
   applyGrid9Weapon,
   advanceGrid9Turn,
@@ -112,6 +113,54 @@ describe('Grid 9 authoritative engine', () => {
     assert.equal(result.state.authority.stateVersion, state.authority.stateVersion + 1);
     assert.equal(result.state.authority.eventSequence, state.authority.eventSequence + 1);
     assert.ok(result.state.authority.cooldowns[`user:${alex.userId}:fireball`]);
+  });
+
+  it('locks a pending target for the spotlight combatant and rejects others', () => {
+    const state = combatState();
+    const { actor, sourceSlotIndex } = resolveGrid9Actor(state, alex);
+    const locked = applyGrid9SelectTarget({
+      state,
+      actor,
+      sourceSlotIndex,
+      targetSlotIndex: 4,
+      nowMs: Date.parse('2026-08-15T03:30:04.000Z'),
+    });
+    assert.equal(locked.turn?.pendingTargetSlotIndex, 4);
+    assert.equal(toGrid9PublicGameState(locked).turn?.pendingTargetSlotIndex, 4);
+    assert.equal(locked.authority.stateVersion, state.authority.stateVersion + 1);
+    const again = applyGrid9SelectTarget({
+      state: locked,
+      actor,
+      sourceSlotIndex,
+      targetSlotIndex: 4,
+      nowMs: Date.parse('2026-08-15T03:30:05.000Z'),
+    });
+    assert.equal(again.authority.stateVersion, locked.authority.stateVersion);
+    const deadTarget = combatState();
+    deadTarget.players[4].status = 'eliminated';
+    assert.throws(
+      () =>
+        applyGrid9SelectTarget({
+          state: deadTarget,
+          actor,
+          sourceSlotIndex,
+          targetSlotIndex: 4,
+          nowMs: Date.parse('2026-08-15T03:30:04.000Z'),
+        }),
+      /eliminated|Target box/i,
+    );
+    const blakeState = combatState();
+    blakeState.turn!.spotlightSlotIndex = 1;
+    assert.throws(
+      () =>
+        applyGrid9SelectTarget({
+          state: blakeState,
+          actor,
+          sourceSlotIndex,
+          targetSlotIndex: 4,
+        }),
+      /active combatant/i,
+    );
   });
 
   it('keeps one deterministic Last Stand survivor after an all-board wipe', () => {

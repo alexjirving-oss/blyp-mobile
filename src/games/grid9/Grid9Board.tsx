@@ -7,8 +7,11 @@ import type { Grid9PublicPlayer } from './protocol';
 import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
 import { slotsForGrid9Board } from './grid9Format';
 import { Grid9Slot } from './Grid9Slot';
-import { playGrid9Cue } from './grid9Audio';
-import { dramaticRouletteHighlightIndex } from './grid9RouletteDrama';
+import { playGrid9Cue, playRouletteTick } from './grid9Audio';
+import {
+  buildGrid9RouletteTicks,
+  grid9RouletteTickAtElapsed,
+} from './grid9RouletteDrama';
 import { View } from './nw';
 
 const GAP = 6;
@@ -22,6 +25,7 @@ export function Grid9Board({
   rouletteSelectedSlotIndex = null,
   rouletteActive = false,
   rouletteEndsAt = null,
+  lockedTargetSlotIndex = null,
   onSlotPress,
   onSeatCentersMeasured,
 }: {
@@ -34,6 +38,7 @@ export function Grid9Board({
   rouletteSelectedSlotIndex?: number | null;
   rouletteActive?: boolean;
   rouletteEndsAt?: string | null;
+  lockedTargetSlotIndex?: number | null;
   onSlotPress?: (slotIndex: number) => void;
   onSeatCentersMeasured?: (centers: Array<Grid9VfxPoint | null>) => void;
 }) {
@@ -57,7 +62,7 @@ export function Grid9Board({
           .filter((index) => index >= 0);
   }, [rouletteCandidateSlotIndices, slots]);
 
-  // Dramatic decelerating spin toward server-selected seat.
+  // Discrete beep-beep cadence toward the server-selected seat (not RAF flicker).
   useEffect(() => {
     if (!rouletteActive || candidates.length === 0) {
       setHighlightSlot(null);
@@ -69,31 +74,39 @@ export function Grid9Board({
         : candidates[candidates.length - 1];
     const selectedOffset = Math.max(0, candidates.indexOf(selected));
     const endsAtMs = rouletteEndsAt ? Date.parse(rouletteEndsAt) : NaN;
+    const remaining = Number.isFinite(endsAtMs) ? endsAtMs - Date.now() : GRID9_ROULETTE_DURATION_MS;
     const duration = Number.isFinite(endsAtMs)
-      ? Math.max(2_500, endsAtMs - Date.now())
+      ? Math.max(10_000, remaining)
       : GRID9_ROULETTE_DURATION_MS;
-    const startedAt = Date.now();
+    const startedAt = Number.isFinite(endsAtMs) ? endsAtMs - duration : Date.now();
     const spinKey = `${selected}:${endsAtMs || duration}`;
     landedRef.current = null;
 
-    let raf = 0;
-    const tick = () => {
-      const elapsed = Date.now() - startedAt;
-      const t = Math.max(0, Math.min(1, elapsed / duration));
-      const idx = dramaticRouletteHighlightIndex(t, candidates.length, selectedOffset);
-      setHighlightSlot(candidates[idx] ?? selected);
-      if (t >= 1) {
-        setHighlightSlot(selected);
-        if (landedRef.current !== spinKey) {
-          landedRef.current = spinKey;
-          void playGrid9Cue('spotlight_select');
-        }
-        return;
+    const ticks = buildGrid9RouletteTicks({
+      durationMs: duration,
+      candidateCount: candidates.length,
+      selectedOffset,
+    });
+    const apply = (tick: { candidateOffset: number; landed: boolean }, beep: boolean) => {
+      setHighlightSlot(candidates[tick.candidateOffset] ?? selected);
+      if (beep) void playRouletteTick();
+      if (tick.landed && landedRef.current !== spinKey) {
+        landedRef.current = spinKey;
+        void playGrid9Cue('spotlight_select');
       }
-      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+
+    const elapsed = Date.now() - startedAt;
+    const current = grid9RouletteTickAtElapsed(elapsed, ticks);
+    apply(current, elapsed < 80);
+    const timers = ticks
+      .filter((tick) => tick.atMs > elapsed)
+      .map((tick) =>
+        setTimeout(() => apply(tick, true), Math.max(0, tick.atMs - elapsed)),
+      );
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
   }, [
     candidates,
     rouletteActive,
@@ -165,6 +178,7 @@ export function Grid9Board({
                   spotlighted={spotlightSlotIndex === slotIndex && !rouletteActive}
                   isLocal={localSlotIndex === slotIndex}
                   targetable={targetableSlotIndices.includes(slotIndex)}
+                  lockedTarget={lockedTargetSlotIndex === slotIndex}
                   rouletteHighlight={rouletteHighlight}
                   onPress={
                     onSlotPress && targetableSlotIndices.includes(slotIndex)

@@ -151,14 +151,13 @@ router.post(
         (player): player is Extract<typeof player, { kind: 'human' }> =>
           player.kind === 'human' && player.userId === userId,
       );
-      const openPhases = new Set([
-        'lobby_waiting',
-        'countdown',
-        'roulette',
-        'combat',
-        'private_lobby',
-      ]);
-      if (!human && !openPhases.has(state.phase)) {
+      const closed =
+        state.phase === 'completed' ||
+        state.phase === 'cancelled' ||
+        state.phase === 'settling';
+      // Seated humans publish; any authenticated viewer may subscribe while the
+      // match is live (same room name as combatants).
+      if (!human && closed) {
         return res.status(403).json({ error: 'NOT_ELIGIBLE', code: 'NOT_ELIGIBLE' });
       }
 

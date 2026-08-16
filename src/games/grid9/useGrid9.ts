@@ -25,6 +25,7 @@ export interface Grid9HookValue {
     weaponId: Grid9WeaponId;
     targetSlotIndex: Grid9SlotIndex | number;
   }) => string;
+  sendSelectTargetIntent: (input: { targetSlotIndex: Grid9SlotIndex | number }) => string;
   sendPurchaseShieldIntent: (input: {
     beneficiarySlotIndex: Grid9SlotIndex | number;
     shieldId?: Grid9ShieldId;
@@ -84,6 +85,11 @@ export function useGrid9(): Grid9HookValue {
       connection.sendFireWeaponIntent(input),
     [connection],
   );
+  const sendSelectTargetIntent = useCallback(
+    (input: { targetSlotIndex: Grid9SlotIndex | number }) =>
+      connection.sendSelectTargetIntent(input),
+    [connection],
+  );
   const sendPurchaseShieldIntent = useCallback(
     (input: { beneficiarySlotIndex: Grid9SlotIndex | number; shieldId?: Grid9ShieldId }) =>
       connection.sendPurchaseShieldIntent(input),
@@ -128,6 +134,7 @@ export function useGrid9(): Grid9HookValue {
       sendMatchJoinIntent,
       sendReserveCoinsIntent,
       sendFireWeaponIntent,
+      sendSelectTargetIntent,
       sendPurchaseShieldIntent,
       sendFundMercenaryIntent,
       sendPrivateRoomCreateIntent,
@@ -147,6 +154,7 @@ export function useGrid9(): Grid9HookValue {
       sendMatchJoinIntent,
       sendReserveCoinsIntent,
       sendFireWeaponIntent,
+      sendSelectTargetIntent,
       sendPurchaseShieldIntent,
       sendFundMercenaryIntent,
       sendPrivateRoomCreateIntent,

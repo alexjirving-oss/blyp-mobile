@@ -10,6 +10,7 @@ import {
   assertGrid9ClientIntent,
   buildFireWeaponIntent,
   buildFundMercenaryIntent,
+  buildSelectTargetIntent,
   buildMatchJoinIntent,
   buildMatchLeaveIntent,
   buildPingIntent,
@@ -227,6 +228,16 @@ export class Grid9Connection {
       buildFireWeaponIntent(this.requireSession(), {
         ...command,
         weaponId: input.weaponId,
+        targetSlotIndex: input.targetSlotIndex,
+      }),
+    );
+  }
+
+  sendSelectTargetIntent(input: { targetSlotIndex: Grid9SlotIndex | number }): string {
+    const command = this.requireMatchCommand();
+    return this.emitBuilt(
+      buildSelectTargetIntent(this.requireSession(), {
+        ...command,
         targetSlotIndex: input.targetSlotIndex,
       }),
     );

@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Grid9DrawerMode } from './grid9Actions';
-import { formatGrid9Coins, formatGrid9Countdown } from './grid9Format';
+import { formatGrid9Coins } from './grid9Format';
 import { Text, TouchableOpacity, View } from './nw';
 
 export function Grid9ActionDrawer({
@@ -37,29 +37,6 @@ export function Grid9ActionDrawer({
         </TouchableOpacity>
       ) : null}
 
-      {mode === 'waiting' ? (
-        <View className="flex-row items-center rounded-xl border border-white/10 bg-blyp-ink px-3 py-2.5">
-          <View className="mr-3 h-10 w-10 items-center justify-center rounded-full border border-blyp-primary/40">
-            <Text className="text-[9px] font-black text-blyp-primary">
-              {countdownMs != null && countdownMs >= 0
-                ? formatGrid9Countdown(countdownMs).slice(-5)
-                : '—'}
-            </Text>
-          </View>
-          <View className="flex-1">
-            <Text className="text-[10px] font-black uppercase tracking-[1px] text-blyp-muted">
-              Waiting for roulette
-            </Text>
-            <Text className="mt-0.5 text-[10px] font-semibold text-blyp-faint">
-              Next spotlight selection{' '}
-              {countdownMs != null && countdownMs >= 0
-                ? formatGrid9Countdown(countdownMs)
-                : '—:—'}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
       {mode === 'targeting' ? (
         <View className="rounded-xl border border-blyp-primary/50 bg-blyp-ink px-4 py-2.5">
           <Text className="text-center text-sm font-extrabold text-blyp-primary">
@@ -86,15 +63,6 @@ export function Grid9ActionDrawer({
             {formatGrid9Coins(mercenaryFundCoins)} coins · your balance{' '}
             {formatGrid9Coins(availableCoins)}
           </Text>
-        </View>
-      ) : null}
-
-      {mode === 'idle' ? (
-        <View className="items-center rounded-xl border border-white/10 bg-blyp-ink px-4 py-2.5">
-          <Text className="text-[10px] font-bold uppercase tracking-[2px] text-blyp-faint">
-            Standby
-          </Text>
-          <Text className="mt-1 text-sm font-extrabold text-blyp-muted">Waiting for Grid 9</Text>
         </View>
       ) : null}
 

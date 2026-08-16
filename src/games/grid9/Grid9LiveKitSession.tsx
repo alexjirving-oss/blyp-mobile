@@ -32,7 +32,7 @@ export function Grid9LiveKitSession({
   const [mods, setMods] = useState<{
     LiveKitRoom: React.ComponentType<any>;
     VideoTrack: React.ComponentType<any>;
-    useTracks: (opts?: any) => any[];
+    useTracks: (sources?: any, opts?: any) => any[];
     TrackSource: any;
   } | null>(null);
 
@@ -158,7 +158,7 @@ export function Grid9LiveKitSession({
         connect
         audio={shouldPublish}
         video={shouldPublish}
-        options={{ adaptiveStream: true, dynacast: true }}
+        options={{ adaptiveStream: true, dynacast: true, autoSubscribe: true }}
         onError={() => onStatus?.('room-error')}
       >
         <Grid9LiveKitSpotlightVideo
@@ -180,20 +180,23 @@ function Grid9LiveKitSpotlightVideo({
 }: {
   spotlightParticipantId: string | null;
   VideoTrack: React.ComponentType<any>;
-  useTracks: (opts?: any) => any[];
+  useTracks: (sources?: any, opts?: any) => any[];
   TrackSource: any;
 }) {
   // useTracks([Track.Source.Camera]) — object `{ sources }` is invalid API.
   const cameraSource = TrackSource?.Camera ?? 'camera';
-  const tracks = useTracks([cameraSource]);
+  const tracks = useTracks([cameraSource], { onlySubscribed: false });
   const track = useMemo(() => {
     if (!spotlightParticipantId || !Array.isArray(tracks)) return null;
     return (
-      tracks.find(
-        (item: any) =>
-          String(item?.participant?.identity || '') === spotlightParticipantId &&
-          item?.publication,
-      ) ?? null
+      tracks.find((item: any) => {
+        const identity = String(item?.participant?.identity || '').trim();
+        const name = String(item?.participant?.name || '').trim();
+        return (
+          Boolean(item?.publication) &&
+          (identity === spotlightParticipantId || name === spotlightParticipantId)
+        );
+      }) ?? null
     );
   }, [spotlightParticipantId, tracks]);
 

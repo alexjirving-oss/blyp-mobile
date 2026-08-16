@@ -51,8 +51,18 @@ describe('Grid 9 action rules', () => {
         localPlayer: player({ slotIndex: 2 }),
         localSlotIndex: 2,
         spotlightSlotIndex: 2,
+        pendingTarget: true,
       }),
     ).toBe('my_turn');
+    expect(
+      resolveGrid9DrawerMode({
+        targeting: false,
+        phase: 'combat',
+        localPlayer: player({ slotIndex: 2 }),
+        localSlotIndex: 2,
+        spotlightSlotIndex: 2,
+      }),
+    ).toBe('waiting');
     expect(
       resolveGrid9DrawerMode({
         targeting: false,

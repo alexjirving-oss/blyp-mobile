@@ -16,7 +16,7 @@ import { Text, View } from './nw';
 type LiveKitMods = {
   LiveKitRoom: React.ComponentType<any>;
   VideoTrack: React.ComponentType<any>;
-  useTracks: (opts?: any) => any[];
+  useTracks: (sources?: any, opts?: any) => any[];
   TrackSource: any;
 };
 
@@ -212,7 +212,7 @@ export function Grid9LiveKitProvider({
         connect
         audio={shouldPublish}
         video={shouldPublish ? { facingMode: 'user' } : false}
-        options={{ adaptiveStream: true, dynacast: true }}
+        options={{ adaptiveStream: true, dynacast: true, autoSubscribe: true }}
         onError={() => {
           setStatus('room-error');
           onStatus?.('room-error');
@@ -227,14 +227,18 @@ export function Grid9LiveKitProvider({
 /** Renders one camera tile for a participant identity inside the shared room. */
 export function Grid9SeatCamera({
   participantId,
+  identities,
 }: {
   participantId: string | null;
+  identities?: string[] | null;
 }) {
   const { mods } = useGrid9LiveKit();
-  if (!mods || !participantId) return null;
+  const ids = (identities || []).filter(Boolean);
+  if (participantId && !ids.includes(participantId)) ids.unshift(participantId);
+  if (!mods || ids.length === 0) return null;
   return (
     <Grid9SeatCameraInner
-      participantId={participantId}
+      identities={ids}
       VideoTrack={mods.VideoTrack}
       useTracks={mods.useTracks}
       TrackSource={mods.TrackSource}
@@ -243,30 +247,47 @@ export function Grid9SeatCamera({
 }
 
 function Grid9SeatCameraInner({
-  participantId,
+  identities,
   VideoTrack,
   useTracks,
   TrackSource,
 }: {
-  participantId: string;
+  identities: string[];
   VideoTrack: React.ComponentType<any>;
   useTracks: (sources?: any, opts?: any) => any[];
   TrackSource: any;
 }) {
-  // useTracks expects SourcesArray as first arg — NOT `{ sources: [...] }`.
-  // Wrong shape throws / returns nothing → blank seat tiles (cam P0).
+  // Default onlySubscribed:true hides remote cams until something already
+  // subscribed — local publisher sees themselves, viewers see blank tiles.
   const cameraSource = TrackSource?.Camera ?? 'camera';
-  const tracks = useTracks([cameraSource]);
+  const tracks = useTracks([cameraSource], { onlySubscribed: false });
   const track = useMemo(() => {
     if (!Array.isArray(tracks)) return null;
     return (
-      tracks.find(
-        (item: any) =>
-          String(item?.participant?.identity || '') === participantId &&
-          item?.publication,
-      ) ?? null
+      tracks.find((item: any) => {
+        const identity = String(item?.participant?.identity || '').trim();
+        const name = String(item?.participant?.name || '').trim();
+        return (
+          Boolean(item?.publication) &&
+          (identities.includes(identity) || identities.includes(name))
+        );
+      }) ?? null
     );
-  }, [participantId, tracks]);
+  }, [identities, tracks]);
+
+  useEffect(() => {
+    const pub = track?.publication as
+      | { isSubscribed?: boolean; setSubscribed?: (next: boolean) => void }
+      | undefined;
+    if (pub && pub.isSubscribed === false && typeof pub.setSubscribed === 'function') {
+      try {
+        pub.setSubscribed(true);
+      } catch {
+        /* soft */
+      }
+    }
+  }, [track]);
+
   if (!track) return null;
   return (
     <RnView style={StyleSheet.absoluteFill} pointerEvents="none">

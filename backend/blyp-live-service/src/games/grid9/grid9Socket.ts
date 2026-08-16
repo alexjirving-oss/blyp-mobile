@@ -27,6 +27,7 @@ import {
   fireGrid9Weapon,
   fundGrid9Mercenary,
   purchaseGrid9Shield,
+  selectGrid9Target,
   sendGrid9ArsenalGift,
 } from './grid9MatchService';
 import { reserveGrid9Coins } from './grid9WalletService';
@@ -535,6 +536,13 @@ async function handleGrid9Intent(args: {
       identity,
       matchId: intent.matchId,
       expectedStateVersion: intent.expectedStateVersion,
+    });
+  } else if (intent.type === 'SELECT_TARGET') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await selectGrid9Target({
+      io,
+      identity,
+      intent,
     });
   } else if (intent.type === 'REQUEST_SNAPSHOT') {
     await requestGrid9Snapshot({

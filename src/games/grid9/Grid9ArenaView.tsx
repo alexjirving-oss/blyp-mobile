@@ -21,7 +21,7 @@ import {
   type Grid9VfxPoint,
 } from './Grid9CombatVfxOverlay';
 import { Grid9EntryPortal } from './Grid9EntryPortal';
-import { Grid9Header } from './Grid9Header';
+import { Grid9TurnOverlay } from './Grid9TurnOverlay';
 import { Grid9PrivateInvitePanel } from './Grid9PrivateInvitePanel';
 import { Grid9SideRail } from './Grid9SideRail';
 import { Grid9SpotlightStage } from './Grid9SpotlightStage';
@@ -58,6 +58,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     sendQueueJoinIntent,
     sendReserveCoinsIntent,
     sendFireWeaponIntent,
+    sendSelectTargetIntent,
     sendPurchaseShieldIntent,
     sendFundMercenaryIntent,
     sendPrivateRoomCreateIntent,
@@ -76,6 +77,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [victoryDismissed, setVictoryDismissed] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [localTargetSlot, setLocalTargetSlot] = useState<number | null>(null);
   const [vfxCue, setVfxCue] = useState<Grid9CombatVfxCue | null>(null);
   const overlayOriginRef = useRef<Grid9VfxPoint | null>(null);
   const spotlightOriginRef = useRef<Grid9VfxPoint | null>(null);
@@ -121,6 +123,10 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         (match.turn.defensesUsedThisTurn ?? 0) >= 1 ||
         match.turn.autoResolved),
   );
+  const lockedTargetSlot =
+    match?.phase === 'combat' && !turnActed
+      ? match.turn?.pendingTargetSlotIndex ?? localTargetSlot
+      : null;
   // After act, do not paint leftover combat endsAt — server advances immediately.
   const countdownMs =
     match?.phase === 'combat' && match.turn
@@ -140,6 +146,8 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     localPlayer,
     localSlotIndex,
     spotlightSlotIndex: activeSlotIndex,
+    turnActed,
+    pendingTarget: lockedTargetSlot != null,
   });
 
   useEffect(() => {
@@ -158,6 +166,18 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   useEffect(() => {
     if (mode !== 'my_turn') setGalleryOpen(false);
   }, [mode]);
+
+  useEffect(() => {
+    if (match?.phase !== 'combat' || turnActed) {
+      setLocalTargetSlot(null);
+    }
+  }, [match?.phase, match?.turn?.turnNumber, turnActed]);
+
+  useEffect(() => {
+    if (mode === 'my_turn' && lockedTargetSlot != null && !spectate) {
+      setGalleryOpen(true);
+    }
+  }, [lockedTargetSlot, mode, spectate]);
 
   useEffect(() => {
     if (match?.phase !== 'completed') setVictoryDismissed(false);
@@ -364,6 +384,14 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     }
   }, [leaveArena, leaving, navigation]);
 
+  const isActor =
+    !spectate &&
+    !turnActed &&
+    match?.phase === 'combat' &&
+    localSlotIndex != null &&
+    activeSlotIndex === localSlotIndex &&
+    localPlayer?.status === 'alive';
+
   const targetableSlotIndices = useMemo(() => {
     const intent =
       mode === 'proxy_war'
@@ -374,7 +402,9 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
             ? 'heal'
             : selection
               ? 'weapon'
-              : null;
+              : isActor
+                ? 'heal'
+                : null;
     if (!intent) return [];
     if (intent === 'mercenary' && accountCoins < GRID9_DEFAULT_MERCENARY_FUND_COINS) {
       return [];
@@ -391,7 +421,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           : -1,
       )
       .filter((slotIndex) => slotIndex >= 0);
-  }, [accountCoins, localSlotIndex, match?.players, mode, selection]);
+  }, [accountCoins, isActor, localSlotIndex, match?.players, mode, selection]);
 
   const ensureEscrowForSpend = useCallback(
     (costCoins: number) => {
@@ -410,8 +440,30 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
 
   const closeTargeting = useCallback(() => {
     setSelection(null);
+    setLocalTargetSlot(null);
     setActionError(null);
   }, []);
+
+  const fireAtSlot = useCallback(
+    (slotIndex: number, nextSelection: NonNullable<typeof selection>) => {
+      if (nextSelection.kind === 'weapon') {
+        sendFireWeaponIntent({
+          weaponId: nextSelection.itemId,
+          targetSlotIndex: slotIndex,
+        });
+      } else {
+        sendPurchaseShieldIntent({
+          shieldId: nextSelection.itemId,
+          beneficiarySlotIndex: slotIndex,
+        });
+      }
+      setSelection(null);
+      setLocalTargetSlot(null);
+      setActionError(null);
+      void refreshAccountCoins();
+    },
+    [refreshAccountCoins, sendFireWeaponIntent, sendPurchaseShieldIntent],
+  );
 
   const onSelectItem = useCallback(
     (item: Grid9ArsenalItem) => {
@@ -423,13 +475,18 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         if (!inv.includes(item.id) && !free) {
           ensureEscrowForSpend(item.costCoins);
         }
-        setSelection(selectionFromArsenalItem(item));
+        const next = selectionFromArsenalItem(item);
         setGalleryOpen(false);
+        if (lockedTargetSlot != null) {
+          fireAtSlot(lockedTargetSlot, next);
+          return;
+        }
+        setSelection(next);
       } catch (error) {
         setActionError(error instanceof Error ? error.message : 'Cannot fund purchase');
       }
     },
-    [ensureEscrowForSpend, localPlayer?.inventory, match?.turn],
+    [ensureEscrowForSpend, fireAtSlot, localPlayer?.inventory, lockedTargetSlot, match?.turn],
   );
 
   const onSlotPress = useCallback(
@@ -444,33 +501,33 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           setActionError(null);
           return;
         }
-        if (!selection) return;
-        if (selection.kind === 'weapon') {
-          sendFireWeaponIntent({
-            weaponId: selection.itemId,
-            targetSlotIndex: slotIndex,
-          });
-        } else {
-          sendPurchaseShieldIntent({
-            shieldId: selection.itemId,
-            beneficiarySlotIndex: slotIndex,
-          });
+        if (selection) {
+          fireAtSlot(slotIndex, selection);
+          return;
         }
-        setSelection(null);
-        setActionError(null);
-        void refreshAccountCoins();
+        if (isActor) {
+          setLocalTargetSlot(slotIndex);
+          setActionError(null);
+          try {
+            sendSelectTargetIntent({ targetSlotIndex: slotIndex });
+          } catch (error) {
+            setActionError(
+              error instanceof Error ? error.message : 'Could not lock target',
+            );
+          }
+        }
       } catch (error) {
         setActionError(error instanceof Error ? error.message : 'Grid 9 action failed');
       }
     },
     [
       ensureEscrowForSpend,
+      fireAtSlot,
+      isActor,
       mode,
-      refreshAccountCoins,
       selection,
-      sendFireWeaponIntent,
       sendFundMercenaryIntent,
-      sendPurchaseShieldIntent,
+      sendSelectTargetIntent,
     ],
   );
 
@@ -538,16 +595,33 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const showVictory = match?.phase === 'completed' && !victoryDismissed;
   const isCombatant = Boolean(localPlayer && localPlayer.kind === 'human');
 
+  const lockedTargetPlayer =
+    lockedTargetSlot == null
+      ? null
+      : match?.players.find((player) => player.slotIndex === lockedTargetSlot) ?? null;
+  const overlayTitle =
+    match?.phase === 'combat' && !turnActed
+      ? lockedTargetSlot == null
+        ? 'Select a box'
+        : 'Target locked'
+      : null;
+  const overlaySubtitle =
+    match?.phase === 'combat' && !turnActed
+      ? lockedTargetSlot == null
+        ? 'Select your target'
+        : lockedTargetPlayer?.displayName || `Seat ${lockedTargetSlot + 1}`
+      : null;
+  const overlayDetail =
+    match?.phase === 'combat' && !turnActed
+      ? lockedTargetSlot == null
+        ? spotlightPlayer
+          ? `${spotlightPlayer.displayName} is choosing`
+          : 'Choosing a seat'
+        : 'Select your weapon'
+      : null;
+
   return (
     <View className="flex-1 bg-blyp-ink" style={{ paddingTop: insets.top }}>
-      <Grid9Header
-        connectionStatus={connectionStatus}
-        audienceCount={Number(match?.audienceCount ?? 0)}
-        onLeave={onLeave}
-        leaving={leaving}
-      />
-
-      {/* Spotlight + seats flush to top (no big jackpot/timer header stack) */}
       <RNView
         ref={overlayRef}
         style={{ position: 'relative' }}
@@ -610,6 +684,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           rouletteActive={match?.phase === 'roulette'}
           localSlotIndex={localSlotIndex}
           targetableSlotIndices={targetableSlotIndices}
+          lockedTargetSlotIndex={lockedTargetSlot}
           onSlotPress={onSlotPress}
           onSeatCentersMeasured={(centers) => {
             seatCentersRef.current = centers;
@@ -621,8 +696,24 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
             setVfxCue((prev) => (prev?.id === id ? null : prev));
           }}
         />
+        <Grid9TurnOverlay
+          visible={Boolean(overlayTitle)}
+          title={overlayTitle || ''}
+          subtitle={overlaySubtitle}
+          detail={overlayDetail}
+        />
         </Grid9LiveKitProvider>
         </View>
+        <TouchableOpacity
+          className="absolute right-2 top-1 z-40 rounded-full border border-white/30 bg-black/70 px-3 py-1.5"
+          activeOpacity={0.85}
+          disabled={leaving}
+          onPress={onLeave}
+        >
+          <Text className="text-[10px] font-black uppercase tracking-[1px] text-white">
+            {leaving ? '…' : 'Leave'}
+          </Text>
+        </TouchableOpacity>
       </RNView>
 
       {match?.phase === 'private_lobby' ? (
