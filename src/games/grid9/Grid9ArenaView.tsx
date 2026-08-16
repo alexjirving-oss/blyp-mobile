@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, View as RNView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import './grid9.css';
 import {
+  GRID9_ARSENAL_CATALOG,
   GRID9_DEFAULT_MERCENARY_FUND_COINS,
+  GRID9_WEAPON_CATALOG,
   isGrid9HealWeapon,
   type Grid9ArsenalItem,
 } from './catalog';
@@ -12,6 +14,11 @@ import { GRID9_DEFAULT_ESCROW_RESERVE_COINS } from './constants';
 import { Grid9ActionDrawer } from './Grid9ActionDrawer';
 import { Grid9ArrivalTicker } from './Grid9ArrivalTicker';
 import { Grid9Board } from './Grid9Board';
+import {
+  Grid9CombatVfxOverlay,
+  type Grid9CombatVfxCue,
+  type Grid9VfxPoint,
+} from './Grid9CombatVfxOverlay';
 import { Grid9EntryPortal } from './Grid9EntryPortal';
 import { Grid9Header } from './Grid9Header';
 import { Grid9PrivateInvitePanel } from './Grid9PrivateInvitePanel';
@@ -31,6 +38,10 @@ import {
   remainingMs,
   slotsForGrid9Board,
 } from './grid9Format';
+import {
+  cueForWeaponVfx,
+  playGrid9Cue,
+} from './grid9Audio';
 import { Text, TouchableOpacity, View } from './nw';
 import { useGrid9 } from './useGrid9';
 import { useGrid9AccountCoinBalance } from './useGrid9AccountCoinBalance';
@@ -64,6 +75,23 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [victoryDismissed, setVictoryDismissed] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [vfxCue, setVfxCue] = useState<Grid9CombatVfxCue | null>(null);
+  const overlayOriginRef = useRef<Grid9VfxPoint | null>(null);
+  const spotlightOriginRef = useRef<Grid9VfxPoint | null>(null);
+  const seatCentersRef = useRef<Array<Grid9VfxPoint | null>>(
+    Array.from({ length: 9 }, () => null),
+  );
+  const lastVfxKeyRef = useRef<string | null>(null);
+  const lastAudioActionKeyRef = useRef<string | null>(null);
+  const prevPhaseRef = useRef<string | null>(null);
+  const prevModeRef = useRef<string | null>(null);
+  const prevLocalStatusRef = useRef<string | null>(null);
+  const arenaLivePlayedRef = useRef(false);
+  const entryFeePlayedRef = useRef(false);
+  const prevHealthRef = useRef<Record<number, { health: number; shield: number }>>(
+    {},
+  );
+  const overlayRef = useRef<React.ElementRef<typeof RNView> | null>(null);
 
   const localSlotIndex = session.assignment?.slotIndex ?? null;
   const activeSlotIndex =
@@ -122,6 +150,205 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   useEffect(() => {
     if (spectate && match) setEntered(true);
   }, [spectate, match]);
+
+  // Phase / spotlight / victory transition SFX (mute-safe via playGrid9Cue).
+  useEffect(() => {
+    const phase = match?.phase ?? null;
+    if (!phase) return;
+
+    if (
+      !arenaLivePlayedRef.current &&
+      (phase === 'combat' || phase === 'roulette') &&
+      entered
+    ) {
+      arenaLivePlayedRef.current = true;
+      void playGrid9Cue('arena_live');
+    }
+
+    const prev = prevPhaseRef.current;
+    if (prev !== phase) {
+      if (phase === 'roulette') {
+        if (prev === 'combat') void playGrid9Cue('turn_end');
+        void playGrid9Cue('roulette_spin');
+      } else if (phase === 'combat' && (prev === 'roulette' || prev == null)) {
+        void playGrid9Cue('spotlight_select');
+      } else if (phase === 'completed') {
+        void playGrid9Cue('victory');
+        void playGrid9Cue('jackpot_sting', { volume: 0.9 });
+      }
+      prevPhaseRef.current = phase;
+    }
+  }, [entered, match?.phase]);
+
+  useEffect(() => {
+    const fee = Number(match?.entryFeeCoins || 0);
+    if (fee <= 0 || entryFeePlayedRef.current) return;
+    if (match?.roomMode !== 'private') return;
+    if (!localPlayer || localPlayer.kind !== 'human') return;
+    entryFeePlayedRef.current = true;
+    void playGrid9Cue('entry_fee');
+  }, [localPlayer, match?.entryFeeCoins, match?.roomMode]);
+
+  useEffect(() => {
+    if (prevModeRef.current !== mode && mode === 'my_turn') {
+      void playGrid9Cue('your_go');
+    }
+    prevModeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    const status = localPlayer?.status ?? null;
+    if (
+      prevLocalStatusRef.current === 'alive' &&
+      status === 'eliminated'
+    ) {
+      void playGrid9Cue('eliminated');
+    }
+    if (status) prevLocalStatusRef.current = status;
+  }, [localPlayer?.status]);
+
+  // Track prior HP/SP so floating amounts stay accurate after resolve.
+  useEffect(() => {
+    if (!match?.players) return;
+    const next: Record<number, { health: number; shield: number }> = {};
+    for (const player of match.players) {
+      next[player.slotIndex] = {
+        health: Number(player.health || 0),
+        shield: Number(player.shieldPoints || 0),
+      };
+    }
+    // Seed once without firing VFX.
+    if (Object.keys(prevHealthRef.current).length === 0) {
+      prevHealthRef.current = next;
+    }
+  }, [match?.players, match?.stateVersion]);
+
+  useEffect(() => {
+    const action = match?.lastAction as
+      | {
+          kind?: string;
+          weaponId?: string;
+          shieldId?: string | null;
+          targetSlotIndex?: number;
+          affectedSlotIndices?: number[];
+          committedAt?: string;
+          actor?: { displayName?: string };
+        }
+      | null
+      | undefined;
+    if (!action?.committedAt || !match) return;
+    const key = `${action.committedAt}:${action.kind}:${action.weaponId || action.shieldId}:${action.targetSlotIndex}`;
+    if (lastVfxKeyRef.current === key) return;
+    lastVfxKeyRef.current = key;
+
+    const targetSlot = Number(action.targetSlotIndex);
+    if (!Number.isInteger(targetSlot) || targetSlot < 0 || targetSlot > 8) return;
+
+    const toWindow = seatCentersRef.current[targetSlot];
+    const fromWindow =
+      spotlightOriginRef.current ||
+      (activeSlotIndex != null ? seatCentersRef.current[activeSlotIndex] : null) ||
+      toWindow;
+    const overlay = overlayOriginRef.current;
+    if (!toWindow || !fromWindow || !overlay) {
+      // Soft-fail VFX; still play action SFX once.
+      if (lastAudioActionKeyRef.current !== key) {
+        lastAudioActionKeyRef.current = key;
+        if (action.kind === 'weapon' && action.weaponId) {
+          const audio = cueForWeaponVfx(
+            isGrid9HealWeapon(action.weaponId) ? 'heal' : 'projectile',
+            action.weaponId,
+          );
+          if (audio.fire) void playGrid9Cue(audio.fire);
+          void playGrid9Cue(audio.impact);
+        } else if (action.kind === 'shield') {
+          void playGrid9Cue(cueForWeaponVfx('shield').impact);
+        }
+        void playGrid9Cue('turn_end', { volume: 0.55 });
+      }
+      const snapshot: Record<number, { health: number; shield: number }> = {};
+      for (const player of match.players) {
+        snapshot[player.slotIndex] = {
+          health: Number(player.health || 0),
+          shield: Number(player.shieldPoints || 0),
+        };
+      }
+      prevHealthRef.current = snapshot;
+      return;
+    }
+
+    const to = { x: toWindow.x - overlay.x, y: toWindow.y - overlay.y };
+    const from = { x: fromWindow.x - overlay.x, y: fromWindow.y - overlay.y };
+    const prev = prevHealthRef.current[targetSlot];
+    const nowPlayer = match.players[targetSlot];
+    const healthNow = Number(nowPlayer?.health || 0);
+    const shieldNow = Number(nowPlayer?.shieldPoints || 0);
+    const healthDelta = prev ? healthNow - prev.health : 0;
+    const shieldDelta = prev ? shieldNow - prev.shield : 0;
+
+    let cue: Grid9CombatVfxCue | null = null;
+    if (action.kind === 'weapon' && action.weaponId) {
+      if (isGrid9HealWeapon(action.weaponId) || healthDelta > 0) {
+        const heal =
+          healthDelta > 0
+            ? healthDelta
+            : Number(GRID9_WEAPON_CATALOG.kiss.healHealth);
+        cue = {
+          id: key,
+          kind: 'heal',
+          weaponId: action.weaponId,
+          from,
+          to,
+          amount: heal,
+        };
+      } else {
+        const catalogDmg = Number(
+          (GRID9_ARSENAL_CATALOG as any)[action.weaponId]?.directDamage || 0,
+        );
+        const dealt =
+          healthDelta < 0 || shieldDelta < 0
+            ? Math.abs(Math.min(0, healthDelta)) + Math.abs(Math.min(0, shieldDelta))
+            : catalogDmg;
+        cue = {
+          id: key,
+          kind: 'projectile',
+          weaponId: action.weaponId,
+          from,
+          to,
+          amount: dealt > 0 ? -dealt : -catalogDmg || -1,
+        };
+      }
+    } else if (action.kind === 'shield') {
+      const gained = shieldDelta > 0 ? shieldDelta : 30;
+      cue = {
+        id: key,
+        kind: 'shield',
+        from,
+        to,
+        amount: gained,
+        label: `+${gained} SP`,
+      };
+    }
+
+    const snapshot: Record<number, { health: number; shield: number }> = {};
+    for (const player of match.players) {
+      snapshot[player.slotIndex] = {
+        health: Number(player.health || 0),
+        shield: Number(player.shieldPoints || 0),
+      };
+    }
+    prevHealthRef.current = snapshot;
+    if (cue) {
+      if (lastAudioActionKeyRef.current !== key) {
+        lastAudioActionKeyRef.current = key;
+        const audio = cueForWeaponVfx(cue.kind, cue.weaponId);
+        if (audio.fire) void playGrid9Cue(audio.fire);
+        void playGrid9Cue(audio.impact);
+        void playGrid9Cue('turn_end', { volume: 0.55 });
+      }
+      setVfxCue(cue);
+    }
+  }, [activeSlotIndex, match, match?.lastAction, match?.players, match?.stateVersion]);
 
   const onLeave = useCallback(async () => {
     if (leaving) return;
@@ -332,7 +559,23 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
       />
 
       {/* Spotlight + seats flush to top (no big jackpot/timer header stack) */}
-      <View className="pt-1">
+      <RNView
+        ref={overlayRef}
+        style={{ position: 'relative' }}
+        onLayout={() => {
+          const node = overlayRef.current as unknown as {
+            measureInWindow?: (
+              cb: (x: number, y: number, w: number, h: number) => void,
+            ) => void;
+          } | null;
+          node?.measureInWindow?.((x, y) => {
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              overlayOriginRef.current = { x, y };
+            }
+          });
+        }}
+      >
+        <View className="pt-1">
         <Grid9SpotlightStage
           player={spotlightPlayer}
           matchId={match?.matchId ?? session.matchId}
@@ -345,6 +588,9 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           countdownMs={countdownMs}
           nextSpotlightMs={countdownMs}
           onAir={connectionStatus === 'connected' && !!spotlightPlayer}
+          onOriginMeasured={(point) => {
+            spotlightOriginRef.current = point;
+          }}
         />
         {freeDropLabel && match?.phase === 'combat' ? (
           <View className="mx-3 mb-1 rounded-lg border border-blyp-primary/35 bg-blyp-primary/10 px-2 py-1">
@@ -362,8 +608,18 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           targetableSlotIndices={targetableSlotIndices}
           spotlightChanceBySlot={spotlightChanceBySlot}
           onSlotPress={onSlotPress}
+          onSeatCentersMeasured={(centers) => {
+            seatCentersRef.current = centers;
+          }}
         />
-      </View>
+        <Grid9CombatVfxOverlay
+          cue={vfxCue}
+          onDone={(id) => {
+            setVfxCue((prev) => (prev?.id === id ? null : prev));
+          }}
+        />
+        </View>
+      </RNView>
 
       {match?.phase === 'private_lobby' ? (
         <View className="px-0 pb-2">

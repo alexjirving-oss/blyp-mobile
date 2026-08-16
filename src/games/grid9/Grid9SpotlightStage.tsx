@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { Grid9PublicPlayer } from './protocol';
 import {
   formatGrid9Coins,
@@ -7,8 +7,10 @@ import {
   playerInitials,
 } from './grid9Format';
 import { GRID9_THEME } from './grid9Theme';
+import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
 import { Grid9LiveKitSession } from './Grid9LiveKitSession';
 import { SentinelStage } from './SentinelStage';
+import { View as RnView } from 'react-native';
 import { Image, Text, View } from './nw';
 
 type FeedLike = {
@@ -103,6 +105,7 @@ export function Grid9SpotlightStage({
   countdownMs,
   nextSpotlightMs,
   onAir = true,
+  onOriginMeasured,
 }: {
   player: Grid9PublicPlayer | null;
   matchId?: string | null;
@@ -114,6 +117,8 @@ export function Grid9SpotlightStage({
   /** Separate chip for next-roulette / next spotlight. */
   nextSpotlightMs?: number | null;
   onAir?: boolean;
+  /** Window-space origin near bottom-center of the stage for projectiles. */
+  onOriginMeasured?: (point: Grid9VfxPoint | null) => void;
 }) {
   const feed = (player as { feed?: FeedLike } | null)?.feed ?? null;
   const participantId = useMemo(() => {
@@ -138,10 +143,46 @@ export function Grid9SpotlightStage({
   const spRatio = Math.max(0, Math.min(1, sp / 100));
   const roundLabel =
     turnNumber != null && turnNumber > 0 ? `ROUND ${turnNumber} / ∞` : 'ROUND —';
+  const stageRef = useRef<React.ElementRef<typeof RnView> | null>(null);
+
+  const publishOrigin = () => {
+    if (!onOriginMeasured) return;
+    const anyNode = stageRef.current as unknown as {
+      measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+    } | null;
+    if (!anyNode?.measureInWindow) {
+      onOriginMeasured(null);
+      return;
+    }
+    try {
+      anyNode.measureInWindow((x, y, w, h) => {
+        if (!Number.isFinite(x) || !Number.isFinite(y) || w <= 0 || h <= 0) {
+          onOriginMeasured(null);
+          return;
+        }
+        onOriginMeasured({ x: x + w / 2, y: y + h - 18 });
+      });
+    } catch {
+      onOriginMeasured(null);
+    }
+  };
 
   return (
     <View className="mb-1 flex-row px-3">
-      <View className="mr-2 h-52 flex-1 overflow-hidden rounded-2xl border border-blyp-primary/40 bg-blyp-ink">
+      <RnView
+        ref={stageRef}
+        style={{
+          marginRight: 8,
+          height: 208,
+          flex: 1,
+          overflow: 'hidden',
+          borderRadius: 16,
+          borderWidth: 1,
+          borderColor: `${GRID9_THEME.primary}66`,
+          backgroundColor: GRID9_THEME.ink,
+        }}
+        onLayout={() => requestAnimationFrame(publishOrigin)}
+      >
         {/* Top chips on stage */}
         <View className="absolute left-2 top-2 z-10 flex-row items-center gap-1.5">
           {onAir ? (
@@ -237,7 +278,7 @@ export function Grid9SpotlightStage({
             </View>
           </View>
         ) : null}
-      </View>
+      </RnView>
 
       {/* Side chips — Round / Next Spotlight / Audience Power */}
       <View className="w-[88px] justify-between py-0.5">

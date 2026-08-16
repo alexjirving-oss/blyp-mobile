@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
-import { Animated } from 'react-native';
+import { Animated, View as RnView } from 'react-native';
 import type { Grid9SlotIndex } from './constants';
 import type { Grid9PublicPlayer } from './protocol';
+import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
 import { slotsForGrid9Board } from './grid9Format';
 import { Grid9Slot } from './Grid9Slot';
 import { View } from './nw';
@@ -18,6 +19,7 @@ export function Grid9Board({
   rouletteActive = false,
   spotlightChanceBySlot = null,
   onSlotPress,
+  onSeatCentersMeasured,
 }: {
   players: Grid9PublicPlayer[] | undefined;
   spotlightSlotIndex: Grid9SlotIndex | null;
@@ -27,9 +29,14 @@ export function Grid9Board({
   rouletteActive?: boolean;
   spotlightChanceBySlot?: Array<number | null> | null;
   onSlotPress?: (slotIndex: number) => void;
+  /** Window-space centers for VFX (soft-fail if unavailable). */
+  onSeatCentersMeasured?: (centers: Array<Grid9VfxPoint | null>) => void;
 }) {
   const [boardWidth, setBoardWidth] = useState(0);
   const flash = useRef(new Animated.Value(0.35)).current;
+  const seatRefs = useRef<Array<React.ElementRef<typeof RnView> | null>>(
+    Array.from({ length: 9 }, () => null),
+  );
   const slots = slotsForGrid9Board(players);
   const cell = boardWidth > 0 ? (boardWidth - GAP * 2) / 3 : 0;
 
@@ -51,9 +58,38 @@ export function Grid9Board({
     };
   }, [flash, rouletteActive]);
 
+  const publishCenters = () => {
+    if (!onSeatCentersMeasured) return;
+    const centers: Array<Grid9VfxPoint | null> = Array.from({ length: 9 }, () => null);
+    let pending = 9;
+    seatRefs.current.forEach((node, slotIndex) => {
+      const anyNode = node as unknown as {
+        measureInWindow?: (cb: (x: number, y: number, w: number, h: number) => void) => void;
+      } | null;
+      if (!anyNode?.measureInWindow) {
+        pending -= 1;
+        if (pending <= 0) onSeatCentersMeasured(centers);
+        return;
+      }
+      try {
+        anyNode.measureInWindow((x, y, w, h) => {
+          if (Number.isFinite(x) && Number.isFinite(y) && w > 0 && h > 0) {
+            centers[slotIndex] = { x: x + w / 2, y: y + h / 2 };
+          }
+          pending -= 1;
+          if (pending <= 0) onSeatCentersMeasured(centers);
+        });
+      } catch {
+        pending -= 1;
+        if (pending <= 0) onSeatCentersMeasured(centers);
+      }
+    });
+  };
+
   const onLayout = (event: LayoutChangeEvent) => {
     const next = Math.floor(event.nativeEvent.layout.width);
     if (next > 0 && next !== boardWidth) setBoardWidth(next);
+    requestAnimationFrame(publishCenters);
   };
 
   return (
@@ -73,7 +109,13 @@ export function Grid9Board({
                 padding: GAP / 2,
               }}
             >
-              <View className="relative h-full w-full">
+              <RnView
+                style={{ position: 'relative', height: '100%', width: '100%' }}
+                ref={(node) => {
+                  seatRefs.current[slotIndex] = node;
+                }}
+                onLayout={() => requestAnimationFrame(publishCenters)}
+              >
                 {rouletteCandidate ? (
                   <Animated.View
                     pointerEvents="none"
@@ -104,7 +146,7 @@ export function Grid9Board({
                       : undefined
                   }
                 />
-              </View>
+              </RnView>
             </View>
           );
         })}
