@@ -310,3 +310,42 @@ export const adminCreateSocialImportSchema = z.object({
         })
         .optional(),
 });
+
+const marketingNetworkSchema = z.enum(['facebook', 'instagram', 'tiktok', 'snapchat']);
+
+export const adminMarketingMetaStartSchema = z.object({
+    network: z.enum(['facebook', 'instagram']),
+});
+
+export const adminMarketingDisconnectSchema = z.object({
+    network: marketingNetworkSchema,
+});
+
+export const adminMarketingScheduleSchema = z.object({
+    enabled: z.coerce.boolean().optional(),
+    timezone: z.string().trim().min(1).max(80).optional(),
+    daysOfWeek: z.array(z.coerce.number().int().min(0).max(6)).min(1).max(7).optional(),
+    timesLocal: z
+        .array(z.string().regex(/^\d{2}:\d{2}$/))
+        .min(1)
+        .max(12)
+        .optional(),
+    sourceMode: z.enum(['recent_public', 'featured', 'promo_template', 'manual']).optional(),
+    captionTemplate: z.string().trim().max(2000).nullable().optional(),
+    networks: z.array(marketingNetworkSchema).min(1).max(8).optional(),
+});
+
+export const adminMarketingEnqueueSchema = z.object({
+    networks: z.array(marketingNetworkSchema).min(1).max(8),
+    sourceType: z.enum(['blyp_post', 'promo_template', 'manual']),
+    sourceId: z.string().trim().min(1).max(128).nullable().optional(),
+    caption: z.string().trim().max(2200).nullable().optional(),
+    mediaUrl: z.string().trim().url().max(2000).nullable().optional(),
+    linkUrl: z.string().trim().url().max(2000).nullable().optional(),
+    scheduledAt: z.string().datetime().nullable().optional(),
+});
+
+export const adminMarketingQueueListSchema = z.object({
+    status: z.enum(['all', 'scheduled', 'publishing', 'published', 'failed', 'cancelled']).default('all'),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+});

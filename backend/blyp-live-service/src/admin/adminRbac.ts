@@ -54,6 +54,7 @@ export const ADMIN_PERMISSIONS = [
   'strikes.write',
   'users.message',
   'agents.oversight',
+  'marketing.manage',
 ] as const;
 
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];
@@ -103,6 +104,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, PermSet> = {
     'dsar.manage',
     'appeals.resolve',
     'users.message',
+    'marketing.manage',
   ),
   // Mel (admin): ops + fraud + withdraw reject + agent oversight + bonus coin credit.
   // Coin credit uses the same audited ADMIN_CREDIT path as Owner; soft-capped per request
@@ -131,6 +133,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, PermSet> = {
     'strikes.write',
     'users.message',
     'agents.oversight',
+    'marketing.manage',
   ),
   trust_safety_lead: set(
     'users.ban',

@@ -230,6 +230,67 @@ export async function ensureAdminSchema(db: Knex): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_agent_proposals_status ON agent_action_proposals (status, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_agent_proposals_user ON agent_action_proposals (user_id, created_at DESC)`,
         `CREATE INDEX IF NOT EXISTS idx_agent_action_log_user ON agent_action_log (user_id, created_at DESC)`,
+
+        // Marketing Hub — social connect + scheduled Blyp → network posts.
+        // Tokens stored encrypted (token_ciphertext); never select into API responses.
+        `CREATE TABLE IF NOT EXISTS marketing_social_accounts (
+          account_id text PRIMARY KEY,
+          network text NOT NULL,
+          status text NOT NULL DEFAULT 'disconnected',
+          display_name text,
+          external_user_id text,
+          external_page_id text,
+          scopes text,
+          token_ciphertext text,
+          token_expires_at timestamptz,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          connected_by text,
+          connected_at timestamptz,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_marketing_accounts_network ON marketing_social_accounts (network)`,
+
+        `CREATE TABLE IF NOT EXISTS marketing_schedules (
+          schedule_id text PRIMARY KEY,
+          enabled boolean NOT NULL DEFAULT false,
+          timezone text NOT NULL DEFAULT 'Europe/London',
+          days_of_week jsonb NOT NULL DEFAULT '[1,2,3,4,5]'::jsonb,
+          times_local jsonb NOT NULL DEFAULT '["10:00","16:00"]'::jsonb,
+          source_mode text NOT NULL DEFAULT 'recent_public',
+          caption_template text,
+          networks jsonb NOT NULL DEFAULT '["facebook"]'::jsonb,
+          last_enqueued_slot text,
+          updated_by text,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE TABLE IF NOT EXISTS marketing_queue_items (
+          item_id text PRIMARY KEY,
+          network text NOT NULL,
+          account_id text,
+          status text NOT NULL DEFAULT 'scheduled',
+          scheduled_at timestamptz NOT NULL,
+          published_at timestamptz,
+          source_type text NOT NULL DEFAULT 'manual',
+          source_post_id text,
+          caption text NOT NULL DEFAULT '',
+          media_url text,
+          permalink text,
+          external_post_id text,
+          error_code text,
+          error_detail text,
+          attempts integer NOT NULL DEFAULT 0,
+          metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_by text,
+          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+
+        `CREATE INDEX IF NOT EXISTS idx_marketing_queue_status_sched ON marketing_queue_items (status, scheduled_at ASC)`,
+        `CREATE INDEX IF NOT EXISTS idx_marketing_queue_created ON marketing_queue_items (created_at DESC)`,
       ];
 
       for (const stmt of ddl) {

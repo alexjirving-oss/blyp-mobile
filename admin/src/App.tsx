@@ -20,6 +20,7 @@ const Live = lazy(() => import("./pages/Live"));
 const Safety = lazy(() => import("./pages/Safety"));
 const Access = lazy(() => import("./pages/Access"));
 const Growth = lazy(() => import("./pages/Growth"));
+const Marketing = lazy(() => import("./pages/Marketing"));
 const Comms = lazy(() => import("./pages/Comms"));
 const Config = lazy(() => import("./pages/Config"));
 const Teams = lazy(() => import("./pages/Teams"));
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/safety" element={<PageSuspense><Safety /></PageSuspense>} />
             <Route path="/economy" element={<PageSuspense><Economy /></PageSuspense>} />
             <Route path="/growth" element={<PageSuspense><Growth /></PageSuspense>} />
+            <Route path="/marketing" element={<PageSuspense><Marketing /></PageSuspense>} />
             <Route path="/comms" element={<PageSuspense><Comms /></PageSuspense>} />
             <Route path="/config" element={<PageSuspense><Config /></PageSuspense>} />
             <Route path="/ops" element={<PageSuspense><Ops /></PageSuspense>} />

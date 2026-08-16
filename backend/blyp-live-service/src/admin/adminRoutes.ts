@@ -65,6 +65,11 @@ import {
     adminListScheduledPostsSchema,
     adminScheduledPostActionSchema,
     adminCreateSocialImportSchema,
+    adminMarketingMetaStartSchema,
+    adminMarketingDisconnectSchema,
+    adminMarketingScheduleSchema,
+    adminMarketingEnqueueSchema,
+    adminMarketingQueueListSchema,
 } from './adminSchemas';
 import {
     banUserByAdmin,
@@ -179,6 +184,20 @@ import {
     AGENT_ACTION_TYPES,
 } from './agentAutomationService';
 import { executeApprovedProposalNow } from './agentExecuteWorker';
+import {
+    cancelMarketingQueueItem,
+    completeMetaOAuth,
+    disconnectMarketingAccount,
+    enqueueMarketingPost,
+    getMarketingSchedule,
+    listMarketingAccounts,
+    listMarketingContentSources,
+    listMarketingQueue,
+    publishQueueItem,
+    startMetaConnect,
+    upsertMarketingSchedule,
+} from './marketingService';
+import { verifyMetaOAuthState } from './marketingMeta';
 
 const router = Router();
 
@@ -2855,5 +2874,253 @@ router.post('/admin/social-imports', requireAdmin, requirePermission('content.mo
         return res.status(500).json({ error: 'INTERNAL' });
     }
 });
+
+// --- Marketing Hub (social connect + scheduled Blyp posts) ---
+
+router.get('/admin/marketing/accounts', requireAdmin, requirePermission('marketing.manage'), async (_req: AuthedRequest, res: Response) => {
+    try {
+        const out = await listMarketingAccounts();
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] marketing accounts failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post(
+    '/admin/marketing/accounts/meta/start',
+    requireAdmin,
+    requirePermission('marketing.manage'),
+    async (req: AuthedRequest, res: Response) => {
+        try {
+            const parsed = adminMarketingMetaStartSchema.safeParse(req.body || {});
+            if (!parsed.success) {
+                return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+            }
+            const actorUserId = String(req.user?.sub || '').trim();
+            const out = await startMetaConnect({ network: parsed.data.network, actorUserId });
+            await writeAdminAudit({
+                actorUserId,
+                action: 'marketing_meta_oauth_start',
+                targetType: 'marketing',
+                targetId: parsed.data.network,
+                metadata: { redirectUri: out.redirectUri },
+            }).catch(() => undefined);
+            return res.json(out);
+        } catch (e: any) {
+            const msg = e?.message || String(e);
+            if (msg.includes('META_ENV') || msg.includes('ENCRYPTION')) {
+                return res.status(503).json({ error: 'NOT_CONFIGURED', code: 'NOT_CONFIGURED', detail: msg });
+            }
+            logger.error({ err: msg }, '[admin] marketing meta start failed');
+            return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail: msg });
+        }
+    },
+);
+
+/**
+ * Meta OAuth browser callback — no Bearer session (Meta redirects here).
+ * State is HMAC-signed with actor + network; tokens never appear in redirects.
+ */
+router.get('/admin/marketing/oauth/meta/callback', async (req: AuthedRequest, res: Response) => {
+    const adminUi = String(process.env.ADMIN_PUBLIC_URL || 'https://admin.blyp.world').replace(/\/$/, '');
+    const fail = (code: string) => {
+        res.redirect(302, `${adminUi}/marketing?oauth=error&code=${encodeURIComponent(code)}`);
+    };
+    try {
+        const err = String(req.query?.error || '').trim();
+        if (err) return fail(err);
+        const code = String(req.query?.code || '').trim();
+        const state = String(req.query?.state || '').trim();
+        if (!code || !state) return fail('missing_code_or_state');
+        const verified = verifyMetaOAuthState(state);
+        if (!verified) return fail('invalid_state');
+        await completeMetaOAuth({
+            network: verified.network,
+            actorUserId: verified.actorUserId,
+            code,
+        });
+        await writeAdminAudit({
+            actorUserId: verified.actorUserId,
+            action: 'marketing_meta_oauth_complete',
+            targetType: 'marketing',
+            targetId: verified.network,
+            metadata: {},
+        }).catch(() => undefined);
+        return res.redirect(302, `${adminUi}/marketing?oauth=ok&network=${encodeURIComponent(verified.network)}`);
+    } catch (e: any) {
+        const msg = e?.message || String(e);
+        logger.warn({ err: msg }, '[admin] marketing meta callback failed');
+        return fail(msg.slice(0, 80));
+    }
+});
+
+router.post(
+    '/admin/marketing/accounts/disconnect',
+    requireAdmin,
+    requirePermission('marketing.manage'),
+    async (req: AuthedRequest, res: Response) => {
+        try {
+            const parsed = adminMarketingDisconnectSchema.safeParse(req.body || {});
+            if (!parsed.success) {
+                return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+            }
+            const actorUserId = String(req.user?.sub || '').trim();
+            await disconnectMarketingAccount({ network: parsed.data.network, actorUserId });
+            await writeAdminAudit({
+                actorUserId,
+                action: 'marketing_account_disconnect',
+                targetType: 'marketing',
+                targetId: parsed.data.network,
+                metadata: {},
+            }).catch(() => undefined);
+            return res.json({ ok: true });
+        } catch (e: any) {
+            logger.error({ err: e?.message || String(e) }, '[admin] marketing disconnect failed');
+            return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+        }
+    },
+);
+
+router.get('/admin/marketing/sources', requireAdmin, requirePermission('marketing.manage'), async (_req: AuthedRequest, res: Response) => {
+    try {
+        const out = await listMarketingContentSources(24);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] marketing sources failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.get('/admin/marketing/schedule', requireAdmin, requirePermission('marketing.manage'), async (_req: AuthedRequest, res: Response) => {
+    try {
+        const schedule = await getMarketingSchedule();
+        return res.json({ schedule });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] marketing schedule get failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post(
+    '/admin/marketing/schedule',
+    requireAdmin,
+    requirePermission('marketing.manage'),
+    async (req: AuthedRequest, res: Response) => {
+        try {
+            const parsed = adminMarketingScheduleSchema.safeParse(req.body || {});
+            if (!parsed.success) {
+                return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+            }
+            const actorUserId = String(req.user?.sub || '').trim();
+            const schedule = await upsertMarketingSchedule({ ...parsed.data, actorUserId });
+            await writeAdminAudit({
+                actorUserId,
+                action: 'marketing_schedule_upsert',
+                targetType: 'marketing',
+                targetId: schedule.scheduleId,
+                metadata: {
+                    enabled: schedule.enabled,
+                    timezone: schedule.timezone,
+                    networks: schedule.networks,
+                },
+            }).catch(() => undefined);
+            return res.json({ schedule });
+        } catch (e: any) {
+            logger.error({ err: e?.message || String(e) }, '[admin] marketing schedule save failed');
+            return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+        }
+    },
+);
+
+router.get('/admin/marketing/queue', requireAdmin, requirePermission('marketing.manage'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const parsed = adminMarketingQueueListSchema.safeParse(req.query);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+        const out = await listMarketingQueue(parsed.data);
+        return res.json(out);
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] marketing queue list failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post(
+    '/admin/marketing/queue',
+    requireAdmin,
+    requirePermission('marketing.manage'),
+    async (req: AuthedRequest, res: Response) => {
+        try {
+            const parsed = adminMarketingEnqueueSchema.safeParse(req.body || {});
+            if (!parsed.success) {
+                return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+            }
+            const actorUserId = String(req.user?.sub || '').trim();
+            const out = await enqueueMarketingPost({ ...parsed.data, actorUserId });
+            await writeAdminAudit({
+                actorUserId,
+                action: 'marketing_queue_enqueue',
+                targetType: 'marketing',
+                targetId: out.items[0]?.itemId || 'batch',
+                metadata: { count: out.items.length, networks: parsed.data.networks },
+            }).catch(() => undefined);
+            return res.json(out);
+        } catch (e: any) {
+            const msg = e?.message || String(e);
+            logger.error({ err: msg }, '[admin] marketing enqueue failed');
+            return res.status(400).json({ error: 'ENQUEUE_FAILED', code: 'ENQUEUE_FAILED', detail: msg });
+        }
+    },
+);
+
+router.post(
+    '/admin/marketing/queue/:itemId/cancel',
+    requireAdmin,
+    requirePermission('marketing.manage'),
+    async (req: AuthedRequest, res: Response) => {
+        try {
+            const itemId = String(req.params?.itemId || '').trim();
+            if (!itemId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+            await cancelMarketingQueueItem(itemId);
+            const actorUserId = String(req.user?.sub || '').trim();
+            await writeAdminAudit({
+                actorUserId,
+                action: 'marketing_queue_cancel',
+                targetType: 'marketing_queue',
+                targetId: itemId,
+                metadata: {},
+            }).catch(() => undefined);
+            return res.json({ ok: true });
+        } catch (e: any) {
+            return res.status(400).json({ error: 'CANCEL_FAILED', code: 'CANCEL_FAILED', detail: e?.message || String(e) });
+        }
+    },
+);
+
+router.post(
+    '/admin/marketing/queue/:itemId/publish-now',
+    requireAdmin,
+    requirePermission('marketing.manage'),
+    async (req: AuthedRequest, res: Response) => {
+        try {
+            const itemId = String(req.params?.itemId || '').trim();
+            if (!itemId) return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+            const item = await publishQueueItem(itemId);
+            const actorUserId = String(req.user?.sub || '').trim();
+            await writeAdminAudit({
+                actorUserId,
+                action: 'marketing_queue_publish_now',
+                targetType: 'marketing_queue',
+                targetId: itemId,
+                metadata: { status: item.status, network: item.network },
+            }).catch(() => undefined);
+            return res.json({ item });
+        } catch (e: any) {
+            return res.status(400).json({ error: 'PUBLISH_FAILED', code: 'PUBLISH_FAILED', detail: e?.message || String(e) });
+        }
+    },
+);
 
 export default router;

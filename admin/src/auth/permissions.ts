@@ -41,7 +41,8 @@ export type AdminPermission =
   | "appeals.resolve"
   | "strikes.write"
   | "users.message"
-  | "agents.oversight";
+  | "agents.oversight"
+  | "marketing.manage";
 
 export const ROLE_DISPLAY: Record<AdminRole, string> = {
   owner: "Owner",

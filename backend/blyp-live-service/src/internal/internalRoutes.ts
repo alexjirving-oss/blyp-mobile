@@ -17,6 +17,7 @@ import { createConnectOnboardLink } from '../economy/withdrawalService';
 import { LAUNCH_TEST_GEM_CREDIT_CAP } from '../economy/withdrawLaunchTest';
 import { runAgentProposalSweep } from '../admin/agentProposalWorker';
 import { runAgentExecuteSweep } from '../admin/agentExecuteWorker';
+import { runMarketingCronSweep } from '../admin/marketingService';
 
 /**
  * Internal service-to-service routes.
@@ -44,6 +45,11 @@ import { runAgentExecuteSweep } from '../admin/agentExecuteWorker';
  *   POST /internal/cron/agent-execute
  *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
  *   Body (optional): { "dryRun": false, "maxExecutes": 25 }
+ *
+ * Marketing Hub publish cron (schedule slots + due queue):
+ *   POST /internal/cron/marketing-publish
+ *   Header: x-internal-secret: $INTERNAL_SHARED_SECRET
+ *   Body (optional): { "dryRun": false, "maxItems": 10 }
  *
  * Example gcloud (replace SECRET; prefer Secret Manager / headers-file):
  *   gcloud scheduler jobs create http rankings-materialize \
@@ -344,6 +350,52 @@ router.post('/internal/cron/agent-execute', requireInternalSecret, async (req, r
     const err = toEconomyError(e);
     if (err.code === 'INTERNAL') {
       logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/agent-execute');
+    }
+    return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
+  }
+});
+
+const marketingPublishSchema = z
+  .object({
+    dryRun: z.coerce.boolean().optional(),
+    maxItems: z.coerce.number().int().min(1).max(50).optional(),
+  })
+  .strict()
+  .optional();
+
+/**
+ * Marketing Hub: enqueue from schedule slots, then publish due queue items.
+ * Cloud Scheduler: every 5 minutes recommended.
+ */
+router.post('/internal/cron/marketing-publish', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = marketingPublishSchema.safeParse(
+      req.body && Object.keys(req.body).length ? req.body : undefined,
+    );
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const out = await runMarketingCronSweep({
+      dryRun: parsed.data?.dryRun,
+      maxItems: parsed.data?.maxItems,
+    });
+    logger.info(
+      {
+        enqueued: out.enqueue.enqueued,
+        slot: out.enqueue.slot,
+        skipped: out.enqueue.skipped,
+        published: out.publish.published,
+        failed: out.publish.failed,
+        scanned: out.publish.scanned,
+        durationMs: out.publish.durationMs,
+      },
+      '[internal] marketing publish sweep complete',
+    );
+    return res.status(out.ok ? 200 : 207).json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[internal] INTERNAL error in /internal/cron/marketing-publish');
     }
     return res.status(err.httpStatus).json({ error: err.message, code: err.code, detail: err.detail });
   }

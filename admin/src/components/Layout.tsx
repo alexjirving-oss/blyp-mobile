@@ -32,6 +32,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     items: [
       { to: "/economy", label: "Economy & Finance", icon: "◈" },
       { to: "/growth", label: "Growth & Analytics", icon: "△" },
+      { to: "/marketing", label: "Marketing", icon: "↗" },
       { to: "/comms", label: "Comms", icon: "✉" },
     ],
   },
