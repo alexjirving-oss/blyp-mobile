@@ -88,7 +88,7 @@ const fireWeapon = z
     expectedStateVersion: z.number().int().nonnegative(),
     payload: z
       .object({
-        weaponId: z.enum(['arrow', 'fireball', 'mega_bomb']),
+        weaponId: z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss']),
         targetSlotIndex: slotIndex,
       })
       .strict(),
@@ -137,7 +137,7 @@ const sendArsenalGift = z
     expectedStateVersion: z.number().int().nonnegative(),
     payload: z
       .object({
-        itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']),
+        itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss', 'basic_shield']),
         recipientSlotIndex: slotIndex,
       })
       .strict(),
@@ -152,7 +152,7 @@ const buyInventoryItem = z
     expectedStateVersion: z.number().int().nonnegative(),
     payload: z
       .object({
-        itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']),
+        itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss', 'basic_shield']),
       })
       .strict(),
   })

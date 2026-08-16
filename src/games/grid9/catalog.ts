@@ -12,6 +12,8 @@ export interface Grid9Weapon {
   costCoins: number;
   jackpotContributionCoins: number;
   directDamage: number;
+  /** When > 0, heals target seat HP instead of dealing damage. */
+  healHealth: number;
   adjacentDamage: number;
   splashPattern: Grid9SplashPattern;
   cooldownMs: number;
@@ -41,6 +43,7 @@ export const GRID9_WEAPON_CATALOG = {
     costCoins: 10,
     jackpotContributionCoins: 5,
     directDamage: 20,
+    healHealth: 0,
     adjacentDamage: 0,
     splashPattern: 'none',
     cooldownMs: 0,
@@ -54,6 +57,7 @@ export const GRID9_WEAPON_CATALOG = {
     costCoins: 25,
     jackpotContributionCoins: 12,
     directDamage: 40,
+    healHealth: 0,
     adjacentDamage: 10,
     splashPattern: 'orthogonal',
     cooldownMs: 30_000,
@@ -67,9 +71,24 @@ export const GRID9_WEAPON_CATALOG = {
     costCoins: 50,
     jackpotContributionCoins: 25,
     directDamage: 60,
+    healHealth: 0,
     adjacentDamage: 0,
     splashPattern: 'none',
     cooldownMs: 60_000,
+  },
+  kiss: {
+    id: 'kiss',
+    kind: 'weapon',
+    displayName: 'Kiss',
+    description: 'Restores +20 HP to one surviving box (capped at max HP).',
+    glyph: '💋',
+    costCoins: 12,
+    jackpotContributionCoins: 6,
+    directDamage: 0,
+    healHealth: 20,
+    adjacentDamage: 0,
+    splashPattern: 'none',
+    cooldownMs: 0,
   },
 } as const satisfies Readonly<Record<Grid9WeaponId, Grid9Weapon>>;
 
@@ -91,6 +110,7 @@ export const GRID9_ARSENAL_ORDER: readonly Grid9ArsenalItemId[] = [
   'arrow',
   'fireball',
   'mega_bomb',
+  'kiss',
   'basic_shield',
 ];
 
@@ -103,4 +123,8 @@ export const GRID9_DEFAULT_MERCENARY_FUND_COINS = 25 as const;
 
 export function listGrid9Arsenal(): Grid9ArsenalItem[] {
   return GRID9_ARSENAL_ORDER.map((id) => GRID9_ARSENAL_CATALOG[id]);
+}
+
+export function isGrid9HealWeapon(itemId: string): boolean {
+  return itemId === 'kiss';
 }

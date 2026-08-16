@@ -56,7 +56,7 @@ describe('Grid 9 phase-one contracts', () => {
 
   it('requires every paid arsenal item to feed the jackpot', () => {
     const items = Object.values(GRID9_ARSENAL_CATALOG);
-    assert.equal(items.length, 4);
+    assert.equal(items.length, 5);
     for (const item of items) {
       assert.equal(Number.isInteger(item.costCoins), true);
       assert.equal(Number.isInteger(item.jackpotContributionCoins), true);
@@ -64,7 +64,7 @@ describe('Grid 9 phase-one contracts', () => {
       assert.ok(item.jackpotContributionCoins > 0);
       assert.ok(item.jackpotContributionCoins <= item.costCoins);
     }
-    assert.equal(Object.keys(GRID9_WEAPON_CATALOG).length, 3);
+    assert.equal(Object.keys(GRID9_WEAPON_CATALOG).length, 4);
     assert.equal(Object.keys(GRID9_SHIELD_CATALOG).length, 1);
     assert.deepEqual(
       Object.fromEntries(
@@ -77,6 +77,7 @@ describe('Grid 9 phase-one contracts', () => {
         arrow: [10, 5],
         fireball: [25, 12],
         mega_bomb: [50, 25],
+        kiss: [12, 6],
         basic_shield: [15, 8],
       },
     );

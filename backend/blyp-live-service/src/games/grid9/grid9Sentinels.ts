@@ -304,28 +304,38 @@ function chooseWeaponOption(
   state: Grid9GameState,
   sentinel: Grid9SentinelPlayer,
 ): Extract<Grid9SentinelDecision, { kind: 'weapon' }> | null {
-  const target = orderedTargets(state, sentinel)[0];
-  if (!target) return null;
+  const enemy = orderedTargets(state, sentinel)[0];
+
+  const resolveTarget = (weaponId: Grid9WeaponId): Grid9SlotIndex | null => {
+    if (GRID9_WEAPON_CATALOG[weaponId].healHealth > 0) {
+      return sentinel.slotIndex;
+    }
+    return enemy?.slotIndex ?? null;
+  };
 
   if (
     state.turn?.freeDropEquipped &&
     state.turn.freeDropItemId &&
     isWeaponId(state.turn.freeDropItemId)
   ) {
+    const targetSlotIndex = resolveTarget(state.turn.freeDropItemId);
+    if (targetSlotIndex == null) return null;
     return {
       kind: 'weapon',
       weaponId: state.turn.freeDropItemId,
-      targetSlotIndex: target.slotIndex,
+      targetSlotIndex,
       payment: 'free_drop',
     };
   }
 
   const inventoryWeapon = sentinel.inventory.find(isWeaponId);
   if (inventoryWeapon) {
+    const targetSlotIndex = resolveTarget(inventoryWeapon);
+    if (targetSlotIndex == null) return null;
     return {
       kind: 'weapon',
       weaponId: inventoryWeapon,
-      targetSlotIndex: target.slotIndex,
+      targetSlotIndex,
       payment: 'inventory',
     };
   }
@@ -335,10 +345,12 @@ function chooseWeaponOption(
     sentinel.ai.aggressionBps,
   );
   if (bankrollWeapon) {
+    const targetSlotIndex = resolveTarget(bankrollWeapon);
+    if (targetSlotIndex == null) return null;
     return {
       kind: 'weapon',
       weaponId: bankrollWeapon,
-      targetSlotIndex: target.slotIndex,
+      targetSlotIndex,
       payment: 'mercenary_bankroll',
     };
   }

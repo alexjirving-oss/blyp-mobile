@@ -339,7 +339,7 @@ export interface Grid9PublicPlayer {
   maxHealth: number;
   shieldPoints: number;
   maxShieldPoints: number;
-  inventory?: Array<'arrow' | 'fireball' | 'mega_bomb' | 'basic_shield'>;
+  inventory?: Array<'arrow' | 'fireball' | 'mega_bomb' | 'kiss' | 'basic_shield'>;
   mercenaryBankrollCoins: number;
   mercenarySponsorCoins?: number;
   mercenaryMicroDropCoins?: number;

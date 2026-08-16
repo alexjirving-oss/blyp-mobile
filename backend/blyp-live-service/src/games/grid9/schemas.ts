@@ -130,7 +130,7 @@ const commonPlayerShape = {
   shieldPoints: z.number().int().min(0).max(GRID9_MAX_SHIELD_POINTS),
   maxShieldPoints: z.literal(GRID9_MAX_SHIELD_POINTS),
   inventory: z
-    .array(z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']))
+    .array(z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss', 'basic_shield']))
     .max(GRID9_INVENTORY_CAPACITY),
   mercenaryBankrollCoins: nonNegativeInteger,
   mercenarySponsorCoins: nonNegativeInteger,
@@ -391,7 +391,7 @@ export const grid9GameStateSchema = z
         attacksUsedThisTurn: nonNegativeInteger,
         defensesUsedThisTurn: nonNegativeInteger,
         freeDropItemId: z
-          .enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield'])
+          .enum(['arrow', 'fireball', 'mega_bomb', 'kiss', 'basic_shield'])
           .nullable(),
         freeDropEquipped: z.boolean(),
         autoResolved: z.boolean(),
@@ -429,7 +429,7 @@ export const grid9GameStateSchema = z
           'arsenal_gift',
           'inventory_buy',
         ]),
-        weaponId: z.enum(['arrow', 'fireball', 'mega_bomb']).nullable(),
+        weaponId: z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss']).nullable(),
         shieldId: z.literal('basic_shield').nullable(),
         targetSlotIndex: slotIndex,
         affectedSlotIndices: z.array(slotIndex).min(1).max(GRID9_SLOT_COUNT),
@@ -506,7 +506,7 @@ export const grid9GameStateSchema = z
         z.object({
           actorKey: id,
           actor: actionActorSchema,
-          itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']),
+          itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss', 'basic_shield']),
           readyAt: isoDate,
         }),
       ),

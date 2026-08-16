@@ -31,11 +31,13 @@ describe('Grid 9 action rules', () => {
     expect(GRID9_ARSENAL_CATALOG.arrow.costCoins).toBe(10);
     expect(GRID9_ARSENAL_CATALOG.fireball.costCoins).toBe(25);
     expect(GRID9_ARSENAL_CATALOG.mega_bomb.costCoins).toBe(50);
+    expect(GRID9_ARSENAL_CATALOG.kiss.costCoins).toBe(12);
     expect(GRID9_ARSENAL_CATALOG.basic_shield.costCoins).toBe(15);
     expect(listGrid9Arsenal().map((item) => item.displayName)).toEqual([
       'Arrow',
       'Fireball',
       'Mega Bomb',
+      'Kiss',
       'Shield',
     ]);
     expect(GRID9_DEFAULT_MERCENARY_FUND_COINS).toBe(25);

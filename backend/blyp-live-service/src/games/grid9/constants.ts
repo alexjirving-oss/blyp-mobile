@@ -74,8 +74,9 @@ export const GRID9_MICRO_DROP_COIN_REWARD = 5 as const;
 export const GRID9_MICRO_DROP_SHIELD_REWARD = 15 as const;
 
 export const GRID9_FREE_DROP_WEIGHTS = {
-  arrow: 70,
-  basic_shield: 20,
+  arrow: 65,
+  basic_shield: 18,
+  kiss: 7,
   fireball: 8,
   mega_bomb: 2,
 } as const;

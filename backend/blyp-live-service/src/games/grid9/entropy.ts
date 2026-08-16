@@ -63,6 +63,7 @@ export function deriveGrid9RouletteSlot(args: {
 const FREE_DROP_ORDER = [
   'arrow',
   'basic_shield',
+  'kiss',
   'fireball',
   'mega_bomb',
 ] as const satisfies readonly Grid9ArsenalItemId[];

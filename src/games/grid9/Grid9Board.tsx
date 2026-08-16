@@ -16,6 +16,7 @@ export function Grid9Board({
   targetableSlotIndices = [],
   rouletteCandidateSlotIndices = [],
   rouletteActive = false,
+  spotlightChanceBySlot = null,
   onSlotPress,
 }: {
   players: Grid9PublicPlayer[] | undefined;
@@ -24,6 +25,7 @@ export function Grid9Board({
   targetableSlotIndices?: number[];
   rouletteCandidateSlotIndices?: number[];
   rouletteActive?: boolean;
+  spotlightChanceBySlot?: Array<number | null> | null;
   onSlotPress?: (slotIndex: number) => void;
 }) {
   const [boardWidth, setBoardWidth] = useState(0);
@@ -95,6 +97,7 @@ export function Grid9Board({
                   spotlighted={spotlightSlotIndex === slotIndex && !rouletteActive}
                   isLocal={localSlotIndex === slotIndex}
                   targetable={targetableSlotIndices.includes(slotIndex)}
+                  spotlightChancePct={spotlightChanceBySlot?.[slotIndex] ?? null}
                   onPress={
                     onSlotPress && targetableSlotIndices.includes(slotIndex)
                       ? () => onSlotPress(slotIndex)

@@ -3,7 +3,11 @@ import { ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import './grid9.css';
-import { GRID9_DEFAULT_MERCENARY_FUND_COINS, type Grid9ArsenalItem } from './catalog';
+import {
+  GRID9_DEFAULT_MERCENARY_FUND_COINS,
+  isGrid9HealWeapon,
+  type Grid9ArsenalItem,
+} from './catalog';
 import { GRID9_DEFAULT_ESCROW_RESERVE_COINS } from './constants';
 import { Grid9ActionDrawer } from './Grid9ActionDrawer';
 import { Grid9ArrivalTicker } from './Grid9ArrivalTicker';
@@ -22,7 +26,6 @@ import {
   type Grid9ArsenalSelection,
 } from './grid9Actions';
 import {
-  formatGrid9Phase,
   getGrid9JackpotPool,
   getGrid9SpotlightSlot,
   remainingMs,
@@ -86,13 +89,6 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const countdownMs = match?.turn
     ? remainingMs(match.turn.endsAt, nowMs)
     : remainingMs(match?.phaseEndsAt, nowMs);
-  const countdownLabel = match?.turn
-    ? `T${match.turn.turnNumber}`
-    : match?.phase === 'lobby_waiting' || match?.phase === 'countdown'
-      ? 'Lobby'
-      : match?.phase === 'roulette'
-        ? 'Spin'
-        : formatGrid9Phase(match?.phase);
 
   const mode = resolveGrid9DrawerMode({
     targeting,
@@ -144,7 +140,15 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
 
   const targetableSlotIndices = useMemo(() => {
     const intent =
-      mode === 'proxy_war' ? 'mercenary' : selection?.kind === 'shield' ? 'shield' : selection ? 'weapon' : null;
+      mode === 'proxy_war'
+        ? 'mercenary'
+        : selection?.kind === 'shield'
+          ? 'shield'
+          : selection?.kind === 'weapon' && isGrid9HealWeapon(selection.itemId)
+            ? 'heal'
+            : selection
+              ? 'weapon'
+              : null;
     if (!intent) return [];
     if (intent === 'mercenary' && accountCoins < GRID9_DEFAULT_MERCENARY_FUND_COINS) {
       return [];
@@ -162,6 +166,16 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
       )
       .filter((slotIndex) => slotIndex >= 0);
   }, [accountCoins, localSlotIndex, match?.players, mode, selection]);
+
+  const spotlightChanceBySlot = useMemo(() => {
+    const alive = (match?.players ?? []).filter((player) => player.status === 'alive');
+    if (alive.length <= 0) return null;
+    const pct = Math.round(100 / alive.length);
+    return Array.from({ length: 9 }, (_, slotIndex) => {
+      const player = match?.players?.[slotIndex];
+      return player?.status === 'alive' ? pct : null;
+    });
+  }, [match?.players]);
 
   const ensureEscrowForSpend = useCallback(
     (costCoins: number) => {
@@ -312,20 +326,25 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     <View className="flex-1 bg-blyp-ink" style={{ paddingTop: insets.top }}>
       <Grid9Header
         connectionStatus={connectionStatus}
+        audienceCount={Number(match?.audienceCount ?? 0)}
         onLeave={onLeave}
         leaving={leaving}
       />
 
       {/* Spotlight + seats flush to top (no big jackpot/timer header stack) */}
-      <View className="pt-8">
+      <View className="pt-1">
         <Grid9SpotlightStage
           player={spotlightPlayer}
           matchId={match?.matchId ?? session.matchId}
           publishLocalAv={isCombatant && !spectate}
+          isLocalSpotlight={
+            localSlotIndex != null && activeSlotIndex === localSlotIndex
+          }
           jackpotCoins={jackpotPool}
-          accountCoins={spectate ? undefined : accountCoins}
+          turnNumber={match?.turn?.turnNumber ?? null}
           countdownMs={countdownMs}
-          countdownLabel={countdownLabel}
+          nextSpotlightMs={countdownMs}
+          onAir={connectionStatus === 'connected' && !!spotlightPlayer}
         />
         {freeDropLabel && match?.phase === 'combat' ? (
           <View className="mx-3 mb-1 rounded-lg border border-blyp-primary/35 bg-blyp-primary/10 px-2 py-1">
@@ -341,6 +360,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           rouletteActive={match?.phase === 'roulette'}
           localSlotIndex={localSlotIndex}
           targetableSlotIndices={targetableSlotIndices}
+          spotlightChanceBySlot={spotlightChanceBySlot}
           onSlotPress={onSlotPress}
         />
       </View>
@@ -385,7 +405,26 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         keyboardShouldPersistTaps="handled"
       >
         <Grid9ArrivalTicker match={match} />
-        <Grid9SideRail match={match} />
+        <Grid9SideRail
+          match={match}
+          inventoryItemIds={localPlayer?.inventory ?? []}
+          accountCoins={spectate ? 0 : accountCoins}
+          canUsePowers={mode === 'my_turn' && !spectate}
+          countdownMs={countdownMs}
+          onPickArsenal={onSelectItem}
+          onPickMercenary={() => {
+            setActionError(null);
+            // Proxy/fund flow: open targeting via mercenary mode by selecting fund path.
+            try {
+              ensureEscrowForSpend(GRID9_DEFAULT_MERCENARY_FUND_COINS);
+              setActionError('Tap a surviving seat to fund as mercenary');
+            } catch (error) {
+              setActionError(
+                error instanceof Error ? error.message : 'Cannot fund mercenary',
+              );
+            }
+          }}
+        />
       </ScrollView>
 
       <View style={{ paddingBottom: Math.max(insets.bottom, 8) }}>
@@ -393,6 +432,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           mode={mode}
           availableCoins={accountCoins}
           mercenaryFundCoins={GRID9_DEFAULT_MERCENARY_FUND_COINS}
+          countdownMs={countdownMs}
           lastError={actionError ?? session.lastError}
           onOpenGallery={() => {
             setActionError(null);

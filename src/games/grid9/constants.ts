@@ -49,7 +49,7 @@ export function coinsFromTokensConvert(tokens: number): number {
   return Math.ceil((t * (10_000 + GRID9_TOKEN_CONVERT_BONUS_BPS)) / 10_000);
 }
 
-export type Grid9WeaponId = 'arrow' | 'fireball' | 'mega_bomb';
+export type Grid9WeaponId = 'arrow' | 'fireball' | 'mega_bomb' | 'kiss';
 export type Grid9ShieldId = 'basic_shield';
 export type Grid9ArsenalItemId = Grid9WeaponId | Grid9ShieldId;
 

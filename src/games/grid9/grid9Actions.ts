@@ -5,7 +5,10 @@ import type { Grid9PublicPlayer } from './protocol';
 export type Grid9DrawerMode = 'idle' | 'my_turn' | 'waiting' | 'targeting' | 'proxy_war';
 
 export type Grid9ArsenalSelection =
-  | { kind: 'weapon'; itemId: Extract<Grid9ArsenalItemId, 'arrow' | 'fireball' | 'mega_bomb'> }
+  | {
+      kind: 'weapon';
+      itemId: Extract<Grid9ArsenalItemId, 'arrow' | 'fireball' | 'mega_bomb' | 'kiss'>;
+    }
   | { kind: 'shield'; itemId: Extract<Grid9ArsenalItemId, 'basic_shield'> };
 
 export function resolveGrid9DrawerMode(input: {
@@ -57,13 +60,13 @@ export function canAffordGrid9Item(availableCoins: number, costCoins: number): b
 }
 
 export function isValidGrid9Target(input: {
-  intent: 'weapon' | 'shield' | 'mercenary';
+  intent: 'weapon' | 'shield' | 'heal' | 'mercenary';
   player: Grid9PublicPlayer | null;
   slotIndex: number;
   localSlotIndex: number | null;
 }): boolean {
   if (!input.player || isGrid9SlotEliminated(input.player)) return false;
-  if (input.intent === 'shield') return true;
+  if (input.intent === 'shield' || input.intent === 'heal') return true;
   return input.localSlotIndex == null || input.slotIndex !== input.localSlotIndex;
 }
 

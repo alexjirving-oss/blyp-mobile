@@ -976,7 +976,8 @@ export function applyGrid9Weapon(args: {
   }
   if (
     args.sourceSlotIndex !== null &&
-    args.sourceSlotIndex === args.targetSlotIndex
+    args.sourceSlotIndex === args.targetSlotIndex &&
+    !(weapon.healHealth > 0)
   ) {
     throw new Grid9Error('TARGET_SELF', 'A box cannot attack itself', {
       stateVersion: args.state.authority.stateVersion,
@@ -1044,44 +1045,64 @@ export function applyGrid9Weapon(args: {
     state.turn.freeDropEquipped = false;
   }
 
-  const rawTargets = affectedSlots(args.state, weapon, args.targetSlotIndex);
-  const damage = rawTargets.map<Grid9DamageResult>(
-    ({ slotIndex, rawDamage }) => {
-    const player = args.state.players[slotIndex];
-    const allocation = allocateGrid9Damage({
-      rawDamage,
-      shieldBefore: player.shieldPoints,
-      shieldPierceBps: weapon.shieldPierceBps,
-    });
-    const healthDamage = Math.min(player.health, allocation.healthDamage);
-    return {
-      slotIndex,
-      healthBefore: player.health,
-      healthAfter: Math.max(0, player.health - healthDamage),
-      shieldBefore: player.shieldPoints,
-      shieldAfter: allocation.shieldAfter,
-      shieldDamage: allocation.shieldDamage,
-      healthDamage,
-      eliminated: player.health - healthDamage <= 0,
-      lastStandApplied: false,
-      };
-    },
-  );
-
-  const predictedAlive = args.state.players.filter((player) => {
-    const result = damage.find((item) => item.slotIndex === player.slotIndex);
-    return player.status === 'alive' && (!result || result.healthAfter > 0);
-  });
-  if (predictedAlive.length === 0) {
-    const lastStand = lastStandCandidate(args.state);
-    const result = damage.find(
-      (item) => item.slotIndex === lastStand.slotIndex,
+  const healAmount = Math.max(0, Math.floor(Number(weapon.healHealth) || 0));
+  const damage: Grid9DamageResult[] = [];
+  if (healAmount > 0) {
+    const player = args.state.players[args.targetSlotIndex];
+    const maxHp = Math.max(
+      1,
+      Math.floor(Number(player.maxHealth) || GRID9_MAX_HEALTH),
     );
-    if (result) {
-      result.healthAfter = 1;
-      result.healthDamage = Math.max(0, result.healthBefore - 1);
-      result.eliminated = false;
-      result.lastStandApplied = true;
+    const healed = Math.min(healAmount, Math.max(0, maxHp - player.health));
+    damage.push({
+      slotIndex: args.targetSlotIndex,
+      healthBefore: player.health,
+      healthAfter: player.health + healed,
+      shieldBefore: player.shieldPoints,
+      shieldAfter: player.shieldPoints,
+      shieldDamage: 0,
+      healthDamage: 0,
+      eliminated: false,
+      lastStandApplied: false,
+    });
+  } else {
+    const rawTargets = affectedSlots(args.state, weapon, args.targetSlotIndex);
+    for (const { slotIndex, rawDamage } of rawTargets) {
+      const player = args.state.players[slotIndex];
+      const allocation = allocateGrid9Damage({
+        rawDamage,
+        shieldBefore: player.shieldPoints,
+        shieldPierceBps: weapon.shieldPierceBps,
+      });
+      const healthDamage = Math.min(player.health, allocation.healthDamage);
+      damage.push({
+        slotIndex,
+        healthBefore: player.health,
+        healthAfter: Math.max(0, player.health - healthDamage),
+        shieldBefore: player.shieldPoints,
+        shieldAfter: allocation.shieldAfter,
+        shieldDamage: allocation.shieldDamage,
+        healthDamage,
+        eliminated: player.health - healthDamage <= 0,
+        lastStandApplied: false,
+      });
+    }
+
+    const predictedAlive = args.state.players.filter((player) => {
+      const result = damage.find((item) => item.slotIndex === player.slotIndex);
+      return player.status === 'alive' && (!result || result.healthAfter > 0);
+    });
+    if (predictedAlive.length === 0) {
+      const lastStand = lastStandCandidate(args.state);
+      const result = damage.find(
+        (item) => item.slotIndex === lastStand.slotIndex,
+      );
+      if (result) {
+        result.healthAfter = 1;
+        result.healthDamage = Math.max(0, result.healthBefore - 1);
+        result.eliminated = false;
+        result.lastStandApplied = true;
+      }
     }
   }
 
@@ -1091,9 +1112,11 @@ export function applyGrid9Weapon(args: {
     const player = state.players[result.slotIndex];
     player.health = result.healthAfter;
     player.shieldPoints = result.shieldAfter;
-    player.stats.damageReceived +=
-      result.healthDamage + result.shieldDamage;
-    player.lastDamagedAt = now;
+    if (healAmount <= 0) {
+      player.stats.damageReceived +=
+        result.healthDamage + result.shieldDamage;
+      player.lastDamagedAt = now;
+    }
     if (result.eliminated) {
       player.status = 'eliminated';
       player.mode = player.kind === 'human' ? 'sabotage' : 'inactive';

@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Grid9DrawerMode } from './grid9Actions';
-import { formatGrid9Coins } from './grid9Format';
+import { formatGrid9Coins, formatGrid9Countdown } from './grid9Format';
 import { Text, TouchableOpacity, View } from './nw';
 
 export function Grid9ActionDrawer({
@@ -8,6 +8,7 @@ export function Grid9ActionDrawer({
   availableCoins,
   mercenaryFundCoins,
   lastError,
+  countdownMs = null,
   onOpenGallery,
   onCancelTargeting,
 }: {
@@ -15,41 +16,57 @@ export function Grid9ActionDrawer({
   availableCoins: number;
   mercenaryFundCoins: number;
   lastError: string | null;
+  countdownMs?: number | null;
   onOpenGallery: () => void;
   onCancelTargeting: () => void;
 }) {
   return (
-    <View className="border-t border-blyp-primary/25 bg-blyp-card px-4 pt-3">
+    <View className="border-t border-blyp-primary/25 bg-blyp-card px-3 pt-2">
       {mode === 'my_turn' ? (
         <TouchableOpacity
-          className="items-center rounded-2xl border-2 border-blyp-primary bg-blyp-primary px-4 py-4"
+          className="items-center rounded-xl border-2 border-blyp-primary bg-blyp-primary px-4 py-3"
           activeOpacity={0.85}
           onPress={onOpenGallery}
         >
-          <Text className="text-center text-base font-black tracking-[1px] text-blyp-ink">
-            OPEN WEAPONS GALLERY
+          <Text className="text-center text-sm font-black tracking-[1px] text-blyp-ink">
+            Open weapons gallery
           </Text>
-          <Text className="mt-1 text-center text-[11px] font-bold uppercase tracking-[1px] text-blyp-ink/80">
+          <Text className="mt-0.5 text-center text-[10px] font-bold uppercase tracking-[1px] text-blyp-ink/80">
             Your coins {formatGrid9Coins(availableCoins)}
           </Text>
         </TouchableOpacity>
       ) : null}
 
       {mode === 'waiting' ? (
-        <View className="items-center rounded-2xl border border-white/10 bg-blyp-ink px-4 py-4">
-          <Text className="text-center text-sm font-extrabold text-blyp-muted">
-            Waiting for roulette
-          </Text>
+        <View className="flex-row items-center rounded-xl border border-white/10 bg-blyp-ink px-3 py-2.5">
+          <View className="mr-3 h-10 w-10 items-center justify-center rounded-full border border-blyp-primary/40">
+            <Text className="text-[9px] font-black text-blyp-primary">
+              {countdownMs != null && countdownMs >= 0
+                ? formatGrid9Countdown(countdownMs).slice(-5)
+                : '—'}
+            </Text>
+          </View>
+          <View className="flex-1">
+            <Text className="text-[10px] font-black uppercase tracking-[1px] text-blyp-muted">
+              Waiting for roulette
+            </Text>
+            <Text className="mt-0.5 text-[10px] font-semibold text-blyp-faint">
+              Next spotlight selection{' '}
+              {countdownMs != null && countdownMs >= 0
+                ? formatGrid9Countdown(countdownMs)
+                : '—:—'}
+            </Text>
+          </View>
         </View>
       ) : null}
 
       {mode === 'targeting' ? (
-        <View className="rounded-2xl border border-blyp-primary/50 bg-blyp-ink px-4 py-3">
+        <View className="rounded-xl border border-blyp-primary/50 bg-blyp-ink px-4 py-2.5">
           <Text className="text-center text-sm font-extrabold text-blyp-primary">
             Tap target box on grid
           </Text>
           <TouchableOpacity
-            className="mt-3 items-center rounded-xl border border-white/15 bg-blyp-surface py-2.5"
+            className="mt-2 items-center rounded-xl border border-white/15 bg-blyp-surface py-2"
             activeOpacity={0.85}
             onPress={onCancelTargeting}
           >
@@ -61,11 +78,11 @@ export function Grid9ActionDrawer({
       ) : null}
 
       {mode === 'proxy_war' ? (
-        <View className="rounded-2xl border border-red-500 bg-red-500/15 px-4 py-3">
+        <View className="rounded-xl border border-red-500 bg-red-500/15 px-4 py-2.5">
           <Text className="text-center text-sm font-black text-red-400">
             Proxy war: tap a surviving box to fund as mercenary
           </Text>
-          <Text className="mt-2 text-center text-[11px] font-bold uppercase tracking-[1px] text-red-200/80">
+          <Text className="mt-1 text-center text-[11px] font-bold uppercase tracking-[1px] text-red-200/80">
             {formatGrid9Coins(mercenaryFundCoins)} coins · your balance{' '}
             {formatGrid9Coins(availableCoins)}
           </Text>
@@ -73,7 +90,7 @@ export function Grid9ActionDrawer({
       ) : null}
 
       {mode === 'idle' ? (
-        <View className="items-center rounded-2xl border border-white/10 bg-blyp-ink px-4 py-3">
+        <View className="items-center rounded-xl border border-white/10 bg-blyp-ink px-4 py-2.5">
           <Text className="text-[10px] font-bold uppercase tracking-[2px] text-blyp-faint">
             Standby
           </Text>
