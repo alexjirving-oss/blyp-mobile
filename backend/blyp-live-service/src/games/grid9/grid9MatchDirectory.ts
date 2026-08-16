@@ -12,6 +12,9 @@ const LISTABLE_PHASES = new Set<Grid9MatchPhase>([
   'combat',
 ]);
 
+/** Drop listable-but-abandoned matches so Live Grid cannot fill with zombies. */
+const STALE_LISTABLE_MS = 3 * 60 * 1000;
+
 export interface Grid9PublicMatchSummary {
   matchId: string;
   phase: Grid9MatchPhase;
@@ -28,10 +31,47 @@ function redis() {
   return getEconomyInfra().redis;
 }
 
+function isStaleOrExpired(state: {
+  phase?: Grid9MatchPhase;
+  updatedAt?: string;
+  authority?: { matchDeadlineAt?: string };
+  players?: Array<{ kind?: string; status?: string }>;
+  audienceCount?: number;
+}): boolean {
+  const now = Date.now();
+  const deadlineMs = Date.parse(String(state.authority?.matchDeadlineAt || ''));
+  if (Number.isFinite(deadlineMs) && deadlineMs > 0 && now > deadlineMs) {
+    return true;
+  }
+  const updatedMs = Date.parse(String(state.updatedAt || ''));
+  if (!Number.isFinite(updatedMs) || updatedMs <= 0) return false;
+  if (now - updatedMs < STALE_LISTABLE_MS) return false;
+
+  // Combat/roulette with no connected humans and zero audience = orphaned zombie.
+  const humansAlive = Array.isArray(state.players)
+    ? state.players.filter(
+        (player) => player.kind === 'human' && player.status === 'alive',
+      ).length
+    : 0;
+  const audience = Math.max(0, Number(state.audienceCount || 0));
+  if (
+    (state.phase === 'combat' || state.phase === 'roulette') &&
+    humansAlive === 0 &&
+    audience === 0
+  ) {
+    return true;
+  }
+  // Any listable phase with no progress for too long.
+  if (now - updatedMs > STALE_LISTABLE_MS * 2) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Public browse list: active public matches only.
  * Never returns private room codes, assignment tokens, escrow, or inventory.
- * Ended matches are removed from the active index when encountered.
+ * Ended / stale / deadline-expired matches are removed from the active index.
  */
 export async function listPublicActiveGrid9Matches(
   limit = 40,
@@ -59,12 +99,16 @@ export async function listPublicActiveGrid9Matches(
         region?: string;
         audienceCount?: number;
         jackpot?: { currentCoins?: number };
-        players?: Array<{ status?: string }>;
+        players?: Array<{ kind?: string; status?: string }>;
         entryFeeCoins?: number;
         updatedAt?: string;
+        authority?: { matchDeadlineAt?: string };
       };
       if (!state.phase || !LISTABLE_PHASES.has(state.phase)) {
-        // Promptly drop ended / non-listable matches from the discoverability index.
+        await redis().srem(grid9RedisKeys.activeMatches(), matchId);
+        continue;
+      }
+      if (isStaleOrExpired(state)) {
         await redis().srem(grid9RedisKeys.activeMatches(), matchId);
         continue;
       }
@@ -105,3 +149,9 @@ export async function getPublicGrid9MatchSummary(
   }
   return found;
 }
+
+/** Exported for unit tests. */
+export const __grid9MatchDirectoryTest = {
+  STALE_LISTABLE_MS,
+  isStaleOrExpired,
+};

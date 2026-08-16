@@ -454,7 +454,7 @@ export function grid9SentinelReactionMs(sentinel: Grid9SentinelPlayer): number {
 /**
  * Combat turn timer due-at:
  * - Sentinel: ~1.5s auto-act ceiling
- * - Human who already attacked (or auto-resolved): immediate → next roulette
+ * - After any spotlight act (attack/shield) or auto-resolved: immediate → next roulette
  * - Otherwise: full 30s window
  */
 export function grid9CombatTimerDueAtMs(state: Grid9GameState): number | null {
@@ -466,6 +466,10 @@ export function grid9CombatTimerDueAtMs(state: Grid9GameState): number | null {
     return Math.min(endsAt, nowMs);
   }
   if (state.turn.autoResolved || state.turn.attacksUsedThisTurn >= 1) {
+    return Math.min(endsAt, nowMs);
+  }
+  // Any completed act (weapon OR shield) must advance to roulette immediately.
+  if (state.turn.defensesUsedThisTurn >= 1) {
     return Math.min(endsAt, nowMs);
   }
   if (spotlight.kind === 'sentinel') {

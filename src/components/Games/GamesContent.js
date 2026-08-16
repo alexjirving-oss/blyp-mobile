@@ -67,7 +67,12 @@ function LiveGrid9Matches({ navigation, enabled }) {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    if (!enabled) return undefined;
+    const timer = setInterval(() => {
+      void refresh();
+    }, 20_000);
+    return () => clearInterval(timer);
+  }, [enabled, refresh]);
 
   const openSpectate = (match) => {
     try {

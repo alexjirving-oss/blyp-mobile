@@ -31,7 +31,7 @@ import {
   createGrid9RoomEvent,
   emitGrid9Room,
 } from './grid9Broadcast';
-import { chooseGrid9SentinelDecision } from './grid9Sentinels';
+import { chooseGrid9SentinelDecision, grid9CombatTimerDueAtMs } from './grid9Sentinels';
 import {
   allocateGrid9MercenarySpend,
   type Grid9EscrowWallet,
@@ -741,12 +741,17 @@ async function processTurnEnd(io: Server, initial: Grid9GameState): Promise<void
     return;
   }
   state = await readGrid9State(state.matchId);
-  if (state.phase !== 'combat' || !state.turn) return;
+  if (state.phase !== 'combat' || !state.turn) {
+    // Never leave a claimed turn_end empty-handed if combat is still live.
+    if (state.phase === 'combat') {
+      await scheduleGrid9Timers(state);
+    }
+    return;
+  }
   const previousTurn = state.turn.turnNumber;
-  const next = advanceGrid9Turn(
-    state,
-    Math.max(Date.now(), Date.parse(state.turn.endsAt)),
-  );
+  // CRITICAL: advance with wall-clock now — never turn.endsAt. Using endsAt
+  // (often ~30s ahead) pushed roulette_end into the future and stalled the loop.
+  const next = advanceGrid9Turn(state, Date.now());
   const event = next.outcome
     ? completionEvent(next, next.authority.eventSequence)
     : next.phase === 'roulette' && next.roulette
@@ -882,6 +887,34 @@ async function repairGrid9Timers(io: Server): Promise<void> {
           state.phase === 'cancelled'
         ) {
           await removeGrid9ActiveMatch(matchId);
+        } else if (
+          Date.parse(state.authority.matchDeadlineAt) > 0 &&
+          Date.now() > Date.parse(state.authority.matchDeadlineAt)
+        ) {
+          // Past hard deadline — force turn-end / settle so zombies leave the list.
+          await processTurnEnd(io, state);
+        } else if (state.phase === 'combat' && state.turn) {
+          const dueMs = grid9CombatTimerDueAtMs(state);
+          const acted =
+            state.turn.attacksUsedThisTurn >= 1 ||
+            state.turn.defensesUsedThisTurn >= 1 ||
+            state.turn.autoResolved;
+          if (
+            acted ||
+            (dueMs != null && dueMs <= Date.now())
+          ) {
+            await processTurnEnd(io, state);
+          } else {
+            await scheduleGrid9Timers(state);
+          }
+          for (const player of state.players) {
+            if (player.kind !== 'human') continue;
+            await repairGrid9PresenceTimeouts(
+              matchId,
+              player.userId,
+              player.connectionState,
+            );
+          }
         } else {
           await scheduleGrid9Timers(state);
           for (const player of state.players) {

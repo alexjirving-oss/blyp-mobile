@@ -3,6 +3,7 @@ import { Animated } from 'react-native';
 import type { Grid9PublicPlayer } from './protocol';
 import { GRID9_ARSENAL_CATALOG } from './catalog';
 import {
+  formatGrid9Coins,
   grid9HealthRatio,
   isGrid9SlotEliminated,
   playerInitials,
@@ -63,6 +64,7 @@ export function Grid9Slot({
   const hp = Math.max(0, Math.floor(player?.health ?? 0));
   const spRatio = Math.max(0, Math.min(1, sp / 100));
   const glyphs = inventoryGlyphs(player);
+  const giftCoins = Math.max(0, Math.floor(player?.mercenaryBankrollCoins ?? 0));
   const badge =
     sentinel && player?.displayName
       ? player.displayName
@@ -148,6 +150,11 @@ export function Grid9Slot({
 
         {player ? (
           <View>
+            <View className="mb-0.5 items-center rounded-md border border-amber-400/50 bg-amber-400/15 px-1 py-0.5">
+              <Text className="text-[10px] font-black text-amber-300" numberOfLines={1}>
+                ⚡ {formatGrid9Coins(giftCoins)}
+              </Text>
+            </View>
             <View className="mb-0.5 flex-row items-center justify-between">
               <Text className="text-[7px] font-black text-red-400">HP {hp}</Text>
               <Text className="text-[7px] font-black text-blyp-primary">SP {sp}</Text>

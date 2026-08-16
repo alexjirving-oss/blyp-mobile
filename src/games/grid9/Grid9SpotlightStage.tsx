@@ -126,15 +126,21 @@ export function Grid9SpotlightStage({
     if (typeof feed?.participantId === 'string' && feed.participantId.trim()) {
       return feed.participantId.trim();
     }
-    return player.publicProfileId || null;
+    // Token mint uses userId when feed.participantId missing — never publicProfileId.
+    const userId = (player as { userId?: string }).userId;
+    if (typeof userId === 'string' && userId.trim()) return userId.trim();
+    return null;
   }, [feed?.participantId, player]);
 
   const [avStatus, setAvStatus] = useState<string>('idle');
-  const showLiveKit =
+  // Connect whenever local combatant must publish OR spotlight is a human feed.
+  // Previously LiveKit only mounted when spotlight was human — so cam/mic never
+  // came up while a sentinel held the stage.
+  const connectLiveKit =
     !!matchId &&
-    !!player &&
-    player.kind === 'human' &&
-    (publishLocalAv || avStatus === 'ready' || Boolean(feed?.provider === 'livekit'));
+    (Boolean(publishLocalAv) ||
+      (player?.kind === 'human' &&
+        (avStatus === 'ready' || Boolean(feed?.provider === 'livekit'))));
 
   const hp = Math.max(0, Math.floor(player?.health ?? 0));
   const sp = Math.max(0, Math.floor(player?.shieldPoints ?? 0));
@@ -168,7 +174,18 @@ export function Grid9SpotlightStage({
   };
 
   return (
-    <View className="mb-1 flex-row px-3">
+    <View className="mb-1 px-3">
+      {/* FOCAL jackpot — primary arena signal above the stage */}
+      <View className="mb-1.5 items-center rounded-2xl border-2 border-amber-400/70 bg-amber-400/15 px-3 py-2">
+        <Text className="text-[9px] font-black uppercase tracking-[3px] text-amber-200">
+          Jackpot
+        </Text>
+        <Text className="mt-0.5 text-[28px] font-black leading-8 text-amber-300">
+          {formatGrid9Coins(jackpotCoins ?? 0)}
+        </Text>
+      </View>
+
+      <View className="flex-row">
       <RnView
         ref={stageRef}
         style={{
@@ -215,6 +232,15 @@ export function Grid9SpotlightStage({
           </View>
         ) : player.kind === 'sentinel' ? (
           <View className="h-full">
+            {connectLiveKit ? (
+              <Grid9LiveKitSession
+                matchId={matchId ?? null}
+                enabled
+                publish={Boolean(publishLocalAv)}
+                spotlightParticipantId={null}
+                onStatus={setAvStatus}
+              />
+            ) : null}
             <SentinelStage
               displayName={player.displayName}
               characterId={typeof feed?.characterId === 'string' ? feed.characterId : null}
@@ -222,7 +248,7 @@ export function Grid9SpotlightStage({
           </View>
         ) : (
           <View className="h-full">
-            {showLiveKit ? (
+            {connectLiveKit ? (
               <Grid9LiveKitSession
                 matchId={matchId ?? null}
                 enabled
@@ -245,7 +271,7 @@ export function Grid9SpotlightStage({
                 />
               </View>
             )}
-            {avStatus === 'ready' ? null : avStatus === 'idle' && !showLiveKit ? (
+            {avStatus === 'ready' ? null : avStatus === 'idle' && !connectLiveKit ? (
               <HumanPendingCard player={player} note="LIVE FEED PENDING" />
             ) : null}
           </View>
@@ -269,7 +295,7 @@ export function Grid9SpotlightStage({
                 Spotlight
               </Text>
             </View>
-            <Text className="mb-1 text-[9px] font-black text-amber-300">
+            <Text className="mb-1 text-[12px] font-black text-amber-300">
               GIFT {formatGrid9Coins(gift)}
             </Text>
             <View className="flex-row gap-2">
@@ -300,12 +326,13 @@ export function Grid9SpotlightStage({
         </View>
         <View className="rounded-xl border border-amber-400/40 bg-blyp-card px-2 py-2">
           <Text className="text-[7px] font-bold uppercase tracking-[1px] text-blyp-faint">
-            Audience power
+            Pot chip
           </Text>
           <Text className="mt-0.5 text-[12px] font-black text-amber-300">
             ⚡ {formatGrid9Coins(jackpotCoins ?? 0)}
           </Text>
         </View>
+      </View>
       </View>
     </View>
   );

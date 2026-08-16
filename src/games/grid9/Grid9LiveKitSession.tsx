@@ -10,6 +10,8 @@ import { Text, View } from './nw';
 /**
  * Grid9-local LiveKit room: combatants publish camera+mic; spotlight renders
  * the selected participant video. Fail-soft — never null-crash the arena.
+ *
+ * Default path attempts permissions + publish when `publish` is true (join/start).
  */
 export function Grid9LiveKitSession({
   matchId,
@@ -42,16 +44,18 @@ export function Grid9LiveKitSession({
     let cancelled = false;
     (async () => {
       try {
+        let allowedToPublish = false;
         if (publish) {
-          const ok = await requestCameraAndAudioPermission();
-          if (!ok) {
+          onStatus?.('requesting-permission');
+          allowedToPublish = await requestCameraAndAudioPermission();
+          if (!allowedToPublish) {
             if (!cancelled) {
               setPermissionDenied(true);
               onStatus?.('permission-denied');
             }
-            return;
+          } else if (!cancelled) {
+            setPermissionDenied(false);
           }
-          if (!cancelled) setPermissionDenied(false);
         }
         const next = await fetchGrid9LiveKitToken(matchId);
         if (cancelled) return;
@@ -61,7 +65,11 @@ export function Grid9LiveKitSession({
           return;
         }
         setCreds(next);
-        onStatus?.('ready');
+        if (publish && !allowedToPublish) {
+          onStatus?.('permission-denied');
+        } else {
+          onStatus?.('ready');
+        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'LiveKit failed');
@@ -123,7 +131,7 @@ export function Grid9LiveKitSession({
     };
   }, [creds, onStatus]);
 
-  if (permissionDenied) {
+  if (permissionDenied && publish) {
     return (
       <View className="absolute inset-0 items-center justify-center bg-blyp-ink/80 px-4">
         <Text className="text-center text-[11px] font-black uppercase tracking-[2px] text-blyp-primary">
@@ -141,14 +149,15 @@ export function Grid9LiveKitSession({
   }
 
   const Room = mods.LiveKitRoom;
+  const shouldPublish = Boolean(publish && creds.canPublish && !permissionDenied);
   return (
     <RNView style={StyleSheet.absoluteFill} pointerEvents="none">
       <Room
         serverUrl={creds.url}
         token={creds.token}
         connect
-        audio={publish && creds.canPublish}
-        video={publish && creds.canPublish}
+        audio={shouldPublish}
+        video={shouldPublish}
         options={{ adaptiveStream: true, dynacast: true }}
         onError={() => onStatus?.('room-error')}
       >

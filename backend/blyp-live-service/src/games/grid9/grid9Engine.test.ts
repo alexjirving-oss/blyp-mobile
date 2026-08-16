@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  GRID9_ROULETTE_DURATION_MS,
   GRID9_SENTINEL_MAX_REACTION_MS,
 } from './constants';
 import {
@@ -535,5 +536,101 @@ describe('Grid 9 authoritative engine', () => {
       advanced.phase === 'roulette' || advanced.phase === 'completed',
       `expected immediate roulette after act, got ${advanced.phase}`,
     );
+  });
+
+  it('shield-only act ends combat timer immediately for next roulette', () => {
+    const t0 = Date.parse('2026-08-16T06:00:00.000Z');
+    let state = createGrid9Match({
+      matchId: 'turn-shield-1',
+      liveSessionId: 'turn-shield-live-1',
+      region: 'eu-west-2',
+      humans: [{ ...alex, queueTicketId: 'ticket-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    state = startGrid9Roulette(state, t0);
+    state.roulette!.selectedSlotIndex = 0;
+    state = landGrid9Roulette(state, t0 + 3_500);
+    state.players[0].inventory = ['basic_shield'];
+    const resolution = applyGrid9Shield({
+      state,
+      actor: {
+        kind: 'human_player',
+        userId: alex.userId,
+        publicProfileId: alex.publicProfileId,
+        displayName: alex.displayName,
+      },
+      sourceSlotIndex: 0,
+      shieldId: 'basic_shield',
+      beneficiarySlotIndex: 0,
+      intentId: 'intent-shield-1',
+      serverOperationId: null,
+      ledgerEntryId: 'ledger-shield-1',
+      payment: { kind: 'inventory' },
+      nowMs: Date.parse(state.turn!.startedAt) + 500,
+    });
+    assert.equal(resolution.state.turn?.defensesUsedThisTurn, 1);
+    const due = grid9CombatTimerDueAtMs(resolution.state)!;
+    assert.ok(
+      due <= Date.now() + 50,
+      'shield-only act must schedule immediate turn_end',
+    );
+    const advanced = advanceGrid9Turn(resolution.state, Date.now());
+    assert.equal(advanced.phase, 'roulette');
+  });
+
+  it('advance after sentinel act uses wall clock — not turn.endsAt — so roulette is immediate', () => {
+    const t0 = Date.parse('2026-08-16T07:00:00.000Z');
+    let state = createGrid9Match({
+      matchId: 'sentinel-clock-1',
+      liveSessionId: 'sentinel-clock-live-1',
+      region: 'eu-west-2',
+      humans: [{ ...alex, queueTicketId: 'ticket-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    state = startGrid9Roulette(state, t0);
+    const sentinelSlot = state.players.find((player) => player.kind === 'sentinel')!
+      .slotIndex;
+    state.roulette!.selectedSlotIndex = sentinelSlot;
+    state = landGrid9Roulette(state, t0 + 3_500);
+    const sentinel = state.players[sentinelSlot] as Grid9SentinelPlayer;
+    sentinel.inventory = ['arrow'];
+    const decision = chooseGrid9SentinelDecision(state, sentinel);
+    assert.ok(decision && decision.kind === 'weapon');
+    const actAt = Date.parse(state.turn!.startedAt) + 1_000;
+    const resolution = applyGrid9Weapon({
+      state,
+      actor: {
+        kind: 'sentinel',
+        sentinelId: sentinel.sentinelId,
+        displayName: sentinel.displayName,
+      },
+      sourceSlotIndex: sentinelSlot,
+      weaponId: decision!.weaponId!,
+      targetSlotIndex: decision!.targetSlotIndex!,
+      intentId: null,
+      serverOperationId: 'auto-clock-1',
+      ledgerEntryId: 'ledger-auto-clock-1',
+      payment: { kind: 'inventory' },
+      nowMs: actAt,
+    });
+    const badClock = Math.max(Date.now(), Date.parse(resolution.state.turn!.endsAt));
+    const goodClock = Date.now();
+    const badAdvance = advanceGrid9Turn(resolution.state, badClock);
+    const goodAdvance = advanceGrid9Turn(resolution.state, goodClock);
+    assert.equal(goodAdvance.phase, 'roulette');
+    assert.ok(goodAdvance.roulette);
+    const goodEnds = Date.parse(goodAdvance.roulette!.endsAt);
+    assert.ok(
+      goodEnds <= goodClock + GRID9_ROULETTE_DURATION_MS + 100,
+      'wall-clock advance must schedule near-term roulette_end',
+    );
+    // Document the production bug: advancing with turn.endsAt pushes roulette far out.
+    if (badAdvance.phase === 'roulette' && badAdvance.roulette) {
+      const badEnds = Date.parse(badAdvance.roulette.endsAt);
+      assert.ok(
+        badEnds > goodEnds,
+        'endsAt-based advance must be later than wall-clock (stall root cause)',
+      );
+    }
   });
 });
