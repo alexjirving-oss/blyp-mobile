@@ -3,8 +3,9 @@ import { SurfaceShell } from "@/components/SurfaceShell";
 import { WalletPanel } from "@/components/WalletPanel";
 
 export const metadata: Metadata = {
-  title: "Coins",
-  description: "Buy Blyp coins on the web with Stripe — same ledger as the app.",
+  title: "Coins & Gems",
+  description:
+    "Buy Blyp coins (card or PayPal) and withdraw gem earnings — same ledger as the app.",
 };
 
 export default function WalletPage() {

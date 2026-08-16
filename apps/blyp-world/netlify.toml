@@ -8,10 +8,31 @@
   NODE_VERSION = "22"
   NEXT_TELEMETRY_DISABLED = "1"
 
+
+# App home is For You (static export cannot emit Next redirect as HTTP).
+[[redirects]]
+  from = "/"
+  to = "/foryou/"
+  status = 302
+  force = true
+# Share links (/p/:id) → OG function (crawlers) / 302 to /v/:id (humans).
+# Must stay above the static /p shell rewrite.
+[[redirects]]
+  from = "/p/*"
+  to = "/.netlify/functions/share-post"
+  status = 200
+  force = true
+
 # Pretty routes → static shells (client reads the real path segment).
 [[redirects]]
   from = "/v/*"
   to = "/v/_/"
+  status = 200
+
+# Fallback shell if function is unavailable (deploy without force above).
+[[redirects]]
+  from = "/p/*"
+  to = "/p/_/"
   status = 200
 
 [[redirects]]
@@ -40,6 +61,16 @@
 [[redirects]]
   from = "/api/wallet/checkout"
   to = "/.netlify/functions/checkout"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth/firebase-token"
+  to = "/.netlify/functions/mint-firebase-token"
   status = 200
 
 [[headers]]

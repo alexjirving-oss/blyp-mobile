@@ -7,7 +7,7 @@ export function VideoClient() {
   const [id, setId] = useState<string | undefined>(undefined);
   useEffect(() => {
     const seg = window.location.pathname.split("/").filter(Boolean);
-    const raw = seg[0] === "v" ? seg[1] : undefined;
+    const raw = seg[0] === "v" || seg[0] === "p" ? seg[1] : undefined;
     setId(raw && raw !== "_" ? decodeURIComponent(raw) : undefined);
   }, []);
   return <ForYouClient startId={id} />;

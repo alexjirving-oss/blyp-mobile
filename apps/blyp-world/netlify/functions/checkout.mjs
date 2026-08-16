@@ -1,11 +1,15 @@
 import Stripe from "stripe";
 
+/**
+ * Must match apps/blyp-world/lib/coinPacks.ts and live-service webCoinCatalog.
+ * Web grants base + ~15% bonus; app IAP is base-only at 1p/coin.
+ */
 const PACKS = [
-  { id: "web.coinpack.100", coins: 100, label: "100 coins", priceUsd: 0.99, blurb: "Starter pack" },
-  { id: "web.coinpack.550", coins: 550, label: "550 coins", priceUsd: 4.99, blurb: "500 + 50 bonus" },
-  { id: "web.coinpack.1150", coins: 1150, label: "1,150 coins", priceUsd: 9.99, blurb: "1000 + 150 bonus" },
-  { id: "web.coinpack.3000", coins: 3000, label: "3,000 coins", priceUsd: 19.99, blurb: "2500 + 500 bonus" },
-  { id: "web.coinpack.6500", coins: 6500, label: "6,500 coins", priceUsd: 39.99, blurb: "5000 + 1500 bonus" },
+  { id: "web.coinpack.100", baseCoins: 100, bonusCoins: 15, coins: 115, label: "115 coins", priceGbp: 1, blurb: "100 base + 15 bonus coins" },
+  { id: "web.coinpack.500", baseCoins: 500, bonusCoins: 75, coins: 575, label: "575 coins", priceGbp: 5, blurb: "500 base + 75 bonus coins" },
+  { id: "web.coinpack.1000", baseCoins: 1000, bonusCoins: 150, coins: 1150, label: "1,150 coins", priceGbp: 10, blurb: "1,000 base + 150 bonus coins" },
+  { id: "web.coinpack.2500", baseCoins: 2500, bonusCoins: 375, coins: 2875, label: "2,875 coins", priceGbp: 25, blurb: "2,500 base + 375 bonus coins" },
+  { id: "web.coinpack.5000", baseCoins: 5000, bonusCoins: 750, coins: 5750, label: "5,750 coins", priceGbp: 50, blurb: "5,000 base + 750 bonus coins" },
 ];
 
 function decodeJwtSub(token) {
@@ -17,6 +21,38 @@ function decodeJwtSub(token) {
   } catch {
     return null;
   }
+}
+
+function isPaypalCapabilityError(err) {
+  const msg = String(err?.message || err?.raw?.message || "").toLowerCase();
+  const code = String(err?.code || err?.raw?.code || "").toLowerCase();
+  return (
+    msg.includes("paypal") ||
+    code.includes("paypal") ||
+    msg.includes("payment_method_type") ||
+    msg.includes("payment method type")
+  );
+}
+
+async function createSession(stripe, params, withPaypal) {
+  const base = {
+    mode: "payment",
+    success_url: params.success_url,
+    cancel_url: params.cancel_url,
+    client_reference_id: params.client_reference_id,
+    metadata: params.metadata,
+    line_items: params.line_items,
+  };
+  if (withPaypal) {
+    return stripe.checkout.sessions.create({
+      ...base,
+      payment_method_types: ["card", "paypal"],
+    });
+  }
+  return stripe.checkout.sessions.create({
+    ...base,
+    payment_method_types: ["card"],
+  });
 }
 
 export async function handler(event) {
@@ -66,19 +102,20 @@ export async function handler(event) {
   const origin =
     event.headers.origin ||
     process.env.NEXT_PUBLIC_SITE_URL ||
-    "https://blyp-world-app.netlify.app";
+    "https://blyp.world";
   const priceEnvKey = `STRIPE_PRICE_${pack.id.replace(/\./g, "_").toUpperCase()}`;
   const priceId = process.env[priceEnvKey];
   const stripe = new Stripe(secret);
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
+  const sessionParams = {
     success_url: `${origin}/wallet?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/wallet?checkout=cancel`,
     client_reference_id: sub,
     metadata: {
       userId: sub,
       packId: pack.id,
+      baseCoins: String(pack.baseCoins),
+      bonusCoins: String(pack.bonusCoins),
       coins: String(pack.coins),
       source: "blyp-world",
     },
@@ -88,16 +125,43 @@ export async function handler(event) {
           {
             quantity: 1,
             price_data: {
-              currency: "usd",
-              unit_amount: Math.round(pack.priceUsd * 100),
+              currency: "gbp",
+              unit_amount: Math.round(pack.priceGbp * 100),
               product_data: {
                 name: `Blyp ${pack.label}`,
-                description: `${pack.coins} Blyp coins — ${pack.blurb}`,
+                description: `${pack.baseCoins} coins + ${pack.bonusCoins} bonus — ${pack.blurb}`,
               },
             },
           },
         ],
-  });
+  };
+
+  let session;
+  let paypalOffered = true;
+  try {
+    session = await createSession(stripe, sessionParams, true);
+  } catch (err) {
+    if (!isPaypalCapabilityError(err)) {
+      return {
+        statusCode: 502,
+        body: JSON.stringify({
+          error: String(err?.message || "Stripe Checkout failed").slice(0, 280),
+        }),
+      };
+    }
+    // PayPal not enabled on the Stripe account — card still works.
+    paypalOffered = false;
+    try {
+      session = await createSession(stripe, sessionParams, false);
+    } catch (cardErr) {
+      return {
+        statusCode: 502,
+        body: JSON.stringify({
+          error: String(cardErr?.message || "Stripe Checkout failed").slice(0, 280),
+        }),
+      };
+    }
+  }
 
   if (!session.url) {
     return {
@@ -109,6 +173,13 @@ export async function handler(event) {
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: session.url, id: session.id }),
+    body: JSON.stringify({
+      url: session.url,
+      id: session.id,
+      paypalOffered,
+      paypalDashboardHint: paypalOffered
+        ? null
+        : "Enable PayPal in Stripe Dashboard → Settings → Payment methods (GBP), then retry checkout.",
+    }),
   };
 }

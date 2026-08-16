@@ -1,15 +1,11 @@
 import type { Metadata } from "next";
-import { SurfaceShell } from "@/components/SurfaceShell";
+import { InboxClient } from "@/components/InboxClient";
 
-export const metadata: Metadata = { title: "Inbox" };
+export const metadata: Metadata = {
+  title: "Messages",
+  description: "Direct messages on Blyp.",
+};
 
 export default function InboxPage() {
-  return (
-    <SurfaceShell eyebrow="Messages" title="Inbox">
-      <p className="max-w-xl text-[var(--blyp-muted)]">
-        TikTok strands DMs in the app. Blyp does not — web inbox is part of the
-        product architecture from day one.
-      </p>
-    </SurfaceShell>
-  );
+  return <InboxClient />;
 }

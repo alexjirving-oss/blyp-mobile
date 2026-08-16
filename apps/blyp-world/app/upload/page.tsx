@@ -1,15 +1,11 @@
 import type { Metadata } from "next";
-import { SurfaceShell } from "@/components/SurfaceShell";
+import { UploadClient } from "@/components/UploadClient";
 
-export const metadata: Metadata = { title: "Upload" };
+export const metadata: Metadata = {
+  title: "Upload",
+  description: "Publish a video to Blyp For You.",
+};
 
 export default function UploadPage() {
-  return (
-    <SurfaceShell eyebrow="Create" title="Upload">
-      <p className="max-w-xl text-[var(--blyp-muted)]">
-        Desktop file upload, caption, and schedule — creator desk parity with
-        TikTok web, then better.
-      </p>
-    </SurfaceShell>
-  );
+  return <UploadClient />;
 }

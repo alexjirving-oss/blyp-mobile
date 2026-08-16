@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ForYouPlayer } from "./ForYouPlayer";
 import { fetchForYouFeed, fetchPostById, type FeedPost } from "@/lib/feed";
@@ -12,7 +13,7 @@ export function ForYouClient({ startId }: { startId?: string }) {
     let alive = true;
     (async () => {
       try {
-        const feed = await fetchForYouFeed(16);
+        const feed = await fetchForYouFeed(28);
         let list = feed;
         if (startId) {
           const focused = await fetchPostById(startId);
@@ -35,17 +36,41 @@ export function ForYouClient({ startId }: { startId?: string }) {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <p className="font-display text-2xl font-bold">Feed error</p>
+      <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center px-5 text-center">
+        <p className="font-display text-2xl font-bold">Couldn’t load For You</p>
         <p className="mt-3 text-sm text-[var(--blyp-muted)]">{error}</p>
+        <button
+          type="button"
+          className="mt-6 rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </button>
       </div>
     );
   }
 
   if (!posts) {
     return (
-      <div className="mx-auto flex h-[calc(100dvh-4rem)] max-w-[480px] items-center justify-center">
-        <p className="text-sm text-[var(--blyp-muted)]">Loading For You…</p>
+      <div className="flex h-full items-center justify-center bg-black">
+        <div className="h-8 w-8 animate-pulse rounded-full bg-[var(--blyp-teal)]/40" />
+      </div>
+    );
+  }
+
+  if (!posts.length) {
+    return (
+      <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center px-5 text-center">
+        <p className="font-display text-2xl font-bold">No videos yet</p>
+        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
+          The feed is empty right now. Browse Explore while creators post.
+        </p>
+        <Link
+          href="/explore"
+          className="mt-6 inline-flex rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
+        >
+          Open Explore
+        </Link>
       </div>
     );
   }

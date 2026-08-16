@@ -18,23 +18,22 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   metadataBase: new URL("https://blyp.world"),
   title: {
-    default: "Blyp — Watch. Live. Gift.",
+    default: "Blyp",
     template: "%s · Blyp",
   },
   description:
-    "Short video, live streaming, Stage pages, and coins — on the web and in the app. Reach is earned, not bought.",
+    "For You, Explore, LIVE, Stage, Messages, and coins — Blyp on the web.",
   openGraph: {
     type: "website",
     siteName: "Blyp",
-    title: "Blyp — Watch. Live. Gift.",
-    description:
-      "A live-first social product on the web: For You, LIVE, Stage, and coins.",
+    title: "Blyp",
+    description: "Short video, LIVE, Stage, and Messages on blyp.world.",
     url: "https://blyp.world/",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Blyp — Watch. Live. Gift.",
-    description: "Watch, gift, and go live — without being stranded in an app funnel.",
+    title: "Blyp",
+    description: "Watch, gift, message, and go live on Blyp.",
   },
 };
 

@@ -1,12 +1,24 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useMemo, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "./AuthProvider";
 
-export function LoginForm() {
+function safeNextPath(raw: string | null): string {
+  if (!raw) return "/foryou";
+  // Only same-origin relative paths (allow hash for /teams#apply).
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/foryou";
+  return raw;
+}
+
+function LoginFormInner() {
   const { login, session, logout } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextPath = useMemo(
+    () => safeNextPath(searchParams.get("next")),
+    [searchParams],
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -24,10 +36,10 @@ export function LoginForm() {
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => router.push("/foryou")}
+            onClick={() => router.push(nextPath)}
             className="rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-semibold text-[var(--blyp-ink)]"
           >
-            Open For You
+            Continue
           </button>
           <button
             type="button"
@@ -47,7 +59,7 @@ export function LoginForm() {
     setError(null);
     try {
       await login(email, password);
-      router.push("/foryou");
+      router.push(nextPath);
     } catch (err) {
       const msg =
         err && typeof err === "object" && "message" in err
@@ -104,5 +116,17 @@ export function LoginForm() {
         {busy ? "Signing in…" : "Log in"}
       </button>
     </form>
+  );
+}
+
+export function LoginForm() {
+  return (
+    <Suspense
+      fallback={
+        <p className="text-sm text-[var(--blyp-muted)]">Loading…</p>
+      }
+    >
+      <LoginFormInner />
+    </Suspense>
   );
 }

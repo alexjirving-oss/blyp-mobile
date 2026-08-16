@@ -1,14 +1,11 @@
 import type { Metadata } from "next";
-import { SurfaceShell } from "@/components/SurfaceShell";
+import { SearchClient } from "@/components/SearchClient";
 
-export const metadata: Metadata = { title: "Search" };
+export const metadata: Metadata = {
+  title: "Search",
+  description: "Search people, videos, and teams on Blyp.",
+};
 
 export default function SearchPage() {
-  return (
-    <SurfaceShell eyebrow="Discover" title="Search">
-      <p className="max-w-xl text-[var(--blyp-muted)]">
-        People, tags, and sounds — keyboard-first, faster than mobile search.
-      </p>
-    </SurfaceShell>
-  );
+  return <SearchClient />;
 }

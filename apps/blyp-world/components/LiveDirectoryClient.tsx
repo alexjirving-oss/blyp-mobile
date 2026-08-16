@@ -30,10 +30,17 @@ export function LiveDirectoryClient({
 
   if (!lives.length) {
     return (
-      <p className="max-w-xl text-[var(--blyp-muted)]">
-        Nobody is on air right now. When a host goes live in the app, they
-        appear here from the liveStreams directory (heartbeat-gated).
-      </p>
+      <div className="max-w-xl space-y-4">
+        <p className="text-[var(--blyp-muted)]">
+          Nobody is on air right now.
+        </p>
+        <Link
+          href="/live/studio"
+          className="inline-flex rounded-full border border-[var(--blyp-line)] px-5 py-2.5 text-sm font-semibold"
+        >
+          Open LIVE Studio
+        </Link>
+      </div>
     );
   }
 
