@@ -177,6 +177,57 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
     return reply('REJECTED', 'TARGET_NOT_ALIVE', nil)
   end
 
+  local function inventoryCount(inv, itemId)
+    local n = 0
+    if type(inv) == 'table' then
+      for _, value in ipairs(inv) do
+        if value == itemId then n = n + 1 end
+      end
+    end
+    return n
+  end
+
+  local function inventoryLen(inv)
+    if type(inv) ~= 'table' then return 0 end
+    return #inv
+  end
+
+  -- Defense-in-depth: inventory/free-drop paths must prove consume in state,
+  -- not only in the engine mutation that produced newState.
+  local function assertInventoryConsume()
+    local oldActor = currentState.players[actorSlot + 1]
+    local newActor = newState.players[actorSlot + 1]
+    if not oldActor or not newActor then
+      return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+    end
+    local beforeCount = inventoryCount(oldActor.inventory, validation.itemId)
+    local afterCount = inventoryCount(newActor.inventory, validation.itemId)
+    if beforeCount < 1 then
+      return reply('REJECTED', 'ITEM_NOT_FOUND', 'inventory missing item before commit')
+    end
+    if afterCount ~= beforeCount - 1 then
+      return reply('REJECTED', 'INTERNAL_ERROR', 'inventory item not consumed')
+    end
+    if inventoryLen(newActor.inventory) ~= inventoryLen(oldActor.inventory) - 1 then
+      return reply('REJECTED', 'INTERNAL_ERROR', 'inventory length mismatch after consume')
+    end
+    return nil
+  end
+
+  local function assertFreeDropConsume()
+    local oldTurn = currentState.turn
+    local newTurn = newState.turn
+    if not oldTurn
+      or oldTurn.freeDropEquipped ~= true
+      or oldTurn.freeDropItemId ~= validation.itemId then
+      return reply('REJECTED', 'ITEM_NOT_FOUND', 'free drop not equipped')
+    end
+    if newTurn and newTurn.freeDropEquipped == true then
+      return reply('REJECTED', 'INTERNAL_ERROR', 'free drop not cleared')
+    end
+    return nil
+  end
+
   if request.commandType == 'FIRE_WEAPON' then
     if actorSlot == nil then
       return reply('REJECTED', 'NOT_ELIGIBLE', nil)
@@ -192,6 +243,8 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
         or tonumber(ledger.jackpotDeltaCoins) ~= 0 then
         return reply('REJECTED', 'INTERNAL_ERROR', 'free action must be zero-cost')
       end
+      local consumeErr = funding == 'inventory' and assertInventoryConsume() or assertFreeDropConsume()
+      if consumeErr ~= nil then return consumeErr end
     else
       if debit ~= tonumber(item.cost) then
         return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
@@ -219,6 +272,8 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
         or tonumber(ledger.jackpotDeltaCoins) ~= 0 then
         return reply('REJECTED', 'INTERNAL_ERROR', 'free shield must be zero-cost')
       end
+      local consumeErr = funding == 'inventory' and assertInventoryConsume() or assertFreeDropConsume()
+      if consumeErr ~= nil then return consumeErr end
     else
       if debit ~= tonumber(item.cost) then
         return reply('REJECTED', 'ITEM_NOT_FOUND', nil)

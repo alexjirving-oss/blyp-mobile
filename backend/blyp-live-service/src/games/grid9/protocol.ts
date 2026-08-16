@@ -361,16 +361,21 @@ export interface Grid9WeaponResolvedPayload {
   damage: Grid9DamageResult[];
   receipt: Grid9PublicPurchaseReceipt;
   jackpotCoins: number;
+  /** Source inventory after consume/fire so clients patch without waiting for snapshot. */
+  inventoryAfter: Array<Grid9WeaponId | Grid9ShieldId>;
 }
 
 export interface Grid9ShieldResolvedPayload {
   actor: Grid9PublicActionActor;
+  sourceSlotIndex: Grid9SlotIndex | null;
   beneficiarySlotIndex: Grid9SlotIndex;
   shieldId: Grid9ShieldId;
   shieldBefore: number;
   shieldAfter: number;
   receipt: Grid9PublicPurchaseReceipt;
   jackpotCoins: number;
+  /** Source inventory after consume/purchase so clients patch without waiting for snapshot. */
+  inventoryAfter: Array<Grid9WeaponId | Grid9ShieldId>;
 }
 
 export interface Grid9MercenaryFundedPayload {

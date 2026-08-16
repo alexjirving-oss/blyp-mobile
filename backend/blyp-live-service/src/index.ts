@@ -10,6 +10,7 @@ import marbleRoutes from './routes/marbleRoutes';
 import frenemiesRoutes from './routes/frenemiesRoutes';
 import reactionDuelRoutes from './routes/reactionDuelRoutes';
 import battleRoutes from './routes/battleRoutes';
+import grid9Routes from './routes/grid9Routes';
 import economyRoutes from './economy/economyRoutes';
 import internalRoutes from './internal/internalRoutes';
 import adminRoutes from './admin/adminRoutes';
@@ -175,6 +176,9 @@ app.use('/api', frenemiesRoutes);
 
 // Reaction Duel — paid, server-authoritative two-player live skill game.
 app.use('/api', reactionDuelRoutes);
+
+// Grid 9 public match directory (Games hub discoverability).
+app.use('/api', grid9Routes);
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   // Central error handler to avoid unhandled rejections leaking details

@@ -7,10 +7,12 @@ import {
   TOKEN_TO_COIN_CONVERT_BONUS_MULTIPLIER,
   TOKEN_TO_COIN_FACE_RATIO,
 } from './tokenToCoinConvert';
+import { allocateTokenConvertDebit } from './tokenConvertDebit';
 import { tokensFromJackpotCoins } from '../games/grid9/constants';
 
 /**
  * Credit Grid 9 victory Tokens (50% of jackpot coins). Idempotent via ledger key.
+ * Credits wallets.token_available only (not token_pending).
  * Does not touch gem columns or gem convert paths.
  */
 export async function creditGrid9VictoryTokens(
@@ -68,8 +70,14 @@ export async function creditGrid9VictoryTokens(
 }
 
 /**
- * Convert Tokens → spendable COIN at ceil(tokens * 1.15). Parallel to gems convert;
- * does not read or write gem balances.
+ * Convert Tokens → spendable COIN at ceil(tokens * 1.15).
+ *
+ * Instant debit policy (mirrors gems, documented in GRID9_V2_DESIGN):
+ * available-first, then pending. Grid 9 victory only credits token_available, so
+ * pending is latent; touching it mirrors gems and stays safe via row lock +
+ * conditional UPDATE that refuses overdraft. Idempotent via ledger keys;
+ * unique-violation → replay (no double convert).
+ * Does not read or write gem balances.
  */
 export async function convertTokensToCoins(
   userId: string,
@@ -148,9 +156,12 @@ export async function convertTokensToCoins(
 
       const tokenAvailable = BigInt(wallet.token_available || 0);
       const tokenPending = BigInt(wallet.token_pending || 0);
-      const convertible = tokenAvailable + tokenPending;
-      const tokensDelta = BigInt(tokens);
-      if (convertible < tokensDelta) {
+      const allocation = allocateTokenConvertDebit(
+        Number(tokenAvailable),
+        Number(tokenPending),
+        tokens,
+      );
+      if (!allocation.ok) {
         throw new EconomyError(
           'INSUFFICIENT_FUNDS',
           409,
@@ -158,14 +169,15 @@ export async function convertTokensToCoins(
           {
             tokenAvailable: Number(tokenAvailable),
             tokenPending: Number(tokenPending),
-            convertible: Number(convertible),
+            convertible: allocation.convertible,
             requested: tokens,
           },
         );
       }
 
-      const fromAvailable = tokensDelta <= tokenAvailable ? tokensDelta : tokenAvailable;
-      const fromPending = tokensDelta - fromAvailable;
+      const fromAvailable = BigInt(allocation.fromAvailable);
+      const fromPending = BigInt(allocation.fromPending);
+      const tokensDelta = BigInt(tokens);
       const coinsDelta = BigInt(coinsCredited);
       const refId = randomUUID();
       const meta = {
@@ -177,6 +189,7 @@ export async function convertTokensToCoins(
         bonusMultiplier: TOKEN_TO_COIN_CONVERT_BONUS_MULTIPLIER,
         rate: describeTokenToCoinRate(),
         originalIdempotencyKey: idempotencyKey,
+        debitPolicy: 'available_first_then_pending',
       };
 
       await trx('ledger_entries').insert({
@@ -204,14 +217,29 @@ export async function convertTokensToCoins(
         metadata: meta,
       });
 
-      await trx('wallets')
+      // Fail-closed overdraft guard (race with concurrent convert).
+      const updated = await trx('wallets')
         .where({ user_id: userId })
+        .andWhereRaw('CAST(token_available AS BIGINT) >= ?', [fromAvailable.toString()])
+        .andWhereRaw('CAST(token_pending AS BIGINT) >= ?', [fromPending.toString()])
         .update({
           token_pending: (tokenPending - fromPending).toString(),
           token_available: (tokenAvailable - fromAvailable).toString(),
           coin_balance: (BigInt(wallet.coin_balance || 0) + coinsDelta).toString(),
           updated_at: trx.fn.now(),
         });
+      if (!updated) {
+        throw new EconomyError(
+          'INSUFFICIENT_FUNDS',
+          409,
+          'Insufficient tokens to convert (concurrent debit)',
+          {
+            tokenAvailable: Number(tokenAvailable),
+            tokenPending: Number(tokenPending),
+            requested: tokens,
+          },
+        );
+      }
 
       return {
         kind: 'ok' as const,

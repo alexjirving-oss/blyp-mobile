@@ -1,12 +1,46 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useRoute, type RouteProp } from '@react-navigation/native';
 import { isGrid9Enabled } from '../../config/Grid9Flags';
+import { getGrid9Connection } from './connection';
 import { Grid9ArenaView } from './Grid9ArenaView';
 import { Grid9Provider } from './Grid9Provider';
+import { patchGrid9Session, resetGrid9Session } from './store';
 import { Text, View } from './nw';
 
-/** Flag-gated mount. Provider connect/close is the socket lifecycle. */
+type Grid9ArenaParams = {
+  matchId?: string;
+  mode?: 'play' | 'spectate';
+};
+
+/**
+ * Flag-gated mount. Spectate mode: set matchId, disable auto-queue, REQUEST_SNAPSHOT as audience.
+ */
 export function Grid9ArenaScreen() {
   const enabled = isGrid9Enabled();
+  const route = useRoute<RouteProp<Record<string, Grid9ArenaParams>, string>>();
+  const matchId = typeof route.params?.matchId === 'string' ? route.params.matchId.trim() : '';
+  const spectate = route.params?.mode === 'spectate' && matchId.length > 0;
+  const spectateArmed = useRef(false);
+
+  useEffect(() => {
+    if (!enabled || !spectate) return;
+    spectateArmed.current = true;
+    const connection = getGrid9Connection();
+    connection.autoQueueOnWelcome = false;
+    resetGrid9Session();
+    patchGrid9Session({ matchId });
+    void connection.connect().catch((error: unknown) => {
+      if (__DEV__) {
+        console.warn('[grid9] spectate connect failed', error);
+      }
+    });
+    return () => {
+      connection.autoQueueOnWelcome = false;
+      connection.close();
+      spectateArmed.current = false;
+    };
+  }, [enabled, spectate, matchId]);
+
   if (!enabled) {
     return (
       <View className="flex-1 items-center justify-center bg-slate-950 px-8">
@@ -24,8 +58,8 @@ export function Grid9ArenaScreen() {
   }
 
   return (
-    <Grid9Provider autoConnect enabled>
-      <Grid9ArenaView />
+    <Grid9Provider autoConnect={!spectate} enabled>
+      <Grid9ArenaView spectate={spectate} />
     </Grid9Provider>
   );
 }

@@ -514,6 +514,40 @@ export async function kickGrid9PrivatePlayer(args: {
   });
   if (result.status !== 'committed') return;
   emitGrid9Room(args.io, state.matchId, roomEvent);
+  // Private notify: kicked user must learn they were demoted to audience.
+  const roomName = `${GRID9_SOCKET_ROOM_PREFIX}${state.matchId}`;
+  const sockets = await args.io.in(roomName).fetchSockets();
+  for (const remote of sockets) {
+    if (remote.data.userId !== args.targetUserId) continue;
+    const connectionSessionId =
+      (remote.data.grid9ConnectionSessionId as string | undefined) ?? remote.id;
+    emitGrid9ToConnection(
+      args.io,
+      connectionSessionId,
+      createGrid9PrivateEvent({
+        type: 'PRIVATE_ROOM_STATUS',
+        connectionSessionId,
+        matchId: state.matchId,
+        stateVersion: resolution.state.authority.stateVersion,
+        causationIntentId: args.intentId,
+        payload: {
+          status: 'kicked',
+          matchId: state.matchId,
+          roomCode: resolution.state.roomCode ?? '',
+          ownerUserId: resolution.state.ownerUserId ?? '',
+          slotIndex: null,
+        },
+      }),
+    );
+    await upsertGrid9Presence({
+      matchId: state.matchId,
+      socketId: remote.id,
+      userId: args.targetUserId,
+      role: 'audience',
+      slotIndex: null,
+    });
+    remote.data.grid9Role = 'audience';
+  }
   if (resolution.wasSpotlight && resolution.state.phase === 'combat') {
     const dueNow: Grid9TimerOutboxRecord = {
       schemaVersion: 1,

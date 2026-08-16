@@ -22,7 +22,7 @@ import { useGrid9 } from './useGrid9';
 
 const DEFAULT_REGION = 'eu-west-2';
 
-export function Grid9ArenaView() {
+export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
   const {
     match,
     session,
@@ -36,7 +36,7 @@ export function Grid9ArenaView() {
     sendStartPrivateMatchIntent,
   } = useGrid9();
   const insets = useSafeAreaInsets();
-  const [entered, setEntered] = useState(false);
+  const [entered, setEntered] = useState(spectate);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [selection, setSelection] = useState<Grid9ArsenalSelection | null>(null);
@@ -85,6 +85,10 @@ export function Grid9ArenaView() {
   useEffect(() => {
     if (match?.phase !== 'completed') setVictoryDismissed(false);
   }, [match?.phase]);
+
+  useEffect(() => {
+    if (spectate && match) setEntered(true);
+  }, [spectate, match]);
 
   const targetableSlotIndices = useMemo(() => {
     const intent =
@@ -150,7 +154,7 @@ export function Grid9ArenaView() {
     [mode, selection, sendFireWeaponIntent, sendFundMercenaryIntent, sendPurchaseShieldIntent],
   );
 
-  if (!entered && !match) {
+  if (!entered && !match && !spectate) {
     return (
       <View className="flex-1 bg-slate-950" style={{ paddingTop: insets.top }}>
         <Grid9EntryPortal
@@ -184,6 +188,22 @@ export function Grid9ArenaView() {
             }
           }}
         />
+      </View>
+    );
+  }
+
+  if (spectate && !match) {
+    return (
+      <View className="flex-1 items-center justify-center bg-slate-950 px-8" style={{ paddingTop: insets.top }}>
+        <Text className="text-[11px] font-black uppercase tracking-[3px] text-slate-500">
+          Spectating
+        </Text>
+        <Text className="mt-3 text-center text-base font-extrabold text-cyan-300">
+          Joining as audience…
+        </Text>
+        <Text className="mt-2 text-center text-xs font-semibold text-slate-400">
+          {session.lastError || connectionStatus}
+        </Text>
       </View>
     );
   }

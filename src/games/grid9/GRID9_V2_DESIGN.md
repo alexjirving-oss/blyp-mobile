@@ -49,8 +49,9 @@ Capacity **3**. On grant when full: **FIFO drop oldest** so gifts always land.
 
 | Field | Rule |
 |---|---|
-| Credit | Human victory: `tokens = floor(jackpotCoins * 0.5)` → `wallets.token_available` |
-| Convert | `POST /wallet/convert-tokens` → `ceil(tokens * 1.15)` coins (Instant +15% bonus, same idea as gems) |
+| Credit | Human victory: `tokens = floor(jackpotCoins * 0.5)` → `wallets.token_available` only |
+| Convert | `POST /wallet/convert-tokens` → `ceil(tokens * 1.15)` coins (Instant +15% bonus) |
+| Instant debit | **Available-first, then pending** — same allocation as gems Instant. Victory never writes `token_pending`, so pending is latent; convert still may debit pending if present, under row lock + conditional UPDATE (no overdraft / double convert via idempotency keys). |
 | Why | Raw coin jackpot payout skips the cut; Tokens→Coins is the monetization boundary |
 | Client | `grid9TokenWallet.ts` only — do not edit BlypCoinService / IAP freeze |
 
@@ -61,7 +62,14 @@ House keeps the other 50% of jackpot value (not credited as Tokens).
 ## Disconnect + kick
 
 - Disconnect: **9s grace** (`GRID9_DISCONNECT_GRACE_MS`), then mark disconnected and **auto-resolve turn** if that seat is spotlight (auto-shield / pass → next roulette).
-- Kick (host-only): seated player → **audience** (can still gift); seat filled with **Sentinel** so the 9-box stays full; notify via room connection event + stateVersion resync.
+- Kick (host-only): seated player → **audience** (can still gift); seat filled with **Sentinel** so the 9-box stays full; room broadcast carries `replacementPlayer` + `audienceCount`; kicked user also receives private `PRIVATE_ROOM_STATUS: kicked` (slotIndex null).
+
+---
+
+## Discoverability (public matches)
+
+- `GET /api/grid9/matches` lists **public** active matches only (no private room codes / tokens / secrets).
+- Games hub → **Live Grid 9** rows → Spectate opens arena as **audience** via `REQUEST_SNAPSHOT` (not a combatant seat).
 
 ---
 

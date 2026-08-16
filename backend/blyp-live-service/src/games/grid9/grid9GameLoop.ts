@@ -454,6 +454,7 @@ async function processAutomatedPurchase(
       damage: resolution.damage,
       receipt,
       jackpotCoins: resolution.state.jackpot.currentCoins,
+      inventoryAfter: resolution.inventoryAfter,
     },
   });
   const committed = await commitGrid9ServerMutation({

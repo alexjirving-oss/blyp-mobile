@@ -123,6 +123,15 @@ function applyRoomPatch(
         })),
       nextMatch,
     );
+    if (
+      event.payload.sourceSlotIndex != null &&
+      Array.isArray(event.payload.inventoryAfter)
+    ) {
+      nextMatch = mapPlayer(nextMatch, event.payload.sourceSlotIndex, (player) => ({
+        ...player,
+        inventory: [...event.payload.inventoryAfter],
+      }));
+    }
     nextMatch = {
       ...nextMatch,
       jackpot: { ...nextMatch.jackpot, currentCoins: event.payload.jackpotCoins },
@@ -132,6 +141,15 @@ function applyRoomPatch(
       ...player,
       shieldPoints: event.payload.shieldAfter,
     }));
+    if (
+      event.payload.sourceSlotIndex != null &&
+      Array.isArray(event.payload.inventoryAfter)
+    ) {
+      nextMatch = mapPlayer(nextMatch, event.payload.sourceSlotIndex, (player) => ({
+        ...player,
+        inventory: [...event.payload.inventoryAfter],
+      }));
+    }
     nextMatch = {
       ...nextMatch,
       jackpot: { ...nextMatch.jackpot, currentCoins: event.payload.jackpotCoins },
@@ -292,12 +310,14 @@ function applyPrivateEvent(
     };
   }
   if (event.type === 'PRIVATE_ROOM_STATUS') {
+    const kicked = event.payload.status === 'kicked';
     return {
       session: {
         ...session,
         matchId: event.payload.matchId,
-        assignment:
-          event.payload.slotIndex == null
+        assignment: kicked
+          ? null
+          : event.payload.slotIndex == null
             ? session.assignment
             : {
                 assignmentId: `private-${event.payload.matchId}`,

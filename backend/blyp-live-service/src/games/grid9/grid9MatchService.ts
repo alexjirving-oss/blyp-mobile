@@ -358,6 +358,7 @@ export async function fireGrid9Weapon(args: {
         committedAt: now,
       }),
       jackpotCoins: resolution.state.jackpot.currentCoins,
+      inventoryAfter: resolution.inventoryAfter,
     },
   });
   const timer = timerOutboxForState(resolution.state);
@@ -639,6 +640,7 @@ export async function purchaseGrid9Shield(args: {
     causationIntentId: args.intent.intentId,
     payload: {
       actor: resolution.state.lastAction!.actor,
+      sourceSlotIndex: resolution.sourceSlotIndex,
       beneficiarySlotIndex: args.intent.payload.beneficiarySlotIndex,
       shieldId: shield.id,
       shieldBefore: resolution.shieldBefore,
@@ -653,6 +655,7 @@ export async function purchaseGrid9Shield(args: {
         committedAt: now,
       }),
       jackpotCoins: resolution.state.jackpot.currentCoins,
+      inventoryAfter: resolution.inventoryAfter,
     },
   });
   const committed = await commitGrid9PaidMutation({

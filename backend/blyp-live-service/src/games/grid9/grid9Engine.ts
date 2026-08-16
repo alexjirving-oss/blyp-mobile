@@ -98,6 +98,8 @@ export interface Grid9WeaponResolution {
   eliminatedSlotIndices: Grid9SlotIndex[];
   mercenarySpend: Grid9MercenarySpendAllocation | null;
   completed: boolean;
+  /** Authoritative source inventory after inventory/free/escrow fire (clients patch without snapshot). */
+  inventoryAfter: Grid9ArsenalItemId[];
 }
 
 export interface Grid9FundingResolution {
@@ -110,9 +112,12 @@ export interface Grid9FundingResolution {
 export interface Grid9ShieldResolution {
   state: Grid9GameState;
   beneficiarySlotIndex: Grid9SlotIndex;
+  sourceSlotIndex: Grid9SlotIndex | null;
   shieldBefore: number;
   shieldAfter: number;
   completed: boolean;
+  /** Authoritative source inventory after inventory/free/escrow shield (clients patch without snapshot). */
+  inventoryAfter: Grid9ArsenalItemId[];
 }
 
 export interface Grid9MicroDropResolution {
@@ -1134,13 +1139,19 @@ export function applyGrid9Weapon(args: {
     committedAt: now,
   };
   const completed = maybeCompleteAfterDamage(state, nowMs);
+  const done = mutationDone(state, args.state, now, completed ? 2 : 1);
+  const inventoryAfter: Grid9ArsenalItemId[] =
+    args.sourceSlotIndex === null
+      ? []
+      : [...done.players[args.sourceSlotIndex].inventory];
   return {
-    state: mutationDone(state, args.state, now, completed ? 2 : 1),
+    state: done,
     damage,
     sourceSlotIndex: args.sourceSlotIndex,
     eliminatedSlotIndices,
     mercenarySpend,
     completed,
+    inventoryAfter,
   };
 }
 
@@ -1374,9 +1385,14 @@ export function applyGrid9Shield(args: {
   return {
     state: mutationDone(state, args.state, now, 1),
     beneficiarySlotIndex: args.beneficiarySlotIndex,
+    sourceSlotIndex: args.sourceSlotIndex,
     shieldBefore,
     shieldAfter: nextBeneficiary.shieldPoints,
     completed: false,
+    inventoryAfter:
+      args.sourceSlotIndex === null
+        ? []
+        : [...state.players[args.sourceSlotIndex].inventory],
   };
 }
 

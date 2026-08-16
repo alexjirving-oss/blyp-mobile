@@ -145,6 +145,7 @@ function weaponEvent(sequence: number, stateVersion = sequence): Grid9WeaponReso
         committedAt: '2026-08-15T00:00:02.000Z',
       },
       jackpotCoins: 30,
+      inventoryAfter: [],
     },
   };
 }
@@ -351,6 +352,72 @@ describe('Grid 9 sequence reconciliation', () => {
     expect(applied.effects.dropped).toBe(false);
     expect(applied.session.match?.players[0].kind).toBe('sentinel');
     expect(applied.session.match?.audienceCount).toBe(1);
+  });
+
+  it('patches source inventory from WEAPON_RESOLVED.inventoryAfter', () => {
+    const afterSnap = applyGrid9ServerEvent(createEmptyGrid9Session(), snapshotEvent()).session;
+    const withStock: typeof afterSnap = {
+      ...afterSnap,
+      match: afterSnap.match
+        ? {
+            ...afterSnap.match,
+            players: afterSnap.match.players.map((player, index) =>
+              index === 0
+                ? { ...player, inventory: ['arrow' as const, 'fireball' as const] }
+                : player,
+            ),
+          }
+        : null,
+    };
+    const fire = {
+      ...weaponEvent(5, 5),
+      payload: {
+        ...weaponEvent(5, 5).payload,
+        inventoryAfter: ['fireball' as const],
+      },
+    };
+    const applied = applyGrid9ServerEvent(withStock, fire);
+    expect(applied.effects.dropped).toBe(false);
+    expect(applied.session.match?.players[0].inventory).toEqual(['fireball']);
+  });
+
+  it('clears assignment when PRIVATE_ROOM_STATUS is kicked', () => {
+    const afterSnap = applyGrid9ServerEvent(createEmptyGrid9Session(), snapshotEvent()).session;
+    const seeded = {
+      ...afterSnap,
+      assignment: {
+        assignmentId: 'private-match-1',
+        matchId: 'match-1',
+        liveSessionId: 'match-1',
+        slotIndex: 0 as const,
+        assignmentToken: 'private',
+        assignmentExpiresAt: '2099-01-01T00:00:00.000Z',
+      },
+    };
+    const kicked = {
+      protocol: 'grid9.ws' as const,
+      protocolVersion: 2 as const,
+      direction: 'server_to_client' as const,
+      routing: 'private' as const,
+      type: 'PRIVATE_ROOM_STATUS' as const,
+      messageId: 'msg-kicked',
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAA',
+      sentAt: '2026-08-15T00:00:05.000Z',
+      connectionSessionId: 'conn-1',
+      matchId: 'match-1',
+      sequence: null,
+      stateVersion: 6,
+      causationIntentId: 'intent-kick',
+      payload: {
+        status: 'kicked' as const,
+        matchId: 'match-1',
+        roomCode: 'ABC123',
+        ownerUserId: 'host',
+        slotIndex: null,
+      },
+    };
+    const applied = applyGrid9ServerEvent(seeded, kicked);
+    expect(applied.session.assignment).toBeNull();
   });
 
   it('accepts protocolVersion 2 on the wire and rejects v1', () => {

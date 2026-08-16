@@ -1,8 +1,8 @@
 // GamesContent — Chat/Games "Games" header tab.
 // Mirrors the live Games picker without reviving the old create-sheet lobby.
 
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Icon from '../Icon';
 import { COLORS } from '../../styles/theme';
@@ -16,6 +16,9 @@ import {
 import { isGrid9Enabled } from '../../config/Grid9Flags';
 import FrenemiesRulesSheet from '../live/frenemies/FrenemiesRulesSheet';
 import FrenemiesWheelGlyph from '../live/frenemies/FrenemiesWheelGlyph';
+import {
+  fetchPublicGrid9Matches,
+} from '../../games/grid9/grid9MatchDirectory';
 
 const MARBLE_ENABLED = isMarbleRaceEnabled();
 const ARTILLERY_ENABLED = isArtilleryEnabled();
@@ -27,6 +30,100 @@ const TEAL = '#00D2BE';
 const GOLD = '#F5C542';
 const GOLD_SOFT = '#FDE68A';
 const INK = '#0A0A0C';
+
+function formatPhase(phase) {
+  switch (phase) {
+    case 'combat':
+      return 'In combat';
+    case 'roulette':
+      return 'Roulette';
+    case 'countdown':
+      return 'Starting';
+    case 'lobby_waiting':
+      return 'Lobby';
+    default:
+      return String(phase || 'Live');
+  }
+}
+
+function LiveGrid9Matches({ navigation, enabled }) {
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    if (!enabled) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await fetchPublicGrid9Matches(24);
+      setMatches(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load matches');
+    } finally {
+      setLoading(false);
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const openSpectate = (match) => {
+    try {
+      navigation?.navigate?.('Grid9Arena', {
+        matchId: match.matchId,
+        mode: 'spectate',
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  if (!enabled) return null;
+
+  return (
+    <View style={styles.liveGridSection}>
+      <View style={styles.liveGridHeader}>
+        <Text style={styles.liveGridTitle}>Live Grid 9</Text>
+        <TouchableOpacity onPress={refresh} hitSlop={8}>
+          <Text style={styles.liveGridRefresh}>Refresh</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.liveGridSub}>
+        Each public match is listed so supporters can spectate and gift without taking a seat.
+      </Text>
+      {loading ? (
+        <ActivityIndicator color={TEAL} style={{ marginVertical: responsiveSize(12) }} />
+      ) : null}
+      {error ? <Text style={styles.liveGridError}>{error}</Text> : null}
+      {!loading && !error && matches.length === 0 ? (
+        <Text style={styles.liveGridEmpty}>No public matches live right now. Open the arena to queue.</Text>
+      ) : null}
+      {matches.map((match) => (
+        <TouchableOpacity
+          key={match.matchId}
+          style={styles.matchRow}
+          activeOpacity={0.85}
+          onPress={() => openSpectate(match)}
+        >
+          <View style={styles.matchRowText}>
+            <Text style={styles.matchRowTitle} numberOfLines={1}>
+              {formatPhase(match.phase)} · {match.survivors}/9 alive
+            </Text>
+            <Text style={styles.matchRowMeta} numberOfLines={1}>
+              Jackpot {match.jackpotCoins} · audience {match.audienceCount} · {match.region}
+            </Text>
+          </View>
+          <View style={styles.spectateBtn}>
+            <Text style={styles.spectateBtnText}>Spectate</Text>
+            <Icon name="chevron-forward" size={responsiveFont(14)} color={INK} />
+          </View>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
 
 function GameCard({ icon, title, badge, body, steps, ctaLabel, onCta, muted }) {
   return (
@@ -168,6 +265,8 @@ export default function GamesContent({ navigation, onSelectChatTab }) {
         after you go live; battles open in Battle HQ.
       </Text>
 
+      <LiveGrid9Matches navigation={navigation} enabled={GRID9_ENABLED} />
+
       <FrenemiesHubCard
         enabled={FRENEMIES_ENABLED}
         onOpenLive={() => startFromLive('GamesFrenemies')}
@@ -298,6 +397,79 @@ const styles = StyleSheet.create({
     fontSize: responsiveFont(13),
     lineHeight: responsiveFont(19),
     marginBottom: responsiveSize(18),
+  },
+  liveGridSection: {
+    marginBottom: responsiveSize(18),
+    padding: responsiveSize(14),
+    borderRadius: responsiveSize(16),
+    borderWidth: 1,
+    borderColor: 'rgba(0,210,190,0.28)',
+    backgroundColor: 'rgba(0,210,190,0.06)',
+  },
+  liveGridHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: responsiveSize(6),
+  },
+  liveGridTitle: {
+    color: COLORS.textPrimary,
+    fontWeight: '900',
+    fontSize: responsiveFont(16),
+  },
+  liveGridRefresh: {
+    color: TEAL,
+    fontWeight: '800',
+    fontSize: responsiveFont(12),
+  },
+  liveGridSub: {
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(12),
+    lineHeight: responsiveFont(17),
+    marginBottom: responsiveSize(10),
+  },
+  liveGridError: {
+    color: '#F87171',
+    fontSize: responsiveFont(12),
+    marginBottom: responsiveSize(8),
+  },
+  liveGridEmpty: {
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(12),
+    lineHeight: responsiveFont(17),
+  },
+  matchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveSize(10),
+    paddingVertical: responsiveSize(10),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  matchRowText: { flex: 1 },
+  matchRowTitle: {
+    color: COLORS.textPrimary,
+    fontWeight: '800',
+    fontSize: responsiveFont(13),
+  },
+  matchRowMeta: {
+    marginTop: 2,
+    color: COLORS.textSecondary,
+    fontSize: responsiveFont(11),
+  },
+  spectateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: TEAL,
+    borderRadius: responsiveSize(10),
+    paddingHorizontal: responsiveSize(10),
+    paddingVertical: responsiveSize(8),
+  },
+  spectateBtnText: {
+    color: INK,
+    fontWeight: '900',
+    fontSize: responsiveFont(12),
   },
   card: {
     backgroundColor: COLORS.backgroundCard,
