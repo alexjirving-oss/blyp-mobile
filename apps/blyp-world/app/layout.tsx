@@ -1,14 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Syne } from "next/font/google";
-import { JsonLd } from "@/components/JsonLd";
 import { SiteChrome } from "@/components/SiteChrome";
-import {
-  DEFAULT_DESCRIPTION,
-  DEFAULT_TITLE,
-  OG_IMAGE_PATH,
-  SITE_NAME,
-  SITE_URL,
-} from "@/lib/site";
 import "./globals.css";
 
 const syne = Syne({
@@ -24,74 +16,25 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
+  metadataBase: new URL("https://blyp.world"),
   title: {
-    default: DEFAULT_TITLE,
-    template: `%s - ${SITE_NAME}`,
+    default: "Blyp — Watch. Live. Gift.",
+    template: "%s · Blyp",
   },
-  description: DEFAULT_DESCRIPTION,
-  applicationName: SITE_NAME,
-  keywords: [
-    "Blyp",
-    "blyp.world",
-    "short video",
-    "live streaming",
-    "LIVE",
-    "creator gifts",
-    "Blyp coins",
-    "For You",
-  ],
-  authors: [{ name: SITE_NAME, url: SITE_URL }],
-  creator: SITE_NAME,
-  publisher: SITE_NAME,
-  category: "social",
-  alternates: {
-    canonical: "/",
-  },
+  description:
+    "Short video, live streaming, Stage pages, and coins — on the web and in the app. Reach is earned, not bought.",
   openGraph: {
     type: "website",
-    locale: "en_GB",
-    siteName: SITE_NAME,
-    title: DEFAULT_TITLE,
-    description: DEFAULT_DESCRIPTION,
-    url: SITE_URL,
-    images: [
-      {
-        url: OG_IMAGE_PATH,
-        width: 1080,
-        height: 1920,
-        alt: "Blyp — Watch. Live. Gift.",
-      },
-    ],
+    siteName: "Blyp",
+    title: "Blyp — Watch. Live. Gift.",
+    description:
+      "A live-first social product on the web: For You, LIVE, Stage, and coins.",
+    url: "https://blyp.world/",
   },
   twitter: {
     card: "summary_large_image",
-    title: DEFAULT_TITLE,
-    description:
-      "Short video, LIVE, Stage, and coins — on the web and on Google Play. Reach is earned, not bought.",
-    images: [OG_IMAGE_PATH],
-  },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: {
-      index: true,
-      follow: true,
-      "max-image-preview": "large",
-      "max-snippet": -1,
-      "max-video-preview": -1,
-    },
-  },
-  // Search Console: HTML file at /google8831d0621217f010.html (meta tag token only if Alex pastes one).
-  icons: {
-    icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
-      { url: "/favicon.png", type: "image/png", sizes: "512x512" },
-    ],
-    apple: [{ url: "/brand/blyp-app-tile-512.png", sizes: "512x512" }],
-  },
-  other: {
-    "theme-color": "#07070a",
+    title: "Blyp — Watch. Live. Gift.",
+    description: "Watch, gift, and go live — without being stranded in an app funnel.",
   },
 };
 
@@ -103,7 +46,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${syne.variable} ${dmSans.variable} antialiased`}>
-        <JsonLd />
         <SiteChrome>{children}</SiteChrome>
       </body>
     </html>

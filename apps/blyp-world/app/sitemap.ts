@@ -7,8 +7,6 @@ export const dynamic = "force-static";
 const ROUTES: { path: string; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"]; priority: number }[] =
   [
     { path: "/", changeFrequency: "weekly", priority: 1 },
-    { path: "/about/", changeFrequency: "monthly", priority: 0.9 },
-    { path: "/download/", changeFrequency: "monthly", priority: 0.95 },
     { path: "/live/", changeFrequency: "hourly", priority: 0.85 },
     { path: "/foryou/", changeFrequency: "hourly", priority: 0.8 },
     { path: "/search/", changeFrequency: "weekly", priority: 0.5 },

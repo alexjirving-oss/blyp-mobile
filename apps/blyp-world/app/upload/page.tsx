@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
 import { SurfaceShell } from "@/components/SurfaceShell";
 
-export const metadata: Metadata = {
-  title: "Upload",
-  robots: { index: false, follow: false },
-};
+export const metadata: Metadata = { title: "Upload" };
 
 export default function UploadPage() {
   return (
