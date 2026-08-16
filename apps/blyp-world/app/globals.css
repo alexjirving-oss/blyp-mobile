@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --blyp-ink: #07070a;
+  --blyp-ink-elevated: #101016;
+  --blyp-fog: #e8e6f0;
+  --blyp-muted: #9a97a8;
+  --blyp-teal: #00d2be;
+  --blyp-teal-deep: #00a89e;
+  --blyp-gold: #e8c47c;
+  --blyp-rose: #f0a0b8;
+  --blyp-line: rgba(232, 230, 240, 0.12);
+  --blyp-glow: rgba(0, 210, 190, 0.18);
+  --font-display: var(--font-syne), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --background: var(--blyp-ink);
+  --foreground: var(--blyp-fog);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(55% 45% at 85% -10%, var(--blyp-glow), transparent 60%),
+    radial-gradient(40% 35% at 5% 15%, rgba(240, 160, 184, 0.08), transparent 55%),
+    radial-gradient(50% 40% at 50% 100%, rgba(232, 196, 124, 0.06), transparent 50%),
+    var(--blyp-ink);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: rgba(0, 210, 190, 0.35);
+  color: var(--blyp-fog);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-body {
+  font-family: var(--font-body);
+}
