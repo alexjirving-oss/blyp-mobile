@@ -11,7 +11,8 @@ import {
   type Grid9ArsenalItem,
 } from './catalog';
 import { GRID9_DEFAULT_ESCROW_RESERVE_COINS, GRID9_HOUSE_SEED_COINS } from './constants';
-import { Grid9LiveKitProvider } from './Grid9LiveKitRoom';
+import { Grid9LiveKitProvider, useGrid9Mic } from './Grid9LiveKitRoom';
+import { shouldAutoUnmuteGrid9Mic } from './grid9Mic';
 import { Grid9ActionDrawer } from './Grid9ActionDrawer';
 import { Grid9ArrivalTicker } from './Grid9ArrivalTicker';
 import { Grid9Board } from './Grid9Board';
@@ -643,7 +644,14 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           matchId={match?.matchId ?? session.matchId}
           enabled={Boolean(match?.matchId || session.matchId)}
           publish={isCombatant && !spectate}
+          forceUnmute={shouldAutoUnmuteGrid9Mic({
+            isCombatant,
+            spectate,
+            localSlotIndex,
+            activeSlotIndex,
+          })}
         >
+        <Grid9ArenaMuteChip visible={isCombatant && !spectate} />
         <Grid9SpotlightStage
           player={spotlightPlayer}
           matchId={match?.matchId ?? session.matchId}
@@ -821,6 +829,24 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         winnerName={outcome?.winnerDisplayName ?? null}
         onClose={() => setVictoryDismissed(true)}
       />
+    </View>
+  );
+}
+
+function Grid9ArenaMuteChip({ visible }: { visible: boolean }) {
+  const { micEnabled, canMute, toggleMic } = useGrid9Mic();
+  if (!visible || !canMute) return null;
+  return (
+    <View className="absolute left-2 top-1 z-40">
+      <TouchableOpacity
+        className="rounded-full border border-white/30 bg-black/70 px-3 py-1.5"
+        activeOpacity={0.85}
+        onPress={toggleMic}
+      >
+        <Text className="text-[10px] font-black uppercase tracking-[1px] text-white">
+          {micEnabled ? 'Mic on' : 'Muted'}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }

@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import type { Grid9PublicPlayer } from './protocol';
 import {
-  formatGrid9Coins,
   formatGrid9Countdown,
   grid9HealthRatio,
   playerInitials,
@@ -10,10 +9,11 @@ import { GRID9_THEME } from './grid9Theme';
 import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
 import { grid9HumanCamIdentities } from './grid9CamIdentity';
 import { Grid9JackpotPot } from './Grid9JackpotPot';
-import { Grid9SeatCamera } from './Grid9LiveKitRoom';
+import { Grid9SeatCamera, useGrid9Mic } from './Grid9LiveKitRoom';
+import { Grid9TileCoinBadge } from './Grid9TileCoinBadge';
 import { grid9SentinelPortrait } from './grid9SentinelPortraits';
 import { View as RnView } from 'react-native';
-import { Image, Text, View } from './nw';
+import { Image, Text, TouchableOpacity, View } from './nw';
 
 type FeedLike = {
   kind?: string;
@@ -141,6 +141,8 @@ export function Grid9SpotlightStage({
   const roundLabel =
     turnNumber != null && turnNumber > 0 ? `ROUND ${turnNumber} / ∞` : 'ROUND —';
   const stageRef = useRef<React.ElementRef<typeof RnView> | null>(null);
+  const { micEnabled, canMute, toggleMic } = useGrid9Mic();
+  const showMute = Boolean(isLocalSpotlight && player?.kind === 'human' && canMute);
 
   const publishOrigin = () => {
     if (!onOriginMeasured) return;
@@ -233,9 +235,25 @@ export function Grid9SpotlightStage({
           </View>
         )}
 
-        <View className="absolute right-1.5 top-8 z-20" pointerEvents="none">
+        {player ? <Grid9TileCoinBadge coins={gift} /> : null}
+
+        <View className="absolute right-1.5 top-10 z-20" pointerEvents="none">
           <Grid9JackpotPot coins={jackpotCoins ?? 0} isSeed={isNewMatchPot} />
         </View>
+
+        {showMute ? (
+          <View className="absolute left-2 top-10 z-30">
+            <TouchableOpacity
+              className="rounded-full border border-white/40 bg-black/75 px-2.5 py-1"
+              activeOpacity={0.85}
+              onPress={toggleMic}
+            >
+              <Text className="text-[9px] font-black uppercase tracking-[1px] text-white">
+                {micEnabled ? 'Mic on' : 'Muted'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {/* Bottom identity + GIFT / SP / HP on stage */}
         {player ? (
@@ -255,9 +273,6 @@ export function Grid9SpotlightStage({
                 Spotlight
               </Text>
             </View>
-            <Text className="mb-1 text-[12px] font-black text-amber-300">
-              GIFT {formatGrid9Coins(gift)}
-            </Text>
             <View className="flex-row gap-2">
               <StatBar label="SP" value={sp} ratio={spRatio} color={GRID9_THEME.sp} />
               <StatBar label="HP" value={hp} ratio={hpRatio} color={GRID9_THEME.hp} />

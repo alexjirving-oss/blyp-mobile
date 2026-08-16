@@ -8,6 +8,7 @@ import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
 import { slotsForGrid9Board } from './grid9Format';
 import { Grid9Slot } from './Grid9Slot';
 import { playGrid9Cue, playRouletteTick } from './grid9Audio';
+import { speakGrid9BoxTurn } from './grid9BoxTurnVo';
 import {
   buildGrid9RouletteTicks,
   grid9RouletteTickAtElapsed,
@@ -93,6 +94,7 @@ export function Grid9Board({
       if (tick.landed && landedRef.current !== spinKey) {
         landedRef.current = spinKey;
         void playGrid9Cue('spotlight_select');
+        speakGrid9BoxTurn(candidates[tick.candidateOffset] ?? selected);
       }
     };
 

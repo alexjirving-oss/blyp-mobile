@@ -24,6 +24,12 @@ type LiveKitMods = {
   VideoTrack: React.ComponentType<any>;
   useTracks: (sources?: any, opts?: any) => any[];
   TrackSource: any;
+  useLocalParticipant?: () => {
+    localParticipant?: {
+      setMicrophoneEnabled?: (enabled: boolean) => Promise<void> | void;
+    };
+    isMicrophoneEnabled?: boolean;
+  };
 };
 
 type Grid9LiveKitContextValue = {
@@ -33,6 +39,12 @@ type Grid9LiveKitContextValue = {
   localParticipantId: string | null;
 };
 
+type Grid9MicContextValue = {
+  micEnabled: boolean;
+  canMute: boolean;
+  toggleMic: () => void;
+};
+
 const Grid9LiveKitContext = createContext<Grid9LiveKitContextValue>({
   status: 'idle',
   configured: false,
@@ -40,8 +52,18 @@ const Grid9LiveKitContext = createContext<Grid9LiveKitContextValue>({
   localParticipantId: null,
 });
 
+const Grid9MicContext = createContext<Grid9MicContextValue>({
+  micEnabled: true,
+  canMute: false,
+  toggleMic: () => undefined,
+});
+
 export function useGrid9LiveKit(): Grid9LiveKitContextValue {
   return useContext(Grid9LiveKitContext);
+}
+
+export function useGrid9Mic(): Grid9MicContextValue {
+  return useContext(Grid9MicContext);
 }
 
 /**
@@ -52,12 +74,15 @@ export function Grid9LiveKitProvider({
   matchId,
   enabled,
   publish,
+  forceUnmute = false,
   children,
   onStatus,
 }: {
   matchId: string | null;
   enabled: boolean;
   publish: boolean;
+  /** Spotlight / roulette called this seat up — force mic on. */
+  forceUnmute?: boolean;
   children: React.ReactNode;
   onStatus?: (status: string) => void;
 }) {
@@ -143,6 +168,7 @@ export function Grid9LiveKitProvider({
           VideoTrack: lk.VideoTrack,
           useTracks: lk.useTracks,
           TrackSource: client?.Track?.Source || null,
+          useLocalParticipant: lk.useLocalParticipant,
         });
       } catch {
         if (!cancelled) {
@@ -221,10 +247,66 @@ export function Grid9LiveKitProvider({
           onStatus?.('room-error');
         }}
       >
-        {children}
+        <Grid9MicTree forceUnmute={forceUnmute && shouldPublish}>
+          {children}
+        </Grid9MicTree>
       </Room>
     </Grid9LiveKitContext.Provider>
   );
+}
+
+function Grid9MicTree({
+  forceUnmute,
+  children,
+}: {
+  forceUnmute: boolean;
+  children: React.ReactNode;
+}) {
+  const { mods } = useGrid9LiveKit();
+  const useLocalParticipant = mods?.useLocalParticipant;
+  if (typeof useLocalParticipant !== 'function') {
+    return <>{children}</>;
+  }
+  return (
+    <Grid9MicBridge forceUnmute={forceUnmute} useLocalParticipant={useLocalParticipant}>
+      {children}
+    </Grid9MicBridge>
+  );
+}
+
+function Grid9MicBridge({
+  forceUnmute,
+  useLocalParticipant,
+  children,
+}: {
+  forceUnmute: boolean;
+  useLocalParticipant: NonNullable<LiveKitMods['useLocalParticipant']>;
+  children: React.ReactNode;
+}) {
+  const local = useLocalParticipant();
+  const participant = local?.localParticipant;
+  const micEnabled = local?.isMicrophoneEnabled !== false;
+
+  useEffect(() => {
+    if (!forceUnmute || !participant?.setMicrophoneEnabled) return;
+    void Promise.resolve(participant.setMicrophoneEnabled(true)).catch(() => undefined);
+  }, [forceUnmute, participant]);
+
+  const value = useMemo<Grid9MicContextValue>(
+    () => ({
+      micEnabled,
+      canMute: Boolean(participant?.setMicrophoneEnabled),
+      toggleMic: () => {
+        if (!participant?.setMicrophoneEnabled) return;
+        void Promise.resolve(participant.setMicrophoneEnabled(!micEnabled)).catch(
+          () => undefined,
+        );
+      },
+    }),
+    [micEnabled, participant],
+  );
+
+  return <Grid9MicContext.Provider value={value}>{children}</Grid9MicContext.Provider>;
 }
 
 /** Renders one camera tile for a participant identity inside the shared room. */

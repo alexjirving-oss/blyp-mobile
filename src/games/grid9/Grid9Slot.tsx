@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated } from 'react-native';
 import type { Grid9PublicPlayer } from './protocol';
 import {
-  formatGrid9Coins,
   grid9HealthRatio,
   isGrid9SlotEliminated,
   playerInitials,
@@ -10,7 +9,8 @@ import {
 import { GRID9_THEME } from './grid9Theme';
 import { grid9SentinelPortrait } from './grid9SentinelPortraits';
 import { grid9HumanCamIdentities } from './grid9CamIdentity';
-import { Grid9SeatCamera } from './Grid9LiveKitRoom';
+import { Grid9SeatCamera, useGrid9Mic } from './Grid9LiveKitRoom';
+import { Grid9TileCoinBadge } from './Grid9TileCoinBadge';
 import { Image, Text, TouchableOpacity, View } from './nw';
 
 function humanParticipantId(player: Grid9PublicPlayer | null): string | null {
@@ -81,6 +81,8 @@ export function Grid9Slot({
   const characterId = sentinelCharacterId(player);
   const portrait = grid9SentinelPortrait(characterId);
   const [portraitFailed, setPortraitFailed] = useState(false);
+  const { micEnabled, canMute, toggleMic } = useGrid9Mic();
+  const showMute = Boolean(isLocal && player?.kind === 'human' && canMute);
 
   const frameClass = lockedTarget
     ? 'border-2 border-amber-400'
@@ -149,14 +151,7 @@ export function Grid9Slot({
         {slotIndex + 1}
       </Text>
 
-      {/* Coin counter — PROMINENT top-right */}
-      {player ? (
-        <View className="absolute right-1 top-1 z-10 min-w-[42px] items-center rounded-md border border-amber-400/70 bg-black/75 px-1.5 py-0.5">
-          <Text className="text-[11px] font-black text-amber-300" numberOfLines={1}>
-            ⚡{formatGrid9Coins(giftCoins)}
-          </Text>
-        </View>
-      ) : null}
+      {player ? <Grid9TileCoinBadge coins={giftCoins} compact /> : null}
 
       {/* Name + YOU / SENTINEL tag */}
       {player ? (
@@ -202,10 +197,34 @@ export function Grid9Slot({
     </View>
   );
 
-  if (!onPress) return body;
+  const muteChip = showMute ? (
+    <View className="absolute bottom-7 left-1 z-30">
+      <TouchableOpacity
+        className="rounded-full border border-white/40 bg-black/75 px-2 py-1"
+        activeOpacity={0.85}
+        onPress={toggleMic}
+      >
+        <Text className="text-[9px] font-black uppercase tracking-[1px] text-white">
+          {micEnabled ? 'Mic' : 'Muted'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  ) : null;
+
+  if (!onPress) {
+    return (
+      <View className="h-full w-full">
+        {body}
+        {muteChip}
+      </View>
+    );
+  }
   return (
-    <TouchableOpacity className="h-full w-full" activeOpacity={0.88} onPress={onPress}>
-      {body}
-    </TouchableOpacity>
+    <View className="h-full w-full">
+      <TouchableOpacity className="h-full w-full" activeOpacity={0.88} onPress={onPress}>
+        {body}
+      </TouchableOpacity>
+      {muteChip}
+    </View>
   );
 }
