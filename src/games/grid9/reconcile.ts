@@ -42,6 +42,8 @@ export interface Grid9ApplyEffects {
   dropped: boolean;
   requestSnapshot: boolean;
   joinMatch: boolean;
+  /** Seated player should reserve account coins into match escrow if empty. */
+  ensureEscrowReserve: boolean;
 }
 
 export interface Grid9ApplyResult {
@@ -72,7 +74,12 @@ export function createEmptyGrid9Session(): Grid9ClientSession {
 }
 
 function noEffects(): Grid9ApplyEffects {
-  return { dropped: false, requestSnapshot: false, joinMatch: false };
+  return {
+    dropped: false,
+    requestSnapshot: false,
+    joinMatch: false,
+    ensureEscrowReserve: false,
+  };
 }
 
 function withMatchVersion(
@@ -193,12 +200,26 @@ function applyRoomPatch(
       },
     };
   } else if (event.type === 'ROULETTE_LAND' && nextMatch) {
+    const turn = event.payload.turn;
+    const freeDropItemId = event.payload.freeDropItemId ?? turn?.freeDropItemId ?? null;
+    const freeDropEquipped =
+      event.payload.freeDropEquipped ?? turn?.freeDropEquipped ?? false;
     nextMatch = {
       ...nextMatch,
       phase: 'combat',
-      turn: event.payload.turn,
+      turn,
       roulette: null,
     };
+    // Server grants free drop into inventory unless capacity forced equip.
+    if (freeDropItemId && !freeDropEquipped && turn) {
+      nextMatch = mapPlayer(nextMatch, turn.spotlightSlotIndex, (player) => {
+        const inventory = Array.isArray(player.inventory) ? [...player.inventory] : [];
+        if (!inventory.includes(freeDropItemId as never)) {
+          inventory.push(freeDropItemId as never);
+        }
+        return { ...player, inventory };
+      });
+    }
   } else if (event.type === 'MICRO_DROP_RESOLVED' && nextMatch) {
     const result = event.payload.result;
     nextMatch = {
@@ -350,17 +371,23 @@ function applyPrivateEvent(
   }
   if (event.type === 'STATE_SNAPSHOT') {
     const state = event.payload.state;
+    const escrow =
+      event.payload.escrow !== undefined ? event.payload.escrow : session.escrow;
+    const needsReserve =
+      !!session.assignment &&
+      Number(escrow?.availableCoins ?? 0) < 10;
     return {
       session: {
         ...session,
         matchId: state.matchId,
         match: state,
+        escrow: escrow ?? session.escrow,
         lastSeenStateVersion: state.stateVersion,
         lastSeenSequence: state.eventSequence,
         needsResync: false,
         lastError: null,
       },
-      effects,
+      effects: { ...effects, ensureEscrowReserve: needsReserve },
     };
   }
   if (event.type === 'ESCROW_UPDATED') {
@@ -424,7 +451,7 @@ export function applyGrid9ServerEvent(
   if (sequence == null) {
     return {
       session: { ...session, needsResync: true },
-      effects: { dropped: true, requestSnapshot: true, joinMatch: false },
+      effects: { ...noEffects(), dropped: true, requestSnapshot: true },
     };
   }
 
@@ -432,7 +459,7 @@ export function applyGrid9ServerEvent(
   if (lastSeen == null) {
     return {
       session: { ...session, needsResync: true },
-      effects: { dropped: true, requestSnapshot: true, joinMatch: false },
+      effects: { ...noEffects(), dropped: true, requestSnapshot: true },
     };
   }
   if (sequence <= lastSeen) {
@@ -441,13 +468,13 @@ export function applyGrid9ServerEvent(
         ...session,
         droppedStalePackets: session.droppedStalePackets + 1,
       },
-      effects: { dropped: true, requestSnapshot: false, joinMatch: false },
+      effects: { ...noEffects(), dropped: true },
     };
   }
   if (sequence > lastSeen + 1) {
     return {
       session: { ...session, needsResync: true },
-      effects: { dropped: true, requestSnapshot: true, joinMatch: false },
+      effects: { ...noEffects(), dropped: true, requestSnapshot: true },
     };
   }
 

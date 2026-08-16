@@ -130,8 +130,14 @@ export function Grid9Slot({
         {player ? (
           <View className="mt-1">
             <View className="mb-0.5 flex-row items-center justify-between">
-              <Text className="text-[8px] font-black text-blyp-primary">SP {sp}</Text>
+              <Text className="text-[8px] font-black text-blyp-primary">
+                GIFT {Math.max(0, Math.floor(player.mercenaryBankrollCoins || 0))}
+              </Text>
               <Text className="text-[8px] font-black text-red-400">HP {hp}</Text>
+            </View>
+            <View className="mb-0.5 flex-row items-center justify-between">
+              <Text className="text-[8px] font-black text-sky-300">SP {sp}</Text>
+              <Text className="text-[8px] font-bold text-blyp-faint"> </Text>
             </View>
             <View className="h-1.5 overflow-hidden rounded-full bg-blyp-alt">
               <View

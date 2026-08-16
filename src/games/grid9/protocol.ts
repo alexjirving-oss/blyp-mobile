@@ -448,6 +448,8 @@ export interface Grid9AuthoritativeGameState {
 export interface Grid9StateSnapshotPayload {
   state: Grid9AuthoritativeGameState;
   reason: 'join' | 'reconnect' | 'requested' | 'version_gap' | 'periodic';
+  /** Match escrow for the requesting user (seat spend buffer). Not account wallet. */
+  escrow?: Grid9EscrowWallet | null;
 }
 
 export interface Grid9LedgerReceipt {

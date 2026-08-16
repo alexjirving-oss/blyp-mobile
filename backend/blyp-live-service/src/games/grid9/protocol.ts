@@ -350,6 +350,8 @@ export interface Grid9MatchAssignedPayload {
 export interface Grid9StateSnapshotPayload {
   state: Grid9PublicGameState;
   reason: 'join' | 'reconnect' | 'requested' | 'version_gap' | 'periodic';
+  /** Private match escrow for the requesting user (null for audience / missing). */
+  escrow?: Grid9EscrowWallet | null;
 }
 
 export interface Grid9IntentCommittedPayload {

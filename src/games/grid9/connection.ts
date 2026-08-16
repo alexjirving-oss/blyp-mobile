@@ -5,6 +5,7 @@ import {
   subscribeGrid9Channel,
 } from '../../realtime/grid9GameSocket';
 import type { Grid9ShieldId, Grid9SlotIndex, Grid9WeaponId } from './constants';
+import { GRID9_DEFAULT_ESCROW_RESERVE_COINS } from './constants';
 import {
   assertGrid9ClientIntent,
   buildFireWeaponIntent,
@@ -415,6 +416,24 @@ export class Grid9Connection {
         patchGrid9Session({
           lastError: error instanceof Error ? error.message : 'Grid 9 snapshot request failed',
         });
+      }
+    }
+    if (effects.ensureEscrowReserve) {
+      const session = getGrid9Session();
+      const escrowCoins = Number(session.escrow?.availableCoins ?? 0);
+      if (session.matchId && session.assignment && escrowCoins < 10) {
+        try {
+          // Pull account coins into match escrow so paid arsenal spends work.
+          // Display in the weapons panel still uses platform /wallet balance.
+          this.sendReserveCoinsIntent(GRID9_DEFAULT_ESCROW_RESERVE_COINS);
+        } catch (error) {
+          patchGrid9Session({
+            lastError:
+              error instanceof Error
+                ? error.message
+                : 'Grid 9 escrow reserve failed — add coins in Wallet',
+          });
+        }
       }
     }
   }

@@ -3,6 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import './grid9.css';
 import { GRID9_DEFAULT_MERCENARY_FUND_COINS, type Grid9ArsenalItem } from './catalog';
+import { GRID9_DEFAULT_ESCROW_RESERVE_COINS } from './constants';
 import { Grid9ActionDrawer } from './Grid9ActionDrawer';
 import { Grid9ArrivalTicker } from './Grid9ArrivalTicker';
 import { Grid9Board } from './Grid9Board';
@@ -18,9 +19,10 @@ import {
   selectionFromArsenalItem,
   type Grid9ArsenalSelection,
 } from './grid9Actions';
-import { getGrid9SpotlightSlot, slotsForGrid9Board } from './grid9Format';
+import { formatGrid9Coins, getGrid9SpotlightSlot, slotsForGrid9Board } from './grid9Format';
 import { Text, TouchableOpacity, View } from './nw';
 import { useGrid9 } from './useGrid9';
+import { useGrid9AccountCoinBalance } from './useGrid9AccountCoinBalance';
 
 const DEFAULT_REGION = 'eu-west-2';
 
@@ -31,6 +33,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     connectionStatus,
     leaveArena,
     sendQueueJoinIntent,
+    sendReserveCoinsIntent,
     sendFireWeaponIntent,
     sendPurchaseShieldIntent,
     sendFundMercenaryIntent,
@@ -38,6 +41,9 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     sendPrivateRoomJoinIntent,
     sendStartPrivateMatchIntent,
   } = useGrid9();
+  const { accountCoins, refresh: refreshAccountCoins } = useGrid9AccountCoinBalance(
+    !spectate,
+  );
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [entered, setEntered] = useState(spectate);
@@ -63,7 +69,10 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     activeSlotIndex == null
       ? null
       : match?.players.find((player) => player.slotIndex === activeSlotIndex) ?? null;
-  const availableCoins = Number(session.escrow?.availableCoins ?? 0);
+  const escrowCoins = Number(session.escrow?.availableCoins ?? 0);
+  const freeDropLabel = match?.turn?.freeDropItemId
+    ? String(match.turn.freeDropItemId).replace(/_/g, ' ')
+    : null;
   const targeting = selection != null;
 
   const mode = resolveGrid9DrawerMode({
@@ -118,7 +127,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     const intent =
       mode === 'proxy_war' ? 'mercenary' : selection?.kind === 'shield' ? 'shield' : selection ? 'weapon' : null;
     if (!intent) return [];
-    if (intent === 'mercenary' && availableCoins < GRID9_DEFAULT_MERCENARY_FUND_COINS) {
+    if (intent === 'mercenary' && accountCoins < GRID9_DEFAULT_MERCENARY_FUND_COINS) {
       return [];
     }
     return slotsForGrid9Board(match?.players)
@@ -133,23 +142,52 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           : -1,
       )
       .filter((slotIndex) => slotIndex >= 0);
-  }, [availableCoins, localSlotIndex, match?.players, mode, selection]);
+  }, [accountCoins, localSlotIndex, match?.players, mode, selection]);
+
+  const ensureEscrowForSpend = useCallback(
+    (costCoins: number) => {
+      if (escrowCoins >= costCoins) return;
+      if (accountCoins < costCoins) {
+        throw new Error('Not enough account coins — buy coins in Wallet');
+      }
+      const amount = Math.max(
+        costCoins,
+        Math.min(accountCoins, GRID9_DEFAULT_ESCROW_RESERVE_COINS),
+      );
+      sendReserveCoinsIntent(amount);
+    },
+    [accountCoins, escrowCoins, sendReserveCoinsIntent],
+  );
 
   const closeTargeting = useCallback(() => {
     setSelection(null);
     setActionError(null);
   }, []);
 
-  const onSelectItem = useCallback((item: Grid9ArsenalItem) => {
-    setActionError(null);
-    setSelection(selectionFromArsenalItem(item));
-    setGalleryOpen(false);
-  }, []);
+  const onSelectItem = useCallback(
+    (item: Grid9ArsenalItem) => {
+      try {
+        setActionError(null);
+        const inv = localPlayer?.inventory ?? [];
+        const free =
+          match?.turn?.freeDropEquipped && match.turn.freeDropItemId === item.id;
+        if (!inv.includes(item.id) && !free) {
+          ensureEscrowForSpend(item.costCoins);
+        }
+        setSelection(selectionFromArsenalItem(item));
+        setGalleryOpen(false);
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : 'Cannot fund purchase');
+      }
+    },
+    [ensureEscrowForSpend, localPlayer?.inventory, match?.turn],
+  );
 
   const onSlotPress = useCallback(
     (slotIndex: number) => {
       try {
         if (mode === 'proxy_war') {
+          ensureEscrowForSpend(GRID9_DEFAULT_MERCENARY_FUND_COINS);
           sendFundMercenaryIntent({
             beneficiarySlotIndex: slotIndex,
             amountCoins: GRID9_DEFAULT_MERCENARY_FUND_COINS,
@@ -171,11 +209,20 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         }
         setSelection(null);
         setActionError(null);
+        void refreshAccountCoins();
       } catch (error) {
         setActionError(error instanceof Error ? error.message : 'Grid 9 action failed');
       }
     },
-    [mode, selection, sendFireWeaponIntent, sendFundMercenaryIntent, sendPurchaseShieldIntent],
+    [
+      ensureEscrowForSpend,
+      mode,
+      refreshAccountCoins,
+      selection,
+      sendFireWeaponIntent,
+      sendFundMercenaryIntent,
+      sendPurchaseShieldIntent,
+    ],
   );
 
   if (!entered && !match && !spectate) {
@@ -281,6 +328,13 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         </View>
       ) : null}
       <Grid9SpotlightStage player={spotlightPlayer} />
+      {freeDropLabel && match?.phase === 'combat' ? (
+        <View className="mx-4 mb-2 rounded-xl border border-blyp-primary/40 bg-blyp-primary/10 px-3 py-2">
+          <Text className="text-center text-[10px] font-black uppercase tracking-[2px] text-blyp-primary">
+            Free drop · {freeDropLabel}
+          </Text>
+        </View>
+      ) : null}
       <Grid9Board
         players={match?.players}
         spotlightSlotIndex={activeSlotIndex}
@@ -293,11 +347,21 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
       <View style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
         <Grid9ActionDrawer
           mode={mode}
-          availableCoins={availableCoins}
+          availableCoins={accountCoins}
           mercenaryFundCoins={GRID9_DEFAULT_MERCENARY_FUND_COINS}
           lastError={actionError ?? session.lastError}
           onOpenGallery={() => {
             setActionError(null);
+            void refreshAccountCoins();
+            if (escrowCoins < 10 && accountCoins >= 10) {
+              try {
+                sendReserveCoinsIntent(
+                  Math.min(accountCoins, GRID9_DEFAULT_ESCROW_RESERVE_COINS),
+                );
+              } catch {
+                /* shown via lastError if needed */
+              }
+            }
             setGalleryOpen(true);
           }}
           onCancelTargeting={closeTargeting}
@@ -305,9 +369,16 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
       </View>
       <Grid9WeaponsGalleryModal
         visible={galleryOpen}
-        availableCoins={availableCoins}
+        accountCoins={accountCoins}
+        inventoryItemIds={localPlayer?.inventory ?? []}
+        freeDropItemId={
+          match?.turn?.freeDropEquipped ? match.turn.freeDropItemId ?? null : null
+        }
         onClose={() => setGalleryOpen(false)}
         onSelectItem={onSelectItem}
+        onVisibleRefresh={() => {
+          void refreshAccountCoins();
+        }}
       />
       <Grid9VictoryModal
         visible={!!showVictory}

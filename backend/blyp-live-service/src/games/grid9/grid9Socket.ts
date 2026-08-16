@@ -34,6 +34,7 @@ import { resolveGrid9Identity } from './grid9Identity';
 import {
   commitGrid9ServerMutation,
   newGrid9ServerOperationReceipt,
+  readGrid9Aggregate,
   readGrid9State,
 } from './grid9AggregateStore';
 import { grid9CanonicalOperationHash } from './canonical';
@@ -241,6 +242,7 @@ async function joinGrid9Match(args: {
     operationSuffix: args.socket.id,
   });
   const updated = await readGrid9State(args.intent.matchId);
+  const aggregate = await readGrid9Aggregate(args.intent.matchId, args.userId);
   emitGrid9Private(
     args.socket,
     createGrid9PrivateEvent({
@@ -252,6 +254,7 @@ async function joinGrid9Match(args: {
       payload: {
         state: toGrid9PublicGameState(updated),
         reason: 'join',
+        escrow: aggregate.escrow,
       },
     }),
   );
@@ -293,6 +296,7 @@ async function requestGrid9Snapshot(args: {
     });
   }
   const updated = await readGrid9State(args.intent.matchId);
+  const aggregate = await readGrid9Aggregate(args.intent.matchId, args.userId);
   emitGrid9Private(
     args.socket,
     createGrid9PrivateEvent({
@@ -307,6 +311,7 @@ async function requestGrid9Snapshot(args: {
           args.intent.payload.lastSeenStateVersion === null
             ? 'reconnect'
             : 'requested',
+        escrow: player ? aggregate.escrow : null,
       },
     }),
   );
@@ -354,6 +359,7 @@ async function resumeExistingGrid9Match(args: {
     operationSuffix: args.socket.id,
   });
   state = await readGrid9State(matchId);
+  const aggregate = await readGrid9Aggregate(matchId, args.userId);
   emitGrid9Private(
     args.socket,
     createGrid9PrivateEvent({
@@ -365,6 +371,7 @@ async function resumeExistingGrid9Match(args: {
       payload: {
         state: toGrid9PublicGameState(state),
         reason: 'reconnect',
+        escrow: aggregate.escrow,
       },
     }),
   );

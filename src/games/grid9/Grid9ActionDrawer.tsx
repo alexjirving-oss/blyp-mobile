@@ -29,6 +29,9 @@ export function Grid9ActionDrawer({
           <Text className="text-center text-base font-black tracking-[1px] text-blyp-ink">
             OPEN WEAPONS GALLERY
           </Text>
+          <Text className="mt-1 text-center text-[11px] font-bold uppercase tracking-[1px] text-blyp-ink/80">
+            Your coins {formatGrid9Coins(availableCoins)}
+          </Text>
         </TouchableOpacity>
       ) : null}
 
@@ -63,7 +66,8 @@ export function Grid9ActionDrawer({
             Proxy war: tap a surviving box to fund as mercenary
           </Text>
           <Text className="mt-2 text-center text-[11px] font-bold uppercase tracking-[1px] text-red-200/80">
-            {formatGrid9Coins(mercenaryFundCoins)} coins · escrow {formatGrid9Coins(availableCoins)}
+            {formatGrid9Coins(mercenaryFundCoins)} coins · your balance{' '}
+            {formatGrid9Coins(availableCoins)}
           </Text>
         </View>
       ) : null}

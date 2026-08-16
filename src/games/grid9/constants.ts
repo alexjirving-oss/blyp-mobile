@@ -14,6 +14,8 @@ export const GRID9_MIN_MERCENARY_FUND_COINS = 10 as const;
 export const GRID9_MAX_MERCENARY_FUND_COINS = 5_000 as const;
 export const GRID9_MIN_ESCROW_RESERVE_COINS = 10 as const;
 export const GRID9_MAX_ESCROW_RESERVE_COINS = 20_000 as const;
+/** Default stake pulled into match escrow when a seated player has none. */
+export const GRID9_DEFAULT_ESCROW_RESERVE_COINS = 100 as const;
 
 export const GRID9_INVENTORY_CAPACITY = 3 as const;
 export const GRID9_ROULETTE_FLASH_MS = 3_500 as const;
