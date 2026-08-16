@@ -192,6 +192,7 @@ const HelpSupportScreen = React.lazy(() => import('./src/screens/HelpSupportScre
 const ChatRoomsScreen = React.lazy(() => import('./src/screens/ChatRoomsScreen'));
 const ChatRoomScreen = React.lazy(() => import('./src/screens/ChatRoomScreen'));
 const CoinStoreScreen = React.lazy(() => import('./src/screens/CoinStoreScreen'));
+const TreasureChestScreen = React.lazy(() => import('./src/screens/TreasureChestScreen'));
 const GamesScreen = React.lazy(() => import('./src/screens/GamesScreen'));
 const GameRoomScreen = React.lazy(() => import('./src/screens/GameRoomScreen'));
 const ModerationQueueScreen = React.lazy(() => import('./src/screens/ModerationQueueScreen'));
@@ -741,6 +742,11 @@ function AppStack() {
           <CoinStoreScreen {...navProps} />
         </Suspense>
       )} />
+      <Stack.Screen name="TreasureChest" children={(navProps) => (
+        <Suspense fallback={null}>
+          <TreasureChestScreen {...navProps} />
+        </Suspense>
+      )} />
       <Stack.Screen name="MatchdayRoom" children={(navProps) => (
         <Suspense fallback={null}>
           <MatchdayRoomScreen {...navProps} />
@@ -1029,6 +1035,8 @@ function AppInner() {
               });
             } else if (data.type === 'streak') {
               routeWhenReady('Home');
+            } else if (data.type === 'treasure_chest') {
+              routeWhenReady('TreasureChest');
             } else if ((data.type === 'message' || data.type === 'conversation') && data.conversationId) {
               routeWhenReady('ChatConversation', {
                 conversationId: data.conversationId,
@@ -1386,6 +1394,11 @@ function AppInner() {
             return;
           case 'activity':
             navWhenReady('Activity');
+            return;
+          case 'treasure':
+          case 'treasure-chest':
+          case 'treasurechest':
+            navWhenReady('TreasureChest');
             return;
           case 'withdraw': {
             // Stripe Connect return/refresh deep links → Coin Store withdraw UI.

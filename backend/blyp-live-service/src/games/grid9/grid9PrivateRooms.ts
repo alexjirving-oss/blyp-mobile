@@ -22,7 +22,9 @@ import {
 } from './grid9Broadcast';
 import {
   createGrid9Match,
+  fillGrid9UnoccupiedSeats,
   kickGrid9SeatToAudience,
+  startGrid9RouletteAsHost,
   startPrivateMatchFromLobby,
   type Grid9Identity,
 } from './grid9Engine';
@@ -476,6 +478,149 @@ export async function startGrid9PrivateMatch(args: {
     emitGrid9Room(args.io, state.matchId, roomEvent);
     const timer = timerOutboxForState(next);
     if (timer) await projectGrid9Timer(timer);
+  }
+}
+
+/**
+ * Host START_ROULETTE — lobby → ROULETTE_START.
+ * Duration is GRID9_ROULETTE_DURATION_MS on state.roulette.endsAt (not a 3s hardcode).
+ */
+export async function startGrid9HostRoulette(args: {
+  io: Server;
+  identity: Grid9Identity;
+  matchId: string;
+  expectedStateVersion: number;
+  intentId: string;
+}): Promise<void> {
+  const state = await readGrid9State(args.matchId);
+  if (state.authority.stateVersion !== args.expectedStateVersion) {
+    throw new Grid9Error('STALE_STATE', 'Stale roulette start', {
+      stateVersion: state.authority.stateVersion,
+      retryable: true,
+    });
+  }
+  const next = startGrid9RouletteAsHost(state, args.identity.userId);
+  const publicState = toGrid9PublicGameState(next);
+  const roomEvent = next.outcome
+    ? createGrid9RoomEvent({
+        type: 'MATCH_COMPLETED',
+        matchId: state.matchId,
+        sequence: next.authority.eventSequence,
+        stateVersion: next.authority.stateVersion,
+        causationIntentId: args.intentId,
+        payload: {
+          outcome: publicState.outcome!,
+          finalState: publicState,
+        },
+      })
+    : createGrid9RoomEvent({
+        type: 'ROULETTE_START',
+        matchId: state.matchId,
+        sequence: next.authority.eventSequence,
+        stateVersion: next.authority.stateVersion,
+        causationIntentId: args.intentId,
+        payload: {
+          turnNumber: next.roulette!.turnNumber,
+          candidateSlotIndices: next.roulette!.candidateSlotIndices,
+          selectedSlotIndex: next.roulette!.selectedSlotIndex,
+          endsAt: next.roulette!.endsAt,
+          entropyDigest: next.roulette!.entropyDigest,
+        },
+      });
+  const operationId = `host-roulette-${state.matchId}-${state.authority.stateVersion}`;
+  const result = await commitGrid9ServerMutation({
+    currentState: state,
+    nextState: next,
+    operationReceipt: newGrid9ServerOperationReceipt({
+      matchId: state.matchId,
+      operationId,
+      kind: 'phase_transition',
+      canonicalOperationHash: grid9CanonicalOperationHash({
+        matchId: state.matchId,
+        operationId,
+        kind: 'phase_transition',
+        payload: { intentId: args.intentId, intent: 'START_ROULETTE' },
+      }),
+      stateVersion: next.authority.stateVersion,
+      result: roomEvent.payload,
+      recordedAt: roomEvent.sentAt,
+    }),
+    timerOutbox: timerOutboxForState(next),
+  });
+  if (result.status === 'committed') {
+    emitGrid9Room(args.io, state.matchId, roomEvent);
+    const timer = timerOutboxForState(next);
+    if (timer) await projectGrid9Timer(timer);
+  }
+}
+
+/** Host FILL_SENTINELS — mint sentinels into unoccupied seats; fan-out STATE_SNAPSHOT. */
+export async function fillGrid9HostSentinels(args: {
+  io: Server;
+  identity: Grid9Identity;
+  matchId: string;
+  expectedStateVersion: number;
+  intentId: string;
+}): Promise<void> {
+  const state = await readGrid9State(args.matchId);
+  if (state.authority.stateVersion !== args.expectedStateVersion) {
+    throw new Grid9Error('STALE_STATE', 'Stale sentinel fill', {
+      stateVersion: state.authority.stateVersion,
+      retryable: true,
+    });
+  }
+  const resolution = fillGrid9UnoccupiedSeats(state, args.identity.userId);
+  if (resolution.filledSlotIndices.length === 0) {
+    return;
+  }
+  const publicState = toGrid9PublicGameState(resolution.state);
+  const operationId = `host-fill-${args.intentId}`;
+  const result = await commitGrid9ServerMutation({
+    currentState: state,
+    nextState: resolution.state,
+    operationReceipt: newGrid9ServerOperationReceipt({
+      matchId: state.matchId,
+      operationId,
+      kind: 'phase_transition',
+      canonicalOperationHash: grid9CanonicalOperationHash({
+        matchId: state.matchId,
+        operationId,
+        kind: 'phase_transition',
+        payload: {
+          intentId: args.intentId,
+          intent: 'FILL_SENTINELS',
+          filledSlotIndices: resolution.filledSlotIndices,
+        },
+      }),
+      stateVersion: resolution.state.authority.stateVersion,
+      result: { filledSlotIndices: resolution.filledSlotIndices },
+      recordedAt: new Date().toISOString(),
+    }),
+    timerOutbox: timerOutboxForState(resolution.state),
+  });
+  if (result.status !== 'committed') return;
+
+  // Alex alias ROOM_STATE_UPDATED → real private STATE_SNAPSHOT (fan-out to room).
+  const roomName = `${GRID9_SOCKET_ROOM_PREFIX}${state.matchId}`;
+  const sockets = await args.io.in(roomName).fetchSockets();
+  for (const remote of sockets) {
+    const connectionSessionId =
+      (remote.data.grid9ConnectionSessionId as string | undefined) ?? remote.id;
+    emitGrid9ToConnection(
+      args.io,
+      connectionSessionId,
+      createGrid9PrivateEvent({
+        type: 'STATE_SNAPSHOT',
+        connectionSessionId,
+        matchId: state.matchId,
+        stateVersion: resolution.state.authority.stateVersion,
+        causationIntentId: args.intentId,
+        payload: {
+          state: publicState,
+          reason: 'sentinel_fill',
+        },
+      }),
+    );
   }
 }
 

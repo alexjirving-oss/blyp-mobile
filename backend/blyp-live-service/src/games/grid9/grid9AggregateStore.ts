@@ -245,6 +245,7 @@ function rejection(
     'MATCH_NOT_ACTIVE',
     'PLAYER_NOT_FOUND',
     'NOT_ELIGIBLE',
+    'UNAUTHORIZED_HOST_ACTION',
     'TARGET_NOT_ALIVE',
     'TARGET_SELF',
     'ITEM_NOT_FOUND',

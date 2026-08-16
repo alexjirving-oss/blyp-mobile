@@ -13,13 +13,16 @@ import {
   advanceGrid9Turn,
   beginGrid9Combat,
   createGrid9Match,
+  fillGrid9UnoccupiedSeats,
   kickGrid9SeatToAudience,
   landGrid9Roulette,
   leaveGrid9SeatAsCombatant,
   resolveGrid9Actor,
   seatGrid9HumanInOpenLobby,
   startGrid9Roulette,
+  startGrid9RouletteAsHost,
 } from './grid9Engine';
+import { Grid9Error } from './grid9Errors';
 import { timerOutboxForState } from './grid9MatchService';
 import {
   chooseGrid9SentinelDecision,
@@ -455,14 +458,18 @@ describe('Grid 9 authoritative engine', () => {
       afterAct = resolution.state;
     }
 
-    const advanced = advanceGrid9Turn(
-      afterAct,
-      Date.parse(afterAct.turn!.endsAt),
-    );
+    const advanced = advanceGrid9Turn(afterAct, Date.now());
     assert.ok(
       advanced.phase === 'roulette' || advanced.phase === 'completed',
       `expected roulette/completed after sentinel act, got ${advanced.phase}`,
     );
+    if (advanced.phase === 'roulette' && advanced.roulette) {
+      const ends = Date.parse(advanced.roulette.endsAt);
+      assert.ok(
+        ends <= Date.now() + GRID9_ROULETTE_DURATION_MS + 250,
+        'sentinel act must schedule near-term roulette (wall clock, not endsAt)',
+      );
+    }
   });
 
   it('open public lobby seats a second human into the same match', () => {
@@ -632,5 +639,111 @@ describe('Grid 9 authoritative engine', () => {
         'endsAt-based advance must be later than wall-clock (stall root cause)',
       );
     }
+  });
+
+  it('START_ROULETTE rejects non-owner with UNAUTHORIZED_HOST_ACTION', () => {
+    const lobby = createGrid9Match({
+      matchId: 'host-roulette-auth-1',
+      liveSessionId: 'host-roulette-auth-live-1',
+      region: 'eu-west-2',
+      roomMode: 'private',
+      ownerUserId: alex.userId,
+      roomCode: 'SPIN01',
+      humans: [{ ...alex, queueTicketId: 't-alex', sponsorPassId: null }],
+      nowMs: Date.parse('2026-08-16T06:00:00.000Z'),
+    });
+    assert.throws(
+      () => startGrid9RouletteAsHost(lobby, blake.userId),
+      (error: unknown) =>
+        error instanceof Grid9Error &&
+        error.code === 'UNAUTHORIZED_HOST_ACTION',
+    );
+  });
+
+  it('START_ROULETTE from private_lobby as owner uses GRID9_ROULETTE_DURATION_MS', () => {
+    const t0 = Date.parse('2026-08-16T06:00:00.000Z');
+    const lobby = createGrid9Match({
+      matchId: 'host-roulette-ok-1',
+      liveSessionId: 'host-roulette-ok-live-1',
+      region: 'eu-west-2',
+      roomMode: 'private',
+      ownerUserId: alex.userId,
+      roomCode: 'SPIN02',
+      humans: [{ ...alex, queueTicketId: 't-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    assert.equal(lobby.phase, 'private_lobby');
+    const spinning = startGrid9RouletteAsHost(lobby, alex.userId, t0);
+    assert.equal(spinning.phase, 'roulette');
+    assert.ok(spinning.roulette);
+    assert.equal(
+      typeof spinning.roulette!.selectedSlotIndex,
+      'number',
+      'payload selectedSlotIndex must be present',
+    );
+    assert.ok(
+      spinning.roulette!.entropyDigest.length > 0,
+      'entropyDigest is the animation seed',
+    );
+    const ends = Date.parse(spinning.roulette!.endsAt);
+    assert.equal(ends, t0 + GRID9_ROULETTE_DURATION_MS);
+    assert.equal(spinning.rules.rouletteDurationMs, GRID9_ROULETTE_DURATION_MS);
+  });
+
+  it('FILL_SENTINELS rejects non-owner with UNAUTHORIZED_HOST_ACTION', () => {
+    const lobby = createGrid9Match({
+      matchId: 'host-fill-auth-1',
+      liveSessionId: 'host-fill-auth-live-1',
+      region: 'eu-west-2',
+      roomMode: 'private',
+      ownerUserId: alex.userId,
+      roomCode: 'FILL01',
+      humans: [{ ...alex, queueTicketId: 't-alex', sponsorPassId: null }],
+      nowMs: Date.parse('2026-08-16T06:00:00.000Z'),
+    });
+    assert.throws(
+      () => fillGrid9UnoccupiedSeats(lobby, blake.userId),
+      (error: unknown) =>
+        error instanceof Grid9Error &&
+        error.code === 'UNAUTHORIZED_HOST_ACTION',
+    );
+  });
+
+  it('FILL_SENTINELS mutates empty (non-human) slots with unique callsigns', () => {
+    const t0 = Date.parse('2026-08-16T06:00:00.000Z');
+    const lobby = createGrid9Match({
+      matchId: 'host-fill-ok-1',
+      liveSessionId: 'host-fill-ok-live-1',
+      region: 'eu-west-2',
+      roomMode: 'private',
+      ownerUserId: alex.userId,
+      roomCode: 'FILL02',
+      humans: [{ ...alex, queueTicketId: 't-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    // Simulate director-empty seats: wipe sentinel identities before host fill.
+    for (const player of lobby.players) {
+      if (player.kind !== 'sentinel') continue;
+      player.displayName = 'VACANT';
+      player.sentinelId = `empty-${player.slotIndex}`;
+    }
+    const beforeIds = lobby.players
+      .filter((player) => player.kind === 'sentinel')
+      .map((player) => (player as Grid9SentinelPlayer).sentinelId);
+    assert.equal(beforeIds.length, 8);
+    const filled = fillGrid9UnoccupiedSeats(lobby, alex.userId, t0 + 1);
+    assert.equal(filled.filledSlotIndices.length, 8);
+    const after = filled.state.players.filter(
+      (player): player is Grid9SentinelPlayer => player.kind === 'sentinel',
+    );
+    assert.equal(after.length, 8);
+    const names = new Set(after.map((player) => player.displayName));
+    assert.equal(names.size, 8);
+    for (const player of after) {
+      assert.match(player.displayName, /^Sentinel /);
+      assert.notEqual(player.displayName, 'VACANT');
+      assert.equal(beforeIds.includes(player.sentinelId), false);
+    }
+    assert.equal(filled.state.players[0].kind, 'human');
   });
 });

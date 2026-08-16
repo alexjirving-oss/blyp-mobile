@@ -18,6 +18,8 @@
     "ios",
     "admin",
     "admin/**",
+    "apps",
+    "apps/**",
     "amplify",
     "amplify/**",
     "diagnostics",

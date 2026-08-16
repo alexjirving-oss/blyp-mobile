@@ -88,6 +88,11 @@ import { EconomyError, toEconomyError } from './economyErrors';
 import { getEconomyInfra } from './infra';
 import { logger } from '../config/logger';
 import { requireNotBanned } from '../admin/banGuard';
+import {
+  claimTreasureChestBase,
+  claimTreasureChestBonus,
+  peekTreasureChest,
+} from './treasureChestService';
 
 const router = Router();
 
@@ -304,6 +309,66 @@ router.post('/economy/daily-reward/claim', async (req: AuthedRequest, res) => {
       logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/daily-reward/claim');
     }
     res.status(err.httpStatus).json({ ok: false, reason: 'error', detail: err.detail });
+  }
+});
+
+// Daily treasure chest (verified accounts). UTC midnight reset.
+//   GET  /economy/treasure-chest       -> peek eligibility + claimable amounts
+//   POST /economy/treasure-chest/claim  -> base grant (idempotent per UTC day)
+//   POST /economy/treasure-chest/bonus  -> video-post bonus (after base; once/day)
+router.get('/economy/treasure-chest', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ ok: false, reason: 'unauthenticated' });
+    const out = await peekTreasureChest(userId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/treasure-chest');
+    }
+    res.status(err.httpStatus).json({ ok: false, reason: 'error', code: err.code, detail: err.detail });
+  }
+});
+
+router.post('/economy/treasure-chest/claim', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ ok: false, reason: 'unauthenticated' });
+    const out = await claimTreasureChestBase(userId);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/treasure-chest/claim');
+    }
+    res.status(err.httpStatus).json({
+      ok: false,
+      reason: err.detail?.reason || err.code || 'error',
+      code: err.code,
+      detail: err.detail,
+    });
+  }
+});
+
+router.post('/economy/treasure-chest/bonus', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) return res.status(401).json({ ok: false, reason: 'unauthenticated' });
+    const postId = typeof req.body?.postId === 'string' ? req.body.postId.trim() : undefined;
+    const out = await claimTreasureChestBonus(userId, postId ? { postId } : undefined);
+    res.json(out);
+  } catch (e: any) {
+    const err = toEconomyError(e);
+    if (err.code === 'INTERNAL') {
+      logger.error({ detail: err.detail }, '[economy] INTERNAL error in /economy/treasure-chest/bonus');
+    }
+    res.status(err.httpStatus).json({
+      ok: false,
+      reason: err.detail?.reason || err.code || 'error',
+      code: err.code,
+      detail: err.detail,
+    });
   }
 });
 

@@ -183,15 +183,16 @@ function Grid9LiveKitSpotlightVideo({
   useTracks: (opts?: any) => any[];
   TrackSource: any;
 }) {
-  const tracks = useTracks(
-    TrackSource?.Camera ? { sources: [TrackSource.Camera] } : {},
-  );
+  // useTracks([Track.Source.Camera]) — object `{ sources }` is invalid API.
+  const cameraSource = TrackSource?.Camera ?? 'camera';
+  const tracks = useTracks([cameraSource]);
   const track = useMemo(() => {
     if (!spotlightParticipantId || !Array.isArray(tracks)) return null;
     return (
       tracks.find(
         (item: any) =>
-          String(item?.participant?.identity || '') === spotlightParticipantId,
+          String(item?.participant?.identity || '') === spotlightParticipantId &&
+          item?.publication,
       ) ?? null
     );
   }, [spotlightParticipantId, tracks]);

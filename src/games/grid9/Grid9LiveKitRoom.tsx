@@ -120,6 +120,9 @@ export function Grid9LiveKitProvider({
     (async () => {
       try {
         // eslint-disable-next-line global-require
+        const { registerLiveKitGlobals } = require('../../runtime/registerLiveKitGlobals');
+        registerLiveKitGlobals();
+        // eslint-disable-next-line global-require
         const lk = require('@livekit/react-native');
         // eslint-disable-next-line global-require
         const client = require('livekit-client');
@@ -208,7 +211,7 @@ export function Grid9LiveKitProvider({
         token={creds.token}
         connect
         audio={shouldPublish}
-        video={shouldPublish}
+        video={shouldPublish ? { facingMode: 'user' } : false}
         options={{ adaptiveStream: true, dynacast: true }}
         onError={() => {
           setStatus('room-error');
@@ -247,18 +250,20 @@ function Grid9SeatCameraInner({
 }: {
   participantId: string;
   VideoTrack: React.ComponentType<any>;
-  useTracks: (opts?: any) => any[];
+  useTracks: (sources?: any, opts?: any) => any[];
   TrackSource: any;
 }) {
-  const tracks = useTracks(
-    TrackSource?.Camera ? { sources: [TrackSource.Camera] } : {},
-  );
+  // useTracks expects SourcesArray as first arg — NOT `{ sources: [...] }`.
+  // Wrong shape throws / returns nothing → blank seat tiles (cam P0).
+  const cameraSource = TrackSource?.Camera ?? 'camera';
+  const tracks = useTracks([cameraSource]);
   const track = useMemo(() => {
     if (!Array.isArray(tracks)) return null;
     return (
       tracks.find(
         (item: any) =>
-          String(item?.participant?.identity || '') === participantId,
+          String(item?.participant?.identity || '') === participantId &&
+          item?.publication,
       ) ?? null
     );
   }, [participantId, tracks]);

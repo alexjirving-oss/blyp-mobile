@@ -149,6 +149,7 @@ const QUICK_ACTIONS = [
   { id: 'people', label: 'Find people', icon: 'person-add', route: 'FindPeople' },
   { id: 'recap', label: 'Your Blyp', icon: 'stats-chart', route: 'YourBlyp' },
   { id: 'wallet', label: 'Wallet', icon: 'wallet', route: 'CoinStore' },
+  { id: 'treasure', label: 'Treasure', icon: 'gift', route: 'TreasureChest' },
 ];
 
 function greeting() {

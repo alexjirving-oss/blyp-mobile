@@ -23,6 +23,8 @@ export type Grid9ClientIntentType =
   | 'PRIVATE_ROOM_CREATE'
   | 'PRIVATE_ROOM_JOIN'
   | 'START_PRIVATE_MATCH'
+  | 'START_ROULETTE'
+  | 'FILL_SENTINELS'
   | 'KICK_PLAYER'
   | 'CHANGE_SETTINGS'
   | 'RESERVE_COINS'
@@ -210,6 +212,16 @@ export interface Grid9StartPrivateMatchPayload {
   confirm: true;
 }
 
+/** Host Director HUD: start lobby roulette (Alex alias START_ROULETTE). */
+export interface Grid9StartRoulettePayload {
+  confirm: true;
+}
+
+/** Host Director HUD: fill unoccupied seats with sentinels (Alex alias FILL_SENTINELS). */
+export interface Grid9FillSentinelsPayload {
+  confirm: true;
+}
+
 export interface Grid9KickPlayerPayload {
   targetUserId: string;
 }
@@ -289,6 +301,14 @@ export type Grid9StartPrivateMatchIntent = Grid9MatchCommandEnvelope<
   'START_PRIVATE_MATCH',
   Grid9StartPrivateMatchPayload
 >;
+export type Grid9StartRouletteIntent = Grid9MatchCommandEnvelope<
+  'START_ROULETTE',
+  Grid9StartRoulettePayload
+>;
+export type Grid9FillSentinelsIntent = Grid9MatchCommandEnvelope<
+  'FILL_SENTINELS',
+  Grid9FillSentinelsPayload
+>;
 export type Grid9KickPlayerIntent = Grid9MatchCommandEnvelope<
   'KICK_PLAYER',
   Grid9KickPlayerPayload
@@ -306,6 +326,8 @@ export type Grid9ClientIntent =
   | Grid9PrivateRoomCreateIntent
   | Grid9PrivateRoomJoinIntent
   | Grid9StartPrivateMatchIntent
+  | Grid9StartRouletteIntent
+  | Grid9FillSentinelsIntent
   | Grid9KickPlayerIntent
   | Grid9ChangeSettingsIntent
   | Grid9ReserveCoinsIntent
@@ -351,7 +373,17 @@ export interface Grid9MatchAssignedPayload {
 
 export interface Grid9StateSnapshotPayload {
   state: Grid9PublicGameState;
-  reason: 'join' | 'reconnect' | 'requested' | 'version_gap' | 'periodic';
+  /**
+   * Alex alias ROOM_STATE_UPDATED → real event STATE_SNAPSHOT.
+   * `sentinel_fill` is the host FILL_SENTINELS fan-out reason.
+   */
+  reason:
+    | 'join'
+    | 'reconnect'
+    | 'requested'
+    | 'version_gap'
+    | 'periodic'
+    | 'sentinel_fill';
   /** Private match escrow for the requesting user (null for audience / missing). */
   escrow?: Grid9EscrowWallet | null;
 }
@@ -496,6 +528,7 @@ export type Grid9ErrorCode =
   | 'MATCH_NOT_ACTIVE'
   | 'PLAYER_NOT_FOUND'
   | 'NOT_ELIGIBLE'
+  | 'UNAUTHORIZED_HOST_ACTION'
   | 'TARGET_NOT_ALIVE'
   | 'TARGET_SELF'
   | 'ITEM_NOT_FOUND'

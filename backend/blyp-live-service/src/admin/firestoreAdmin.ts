@@ -1287,6 +1287,45 @@ export async function endFirestoreStream(streamId: string): Promise<{ ok: boolea
   }
 }
 
+/**
+ * Host presence ping for web/native studio. Refreshes Firestore discovery
+ * heartbeat so status-probe sweeps do not end an otherwise-LIVE Dynamo session.
+ */
+export async function touchLiveDirectoryHeartbeat(
+  streamId: string,
+): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const id = String(streamId || '').trim();
+  if (!fs || !id) return { ok: false, detail: 'unavailable' };
+  try {
+    const payload = {
+      lastHeartbeatAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      status: 'live',
+      directoryReady: true,
+    };
+    await Promise.all([
+      fs.collection('liveStreams').doc(id).set(payload, { merge: true }),
+      fs.collection('streams').doc(id).set(
+        {
+          lastHeartbeatAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          status: 'live',
+          directoryReady: true,
+        },
+        { merge: true },
+      ),
+    ]);
+    return { ok: true };
+  } catch (e: any) {
+    logger.error(
+      { err: e?.message || String(e), streamId: id },
+      '[firestore-admin] touchLiveDirectoryHeartbeat failed',
+    );
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}
+
 /** Ops / join-path: end status=live cards whose heartbeat is stale. */
 export async function sweepStaleLiveDirectory(opts?: {
   staleMs?: number;
@@ -1462,6 +1501,70 @@ export async function enqueuePostGiftNotification(input: {
     logger.error(
       { err: detail, giftEventId, postId, receiverUserId },
       '[firestore-admin] enqueuePostGiftNotification failed',
+    );
+    return { ok: false, detail };
+  }
+}
+
+/**
+ * Grant ping after a verified user claims the daily treasure chest (base or bonus).
+ * Uses the shared notifications/{id} outbox → FCM dispatcher (type system; prefs default ON).
+ */
+export async function enqueueTreasureChestGrantNotification(input: {
+  userId: string;
+  coins: number;
+  kind: 'base' | 'bonus';
+  day: string;
+}): Promise<{ ok: boolean; detail?: string }> {
+  const fs = getFirestore();
+  const userId = String(input.userId || '').trim();
+  const coins = Math.max(0, Math.floor(Number(input.coins) || 0));
+  const day = String(input.day || '').trim();
+  const kind = input.kind === 'bonus' ? 'bonus' : 'base';
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+  if (!userId || !day || coins <= 0) return { ok: false, detail: 'missing_fields' };
+
+  const crypto = await import('crypto');
+  const dedupeKey = `treasure:${kind}:${userId}:${day}`;
+  const id = 'n_' + crypto.createHash('sha1').update(dedupeKey).digest('hex').slice(0, 32);
+  const now = Date.now();
+  const title = kind === 'bonus' ? 'Bonus coins unlocked' : 'Treasure chest opened';
+  const body = `You got ${coins} coins`;
+  const doc = {
+    userId,
+    type: 'system',
+    title,
+    body,
+    data: {
+      type: 'treasure_chest',
+      kind,
+      coins: String(coins),
+      day,
+      deepLink: 'blyp://treasure',
+      screen: 'TreasureChest',
+    },
+    dedupeKey,
+    collapseKey: `treasure:${userId}:${day}`,
+    status: 'queued',
+    sendAfter: now,
+    attempts: 0,
+    maxAttempts: 5,
+    nextAttemptAt: 0,
+    createdAt: now,
+  };
+
+  try {
+    await fs.collection('notifications').doc(id).create(doc);
+    return { ok: true };
+  } catch (e: any) {
+    const code = e?.code || e?.status;
+    if (code === 6 || code === 'already-exists' || /already exists/i.test(String(e?.message || ''))) {
+      return { ok: true, detail: 'already_queued' };
+    }
+    const detail = e?.message || String(e);
+    logger.error(
+      { err: detail, userId, kind, day },
+      '[firestore-admin] enqueueTreasureChestGrantNotification failed',
     );
     return { ok: false, detail };
   }

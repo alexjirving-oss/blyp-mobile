@@ -115,9 +115,24 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     : null;
   const targeting = selection != null;
   const jackpotPool = getGrid9JackpotPool(match);
-  const countdownMs = match?.turn
-    ? remainingMs(match.turn.endsAt, nowMs)
-    : remainingMs(match?.phaseEndsAt, nowMs);
+  const turnActed = Boolean(
+    match?.turn &&
+      ((match.turn.attacksUsedThisTurn ?? 0) >= 1 ||
+        (match.turn.defensesUsedThisTurn ?? 0) >= 1 ||
+        match.turn.autoResolved),
+  );
+  // After act, do not paint leftover combat endsAt — server advances immediately.
+  const countdownMs =
+    match?.phase === 'combat' && match.turn
+      ? turnActed
+        ? 0
+        : remainingMs(match.turn.endsAt, nowMs)
+      : remainingMs(
+          match?.phase === 'roulette'
+            ? match.roulette?.endsAt ?? match.phaseEndsAt
+            : match?.phaseEndsAt,
+          nowMs,
+        );
 
   const mode = resolveGrid9DrawerMode({
     targeting,

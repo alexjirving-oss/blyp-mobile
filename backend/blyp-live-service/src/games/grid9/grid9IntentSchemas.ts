@@ -219,6 +219,26 @@ const startPrivateMatch = z
   })
   .strict();
 
+const startRoulette = z
+  .object({
+    ...common,
+    type: z.literal('START_ROULETTE'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ confirm: z.literal(true) }).strict(),
+  })
+  .strict();
+
+const fillSentinels = z
+  .object({
+    ...common,
+    type: z.literal('FILL_SENTINELS'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ confirm: z.literal(true) }).strict(),
+  })
+  .strict();
+
 const kickPlayer = z
   .object({
     ...common,
@@ -261,6 +281,8 @@ export const grid9ClientIntentSchema = z.discriminatedUnion('type', [
   privateRoomCreate,
   privateRoomJoin,
   startPrivateMatch,
+  startRoulette,
+  fillSentinels,
   kickPlayer,
   changeSettings,
   reserveCoins,

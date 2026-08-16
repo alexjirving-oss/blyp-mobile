@@ -949,6 +949,90 @@ export function startPrivateMatchFromLobby(
   return startGrid9Roulette(current, nowMs);
 }
 
+/**
+ * Host Director HUD intent START_ROULETTE.
+ * Allowed in private_lobby / lobby_waiting (and legacy countdown).
+ * Roulette duration uses GRID9_ROULETTE_DURATION_MS (~12s dramatic) — not a 3s hardcode;
+ * selectedSlotIndex + entropyDigest (animation seed) are on ROULETTE_START payload.
+ */
+export function startGrid9RouletteAsHost(
+  current: Grid9GameState,
+  hostUserId: string,
+  nowMs = Date.now(),
+): Grid9GameState {
+  if (!current.ownerUserId || current.ownerUserId !== hostUserId) {
+    throw new Grid9Error(
+      'UNAUTHORIZED_HOST_ACTION',
+      'Only the room host can start roulette',
+      { stateVersion: current.authority.stateVersion },
+    );
+  }
+  if (
+    current.phase !== 'private_lobby' &&
+    current.phase !== 'lobby_waiting' &&
+    current.phase !== 'countdown'
+  ) {
+    throw new Grid9Error(
+      'MATCH_NOT_ACTIVE',
+      'Roulette start is only allowed in lobby',
+      { stateVersion: current.authority.stateVersion },
+    );
+  }
+  return startGrid9Roulette(current, nowMs);
+}
+
+/**
+ * Host Director HUD intent FILL_SENTINELS.
+ * Unoccupied = any seat that is not an alive human — mint unique callsign sentinels
+ * from SENTINEL_TEMPLATES (Onyx/Pulse/etc.).
+ */
+export function fillGrid9UnoccupiedSeats(
+  current: Grid9GameState,
+  hostUserId: string,
+  nowMs = Date.now(),
+): { state: Grid9GameState; filledSlotIndices: Grid9SlotIndex[] } {
+  if (!current.ownerUserId || current.ownerUserId !== hostUserId) {
+    throw new Grid9Error(
+      'UNAUTHORIZED_HOST_ACTION',
+      'Only the room host can fill sentinels',
+      { stateVersion: current.authority.stateVersion },
+    );
+  }
+  if (
+    current.phase !== 'private_lobby' &&
+    current.phase !== 'lobby_waiting' &&
+    current.phase !== 'countdown'
+  ) {
+    throw new Grid9Error(
+      'MATCH_NOT_ACTIVE',
+      'Sentinel fill is only allowed in lobby',
+      { stateVersion: current.authority.stateVersion },
+    );
+  }
+  const state = cloneState(current);
+  const now = iso(nowMs);
+  const filledSlotIndices: Grid9SlotIndex[] = [];
+  for (const slotIndex of GRID9_SLOT_INDICES) {
+    const player = state.players[slotIndex];
+    if (player.kind === 'human' && player.status === 'alive') {
+      continue;
+    }
+    state.players[slotIndex] = createGrid9Sentinel(
+      state.matchId,
+      slotIndex,
+      now,
+    );
+    filledSlotIndices.push(slotIndex);
+  }
+  if (filledSlotIndices.length === 0) {
+    return { state: current, filledSlotIndices };
+  }
+  return {
+    state: mutationDone(state, current, now, 1),
+    filledSlotIndices,
+  };
+}
+
 export function applyGrid9Weapon(args: {
   state: Grid9GameState;
   actor: Grid9ActionActor;
@@ -1514,10 +1598,14 @@ export function advanceGrid9Turn(
   if (!current.turn) {
     throw new Grid9Error('INTERNAL_ERROR', 'Grid 9 turn is missing');
   }
-  const resolved =
+  // Any completed go (attack OR shield OR prior auto-resolve) ends combat.
+  // autoResolve still fills a free basic shield when defense unused.
+  const acted =
     current.turn.autoResolved ||
-    (current.turn.attacksUsedThisTurn >= 1 &&
-      current.turn.defensesUsedThisTurn >= 1)
+    current.turn.attacksUsedThisTurn >= 1 ||
+    current.turn.defensesUsedThisTurn >= 1;
+  const resolved =
+    acted && current.turn.defensesUsedThisTurn >= 1
       ? current
       : autoResolveGrid9Turn(current, nowMs);
   return startGrid9Roulette(resolved, nowMs);

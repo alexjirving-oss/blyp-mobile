@@ -32,6 +32,7 @@ import { requireCanGoLive } from '../admin/liveRestrictionGuard';
 import {
   endFirestoreStream,
   sweepStaleLiveDirectory,
+  touchLiveDirectoryHeartbeat,
 } from '../admin/firestoreAdmin';
 import { getSessionById } from '../live/liveSessionStore';
 import { battlesEnabled, battlesDisabledPayload } from '../battles/battlesFlags';
@@ -473,7 +474,40 @@ router.get('/live/guest/requests', async (req: AuthedRequest, res) => {
       })),
     });
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to list guest requests', detail: err.message });
+    const status = err?.code === 'FORBIDDEN' ? 403 : 500;
+    res.status(status).json({
+      error: 'Failed to list guest requests',
+      code: err?.code || 'UNKNOWN_ERROR',
+      detail: err.message,
+    });
+  }
+});
+
+/**
+ * Host presence ping. Web studio must call this while on-air so Firestore
+ * discovery heartbeats stay fresh; otherwise /live/session/:id/status sweeps
+ * end the directory card after ~3 minutes even though Dynamo is still LIVE.
+ */
+router.post('/live/heartbeat', async (req: AuthedRequest, res) => {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not found in token' });
+    }
+    const sessionId = resolveLiveSessionId(req.body || {});
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId required' });
+    }
+    await assertSessionHost(sessionId, userId);
+    const touched = await touchLiveDirectoryHeartbeat(sessionId);
+    res.json({ ok: touched.ok, sessionId, detail: touched.detail });
+  } catch (err: any) {
+    const status = err?.code === 'FORBIDDEN' ? 403 : 500;
+    res.status(status).json({
+      error: 'Failed to heartbeat live session',
+      code: err?.code || 'UNKNOWN_ERROR',
+      detail: err?.message,
+    });
   }
 });
 

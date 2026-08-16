@@ -347,6 +347,15 @@ async function processAutomatedPurchase(
   state: Grid9GameState,
 ): Promise<Grid9GameState> {
   if (!state.turn) return state;
+  // Spotlight already completed their go — do not mercenary-proxy or re-act;
+  // caller advances to next roulette immediately.
+  if (
+    state.turn.autoResolved ||
+    state.turn.attacksUsedThisTurn >= 1 ||
+    state.turn.defensesUsedThisTurn >= 1
+  ) {
+    return state;
+  }
   const source = state.players[state.turn.spotlightSlotIndex];
   if (source.status !== 'alive') {
     return state;

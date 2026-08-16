@@ -55,8 +55,10 @@ import {
 import {
   changeGrid9PrivateSettings,
   createGrid9PrivateRoom,
+  fillGrid9HostSentinels,
   joinGrid9PrivateRoom,
   kickGrid9PrivatePlayer,
+  startGrid9HostRoulette,
   startGrid9PrivateMatch,
 } from './grid9PrivateRooms';
 import type { Grid9ClientIntent } from './protocol';
@@ -499,6 +501,24 @@ async function handleGrid9Intent(args: {
       expectedStateVersion: intent.expectedStateVersion,
       intentId: intent.intentId,
     });
+  } else if (intent.type === 'START_ROULETTE') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await startGrid9HostRoulette({
+      io,
+      identity,
+      matchId: intent.matchId,
+      expectedStateVersion: intent.expectedStateVersion,
+      intentId: intent.intentId,
+    });
+  } else if (intent.type === 'FILL_SENTINELS') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await fillGrid9HostSentinels({
+      io,
+      identity,
+      matchId: intent.matchId,
+      expectedStateVersion: intent.expectedStateVersion,
+      intentId: intent.intentId,
+    });
   } else if (intent.type === 'KICK_PLAYER') {
     await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
     await kickGrid9PrivatePlayer({
@@ -582,6 +602,19 @@ async function handleGrid9Intent(args: {
     );
     for (const event of action.roomEvents) {
       emitGrid9Room(io, intent.matchId, event);
+    }
+    // Human weapon/shield completes the go → advance immediately (no leftover
+    // combat timer stall waiting for poll). Gifts/fund/buy-inventory do not.
+    if (
+      (intent.type === 'FIRE_WEAPON' || intent.type === 'PURCHASE_SHIELD') &&
+      action.state.phase === 'combat' &&
+      action.state.turn &&
+      (action.state.turn.attacksUsedThisTurn >= 1 ||
+        action.state.turn.defensesUsedThisTurn >= 1 ||
+        action.state.outcome)
+    ) {
+      const { forceGrid9DisconnectedTurnEnd } = await import('./grid9GameLoop');
+      await forceGrid9DisconnectedTurnEnd(io, intent.matchId);
     }
   }
 }
