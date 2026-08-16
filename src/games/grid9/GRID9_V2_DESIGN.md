@@ -4,7 +4,7 @@
 **Not unlocked:** LIVE / IVS / `src/live/**` — video stage stays SentinelStage / avatar placeholders only.  
 **Authority that stays:** Redis aggregate, Lua commit, nonce, sequence, Cognito socket, escrow settlement.
 
-Protocol: `GRID9_PROTOCOL_VERSION = 2`. Rules: `2026-08-16.3`.
+Protocol: `GRID9_PROTOCOL_VERSION = 2`. Rules: `2026-08-16.4`.
 
 ---
 

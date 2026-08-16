@@ -1,28 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import type { Grid9PublicPlayer } from './protocol';
-import { playerInitials } from './grid9Format';
+import { formatGrid9Coins, formatGrid9Countdown, playerInitials } from './grid9Format';
+import { Grid9LiveKitSession } from './Grid9LiveKitSession';
 import { SentinelStage } from './SentinelStage';
 import { Image, Text, View } from './nw';
 
 type FeedLike = {
   kind?: string;
+  provider?: string;
+  participantId?: string;
+  streamId?: string;
   playbackUrl?: string | null;
   hlsUrl?: string | null;
   streamUrl?: string | null;
   url?: string | null;
   characterId?: string;
 };
-
-function readUsableFeedUrl(feed: FeedLike | null | undefined): string | null {
-  if (!feed || typeof feed !== 'object') return null;
-  const candidates = [feed.playbackUrl, feed.hlsUrl, feed.streamUrl, feed.url];
-  for (const value of candidates) {
-    if (typeof value === 'string' && /^https?:\/\//i.test(value.trim())) {
-      return value.trim();
-    }
-  }
-  return null;
-}
 
 function HumanPendingCard({
   player,
@@ -63,55 +56,107 @@ function HumanPendingCard({
 
 export function Grid9SpotlightStage({
   player,
+  matchId,
+  publishLocalAv,
+  jackpotCoins,
+  accountCoins,
+  countdownMs,
+  countdownLabel,
 }: {
   player: Grid9PublicPlayer | null;
+  matchId?: string | null;
+  /** Local combatant should publish camera+mic into the Grid9 LiveKit room. */
+  publishLocalAv?: boolean;
+  jackpotCoins?: number;
+  accountCoins?: number;
+  countdownMs?: number | null;
+  countdownLabel?: string;
 }) {
   const feed = (player as { feed?: FeedLike } | null)?.feed ?? null;
-  const feedUrl = useMemo(() => readUsableFeedUrl(feed), [feed]);
+  const participantId = useMemo(() => {
+    if (!player || player.kind !== 'human') return null;
+    if (typeof feed?.participantId === 'string' && feed.participantId.trim()) {
+      return feed.participantId.trim();
+    }
+    return player.publicProfileId || null;
+  }, [feed?.participantId, player]);
 
-  if (!player) {
-    return (
-      <View className="mx-4 mb-3 h-44 items-center justify-center rounded-2xl border border-white/10 bg-blyp-ink">
-        <Text className="text-[10px] font-black uppercase tracking-[2px] text-blyp-faint">
-          Spotlight
-        </Text>
-        <Text className="mt-1 text-sm font-semibold text-blyp-muted">Waiting for seat</Text>
-      </View>
-    );
-  }
-
-  if (player.kind === 'sentinel') {
-    const characterId =
-      typeof feed?.characterId === 'string' ? feed.characterId : null;
-    return (
-      <View className="mx-4 mb-3 h-44">
-        <SentinelStage displayName={player.displayName} characterId={characterId} />
-      </View>
-    );
-  }
-
-  // Never mount frozen LIVE players — only a safe URL card or pending fallback.
-  if (feedUrl) {
-    return (
-      <View className="mx-4 mb-3 h-44 overflow-hidden rounded-2xl border border-blyp-primary/35 bg-blyp-ink">
-        <View className="flex-1 items-center justify-center px-4">
-          <Text className="text-[10px] font-black uppercase tracking-[2px] text-blyp-primary">
-            Live feed ready
-          </Text>
-          <Text className="mt-2 text-center text-sm font-extrabold text-blyp-text" numberOfLines={1}>
-            {player.displayName}
-          </Text>
-          <Text className="mt-1 text-center text-[10px] font-semibold text-blyp-faint" numberOfLines={1}>
-            {feedUrl}
-          </Text>
-        </View>
-      </View>
-    );
-  }
+  const [avStatus, setAvStatus] = useState<string>('idle');
+  const showLiveKit =
+    !!matchId &&
+    !!player &&
+    player.kind === 'human' &&
+    (publishLocalAv || avStatus === 'ready' || Boolean(feed?.provider === 'livekit'));
 
   return (
-    <View className="mx-4 mb-3 h-44">
-      <HumanPendingCard player={player} note="LIVE FEED PENDING" />
+    <View className="mx-3 mb-2 h-48 overflow-hidden rounded-2xl border border-blyp-primary/35 bg-blyp-ink">
+      {/* Corner chips: coins + timer inside spotlight */}
+      <View className="absolute left-2 top-2 z-10 rounded-full border border-blyp-primary/40 bg-blyp-ink/85 px-2.5 py-1">
+        <Text className="text-[9px] font-black uppercase tracking-[1px] text-blyp-primary">
+          JP {formatGrid9Coins(jackpotCoins ?? 0)}
+          {typeof accountCoins === 'number' ? ` · You ${formatGrid9Coins(accountCoins)}` : ''}
+        </Text>
+      </View>
+      <View className="absolute right-2 top-2 z-10 rounded-full border border-white/20 bg-blyp-ink/85 px-2.5 py-1">
+        <Text className="text-[9px] font-black uppercase tracking-[1px] text-blyp-text">
+          {countdownLabel || 'Clock'}{' '}
+          {countdownMs != null && countdownMs >= 0
+            ? formatGrid9Countdown(countdownMs)
+            : '—'}
+        </Text>
+      </View>
+
+      {!player ? (
+        <View className="h-full items-center justify-center">
+          <Text className="text-[10px] font-black uppercase tracking-[2px] text-blyp-faint">
+            Spotlight
+          </Text>
+          <Text className="mt-1 text-sm font-semibold text-blyp-muted">Waiting for seat</Text>
+        </View>
+      ) : player.kind === 'sentinel' ? (
+        <View className="h-full">
+          <SentinelStage
+            displayName={player.displayName}
+            characterId={typeof feed?.characterId === 'string' ? feed.characterId : null}
+          />
+        </View>
+      ) : (
+        <View className="h-full">
+          {showLiveKit ? (
+            <Grid9LiveKitSession
+              matchId={matchId ?? null}
+              enabled
+              publish={Boolean(publishLocalAv)}
+              spotlightParticipantId={participantId}
+              onStatus={setAvStatus}
+            />
+          ) : null}
+          {avStatus === 'ready' || avStatus === 'idle' ? null : (
+            <View className="absolute inset-0">
+              <HumanPendingCard
+                player={player}
+                note={
+                  avStatus === 'permission-denied'
+                    ? 'CAM/MIC DENIED'
+                    : avStatus === 'unavailable' || avStatus === 'module-missing'
+                      ? 'A/V UNAVAILABLE'
+                      : 'LIVE FEED PENDING'
+                }
+              />
+            </View>
+          )}
+          {avStatus === 'ready' ? null : avStatus === 'idle' && !showLiveKit ? (
+            <HumanPendingCard player={player} note="LIVE FEED PENDING" />
+          ) : null}
+          {avStatus === 'ready' ? (
+            <View className="absolute bottom-2 left-0 right-0 items-center">
+              <Text className="rounded-full bg-blyp-ink/70 px-2 py-0.5 text-[10px] font-extrabold text-blyp-primary">
+                {player.displayName}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      )}
     </View>
   );
 }

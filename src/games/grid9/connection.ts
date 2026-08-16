@@ -102,7 +102,11 @@ export class Grid9Connection {
     );
   }
 
-  sendPrivateRoomCreateIntent(input: { region: string; displayName?: string }): string {
+  sendPrivateRoomCreateIntent(input: {
+    region: string;
+    displayName?: string;
+    entryFeeCoins?: number;
+  }): string {
     patchGrid9Session({ region: input.region });
     return this.emitBuilt(
       buildPrivateRoomCreateIntent(this.requireSession(), input),

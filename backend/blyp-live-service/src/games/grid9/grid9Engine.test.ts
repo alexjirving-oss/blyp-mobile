@@ -7,6 +7,7 @@ import {
   applyGrid9ArsenalGift,
   applyGrid9InventoryBuy,
   applyGrid9MercenaryFunding,
+  applyGrid9Shield,
   applyGrid9Weapon,
   advanceGrid9Turn,
   beginGrid9Combat,
@@ -15,6 +16,7 @@ import {
   landGrid9Roulette,
   leaveGrid9SeatAsCombatant,
   resolveGrid9Actor,
+  seatGrid9HumanInOpenLobby,
   startGrid9Roulette,
 } from './grid9Engine';
 import { timerOutboxForState } from './grid9MatchService';
@@ -25,11 +27,17 @@ import {
 } from './grid9Sentinels';
 import { toGrid9PublicGameState } from './grid9Projection';
 import { parseGrid9GameState } from './schemas';
-import type { Grid9SentinelPlayer } from './players';
+import type { Grid9HumanPlayer, Grid9SentinelPlayer } from './players';
 const alex = {
   userId: '26522274-e001-70aa-51b6-bcbbdffc43bb',
   publicProfileId: 'alex',
   displayName: 'Alex',
+  avatarUrl: null,
+};
+const blake = {
+  userId: '36522274-e001-70aa-51b6-bcbbdffc43cc',
+  publicProfileId: 'blake',
+  displayName: 'Blake',
   avatarUrl: null,
 };
 
@@ -387,41 +395,145 @@ describe('Grid 9 authoritative engine', () => {
 
     const decision = chooseGrid9SentinelDecision(state, sentinel);
     assert.ok(decision, 'sentinel must decide without client intents');
-    assert.equal(decision!.kind, 'weapon');
-    if (decision!.kind !== 'weapon') throw new Error('expected weapon');
+    assert.ok(
+      decision!.kind === 'weapon' || decision!.kind === 'shield',
+      `expected weapon or shield, got ${decision!.kind}`,
+    );
 
-    const resolution = applyGrid9Weapon({
-      state,
-      actor: {
-        kind: 'sentinel',
-        sentinelId: sentinel.sentinelId,
-        displayName: sentinel.displayName,
-      },
-      sourceSlotIndex: sentinelSlot,
-      weaponId: decision.weaponId,
-      targetSlotIndex: decision.targetSlotIndex,
-      intentId: null,
-      serverOperationId: `auto-sentinel-${state.turn!.turnNumber}`,
-      ledgerEntryId: 'ledger-sentinel-auto',
-      payment:
-        decision.payment === 'mercenary_bankroll'
-          ? {
-              kind: 'mercenary_bankroll' as const,
-              sourceSlotIndex: sentinelSlot,
-            }
-          : { kind: decision.payment },
-      nowMs: Date.parse(state.turn!.startedAt) + reactionMs,
-    });
-    assert.equal(resolution.state.turn?.attacksUsedThisTurn, 1);
-    assert.equal(resolution.state.lastAction?.kind, 'weapon');
+    let afterAct = state;
+    if (decision!.kind === 'weapon') {
+      const resolution = applyGrid9Weapon({
+        state,
+        actor: {
+          kind: 'sentinel',
+          sentinelId: sentinel.sentinelId,
+          displayName: sentinel.displayName,
+        },
+        sourceSlotIndex: sentinelSlot,
+        weaponId: decision.weaponId,
+        targetSlotIndex: decision.targetSlotIndex,
+        intentId: null,
+        serverOperationId: `auto-sentinel-${state.turn!.turnNumber}`,
+        ledgerEntryId: 'ledger-sentinel-auto',
+        payment:
+          decision.payment === 'mercenary_bankroll'
+            ? {
+                kind: 'mercenary_bankroll' as const,
+                sourceSlotIndex: sentinelSlot,
+              }
+            : { kind: decision.payment },
+        nowMs: Date.parse(state.turn!.startedAt) + reactionMs,
+      });
+      assert.equal(resolution.state.turn?.attacksUsedThisTurn, 1);
+      assert.equal(resolution.state.lastAction?.kind, 'weapon');
+      afterAct = resolution.state;
+    } else if (decision!.kind === 'shield') {
+      const resolution = applyGrid9Shield({
+        state,
+        actor: {
+          kind: 'sentinel',
+          sentinelId: sentinel.sentinelId,
+          displayName: sentinel.displayName,
+        },
+        sourceSlotIndex: sentinelSlot,
+        beneficiarySlotIndex: sentinelSlot,
+        shieldId: decision.shieldId,
+        intentId: null,
+        serverOperationId: `auto-sentinel-shield-${state.turn!.turnNumber}`,
+        ledgerEntryId: 'ledger-sentinel-auto-shield',
+        payment:
+          decision.payment === 'mercenary_bankroll'
+            ? {
+                kind: 'mercenary_bankroll' as const,
+                sourceSlotIndex: sentinelSlot,
+              }
+            : { kind: decision.payment },
+        nowMs: Date.parse(state.turn!.startedAt) + reactionMs,
+      });
+      assert.equal(resolution.state.lastAction?.kind, 'shield');
+      afterAct = resolution.state;
+    }
 
     const advanced = advanceGrid9Turn(
-      resolution.state,
-      Date.parse(resolution.state.turn!.endsAt),
+      afterAct,
+      Date.parse(afterAct.turn!.endsAt),
     );
     assert.ok(
       advanced.phase === 'roulette' || advanced.phase === 'completed',
       `expected roulette/completed after sentinel act, got ${advanced.phase}`,
+    );
+  });
+
+  it('open public lobby seats a second human into the same match', () => {
+    const t0 = Date.parse('2026-08-16T04:00:00.000Z');
+    let state = createGrid9Match({
+      matchId: 'lobby-coalesce-1',
+      liveSessionId: 'lobby-live-1',
+      region: 'eu-west-2',
+      humans: [{ ...alex, queueTicketId: 'ticket-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    assert.equal(state.phase, 'lobby_waiting');
+    assert.equal(state.rules.publicLobbyMs, 30_000);
+    const seated = seatGrid9HumanInOpenLobby(
+      state,
+      { ...blake, queueTicketId: 'ticket-blake', sponsorPassId: null },
+      t0 + 5_000,
+    );
+    assert.equal(seated.state.matchId, state.matchId);
+    assert.equal(seated.state.players[seated.slotIndex].kind, 'human');
+    assert.equal(
+      (seated.state.players[seated.slotIndex] as Grid9HumanPlayer).userId,
+      blake.userId,
+    );
+    const humans = seated.state.players.filter((p) => p.kind === 'human');
+    assert.equal(humans.length, 2);
+  });
+
+  it('human attack ends combat timer immediately for next roulette', () => {
+    const t0 = Date.parse('2026-08-16T05:00:00.000Z');
+    let state = createGrid9Match({
+      matchId: 'turn-end-1',
+      liveSessionId: 'turn-live-1',
+      region: 'eu-west-2',
+      humans: [{ ...alex, queueTicketId: 'ticket-alex', sponsorPassId: null }],
+      nowMs: t0,
+    });
+    state = startGrid9Roulette(state, t0);
+    state.roulette!.selectedSlotIndex = 0;
+    state = landGrid9Roulette(state, t0 + 3_500);
+    assert.equal(state.turn?.spotlightSlotIndex, 0);
+    const before = grid9CombatTimerDueAtMs(state)!;
+    assert.ok(before - Date.parse(state.turn!.startedAt) > 5_000);
+
+    state.players[0].inventory = ['arrow'];
+    const resolution = applyGrid9Weapon({
+      state,
+      actor: {
+        kind: 'human_player',
+        userId: alex.userId,
+        publicProfileId: alex.publicProfileId,
+        displayName: alex.displayName,
+      },
+      sourceSlotIndex: 0,
+      weaponId: 'arrow',
+      targetSlotIndex: 1,
+      intentId: 'intent-fire-1',
+      serverOperationId: null,
+      ledgerEntryId: 'ledger-fire-1',
+      payment: { kind: 'inventory' },
+      nowMs: Date.parse(state.turn!.startedAt) + 1_000,
+    });
+    assert.equal(resolution.state.turn?.attacksUsedThisTurn, 1);
+    const due = grid9CombatTimerDueAtMs(resolution.state)!;
+    assert.ok(
+      due <= Date.now() + 50,
+      'acted human turn must schedule immediate turn_end',
+    );
+    const advanced = advanceGrid9Turn(resolution.state, due);
+    assert.ok(
+      advanced.phase === 'roulette' || advanced.phase === 'completed',
+      `expected immediate roulette after act, got ${advanced.phase}`,
     );
   });
 });

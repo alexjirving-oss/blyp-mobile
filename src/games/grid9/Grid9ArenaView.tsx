@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import './grid9.css';
@@ -9,6 +10,7 @@ import { Grid9ArrivalTicker } from './Grid9ArrivalTicker';
 import { Grid9Board } from './Grid9Board';
 import { Grid9EntryPortal } from './Grid9EntryPortal';
 import { Grid9Header } from './Grid9Header';
+import { Grid9PrivateInvitePanel } from './Grid9PrivateInvitePanel';
 import { Grid9SideRail } from './Grid9SideRail';
 import { Grid9SpotlightStage } from './Grid9SpotlightStage';
 import { Grid9VictoryModal } from './Grid9VictoryModal';
@@ -19,7 +21,13 @@ import {
   selectionFromArsenalItem,
   type Grid9ArsenalSelection,
 } from './grid9Actions';
-import { formatGrid9Coins, getGrid9SpotlightSlot, slotsForGrid9Board } from './grid9Format';
+import {
+  formatGrid9Phase,
+  getGrid9JackpotPool,
+  getGrid9SpotlightSlot,
+  remainingMs,
+  slotsForGrid9Board,
+} from './grid9Format';
 import { Text, TouchableOpacity, View } from './nw';
 import { useGrid9 } from './useGrid9';
 import { useGrid9AccountCoinBalance } from './useGrid9AccountCoinBalance';
@@ -74,6 +82,17 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     ? String(match.turn.freeDropItemId).replace(/_/g, ' ')
     : null;
   const targeting = selection != null;
+  const jackpotPool = getGrid9JackpotPool(match);
+  const countdownMs = match?.turn
+    ? remainingMs(match.turn.endsAt, nowMs)
+    : remainingMs(match?.phaseEndsAt, nowMs);
+  const countdownLabel = match?.turn
+    ? `T${match.turn.turnNumber}`
+    : match?.phase === 'lobby_waiting' || match?.phase === 'countdown'
+      ? 'Lobby'
+      : match?.phase === 'roulette'
+        ? 'Spin'
+        : formatGrid9Phase(match?.phase);
 
   const mode = resolveGrid9DrawerMode({
     targeting,
@@ -240,9 +259,12 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
               setActionError(error instanceof Error ? error.message : 'Queue join failed');
             }
           }}
-          onCreatePrivate={() => {
+          onCreatePrivate={(entryFeeCoins) => {
             try {
-              sendPrivateRoomCreateIntent({ region: DEFAULT_REGION });
+              sendPrivateRoomCreateIntent({
+                region: DEFAULT_REGION,
+                entryFeeCoins,
+              });
               setEntered(true);
               setActionError(null);
             } catch (error) {
@@ -284,28 +306,56 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
     | null
     | undefined;
   const showVictory = match?.phase === 'completed' && !victoryDismissed;
+  const isCombatant = Boolean(localPlayer && localPlayer.kind === 'human');
 
   return (
     <View className="flex-1 bg-blyp-ink" style={{ paddingTop: insets.top }}>
       <Grid9Header
-        match={match}
         connectionStatus={connectionStatus}
-        nowMs={nowMs}
         onLeave={onLeave}
         leaving={leaving}
       />
-      <Grid9ArrivalTicker match={match} />
-      <Grid9SideRail match={match} />
-      {match?.phase === 'private_lobby' ? (
-        <View className="px-4 pb-2">
-          <View className="rounded-2xl border border-blyp-primary/40 bg-blyp-card px-3 py-3">
-            <Text className="text-center text-[10px] font-bold uppercase tracking-[2px] text-blyp-muted">
-              Private lobby · code {match.roomCode ?? '······'}
+
+      {/* Spotlight + seats flush to top (no big jackpot/timer header stack) */}
+      <View className="pt-8">
+        <Grid9SpotlightStage
+          player={spotlightPlayer}
+          matchId={match?.matchId ?? session.matchId}
+          publishLocalAv={isCombatant && !spectate}
+          jackpotCoins={jackpotPool}
+          accountCoins={spectate ? undefined : accountCoins}
+          countdownMs={countdownMs}
+          countdownLabel={countdownLabel}
+        />
+        {freeDropLabel && match?.phase === 'combat' ? (
+          <View className="mx-3 mb-1 rounded-lg border border-blyp-primary/35 bg-blyp-primary/10 px-2 py-1">
+            <Text className="text-center text-[9px] font-black uppercase tracking-[2px] text-blyp-primary">
+              Free drop · {freeDropLabel}
             </Text>
+          </View>
+        ) : null}
+        <Grid9Board
+          players={match?.players}
+          spotlightSlotIndex={activeSlotIndex}
+          rouletteCandidateSlotIndices={rouletteCandidates}
+          rouletteActive={match?.phase === 'roulette'}
+          localSlotIndex={localSlotIndex}
+          targetableSlotIndices={targetableSlotIndices}
+          onSlotPress={onSlotPress}
+        />
+      </View>
+
+      {match?.phase === 'private_lobby' ? (
+        <View className="px-0 pb-2">
+          <Grid9PrivateInvitePanel
+            roomCode={match.roomCode}
+            entryFeeCoins={Number(match.entryFeeCoins || 0)}
+          />
+          <View className="mx-3 rounded-xl border border-blyp-primary/40 bg-blyp-card px-3 py-2">
             {match.ownerPublicProfileId &&
             localPlayer?.publicProfileId === match.ownerPublicProfileId ? (
               <TouchableOpacity
-                className="mt-2 items-center rounded-xl border border-blyp-primary bg-blyp-primary py-2.5"
+                className="items-center rounded-xl border border-blyp-primary bg-blyp-primary py-2"
                 activeOpacity={0.85}
                 onPress={() => {
                   try {
@@ -320,31 +370,25 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
                 </Text>
               </TouchableOpacity>
             ) : (
-              <Text className="mt-2 text-center text-[11px] font-semibold text-blyp-faint">
+              <Text className="text-center text-[11px] font-semibold text-blyp-faint">
                 Waiting for host to start
               </Text>
             )}
           </View>
         </View>
       ) : null}
-      <Grid9SpotlightStage player={spotlightPlayer} />
-      {freeDropLabel && match?.phase === 'combat' ? (
-        <View className="mx-4 mb-2 rounded-xl border border-blyp-primary/40 bg-blyp-primary/10 px-3 py-2">
-          <Text className="text-center text-[10px] font-black uppercase tracking-[2px] text-blyp-primary">
-            Free drop · {freeDropLabel}
-          </Text>
-        </View>
-      ) : null}
-      <Grid9Board
-        players={match?.players}
-        spotlightSlotIndex={activeSlotIndex}
-        rouletteCandidateSlotIndices={rouletteCandidates}
-        rouletteActive={match?.phase === 'roulette'}
-        localSlotIndex={localSlotIndex}
-        targetableSlotIndices={targetableSlotIndices}
-        onSlotPress={onSlotPress}
-      />
-      <View style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
+
+      {/* Rest of screen: social / audience only */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 12) }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Grid9ArrivalTicker match={match} />
+        <Grid9SideRail match={match} />
+      </ScrollView>
+
+      <View style={{ paddingBottom: Math.max(insets.bottom, 8) }}>
         <Grid9ActionDrawer
           mode={mode}
           availableCoins={accountCoins}

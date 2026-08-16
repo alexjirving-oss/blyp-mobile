@@ -142,6 +142,7 @@ export function toGrid9PublicGameState(
     roomMode: state.roomMode,
     ownerPublicProfileId: owner?.publicProfileId ?? null,
     roomCode: state.roomCode,
+    entryFeeCoins: Math.max(0, Number(state.entryFeeCoins || 0)),
     phase: state.phase,
     phaseStartedAt: state.phaseStartedAt,
     phaseEndsAt: state.phaseEndsAt,

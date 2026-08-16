@@ -384,6 +384,12 @@ export async function settleGrid9Match(
     emitGrid9Room(io, current.matchId, event);
   }
   await removeGrid9ActiveMatch(current.matchId);
+  try {
+    const { clearOpenPublicLobbyMatchId } = await import('./grid9Matchmaker');
+    await clearOpenPublicLobbyMatchId(current.region, current.matchId);
+  } catch {
+    /* best-effort open-lobby clear */
+  }
   logger.info(
     { matchId: current.matchId, winnerKind: current.outcome.winnerKind },
     '[grid9] match settlement complete',

@@ -3,8 +3,10 @@ import { grid9RedisKeys } from './redisKeys';
 import { Grid9Error } from './grid9Errors';
 import type { Grid9MatchPhase, Grid9RoomMode } from './state';
 
+/** Active browse phases only — never completed / cancelled / settling. */
 const LISTABLE_PHASES = new Set<Grid9MatchPhase>([
   'lobby_waiting',
+  'private_lobby',
   'countdown',
   'roulette',
   'combat',
@@ -18,6 +20,7 @@ export interface Grid9PublicMatchSummary {
   region: string;
   roomMode: 'public';
   survivors: number;
+  entryFeeCoins: number;
   updatedAt: string;
 }
 
@@ -28,6 +31,7 @@ function redis() {
 /**
  * Public browse list: active public matches only.
  * Never returns private room codes, assignment tokens, escrow, or inventory.
+ * Ended matches are removed from the active index when encountered.
  */
 export async function listPublicActiveGrid9Matches(
   limit = 40,
@@ -56,10 +60,15 @@ export async function listPublicActiveGrid9Matches(
         audienceCount?: number;
         jackpot?: { currentCoins?: number };
         players?: Array<{ status?: string }>;
+        entryFeeCoins?: number;
         updatedAt?: string;
       };
+      if (!state.phase || !LISTABLE_PHASES.has(state.phase)) {
+        // Promptly drop ended / non-listable matches from the discoverability index.
+        await redis().srem(grid9RedisKeys.activeMatches(), matchId);
+        continue;
+      }
       if (state.roomMode !== 'public') continue;
-      if (!state.phase || !LISTABLE_PHASES.has(state.phase)) continue;
       const survivors = Array.isArray(state.players)
         ? state.players.filter((player) => player.status === 'alive').length
         : 0;
@@ -71,6 +80,7 @@ export async function listPublicActiveGrid9Matches(
         region: String(state.region || 'eu-west-2'),
         roomMode: 'public',
         survivors,
+        entryFeeCoins: Math.max(0, Number(state.entryFeeCoins || 0)),
         updatedAt: String(state.updatedAt || new Date().toISOString()),
       });
     } catch {

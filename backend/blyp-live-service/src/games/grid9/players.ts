@@ -85,6 +85,8 @@ export interface Grid9HumanPlayer extends Grid9PlayerBase {
   connectionState: Grid9HumanConnectionState;
   queueTicketId: string;
   sponsorPassId: string | null;
+  /** Coins paid as match entry (0 if free / unpaid). */
+  entryFeePaidCoins?: number;
 }
 
 export type Grid9SentinelTargetStrategy =

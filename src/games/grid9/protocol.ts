@@ -181,6 +181,8 @@ export interface Grid9PingPayload {
 export interface Grid9PrivateRoomCreatePayload {
   region: string;
   displayName?: string;
+  /** Optional entry fee (0–5000). 100% goes to jackpot. Host pays too. */
+  entryFeeCoins?: number;
 }
 
 export interface Grid9PrivateRoomJoinPayload {
@@ -427,6 +429,8 @@ export interface Grid9AuthoritativeGameState {
   roomMode?: 'public' | 'private';
   ownerPublicProfileId?: string | null;
   roomCode?: string | null;
+  /** Entry fee paid into jackpot (private rooms; 0 = free). */
+  entryFeeCoins?: number;
   phase: string;
   phaseStartedAt: string;
   phaseEndsAt: string | null;

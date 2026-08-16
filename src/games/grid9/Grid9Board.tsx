@@ -55,7 +55,7 @@ export function Grid9Board({
   };
 
   return (
-    <View className="w-full flex-1 items-center justify-center px-3" onLayout={onLayout}>
+    <View className="w-full items-center justify-center px-3 pb-1" onLayout={onLayout}>
       <View className="flex-row flex-wrap" style={{ width: boardWidth || '100%' }}>
         {slots.map((player, slotIndex) => {
           const rouletteCandidate =

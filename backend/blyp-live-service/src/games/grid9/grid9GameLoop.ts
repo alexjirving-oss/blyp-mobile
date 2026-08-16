@@ -50,7 +50,7 @@ import { timerOutboxForState } from './grid9MatchService';
 import { toGrid9PublicGameState } from './grid9Projection';
 import type { Grid9GameState, Grid9MatchOutcome } from './state';
 import { settleGrid9Match } from './grid9Settlement';
-import { recoverGrid9InitializingMatch } from './grid9Matchmaker';
+import { recoverGrid9InitializingMatch, clearOpenPublicLobbyMatchId } from './grid9Matchmaker';
 import {
   processGrid9PresenceTimeouts,
   repairGrid9PresenceTimeouts,
@@ -139,6 +139,7 @@ async function commitSimpleStateEvent(args: {
 
 async function processLobbyWaiting(io: Server, state: Grid9GameState): Promise<void> {
   if (state.phase !== 'lobby_waiting' && state.phase !== 'countdown') return;
+  await clearOpenPublicLobbyMatchId(state.region, state.matchId);
   const nowMs = Math.max(Date.now(), Date.parse(state.phaseEndsAt as string));
   const next = startGrid9Roulette(state, nowMs);
   const event = next.outcome

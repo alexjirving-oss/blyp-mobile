@@ -28,6 +28,7 @@ import {
   GRID9_MAX_ESCROW_RESERVE_COINS,
   GRID9_MIN_ESCROW_RESERVE_COINS,
 } from './constants';
+import { normalizeGrid9EntryFeeCoins } from './grid9EntryFee';
 import {
   GRID9_ARSENAL_CATALOG,
   GRID9_SHIELD_CATALOG,
@@ -328,6 +329,7 @@ function createHuman(
     lastDamagedAt: null,
     queueTicketId: seed.queueTicketId,
     sponsorPassId: seed.sponsorPassId,
+    entryFeePaidCoins: 0,
   };
 }
 
@@ -341,6 +343,7 @@ export function createGrid9Match(args: {
   ownerUserId?: string | null;
   roomCode?: string | null;
   houseSeedCoins?: number;
+  entryFeeCoins?: number;
   nowMs?: number;
 }): Grid9GameState {
   if (args.humans.length < 1 || args.humans.length > 9) {
@@ -355,6 +358,7 @@ export function createGrid9Match(args: {
   const matchId = args.matchId ?? randomUUID();
   const liveSessionId = args.liveSessionId ?? matchId;
   const roomMode: Grid9RoomMode = args.roomMode ?? 'public';
+  const entryFeeCoins = normalizeGrid9EntryFeeCoins(args.entryFeeCoins);
   const houseSeedCoins =
     args.houseSeedCoins ??
     (roomMode === 'public' ? GRID9_HOUSE_SEED_COINS : 0);
@@ -388,6 +392,7 @@ export function createGrid9Match(args: {
     roomMode,
     ownerUserId,
     roomCode: args.roomCode ?? null,
+    entryFeeCoins,
     phase,
     phaseStartedAt: now,
     phaseEndsAt,
@@ -1658,6 +1663,60 @@ export function applyGrid9InventoryBuy(args: {
     inventoryAfter: granted.inventory,
     droppedItemId: granted.droppedItemId,
     selfBuy: true,
+  };
+}
+
+/**
+ * Admit a queued human into an open public lobby by replacing a Sentinel seat.
+ * Private rooms use code-join paths instead — do not call this for private_lobby.
+ */
+export function seatGrid9HumanInOpenLobby(
+  current: Grid9GameState,
+  seed: Grid9HumanSeed,
+  nowMs = Date.now(),
+): { state: Grid9GameState; slotIndex: Grid9SlotIndex } {
+  if (current.roomMode !== 'public') {
+    throw new Grid9Error(
+      'NOT_ELIGIBLE',
+      'Open lobby seating is public-only; private rooms use code join',
+    );
+  }
+  if (current.phase !== 'lobby_waiting' && current.phase !== 'countdown') {
+    throw new Grid9Error(
+      'MATCH_NOT_ACTIVE',
+      'Public lobby is no longer accepting joiners',
+      { stateVersion: current.authority.stateVersion },
+    );
+  }
+  const already = current.players.find(
+    (player): player is Grid9HumanPlayer =>
+      player.kind === 'human' && player.userId === seed.userId,
+  );
+  if (already) {
+    return { state: current, slotIndex: already.slotIndex };
+  }
+  const openIndex = current.players.findIndex(
+    (player) => player.kind === 'sentinel',
+  );
+  if (openIndex < 0) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Public lobby is full', {
+      stateVersion: current.authority.stateVersion,
+    });
+  }
+  const slotIndex = openIndex as Grid9SlotIndex;
+  const now = iso(nowMs);
+  const state = cloneState(current);
+  state.players[slotIndex] = createHuman(
+    state.matchId,
+    state.liveSessionId,
+    seed,
+    slotIndex,
+    now,
+  );
+  state.players[slotIndex].connectionState = 'connected';
+  return {
+    state: mutationDone(state, current, now, 1),
+    slotIndex,
   };
 }
 

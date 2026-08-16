@@ -123,6 +123,8 @@ export const grid9AggregateFields = {
 
 export const grid9RegionalAggregateFields = {
   rollover: 'rollover',
+  /** Match id of the region's open public lobby_waiting match (coalesce Join). */
+  openPublicLobby: 'open-public-lobby',
   connectionNonce(connectionSessionId: string, nonceDigest: string): string {
     return `nonce:${keyPart(connectionSessionId, 'connectionSessionId')}:${nonceDigestPart(nonceDigest)}`;
   },

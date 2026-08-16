@@ -7,22 +7,30 @@ import type { Server } from 'socket.io';
 import { getEconomyInfra } from '../../economy/infra';
 import { logger } from '../../config/logger';
 import { GRID9_MATCH_TTL_SECONDS } from './constants';
+import { grid9CanonicalOperationHash } from './canonical';
 import {
   activateGrid9InitializedMatch,
   createGrid9Match,
+  seatGrid9HumanInOpenLobby,
   type Grid9Identity,
   type Grid9OpeningRollover,
 } from './grid9Engine';
 import {
+  commitGrid9ServerMutation,
   createGrid9Aggregate,
   grid9NonceDigest,
+  newGrid9ServerOperationReceipt,
   readGrid9State,
 } from './grid9AggregateStore';
 import { Grid9Error } from './grid9Errors';
 import {
   createGrid9PrivateEvent,
+  createGrid9RoomEvent,
+  emitGrid9Room,
   emitGrid9ToConnection,
 } from './grid9Broadcast';
+import { timerOutboxForState } from './grid9MatchService';
+import { toGrid9PublicGameState } from './grid9Projection';
 import type {
   Grid9QueueJoinIntent,
   Grid9QueueLeaveIntent,
@@ -42,8 +50,46 @@ import type {
   Grid9SponsorPass,
 } from './state';
 
-const MATCHMAKING_WINDOW_MS = 150;
+/** Short delay so near-simultaneous Joins land in one Redis queue batch. */
+const MATCHMAKING_WINDOW_MS = 400;
 const REGION_LOCK_MS = 15_000;
+
+async function readOpenPublicLobbyMatchId(
+  region: string,
+): Promise<string | null> {
+  const raw = await redis().hget(
+    grid9RedisKeys.regionalAggregate(region),
+    grid9RegionalAggregateFields.openPublicLobby,
+  );
+  return raw && raw.length > 0 ? raw : null;
+}
+
+export async function setOpenPublicLobbyMatchId(
+  region: string,
+  matchId: string,
+): Promise<void> {
+  await redis().hset(
+    grid9RedisKeys.regionalAggregate(region),
+    grid9RegionalAggregateFields.openPublicLobby,
+    matchId,
+  );
+}
+
+export async function clearOpenPublicLobbyMatchId(
+  region: string,
+  matchId?: string,
+): Promise<void> {
+  const key = grid9RedisKeys.regionalAggregate(region);
+  const field = grid9RegionalAggregateFields.openPublicLobby;
+  if (!matchId) {
+    await redis().hdel(key, field);
+    return;
+  }
+  const current = await redis().hget(key, field);
+  if (current === matchId) {
+    await redis().hdel(key, field);
+  }
+}
 
 const SPONSOR_PASS_RESERVE_LUA = `
 local key = KEYS[1]
@@ -443,6 +489,217 @@ async function releaseLock(key: string, token: string): Promise<void> {
   );
 }
 
+async function assignQueueEntryToMatch(args: {
+  io: Server;
+  region: string;
+  entry: Grid9QueueEntry;
+  matchId: string;
+  liveSessionId: string;
+  slotIndex: number;
+  stateVersion: number;
+}): Promise<void> {
+  const assignmentId = randomUUID();
+  const assignmentToken = randomBytes(32).toString('base64url');
+  const assignment: Grid9MatchAssignment = {
+    schemaVersion: 1,
+    assignmentId,
+    region: args.region,
+    assignmentTokenHash: createHash('sha256')
+      .update(assignmentToken, 'utf8')
+      .digest('hex'),
+    matchId: args.matchId,
+    liveSessionId: args.liveSessionId,
+    ticketId: args.entry.ticketId,
+    userId: args.entry.userId,
+    connectionSessionId: args.entry.connectionSessionId,
+    sponsorPassId: args.entry.sponsorPassId,
+    slotIndex: args.slotIndex as Grid9MatchAssignment['slotIndex'],
+    issuedAt: new Date().toISOString(),
+    expiresAt: new Date(
+      Date.now() + GRID9_ASSIGNMENT_TTL_SECONDS * 1000,
+    ).toISOString(),
+    consumedAt: null,
+  };
+  await redis()
+    .multi()
+    .set(
+      grid9RedisKeys.userMatch(args.entry.userId),
+      args.matchId,
+      'EX',
+      GRID9_MATCH_TTL_SECONDS,
+    )
+    .set(
+      grid9RedisKeys.assignment(args.region, assignmentId),
+      JSON.stringify(assignment),
+      'EX',
+      GRID9_ASSIGNMENT_TTL_SECONDS,
+    )
+    .del(grid9RedisKeys.queueEntry(args.region, args.entry.ticketId))
+    .zrem(grid9RedisKeys.queue(args.region), args.entry.ticketId)
+    .exec();
+  emitGrid9ToConnection(
+    args.io,
+    args.entry.connectionSessionId,
+    createGrid9PrivateEvent({
+      type: 'MATCH_ASSIGNED',
+      connectionSessionId: args.entry.connectionSessionId,
+      matchId: args.matchId,
+      stateVersion: args.stateVersion,
+      causationIntentId: args.entry.ticketId,
+      payload: {
+        assignmentId,
+        matchId: args.matchId,
+        liveSessionId: args.liveSessionId,
+        slotIndex: args.slotIndex as Grid9MatchAssignment['slotIndex'],
+        assignmentToken,
+        assignmentExpiresAt: assignment.expiresAt,
+      },
+    }),
+  );
+}
+
+/**
+ * Prefer seating into the region's open public lobby_waiting match so same-window
+ * Joins share one room. Private rooms are untouched (code join).
+ */
+async function tryAdmitEntriesToOpenPublicLobby(args: {
+  io: Server;
+  region: string;
+  entries: Grid9QueueEntry[];
+}): Promise<Grid9QueueEntry[]> {
+  const openMatchId = await readOpenPublicLobbyMatchId(args.region);
+  if (!openMatchId) return args.entries;
+
+  let state: Awaited<ReturnType<typeof readGrid9State>>;
+  try {
+    state = await readGrid9State(openMatchId);
+  } catch (error) {
+    if (error instanceof Grid9Error && error.code === 'MATCH_NOT_FOUND') {
+      await clearOpenPublicLobbyMatchId(args.region, openMatchId);
+      return args.entries;
+    }
+    throw error;
+  }
+
+  if (
+    state.roomMode !== 'public' ||
+    (state.phase !== 'lobby_waiting' && state.phase !== 'countdown')
+  ) {
+    await clearOpenPublicLobbyMatchId(args.region, openMatchId);
+    return args.entries;
+  }
+
+  const remaining: Grid9QueueEntry[] = [];
+  let working = state;
+  for (const entry of args.entries) {
+    const openSeats = working.players.filter((p) => p.kind === 'sentinel').length;
+    if (openSeats <= 0) {
+      remaining.push(entry);
+      continue;
+    }
+    try {
+      const seated = seatGrid9HumanInOpenLobby(working, {
+        userId: entry.userId,
+        publicProfileId: entry.publicProfileId,
+        displayName: entry.displayName,
+        avatarUrl: entry.avatarUrl,
+        queueTicketId: entry.ticketId,
+        sponsorPassId: entry.sponsorPassId,
+      });
+      if (seated.state === working) {
+        await assignQueueEntryToMatch({
+          io: args.io,
+          region: args.region,
+          entry,
+          matchId: working.matchId,
+          liveSessionId: working.liveSessionId,
+          slotIndex: seated.slotIndex,
+          stateVersion: working.authority.stateVersion,
+        });
+        continue;
+      }
+      const operationId = `lobby-admit-${working.matchId}-${entry.ticketId}`;
+      const publicAfter = toGrid9PublicGameState(seated.state);
+      const replacementPlayer = publicAfter.players[seated.slotIndex];
+      const roomEvent = createGrid9RoomEvent({
+        type: 'PLAYER_CONNECTION_CHANGED',
+        matchId: working.matchId,
+        sequence: seated.state.authority.eventSequence,
+        stateVersion: seated.state.authority.stateVersion,
+        causationIntentId: entry.ticketId,
+        payload: {
+          slotIndex: seated.slotIndex,
+          connectionState: 'connected',
+          replacementPlayer,
+          audienceCount: publicAfter.audienceCount,
+        },
+      });
+      const operationHash = grid9CanonicalOperationHash({
+        matchId: working.matchId,
+        operationId,
+        kind: 'phase_transition',
+        payload: {
+          stateVersion: working.authority.stateVersion,
+          admittedUserId: entry.userId,
+          slotIndex: seated.slotIndex,
+        },
+      });
+      const committed = await commitGrid9ServerMutation({
+        currentState: working,
+        nextState: seated.state,
+        operationReceipt: newGrid9ServerOperationReceipt({
+          matchId: working.matchId,
+          operationId,
+          kind: 'phase_transition',
+          canonicalOperationHash: operationHash,
+          stateVersion: seated.state.authority.stateVersion,
+          result: { slotIndex: seated.slotIndex, userId: entry.userId },
+          recordedAt: roomEvent.sentAt,
+        }),
+        timerOutbox: timerOutboxForState(seated.state),
+      });
+      if (committed.status !== 'committed') {
+        remaining.push(entry);
+        working = await readGrid9State(openMatchId);
+        continue;
+      }
+      working = seated.state;
+      emitGrid9Room(args.io, working.matchId, roomEvent);
+      await assignQueueEntryToMatch({
+        io: args.io,
+        region: args.region,
+        entry,
+        matchId: working.matchId,
+        liveSessionId: working.liveSessionId,
+        slotIndex: seated.slotIndex,
+        stateVersion: working.authority.stateVersion,
+      });
+    } catch (error: any) {
+      if (
+        error instanceof Grid9Error &&
+        (error.code === 'NOT_ELIGIBLE' || error.code === 'MATCH_NOT_ACTIVE')
+      ) {
+        remaining.push(entry);
+        continue;
+      }
+      logger.warn(
+        {
+          region: args.region,
+          matchId: openMatchId,
+          err: error?.message || String(error),
+        },
+        '[grid9] open lobby admit failed',
+      );
+      remaining.push(entry);
+    }
+  }
+
+  if (working.players.every((p) => p.kind === 'human')) {
+    await clearOpenPublicLobbyMatchId(args.region, openMatchId);
+  }
+  return remaining;
+}
+
 export async function processGrid9RegionQueue(
   io: Server,
   region: string,
@@ -497,6 +754,9 @@ export async function processGrid9RegionQueue(
         entries.push(entry);
       }
     }
+    if (entries.length === 0) return;
+
+    entries = await tryAdmitEntriesToOpenPublicLobby({ io, region, entries });
     if (entries.length === 0) return;
 
     const claimField = grid9RegionalAggregateFields.matchmakingClaim(
@@ -583,19 +843,14 @@ export async function processGrid9RegionQueue(
       if (!recovered) return;
       state = recovered;
     }
+    if (state.phase === 'lobby_waiting' || state.phase === 'countdown') {
+      await setOpenPublicLobbyMatchId(region, state.matchId);
+    }
     await redis().zadd(
       grid9RedisKeys.timersProjection(),
       Date.parse(state.phaseEndsAt as string),
       `${state.matchId}|lobby_waiting_end|${state.authority.stateVersion}`,
     );
-    for (const entry of entries) {
-      await redis().set(
-        grid9RedisKeys.userMatch(entry.userId),
-        state.matchId,
-        'EX',
-        GRID9_MATCH_TTL_SECONDS,
-      );
-    }
 
     for (const entry of entries) {
       const slot = state.players.find(
@@ -603,58 +858,15 @@ export async function processGrid9RegionQueue(
           player.kind === 'human' && player.userId === entry.userId,
       );
       if (!slot) continue;
-      const assignmentId = randomUUID();
-      const assignmentToken = randomBytes(32).toString('base64url');
-      const assignment: Grid9MatchAssignment = {
-        schemaVersion: 1,
-        assignmentId,
+      await assignQueueEntryToMatch({
+        io,
         region,
-        assignmentTokenHash: createHash('sha256')
-          .update(assignmentToken, 'utf8')
-          .digest('hex'),
+        entry,
         matchId: state.matchId,
         liveSessionId: state.liveSessionId,
-        ticketId: entry.ticketId,
-        userId: entry.userId,
-        connectionSessionId: entry.connectionSessionId,
-        sponsorPassId: entry.sponsorPassId,
         slotIndex: slot.slotIndex,
-        issuedAt: new Date().toISOString(),
-        expiresAt: new Date(
-          Date.now() + GRID9_ASSIGNMENT_TTL_SECONDS * 1000,
-        ).toISOString(),
-        consumedAt: null,
-      };
-      await redis()
-        .multi()
-        .set(
-          grid9RedisKeys.assignment(region, assignmentId),
-          JSON.stringify(assignment),
-          'EX',
-          GRID9_ASSIGNMENT_TTL_SECONDS,
-        )
-        .del(grid9RedisKeys.queueEntry(region, entry.ticketId))
-        .zrem(grid9RedisKeys.queue(region), entry.ticketId)
-        .exec();
-      emitGrid9ToConnection(
-        io,
-        entry.connectionSessionId,
-        createGrid9PrivateEvent({
-          type: 'MATCH_ASSIGNED',
-          connectionSessionId: entry.connectionSessionId,
-          matchId: state.matchId,
-          stateVersion: state.authority.stateVersion,
-          causationIntentId: entry.ticketId,
-          payload: {
-            assignmentId,
-            matchId: state.matchId,
-            liveSessionId: state.liveSessionId,
-            slotIndex: slot.slotIndex,
-            assignmentToken,
-            assignmentExpiresAt: assignment.expiresAt,
-          },
-        }),
-      );
+        stateVersion: state.authority.stateVersion,
+      });
     }
     await redis().hdel(
       grid9RedisKeys.regionalAggregate(region),

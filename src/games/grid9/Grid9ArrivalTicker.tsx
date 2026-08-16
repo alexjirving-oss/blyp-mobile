@@ -38,8 +38,8 @@ export function Grid9ArrivalTicker({
   if (!message) return null;
 
   return (
-    <View className="mx-4 mb-2 rounded-xl border border-amber-400/30 bg-slate-900/90 px-3 py-2">
-      <Text className="text-center text-[11px] font-extrabold text-amber-200">{message}</Text>
+    <View className="mx-3 mb-2 rounded-xl border border-blyp-primary/30 bg-blyp-card/90 px-3 py-2">
+      <Text className="text-center text-[11px] font-extrabold text-blyp-primary">{message}</Text>
     </View>
   );
 }

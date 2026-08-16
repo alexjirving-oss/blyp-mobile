@@ -363,6 +363,7 @@ export const grid9GameStateSchema = z
     roomMode: z.enum(['public', 'private']),
     ownerUserId: id.nullable(),
     roomCode: z.string().min(4).max(12).nullable(),
+    entryFeeCoins: nonNegativeInteger.default(0),
     phase: z.enum([
       'initializing',
       'lobby',

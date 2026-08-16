@@ -439,16 +439,27 @@ export function grid9SentinelReactionMs(sentinel: Grid9SentinelPlayer): number {
   );
 }
 
-/** Combat turn timer due-at: early for sentinels, full 30s for humans. */
+/**
+ * Combat turn timer due-at:
+ * - Sentinel: ~1.5s auto-act ceiling
+ * - Human who already attacked (or auto-resolved): immediate → next roulette
+ * - Otherwise: full 30s window
+ */
 export function grid9CombatTimerDueAtMs(state: Grid9GameState): number | null {
   if (state.phase !== 'combat' || !state.turn) return null;
   const endsAt = Date.parse(state.turn.endsAt);
+  const nowMs = Date.now();
   const spotlight = state.players[state.turn.spotlightSlotIndex];
-  if (!spotlight || spotlight.kind !== 'sentinel' || spotlight.status !== 'alive') {
-    return endsAt;
+  if (!spotlight || spotlight.status !== 'alive') {
+    return Math.min(endsAt, nowMs);
   }
-  if (state.turn.autoResolved) return endsAt;
-  const startedAt = Date.parse(state.turn.startedAt);
-  const early = startedAt + grid9SentinelReactionMs(spotlight);
-  return Math.min(endsAt, early);
+  if (state.turn.autoResolved || state.turn.attacksUsedThisTurn >= 1) {
+    return Math.min(endsAt, nowMs);
+  }
+  if (spotlight.kind === 'sentinel') {
+    const startedAt = Date.parse(state.turn.startedAt);
+    const early = startedAt + grid9SentinelReactionMs(spotlight);
+    return Math.min(endsAt, early);
+  }
+  return endsAt;
 }

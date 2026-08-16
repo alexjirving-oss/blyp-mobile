@@ -9,6 +9,7 @@ export type Grid9PublicMatchSummary = {
   region: string;
   roomMode: 'public';
   survivors: number;
+  entryFeeCoins: number;
   updatedAt: string;
 };
 
@@ -41,6 +42,7 @@ export async function fetchPublicGrid9Matches(
     region: String(row.region || 'eu-west-2'),
     roomMode: 'public' as const,
     survivors: Math.max(0, Number(row.survivors || 0)),
+    entryFeeCoins: Math.max(0, Number(row.entryFeeCoins || 0)),
     updatedAt: String(row.updatedAt || ''),
   })).filter((row: Grid9PublicMatchSummary) => row.matchId.length > 0);
 }

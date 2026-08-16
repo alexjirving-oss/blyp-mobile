@@ -33,7 +33,11 @@ export interface Grid9HookValue {
     beneficiarySlotIndex: Grid9SlotIndex | number;
     amountCoins: number;
   }) => string;
-  sendPrivateRoomCreateIntent: (input: { region: string; displayName?: string }) => string;
+  sendPrivateRoomCreateIntent: (input: {
+    region: string;
+    displayName?: string;
+    entryFeeCoins?: number;
+  }) => string;
   sendPrivateRoomJoinIntent: (input: { region: string; roomCode: string }) => string;
   sendStartPrivateMatchIntent: () => string;
   sendRequestSnapshotIntent: (matchId?: string) => string;

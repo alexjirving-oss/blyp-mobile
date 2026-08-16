@@ -26,6 +26,11 @@ import {
   startPrivateMatchFromLobby,
   type Grid9Identity,
 } from './grid9Engine';
+import {
+  applyGrid9EntryFeeCredit,
+  debitGrid9EntryFee,
+  normalizeGrid9EntryFeeCoins,
+} from './grid9EntryFee';
 import { Grid9Error } from './grid9Errors';
 import { grid9CanonicalOperationHash } from './canonical';
 import { toGrid9PublicGameState } from './grid9Projection';
@@ -84,10 +89,12 @@ export async function createGrid9PrivateRoom(args: {
   connectionSessionId: string;
   region: string;
   intentId: string;
+  entryFeeCoins?: number;
 }): Promise<void> {
   const roomCode = mintRoomCode();
   const matchId = randomUUID();
-  const state = createGrid9Match({
+  const entryFeeCoins = normalizeGrid9EntryFeeCoins(args.entryFeeCoins);
+  let state = createGrid9Match({
     matchId,
     liveSessionId: matchId,
     region: args.region,
@@ -95,6 +102,7 @@ export async function createGrid9PrivateRoom(args: {
     ownerUserId: args.identity.userId,
     roomCode,
     houseSeedCoins: 0,
+    entryFeeCoins,
     humans: [
       {
         ...args.identity,
@@ -103,6 +111,15 @@ export async function createGrid9PrivateRoom(args: {
       },
     ],
   });
+  if (entryFeeCoins > 0) {
+    await debitGrid9EntryFee({
+      matchId,
+      userId: args.identity.userId,
+      intentId: args.intentId,
+      amountCoins: entryFeeCoins,
+    });
+    state = applyGrid9EntryFeeCredit(state, args.identity.userId, entryFeeCoins);
+  }
   const created = await createGrid9Aggregate(state);
   if (!created) {
     throw new Grid9Error('INTERNAL_ERROR', 'Failed to create private room');
@@ -258,7 +275,21 @@ export async function joinGrid9PrivateRoom(args: {
       args.identity,
       args.intentId,
     );
-    if (next === state) {
+    let seatedState = next;
+    if (next !== state && Number(state.entryFeeCoins || 0) > 0) {
+      await debitGrid9EntryFee({
+        matchId,
+        userId: args.identity.userId,
+        intentId: args.intentId,
+        amountCoins: state.entryFeeCoins,
+      });
+      seatedState = applyGrid9EntryFeeCredit(
+        next,
+        args.identity.userId,
+        state.entryFeeCoins,
+      );
+    }
+    if (seatedState === state) {
       await redis().set(
         grid9RedisKeys.userMatch(args.identity.userId),
         matchId,
@@ -310,7 +341,7 @@ export async function joinGrid9PrivateRoom(args: {
     try {
       const result = await commitGrid9ServerMutation({
         currentState: state,
-        nextState: next,
+        nextState: seatedState,
         operationReceipt: newGrid9ServerOperationReceipt({
           matchId,
           operationId,
@@ -321,9 +352,9 @@ export async function joinGrid9PrivateRoom(args: {
             kind: 'phase_transition',
             payload: { intentId: args.intentId, userId: args.identity.userId },
           }),
-          stateVersion: next.authority.stateVersion,
+          stateVersion: seatedState.authority.stateVersion,
           result: { slotIndex },
-          recordedAt: next.updatedAt,
+          recordedAt: seatedState.updatedAt,
         }),
       });
       if (result.status === 'committed' || result.status === 'replay') {

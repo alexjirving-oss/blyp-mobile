@@ -112,7 +112,9 @@ function LiveGrid9Matches({ navigation, enabled }) {
               {formatPhase(match.phase)} · {match.survivors}/9 alive
             </Text>
             <Text style={styles.matchRowMeta} numberOfLines={1}>
-              Jackpot {match.jackpotCoins} · audience {match.audienceCount} · {match.region}
+              Jackpot {match.jackpotCoins}
+              {match.entryFeeCoins > 0 ? ` · entry ${match.entryFeeCoins}` : ''}
+              {' · '}audience {match.audienceCount} · {match.region}
             </Text>
           </View>
           <View style={styles.spectateBtn}>

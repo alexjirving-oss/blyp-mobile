@@ -197,6 +197,8 @@ export interface Grid9PingPayload {
 export interface Grid9PrivateRoomCreatePayload {
   region: string;
   displayName?: string;
+  /** Optional entry fee (0–5000). 100% goes to jackpot. Host pays too. */
+  entryFeeCoins?: number;
 }
 
 export interface Grid9PrivateRoomJoinPayload {

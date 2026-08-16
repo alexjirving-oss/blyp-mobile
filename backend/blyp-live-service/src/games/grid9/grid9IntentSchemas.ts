@@ -193,6 +193,7 @@ const privateRoomCreate = z
       .object({
         region: id,
         displayName: z.string().min(1).max(80).optional(),
+        entryFeeCoins: z.number().int().min(0).max(5_000).optional(),
       })
       .strict(),
   })

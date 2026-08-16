@@ -293,6 +293,7 @@ describe('Grid 9 phase-one contracts', () => {
       roomMode: 'public',
       ownerUserId: null,
       roomCode: null,
+      entryFeeCoins: 0,
       phase: 'combat',
       phaseStartedAt: now,
       phaseEndsAt: '2026-08-15T03:45:00.000Z',
@@ -390,7 +391,7 @@ describe('Grid 9 phase-one contracts', () => {
   it('keeps the documented canonical Redis JSON executable', () => {
     // Historical Phase-1 JSON sample in ARCHITECTURE.md is v1-shaped.
     // Wave 1 authority is covered by the runtime fixture + engine tests.
-    assert.equal(GRID9_RULES_VERSION, '2026-08-16.3');
+    assert.equal(GRID9_RULES_VERSION, '2026-08-16.5');
     assert.ok(
       readFileSync(resolve(process.cwd(), 'src/games/grid9/ARCHITECTURE.md'), 'utf8').includes(
         'Grid 9 v2',

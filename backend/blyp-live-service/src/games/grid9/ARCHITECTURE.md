@@ -855,8 +855,8 @@ and must follow the atomic boundary above.
 ## Grid 9 v2 (Wave 1)
 
 **Unlocked** 2026-08-16 as a protocol/product redesign. Client design: `src/games/grid9/GRID9_V2_DESIGN.md`.
-Protocol version **2**, rules version **2026-08-16.3**. LIVE / IVS paths remain frozen; stage video is
-placeholder / Sentinel only.
+Protocol version **2**, rules version **2026-08-16.4**. LIVE / IVS paths remain frozen; stage video is
+Grid9-local LiveKit (or SentinelStage fallback).
 
 ### Authority that does not change
 
@@ -866,8 +866,11 @@ send intents only; they never invent HP, jackpot, or winner.
 
 ### Lifecycle (v2)
 
-**Public:** `initializing` → `lobby_waiting` (15s) → sentinel fill → `roulette` (≈3.5s) → `combat`
-(30s action window) → `roulette` … → `settling` → `completed`.
+**Public:** `initializing` → `lobby_waiting` (~30s open lobby) → sentinel fill → `roulette` (≈3.5s) → `combat`
+(30s action window; after act or timeout → immediate next roulette) → … → `settling` → `completed`.
+
+Humans who Join during the same public lobby window coalesce into **one** open match (Redis
+`open-public-lobby` pointer + seat replace). Private rooms are unchanged (code join / host start).
 
 **Private:** `initializing` → `private_lobby` (indefinite) until host `START_PRIVATE_MATCH` →
 sentinel fill → same `roulette` / `combat` loop.

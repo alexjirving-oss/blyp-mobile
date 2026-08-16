@@ -235,6 +235,8 @@ export interface Grid9GameState {
   roomMode: Grid9RoomMode;
   ownerUserId: string | null;
   roomCode: string | null;
+  /** Optional join fee (coins). 100% credited to jackpot on seat claim. */
+  entryFeeCoins: number;
   phase: Grid9MatchPhase;
   phaseStartedAt: string;
   phaseEndsAt: string | null;
@@ -262,6 +264,7 @@ export interface Grid9PublicGameState {
   roomMode: Grid9RoomMode;
   ownerPublicProfileId: string | null;
   roomCode: string | null;
+  entryFeeCoins: number;
   phase: Grid9MatchPhase;
   phaseStartedAt: string;
   phaseEndsAt: string | null;

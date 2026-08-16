@@ -248,8 +248,9 @@ export function buildPingIntent(session: Grid9IntentSessionFields): Grid9PingInt
 
 export function buildPrivateRoomCreateIntent(
   session: Grid9IntentSessionFields,
-  payload: { region: string; displayName?: string },
+  payload: { region: string; displayName?: string; entryFeeCoins?: number },
 ): Grid9PrivateRoomCreateIntent {
+  const fee = Math.max(0, Math.floor(Number(payload.entryFeeCoins) || 0));
   return {
     ...envelopeBase(session),
     type: 'PRIVATE_ROOM_CREATE',
@@ -258,6 +259,7 @@ export function buildPrivateRoomCreateIntent(
     payload: {
       region: payload.region,
       ...(payload.displayName ? { displayName: payload.displayName } : {}),
+      ...(fee > 0 ? { entryFeeCoins: fee } : {}),
     },
   };
 }

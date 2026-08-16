@@ -477,6 +477,7 @@ async function handleGrid9Intent(args: {
       connectionSessionId,
       region: intent.payload.region,
       intentId: intent.intentId,
+      entryFeeCoins: intent.payload.entryFeeCoins,
     });
   } else if (intent.type === 'PRIVATE_ROOM_JOIN') {
     await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
