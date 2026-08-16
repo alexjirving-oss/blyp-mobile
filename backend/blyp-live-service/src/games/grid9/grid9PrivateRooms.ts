@@ -469,6 +469,8 @@ export async function kickGrid9PrivatePlayer(args: {
     args.identity.userId,
     args.targetUserId,
   );
+  const publicAfter = toGrid9PublicGameState(resolution.state);
+  const replacementPlayer = publicAfter.players[resolution.kickedSlotIndex];
   const operationId = `kick-${args.intentId}`;
   const roomEvent = createGrid9RoomEvent({
     type: 'PLAYER_CONNECTION_CHANGED',
@@ -479,6 +481,9 @@ export async function kickGrid9PrivatePlayer(args: {
     payload: {
       slotIndex: resolution.kickedSlotIndex,
       connectionState: 'disconnected',
+      // Host kick fills the seat with a Sentinel — clients must replace, not ghost.
+      replacementPlayer,
+      audienceCount: publicAfter.audienceCount,
     },
   });
   const result = await commitGrid9ServerMutation({

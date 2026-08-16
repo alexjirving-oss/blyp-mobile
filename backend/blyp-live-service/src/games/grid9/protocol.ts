@@ -14,7 +14,7 @@ import type {
   Grid9QueueEntry,
   Grid9TurnState,
 } from './state';
-import type { Grid9PublicActionActor } from './players';
+import type { Grid9PublicActionActor, Grid9PublicPlayer } from './players';
 
 export type Grid9ClientIntentType =
   | 'QUEUE_JOIN'
@@ -437,6 +437,9 @@ export interface Grid9PlayerEliminatedPayload {
 export interface Grid9PlayerConnectionChangedPayload {
   slotIndex: Grid9SlotIndex;
   connectionState: 'connected' | 'reconnecting' | 'disconnected';
+  /** Present on host kick: seat is replaced (Sentinel) so the 9-box stays full. */
+  replacementPlayer?: Grid9PublicPlayer;
+  audienceCount?: number;
 }
 
 export interface Grid9JackpotChangedPayload {

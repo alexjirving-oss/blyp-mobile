@@ -327,7 +327,8 @@ export async function fireGrid9Weapon(args: {
     debitCoins,
     creditCoins: 0,
     jackpotDeltaCoins: jackpotContributionCoins,
-    escrowBalanceBefore: snapshot.escrow!.availableCoins,
+    // Inventory/free-drop fires may have no prior escrow (gifted arsenal only).
+    escrowBalanceBefore: snapshot.escrow?.availableCoins ?? 0,
     escrowBalanceAfter: spent.wallet.availableCoins,
     stateVersionBefore: snapshot.state.authority.stateVersion,
     stateVersionAfter: resolution.state.authority.stateVersion,

@@ -141,6 +141,21 @@ function applyRoomPatch(
       ...player,
       mercenaryBankrollCoins: event.payload.bankrollAfter,
     }));
+  } else if (event.type === 'ARSENAL_GRANTED' && nextMatch) {
+    nextMatch = mapPlayer(nextMatch, event.payload.recipientSlotIndex, (player) => ({
+      ...player,
+      inventory: [...event.payload.inventoryAfter],
+      mercenaryBankrollCoins: player.mercenaryBankrollCoins + event.payload.seatCoins,
+      mercenarySponsorCoins:
+        (player.mercenarySponsorCoins ?? 0) + event.payload.seatCoins,
+    }));
+    nextMatch = {
+      ...nextMatch,
+      jackpot: {
+        ...nextMatch.jackpot,
+        currentCoins: event.payload.jackpotTotalCoins,
+      },
+    };
   } else if (event.type === 'TURN_ADVANCED' && nextMatch) {
     nextMatch = { ...nextMatch, turn: event.payload.turn, phase: 'combat', roulette: null };
   } else if (event.type === 'TURN_TICK' && nextMatch) {
@@ -189,11 +204,26 @@ function applyRoomPatch(
       lastMicroDrop: result,
     };
   } else if (event.type === 'PLAYER_CONNECTION_CHANGED' && nextMatch) {
-    nextMatch = mapPlayer(nextMatch, event.payload.slotIndex, (player) =>
-      player.kind === 'human'
-        ? { ...player, connectionState: event.payload.connectionState }
-        : player,
-    );
+    if (event.payload.replacementPlayer) {
+      nextMatch = {
+        ...nextMatch,
+        players: nextMatch.players.map((player) =>
+          player.slotIndex === event.payload.slotIndex
+            ? event.payload.replacementPlayer!
+            : player,
+        ),
+        audienceCount:
+          typeof event.payload.audienceCount === 'number'
+            ? event.payload.audienceCount
+            : nextMatch.audienceCount,
+      };
+    } else {
+      nextMatch = mapPlayer(nextMatch, event.payload.slotIndex, (player) =>
+        player.kind === 'human'
+          ? { ...player, connectionState: event.payload.connectionState }
+          : player,
+      );
+    }
   } else if (event.type === 'PLAYER_ELIMINATED' && nextMatch) {
     nextMatch = mapPlayer(nextMatch, event.payload.slotIndex, (player) => ({
       ...player,

@@ -502,6 +502,21 @@ export interface Grid9MercenaryFundedPayload {
   receipt: Grid9PublicPurchaseReceipt;
 }
 
+export interface Grid9ArsenalGrantedPayload {
+  senderPublicProfileId: string;
+  senderDisplayName: string;
+  recipientSlotIndex: Grid9SlotIndex;
+  itemId: Grid9WeaponId | Grid9ShieldId;
+  costCoins: number;
+  seatCoins: number;
+  jackpotCoins: number;
+  selfBuy: boolean;
+  droppedItemId: Grid9WeaponId | Grid9ShieldId | null;
+  inventoryAfter: Array<Grid9WeaponId | Grid9ShieldId>;
+  receipt: Grid9PublicPurchaseReceipt;
+  jackpotTotalCoins: number;
+}
+
 export interface Grid9TurnAdvancedPayload {
   previousTurnNumber: number;
   turn: Grid9TurnState;
@@ -541,6 +556,9 @@ export interface Grid9PlayerEliminatedPayload {
 export interface Grid9PlayerConnectionChangedPayload {
   slotIndex: Grid9SlotIndex;
   connectionState: Grid9HumanConnectionState;
+  /** Present on host kick: seat replaced with Sentinel (closed 9-seat model). */
+  replacementPlayer?: Grid9PublicPlayer;
+  audienceCount?: number;
 }
 
 export interface Grid9JackpotChangedPayload {
@@ -639,6 +657,10 @@ export type Grid9MercenaryFundedEvent = Grid9RoomServerEventEnvelope<
   'MERCENARY_FUNDED',
   Grid9MercenaryFundedPayload
 >;
+export type Grid9ArsenalGrantedEvent = Grid9RoomServerEventEnvelope<
+  'ARSENAL_GRANTED',
+  Grid9ArsenalGrantedPayload
+>;
 export type Grid9TurnAdvancedEvent = Grid9RoomServerEventEnvelope<
   'TURN_ADVANCED',
   Grid9TurnAdvancedPayload
@@ -701,6 +723,7 @@ export type Grid9RoomServerEvent =
   | Grid9WeaponResolvedEvent
   | Grid9ShieldResolvedEvent
   | Grid9MercenaryFundedEvent
+  | Grid9ArsenalGrantedEvent
   | Grid9TurnAdvancedEvent
   | Grid9TurnTickEvent
   | Grid9RouletteStartEvent

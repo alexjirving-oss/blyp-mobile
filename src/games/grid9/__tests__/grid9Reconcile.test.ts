@@ -264,6 +264,95 @@ describe('Grid 9 sequence reconciliation', () => {
     expect(applied.session.match?.phase).toBe('completed');
   });
 
+  it('applies ARSENAL_GRANTED into inventory and jackpot', () => {
+    const afterSnap = applyGrid9ServerEvent(createEmptyGrid9Session(), snapshotEvent()).session;
+    const granted = {
+      protocol: 'grid9.ws' as const,
+      protocolVersion: 2 as const,
+      direction: 'server_to_client' as const,
+      routing: 'room' as const,
+      type: 'ARSENAL_GRANTED' as const,
+      messageId: 'msg-gift',
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAA',
+      sentAt: '2026-08-15T00:00:03.000Z',
+      serverSessionId: 'server-1',
+      matchId: 'match-1',
+      sequence: 5,
+      stateVersion: 5,
+      causationIntentId: 'intent-gift',
+      payload: {
+        senderPublicProfileId: 'aud',
+        senderDisplayName: 'Viewer',
+        recipientSlotIndex: 0 as const,
+        itemId: 'arrow' as const,
+        costCoins: 10,
+        seatCoins: 7,
+        jackpotCoins: 3,
+        selfBuy: false,
+        droppedItemId: null,
+        inventoryAfter: ['arrow' as const],
+        receipt: {
+          entryId: 'e-gift',
+          intentId: 'intent-gift',
+          debitCoins: 10,
+          jackpotContributionCoins: 3,
+          stateVersion: 5,
+          committedAt: '2026-08-15T00:00:03.000Z',
+        },
+        jackpotTotalCoins: 28,
+      },
+    };
+    const applied = applyGrid9ServerEvent(afterSnap, granted);
+    expect(applied.effects.dropped).toBe(false);
+    expect(applied.session.match?.players[0].inventory).toEqual(['arrow']);
+    expect(applied.session.match?.players[0].mercenaryBankrollCoins).toBe(7);
+    expect(applied.session.match?.jackpot.currentCoins).toBe(28);
+  });
+
+  it('replaces kicked seat when PLAYER_CONNECTION_CHANGED carries replacementPlayer', () => {
+    const afterSnap = applyGrid9ServerEvent(createEmptyGrid9Session(), snapshotEvent()).session;
+    const kick = {
+      protocol: 'grid9.ws' as const,
+      protocolVersion: 2 as const,
+      direction: 'server_to_client' as const,
+      routing: 'room' as const,
+      type: 'PLAYER_CONNECTION_CHANGED' as const,
+      messageId: 'msg-kick',
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAA',
+      sentAt: '2026-08-15T00:00:04.000Z',
+      serverSessionId: 'server-1',
+      matchId: 'match-1',
+      sequence: 5,
+      stateVersion: 5,
+      causationIntentId: 'intent-kick',
+      payload: {
+        slotIndex: 0 as const,
+        connectionState: 'disconnected' as const,
+        replacementPlayer: {
+          slotId: 'slot-0',
+          slotIndex: 0 as const,
+          kind: 'sentinel' as const,
+          displayName: 'Sentinel',
+          avatarUrl: null,
+          status: 'alive' as const,
+          mode: 'combatant' as const,
+          health: 100,
+          maxHealth: 100,
+          shieldPoints: 0,
+          maxShieldPoints: 60,
+          mercenaryBankrollCoins: 0,
+          sentinelId: 'sentinel-kick',
+          connectionState: 'not_applicable' as const,
+        },
+        audienceCount: 1,
+      },
+    };
+    const applied = applyGrid9ServerEvent(afterSnap, kick);
+    expect(applied.effects.dropped).toBe(false);
+    expect(applied.session.match?.players[0].kind).toBe('sentinel');
+    expect(applied.session.match?.audienceCount).toBe(1);
+  });
+
   it('accepts protocolVersion 2 on the wire and rejects v1', () => {
     const welcome = {
       protocol: 'grid9.ws',
