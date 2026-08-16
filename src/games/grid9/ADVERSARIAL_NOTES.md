@@ -18,6 +18,10 @@ Branch tip: `feat/full-tip-package-20260809`
    `GET /api/grid9/matches` is Cognito-free **in grid9Routes**, but must be mounted **before** `economyRoutes` / `liveRoutes` (those use `router.use(cognitoJwtMiddleware)` and 401 every `/api/*` first).  
    Remount shipped in tip `index.ts`; verify with unauthenticated curl after deploy (expect JSON `ok/count/matches`, not 401).
 
+**Curl proof (rev `blyp-live-service-00227-pbl`):**
+- `GET /api/grid9/matches?limit=20` → HTTP 200 `{"ok":true,"matches":[],"count":0}`
+- `GET /api/grid9/livekit-status` → HTTP 200 `{"ok":true,"configured":false,"urlHost":null}`
+
 3. **Jackpot 1100 → 100 is correct product math**  
    Each new public match seeds `GRID9_HOUSE_SEED_COINS = 100`. Pots do not carry across matches.  
    UI now labels **New match pot** + house-seed copy when pot ≤ seed.
