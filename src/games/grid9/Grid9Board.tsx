@@ -1,14 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { LayoutChangeEvent } from 'react-native';
 import { Animated, View as RnView } from 'react-native';
 import type { Grid9SlotIndex } from './constants';
+import { GRID9_ROULETTE_DURATION_MS } from './constants';
 import type { Grid9PublicPlayer } from './protocol';
 import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
 import { slotsForGrid9Board } from './grid9Format';
 import { Grid9Slot } from './Grid9Slot';
+import { playGrid9Cue } from './grid9Audio';
+import { dramaticRouletteHighlightIndex } from './grid9RouletteDrama';
 import { View } from './nw';
 
-const GAP = 8;
+const GAP = 6;
 
 export function Grid9Board({
   players,
@@ -16,8 +19,9 @@ export function Grid9Board({
   localSlotIndex,
   targetableSlotIndices = [],
   rouletteCandidateSlotIndices = [],
+  rouletteSelectedSlotIndex = null,
   rouletteActive = false,
-  spotlightChanceBySlot = null,
+  rouletteEndsAt = null,
   onSlotPress,
   onSeatCentersMeasured,
 }: {
@@ -26,37 +30,76 @@ export function Grid9Board({
   localSlotIndex: number | null;
   targetableSlotIndices?: number[];
   rouletteCandidateSlotIndices?: number[];
+  /** Authoritative winner — client animates toward this seat. */
+  rouletteSelectedSlotIndex?: number | null;
   rouletteActive?: boolean;
-  spotlightChanceBySlot?: Array<number | null> | null;
+  rouletteEndsAt?: string | null;
   onSlotPress?: (slotIndex: number) => void;
-  /** Window-space centers for VFX (soft-fail if unavailable). */
   onSeatCentersMeasured?: (centers: Array<Grid9VfxPoint | null>) => void;
 }) {
   const [boardWidth, setBoardWidth] = useState(0);
-  const flash = useRef(new Animated.Value(0.35)).current;
+  const [highlightSlot, setHighlightSlot] = useState<number | null>(null);
+  const landedRef = useRef<string | null>(null);
   const seatRefs = useRef<Array<React.ElementRef<typeof RnView> | null>>(
     Array.from({ length: 9 }, () => null),
   );
   const slots = slotsForGrid9Board(players);
   const cell = boardWidth > 0 ? (boardWidth - GAP * 2) / 3 : 0;
 
+  const candidates = useMemo(() => {
+    const list = (rouletteCandidateSlotIndices || []).filter(
+      (slot) => Number.isInteger(slot) && slot >= 0 && slot <= 8,
+    );
+    return list.length > 0
+      ? list
+      : slots
+          .map((player, index) => (player?.status === 'alive' ? index : -1))
+          .filter((index) => index >= 0);
+  }, [rouletteCandidateSlotIndices, slots]);
+
+  // Dramatic decelerating spin toward server-selected seat.
   useEffect(() => {
-    if (!rouletteActive) {
-      flash.setValue(0.35);
+    if (!rouletteActive || candidates.length === 0) {
+      setHighlightSlot(null);
       return;
     }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(flash, { toValue: 1, duration: 180, useNativeDriver: true }),
-        Animated.timing(flash, { toValue: 0.25, duration: 280, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => {
-      loop.stop();
-      flash.setValue(0.35);
+    const selected =
+      rouletteSelectedSlotIndex != null && candidates.includes(rouletteSelectedSlotIndex)
+        ? rouletteSelectedSlotIndex
+        : candidates[candidates.length - 1];
+    const selectedOffset = Math.max(0, candidates.indexOf(selected));
+    const endsAtMs = rouletteEndsAt ? Date.parse(rouletteEndsAt) : NaN;
+    const duration = Number.isFinite(endsAtMs)
+      ? Math.max(2_500, endsAtMs - Date.now())
+      : GRID9_ROULETTE_DURATION_MS;
+    const startedAt = Date.now();
+    const spinKey = `${selected}:${endsAtMs || duration}`;
+    landedRef.current = null;
+
+    let raf = 0;
+    const tick = () => {
+      const elapsed = Date.now() - startedAt;
+      const t = Math.max(0, Math.min(1, elapsed / duration));
+      const idx = dramaticRouletteHighlightIndex(t, candidates.length, selectedOffset);
+      setHighlightSlot(candidates[idx] ?? selected);
+      if (t >= 1) {
+        setHighlightSlot(selected);
+        if (landedRef.current !== spinKey) {
+          landedRef.current = spinKey;
+          void playGrid9Cue('spotlight_select');
+        }
+        return;
+      }
+      raf = requestAnimationFrame(tick);
     };
-  }, [flash, rouletteActive]);
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [
+    candidates,
+    rouletteActive,
+    rouletteEndsAt,
+    rouletteSelectedSlotIndex,
+  ]);
 
   const publishCenters = () => {
     if (!onSeatCentersMeasured) return;
@@ -93,11 +136,11 @@ export function Grid9Board({
   };
 
   return (
-    <View className="w-full items-center justify-center px-3 pb-1" onLayout={onLayout}>
+    <View className="w-full items-center justify-center px-2 pb-1" onLayout={onLayout}>
       <View className="flex-row flex-wrap" style={{ width: boardWidth || '100%' }}>
         {slots.map((player, slotIndex) => {
-          const rouletteCandidate =
-            rouletteActive && rouletteCandidateSlotIndices.includes(slotIndex);
+          const rouletteHighlight =
+            rouletteActive && highlightSlot === slotIndex;
           return (
             <View
               key={player?.slotId ?? `empty-${slotIndex}`}
@@ -116,30 +159,13 @@ export function Grid9Board({
                 }}
                 onLayout={() => requestAnimationFrame(publishCenters)}
               >
-                {rouletteCandidate ? (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={{
-                      opacity: flash,
-                      position: 'absolute',
-                      top: 0,
-                      right: 0,
-                      bottom: 0,
-                      left: 0,
-                      borderWidth: 3,
-                      borderColor: '#00D2BE',
-                      borderRadius: 18,
-                      zIndex: 2,
-                    }}
-                  />
-                ) : null}
                 <Grid9Slot
                   player={player}
                   slotIndex={slotIndex}
                   spotlighted={spotlightSlotIndex === slotIndex && !rouletteActive}
                   isLocal={localSlotIndex === slotIndex}
                   targetable={targetableSlotIndices.includes(slotIndex)}
-                  spotlightChancePct={spotlightChanceBySlot?.[slotIndex] ?? null}
+                  rouletteHighlight={rouletteHighlight}
                   onPress={
                     onSlotPress && targetableSlotIndices.includes(slotIndex)
                       ? () => onSlotPress(slotIndex)

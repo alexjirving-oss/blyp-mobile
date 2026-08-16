@@ -13,7 +13,9 @@ const LISTABLE_PHASES = new Set<Grid9MatchPhase>([
 ]);
 
 /** Drop listable-but-abandoned matches so Live Grid cannot fill with zombies. */
-const STALE_LISTABLE_MS = 3 * 60 * 1000;
+const STALE_LISTABLE_MS = 90 * 1000;
+/** Hard abandon: no Redis progress for this long → leave the public index. */
+const HARD_STALE_MS = 3 * 60 * 1000;
 
 export interface Grid9PublicMatchSummary {
   matchId: string;
@@ -35,7 +37,7 @@ function isStaleOrExpired(state: {
   phase?: Grid9MatchPhase;
   updatedAt?: string;
   authority?: { matchDeadlineAt?: string };
-  players?: Array<{ kind?: string; status?: string }>;
+  players?: Array<{ kind?: string; status?: string; connectionState?: string }>;
   audienceCount?: number;
 }): boolean {
   const now = Date.now();
@@ -44,16 +46,29 @@ function isStaleOrExpired(state: {
     return true;
   }
   const updatedMs = Date.parse(String(state.updatedAt || ''));
-  if (!Number.isFinite(updatedMs) || updatedMs <= 0) return false;
-  if (now - updatedMs < STALE_LISTABLE_MS) return false;
+  if (!Number.isFinite(updatedMs) || updatedMs <= 0) {
+    // Missing heartbeat → treat as orphan once encountered.
+    return true;
+  }
+  const age = now - updatedMs;
+  if (age < STALE_LISTABLE_MS) return false;
 
-  // Combat/roulette with no connected humans and zero audience = orphaned zombie.
   const humansAlive = Array.isArray(state.players)
     ? state.players.filter(
         (player) => player.kind === 'human' && player.status === 'alive',
       ).length
     : 0;
+  const humansConnected = Array.isArray(state.players)
+    ? state.players.filter(
+        (player) =>
+          player.kind === 'human' &&
+          player.status === 'alive' &&
+          player.connectionState === 'connected',
+      ).length
+    : 0;
   const audience = Math.max(0, Number(state.audienceCount || 0));
+
+  // Sentinel-only combat/roulette with nobody watching = zombie.
   if (
     (state.phase === 'combat' || state.phase === 'roulette') &&
     humansAlive === 0 &&
@@ -61,17 +76,27 @@ function isStaleOrExpired(state: {
   ) {
     return true;
   }
-  // Any listable phase with no progress for too long.
-  if (now - updatedMs > STALE_LISTABLE_MS * 2) {
+  // Humans marked alive but none connected + no audience + stale = abandoned.
+  if (
+    (state.phase === 'combat' || state.phase === 'roulette') &&
+    humansConnected === 0 &&
+    audience === 0 &&
+    age >= STALE_LISTABLE_MS
+  ) {
     return true;
   }
+  if (age >= HARD_STALE_MS) return true;
   return false;
+}
+
+async function dropFromActiveIndex(matchId: string): Promise<void> {
+  await redis().srem(grid9RedisKeys.activeMatches(), matchId);
 }
 
 /**
  * Public browse list: active public matches only.
- * Never returns private room codes, assignment tokens, escrow, or inventory.
- * Ended / stale / deadline-expired matches are removed from the active index.
+ * Ended / stale / deadline-expired matches are removed from the active index
+ * on every list read (not a one-shot clear).
  */
 export async function listPublicActiveGrid9Matches(
   limit = 40,
@@ -82,14 +107,13 @@ export async function listPublicActiveGrid9Matches(
 
   const summaries: Grid9PublicMatchSummary[] = [];
   for (const matchId of matchIds) {
-    if (summaries.length >= capped) break;
     try {
       const stateJson = await redis().hget(
         grid9RedisKeys.matchAggregate(matchId),
         'state',
       );
       if (!stateJson) {
-        await redis().srem(grid9RedisKeys.activeMatches(), matchId);
+        await dropFromActiveIndex(matchId);
         continue;
       }
       const state = JSON.parse(stateJson) as {
@@ -99,20 +123,26 @@ export async function listPublicActiveGrid9Matches(
         region?: string;
         audienceCount?: number;
         jackpot?: { currentCoins?: number };
-        players?: Array<{ kind?: string; status?: string }>;
+        players?: Array<{
+          kind?: string;
+          status?: string;
+          connectionState?: string;
+        }>;
         entryFeeCoins?: number;
         updatedAt?: string;
         authority?: { matchDeadlineAt?: string };
       };
       if (!state.phase || !LISTABLE_PHASES.has(state.phase)) {
-        await redis().srem(grid9RedisKeys.activeMatches(), matchId);
+        // completed / cancelled / settling → leave the discoverability set forever.
+        await dropFromActiveIndex(matchId);
         continue;
       }
       if (isStaleOrExpired(state)) {
-        await redis().srem(grid9RedisKeys.activeMatches(), matchId);
+        await dropFromActiveIndex(matchId);
         continue;
       }
       if (state.roomMode !== 'public') continue;
+      if (summaries.length >= capped) continue;
       const survivors = Array.isArray(state.players)
         ? state.players.filter((player) => player.status === 'alive').length
         : 0;
@@ -139,6 +169,51 @@ export async function listPublicActiveGrid9Matches(
   return summaries;
 }
 
+/**
+ * Startup / repair sweep: walk the entire active set and SREM anything
+ * non-listable or stale. Returns how many IDs were dropped.
+ */
+export async function sweepGrid9ActiveMatchIndex(): Promise<{
+  scanned: number;
+  dropped: number;
+}> {
+  const matchIds = await redis().smembers(grid9RedisKeys.activeMatches());
+  let dropped = 0;
+  for (const matchId of matchIds) {
+    try {
+      const stateJson = await redis().hget(
+        grid9RedisKeys.matchAggregate(matchId),
+        'state',
+      );
+      if (!stateJson) {
+        await dropFromActiveIndex(matchId);
+        dropped += 1;
+        continue;
+      }
+      const state = JSON.parse(stateJson) as {
+        phase?: Grid9MatchPhase;
+        roomMode?: Grid9RoomMode;
+        updatedAt?: string;
+        audienceCount?: number;
+        players?: Array<{
+          kind?: string;
+          status?: string;
+          connectionState?: string;
+        }>;
+        authority?: { matchDeadlineAt?: string };
+      };
+      if (!state.phase || !LISTABLE_PHASES.has(state.phase) || isStaleOrExpired(state)) {
+        await dropFromActiveIndex(matchId);
+        dropped += 1;
+      }
+    } catch {
+      await dropFromActiveIndex(matchId);
+      dropped += 1;
+    }
+  }
+  return { scanned: matchIds.length, dropped };
+}
+
 export async function getPublicGrid9MatchSummary(
   matchId: string,
 ): Promise<Grid9PublicMatchSummary> {
@@ -153,5 +228,7 @@ export async function getPublicGrid9MatchSummary(
 /** Exported for unit tests. */
 export const __grid9MatchDirectoryTest = {
   STALE_LISTABLE_MS,
+  HARD_STALE_MS,
+  LISTABLE_PHASES,
   isStaleOrExpired,
 };

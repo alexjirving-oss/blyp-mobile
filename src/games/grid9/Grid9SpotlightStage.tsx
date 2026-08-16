@@ -8,8 +8,8 @@ import {
 } from './grid9Format';
 import { GRID9_THEME } from './grid9Theme';
 import type { Grid9VfxPoint } from './Grid9CombatVfxOverlay';
-import { Grid9LiveKitSession } from './Grid9LiveKitSession';
-import { SentinelStage } from './SentinelStage';
+import { Grid9SeatCamera } from './Grid9LiveKitRoom';
+import { grid9SentinelPortrait } from './grid9SentinelPortraits';
 import { View as RnView } from 'react-native';
 import { Image, Text, View } from './nw';
 
@@ -101,6 +101,8 @@ export function Grid9SpotlightStage({
   publishLocalAv,
   isLocalSpotlight,
   jackpotCoins,
+  houseSeedCoins = 100,
+  isNewMatchPot = false,
   turnNumber,
   countdownMs,
   nextSpotlightMs,
@@ -112,12 +114,13 @@ export function Grid9SpotlightStage({
   publishLocalAv?: boolean;
   isLocalSpotlight?: boolean;
   jackpotCoins?: number;
+  houseSeedCoins?: number;
+  /** True when pot is still at (or below) house seed — clarify 100 ≠ broken carry. */
+  isNewMatchPot?: boolean;
   turnNumber?: number | null;
   countdownMs?: number | null;
-  /** Separate chip for next-roulette / next spotlight. */
   nextSpotlightMs?: number | null;
   onAir?: boolean;
-  /** Window-space origin near bottom-center of the stage for projectiles. */
   onOriginMeasured?: (point: Grid9VfxPoint | null) => void;
 }) {
   const feed = (player as { feed?: FeedLike } | null)?.feed ?? null;
@@ -132,15 +135,9 @@ export function Grid9SpotlightStage({
     return null;
   }, [feed?.participantId, player]);
 
-  const [avStatus, setAvStatus] = useState<string>('idle');
-  // Connect whenever local combatant must publish OR spotlight is a human feed.
-  // Previously LiveKit only mounted when spotlight was human — so cam/mic never
-  // came up while a sentinel held the stage.
-  const connectLiveKit =
-    !!matchId &&
-    (Boolean(publishLocalAv) ||
-      (player?.kind === 'human' &&
-        (avStatus === 'ready' || Boolean(feed?.provider === 'livekit'))));
+  const portrait = grid9SentinelPortrait(
+    typeof feed?.characterId === 'string' ? feed.characterId : null,
+  );
 
   const hp = Math.max(0, Math.floor(player?.health ?? 0));
   const sp = Math.max(0, Math.floor(player?.shieldPoints ?? 0));
@@ -178,11 +175,16 @@ export function Grid9SpotlightStage({
       {/* FOCAL jackpot — primary arena signal above the stage */}
       <View className="mb-1.5 items-center rounded-2xl border-2 border-amber-400/70 bg-amber-400/15 px-3 py-2">
         <Text className="text-[9px] font-black uppercase tracking-[3px] text-amber-200">
-          Jackpot
+          {isNewMatchPot ? 'New match pot' : 'Jackpot'}
         </Text>
         <Text className="mt-0.5 text-[28px] font-black leading-8 text-amber-300">
           {formatGrid9Coins(jackpotCoins ?? 0)}
         </Text>
+        {isNewMatchPot ? (
+          <Text className="mt-0.5 text-center text-[9px] font-semibold text-amber-100/80">
+            House seed {formatGrid9Coins(houseSeedCoins)} · grows with fees & gifts
+          </Text>
+        ) : null}
       </View>
 
       <View className="flex-row">
@@ -231,49 +233,24 @@ export function Grid9SpotlightStage({
             <Text className="mt-1 text-sm font-semibold text-blyp-muted">Waiting for seat</Text>
           </View>
         ) : player.kind === 'sentinel' ? (
-          <View className="h-full">
-            {connectLiveKit ? (
-              <Grid9LiveKitSession
-                matchId={matchId ?? null}
-                enabled
-                publish={Boolean(publishLocalAv)}
-                spotlightParticipantId={null}
-                onStatus={setAvStatus}
-              />
-            ) : null}
-            <SentinelStage
-              displayName={player.displayName}
-              characterId={typeof feed?.characterId === 'string' ? feed.characterId : null}
-            />
+          <View className="h-full bg-[#1a0a0c]">
+            {portrait ? (
+              <Image className="h-full w-full" source={portrait} resizeMode="cover" />
+            ) : (
+              <View className="h-full items-center justify-center">
+                <Text className="text-3xl font-black text-red-400">
+                  {playerInitials(player.displayName)}
+                </Text>
+              </View>
+            )}
+            <View className="absolute inset-0 bg-red-950/30" />
           </View>
         ) : (
           <View className="h-full">
-            {connectLiveKit ? (
-              <Grid9LiveKitSession
-                matchId={matchId ?? null}
-                enabled
-                publish={Boolean(publishLocalAv)}
-                spotlightParticipantId={participantId}
-                onStatus={setAvStatus}
-              />
-            ) : null}
-            {avStatus === 'ready' || avStatus === 'idle' ? null : (
-              <View className="absolute inset-0">
-                <HumanPendingCard
-                  player={player}
-                  note={
-                    avStatus === 'permission-denied'
-                      ? 'CAM/MIC DENIED'
-                      : avStatus === 'unavailable' || avStatus === 'module-missing'
-                        ? 'A/V UNAVAILABLE'
-                        : 'LIVE FEED PENDING'
-                  }
-                />
-              </View>
-            )}
-            {avStatus === 'ready' ? null : avStatus === 'idle' && !connectLiveKit ? (
+            <View className="absolute inset-0">
               <HumanPendingCard player={player} note="LIVE FEED PENDING" />
-            ) : null}
+            </View>
+            <Grid9SeatCamera participantId={participantId} />
           </View>
         )}
 

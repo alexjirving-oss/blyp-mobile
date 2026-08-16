@@ -21,7 +21,9 @@ export const GRID9_MIN_ENTRY_FEE_COINS = 0 as const;
 export const GRID9_MAX_ENTRY_FEE_COINS = 5_000 as const;
 
 export const GRID9_INVENTORY_CAPACITY = 3 as const;
-export const GRID9_ROULETTE_FLASH_MS = 3_500 as const;
+export const GRID9_ROULETTE_FLASH_MS = 12_000 as const;
+/** Dramatic selection show length (must match server GRID9_ROULETTE_DURATION_MS). */
+export const GRID9_ROULETTE_DURATION_MS = GRID9_ROULETTE_FLASH_MS;
 /** Public Join coalesces into one open lobby for this window (ms). */
 export const GRID9_PUBLIC_LOBBY_MS = 30_000 as const;
 export const GRID9_TURN_DURATION_MS = 30_000 as const;

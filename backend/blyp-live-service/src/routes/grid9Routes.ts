@@ -78,8 +78,8 @@ router.use((req, res, next) => {
   next();
 });
 
-/** Cognito preferred; list itself is non-secret public summaries. */
-router.get('/grid9/matches', cognitoJwtMiddleware, async (req: AuthedRequest, res) => {
+/** Public browse — no auth required (summaries only). Bearer accepted but unused. */
+router.get('/grid9/matches', async (req, res) => {
   try {
     const limitRaw = Number(req.query.limit);
     const matches = await listPublicActiveGrid9Matches(limitRaw);
@@ -90,6 +90,36 @@ router.get('/grid9/matches', cognitoJwtMiddleware, async (req: AuthedRequest, re
     });
   } catch (error: any) {
     logger.warn({ err: error?.message || String(error) }, '[grid9] list matches failed');
+    return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+  }
+});
+
+/** Ops/debug: LiveKit config presence (never leaks secrets). */
+router.get('/grid9/livekit-status', (_req, res) => {
+  const cfg = livekitConfig();
+  return res.json({
+    ok: true,
+    configured: Boolean(cfg),
+    urlHost: cfg?.url ? (() => {
+      try {
+        return new URL(cfg.url.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:')).host;
+      } catch {
+        return 'invalid';
+      }
+    })() : null,
+  });
+});
+
+/** Ops: sweep zombie IDs from the public active index. */
+router.post('/grid9/sweep-active', cognitoJwtMiddleware, async (req: AuthedRequest, res) => {
+  try {
+    const { sweepGrid9ActiveMatchIndex } = await import(
+      '../games/grid9/grid9MatchDirectory'
+    );
+    const result = await sweepGrid9ActiveMatchIndex();
+    return res.json({ ok: true, ...result });
+  } catch (error: any) {
+    logger.warn({ err: error?.message || String(error) }, '[grid9] sweep failed');
     return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
   }
 });

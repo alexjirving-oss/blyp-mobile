@@ -3,19 +3,27 @@ import assert from 'node:assert/strict';
 import { __grid9MatchDirectoryTest } from './grid9MatchDirectory';
 
 describe('grid9MatchDirectory stale filter', () => {
-  const { isStaleOrExpired, STALE_LISTABLE_MS } = __grid9MatchDirectoryTest;
+  const { isStaleOrExpired, STALE_LISTABLE_MS, LISTABLE_PHASES } =
+    __grid9MatchDirectoryTest;
 
-  it('keeps fresh combat with humans', () => {
+  it('keeps fresh combat with connected humans', () => {
     assert.equal(
       isStaleOrExpired({
         phase: 'combat',
         updatedAt: new Date().toISOString(),
         audienceCount: 0,
-        players: [{ kind: 'human', status: 'alive' }],
+        players: [
+          { kind: 'human', status: 'alive', connectionState: 'connected' },
+        ],
         authority: { matchDeadlineAt: new Date(Date.now() + 60_000).toISOString() },
       }),
       false,
     );
+  });
+
+  it('treats completed as non-listable (list API must SREM)', () => {
+    assert.equal(LISTABLE_PHASES.has('completed' as any), false);
+    assert.equal(LISTABLE_PHASES.has('cancelled' as any), false);
   });
 
   it('drops past match deadline', () => {
@@ -24,7 +32,9 @@ describe('grid9MatchDirectory stale filter', () => {
         phase: 'combat',
         updatedAt: new Date().toISOString(),
         audienceCount: 0,
-        players: [{ kind: 'human', status: 'alive' }],
+        players: [
+          { kind: 'human', status: 'alive', connectionState: 'connected' },
+        ],
         authority: { matchDeadlineAt: new Date(Date.now() - 1_000).toISOString() },
       }),
       true,
@@ -38,6 +48,21 @@ describe('grid9MatchDirectory stale filter', () => {
         updatedAt: new Date(Date.now() - STALE_LISTABLE_MS - 1_000).toISOString(),
         audienceCount: 0,
         players: [{ kind: 'sentinel', status: 'alive' }],
+        authority: { matchDeadlineAt: new Date(Date.now() + 60_000).toISOString() },
+      }),
+      true,
+    );
+  });
+
+  it('drops abandoned combat when humans are not connected', () => {
+    assert.equal(
+      isStaleOrExpired({
+        phase: 'combat',
+        updatedAt: new Date(Date.now() - STALE_LISTABLE_MS - 1_000).toISOString(),
+        audienceCount: 0,
+        players: [
+          { kind: 'human', status: 'alive', connectionState: 'disconnected' },
+        ],
         authority: { matchDeadlineAt: new Date(Date.now() + 60_000).toISOString() },
       }),
       true,

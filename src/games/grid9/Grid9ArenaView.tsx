@@ -10,7 +10,8 @@ import {
   isGrid9HealWeapon,
   type Grid9ArsenalItem,
 } from './catalog';
-import { GRID9_DEFAULT_ESCROW_RESERVE_COINS } from './constants';
+import { GRID9_DEFAULT_ESCROW_RESERVE_COINS, GRID9_HOUSE_SEED_COINS } from './constants';
+import { Grid9LiveKitProvider } from './Grid9LiveKitRoom';
 import { Grid9ActionDrawer } from './Grid9ActionDrawer';
 import { Grid9ArrivalTicker } from './Grid9ArrivalTicker';
 import { Grid9Board } from './Grid9Board';
@@ -250,35 +251,18 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
       (activeSlotIndex != null ? seatCentersRef.current[activeSlotIndex] : null) ||
       toWindow;
     const overlay = overlayOriginRef.current;
-    if (!toWindow || !fromWindow || !overlay) {
-      // Soft-fail VFX; still play action SFX once.
-      if (lastAudioActionKeyRef.current !== key) {
-        lastAudioActionKeyRef.current = key;
-        if (action.kind === 'weapon' && action.weaponId) {
-          const audio = cueForWeaponVfx(
-            isGrid9HealWeapon(action.weaponId) ? 'heal' : 'projectile',
-            action.weaponId,
-          );
-          if (audio.fire) void playGrid9Cue(audio.fire);
-          void playGrid9Cue(audio.impact);
-        } else if (action.kind === 'shield') {
-          void playGrid9Cue(cueForWeaponVfx('shield').impact);
-        }
-        void playGrid9Cue('turn_end', { volume: 0.55 });
-      }
-      const snapshot: Record<number, { health: number; shield: number }> = {};
-      for (const player of match.players) {
-        snapshot[player.slotIndex] = {
-          health: Number(player.health || 0),
-          shield: Number(player.shieldPoints || 0),
-        };
-      }
-      prevHealthRef.current = snapshot;
-      return;
-    }
-
-    const to = { x: toWindow.x - overlay.x, y: toWindow.y - overlay.y };
-    const from = { x: fromWindow.x - overlay.x, y: fromWindow.y - overlay.y };
+    // Never skip VFX forever — synthesize tile centers when measure is late.
+    const synth = (slot: number): Grid9VfxPoint => ({
+      x: 40 + (slot % 3) * 110,
+      y: 220 + Math.floor(slot / 3) * 110,
+    });
+    const toAbs = toWindow || synth(targetSlot);
+    const fromAbs =
+      fromWindow ||
+      (activeSlotIndex != null ? synth(activeSlotIndex) : synth(targetSlot));
+    const origin = overlay || { x: 0, y: 0 };
+    const to = { x: toAbs.x - origin.x, y: toAbs.y - origin.y };
+    const from = { x: fromAbs.x - origin.x, y: fromAbs.y - origin.y };
     const prev = prevHealthRef.current[targetSlot];
     const nowPlayer = match.players[targetSlot];
     const healthNow = Number(nowPlayer?.health || 0);
@@ -393,16 +377,6 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
       )
       .filter((slotIndex) => slotIndex >= 0);
   }, [accountCoins, localSlotIndex, match?.players, mode, selection]);
-
-  const spotlightChanceBySlot = useMemo(() => {
-    const alive = (match?.players ?? []).filter((player) => player.status === 'alive');
-    if (alive.length <= 0) return null;
-    const pct = Math.round(100 / alive.length);
-    return Array.from({ length: 9 }, (_, slotIndex) => {
-      const player = match?.players?.[slotIndex];
-      return player?.status === 'alive' ? pct : null;
-    });
-  }, [match?.players]);
 
   const ensureEscrowForSpend = useCallback(
     (costCoins: number) => {
@@ -576,6 +550,11 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
         }}
       >
         <View className="pt-1">
+        <Grid9LiveKitProvider
+          matchId={match?.matchId ?? session.matchId}
+          enabled={Boolean(match?.matchId || session.matchId)}
+          publish={isCombatant && !spectate}
+        >
         <Grid9SpotlightStage
           player={spotlightPlayer}
           matchId={match?.matchId ?? session.matchId}
@@ -584,6 +563,8 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
             localSlotIndex != null && activeSlotIndex === localSlotIndex
           }
           jackpotCoins={jackpotPool}
+          houseSeedCoins={GRID9_HOUSE_SEED_COINS}
+          isNewMatchPot={jackpotPool <= GRID9_HOUSE_SEED_COINS}
           turnNumber={match?.turn?.turnNumber ?? null}
           countdownMs={countdownMs}
           nextSpotlightMs={countdownMs}
@@ -603,10 +584,17 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
           players={match?.players}
           spotlightSlotIndex={activeSlotIndex}
           rouletteCandidateSlotIndices={rouletteCandidates}
+          rouletteSelectedSlotIndex={
+            match?.phase === 'roulette'
+              ? match.roulette?.selectedSlotIndex ?? null
+              : null
+          }
+          rouletteEndsAt={
+            match?.phase === 'roulette' ? match.roulette?.endsAt ?? null : null
+          }
           rouletteActive={match?.phase === 'roulette'}
           localSlotIndex={localSlotIndex}
           targetableSlotIndices={targetableSlotIndices}
-          spotlightChanceBySlot={spotlightChanceBySlot}
           onSlotPress={onSlotPress}
           onSeatCentersMeasured={(centers) => {
             seatCentersRef.current = centers;
@@ -618,6 +606,7 @@ export function Grid9ArenaView({ spectate = false }: { spectate?: boolean }) {
             setVfxCue((prev) => (prev?.id === id ? null : prev));
           }}
         />
+        </Grid9LiveKitProvider>
         </View>
       </RNView>
 

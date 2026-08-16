@@ -152,10 +152,12 @@ export function createGrid9Sentinel(
   slotIndex: Grid9SlotIndex,
   joinedAt: string,
 ): Grid9SentinelPlayer {
-  const templateIndex =
-    deterministicUint32(`${matchId}:sentinel:${slotIndex}`) %
-    SENTINEL_TEMPLATES.length;
-  const template = SENTINEL_TEMPLATES[templateIndex];
+  // Unique per seat within a match: shuffle templates by match seed, then pick by slot.
+  const order = SENTINEL_TEMPLATES.map((template, index) => ({
+    template,
+    rank: deterministicUint32(`${matchId}:sentinel-order:${template.characterId}:${index}`),
+  })).sort((a, b) => a.rank - b.rank || a.template.characterId.localeCompare(b.template.characterId));
+  const template = order[slotIndex % order.length].template;
   return {
     slotId: randomUUID(),
     slotIndex,

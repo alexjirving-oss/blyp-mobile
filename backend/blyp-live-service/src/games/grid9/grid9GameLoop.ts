@@ -943,6 +943,20 @@ async function repairGrid9Timers(io: Server): Promise<void> {
 export function startGrid9GameLoop(io: Server): () => void {
   let polling = false;
   let repairing = false;
+  // Startup sweep so zombies from prior stalls leave the public index immediately.
+  void import('./grid9MatchDirectory')
+    .then(({ sweepGrid9ActiveMatchIndex }) => sweepGrid9ActiveMatchIndex())
+    .then((result) => {
+      if (result.dropped > 0) {
+        logger.info(result, '[grid9] startup active-match sweep dropped zombies');
+      }
+    })
+    .catch((error: any) => {
+      logger.warn(
+        { err: error?.message || String(error) },
+        '[grid9] startup active-match sweep failed',
+      );
+    });
   const poll = setInterval(() => {
     if (polling) return;
     polling = true;
