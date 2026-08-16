@@ -15,7 +15,8 @@ Branch tip: `feat/full-tip-package-20260809`
    Matches stay in `grid9:active-matches` while phase remains `combat`/`roulette`.  
    Stuck turn loops (or idle Cloud Run) leave “In combat · 9/9 · audience 0 · jackpot ~100” forever.  
    Fix: stricter stale/abandon filters + SREM on every list read + startup `sweepGrid9ActiveMatchIndex` + optional `POST /api/grid9/sweep-active`.  
-   `GET /api/grid9/matches` no longer requires Cognito (public summaries) so ops can curl.
+   `GET /api/grid9/matches` is Cognito-free **in grid9Routes**, but must be mounted **before** `economyRoutes` / `liveRoutes` (those use `router.use(cognitoJwtMiddleware)` and 401 every `/api/*` first).  
+   Remount shipped in tip `index.ts`; verify with unauthenticated curl after deploy (expect JSON `ok/count/matches`, not 401).
 
 3. **Jackpot 1100 → 100 is correct product math**  
    Each new public match seeds `GRID9_HOUSE_SEED_COINS = 100`. Pots do not carry across matches.  
@@ -38,6 +39,7 @@ Branch tip: `feat/full-tip-package-20260809`
 | Risk | Severity | Mitigation needed |
 |---|---|---|
 | LIVEKIT_* still unset after deploy | P0 for cams | Set secrets via `--update-env-vars` / Secret Manager; verify `GET /api/grid9/livekit-status` → `configured:true` |
+| Old Redis matches with prior rules literals | P0 for turn loop | `migrateGrid9GameStateInput` rewrites rules to current constants on parse (proved: timer was failing on `rouletteDurationMs: 3500` vs `12000`) |
 | Sentinel-only public matches still create briefly before stale GC | Med | Startup + list sweep; consider not listing until ≥1 human |
 | Synthesized VFX coords if measure fails | Low | Soft geometry; may look offset once |
 | Roulette 12s feels long if SFX missing | Low | Assets are placeholders |

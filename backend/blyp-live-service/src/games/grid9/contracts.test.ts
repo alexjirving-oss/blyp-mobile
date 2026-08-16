@@ -384,6 +384,14 @@ describe('Grid 9 phase-one contracts', () => {
     };
 
     assert.equal(parseGrid9GameState(state).players.length, 9);
+    const legacy = structuredClone(state) as Grid9GameState;
+    legacy.rules.rulesVersion = '2026-08-16.3';
+    legacy.rules.rouletteDurationMs = 3500 as typeof GRID9_ROULETTE_DURATION_MS;
+    assert.equal(
+      parseGrid9GameState(legacy).rules.rouletteDurationMs,
+      GRID9_ROULETTE_DURATION_MS,
+    );
+    assert.equal(parseGrid9GameState(legacy).rules.rulesVersion, GRID9_RULES_VERSION);
     const invalid = structuredClone(state) as Grid9GameState;
     invalid.players[8].slotIndex = 7;
     assert.throws(() => parseGrid9GameState(invalid), /slotIndex/);

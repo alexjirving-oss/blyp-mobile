@@ -613,6 +613,44 @@ export const grid9GameStateSchema = z
     }
   });
 
+/**
+ * In-flight Redis matches may still carry older rules literals (e.g. 3.5s
+ * roulette / rulesVersion 2026-08-16.3). Rewrite the rules snapshot to the
+ * current process constants before Zod literals so the timer loop cannot
+ * soft-lock the entire active set after a duration bump.
+ */
+export function migrateGrid9GameStateInput(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const state = value as Record<string, unknown>;
+  const rules = state.rules;
+  if (!rules || typeof rules !== 'object') return value;
+  const prev = rules as Record<string, unknown>;
+  return {
+    ...state,
+    rules: {
+      ...prev,
+      rulesVersion: GRID9_RULES_VERSION,
+      slotCount: GRID9_SLOT_COUNT,
+      maxHealth: GRID9_MAX_HEALTH,
+      maxShieldPoints: GRID9_MAX_SHIELD_POINTS,
+      sentinelFillDelayMs: GRID9_SENTINEL_FILL_DELAY_MS,
+      countdownMs: GRID9_COUNTDOWN_MS,
+      publicLobbyMs: GRID9_PUBLIC_LOBBY_MS,
+      rouletteDurationMs: GRID9_ROULETTE_DURATION_MS,
+      turnDurationMs: GRID9_TURN_DURATION_MS,
+      spotlightDurationMs: GRID9_SPOTLIGHT_DURATION_MS,
+      maxMatchDurationMs: GRID9_MAX_MATCH_DURATION_MS,
+      inventoryCapacity: GRID9_INVENTORY_CAPACITY,
+      microDropCoinReward: GRID9_MICRO_DROP_COIN_REWARD,
+      microDropShieldReward: GRID9_MICRO_DROP_SHIELD_REWARD,
+      minEscrowReserveCoins: GRID9_MIN_ESCROW_RESERVE_COINS,
+      maxEscrowReserveCoins: GRID9_MAX_ESCROW_RESERVE_COINS,
+      minMercenaryFundCoins: GRID9_MIN_MERCENARY_FUND_COINS,
+      maxMercenaryFundCoins: GRID9_MAX_MERCENARY_FUND_COINS,
+    },
+  };
+}
+
 export function parseGrid9GameState(value: unknown): Grid9GameState {
-  return grid9GameStateSchema.parse(value) as Grid9GameState;
+  return grid9GameStateSchema.parse(migrateGrid9GameStateInput(value)) as Grid9GameState;
 }

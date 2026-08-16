@@ -153,6 +153,11 @@ app.use(adminRoutes);
 // router-level Cognito middleware would otherwise reject these as unauthenticated.
 app.use(internalRoutes);
 
+// Grid 9 browse + livekit-status must be public. Mount BEFORE economyRoutes /
+// liveRoutes — those routers use router.use(cognitoJwtMiddleware) and would
+// 401 unauthenticated /api/grid9/* before this router ever sees the request.
+app.use('/api', grid9Routes);
+
 // Economy contracts (auth required inside router)
 app.use(economyRoutes);
 
@@ -176,9 +181,6 @@ app.use('/api', frenemiesRoutes);
 
 // Reaction Duel — paid, server-authoritative two-player live skill game.
 app.use('/api', reactionDuelRoutes);
-
-// Grid 9 public match directory (Games hub discoverability).
-app.use('/api', grid9Routes);
 
 app.use((err: any, _req: any, res: any, _next: any) => {
   // Central error handler to avoid unhandled rejections leaking details
