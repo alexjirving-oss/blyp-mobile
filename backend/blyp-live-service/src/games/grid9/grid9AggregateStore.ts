@@ -324,6 +324,7 @@ export async function commitGrid9PaidMutation(args: {
   privateReceipt: Grid9LedgerReceipt;
   roomEvent: Grid9RoomServerEvent;
   timerOutbox: Grid9TimerOutboxRecord | null;
+  fundingSource?: 'actor_escrow' | 'inventory' | 'free_drop' | 'mercenary_bankroll';
 }): Promise<Grid9PaidCommitResult> {
   const nextState = parseGrid9GameState(args.nextState);
   const key = grid9RedisKeys.matchAggregate(nextState.matchId);
@@ -403,6 +404,7 @@ export async function commitGrid9PaidMutation(args: {
             ledgerField,
             itemId: args.intent.payload.weaponId,
             targetSlotIndex: args.intent.payload.targetSlotIndex,
+            fundingSource: args.fundingSource ?? 'actor_escrow',
           }
         : args.intent.type === 'PURCHASE_SHIELD'
           ? {
@@ -410,6 +412,7 @@ export async function commitGrid9PaidMutation(args: {
               itemId: args.intent.payload.shieldId,
               targetSlotIndex:
                 args.intent.payload.beneficiarySlotIndex,
+              fundingSource: args.fundingSource ?? 'actor_escrow',
             }
           : args.intent.type === 'FUND_MERCENARY'
             ? {
@@ -418,7 +421,24 @@ export async function commitGrid9PaidMutation(args: {
                 targetSlotIndex:
                   args.intent.payload.beneficiarySlotIndex,
               }
-            : null,
+            : args.intent.type === 'SEND_ARSENAL_GIFT'
+              ? {
+                  ledgerField,
+                  itemId: args.intent.payload.itemId,
+                  targetSlotIndex: args.intent.payload.recipientSlotIndex,
+                }
+              : args.intent.type === 'BUY_INVENTORY_ITEM'
+                ? {
+                    ledgerField,
+                    itemId: args.intent.payload.itemId,
+                    targetSlotIndex:
+                      args.nextState.players.find(
+                        (player) =>
+                          player.kind === 'human' &&
+                          player.userId === args.authenticatedUserId,
+                      )?.slotIndex ?? 0,
+                  }
+                : null,
     fields,
   });
   if (result.status === 'REJECTED') {

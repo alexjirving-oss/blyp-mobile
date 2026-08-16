@@ -168,6 +168,7 @@ export function createGrid9Sentinel(
     maxHealth: GRID9_MAX_HEALTH,
     shieldPoints: 0,
     maxShieldPoints: GRID9_MAX_SHIELD_POINTS,
+    inventory: [],
     mercenaryBankrollCoins: 0,
     mercenarySponsorCoins: 0,
     mercenaryMicroDropCoins: 0,

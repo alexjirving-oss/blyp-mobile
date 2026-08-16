@@ -19,7 +19,7 @@ function player(overrides: Partial<Grid9PublicPlayer> = {}): Grid9PublicPlayer {
     health: 100,
     maxHealth: 100,
     shieldPoints: 0,
-    maxShieldPoints: 60,
+    maxShieldPoints: 100,
     mercenaryBankrollCoins: 0,
     connectionState: 'connected',
     ...overrides,
@@ -27,16 +27,16 @@ function player(overrides: Partial<Grid9PublicPlayer> = {}): Grid9PublicPlayer {
 }
 
 describe('Grid 9 action rules', () => {
-  it('mirrors the live catalog costs and Phase 5 names', () => {
+  it('mirrors the live catalog costs and Wave 1 names', () => {
     expect(GRID9_ARSENAL_CATALOG.arrow.costCoins).toBe(10);
-    expect(GRID9_ARSENAL_CATALOG.fireball.costCoins).toBe(50);
-    expect(GRID9_ARSENAL_CATALOG.mega_bomb.costCoins).toBe(200);
-    expect(GRID9_ARSENAL_CATALOG.basic_shield.costCoins).toBe(25);
+    expect(GRID9_ARSENAL_CATALOG.fireball.costCoins).toBe(25);
+    expect(GRID9_ARSENAL_CATALOG.mega_bomb.costCoins).toBe(50);
+    expect(GRID9_ARSENAL_CATALOG.basic_shield.costCoins).toBe(15);
     expect(listGrid9Arsenal().map((item) => item.displayName)).toEqual([
-      'Quick Arrow',
+      'Arrow',
       'Fireball',
       'Mega Bomb',
-      'Nano Shield',
+      'Shield',
     ]);
     expect(GRID9_DEFAULT_MERCENARY_FUND_COINS).toBe(25);
   });

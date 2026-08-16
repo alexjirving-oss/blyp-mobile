@@ -1,4 +1,5 @@
 import { getEconomyInfra } from '../../economy/infra';
+import { GRID9_DISCONNECT_GRACE_MS } from './constants';
 import {
   GRID9_PRESENCE_TTL_SECONDS,
   grid9RedisKeys,
@@ -112,7 +113,7 @@ export async function scheduleGrid9DisconnectTimeout(
 ): Promise<void> {
   await redis().zadd(
     grid9RedisKeys.presenceTimeouts(),
-    Date.now() + GRID9_PRESENCE_TTL_SECONDS * 1000,
+    Date.now() + GRID9_DISCONNECT_GRACE_MS,
     grid9RedisKeys.presenceTimeoutMember(matchId, userId),
   );
 }
@@ -165,7 +166,7 @@ export async function ensureGrid9DisconnectTimeout(
   await redis().zadd(
     grid9RedisKeys.presenceTimeouts(),
     'NX',
-    Date.now() + GRID9_PRESENCE_TTL_SECONDS * 1000,
+    Date.now() + GRID9_DISCONNECT_GRACE_MS,
     member,
   );
 }

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   GRID9_COUNTDOWN_MS,
+  GRID9_INVENTORY_CAPACITY,
   GRID9_MAX_HEALTH,
   GRID9_MAX_ESCROW_RESERVE_COINS,
   GRID9_MAX_MATCH_DURATION_MS,
@@ -10,6 +11,8 @@ import {
   GRID9_MICRO_DROP_SHIELD_REWARD,
   GRID9_MIN_MERCENARY_FUND_COINS,
   GRID9_MIN_ESCROW_RESERVE_COINS,
+  GRID9_PUBLIC_LOBBY_MS,
+  GRID9_ROULETTE_DURATION_MS,
   GRID9_RULES_VERSION,
   GRID9_SENTINEL_FILL_DELAY_MS,
   GRID9_SLOT_COUNT,
@@ -126,6 +129,9 @@ const commonPlayerShape = {
   maxHealth: z.literal(GRID9_MAX_HEALTH),
   shieldPoints: z.number().int().min(0).max(GRID9_MAX_SHIELD_POINTS),
   maxShieldPoints: z.literal(GRID9_MAX_SHIELD_POINTS),
+  inventory: z
+    .array(z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']))
+    .max(GRID9_INVENTORY_CAPACITY),
   mercenaryBankrollCoins: nonNegativeInteger,
   mercenarySponsorCoins: nonNegativeInteger,
   mercenaryMicroDropCoins: nonNegativeInteger,
@@ -292,6 +298,7 @@ const jackpotSchema = z
   .object({
     currency: z.literal('coins'),
     openingRolloverCoins: nonNegativeInteger,
+    houseSeedCoins: nonNegativeInteger,
     openingRolloverClaimId: id.nullable(),
     openingRolloverFenceToken: nonNegativeInteger.nullable(),
     openingRolloverClaimStatus: z.enum(['none', 'reserved', 'consumed']),
@@ -315,8 +322,13 @@ const jackpotSchema = z
     (jackpot) =>
       jackpot.status !== 'growing' ||
       jackpot.currentCoins ===
-        jackpot.openingRolloverCoins + jackpot.purchaseContributionCoins,
-    { message: 'a growing jackpot must equal rollover plus purchase contributions' },
+        jackpot.openingRolloverCoins +
+          jackpot.houseSeedCoins +
+          jackpot.purchaseContributionCoins,
+    {
+      message:
+        'a growing jackpot must equal rollover plus house seed plus purchase contributions',
+    },
   );
 
 const rulesSchema = z.object({
@@ -326,9 +338,13 @@ const rulesSchema = z.object({
   maxShieldPoints: z.literal(GRID9_MAX_SHIELD_POINTS),
   sentinelFillDelayMs: z.literal(GRID9_SENTINEL_FILL_DELAY_MS),
   countdownMs: z.literal(GRID9_COUNTDOWN_MS),
+  publicLobbyMs: z.literal(GRID9_PUBLIC_LOBBY_MS),
+  rouletteDurationMs: z.literal(GRID9_ROULETTE_DURATION_MS),
   turnDurationMs: z.literal(GRID9_TURN_DURATION_MS),
   spotlightDurationMs: z.literal(GRID9_SPOTLIGHT_DURATION_MS),
   maxMatchDurationMs: z.literal(GRID9_MAX_MATCH_DURATION_MS),
+  houseSeedCoins: nonNegativeInteger,
+  inventoryCapacity: z.literal(GRID9_INVENTORY_CAPACITY),
   microDropCoinReward: z.literal(GRID9_MICRO_DROP_COIN_REWARD),
   microDropShieldReward: z.literal(GRID9_MICRO_DROP_SHIELD_REWARD),
   minEscrowReserveCoins: z.literal(GRID9_MIN_ESCROW_RESERVE_COINS),
@@ -344,9 +360,15 @@ export const grid9GameStateSchema = z
     matchId: id,
     liveSessionId: id,
     region: id,
+    roomMode: z.enum(['public', 'private']),
+    ownerUserId: id.nullable(),
+    roomCode: z.string().min(4).max(12).nullable(),
     phase: z.enum([
       'initializing',
       'lobby',
+      'lobby_waiting',
+      'private_lobby',
+      'roulette',
       'countdown',
       'combat',
       'settling',
@@ -365,6 +387,23 @@ export const grid9GameStateSchema = z
         spotlightEndsAt: isoDate,
         endsAt: isoDate,
         microDropAwarded: z.boolean(),
+        attacksUsedThisTurn: nonNegativeInteger,
+        defensesUsedThisTurn: nonNegativeInteger,
+        freeDropItemId: z
+          .enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield'])
+          .nullable(),
+        freeDropEquipped: z.boolean(),
+        autoResolved: z.boolean(),
+      })
+      .nullable(),
+    roulette: z
+      .object({
+        turnNumber: nonNegativeInteger,
+        candidateSlotIndices: z.array(slotIndex).min(1).max(GRID9_SLOT_COUNT),
+        selectedSlotIndex: slotIndex,
+        startedAt: isoDate,
+        endsAt: isoDate,
+        entropyDigest: z.string().regex(/^[a-f0-9]{64}$/),
       })
       .nullable(),
     lastMicroDrop: z
@@ -382,7 +421,13 @@ export const grid9GameStateSchema = z
         intentId: id.nullable(),
         serverOperationId: id.nullable(),
         actor: publicActionActorSchema,
-        kind: z.enum(['weapon', 'shield', 'mercenary_funding']),
+        kind: z.enum([
+          'weapon',
+          'shield',
+          'mercenary_funding',
+          'arsenal_gift',
+          'inventory_buy',
+        ]),
         weaponId: z.enum(['arrow', 'fireball', 'mega_bomb']).nullable(),
         shieldId: z.literal('basic_shield').nullable(),
         targetSlotIndex: slotIndex,
@@ -405,7 +450,10 @@ export const grid9GameStateSchema = z
             action.shieldId !== null) ||
           (action.kind === 'mercenary_funding' &&
             action.weaponId === null &&
-            action.shieldId === null),
+            action.shieldId === null) ||
+          ((action.kind === 'arsenal_gift' || action.kind === 'inventory_buy') &&
+            ((action.weaponId !== null && action.shieldId === null) ||
+              (action.weaponId === null && action.shieldId !== null))),
         { message: 'lastAction item ids must match its action kind' },
       )
       .nullable(),

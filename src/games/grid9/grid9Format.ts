@@ -10,7 +10,12 @@ export function formatGrid9Phase(phase: string | null | undefined): string {
     case 'initializing':
       return 'BOOTING';
     case 'lobby':
-      return 'LOCKING IN';
+    case 'lobby_waiting':
+      return 'MATCH STARTING';
+    case 'private_lobby':
+      return 'PRIVATE LOBBY';
+    case 'roulette':
+      return 'ROULETTE';
     case 'countdown':
       return 'COUNTDOWN';
     case 'combat':

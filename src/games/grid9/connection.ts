@@ -11,11 +11,14 @@ import {
   buildFundMercenaryIntent,
   buildMatchJoinIntent,
   buildPingIntent,
+  buildPrivateRoomCreateIntent,
+  buildPrivateRoomJoinIntent,
   buildPurchaseShieldIntent,
   buildQueueJoinIntent,
   buildQueueLeaveIntent,
   buildRequestSnapshotIntent,
   buildReserveCoinsIntent,
+  buildStartPrivateMatchIntent,
 } from './intents';
 import type { Grid9ClientIntent } from './protocol';
 import { applyGrid9ServerEvent, asGrid9ServerEvent, type Grid9ApplyEffects } from './reconcile';
@@ -44,6 +47,8 @@ export class Grid9Connection {
   private snapshotInFlight = false;
   private joinInFlight: string | null = null;
   private queueJoinInFlight = false;
+  /** Wave 1: portal Play triggers queue; set true only for deep-link auto-queue. */
+  autoQueueOnWelcome = false;
   private welcomeWaiters: Array<{
     resolve: () => void;
     reject: (error: Error) => void;
@@ -92,6 +97,27 @@ export class Grid9Connection {
         region: input.region,
         sponsorPassId: input.sponsorPassId ?? null,
       }),
+    );
+  }
+
+  sendPrivateRoomCreateIntent(input: { region: string; displayName?: string }): string {
+    patchGrid9Session({ region: input.region });
+    return this.emitBuilt(
+      buildPrivateRoomCreateIntent(this.requireSession(), input),
+    );
+  }
+
+  sendPrivateRoomJoinIntent(input: { region: string; roomCode: string }): string {
+    patchGrid9Session({ region: input.region });
+    return this.emitBuilt(
+      buildPrivateRoomJoinIntent(this.requireSession(), input),
+    );
+  }
+
+  sendStartPrivateMatchIntent(): string {
+    const command = this.requireMatchCommand();
+    return this.emitBuilt(
+      buildStartPrivateMatchIntent(this.requireSession(), command),
     );
   }
 
@@ -305,6 +331,7 @@ export class Grid9Connection {
    * uses REQUEST_SNAPSHOT via handleEffects instead).
    */
   private maybeAutoQueueJoinAfterWelcome(): void {
+    if (!this.autoQueueOnWelcome) return;
     if (this.closed || this.queueJoinInFlight) return;
     const session = getGrid9Session();
     if (!session.connectionSessionId) return;

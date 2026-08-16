@@ -62,7 +62,7 @@ local nonceJson = ARGV[7]
 local stateJson = redis.call('HGET', key, 'state')
 if not stateJson then return cjson.encode({ status = 'REJECTED', code = 'MATCH_NOT_FOUND' }) end
 local state = cjson.decode(stateJson)
-if state.phase ~= 'countdown' and state.phase ~= 'combat' then
+if state.phase ~= 'lobby_waiting' and state.phase ~= 'private_lobby' and state.phase ~= 'roulette' and state.phase ~= 'countdown' and state.phase ~= 'combat' then
   return cjson.encode({ status = 'REJECTED', code = 'MATCH_NOT_ACTIVE' })
 end
 if tonumber(state.authority.stateVersion) ~= expectedVersion then

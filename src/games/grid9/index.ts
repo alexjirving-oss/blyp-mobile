@@ -10,6 +10,8 @@ export { Grid9Provider, Grid9Context } from './Grid9Provider';
 export { useGrid9 } from './useGrid9';
 export { Grid9ArenaView } from './Grid9ArenaView';
 export { Grid9ArenaScreen } from './Grid9ArenaScreen';
+export { Grid9EntryPortal } from './Grid9EntryPortal';
+export { Grid9VictoryModal } from './Grid9VictoryModal';
 export { Grid9Header } from './Grid9Header';
 export { Grid9Board } from './Grid9Board';
 export { Grid9Slot } from './Grid9Slot';

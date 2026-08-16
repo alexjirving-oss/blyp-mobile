@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import type { Server, Socket } from 'socket.io';
 import {
   GRID9_NONCE_TTL_SECONDS,
+  GRID9_PROTOCOL_VERSION,
   GRID9_SOCKET_CHANNEL,
   GRID9_SOCKET_ROOM_PREFIX,
   createGrid9CryptographicNonce,
@@ -14,17 +15,22 @@ import type {
   Grid9MatchAssignedPayload,
   Grid9MatchCompletedPayload,
   Grid9MercenaryFundedPayload,
+  Grid9ArsenalGrantedPayload,
   Grid9MicroDropResolvedPayload,
   Grid9PlayerEliminatedPayload,
   Grid9PlayerConnectionChangedPayload,
   Grid9PongPayload,
+  Grid9PrivateRoomStatusPayload,
   Grid9PrivateServerEvent,
   Grid9QueueStatusPayload,
   Grid9ResyncRequiredPayload,
   Grid9RoomServerEvent,
+  Grid9RouletteLandPayload,
+  Grid9RouletteStartPayload,
   Grid9ShieldResolvedPayload,
   Grid9StateSnapshotPayload,
   Grid9TurnAdvancedPayload,
+  Grid9TurnTickPayload,
   Grid9WeaponResolvedPayload,
   Grid9WelcomePayload,
 } from './protocol';
@@ -33,6 +39,7 @@ type PrivatePayloadMap = {
   WELCOME: Grid9WelcomePayload;
   QUEUE_STATUS: Grid9QueueStatusPayload;
   MATCH_ASSIGNED: Grid9MatchAssignedPayload;
+  PRIVATE_ROOM_STATUS: Grid9PrivateRoomStatusPayload;
   STATE_SNAPSHOT: Grid9StateSnapshotPayload;
   ESCROW_UPDATED: Grid9EscrowUpdatedPayload;
   INTENT_COMMITTED: Grid9IntentCommittedPayload;
@@ -45,7 +52,11 @@ type RoomPayloadMap = {
   WEAPON_RESOLVED: Grid9WeaponResolvedPayload;
   SHIELD_RESOLVED: Grid9ShieldResolvedPayload;
   MERCENARY_FUNDED: Grid9MercenaryFundedPayload;
+  ARSENAL_GRANTED: Grid9ArsenalGrantedPayload;
   TURN_ADVANCED: Grid9TurnAdvancedPayload;
+  TURN_TICK: Grid9TurnTickPayload;
+  ROULETTE_START: Grid9RouletteStartPayload;
+  ROULETTE_LAND: Grid9RouletteLandPayload;
   MICRO_DROP_RESOLVED: Grid9MicroDropResolvedPayload;
   PLAYER_CONNECTION_CHANGED: Grid9PlayerConnectionChangedPayload;
   PLAYER_ELIMINATED: Grid9PlayerEliminatedPayload;
@@ -70,7 +81,7 @@ export function createGrid9PrivateEvent<K extends keyof PrivatePayloadMap>(args:
 }): Extract<Grid9PrivateServerEvent, { type: K }> {
   return {
     protocol: 'grid9.ws',
-    protocolVersion: 1,
+    protocolVersion: GRID9_PROTOCOL_VERSION,
     direction: 'server_to_client',
     routing: 'private',
     type: args.type,
@@ -97,7 +108,7 @@ export function createGrid9RoomEvent<K extends keyof RoomPayloadMap>(args: {
 }): Extract<Grid9RoomServerEvent, { type: K }> {
   return {
     protocol: 'grid9.ws',
-    protocolVersion: 1,
+    protocolVersion: GRID9_PROTOCOL_VERSION,
     direction: 'server_to_client',
     routing: 'room',
     type: args.type,
@@ -127,7 +138,7 @@ export function createGrid9Welcome(
       connectionId: socket.id,
       connectionSessionId,
       serverTime: new Date().toISOString(),
-      minimumProtocolVersion: 1,
+      minimumProtocolVersion: 2,
       nonceTtlSeconds: GRID9_NONCE_TTL_SECONDS,
     },
   });

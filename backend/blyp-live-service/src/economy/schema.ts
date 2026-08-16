@@ -402,6 +402,11 @@ export async function ensureEconomySchema(db: Knex): Promise<void> {
         `ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS paypal_email text`,
         `ALTER TABLE withdrawal_requests ADD COLUMN IF NOT EXISTS paypal_payout_batch_id text`,
 
+        // Grid 9 Tokens ledger (parallel to gems; do not alter gem columns).
+        `ALTER TABLE wallets ADD COLUMN IF NOT EXISTS token_available bigint NOT NULL DEFAULT 0`,
+        `ALTER TABLE wallets ADD COLUMN IF NOT EXISTS token_pending bigint NOT NULL DEFAULT 0`,
+        `ALTER TABLE wallets ADD COLUMN IF NOT EXISTS lifetime_earned_tokens bigint NOT NULL DEFAULT 0`,
+
         `CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_id ON ledger_entries (user_id)`,
         `CREATE INDEX IF NOT EXISTS idx_ledger_user_created ON ledger_entries (user_id, created_at DESC, ledger_id DESC)`,
         // Rankings P1: windowed board aggregates filter by type + time.

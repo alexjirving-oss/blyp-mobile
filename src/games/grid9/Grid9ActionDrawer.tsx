@@ -35,7 +35,7 @@ export function Grid9ActionDrawer({
       {mode === 'waiting' ? (
         <View className="items-center rounded-2xl border border-slate-700 bg-slate-950 px-4 py-4">
           <Text className="text-center text-sm font-extrabold text-slate-400">
-            ⏳ WAITING FOR SPOTLIGHT
+            ⏳ WAITING FOR ROULETTE
           </Text>
         </View>
       ) : null}

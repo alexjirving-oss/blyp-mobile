@@ -87,6 +87,9 @@ export const grid9RedisKeys = {
   userMatch(userId: string): string {
     return `grid9:user-match:${keyPart(userId, 'userId')}`;
   },
+  privateRoomCode(region: string, roomCode: string): string {
+    return `grid9:${regionHashTag(region)}:private-code:${keyPart(roomCode.toUpperCase(), 'roomCode')}`;
+  },
 } as const;
 
 export const grid9AggregateFields = {
@@ -190,6 +193,8 @@ export interface Grid9TimerOutboxRecord {
   reason:
     | 'sentinel_fill'
     | 'countdown_end'
+    | 'lobby_waiting_end'
+    | 'roulette_end'
     | 'micro_drop'
     | 'turn_end'
     | 'match_deadline';

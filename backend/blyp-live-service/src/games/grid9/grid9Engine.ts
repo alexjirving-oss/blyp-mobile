@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from 'crypto';
 import {
   GRID9_COUNTDOWN_MS,
+  GRID9_HOUSE_SEED_COINS,
+  GRID9_INVENTORY_CAPACITY,
   GRID9_MATCH_TTL_SECONDS,
   GRID9_MAX_HEALTH,
   GRID9_MAX_MATCH_DURATION_MS,
@@ -9,6 +11,8 @@ import {
   GRID9_MICRO_DROP_COIN_REWARD,
   GRID9_MICRO_DROP_SHIELD_REWARD,
   GRID9_MIN_MERCENARY_FUND_COINS,
+  GRID9_PUBLIC_LOBBY_MS,
+  GRID9_ROULETTE_DURATION_MS,
   GRID9_RULES_VERSION,
   GRID9_SENTINEL_FILL_DELAY_MS,
   GRID9_SLOT_INDICES,
@@ -17,6 +21,7 @@ import {
   GRID9_TOP_SUPPORTERS_PER_SLOT,
   GRID9_TURN_DURATION_MS,
   grid9EntropyCommitment,
+  splitGrid9AudienceGiftCoins,
   type Grid9SlotIndex,
 } from './constants';
 import {
@@ -24,8 +29,10 @@ import {
   GRID9_MIN_ESCROW_RESERVE_COINS,
 } from './constants';
 import {
+  GRID9_ARSENAL_CATALOG,
   GRID9_SHIELD_CATALOG,
   GRID9_WEAPON_CATALOG,
+  type Grid9ArsenalItemId,
   type Grid9ShieldId,
   type Grid9Weapon,
   type Grid9WeaponId,
@@ -39,7 +46,7 @@ import {
   allocateGrid9MercenarySpend,
   type Grid9MercenarySpendAllocation,
 } from './ledger';
-import { deriveGrid9MicroDrop } from './entropy';
+import { deriveGrid9FreeDrop, deriveGrid9MicroDrop, deriveGrid9RouletteSlot } from './entropy';
 import { Grid9Error } from './grid9Errors';
 import { createGrid9Sentinel } from './grid9Sentinels';
 import {
@@ -58,6 +65,7 @@ import type {
   Grid9MatchEndReason,
   Grid9MatchOutcome,
   Grid9PlayerSlots,
+  Grid9RoomMode,
   Grid9SponsorPassAward,
   Grid9TurnState,
 } from './state';
@@ -114,9 +122,145 @@ export interface Grid9MicroDropResolution {
     | null;
 }
 
+export interface Grid9ArsenalGrantResolution {
+  state: Grid9GameState;
+  recipientSlotIndex: Grid9SlotIndex;
+  itemId: Grid9ArsenalItemId;
+  costCoins: number;
+  seatCoins: number;
+  jackpotCoins: number;
+  inventoryAfter: Grid9ArsenalItemId[];
+  droppedItemId: Grid9ArsenalItemId | null;
+  selfBuy: boolean;
+}
+
+export interface Grid9KickResolution {
+  state: Grid9GameState;
+  kickedSlotIndex: Grid9SlotIndex;
+  targetUserId: string;
+  wasSpotlight: boolean;
+}
+
 type WeaponPayment =
   | { kind: 'actor_escrow' }
-  | { kind: 'mercenary_bankroll'; sourceSlotIndex: Grid9SlotIndex };
+  | { kind: 'mercenary_bankroll'; sourceSlotIndex: Grid9SlotIndex }
+  | { kind: 'inventory' }
+  | { kind: 'free_drop' };
+
+function requireActiveCombatantTurn(
+  state: Grid9GameState,
+  actor: Grid9ActionActor,
+  sourceSlotIndex: Grid9SlotIndex | null,
+): void {
+  if (actor.kind === 'audience') {
+    throw new Grid9Error(
+      'NOT_ELIGIBLE',
+      'Audience cannot fire arsenal; send weapon gifts instead',
+      { stateVersion: state.authority.stateVersion },
+    );
+  }
+  if (actor.kind !== 'human_player') return;
+  if (
+    !state.turn ||
+    sourceSlotIndex === null ||
+    sourceSlotIndex !== state.turn.spotlightSlotIndex
+  ) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Only the active combatant may act', {
+      stateVersion: state.authority.stateVersion,
+    });
+  }
+}
+
+/**
+ * Inventory overflow policy (locked): FIFO drop oldest when at capacity.
+ * Gifted/bought items always land; oldest stock is discarded.
+ */
+export function grantGrid9InventoryItem(
+  inventory: readonly Grid9ArsenalItemId[],
+  itemId: Grid9ArsenalItemId,
+  capacity = GRID9_INVENTORY_CAPACITY,
+): { inventory: Grid9ArsenalItemId[]; droppedItemId: Grid9ArsenalItemId | null } {
+  const next = [...inventory, itemId];
+  if (next.length <= capacity) {
+    return { inventory: next, droppedItemId: null };
+  }
+  return {
+    inventory: next.slice(next.length - capacity),
+    droppedItemId: next[0] ?? null,
+  };
+}
+
+function requireGiftMatchActive(state: Grid9GameState): void {
+  if (
+    state.phase === 'initializing' ||
+    state.phase === 'settling' ||
+    state.phase === 'completed' ||
+    state.phase === 'cancelled'
+  ) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Match is not open for arsenal gifts', {
+      stateVersion: state.authority.stateVersion,
+    });
+  }
+}
+
+function creditSeatBankrollAndSupporters(args: {
+  beneficiary: Grid9Player;
+  seatCoins: number;
+  sponsor: Grid9Identity;
+  now: string;
+}): void {
+  if (args.seatCoins <= 0) return;
+  args.beneficiary.mercenarySponsorCoins += args.seatCoins;
+  args.beneficiary.mercenaryBankrollCoins += args.seatCoins;
+  args.beneficiary.supporterTotalCoins += args.seatCoins;
+  args.beneficiary.stats.mercenaryCoinsReceived += args.seatCoins;
+  const existing = args.beneficiary.topSupporters.find(
+    (supporter) => supporter.userId === args.sponsor.userId,
+  );
+  if (existing) {
+    existing.contributedCoins += args.seatCoins;
+    existing.lastFundedAt = args.now;
+  } else {
+    args.beneficiary.topSupporters.push({
+      userId: args.sponsor.userId,
+      publicProfileId: args.sponsor.publicProfileId,
+      displayName: args.sponsor.displayName,
+      contributedCoins: args.seatCoins,
+      firstFundedAt: args.now,
+      lastFundedAt: args.now,
+    });
+  }
+  args.beneficiary.topSupporters = args.beneficiary.topSupporters
+    .sort(
+      (left, right) =>
+        right.contributedCoins - left.contributedCoins ||
+        left.firstFundedAt.localeCompare(right.firstFundedAt) ||
+        left.userId.localeCompare(right.userId),
+    )
+    .slice(0, GRID9_TOP_SUPPORTERS_PER_SLOT);
+}
+
+export function resolveGrid9ItemFunding(args: {
+  state: Grid9GameState;
+  sourceSlotIndex: Grid9SlotIndex | null;
+  itemId: string;
+}): WeaponPayment {
+  if (args.sourceSlotIndex === null || !args.state.turn) {
+    return { kind: 'actor_escrow' };
+  }
+  const player = args.state.players[args.sourceSlotIndex];
+  if (!player) return { kind: 'actor_escrow' };
+  if (player.inventory.includes(args.itemId as never)) {
+    return { kind: 'inventory' };
+  }
+  if (
+    args.state.turn.freeDropEquipped &&
+    args.state.turn.freeDropItemId === args.itemId
+  ) {
+    return { kind: 'free_drop' };
+  }
+  return { kind: 'actor_escrow' };
+}
 
 function cloneState(state: Grid9GameState): Grid9GameState {
   return JSON.parse(JSON.stringify(state)) as Grid9GameState;
@@ -166,6 +310,7 @@ function createHuman(
     maxHealth: GRID9_MAX_HEALTH,
     shieldPoints: 0,
     maxShieldPoints: GRID9_MAX_SHIELD_POINTS,
+    inventory: [],
     mercenaryBankrollCoins: 0,
     mercenarySponsorCoins: 0,
     mercenaryMicroDropCoins: 0,
@@ -187,6 +332,10 @@ export function createGrid9Match(args: {
   region: string;
   humans: Grid9HumanSeed[];
   openingRollover?: Grid9OpeningRollover | null;
+  roomMode?: Grid9RoomMode;
+  ownerUserId?: string | null;
+  roomCode?: string | null;
+  houseSeedCoins?: number;
   nowMs?: number;
 }): Grid9GameState {
   if (args.humans.length < 1 || args.humans.length > 9) {
@@ -200,6 +349,10 @@ export function createGrid9Match(args: {
   const now = iso(nowMs);
   const matchId = args.matchId ?? randomUUID();
   const liveSessionId = args.liveSessionId ?? matchId;
+  const roomMode: Grid9RoomMode = args.roomMode ?? 'public';
+  const houseSeedCoins =
+    args.houseSeedCoins ??
+    (roomMode === 'public' ? GRID9_HOUSE_SEED_COINS : 0);
   const players = GRID9_SLOT_INDICES.map((slotIndex) => {
     const human = args.humans[slotIndex];
     return human
@@ -207,33 +360,49 @@ export function createGrid9Match(args: {
       : createGrid9Sentinel(matchId, slotIndex, now);
   }) as Grid9PlayerSlots;
   const entropySeed = randomBytes(32).toString('base64url');
-  const countdownEndsMs = nowMs + GRID9_COUNTDOWN_MS;
+  const lobbyEndsMs = nowMs + GRID9_PUBLIC_LOBBY_MS;
   const rollover = args.openingRollover ?? null;
   const initializing = rollover?.claimStatus === 'reserved';
+  const openingRolloverCoins = rollover?.coins ?? 0;
+  const ownerUserId =
+    args.ownerUserId ??
+    (roomMode === 'private' ? args.humans[0]?.userId ?? null : null);
+  const phase = initializing
+    ? 'initializing'
+    : roomMode === 'private'
+      ? 'private_lobby'
+      : 'lobby_waiting';
+  const phaseEndsAt =
+    initializing || roomMode === 'private' ? null : iso(lobbyEndsMs);
   const state: Grid9GameState = {
     schemaVersion: 1,
     game: 'grid9',
     matchId,
     liveSessionId,
     region: args.region,
-    phase: initializing ? 'initializing' : 'countdown',
+    roomMode,
+    ownerUserId,
+    roomCode: args.roomCode ?? null,
+    phase,
     phaseStartedAt: now,
-    phaseEndsAt: initializing ? null : iso(countdownEndsMs),
+    phaseEndsAt,
     players,
     audienceCount: 0,
     turn: null,
+    roulette: null,
     lastMicroDrop: null,
     lastAction: null,
     jackpot: {
       currency: 'coins',
-      openingRolloverCoins: rollover?.coins ?? 0,
+      openingRolloverCoins,
+      houseSeedCoins,
       openingRolloverClaimId: rollover?.claimId ?? null,
       openingRolloverFenceToken: rollover?.fenceToken ?? null,
       openingRolloverClaimStatus: rollover
         ? rollover.claimStatus ?? 'consumed'
         : 'none',
       purchaseContributionCoins: 0,
-      currentCoins: rollover?.coins ?? 0,
+      currentCoins: openingRolloverCoins + houseSeedCoins,
       status: 'growing',
       rolloverSourceMatchId: rollover?.sourceMatchId ?? null,
       rolloverDestinationMatchId: null,
@@ -261,9 +430,13 @@ export function createGrid9Match(args: {
       maxShieldPoints: GRID9_MAX_SHIELD_POINTS,
       sentinelFillDelayMs: GRID9_SENTINEL_FILL_DELAY_MS,
       countdownMs: GRID9_COUNTDOWN_MS,
+      publicLobbyMs: GRID9_PUBLIC_LOBBY_MS,
+      rouletteDurationMs: GRID9_ROULETTE_DURATION_MS,
       turnDurationMs: GRID9_TURN_DURATION_MS,
       spotlightDurationMs: GRID9_SPOTLIGHT_DURATION_MS,
       maxMatchDurationMs: GRID9_MAX_MATCH_DURATION_MS,
+      houseSeedCoins,
+      inventoryCapacity: GRID9_INVENTORY_CAPACITY,
       microDropCoinReward: GRID9_MICRO_DROP_COIN_REWARD,
       microDropShieldReward: GRID9_MICRO_DROP_SHIELD_REWARD,
       minEscrowReserveCoins: GRID9_MIN_ESCROW_RESERVE_COINS,
@@ -276,9 +449,9 @@ export function createGrid9Match(args: {
       eventSequence: 0,
       entropySeed,
       entropyCommitment: grid9EntropyCommitment(matchId, entropySeed),
-      nextTurnAt: initializing ? null : iso(countdownEndsMs),
+      nextTurnAt: phaseEndsAt,
       matchDeadlineAt: iso(
-        countdownEndsMs + GRID9_MAX_MATCH_DURATION_MS,
+        (phaseEndsAt ? lobbyEndsMs : nowMs) + GRID9_MAX_MATCH_DURATION_MS,
       ),
       cooldowns: {},
       proxyNextActionAt: {},
@@ -531,6 +704,7 @@ function completeMatchInPlace(
   state.phaseStartedAt = concludedAt;
   state.phaseEndsAt = null;
   state.turn = null;
+  state.roulette = null;
   state.outcome = outcome;
   state.authority.nextTurnAt = null;
   state.jackpot.winnerSlotIndex = winner?.slotIndex ?? null;
@@ -579,40 +753,190 @@ export function activateGrid9InitializedMatch(
   }
   const state = cloneState(current);
   const now = iso(nowMs);
-  state.phase = 'countdown';
+  if (state.roomMode === 'private') {
+    state.phase = 'private_lobby';
+    state.phaseEndsAt = null;
+    state.authority.nextTurnAt = null;
+  } else {
+    state.phase = 'lobby_waiting';
+    state.phaseEndsAt = iso(nowMs + GRID9_PUBLIC_LOBBY_MS);
+    state.authority.nextTurnAt = state.phaseEndsAt;
+  }
   state.phaseStartedAt = now;
-  state.phaseEndsAt = iso(nowMs + GRID9_COUNTDOWN_MS);
   if (state.jackpot.openingRolloverClaimStatus === 'reserved') {
     state.jackpot.openingRolloverClaimStatus = 'consumed';
   }
-  state.authority.nextTurnAt = state.phaseEndsAt;
   return mutationDone(state, current, now, 0);
 }
 
+/** @deprecated Prefer startGrid9Roulette after lobby — kept for test helpers. */
 export function beginGrid9Combat(
   current: Grid9GameState,
   nowMs = Date.now(),
 ): Grid9GameState {
-  if (current.phase !== 'countdown') {
-    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Grid 9 countdown is not active');
+  const fromLobby =
+    current.phase === 'lobby_waiting' ||
+    current.phase === 'countdown' ||
+    current.phase === 'private_lobby';
+  if (!fromLobby) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Grid 9 lobby is not active');
+  }
+  return landGrid9Roulette(startGrid9Roulette(current, nowMs), nowMs + GRID9_ROULETTE_DURATION_MS);
+}
+
+export function startGrid9Roulette(
+  current: Grid9GameState,
+  nowMs = Date.now(),
+): Grid9GameState {
+  const allowed =
+    current.phase === 'lobby_waiting' ||
+    current.phase === 'countdown' ||
+    current.phase === 'private_lobby' ||
+    current.phase === 'combat' ||
+    current.phase === 'roulette';
+  if (!allowed) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Grid 9 cannot start roulette');
   }
   const state = cloneState(current);
   const now = iso(nowMs);
-  const spotlightSlotIndex =
-    survivingPlayers(state)[0]?.slotIndex ?? (0 as Grid9SlotIndex);
+  if (nowMs >= Date.parse(state.authority.matchDeadlineAt)) {
+    completeMatchInPlace(
+      state,
+      winnerAtDeadline(state),
+      'max_duration_health_tiebreak',
+      nowMs,
+    );
+    return mutationDone(state, current, now, 1);
+  }
+  const survivors = survivingPlayers(state);
+  if (survivors.length <= 1) {
+    completeMatchInPlace(
+      state,
+      survivors[0] ?? null,
+      'last_box_standing',
+      nowMs,
+    );
+    return mutationDone(state, current, now, 1);
+  }
+  const turnNumber = (state.turn?.turnNumber ?? 0) + 1;
+  const candidateSlotIndices = survivors.map(
+    (player) => player.slotIndex,
+  ) as Grid9SlotIndex[];
+  const pick = deriveGrid9RouletteSlot({
+    entropySeed: state.authority.entropySeed,
+    matchId: state.matchId,
+    turnNumber,
+    candidateSlotIndices,
+  });
+  state.phase = 'roulette';
+  state.phaseStartedAt = now;
+  state.phaseEndsAt = iso(nowMs + GRID9_ROULETTE_DURATION_MS);
+  state.turn = null;
+  state.roulette = {
+    turnNumber,
+    candidateSlotIndices,
+    selectedSlotIndex: pick.selectedSlotIndex,
+    startedAt: now,
+    endsAt: state.phaseEndsAt,
+    entropyDigest: pick.digest,
+  };
+  state.authority.nextTurnAt = state.phaseEndsAt;
+  if (!state.phaseEndsAt || Date.parse(state.authority.matchDeadlineAt) < nowMs) {
+    state.authority.matchDeadlineAt = iso(nowMs + GRID9_MAX_MATCH_DURATION_MS);
+  }
+  return mutationDone(state, current, now, 1);
+}
+
+export function landGrid9Roulette(
+  current: Grid9GameState,
+  nowMs = Date.now(),
+): Grid9GameState {
+  if (current.phase !== 'roulette' || !current.roulette) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Grid 9 roulette is not active');
+  }
+  const state = cloneState(current);
+  const now = iso(nowMs);
+  const roulette = state.roulette!;
+  const selected = state.players[roulette.selectedSlotIndex];
+  if (!selected || selected.status !== 'alive') {
+    return startGrid9Roulette(current, nowMs);
+  }
+  const drop = deriveGrid9FreeDrop({
+    entropySeed: state.authority.entropySeed,
+    matchId: state.matchId,
+    turnNumber: roulette.turnNumber,
+    slotIndex: roulette.selectedSlotIndex,
+  });
+  let freeDropEquipped = false;
+  if (selected.inventory.length < GRID9_INVENTORY_CAPACITY) {
+    selected.inventory = [...selected.inventory, drop.itemId];
+  } else {
+    freeDropEquipped = true;
+  }
   state.phase = 'combat';
   state.phaseStartedAt = now;
   state.phaseEndsAt = state.authority.matchDeadlineAt;
+  state.roulette = null;
   state.turn = {
-    turnNumber: 1,
-    spotlightSlotIndex,
+    turnNumber: roulette.turnNumber,
+    spotlightSlotIndex: roulette.selectedSlotIndex,
     startedAt: now,
-    spotlightEndsAt: iso(nowMs + GRID9_SPOTLIGHT_DURATION_MS),
+    spotlightEndsAt: iso(nowMs + GRID9_TURN_DURATION_MS),
     endsAt: iso(nowMs + GRID9_TURN_DURATION_MS),
-    microDropAwarded: false,
+    microDropAwarded: true,
+    attacksUsedThisTurn: 0,
+    defensesUsedThisTurn: 0,
+    freeDropItemId: drop.itemId,
+    freeDropEquipped,
+    autoResolved: false,
   };
-  state.authority.nextTurnAt = state.turn.spotlightEndsAt;
+  state.authority.nextTurnAt = state.turn.endsAt;
   return mutationDone(state, current, now, 1);
+}
+
+export function autoResolveGrid9Turn(
+  current: Grid9GameState,
+  nowMs = Date.now(),
+): Grid9GameState {
+  requireCombat(current);
+  if (!current.turn) {
+    throw new Grid9Error('INTERNAL_ERROR', 'Grid 9 turn is missing');
+  }
+  const state = cloneState(current);
+  const turn = state.turn!;
+  const actor = state.players[turn.spotlightSlotIndex];
+  if (
+    actor &&
+    actor.status === 'alive' &&
+    turn.defensesUsedThisTurn < 1
+  ) {
+    const before = actor.shieldPoints;
+    actor.shieldPoints = Math.min(
+      actor.maxShieldPoints,
+      actor.shieldPoints + GRID9_SHIELD_CATALOG.basic_shield.shieldPoints,
+    );
+    turn.defensesUsedThisTurn = 1;
+    if (actor.shieldPoints !== before) {
+      actor.stats.shieldsPurchased += 1;
+    }
+  }
+  turn.autoResolved = true;
+  state.authority.nextTurnAt = iso(nowMs);
+  return mutationDone(state, current, iso(nowMs), 0);
+}
+
+export function startPrivateMatchFromLobby(
+  current: Grid9GameState,
+  hostUserId: string,
+  nowMs = Date.now(),
+): Grid9GameState {
+  if (current.phase !== 'private_lobby') {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Private lobby is not active');
+  }
+  if (!current.ownerUserId || current.ownerUserId !== hostUserId) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Only the room host can start');
+  }
+  return startGrid9Roulette(current, nowMs);
 }
 
 export function applyGrid9Weapon(args: {
@@ -631,6 +955,7 @@ export function applyGrid9Weapon(args: {
   const now = iso(nowMs);
   requireCombat(args.state);
   requireActorEligible(args.state, args.actor);
+  requireActiveCombatantTurn(args.state, args.actor, args.sourceSlotIndex);
   const weapon = GRID9_WEAPON_CATALOG[args.weaponId];
   if (!weapon) throw new Grid9Error('ITEM_NOT_FOUND', 'Unknown Grid 9 weapon');
   const target = args.state.players[args.targetSlotIndex];
@@ -655,9 +980,21 @@ export function applyGrid9Weapon(args: {
       stateVersion: args.state.authority.stateVersion,
     });
   }
+  if (
+    args.actor.kind === 'human_player' &&
+    args.state.turn &&
+    args.sourceSlotIndex === args.state.turn.spotlightSlotIndex &&
+    args.state.turn.attacksUsedThisTurn >= 1
+  ) {
+    throw new Grid9Error('RATE_LIMITED', 'Only one attack per turn', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
 
   const state = cloneState(args.state);
   let mercenarySpend: Grid9MercenarySpendAllocation | null = null;
+  const isFree =
+    args.payment.kind === 'inventory' || args.payment.kind === 'free_drop';
   if (args.payment.kind === 'mercenary_bankroll') {
     const payer = state.players[args.payment.sourceSlotIndex];
     mercenarySpend = allocateGrid9MercenarySpend({
@@ -668,6 +1005,33 @@ export function applyGrid9Weapon(args: {
     payer.mercenaryMicroDropCoins -= mercenarySpend.microDropCoins;
     payer.mercenarySponsorCoins -= mercenarySpend.sponsorCoins;
     payer.mercenaryBankrollCoins -= weapon.costCoins;
+  } else if (args.payment.kind === 'inventory') {
+    if (args.sourceSlotIndex === null) {
+      throw new Grid9Error('NOT_ELIGIBLE', 'Inventory requires a combat seat', {
+        stateVersion: args.state.authority.stateVersion,
+      });
+    }
+    const source = state.players[args.sourceSlotIndex];
+    const invIndex = source.inventory.indexOf(weapon.id);
+    if (invIndex < 0) {
+      throw new Grid9Error('ITEM_NOT_FOUND', 'Item not in inventory', {
+        stateVersion: args.state.authority.stateVersion,
+      });
+    }
+    source.inventory = [
+      ...source.inventory.slice(0, invIndex),
+      ...source.inventory.slice(invIndex + 1),
+    ];
+  } else if (args.payment.kind === 'free_drop') {
+    if (
+      !state.turn?.freeDropEquipped ||
+      state.turn.freeDropItemId !== weapon.id
+    ) {
+      throw new Grid9Error('ITEM_NOT_FOUND', 'Free drop is not equipped', {
+        stateVersion: args.state.authority.stateVersion,
+      });
+    }
+    state.turn.freeDropEquipped = false;
   }
 
   const rawTargets = affectedSlots(args.state, weapon, args.targetSlotIndex);
@@ -737,11 +1101,20 @@ export function applyGrid9Weapon(args: {
     const source = state.players[args.sourceSlotIndex];
     source.stats.attacksPurchased += 1;
     source.stats.damageDealt += totalDamage;
-    source.stats.coinsSpent += weapon.costCoins;
+    if (!isFree) source.stats.coinsSpent += weapon.costCoins;
   }
-  state.jackpot.purchaseContributionCoins +=
-    weapon.jackpotContributionCoins;
-  state.jackpot.currentCoins += weapon.jackpotContributionCoins;
+  if (
+    state.turn &&
+    args.sourceSlotIndex === state.turn.spotlightSlotIndex &&
+    args.actor.kind === 'human_player'
+  ) {
+    state.turn.attacksUsedThisTurn += 1;
+  }
+  if (!isFree) {
+    state.jackpot.purchaseContributionCoins +=
+      weapon.jackpotContributionCoins;
+    state.jackpot.currentCoins += weapon.jackpotContributionCoins;
+  }
   state.authority.cooldowns[cooldownKey] = {
     actorKey,
     actor: args.actor,
@@ -893,6 +1266,7 @@ export function applyGrid9Shield(args: {
   const now = iso(nowMs);
   requireCombat(args.state);
   requireActorEligible(args.state, args.actor);
+  requireActiveCombatantTurn(args.state, args.actor, args.sourceSlotIndex);
   const shield = GRID9_SHIELD_CATALOG[args.shieldId];
   if (!shield) throw new Grid9Error('ITEM_NOT_FOUND', 'Unknown Grid 9 shield');
   const beneficiary = args.state.players[args.beneficiarySlotIndex];
@@ -905,7 +1279,19 @@ export function applyGrid9Shield(args: {
   if (cooldown && Date.parse(cooldown.readyAt) > nowMs) {
     throw new Grid9Error('COOLDOWN_ACTIVE', 'Shield is cooling down');
   }
+  if (
+    args.actor.kind === 'human_player' &&
+    args.state.turn &&
+    args.sourceSlotIndex === args.state.turn.spotlightSlotIndex &&
+    args.state.turn.defensesUsedThisTurn >= 1
+  ) {
+    throw new Grid9Error('RATE_LIMITED', 'Only one defense per turn', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
   const state = cloneState(args.state);
+  const isFree =
+    args.payment.kind === 'inventory' || args.payment.kind === 'free_drop';
   if (args.payment.kind === 'mercenary_bankroll') {
     const payer = state.players[args.payment.sourceSlotIndex];
     const allocation = allocateGrid9MercenarySpend({
@@ -916,6 +1302,33 @@ export function applyGrid9Shield(args: {
     payer.mercenaryMicroDropCoins -= allocation.microDropCoins;
     payer.mercenarySponsorCoins -= allocation.sponsorCoins;
     payer.mercenaryBankrollCoins -= shield.costCoins;
+  } else if (args.payment.kind === 'inventory') {
+    if (args.sourceSlotIndex === null) {
+      throw new Grid9Error('NOT_ELIGIBLE', 'Inventory requires a combat seat', {
+        stateVersion: args.state.authority.stateVersion,
+      });
+    }
+    const source = state.players[args.sourceSlotIndex];
+    const invIndex = source.inventory.indexOf(shield.id);
+    if (invIndex < 0) {
+      throw new Grid9Error('ITEM_NOT_FOUND', 'Shield not in inventory', {
+        stateVersion: args.state.authority.stateVersion,
+      });
+    }
+    source.inventory = [
+      ...source.inventory.slice(0, invIndex),
+      ...source.inventory.slice(invIndex + 1),
+    ];
+  } else if (args.payment.kind === 'free_drop') {
+    if (
+      !state.turn?.freeDropEquipped ||
+      state.turn.freeDropItemId !== shield.id
+    ) {
+      throw new Grid9Error('ITEM_NOT_FOUND', 'Free drop is not equipped', {
+        stateVersion: args.state.authority.stateVersion,
+      });
+    }
+    state.turn.freeDropEquipped = false;
   }
   const nextBeneficiary = state.players[args.beneficiarySlotIndex];
   const shieldBefore = nextBeneficiary.shieldPoints;
@@ -926,11 +1339,20 @@ export function applyGrid9Shield(args: {
   if (args.sourceSlotIndex !== null) {
     const source = state.players[args.sourceSlotIndex];
     source.stats.shieldsPurchased += 1;
-    source.stats.coinsSpent += shield.costCoins;
+    if (!isFree) source.stats.coinsSpent += shield.costCoins;
   }
-  state.jackpot.purchaseContributionCoins +=
-    shield.jackpotContributionCoins;
-  state.jackpot.currentCoins += shield.jackpotContributionCoins;
+  if (
+    state.turn &&
+    args.sourceSlotIndex === state.turn.spotlightSlotIndex &&
+    args.actor.kind === 'human_player'
+  ) {
+    state.turn.defensesUsedThisTurn += 1;
+  }
+  if (!isFree) {
+    state.jackpot.purchaseContributionCoins +=
+      shield.jackpotContributionCoins;
+    state.jackpot.currentCoins += shield.jackpotContributionCoins;
+  }
   state.authority.cooldowns[cooldownKey] = {
     actorKey,
     actor: args.actor,
@@ -1048,46 +1470,13 @@ export function advanceGrid9Turn(
   if (!current.turn) {
     throw new Grid9Error('INTERNAL_ERROR', 'Grid 9 turn is missing');
   }
-  const state = cloneState(current);
-  const now = iso(nowMs);
-  if (nowMs >= Date.parse(state.authority.matchDeadlineAt)) {
-    const winner = winnerAtDeadline(state);
-    completeMatchInPlace(
-      state,
-      winner,
-      'max_duration_health_tiebreak',
-      nowMs,
-    );
-    return mutationDone(state, current, now, 1);
-  }
-  const survivors = survivingPlayers(state);
-  if (survivors.length <= 1) {
-    completeMatchInPlace(
-      state,
-      survivors[0] ?? null,
-      'last_box_standing',
-      nowMs,
-    );
-    return mutationDone(state, current, now, 1);
-  }
-  const previousTurn = state.turn;
-  if (!previousTurn) {
-    throw new Grid9Error('INTERNAL_ERROR', 'Grid 9 turn is missing');
-  }
-  const spotlightSlotIndex = nextSurvivingSlot(
-    state,
-    previousTurn.spotlightSlotIndex,
-  );
-  state.turn = {
-    turnNumber: previousTurn.turnNumber + 1,
-    spotlightSlotIndex,
-    startedAt: now,
-    spotlightEndsAt: iso(nowMs + GRID9_SPOTLIGHT_DURATION_MS),
-    endsAt: iso(nowMs + GRID9_TURN_DURATION_MS),
-    microDropAwarded: false,
-  };
-  state.authority.nextTurnAt = state.turn.spotlightEndsAt;
-  return mutationDone(state, current, now, 1);
+  const resolved =
+    current.turn.autoResolved ||
+    (current.turn.attacksUsedThisTurn >= 1 &&
+      current.turn.defensesUsedThisTurn >= 1)
+      ? current
+      : autoResolveGrid9Turn(current, nowMs);
+  return startGrid9Roulette(resolved, nowMs);
 }
 
 export function markGrid9Connection(
@@ -1106,4 +1495,201 @@ export function markGrid9Connection(
   if (human) human.connectionState = connectionState;
   state.audienceCount = Math.max(0, state.audienceCount + audienceDelta);
   return mutationDone(state, current, iso(nowMs), human ? 1 : 0);
+}
+
+/**
+ * Audience (or any non-arsenal path) gifts a catalog arsenal item into a living seat.
+ * Debit face cost externally; here: 70% seat bankroll, 30% jackpot, item → inventory (FIFO overflow).
+ * Does not remote-detonate — recipient fires on their next active turn from inventory.
+ */
+export function applyGrid9ArsenalGift(args: {
+  state: Grid9GameState;
+  sender: Grid9Identity;
+  recipientSlotIndex: Grid9SlotIndex;
+  itemId: Grid9ArsenalItemId;
+  intentId: string;
+  ledgerEntryId: string;
+  nowMs?: number;
+}): Grid9ArsenalGrantResolution {
+  const nowMs = args.nowMs ?? Date.now();
+  const now = iso(nowMs);
+  requireGiftMatchActive(args.state);
+  const item = GRID9_ARSENAL_CATALOG[args.itemId];
+  if (!item) throw new Grid9Error('ITEM_NOT_FOUND', 'Unknown Grid 9 arsenal item');
+  const recipient = args.state.players[args.recipientSlotIndex];
+  if (!recipient || recipient.status !== 'alive') {
+    throw new Grid9Error('TARGET_NOT_ALIVE', 'Gift target seat is eliminated', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  const { seatCoins, jackpotCoins } = splitGrid9AudienceGiftCoins(item.costCoins);
+  const state = cloneState(args.state);
+  const nextRecipient = state.players[args.recipientSlotIndex];
+  const granted = grantGrid9InventoryItem(nextRecipient.inventory, args.itemId);
+  nextRecipient.inventory = granted.inventory;
+  creditSeatBankrollAndSupporters({
+    beneficiary: nextRecipient,
+    seatCoins,
+    sponsor: args.sender,
+    now,
+  });
+  state.jackpot.currentCoins += jackpotCoins;
+  state.jackpot.purchaseContributionCoins += jackpotCoins;
+  const seatedSender = state.players.find(
+    (player): player is Grid9HumanPlayer =>
+      player.kind === 'human' && player.userId === args.sender.userId,
+  );
+  if (seatedSender) seatedSender.stats.coinsSpent += item.costCoins;
+  const isWeapon = item.kind === 'weapon';
+  state.lastAction = {
+    intentId: args.intentId,
+    serverOperationId: null,
+    actor: {
+      kind: 'audience',
+      publicProfileId: args.sender.publicProfileId,
+      displayName: args.sender.displayName,
+    },
+    kind: 'arsenal_gift',
+    weaponId: isWeapon ? (args.itemId as Grid9WeaponId) : null,
+    shieldId: isWeapon ? null : (args.itemId as Grid9ShieldId),
+    targetSlotIndex: args.recipientSlotIndex,
+    affectedSlotIndices: [args.recipientSlotIndex],
+    ledgerEntryId: args.ledgerEntryId,
+    committedAt: now,
+  };
+  return {
+    state: mutationDone(state, args.state, now, 1),
+    recipientSlotIndex: args.recipientSlotIndex,
+    itemId: args.itemId,
+    costCoins: item.costCoins,
+    seatCoins,
+    jackpotCoins,
+    inventoryAfter: granted.inventory,
+    droppedItemId: granted.droppedItemId,
+    selfBuy: false,
+  };
+}
+
+/**
+ * Combatant self-buy into inventory (not instant fire).
+ * Same 70/30 as gifts: 70% stays on own bankroll, 30% jackpot, item stocked for a later turn.
+ */
+export function applyGrid9InventoryBuy(args: {
+  state: Grid9GameState;
+  buyer: Grid9Identity;
+  itemId: Grid9ArsenalItemId;
+  intentId: string;
+  ledgerEntryId: string;
+  nowMs?: number;
+}): Grid9ArsenalGrantResolution {
+  const nowMs = args.nowMs ?? Date.now();
+  const now = iso(nowMs);
+  requireGiftMatchActive(args.state);
+  const item = GRID9_ARSENAL_CATALOG[args.itemId];
+  if (!item) throw new Grid9Error('ITEM_NOT_FOUND', 'Unknown Grid 9 arsenal item');
+  const buyerSeat = args.state.players.find(
+    (player): player is Grid9HumanPlayer =>
+      player.kind === 'human' &&
+      player.userId === args.buyer.userId &&
+      player.status === 'alive' &&
+      player.mode === 'combatant',
+  );
+  if (!buyerSeat) {
+    throw new Grid9Error(
+      'NOT_ELIGIBLE',
+      'Only living combatants can buy inventory stock',
+      { stateVersion: args.state.authority.stateVersion },
+    );
+  }
+  const { seatCoins, jackpotCoins } = splitGrid9AudienceGiftCoins(item.costCoins);
+  const state = cloneState(args.state);
+  const nextBuyer = state.players[buyerSeat.slotIndex] as Grid9HumanPlayer;
+  const granted = grantGrid9InventoryItem(nextBuyer.inventory, args.itemId);
+  nextBuyer.inventory = granted.inventory;
+  creditSeatBankrollAndSupporters({
+    beneficiary: nextBuyer,
+    seatCoins,
+    sponsor: args.buyer,
+    now,
+  });
+  nextBuyer.stats.coinsSpent += item.costCoins;
+  state.jackpot.currentCoins += jackpotCoins;
+  state.jackpot.purchaseContributionCoins += jackpotCoins;
+  const isWeapon = item.kind === 'weapon';
+  state.lastAction = {
+    intentId: args.intentId,
+    serverOperationId: null,
+    actor: {
+      kind: 'human_player',
+      publicProfileId: args.buyer.publicProfileId,
+      displayName: args.buyer.displayName,
+    },
+    kind: 'inventory_buy',
+    weaponId: isWeapon ? (args.itemId as Grid9WeaponId) : null,
+    shieldId: isWeapon ? null : (args.itemId as Grid9ShieldId),
+    targetSlotIndex: buyerSeat.slotIndex,
+    affectedSlotIndices: [buyerSeat.slotIndex],
+    ledgerEntryId: args.ledgerEntryId,
+    committedAt: now,
+  };
+  return {
+    state: mutationDone(state, args.state, now, 1),
+    recipientSlotIndex: buyerSeat.slotIndex,
+    itemId: args.itemId,
+    costCoins: item.costCoins,
+    seatCoins,
+    jackpotCoins,
+    inventoryAfter: granted.inventory,
+    droppedItemId: granted.droppedItemId,
+    selfBuy: true,
+  };
+}
+
+/** Host kick: seat → audience, Sentinel fill so the 9-box stays full. */
+export function kickGrid9SeatToAudience(
+  current: Grid9GameState,
+  hostUserId: string,
+  targetUserId: string,
+  nowMs = Date.now(),
+): Grid9KickResolution {
+  if (!current.ownerUserId || current.ownerUserId !== hostUserId) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Only the room host can kick');
+  }
+  if (targetUserId === hostUserId || targetUserId === current.ownerUserId) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Cannot kick the host');
+  }
+  if (
+    current.phase === 'initializing' ||
+    current.phase === 'settling' ||
+    current.phase === 'completed' ||
+    current.phase === 'cancelled'
+  ) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Cannot kick in this phase');
+  }
+  const human = current.players.find(
+    (player): player is Grid9HumanPlayer =>
+      player.kind === 'human' && player.userId === targetUserId,
+  );
+  if (!human) {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Target is not a seated combatant', {
+      stateVersion: current.authority.stateVersion,
+    });
+  }
+  const wasSpotlight =
+    current.phase === 'combat' &&
+    current.turn?.spotlightSlotIndex === human.slotIndex;
+  const now = iso(nowMs);
+  const state = cloneState(current);
+  state.players[human.slotIndex] = createGrid9Sentinel(
+    state.matchId,
+    human.slotIndex,
+    now,
+  );
+  state.audienceCount = Math.max(0, state.audienceCount + 1);
+  return {
+    state: mutationDone(state, current, now, 1),
+    kickedSlotIndex: human.slotIndex,
+    targetUserId,
+    wasSpotlight: Boolean(wasSpotlight),
+  };
 }

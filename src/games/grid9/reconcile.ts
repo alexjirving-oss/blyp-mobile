@@ -8,6 +8,7 @@ import type {
   Grid9PublicPlayer,
   Grid9QueueStatusPayload,
   Grid9ServerEvent,
+  Grid9TurnState,
 } from './protocol';
 
 export type Grid9ConnectionStatus =
@@ -141,7 +142,30 @@ function applyRoomPatch(
       mercenaryBankrollCoins: event.payload.bankrollAfter,
     }));
   } else if (event.type === 'TURN_ADVANCED' && nextMatch) {
-    nextMatch = { ...nextMatch, turn: event.payload.turn };
+    nextMatch = { ...nextMatch, turn: event.payload.turn, phase: 'combat', roulette: null };
+  } else if (event.type === 'TURN_TICK' && nextMatch) {
+    nextMatch = { ...nextMatch, turn: event.payload.turn, phase: 'combat' };
+  } else if (event.type === 'ROULETTE_START' && nextMatch) {
+    nextMatch = {
+      ...nextMatch,
+      phase: 'roulette',
+      turn: null,
+      roulette: {
+        turnNumber: event.payload.turnNumber,
+        candidateSlotIndices: event.payload.candidateSlotIndices as Grid9TurnState['spotlightSlotIndex'][],
+        selectedSlotIndex: event.payload.selectedSlotIndex as Grid9TurnState['spotlightSlotIndex'],
+        startedAt: nextMatch.serverTime,
+        endsAt: event.payload.endsAt,
+        entropyDigest: event.payload.entropyDigest,
+      },
+    };
+  } else if (event.type === 'ROULETTE_LAND' && nextMatch) {
+    nextMatch = {
+      ...nextMatch,
+      phase: 'combat',
+      turn: event.payload.turn,
+      roulette: null,
+    };
   } else if (event.type === 'MICRO_DROP_RESOLVED' && nextMatch) {
     const result = event.payload.result;
     nextMatch = {
@@ -235,6 +259,26 @@ function applyPrivateEvent(
           : session.queue,
       },
       effects: { ...effects, joinMatch: true },
+    };
+  }
+  if (event.type === 'PRIVATE_ROOM_STATUS') {
+    return {
+      session: {
+        ...session,
+        matchId: event.payload.matchId,
+        assignment:
+          event.payload.slotIndex == null
+            ? session.assignment
+            : {
+                assignmentId: `private-${event.payload.matchId}`,
+                matchId: event.payload.matchId,
+                liveSessionId: event.payload.matchId,
+                slotIndex: event.payload.slotIndex as Grid9TurnState['spotlightSlotIndex'],
+                assignmentToken: 'private',
+                assignmentExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+              },
+      },
+      effects,
     };
   }
   if (event.type === 'STATE_SNAPSHOT') {
@@ -349,7 +393,7 @@ export function applyGrid9ServerEvent(
 export function asGrid9ServerEvent(raw: unknown): Grid9ServerEvent | null {
   if (!raw || typeof raw !== 'object') return null;
   const value = raw as Record<string, unknown>;
-  if (value.protocol !== 'grid9.ws' || value.protocolVersion !== 1) return null;
+  if (value.protocol !== 'grid9.ws' || value.protocolVersion !== 2) return null;
   if (value.direction !== 'server_to_client' || typeof value.type !== 'string') {
     return null;
   }

@@ -1,3 +1,4 @@
+import type { Grid9ArsenalItemId } from './catalog';
 import type { Grid9SlotIndex } from './constants';
 
 export type Grid9PlayerKind = 'human' | 'sentinel';
@@ -63,6 +64,7 @@ export interface Grid9PlayerBase {
   maxHealth: number;
   shieldPoints: number;
   maxShieldPoints: number;
+  inventory: Grid9ArsenalItemId[];
   mercenaryBankrollCoins: number;
   mercenarySponsorCoins: number;
   mercenaryMicroDropCoins: number;
@@ -122,6 +124,7 @@ export interface Grid9PublicPlayerBase {
   maxHealth: number;
   shieldPoints: number;
   maxShieldPoints: number;
+  inventory: Grid9ArsenalItemId[];
   mercenaryBankrollCoins: number;
   mercenarySponsorCoins: number;
   mercenaryMicroDropCoins: number;

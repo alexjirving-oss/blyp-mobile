@@ -32,6 +32,9 @@ export interface Grid9HookValue {
     beneficiarySlotIndex: Grid9SlotIndex | number;
     amountCoins: number;
   }) => string;
+  sendPrivateRoomCreateIntent: (input: { region: string; displayName?: string }) => string;
+  sendPrivateRoomJoinIntent: (input: { region: string; roomCode: string }) => string;
+  sendStartPrivateMatchIntent: () => string;
   sendRequestSnapshotIntent: (matchId?: string) => string;
   sendPingIntent: () => string;
 }
@@ -82,6 +85,20 @@ export function useGrid9(): Grid9HookValue {
       connection.sendFundMercenaryIntent(input),
     [connection],
   );
+  const sendPrivateRoomCreateIntent = useCallback(
+    (input: { region: string; displayName?: string }) =>
+      connection.sendPrivateRoomCreateIntent(input),
+    [connection],
+  );
+  const sendPrivateRoomJoinIntent = useCallback(
+    (input: { region: string; roomCode: string }) =>
+      connection.sendPrivateRoomJoinIntent(input),
+    [connection],
+  );
+  const sendStartPrivateMatchIntent = useCallback(
+    () => connection.sendStartPrivateMatchIntent(),
+    [connection],
+  );
   const sendRequestSnapshotIntent = useCallback(
     (matchId?: string) => connection.sendRequestSnapshotIntent(matchId),
     [connection],
@@ -103,6 +120,9 @@ export function useGrid9(): Grid9HookValue {
       sendFireWeaponIntent,
       sendPurchaseShieldIntent,
       sendFundMercenaryIntent,
+      sendPrivateRoomCreateIntent,
+      sendPrivateRoomJoinIntent,
+      sendStartPrivateMatchIntent,
       sendRequestSnapshotIntent,
       sendPingIntent,
     }),
@@ -118,6 +138,9 @@ export function useGrid9(): Grid9HookValue {
       sendFireWeaponIntent,
       sendPurchaseShieldIntent,
       sendFundMercenaryIntent,
+      sendPrivateRoomCreateIntent,
+      sendPrivateRoomJoinIntent,
+      sendStartPrivateMatchIntent,
       sendRequestSnapshotIntent,
       sendPingIntent,
     ],

@@ -314,6 +314,16 @@ export const convertGemsToCoinsSchema = z
 
 export type ConvertGemsToCoinsInput = z.infer<typeof convertGemsToCoinsSchema>;
 
+/** Convert Grid 9 Tokens → spendable COIN at ceil(tokens * 1.15). */
+export const convertTokensToCoinsSchema = z
+  .object({
+    amountTokens: z.coerce.number().int().min(1),
+    idempotencyKey: z.string().min(1).max(120),
+  })
+  .strict();
+
+export type ConvertTokensToCoinsInput = z.infer<typeof convertTokensToCoinsSchema>;
+
 export const socialFollowSchema = z
   .object({
     targetUserId: z.string().min(1).max(128),

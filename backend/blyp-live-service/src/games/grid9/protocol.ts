@@ -20,10 +20,17 @@ export type Grid9ClientIntentType =
   | 'QUEUE_JOIN'
   | 'QUEUE_LEAVE'
   | 'MATCH_JOIN'
+  | 'PRIVATE_ROOM_CREATE'
+  | 'PRIVATE_ROOM_JOIN'
+  | 'START_PRIVATE_MATCH'
+  | 'KICK_PLAYER'
+  | 'CHANGE_SETTINGS'
   | 'RESERVE_COINS'
   | 'FIRE_WEAPON'
   | 'PURCHASE_SHIELD'
   | 'FUND_MERCENARY'
+  | 'SEND_ARSENAL_GIFT'
+  | 'BUY_INVENTORY_ITEM'
   | 'REQUEST_SNAPSHOT'
   | 'PING';
 
@@ -31,13 +38,18 @@ export type Grid9ServerEventType =
   | 'WELCOME'
   | 'QUEUE_STATUS'
   | 'MATCH_ASSIGNED'
+  | 'PRIVATE_ROOM_STATUS'
   | 'STATE_SNAPSHOT'
   | 'ESCROW_UPDATED'
   | 'INTENT_COMMITTED'
   | 'WEAPON_RESOLVED'
   | 'SHIELD_RESOLVED'
   | 'MERCENARY_FUNDED'
+  | 'ARSENAL_GRANTED'
   | 'TURN_ADVANCED'
+  | 'TURN_TICK'
+  | 'ROULETTE_START'
+  | 'ROULETTE_LAND'
   | 'MICRO_DROP_RESOLVED'
   | 'PLAYER_CONNECTION_CHANGED'
   | 'PLAYER_ELIMINATED'
@@ -49,7 +61,7 @@ export type Grid9ServerEventType =
 
 export interface Grid9WireEnvelopeBase {
   protocol: 'grid9.ws';
-  protocolVersion: 1;
+  protocolVersion: 2;
   messageId: string;
   /**
    * Base64url CSPRNG output with at least 128 bits of entropy. The receiver
@@ -163,6 +175,15 @@ export interface Grid9FundMercenaryPayload {
   amountCoins: number;
 }
 
+export interface Grid9SendArsenalGiftPayload {
+  itemId: Grid9WeaponId | Grid9ShieldId;
+  recipientSlotIndex: Grid9SlotIndex;
+}
+
+export interface Grid9BuyInventoryItemPayload {
+  itemId: Grid9WeaponId | Grid9ShieldId;
+}
+
 export interface Grid9RequestSnapshotPayload {
   lastSeenStateVersion: number | null;
   lastSeenSequence: number | null;
@@ -170,6 +191,28 @@ export interface Grid9RequestSnapshotPayload {
 
 export interface Grid9PingPayload {
   clientTime: string;
+}
+
+export interface Grid9PrivateRoomCreatePayload {
+  region: string;
+  displayName?: string;
+}
+
+export interface Grid9PrivateRoomJoinPayload {
+  region: string;
+  roomCode: string;
+}
+
+export interface Grid9StartPrivateMatchPayload {
+  confirm: true;
+}
+
+export interface Grid9KickPlayerPayload {
+  targetUserId: string;
+}
+
+export interface Grid9ChangeSettingsPayload {
+  settings: Record<string, unknown>;
 }
 
 export type Grid9QueueJoinIntent = Grid9ConnectionIntentEnvelope<
@@ -200,20 +243,55 @@ export type Grid9FundMercenaryIntent = Grid9MatchCommandEnvelope<
   'FUND_MERCENARY',
   Grid9FundMercenaryPayload
 >;
+export type Grid9SendArsenalGiftIntent = Grid9MatchCommandEnvelope<
+  'SEND_ARSENAL_GIFT',
+  Grid9SendArsenalGiftPayload
+>;
+export type Grid9BuyInventoryItemIntent = Grid9MatchCommandEnvelope<
+  'BUY_INVENTORY_ITEM',
+  Grid9BuyInventoryItemPayload
+>;
 export type Grid9RequestSnapshotIntent = Grid9MatchAdmissionIntentEnvelope<
   'REQUEST_SNAPSHOT',
   Grid9RequestSnapshotPayload
 >;
 export type Grid9PingIntent = Grid9ConnectionIntentEnvelope<'PING', Grid9PingPayload>;
+export type Grid9PrivateRoomCreateIntent = Grid9ConnectionIntentEnvelope<
+  'PRIVATE_ROOM_CREATE',
+  Grid9PrivateRoomCreatePayload
+>;
+export type Grid9PrivateRoomJoinIntent = Grid9ConnectionIntentEnvelope<
+  'PRIVATE_ROOM_JOIN',
+  Grid9PrivateRoomJoinPayload
+>;
+export type Grid9StartPrivateMatchIntent = Grid9MatchCommandEnvelope<
+  'START_PRIVATE_MATCH',
+  Grid9StartPrivateMatchPayload
+>;
+export type Grid9KickPlayerIntent = Grid9MatchCommandEnvelope<
+  'KICK_PLAYER',
+  Grid9KickPlayerPayload
+>;
+export type Grid9ChangeSettingsIntent = Grid9MatchCommandEnvelope<
+  'CHANGE_SETTINGS',
+  Grid9ChangeSettingsPayload
+>;
 
 export type Grid9ClientIntent =
   | Grid9QueueJoinIntent
   | Grid9QueueLeaveIntent
   | Grid9MatchJoinIntent
+  | Grid9PrivateRoomCreateIntent
+  | Grid9PrivateRoomJoinIntent
+  | Grid9StartPrivateMatchIntent
+  | Grid9KickPlayerIntent
+  | Grid9ChangeSettingsIntent
   | Grid9ReserveCoinsIntent
   | Grid9FireWeaponIntent
   | Grid9PurchaseShieldIntent
   | Grid9FundMercenaryIntent
+  | Grid9SendArsenalGiftIntent
+  | Grid9BuyInventoryItemIntent
   | Grid9RequestSnapshotIntent
   | Grid9PingIntent;
 
@@ -221,8 +299,16 @@ export interface Grid9WelcomePayload {
   connectionId: string;
   connectionSessionId: string;
   serverTime: string;
-  minimumProtocolVersion: 1;
+  minimumProtocolVersion: 2;
   nonceTtlSeconds: number;
+}
+
+export interface Grid9PrivateRoomStatusPayload {
+  status: 'created' | 'joined' | 'started' | 'kicked' | 'closed';
+  matchId: string;
+  roomCode: string;
+  ownerUserId: string;
+  slotIndex: number | null;
 }
 
 export interface Grid9QueueStatusPayload {
@@ -297,9 +383,43 @@ export interface Grid9MercenaryFundedPayload {
   receipt: Grid9PublicPurchaseReceipt;
 }
 
+export interface Grid9ArsenalGrantedPayload {
+  senderPublicProfileId: string;
+  senderDisplayName: string;
+  recipientSlotIndex: Grid9SlotIndex;
+  itemId: Grid9WeaponId | Grid9ShieldId;
+  costCoins: number;
+  seatCoins: number;
+  jackpotCoins: number;
+  selfBuy: boolean;
+  droppedItemId: Grid9WeaponId | Grid9ShieldId | null;
+  inventoryAfter: Array<Grid9WeaponId | Grid9ShieldId>;
+  receipt: Grid9PublicPurchaseReceipt;
+  jackpotTotalCoins: number;
+}
+
 export interface Grid9TurnAdvancedPayload {
   previousTurnNumber: number;
   turn: Grid9TurnState;
+}
+
+export interface Grid9TurnTickPayload {
+  turn: Grid9TurnState;
+  remainingMs: number;
+}
+
+export interface Grid9RouletteStartPayload {
+  turnNumber: number;
+  candidateSlotIndices: number[];
+  selectedSlotIndex: number;
+  endsAt: string;
+  entropyDigest: string;
+}
+
+export interface Grid9RouletteLandPayload {
+  turn: Grid9TurnState;
+  freeDropItemId: string | null;
+  freeDropEquipped: boolean;
 }
 
 export interface Grid9MicroDropResolvedPayload {
@@ -387,6 +507,10 @@ export type Grid9MatchAssignedEvent = Grid9PrivateServerEventEnvelope<
   'MATCH_ASSIGNED',
   Grid9MatchAssignedPayload
 >;
+export type Grid9PrivateRoomStatusEvent = Grid9PrivateServerEventEnvelope<
+  'PRIVATE_ROOM_STATUS',
+  Grid9PrivateRoomStatusPayload
+>;
 export type Grid9StateSnapshotEvent = Grid9PrivateServerEventEnvelope<
   'STATE_SNAPSHOT',
   Grid9StateSnapshotPayload
@@ -411,9 +535,25 @@ export type Grid9MercenaryFundedEvent = Grid9RoomServerEventEnvelope<
   'MERCENARY_FUNDED',
   Grid9MercenaryFundedPayload
 >;
+export type Grid9ArsenalGrantedEvent = Grid9RoomServerEventEnvelope<
+  'ARSENAL_GRANTED',
+  Grid9ArsenalGrantedPayload
+>;
 export type Grid9TurnAdvancedEvent = Grid9RoomServerEventEnvelope<
   'TURN_ADVANCED',
   Grid9TurnAdvancedPayload
+>;
+export type Grid9TurnTickEvent = Grid9RoomServerEventEnvelope<
+  'TURN_TICK',
+  Grid9TurnTickPayload
+>;
+export type Grid9RouletteStartEvent = Grid9RoomServerEventEnvelope<
+  'ROULETTE_START',
+  Grid9RouletteStartPayload
+>;
+export type Grid9RouletteLandEvent = Grid9RoomServerEventEnvelope<
+  'ROULETTE_LAND',
+  Grid9RouletteLandPayload
 >;
 export type Grid9MicroDropResolvedEvent = Grid9RoomServerEventEnvelope<
   'MICRO_DROP_RESOLVED',
@@ -453,6 +593,7 @@ export type Grid9PrivateServerEvent =
   | Grid9WelcomeEvent
   | Grid9QueueStatusEvent
   | Grid9MatchAssignedEvent
+  | Grid9PrivateRoomStatusEvent
   | Grid9StateSnapshotEvent
   | Grid9EscrowUpdatedEvent
   | Grid9IntentCommittedEvent
@@ -464,7 +605,11 @@ export type Grid9RoomServerEvent =
   | Grid9WeaponResolvedEvent
   | Grid9ShieldResolvedEvent
   | Grid9MercenaryFundedEvent
+  | Grid9ArsenalGrantedEvent
   | Grid9TurnAdvancedEvent
+  | Grid9TurnTickEvent
+  | Grid9RouletteStartEvent
+  | Grid9RouletteLandEvent
   | Grid9MicroDropResolvedEvent
   | Grid9PlayerConnectionChangedEvent
   | Grid9PlayerEliminatedEvent

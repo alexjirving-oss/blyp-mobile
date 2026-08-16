@@ -1210,6 +1210,8 @@ export async function getWallet(userId: string) {
 
   const gemAvailable = Number(row.gem_available);
   const gemPending = Number(row.gem_pending);
+  const tokenAvailable = Number(row.token_available || 0);
+  const tokenPending = Number(row.token_pending || 0);
   return {
     coinBalance: Number(row.coin_balance),
     bonusCoinBalance: Number(row.bonus_coin_balance),
@@ -1217,6 +1219,9 @@ export async function getWallet(userId: string) {
     gemPending,
     /** Immediate convert total (available + pending). Withdraw still uses gemAvailable only. */
     gemConvertible: gemAvailable + gemPending,
+    tokenAvailable,
+    tokenPending,
+    tokenConvertible: tokenAvailable + tokenPending,
   };
 }
 

@@ -11,7 +11,8 @@ import {
   advanceGrid9Turn,
   applyGrid9MicroDrop,
   applyGrid9Weapon,
-  beginGrid9Combat,
+  landGrid9Roulette,
+  startGrid9Roulette,
   type Grid9Identity,
 } from './grid9Engine';
 import {
@@ -134,26 +135,60 @@ async function commitSimpleStateEvent(args: {
   }
 }
 
-async function processCountdown(io: Server, state: Grid9GameState): Promise<void> {
-  if (state.phase !== 'countdown') return;
+async function processLobbyWaiting(io: Server, state: Grid9GameState): Promise<void> {
+  if (state.phase !== 'lobby_waiting' && state.phase !== 'countdown') return;
   const nowMs = Math.max(Date.now(), Date.parse(state.phaseEndsAt as string));
-  const next = beginGrid9Combat(state, nowMs);
+  const next = startGrid9Roulette(state, nowMs);
+  const event = next.outcome
+    ? completionEvent(next, next.authority.eventSequence)
+    : createGrid9RoomEvent({
+        type: 'ROULETTE_START',
+        matchId: state.matchId,
+        sequence: next.authority.eventSequence,
+        stateVersion: next.authority.stateVersion,
+        causationIntentId: null,
+        payload: {
+          turnNumber: next.roulette!.turnNumber,
+          candidateSlotIndices: next.roulette!.candidateSlotIndices,
+          selectedSlotIndex: next.roulette!.selectedSlotIndex,
+          endsAt: next.roulette!.endsAt,
+          entropyDigest: next.roulette!.entropyDigest,
+        },
+      });
+  await commitSimpleStateEvent({
+    io,
+    current: state,
+    next,
+    operationId: `lobby-${state.matchId}-${state.authority.stateVersion}`,
+    kind: 'phase_transition',
+    roomEvent: event,
+  });
+  if (next.phase === 'completed') {
+    await settleGrid9Match(io, next);
+  }
+}
+
+async function processRouletteEnd(io: Server, state: Grid9GameState): Promise<void> {
+  if (state.phase !== 'roulette' || !state.roulette) return;
+  const nowMs = Math.max(Date.now(), Date.parse(state.roulette.endsAt));
+  const next = landGrid9Roulette(state, nowMs);
   const event = createGrid9RoomEvent({
-    type: 'TURN_ADVANCED',
+    type: 'ROULETTE_LAND',
     matchId: state.matchId,
     sequence: next.authority.eventSequence,
     stateVersion: next.authority.stateVersion,
     causationIntentId: null,
     payload: {
-      previousTurnNumber: 0,
       turn: next.turn!,
+      freeDropItemId: next.turn!.freeDropItemId,
+      freeDropEquipped: next.turn!.freeDropEquipped,
     },
   });
   await commitSimpleStateEvent({
     io,
     current: state,
     next,
-    operationId: `countdown-${state.matchId}-${state.authority.stateVersion}`,
+    operationId: `roulette-${state.matchId}-${state.roulette.turnNumber}`,
     kind: 'phase_transition',
     roomEvent: event,
   });
@@ -473,17 +508,32 @@ async function processTurnEnd(io: Server, initial: Grid9GameState): Promise<void
   );
   const event = next.outcome
     ? completionEvent(next, next.authority.eventSequence)
-    : createGrid9RoomEvent({
-        type: 'TURN_ADVANCED',
-        matchId: state.matchId,
-        sequence: next.authority.eventSequence,
-        stateVersion: next.authority.stateVersion,
-        causationIntentId: null,
-        payload: {
-          previousTurnNumber: previousTurn,
-          turn: next.turn!,
-        },
-      });
+    : next.phase === 'roulette' && next.roulette
+      ? createGrid9RoomEvent({
+          type: 'ROULETTE_START',
+          matchId: state.matchId,
+          sequence: next.authority.eventSequence,
+          stateVersion: next.authority.stateVersion,
+          causationIntentId: null,
+          payload: {
+            turnNumber: next.roulette.turnNumber,
+            candidateSlotIndices: next.roulette.candidateSlotIndices,
+            selectedSlotIndex: next.roulette.selectedSlotIndex,
+            endsAt: next.roulette.endsAt,
+            entropyDigest: next.roulette.entropyDigest,
+          },
+        })
+      : createGrid9RoomEvent({
+          type: 'TURN_ADVANCED',
+          matchId: state.matchId,
+          sequence: next.authority.eventSequence,
+          stateVersion: next.authority.stateVersion,
+          causationIntentId: null,
+          payload: {
+            previousTurnNumber: previousTurn,
+            turn: next.turn!,
+          },
+        });
   await commitSimpleStateEvent({
     io,
     current: state,
@@ -497,6 +547,16 @@ async function processTurnEnd(io: Server, initial: Grid9GameState): Promise<void
   }
 }
 
+/** After disconnect grace or kick of the spotlight seat: auto-shield/pass and continue. */
+export async function forceGrid9DisconnectedTurnEnd(
+  io: Server,
+  matchId: string,
+): Promise<void> {
+  const state = await readGrid9State(matchId);
+  if (state.phase !== 'combat' || !state.turn) return;
+  await processTurnEnd(io, state);
+}
+
 async function processTimerMember(io: Server, member: string): Promise<void> {
   const [matchId, reason, versionText] = member.split('|');
   if (!matchId || !reason || !versionText) return;
@@ -505,8 +565,13 @@ async function processTimerMember(io: Server, member: string): Promise<void> {
     await scheduleGrid9Timers(state);
     return;
   }
-  if (reason === 'countdown_end') {
-    await processCountdown(io, state);
+  if (
+    reason === 'countdown_end' ||
+    reason === 'lobby_waiting_end'
+  ) {
+    await processLobbyWaiting(io, state);
+  } else if (reason === 'roulette_end') {
+    await processRouletteEnd(io, state);
   } else if (reason === 'micro_drop') {
     await processMicroDrop(io, state);
   } else if (reason === 'turn_end' || reason === 'match_deadline') {

@@ -11,11 +11,16 @@ import type {
 export type Grid9MatchPhase =
   | 'initializing'
   | 'lobby'
+  | 'lobby_waiting'
+  | 'private_lobby'
+  | 'roulette'
   | 'countdown'
   | 'combat'
   | 'settling'
   | 'completed'
   | 'cancelled';
+
+export type Grid9RoomMode = 'public' | 'private';
 
 export type Grid9MatchEndReason =
   | 'last_box_standing'
@@ -74,11 +79,26 @@ export interface Grid9TurnState {
   spotlightEndsAt: string;
   endsAt: string;
   microDropAwarded: boolean;
+  attacksUsedThisTurn: number;
+  defensesUsedThisTurn: number;
+  freeDropItemId: Grid9WeaponId | Grid9ShieldId | null;
+  freeDropEquipped: boolean;
+  autoResolved: boolean;
+}
+
+export interface Grid9RouletteState {
+  turnNumber: number;
+  candidateSlotIndices: Grid9SlotIndex[];
+  selectedSlotIndex: Grid9SlotIndex;
+  startedAt: string;
+  endsAt: string;
+  entropyDigest: string;
 }
 
 export interface Grid9JackpotState {
   currency: 'coins';
   openingRolloverCoins: number;
+  houseSeedCoins: number;
   openingRolloverClaimId: string | null;
   openingRolloverFenceToken: number | null;
   openingRolloverClaimStatus: 'none' | 'reserved' | 'consumed';
@@ -96,6 +116,7 @@ export interface Grid9JackpotState {
 export interface Grid9PublicJackpotState {
   currency: 'coins';
   openingRolloverCoins: number;
+  houseSeedCoins: number;
   purchaseContributionCoins: number;
   currentCoins: number;
   status: Grid9JackpotState['status'];
@@ -154,7 +175,7 @@ export interface Grid9ActionSummary {
   intentId: string | null;
   serverOperationId: string | null;
   actor: Grid9PublicActionActor;
-  kind: 'weapon' | 'shield' | 'mercenary_funding';
+  kind: 'weapon' | 'shield' | 'mercenary_funding' | 'arsenal_gift' | 'inventory_buy';
   weaponId: Grid9WeaponId | null;
   shieldId: Grid9ShieldId | null;
   targetSlotIndex: Grid9SlotIndex;
@@ -170,9 +191,13 @@ export interface Grid9RulesSnapshot {
   maxShieldPoints: number;
   sentinelFillDelayMs: number;
   countdownMs: number;
+  publicLobbyMs: number;
+  rouletteDurationMs: number;
   turnDurationMs: number;
   spotlightDurationMs: number;
   maxMatchDurationMs: number;
+  houseSeedCoins: number;
+  inventoryCapacity: number;
   microDropCoinReward: number;
   microDropShieldReward: number;
   minEscrowReserveCoins: number;
@@ -207,12 +232,16 @@ export interface Grid9GameState {
   matchId: string;
   liveSessionId: string;
   region: string;
+  roomMode: Grid9RoomMode;
+  ownerUserId: string | null;
+  roomCode: string | null;
   phase: Grid9MatchPhase;
   phaseStartedAt: string;
   phaseEndsAt: string | null;
   players: Grid9PlayerSlots;
   audienceCount: number;
   turn: Grid9TurnState | null;
+  roulette: Grid9RouletteState | null;
   lastMicroDrop: Grid9MicroDropResult | null;
   lastAction: Grid9ActionSummary | null;
   jackpot: Grid9JackpotState;
@@ -230,6 +259,9 @@ export interface Grid9PublicGameState {
   game: 'grid9';
   matchId: string;
   liveSessionId: string;
+  roomMode: Grid9RoomMode;
+  ownerPublicProfileId: string | null;
+  roomCode: string | null;
   phase: Grid9MatchPhase;
   phaseStartedAt: string;
   phaseEndsAt: string | null;
@@ -239,6 +271,7 @@ export interface Grid9PublicGameState {
   players: Grid9PublicPlayerSlots;
   audienceCount: number;
   turn: Grid9TurnState | null;
+  roulette: Grid9RouletteState | null;
   lastMicroDrop: Grid9MicroDropResult | null;
   lastAction: Grid9ActionSummary | null;
   jackpot: Grid9PublicJackpotState;

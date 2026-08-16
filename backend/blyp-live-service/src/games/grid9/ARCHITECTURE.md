@@ -849,3 +849,81 @@ field `state` at `grid9:{3f6582f0-808d-468b-b88f-e208aa56cff3}:aggregate`.
 Phase 1 contains contracts, catalog values, Redis keys, and invariant tests. It does not open a
 socket, execute Redis commands, debit a wallet, or render UI. Those mutations belong to Phase 2
 and must follow the atomic boundary above.
+
+---
+
+## Grid 9 v2 (Wave 1)
+
+**Unlocked** 2026-08-16 as a protocol/product redesign. Client design: `src/games/grid9/GRID9_V2_DESIGN.md`.
+Protocol version **2**, rules version **2026-08-16.3**. LIVE / IVS paths remain frozen; stage video is
+placeholder / Sentinel only.
+
+### Authority that does not change
+
+Redis match aggregate, Lua single-`HSET` commit, nonce replay rejection, room `eventSequence`,
+Cognito socket identity, and escrow reservation/settlement remain the source of truth. Clients still
+send intents only; they never invent HP, jackpot, or winner.
+
+### Lifecycle (v2)
+
+**Public:** `initializing` → `lobby_waiting` (15s) → sentinel fill → `roulette` (≈3.5s) → `combat`
+(30s action window) → `roulette` … → `settling` → `completed`.
+
+**Private:** `initializing` → `private_lobby` (indefinite) until host `START_PRIVATE_MATCH` →
+sentinel fill → same `roulette` / `combat` loop.
+
+Legacy phase name `countdown` is retired in new matches; timer reason becomes `lobby_waiting_end`
+/ `roulette_end` / `turn_end`.
+
+### Roulette + turn clock
+
+Spotlight is no longer sequential grid order. Server RNG picks among living slots, broadcasts
+`ROULETTE_START`, then after `rouletteDurationMs` lands with `ROULETTE_LAND` and starts a 30s
+`combat` turn (`TURN_TICK` / turn state). Timeout or disconnect auto-shields (if defense unused)
+or auto-passes, then advances to the next roulette.
+
+### Catalog (locked with Lua)
+
+| Item | Cost | Jackpot | Effect |
+| --- | ---: | ---: | --- |
+| Arrow | 10 | 5 | 20 direct |
+| Fireball | 25 | 12 | 40 direct + 10 orthogonal |
+| Mega Bomb | 50 | 25 | 60 direct |
+| Shield | 15 | 8 | +30 SP, cap 100 |
+
+Inventory capacity 3. Roulette land free drop weights: 70 / 20 / 8 / 2 (Arrow / Shield / Fireball /
+Mega Bomb). Per turn: max 1 attack + 1 defense for the active combatant.
+
+### Room mode + host
+
+Match state carries `roomMode: "public" | "private"`, `ownerUserId`, and optional `roomCode`.
+Host-only intents (`START_PRIVATE_MATCH`, `KICK_PLAYER`, `CHANGE_SETTINGS`) require
+`socket.userId === ownerUserId`.
+
+### Economy (locked)
+
+Public matches seed `houseSeedCoins = 100` into the jackpot pool.
+
+**Victory Tokens (SoT):** human winners are credited `floor(jackpotCoins * GRID9_TOKEN_PAYOUT_BPS / 10000)`
+into `wallets.token_available` (not raw coins). Instant convert:
+`POST /wallet/convert-tokens` → `ceil(tokens * 1.15)` spendable coins (gems paths remain read-only).
+
+**Audience weapon gifts:** `SEND_ARSENAL_GIFT` / `BUY_INVENTORY_ITEM` debit catalog `costCoins`, split
+`GRID9_AUDIENCE_GIFT_SEAT_BPS=7000` bankroll + `GRID9_AUDIENCE_GIFT_JACKPOT_BPS=3000` jackpot, and grant
+the arsenal item into inventory (FIFO drop oldest at capacity 3). Audience cannot FIRE arsenal;
+only the roulette-active seat fires from inventory/on-turn purchase.
+
+**Disconnect:** `GRID9_DISCONNECT_GRACE_MS=9000` then auto-resolve spotlight turn.
+
+**Kick:** host demotes seat → audience + Sentinel fill.
+
+Wave constants:
+`GRID9_AUDIENCE_GIFT_SEAT_BPS=7000`, `GRID9_AUDIENCE_GIFT_JACKPOT_BPS=3000`,
+`GRID9_TOKEN_PAYOUT_BPS=5000`, `GRID9_TOKEN_CONVERT_BONUS_BPS=1500`.
+
+### New intents / events (additive)
+
+Intents: `PRIVATE_ROOM_CREATE`, `PRIVATE_ROOM_JOIN`, `START_PRIVATE_MATCH`, `KICK_PLAYER`,
+`CHANGE_SETTINGS`.
+
+Room events: `ROULETTE_START`, `ROULETTE_LAND`, `TURN_TICK` (plus existing resolve/completion events).

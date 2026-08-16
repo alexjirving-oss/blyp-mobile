@@ -48,7 +48,9 @@ export type Grid9LedgerFundingSource =
   | 'actor_escrow'
   | 'mercenary_bankroll'
   | 'house_micro_drop'
-  | 'jackpot_pool';
+  | 'jackpot_pool'
+  | 'inventory'
+  | 'free_drop';
 
 export interface Grid9LedgerFundingBreakdown {
   platformReservationCoins: number;
@@ -110,6 +112,8 @@ export type Grid9LedgerEntryKind =
   | 'weapon_purchase'
   | 'shield_purchase'
   | 'mercenary_funding'
+  | 'arsenal_gift'
+  | 'inventory_buy'
   | 'micro_drop_credit'
   | 'action_refund'
   | 'jackpot_payout'

@@ -104,6 +104,9 @@ if tonumber(currentState.authority.stateVersion) ~= request.expectedStateVersion
   return reply('REJECTED', 'STALE_STATE', currentStateJson)
 end
 if request.commandType == 'RESERVE_COINS'
+  and currentState.phase ~= 'lobby_waiting'
+  and currentState.phase ~= 'private_lobby'
+  and currentState.phase ~= 'roulette'
   and currentState.phase ~= 'countdown'
   and currentState.phase ~= 'combat' then
   return reply('REJECTED', 'MATCH_NOT_ACTIVE', currentState.phase)
@@ -111,6 +114,15 @@ end
 if (request.commandType == 'FIRE_WEAPON'
     or request.commandType == 'PURCHASE_SHIELD'
     or request.commandType == 'FUND_MERCENARY')
+  and currentState.phase ~= 'combat' then
+  return reply('REJECTED', 'MATCH_NOT_ACTIVE', currentState.phase)
+end
+if (request.commandType == 'SEND_ARSENAL_GIFT'
+    or request.commandType == 'BUY_INVENTORY_ITEM')
+  and currentState.phase ~= 'lobby_waiting'
+  and currentState.phase ~= 'private_lobby'
+  and currentState.phase ~= 'roulette'
+  and currentState.phase ~= 'countdown'
   and currentState.phase ~= 'combat' then
   return reply('REJECTED', 'MATCH_NOT_ACTIVE', currentState.phase)
 end
@@ -151,7 +163,8 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
     if player.kind == 'human' and player.userId == request.authenticatedUserId then
       actorSlot = index - 1
       if player.status ~= 'alive' or player.mode ~= 'combatant' then
-        if request.commandType ~= 'FUND_MERCENARY' then
+        if request.commandType ~= 'FUND_MERCENARY'
+          and request.commandType ~= 'SEND_ARSENAL_GIFT' then
           return reply('REJECTED', 'NOT_ELIGIBLE', nil)
         end
       end
@@ -165,25 +178,55 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
   end
 
   if request.commandType == 'FIRE_WEAPON' then
+    if actorSlot == nil then
+      return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+    end
     local item = paidCatalog.weapons[validation.itemId]
-    if not item or debit ~= tonumber(item.cost) or ledger.itemId ~= validation.itemId then
+    if not item or ledger.itemId ~= validation.itemId then
       return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
+    end
+    local funding = validation.fundingSource or 'actor_escrow'
+    if funding == 'inventory' or funding == 'free_drop' then
+      if debit ~= 0
+        or tonumber(newState.jackpot.currentCoins) ~= tonumber(currentState.jackpot.currentCoins)
+        or tonumber(ledger.jackpotDeltaCoins) ~= 0 then
+        return reply('REJECTED', 'INTERNAL_ERROR', 'free action must be zero-cost')
+      end
+    else
+      if debit ~= tonumber(item.cost) then
+        return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
+      end
+      if tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= tonumber(item.jackpot)
+        or tonumber(ledger.jackpotDeltaCoins) ~= tonumber(item.jackpot) then
+        return reply('REJECTED', 'INTERNAL_ERROR', 'jackpot delta mismatch')
+      end
     end
     if actorSlot ~= nil and actorSlot == targetIndex then
       return reply('REJECTED', 'TARGET_SELF', nil)
     end
-    if tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= tonumber(item.jackpot)
-      or tonumber(ledger.jackpotDeltaCoins) ~= tonumber(item.jackpot) then
-      return reply('REJECTED', 'INTERNAL_ERROR', 'jackpot delta mismatch')
-    end
   elseif request.commandType == 'PURCHASE_SHIELD' then
+    if actorSlot == nil then
+      return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+    end
     local item = paidCatalog.shields[validation.itemId]
-    if not item or debit ~= tonumber(item.cost) or ledger.itemId ~= validation.itemId then
+    if not item or ledger.itemId ~= validation.itemId then
       return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
     end
-    if tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= tonumber(item.jackpot)
-      or tonumber(ledger.jackpotDeltaCoins) ~= tonumber(item.jackpot) then
-      return reply('REJECTED', 'INTERNAL_ERROR', 'shield purchase mismatch')
+    local funding = validation.fundingSource or 'actor_escrow'
+    if funding == 'inventory' or funding == 'free_drop' then
+      if debit ~= 0
+        or tonumber(newState.jackpot.currentCoins) ~= tonumber(currentState.jackpot.currentCoins)
+        or tonumber(ledger.jackpotDeltaCoins) ~= 0 then
+        return reply('REJECTED', 'INTERNAL_ERROR', 'free shield must be zero-cost')
+      end
+    else
+      if debit ~= tonumber(item.cost) then
+        return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
+      end
+      if tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= tonumber(item.jackpot)
+        or tonumber(ledger.jackpotDeltaCoins) ~= tonumber(item.jackpot) then
+        return reply('REJECTED', 'INTERNAL_ERROR', 'shield purchase mismatch')
+      end
     end
   elseif request.commandType == 'FUND_MERCENARY' then
     if actorSlot == nil then return reply('REJECTED', 'NOT_ELIGIBLE', nil) end
@@ -198,6 +241,28 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
       or tonumber(newState.jackpot.currentCoins) ~= tonumber(currentState.jackpot.currentCoins)
       or tonumber(ledger.jackpotDeltaCoins) ~= 0 then
       return reply('REJECTED', 'INVALID_FUND_AMOUNT', nil)
+    end
+  elseif request.commandType == 'SEND_ARSENAL_GIFT'
+    or request.commandType == 'BUY_INVENTORY_ITEM' then
+    local item = paidCatalog.weapons[validation.itemId] or paidCatalog.shields[validation.itemId]
+    if not item or ledger.itemId ~= validation.itemId then
+      return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
+    end
+    if debit ~= tonumber(item.cost) then
+      return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
+    end
+    local seatDelta = math.floor(debit * 7000 / 10000)
+    local jackpotDelta = debit - seatDelta
+    if tonumber(ledger.jackpotDeltaCoins) ~= jackpotDelta
+      or tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= jackpotDelta
+      or tonumber(newTarget.mercenaryBankrollCoins) - tonumber(oldTarget.mercenaryBankrollCoins) ~= seatDelta
+      or tonumber(newTarget.mercenarySponsorCoins) - tonumber(oldTarget.mercenarySponsorCoins) ~= seatDelta then
+      return reply('REJECTED', 'INTERNAL_ERROR', 'arsenal grant split mismatch')
+    end
+    if request.commandType == 'BUY_INVENTORY_ITEM' then
+      if actorSlot == nil or actorSlot ~= targetIndex then
+        return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+      end
     end
   end
 end
@@ -264,6 +329,7 @@ export type Grid9AtomicCommitRequest = {
     ledgerField: string;
     itemId: string | null;
     targetSlotIndex: number;
+    fundingSource?: 'actor_escrow' | 'inventory' | 'free_drop' | 'mercenary_bankroll';
   } | null;
   fields: Array<[field: string, value: string]>;
 };

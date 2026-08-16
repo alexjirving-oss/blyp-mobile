@@ -22,9 +22,11 @@ import {
   leaveGrid9Queue,
 } from './grid9Matchmaker';
 import {
+  buyGrid9InventoryItem,
   fireGrid9Weapon,
   fundGrid9Mercenary,
   purchaseGrid9Shield,
+  sendGrid9ArsenalGift,
 } from './grid9MatchService';
 import { reserveGrid9Coins } from './grid9WalletService';
 import { resolveGrid9Identity } from './grid9Identity';
@@ -48,6 +50,13 @@ import {
   scheduleGrid9DisconnectTimeout,
   upsertGrid9Presence,
 } from './grid9Presence';
+import {
+  changeGrid9PrivateSettings,
+  createGrid9PrivateRoom,
+  joinGrid9PrivateRoom,
+  kickGrid9PrivatePlayer,
+  startGrid9PrivateMatch,
+} from './grid9PrivateRooms';
 import type { Grid9ClientIntent } from './protocol';
 
 const MAX_MESSAGES_PER_SECOND = 30;
@@ -440,6 +449,53 @@ async function handleGrid9Intent(args: {
       connectionSessionId,
       intent,
     });
+  } else if (intent.type === 'PRIVATE_ROOM_CREATE') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await createGrid9PrivateRoom({
+      io,
+      socket,
+      identity,
+      connectionSessionId,
+      region: intent.payload.region,
+      intentId: intent.intentId,
+    });
+  } else if (intent.type === 'PRIVATE_ROOM_JOIN') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await joinGrid9PrivateRoom({
+      io,
+      socket,
+      identity,
+      connectionSessionId,
+      region: intent.payload.region,
+      roomCode: intent.payload.roomCode,
+      intentId: intent.intentId,
+    });
+  } else if (intent.type === 'START_PRIVATE_MATCH') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await startGrid9PrivateMatch({
+      io,
+      identity,
+      matchId: intent.matchId,
+      expectedStateVersion: intent.expectedStateVersion,
+      intentId: intent.intentId,
+    });
+  } else if (intent.type === 'KICK_PLAYER') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await kickGrid9PrivatePlayer({
+      io,
+      identity,
+      matchId: intent.matchId,
+      targetUserId: intent.payload.targetUserId,
+      expectedStateVersion: intent.expectedStateVersion,
+      intentId: intent.intentId,
+    });
+  } else if (intent.type === 'CHANGE_SETTINGS') {
+    await consumeGrid9ConnectionNonce(connectionSessionId, intent.nonce);
+    await changeGrid9PrivateSettings({
+      identity,
+      matchId: intent.matchId,
+      expectedStateVersion: intent.expectedStateVersion,
+    });
   } else if (intent.type === 'REQUEST_SNAPSHOT') {
     await requestGrid9Snapshot({
       io,
@@ -488,7 +544,11 @@ async function handleGrid9Intent(args: {
         ? await fireGrid9Weapon({ intent, identity })
         : intent.type === 'FUND_MERCENARY'
           ? await fundGrid9Mercenary({ intent, identity })
-          : await purchaseGrid9Shield({ intent, identity });
+          : intent.type === 'SEND_ARSENAL_GIFT'
+            ? await sendGrid9ArsenalGift({ intent, identity })
+            : intent.type === 'BUY_INVENTORY_ITEM'
+              ? await buyGrid9InventoryItem({ intent, identity })
+              : await purchaseGrid9Shield({ intent, identity });
     emitGrid9Private(
       socket,
       createGrid9PrivateEvent({
@@ -632,6 +692,19 @@ export async function processGrid9PresenceTimeouts(
         connectionState: 'disconnected',
         operationSuffix: `presence-timeout-${userId}`,
       });
+      const after = await readGrid9State(matchId);
+      const human = after.players.find(
+        (player) => player.kind === 'human' && player.userId === userId,
+      );
+      if (
+        after.phase === 'combat' &&
+        after.turn &&
+        human &&
+        human.slotIndex === after.turn.spotlightSlotIndex
+      ) {
+        const { forceGrid9DisconnectedTurnEnd } = await import('./grid9GameLoop');
+        await forceGrid9DisconnectedTurnEnd(io, matchId);
+      }
     } catch (error: any) {
       if (error instanceof Grid9Error && error.code === 'MATCH_NOT_FOUND') {
         await cancelGrid9DisconnectTimeout(matchId, userId);

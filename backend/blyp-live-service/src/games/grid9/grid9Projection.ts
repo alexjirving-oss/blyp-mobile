@@ -24,6 +24,7 @@ function projectCommonPlayer(player: Grid9Player) {
     maxHealth: player.maxHealth,
     shieldPoints: player.shieldPoints,
     maxShieldPoints: player.maxShieldPoints,
+    inventory: [...player.inventory],
     mercenaryBankrollCoins: player.mercenaryBankrollCoins,
     mercenarySponsorCoins: player.mercenarySponsorCoins,
     mercenaryMicroDropCoins: player.mercenaryMicroDropCoins,
@@ -79,6 +80,7 @@ function projectJackpot(state: Grid9GameState): Grid9PublicJackpotState {
   return {
     currency: 'coins',
     openingRolloverCoins: state.jackpot.openingRolloverCoins,
+    houseSeedCoins: state.jackpot.houseSeedCoins,
     purchaseContributionCoins: state.jackpot.purchaseContributionCoins,
     currentCoins: state.jackpot.currentCoins,
     status: state.jackpot.status,
@@ -131,11 +133,15 @@ export function toGrid9PublicGameState(
   state: Grid9GameState,
   serverTime = new Date().toISOString(),
 ): Grid9PublicGameState {
+  const owner = humanByUserId(state, state.ownerUserId);
   return {
     schemaVersion: 1,
     game: 'grid9',
     matchId: state.matchId,
     liveSessionId: state.liveSessionId,
+    roomMode: state.roomMode,
+    ownerPublicProfileId: owner?.publicProfileId ?? null,
+    roomCode: state.roomCode,
     phase: state.phase,
     phaseStartedAt: state.phaseStartedAt,
     phaseEndsAt: state.phaseEndsAt,
@@ -145,6 +151,7 @@ export function toGrid9PublicGameState(
     players: state.players.map(projectPlayer) as Grid9PublicPlayerSlots,
     audienceCount: state.audienceCount,
     turn: state.turn ? { ...state.turn } : null,
+    roulette: state.roulette ? { ...state.roulette } : null,
     lastMicroDrop: state.lastMicroDrop
       ? JSON.parse(JSON.stringify(state.lastMicroDrop))
       : null,

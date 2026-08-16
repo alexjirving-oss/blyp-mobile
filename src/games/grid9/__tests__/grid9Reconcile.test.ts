@@ -1,5 +1,6 @@
 import {
   applyGrid9ServerEvent,
+  asGrid9ServerEvent,
   createEmptyGrid9Session,
   readGrid9Sequence,
 } from '../reconcile';
@@ -86,7 +87,7 @@ function publicState(
 function snapshotEvent(state = publicState()): Grid9StateSnapshotEvent {
   return {
     protocol: 'grid9.ws',
-    protocolVersion: 1,
+    protocolVersion: 2,
     direction: 'server_to_client',
     routing: 'private',
     type: 'STATE_SNAPSHOT',
@@ -105,7 +106,7 @@ function snapshotEvent(state = publicState()): Grid9StateSnapshotEvent {
 function weaponEvent(sequence: number, stateVersion = sequence): Grid9WeaponResolvedEvent {
   return {
     protocol: 'grid9.ws',
-    protocolVersion: 1,
+    protocolVersion: 2,
     direction: 'server_to_client',
     routing: 'room',
     type: 'WEAPON_RESOLVED',
@@ -210,7 +211,7 @@ describe('Grid 9 sequence reconciliation', () => {
     };
     const welcome: Grid9WelcomeEvent = {
       protocol: 'grid9.ws',
-      protocolVersion: 1,
+      protocolVersion: 2,
       direction: 'server_to_client',
       routing: 'private',
       type: 'WELCOME',
@@ -226,7 +227,7 @@ describe('Grid 9 sequence reconciliation', () => {
         connectionId: 'sock-1',
         connectionSessionId: 'conn-2',
         serverTime: '2026-08-15T00:00:00.000Z',
-        minimumProtocolVersion: 1,
+        minimumProtocolVersion: 2,
         nonceTtlSeconds: 600,
       },
     };
@@ -244,7 +245,7 @@ describe('Grid 9 sequence reconciliation', () => {
     });
     const completed: Grid9MatchCompletedEvent = {
       protocol: 'grid9.ws',
-      protocolVersion: 1,
+      protocolVersion: 2,
       direction: 'server_to_client',
       routing: 'room',
       type: 'MATCH_COMPLETED',
@@ -261,5 +262,32 @@ describe('Grid 9 sequence reconciliation', () => {
     const applied = applyGrid9ServerEvent(afterSnap, completed);
     expect(applied.effects.dropped).toBe(false);
     expect(applied.session.match?.phase).toBe('completed');
+  });
+
+  it('accepts protocolVersion 2 on the wire and rejects v1', () => {
+    const welcome = {
+      protocol: 'grid9.ws',
+      protocolVersion: 2,
+      direction: 'server_to_client',
+      routing: 'private',
+      type: 'WELCOME',
+      messageId: 'msg-w2',
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAA',
+      sentAt: '2026-08-15T00:00:00.000Z',
+      connectionSessionId: 'conn-3',
+      matchId: null,
+      sequence: null,
+      stateVersion: null,
+      causationIntentId: null,
+      payload: {
+        connectionId: 'sock-2',
+        connectionSessionId: 'conn-3',
+        serverTime: '2026-08-15T00:00:00.000Z',
+        minimumProtocolVersion: 2,
+        nonceTtlSeconds: 600,
+      },
+    };
+    expect(asGrid9ServerEvent(welcome)?.type).toBe('WELCOME');
+    expect(asGrid9ServerEvent({ ...welcome, protocolVersion: 1 })).toBeNull();
   });
 });

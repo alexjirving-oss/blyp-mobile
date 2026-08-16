@@ -12,7 +12,7 @@ const id = z.string().min(1).max(200);
 const slotIndex = z.number().int().min(0).max(8);
 const common = {
   protocol: z.literal('grid9.ws'),
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   direction: z.literal('client_to_server'),
   messageId: id,
   connectionSessionId: id,
@@ -129,6 +129,35 @@ const fundMercenary = z
   })
   .strict();
 
+const sendArsenalGift = z
+  .object({
+    ...common,
+    type: z.literal('SEND_ARSENAL_GIFT'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z
+      .object({
+        itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']),
+        recipientSlotIndex: slotIndex,
+      })
+      .strict(),
+  })
+  .strict();
+
+const buyInventoryItem = z
+  .object({
+    ...common,
+    type: z.literal('BUY_INVENTORY_ITEM'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z
+      .object({
+        itemId: z.enum(['arrow', 'fireball', 'mega_bomb', 'basic_shield']),
+      })
+      .strict(),
+  })
+  .strict();
+
 const requestSnapshot = z
   .object({
     ...common,
@@ -154,14 +183,76 @@ const ping = z
   })
   .strict();
 
+const privateRoomCreate = z
+  .object({
+    ...common,
+    type: z.literal('PRIVATE_ROOM_CREATE'),
+    matchId: z.null(),
+    expectedStateVersion: z.null(),
+    payload: z
+      .object({
+        region: id,
+        displayName: z.string().min(1).max(80).optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const privateRoomJoin = z
+  .object({
+    ...common,
+    type: z.literal('PRIVATE_ROOM_JOIN'),
+    matchId: z.null(),
+    expectedStateVersion: z.null(),
+    payload: z.object({ region: id, roomCode: z.string().min(4).max(12) }).strict(),
+  })
+  .strict();
+
+const startPrivateMatch = z
+  .object({
+    ...common,
+    type: z.literal('START_PRIVATE_MATCH'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ confirm: z.literal(true) }).strict(),
+  })
+  .strict();
+
+const kickPlayer = z
+  .object({
+    ...common,
+    type: z.literal('KICK_PLAYER'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ targetUserId: id }).strict(),
+  })
+  .strict();
+
+const changeSettings = z
+  .object({
+    ...common,
+    type: z.literal('CHANGE_SETTINGS'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ settings: z.record(z.unknown()) }).strict(),
+  })
+  .strict();
+
 export const grid9ClientIntentSchema = z.discriminatedUnion('type', [
   queueJoin,
   queueLeave,
   matchJoin,
+  privateRoomCreate,
+  privateRoomJoin,
+  startPrivateMatch,
+  kickPlayer,
+  changeSettings,
   reserveCoins,
   fireWeapon,
   purchaseShield,
   fundMercenary,
+  sendArsenalGift,
+  buyInventoryItem,
   requestSnapshot,
   ping,
 ]);

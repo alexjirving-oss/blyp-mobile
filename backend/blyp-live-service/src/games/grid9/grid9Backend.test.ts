@@ -17,7 +17,7 @@ describe('Grid 9 Phase 2 backend contracts', () => {
   it('accepts a complete paid intent and rejects nullable match authority', () => {
     const intent = {
       protocol: 'grid9.ws',
-      protocolVersion: 1,
+      protocolVersion: 2,
       direction: 'client_to_server',
       messageId: 'message-1',
       connectionSessionId: 'connection-1',

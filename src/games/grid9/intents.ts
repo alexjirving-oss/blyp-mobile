@@ -12,16 +12,21 @@ import {
 } from './constants';
 import { createGrid9ClientNonce, createGrid9Id, isGrid9NonceEncoding } from './nonce';
 import type {
+  Grid9BuyInventoryItemIntent,
   Grid9ClientIntent,
   Grid9FireWeaponIntent,
   Grid9FundMercenaryIntent,
   Grid9MatchJoinIntent,
   Grid9PingIntent,
+  Grid9PrivateRoomCreateIntent,
+  Grid9PrivateRoomJoinIntent,
   Grid9PurchaseShieldIntent,
   Grid9QueueJoinIntent,
   Grid9QueueLeaveIntent,
   Grid9RequestSnapshotIntent,
   Grid9ReserveCoinsIntent,
+  Grid9SendArsenalGiftIntent,
+  Grid9StartPrivateMatchIntent,
 } from './protocol';
 
 export interface Grid9IntentSessionFields {
@@ -221,6 +226,92 @@ export function buildPingIntent(session: Grid9IntentSessionFields): Grid9PingInt
     matchId: null,
     expectedStateVersion: null,
     payload: { clientTime: new Date().toISOString() },
+  };
+}
+
+export function buildPrivateRoomCreateIntent(
+  session: Grid9IntentSessionFields,
+  payload: { region: string; displayName?: string },
+): Grid9PrivateRoomCreateIntent {
+  return {
+    ...envelopeBase(session),
+    type: 'PRIVATE_ROOM_CREATE',
+    matchId: null,
+    expectedStateVersion: null,
+    payload: {
+      region: payload.region,
+      ...(payload.displayName ? { displayName: payload.displayName } : {}),
+    },
+  };
+}
+
+export function buildPrivateRoomJoinIntent(
+  session: Grid9IntentSessionFields,
+  payload: { region: string; roomCode: string },
+): Grid9PrivateRoomJoinIntent {
+  return {
+    ...envelopeBase(session),
+    type: 'PRIVATE_ROOM_JOIN',
+    matchId: null,
+    expectedStateVersion: null,
+    payload: {
+      region: payload.region,
+      roomCode: payload.roomCode.trim().toUpperCase(),
+    },
+  };
+}
+
+export function buildStartPrivateMatchIntent(
+  session: Grid9IntentSessionFields,
+  payload: { matchId: string; expectedStateVersion: number },
+): Grid9StartPrivateMatchIntent {
+  return {
+    ...envelopeBase(session),
+    type: 'START_PRIVATE_MATCH',
+    matchId: payload.matchId,
+    expectedStateVersion: payload.expectedStateVersion,
+    payload: { confirm: true },
+  };
+}
+
+export function buildSendArsenalGiftIntent(
+  session: Grid9IntentSessionFields,
+  payload: {
+    matchId: string;
+    expectedStateVersion: number;
+    itemId: Grid9WeaponId | Grid9ShieldId;
+    recipientSlotIndex: Grid9SlotIndex;
+  },
+): Grid9SendArsenalGiftIntent {
+  if (!isGrid9SlotIndex(payload.recipientSlotIndex)) {
+    throw new Error('Invalid Grid 9 gift recipient slot');
+  }
+  return {
+    ...envelopeBase(session),
+    type: 'SEND_ARSENAL_GIFT',
+    matchId: payload.matchId,
+    expectedStateVersion: payload.expectedStateVersion,
+    payload: {
+      itemId: payload.itemId,
+      recipientSlotIndex: payload.recipientSlotIndex,
+    },
+  };
+}
+
+export function buildBuyInventoryItemIntent(
+  session: Grid9IntentSessionFields,
+  payload: {
+    matchId: string;
+    expectedStateVersion: number;
+    itemId: Grid9WeaponId | Grid9ShieldId;
+  },
+): Grid9BuyInventoryItemIntent {
+  return {
+    ...envelopeBase(session),
+    type: 'BUY_INVENTORY_ITEM',
+    matchId: payload.matchId,
+    expectedStateVersion: payload.expectedStateVersion,
+    payload: { itemId: payload.itemId },
   };
 }
 

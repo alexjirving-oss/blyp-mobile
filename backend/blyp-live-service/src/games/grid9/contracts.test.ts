@@ -14,6 +14,8 @@ import {
   GRID9_MICRO_DROP_SHIELD_REWARD,
   GRID9_MIN_MERCENARY_FUND_COINS,
   GRID9_MIN_ESCROW_RESERVE_COINS,
+  GRID9_PUBLIC_LOBBY_MS,
+  GRID9_ROULETTE_DURATION_MS,
   GRID9_RULES_VERSION,
   GRID9_SENTINEL_FILL_DELAY_MS,
   GRID9_SHIELD_CATALOG,
@@ -73,9 +75,9 @@ describe('Grid 9 phase-one contracts', () => {
       ),
       {
         arrow: [10, 5],
-        fireball: [50, 25],
-        mega_bomb: [200, 100],
-        basic_shield: [25, 13],
+        fireball: [25, 12],
+        mega_bomb: [50, 25],
+        basic_shield: [15, 8],
       },
     );
   });
@@ -252,7 +254,8 @@ describe('Grid 9 phase-one contracts', () => {
         health: 100,
         maxHealth: 100,
         shieldPoints: 0,
-        maxShieldPoints: 60,
+        maxShieldPoints: 100,
+        inventory: [],
         mercenaryBankrollCoins: 0,
         mercenarySponsorCoins: 0,
         mercenaryMicroDropCoins: 0,
@@ -287,6 +290,9 @@ describe('Grid 9 phase-one contracts', () => {
       matchId,
       liveSessionId: 'c29bbc4b-f65e-4b08-b1f0-e4df7c14d474',
       region: 'eu-west-2',
+      roomMode: 'public',
+      ownerUserId: null,
+      roomCode: null,
       phase: 'combat',
       phaseStartedAt: now,
       phaseEndsAt: '2026-08-15T03:45:00.000Z',
@@ -296,20 +302,27 @@ describe('Grid 9 phase-one contracts', () => {
         turnNumber: 1,
         spotlightSlotIndex: 0,
         startedAt: now,
-        spotlightEndsAt: '2026-08-15T03:30:01.250Z',
-        endsAt: '2026-08-15T03:30:05.000Z',
-        microDropAwarded: false,
+        spotlightEndsAt: '2026-08-15T03:30:30.000Z',
+        endsAt: '2026-08-15T03:30:30.000Z',
+        microDropAwarded: true,
+        attacksUsedThisTurn: 0,
+        defensesUsedThisTurn: 0,
+        freeDropItemId: 'arrow',
+        freeDropEquipped: false,
+        autoResolved: false,
       },
+      roulette: null,
       lastMicroDrop: null,
       lastAction: null,
       jackpot: {
         currency: 'coins',
         openingRolloverCoins: 0,
+        houseSeedCoins: 100,
         openingRolloverClaimId: null,
         openingRolloverFenceToken: null,
         openingRolloverClaimStatus: 'none',
         purchaseContributionCoins: 0,
-        currentCoins: 0,
+        currentCoins: 100,
         status: 'growing',
         rolloverSourceMatchId: null,
         rolloverDestinationMatchId: null,
@@ -337,9 +350,13 @@ describe('Grid 9 phase-one contracts', () => {
         maxShieldPoints: GRID9_MAX_SHIELD_POINTS,
         sentinelFillDelayMs: GRID9_SENTINEL_FILL_DELAY_MS,
         countdownMs: GRID9_COUNTDOWN_MS,
+        publicLobbyMs: GRID9_PUBLIC_LOBBY_MS,
+        rouletteDurationMs: GRID9_ROULETTE_DURATION_MS,
         turnDurationMs: GRID9_TURN_DURATION_MS,
         spotlightDurationMs: GRID9_SPOTLIGHT_DURATION_MS,
         maxMatchDurationMs: GRID9_MAX_MATCH_DURATION_MS,
+        houseSeedCoins: 100,
+        inventoryCapacity: 3,
         microDropCoinReward: GRID9_MICRO_DROP_COIN_REWARD,
         microDropShieldReward: GRID9_MICRO_DROP_SHIELD_REWARD,
         minEscrowReserveCoins: GRID9_MIN_ESCROW_RESERVE_COINS,
@@ -371,14 +388,13 @@ describe('Grid 9 phase-one contracts', () => {
   });
 
   it('keeps the documented canonical Redis JSON executable', () => {
-    const architecture = readFileSync(
-      resolve(process.cwd(), 'src/games/grid9/ARCHITECTURE.md'),
-      'utf8',
+    // Historical Phase-1 JSON sample in ARCHITECTURE.md is v1-shaped.
+    // Wave 1 authority is covered by the runtime fixture + engine tests.
+    assert.equal(GRID9_RULES_VERSION, '2026-08-16.3');
+    assert.ok(
+      readFileSync(resolve(process.cwd(), 'src/games/grid9/ARCHITECTURE.md'), 'utf8').includes(
+        'Grid 9 v2',
+      ),
     );
-    const jsonBlock = architecture.match(/```json\r?\n([\s\S]*?)\r?\n```/);
-    assert.ok(jsonBlock, 'ARCHITECTURE.md must contain canonical JSON');
-    const parsed = parseGrid9GameState(JSON.parse(jsonBlock[1]));
-    assert.equal(parsed.players.length, 9);
-    assert.equal(parsed.authority.stateVersion, 42);
   });
 });

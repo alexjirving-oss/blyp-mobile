@@ -586,7 +586,7 @@ export async function processGrid9RegionQueue(
     await redis().zadd(
       grid9RedisKeys.timersProjection(),
       Date.parse(state.phaseEndsAt as string),
-      `${state.matchId}|countdown_end|${state.authority.stateVersion}`,
+      `${state.matchId}|lobby_waiting_end|${state.authority.stateVersion}`,
     );
     for (const entry of entries) {
       await redis().set(

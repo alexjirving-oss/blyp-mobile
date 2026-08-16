@@ -27,6 +27,7 @@ import type {
   Grid9SponsorPass,
 } from './state';
 import { toGrid9PublicGameState } from './grid9Projection';
+import { creditGrid9VictoryTokens } from '../../economy/tokenWalletService';
 
 type ReservationRow = {
   reservation_id: string;
@@ -200,40 +201,15 @@ async function payHumanWinner(
   state: Grid9GameState,
 ): Promise<void> {
   const winnerUserId = state.outcome?.winnerUserId;
-  const amount = state.outcome?.jackpotCoins ?? 0;
-  if (!winnerUserId || amount <= 0) return;
-  const idempotencyKey = `grid9:jackpot:${state.matchId}:${winnerUserId}`;
-  const existing = await trx('ledger_entries')
-    .where({ idempotency_key: idempotencyKey })
-    .first();
-  if (existing) return;
-  await trx('wallets')
-    .insert({ user_id: winnerUserId })
-    .onConflict('user_id')
-    .ignore();
-  const wallet = await trx('wallets')
-    .where({ user_id: winnerUserId })
-    .forUpdate()
-    .first();
-  if (!wallet) throw new Error('Grid 9 winner wallet missing');
-  await trx('ledger_entries').insert({
-    ledger_id: randomUUID(),
-    user_id: winnerUserId,
-    entry_type: 'GRID9_JACKPOT_PAYOUT',
-    currency: 'COIN',
-    amount: String(amount),
-    status: 'POSTED',
-    reference_type: 'GRID9_MATCH',
-    reference_id: state.matchId,
-    idempotency_key: idempotencyKey,
-    metadata: { matchId: state.matchId, winnerSlotIndex: state.outcome?.winnerSlotIndex },
+  const jackpotCoins = state.outcome?.jackpotCoins ?? 0;
+  if (!winnerUserId || jackpotCoins <= 0) return;
+  // Victory pays Tokens @ 50% of jackpot (not raw coins) — Instant convert is the monetization boundary.
+  await creditGrid9VictoryTokens(trx, {
+    userId: winnerUserId,
+    matchId: state.matchId,
+    jackpotCoins,
+    winnerSlotIndex: state.outcome?.winnerSlotIndex ?? null,
   });
-  await trx('wallets')
-    .where({ user_id: winnerUserId })
-    .update({
-      coin_balance: (BigInt(wallet.coin_balance) + BigInt(amount)).toString(),
-      updated_at: trx.fn.now(),
-    });
 }
 
 async function applySentinelRollover(state: Grid9GameState): Promise<void> {
