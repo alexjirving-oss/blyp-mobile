@@ -89,6 +89,7 @@ class IVSBroadcastModule(
     private var currentSessionId: String? = null
     private var currentViewerToken: String? = null
     private var lastStageConnectionState: Stage.ConnectionState? = null
+    private var viewerReachedStableConnection: Boolean = false
     private var sessionMode: SessionMode = SessionMode.NONE
     private var renderOwner: RenderOwner = RenderOwner.NONE
     private var hostRenderSurface: RenderSurfaceConfig? = null
@@ -860,6 +861,7 @@ class IVSBroadcastModule(
         currentSessionId = null
         currentViewerToken = null
         lastStageConnectionState = null
+        viewerReachedStableConnection = false
         sessionMode = SessionMode.NONE
         viewerParticipantId = null
         firstFrameSignalKeys.clear()
@@ -986,6 +988,7 @@ class IVSBroadcastModule(
         configureStageAudio(publishing = false, role = "viewer")
 
         sessionMode = SessionMode.VIEWER
+        viewerReachedStableConnection = false
         loudspeakerController.start(
             LiveLoudspeakerController.Profile.PLAYBACK,
             "viewer-before-stage-create",
@@ -1920,18 +1923,24 @@ class IVSBroadcastModule(
             if (state == Stage.ConnectionState.CONNECTING || state == Stage.ConnectionState.CONNECTED) {
                 loudspeakerController.forceActive("stage-state-${state.name.lowercase()}")
             }
+            if (sessionMode == SessionMode.VIEWER && state == Stage.ConnectionState.CONNECTED) {
+                viewerReachedStableConnection = true
+            }
             // Viewer DISCONNECTED without an exception is a recoverable ICE/token
-            // blip. Emitting it to JS used to map to "Stream has ended" + stopSession.
+            // blip during early setup. Only emit after the viewer has reached a
+            // real connected phase so JS auto-rejoin handles true drops without
+            // turning setup noise into reconnect storms.
             val suppressViewerDisconnect =
                 sessionMode == SessionMode.VIEWER &&
                     state == Stage.ConnectionState.DISCONNECTED &&
-                    exception == null
+                    exception == null &&
+                    !viewerReachedStableConnection
             if (!suppressViewerDisconnect) {
                 emit("IVS_BROADCAST_STATE_CHANGED", Arguments.createMap().apply {
                     putString("state", state.name)
                 })
             } else {
-                Log.i(IVS_TAG, "[VIEWER] suppress DISCONNECTED emit (no exception)")
+                Log.i(IVS_TAG, "[VIEWER] suppress early DISCONNECTED emit (no stable connect)")
             }
 
             if (state == Stage.ConnectionState.DISCONNECTED) {
