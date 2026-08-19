@@ -1446,7 +1446,7 @@ const IVSLiveStreamViewer = ({
                   sessionId={streamId}
                   slotId={0}
                   participantId={hostStream.participantId}
-                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                  remoteTrackCount={1}
                   zoom={1.0}
                   testID="ivs-realtime-battle-host"
                 />
@@ -1471,7 +1471,7 @@ const IVSLiveStreamViewer = ({
                       : 1
                   }
                   participantId={opponentStream.participantId}
-                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                  remoteTrackCount={1}
                   zoom={1.0}
                   testID="ivs-realtime-battle-opponent"
                 />
@@ -1552,7 +1552,7 @@ const IVSLiveStreamViewer = ({
                   sessionId={streamId}
                   slotId={globalSlotId}
                   participantId={stream.participantId}
-                  remoteTrackCount={ivsSession.remoteVideoTracks}
+                  remoteTrackCount={1}
                   zoom={GUEST_TILE_ZOOM}
                   testID={`ivs-realtime-compose-guest-${globalSlotId}`}
                 />
@@ -1600,7 +1600,7 @@ const IVSLiveStreamViewer = ({
                 sessionId={streamId}
                 slotId={0}
                 participantId={hostStream.participantId}
-                remoteTrackCount={ivsSession.remoteVideoTracks}
+                remoteTrackCount={1}
                 zoom={1.0}
                 testID="ivs-realtime-viewer-host"
               />
@@ -1792,7 +1792,7 @@ const IVSLiveStreamViewer = ({
                                       sessionId={streamId}
                                       slotId={globalSlotId}
                                       participantId={stream.participantId}
-                                      remoteTrackCount={ivsSession.remoteVideoTracks}
+                                      remoteTrackCount={1}
                                       zoom={GUEST_TILE_ZOOM}
                                       testID={`ivs-realtime-viewer-guest-${globalSlotId}`}
                                     />

@@ -30,7 +30,6 @@ import com.amazonaws.ivs.broadcast.StageStream.Type
 import com.amazonaws.ivs.broadcast.StageVideoConfiguration
 import com.amazonaws.ivs.broadcast.JitterBufferConfiguration
 import com.amazonaws.ivs.broadcast.SubscribeConfiguration
-import com.amazonaws.ivs.broadcast.SubscribeSimulcastConfiguration
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Callback
 import com.facebook.react.bridge.LifecycleEventListener
@@ -1066,10 +1065,10 @@ class IVSBroadcastModule(
     }
 
     /**
-     * Empty SubscribeConfiguration uses jitter DEFAULT + lowest simulcast layer
-     * then ramp. Browser publishers (Studio, simulcast off, ~900kbps) look like
-     * stall-then-jump on the phone. LOW jitter + highest layer: first frame is
-     * the layer the web host actually sends.
+     * Web Studio publishes a single non-simulcast layer (~900kbps / 24fps).
+     * Default SDK subscribe picks lowest simulcast layer then ramps (slideshow).
+     * Do NOT set simulcast layer preference — there is only one layer. LOW jitter
+     * keeps latency tight without waiting for layer adaptation.
      */
     private fun viewerSubscribeConfiguration(): SubscribeConfiguration {
         val config = SubscribeConfiguration()
@@ -1078,14 +1077,13 @@ class IVSBroadcastModule(
         } catch (e: Throwable) {
             Log.w(IVS_TAG, "[VIEWER] jitterBuffer LOW not set: ${e.message}")
         }
-        try {
-            config.simulcast.setInitialLayerPreference(
-                SubscribeSimulcastConfiguration.InitialLayerPreference.HIGHEST_QUALITY,
-            )
-        } catch (e: Throwable) {
-            Log.w(IVS_TAG, "[VIEWER] simulcast initial layer not set: ${e.message}")
-        }
         return config
+    }
+
+    /** Re-pin media loudspeaker when viewer subscribe receives playable audio. */
+    private fun reassertViewerPlaybackAudio(reason: String) {
+        if (sessionMode != SessionMode.VIEWER) return
+        loudspeakerController.force(LiveLoudspeakerController.Profile.PLAYBACK, reason)
     }
 
     private fun emitNetworkQuality(quality: QualityStats.NetworkQuality?, isLocal: Boolean) {
@@ -1925,22 +1923,31 @@ class IVSBroadcastModule(
             }
             if (sessionMode == SessionMode.VIEWER && state == Stage.ConnectionState.CONNECTED) {
                 viewerReachedStableConnection = true
+                reassertViewerPlaybackAudio("viewer-stage-connected")
             }
-            // Viewer DISCONNECTED without an exception is a recoverable ICE/token
-            // blip during early setup. Only emit after the viewer has reached a
-            // real connected phase so JS auto-rejoin handles true drops without
-            // turning setup noise into reconnect storms.
-            val suppressViewerDisconnect =
+            // Recoverable viewer ICE blips must not reach JS: stopSession there
+            // tears down TextureViews and triggers reconnect storms (slideshow +
+            // frozen UI). Native re-join keeps the same Stage + surfaces.
+            val recoverableViewerDisconnect =
                 sessionMode == SessionMode.VIEWER &&
                     state == Stage.ConnectionState.DISCONNECTED &&
-                    exception == null &&
-                    !viewerReachedStableConnection
-            if (!suppressViewerDisconnect) {
+                    exception == null
+            if (recoverableViewerDisconnect) {
+                Log.i(IVS_TAG, "[VIEWER] recoverable DISCONNECTED; native rejoin (no JS emit)")
+                mainHandler.postDelayed({
+                    if (sessionMode != SessionMode.VIEWER || stage == null) return@postDelayed
+                    try {
+                        stage?.join()
+                        reassertViewerPlaybackAudio("viewer-auto-rejoin")
+                        reattachViewerSurfaces("viewer-auto-rejoin")
+                    } catch (e: Exception) {
+                        Log.w(IVS_TAG, "[VIEWER] auto-rejoin failed: ${e.message}")
+                    }
+                }, 400)
+            } else {
                 emit("IVS_BROADCAST_STATE_CHANGED", Arguments.createMap().apply {
                     putString("state", state.name)
                 })
-            } else {
-                Log.i(IVS_TAG, "[VIEWER] suppress early DISCONNECTED emit (no stable connect)")
             }
 
             if (state == Stage.ConnectionState.DISCONNECTED) {
@@ -2005,7 +2012,11 @@ class IVSBroadcastModule(
 
         override fun onParticipantSubscribeStateChanged(stage: Stage, participant: ParticipantInfo, subscribeState: Stage.SubscribeState) {
             Log.d(IVS_TAG, "[IVS_STAGE] Subscribe state changed: id=${participant.participantId}, state=$subscribeState")
-            if (sessionMode != SessionMode.VIEWER) {
+            if (sessionMode == SessionMode.VIEWER && !participant.isLocal &&
+                subscribeState == Stage.SubscribeState.SUBSCRIBED
+            ) {
+                reassertViewerPlaybackAudio("viewer-subscribed-${participant.participantId}")
+            } else if (sessionMode != SessionMode.VIEWER) {
                 loudspeakerController.forceActive("subscribe-state-${subscribeState.name.lowercase()}")
             }
         }
@@ -2023,8 +2034,12 @@ class IVSBroadcastModule(
                 "IVS_REMOTE_STREAMS",
                 "LOG: IVS_REMOTE_STREAMS added count=${streams.size} participants=$participantId streamTypes=$streamTypes"
             )
-            if (streams.any { it.streamType == Type.AUDIO } && sessionMode != SessionMode.VIEWER) {
-                loudspeakerController.forceActive("remote-audio-stream-added")
+            if (streams.any { it.streamType == Type.AUDIO } && !participant.isLocal) {
+                if (sessionMode == SessionMode.VIEWER) {
+                    reassertViewerPlaybackAudio("viewer-remote-audio-added")
+                } else {
+                    loudspeakerController.forceActive("remote-audio-stream-added")
+                }
             }
             Log.d(IVS_TAG, "[IVS_STAGE] Streams added for ${participant.participantId}: count=${streams.size}, isLocal=${participant.isLocal}")
             attachStreamListeners(participant, streams)

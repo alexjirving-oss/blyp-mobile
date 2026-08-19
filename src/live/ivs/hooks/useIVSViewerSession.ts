@@ -96,6 +96,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
   const joinRequestedRef = useRef<boolean>(false);
   const lastStreamIdRef = useRef<string | null>(null);
   const participantMetaRef = useRef<Map<string, { isMuted: boolean; role?: string }>>(new Map());
+  const lastNetworkQualityRef = useRef<NetworkQuality>(NetworkQuality.UNKNOWN);
   tokenRef.current = token;
   stageArnRef.current = stageArn;
 
@@ -453,11 +454,13 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       setRemoteParticipants((prev) => prev.filter((p) => p.participantId !== payload.participantId));
     });
 
-    // Network quality updated
+    // Network quality updated — skip identical values to avoid re-render churn.
     const unsubNetworkQuality = client.on('networkQualityUpdated', (event) => {
-      console.log('[IVS_VIEWER][NETWORK_QUALITY]', event.payload);
       const payload = event.payload as any;
-      setNetworkQuality(payload.quality);
+      const quality = payload.quality as NetworkQuality;
+      if (quality === lastNetworkQualityRef.current) return;
+      lastNetworkQualityRef.current = quality;
+      setNetworkQuality(quality);
     });
 
     // Remote video track added/removed (from native diagnostics)
