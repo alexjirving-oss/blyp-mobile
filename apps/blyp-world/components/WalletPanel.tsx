@@ -14,6 +14,7 @@ import {
   type WithdrawPayoutMethod,
 } from "@/lib/economy";
 import { useAuth } from "./AuthProvider";
+import "./wallet-panel.css";
 
 export function WalletPanel() {
   const { session, requireAuth } = useAuth();
@@ -257,39 +258,41 @@ export function WalletPanel() {
   const bankReady = Boolean(eligibility?.connect?.payoutsEnabled);
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      <div className="rounded-2xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] p-4 sm:p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--blyp-gold)]">
-          Balance
+    <div className="wal">
+      <header>
+        <p className="wal-kicker">Economy</p>
+        <h1 className="wal-title">Coins & Gems</h1>
+        <p className="wal-lead">
+          Same shared wallet as the Blyp app. Buy coins with card or PayPal;
+          cash out cleared gem earnings.
         </p>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="font-display text-3xl font-extrabold sm:text-4xl">
+      </header>
+
+      <div className="wal-stack">
+        <div className="wal-balances">
+          <div className="wal-stat wal-stat-coin">
+            <p className="wal-stat-label">Coins</p>
+            <p className="wal-stat-value">
               {session
                 ? coins == null
                   ? "…"
                   : coins.toLocaleString()
-                : "—"}{" "}
-              <span className="text-base font-semibold text-[var(--blyp-muted)] sm:text-lg">
-                coins
-              </span>
+                : "—"}
+              <span className="wal-stat-unit">coins</span>
             </p>
-            <p className="mt-1 text-xs text-[var(--blyp-muted)]">
-              Spendable (purchased + bonus)
-            </p>
+            <p className="wal-stat-hint">Spendable (purchased + bonus)</p>
           </div>
-          <div>
-            <p className="font-display text-3xl font-extrabold sm:text-4xl">
+          <div className="wal-stat wal-stat-gem">
+            <p className="wal-stat-label">Gems</p>
+            <p className="wal-stat-value">
               {session
                 ? gems == null
                   ? "…"
                   : gems.toLocaleString()
-                : "—"}{" "}
-              <span className="text-base font-semibold text-[var(--blyp-muted)] sm:text-lg">
-                gems
-              </span>
+                : "—"}
+              <span className="wal-stat-unit">gems</span>
             </p>
-            <p className="mt-1 text-xs text-[var(--blyp-muted)]">
+            <p className="wal-stat-hint">
               {session && gemAvailable != null
                 ? `${gemAvailable.toLocaleString()} available${
                     gemPending ? ` · ${gemPending.toLocaleString()} pending` : ""
@@ -299,201 +302,184 @@ export function WalletPanel() {
           </div>
         </div>
         {!session ? (
-          <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-            <Link href="/login" className="text-[var(--blyp-teal)]">
+          <p className="wal-copy">
+            <Link href="/login" className="wal-link">
               Log in
             </Link>{" "}
             to see your ledger balance from live-service.
           </p>
-        ) : (
-          <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-            Same shared wallet as the Blyp app.
+        ) : null}
+
+        <section className="wal-card">
+          <h2 className="wal-h2">Withdraw gems</h2>
+          <p className="wal-copy">
+            Cash out cleared gem earnings (min {minPayout.toLocaleString()} gems).
+            Platform fee {feePct}%. Purchased coins are never cashable.
           </p>
-        )}
-      </div>
 
-      <div className="rounded-2xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] p-4 sm:p-6">
-        <h2 className="font-display text-xl font-bold sm:text-2xl">
-          Withdraw gems
-        </h2>
-        <p className="mt-2 max-w-xl text-sm text-[var(--blyp-muted)]">
-          Cash out cleared gem earnings (min {minPayout.toLocaleString()} gems).
-          Platform fee {feePct}%. Purchased coins are never cashable.
-        </p>
-
-        {!session ? (
-          <p className="mt-4 text-sm text-[var(--blyp-muted)]">
-            <Link href="/login" className="text-[var(--blyp-teal)]">
-              Log in
-            </Link>{" "}
-            to withdraw.
-          </p>
-        ) : (
-          <div className="mt-5 space-y-4">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setWithdrawMethod("paypal")}
-                className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                  withdrawMethod === "paypal"
-                    ? "bg-[var(--blyp-teal)] text-[var(--blyp-ink)]"
-                    : "border border-[var(--blyp-line)] text-[var(--blyp-muted)]"
-                }`}
-              >
-                PayPal
-              </button>
-              <button
-                type="button"
-                onClick={() => setWithdrawMethod("stripe_connect")}
-                className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                  withdrawMethod === "stripe_connect"
-                    ? "bg-[var(--blyp-teal)] text-[var(--blyp-ink)]"
-                    : "border border-[var(--blyp-line)] text-[var(--blyp-muted)]"
-                }`}
-              >
-                Bank (Stripe)
-              </button>
-            </div>
-
-            {withdrawMethod === "paypal" ? (
-              <div className="space-y-3">
-                <p className="text-sm text-[var(--blyp-muted)]">
-                  Payout to your PayPal email via PayPal Payouts.
-                  {!paypalConfigured
-                    ? " Backend PayPal credentials are not configured yet — UI is ready; Alex must add PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET on live-service."
-                    : paypalReady
-                      ? " Ready once you meet the min balance and policy checks."
-                      : " Save your PayPal email below, then request a withdrawal."}
-                </p>
-                <label className="block text-sm">
-                  <span className="text-[var(--blyp-muted)]">PayPal email</span>
-                  <input
-                    type="email"
-                    value={paypalEmail}
-                    onChange={(e) => setPaypalEmail(e.target.value)}
-                    className="mt-1 w-full rounded-xl border border-[var(--blyp-line)] bg-black/30 px-3 py-2"
-                    placeholder="you@email.com"
-                  />
-                </label>
+          {!session ? (
+            <p className="wal-copy">
+              <Link href="/login" className="wal-link">
+                Log in
+              </Link>{" "}
+              to withdraw.
+            </p>
+          ) : (
+            <div className="wal-body">
+              <div className="wal-tabs">
                 <button
                   type="button"
-                  disabled={withdrawBusy || !paypalEmail}
-                  onClick={() => void savePaypal()}
-                  className="rounded-full border border-[var(--blyp-line)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                  onClick={() => setWithdrawMethod("paypal")}
+                  className={`wal-tab${withdrawMethod === "paypal" ? " is-on" : ""}`}
                 >
-                  Save PayPal email
+                  PayPal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWithdrawMethod("stripe_connect")}
+                  className={`wal-tab${withdrawMethod === "stripe_connect" ? " is-on" : ""}`}
+                >
+                  Bank (Stripe)
                 </button>
               </div>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-[var(--blyp-muted)]">
-                  Bank payout via Stripe Connect Express (UK). This is not PayPal.
-                  {eligibility?.connect?.blockerMessage
-                    ? ` ${eligibility.connect.blockerMessage}`
-                    : bankReady
-                      ? " Bank account linked."
-                      : " Link a bank account to continue."}
-                </p>
-                {!bankReady ? (
-                  <button
-                    type="button"
-                    disabled={withdrawBusy}
-                    onClick={() => void connectBank()}
-                    className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold disabled:opacity-50"
-                  >
-                    {withdrawBusy ? "Opening Stripe…" : "Set up bank payouts"}
-                  </button>
-                ) : null}
-              </div>
-            )}
 
-            <label className="block text-sm">
-              <span className="text-[var(--blyp-muted)]">
+              {withdrawMethod === "paypal" ? (
+                <div className="wal-body">
+                  <p className="wal-copy">
+                    Payout to your PayPal email via PayPal Payouts.
+                    {!paypalConfigured
+                      ? " Backend PayPal credentials are not configured yet — UI is ready; Alex must add PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET on live-service."
+                      : paypalReady
+                        ? " Ready once you meet the min balance and policy checks."
+                        : " Save your PayPal email below, then request a withdrawal."}
+                  </p>
+                  <label className="wal-field">
+                    PayPal email
+                    <input
+                      type="email"
+                      value={paypalEmail}
+                      onChange={(e) => setPaypalEmail(e.target.value)}
+                      className="wal-input"
+                      placeholder="you@email.com"
+                    />
+                  </label>
+                  <div className="wal-actions">
+                    <button
+                      type="button"
+                      disabled={withdrawBusy || !paypalEmail}
+                      onClick={() => void savePaypal()}
+                      className="wal-btn wal-btn-ghost"
+                    >
+                      Save PayPal email
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="wal-body">
+                  <p className="wal-copy">
+                    Bank payout via Stripe Connect Express (UK). This is not
+                    PayPal.
+                    {eligibility?.connect?.blockerMessage
+                      ? ` ${eligibility.connect.blockerMessage}`
+                      : bankReady
+                        ? " Bank account linked."
+                        : " Link a bank account to continue."}
+                  </p>
+                  {!bankReady ? (
+                    <div className="wal-actions">
+                      <button
+                        type="button"
+                        disabled={withdrawBusy}
+                        onClick={() => void connectBank()}
+                        className="wal-btn wal-btn-teal"
+                      >
+                        {withdrawBusy ? "Opening Stripe…" : "Set up bank payouts"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              <label className="wal-field">
                 Amount (available{" "}
                 {eligibility
                   ? eligibility.withdrawableGems.toLocaleString()
                   : gemAvailable?.toLocaleString() || "—"}{" "}
                 gems)
-              </span>
-              <input
-                type="number"
-                min={minPayout}
-                step={1}
-                value={amountGems}
-                onChange={(e) => setAmountGems(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-[var(--blyp-line)] bg-black/30 px-3 py-2 sm:max-w-xs"
-              />
-            </label>
+                <input
+                  type="number"
+                  min={minPayout}
+                  step={1}
+                  value={amountGems}
+                  onChange={(e) => setAmountGems(e.target.value)}
+                  className="wal-input wal-input-sm"
+                />
+              </label>
 
+              <div className="wal-actions">
+                <button
+                  type="button"
+                  disabled={withdrawBusy}
+                  onClick={() => void withdraw()}
+                  className="wal-btn wal-btn-gold"
+                >
+                  {withdrawBusy
+                    ? "Working…"
+                    : withdrawMethod === "paypal"
+                      ? "Withdraw to PayPal"
+                      : "Withdraw to bank"}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="wal-packs-head">
+          <h2 className="wal-h2">Get Coins on the web</h2>
+          <p className="wal-copy">
+            Best value on the web — 1 coin = 1p base, plus bonus coins on every
+            pack. Pay with card or PayPal via Stripe Checkout. Credits go to
+            your shared Blyp wallet.
+          </p>
+        </section>
+
+        <div className="wal-packs">
+          {WEB_COIN_PACKS.map((pack) => (
             <button
+              key={pack.id}
               type="button"
-              disabled={withdrawBusy}
-              onClick={() => void withdraw()}
-              className="rounded-full bg-[var(--blyp-gold)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)] disabled:opacity-50"
+              disabled={busyId === pack.id}
+              onClick={() => buy(pack.id)}
+              className="wal-pack"
             >
-              {withdrawBusy
-                ? "Working…"
-                : withdrawMethod === "paypal"
-                  ? "Withdraw to PayPal"
-                  : "Withdraw to bank"}
+              <p className="wal-pack-coins">
+                {pack.coins.toLocaleString()}{" "}
+                <span className="wal-stat-unit">coins</span>
+              </p>
+              <p className="wal-pack-bonus">
+                +{pack.bonusCoins.toLocaleString()} bonus coins
+              </p>
+              <p className="wal-pack-base">
+                {pack.baseCoins.toLocaleString()} base @ 1p
+              </p>
+              <p className="wal-pack-price">£{pack.priceGbp.toFixed(2)}</p>
+              <p className="wal-pack-cta">
+                {busyId === pack.id ? "Redirecting…" : "Buy · Card or PayPal"}
+              </p>
             </button>
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
 
-      <div>
-        <h2 className="font-display text-xl font-bold sm:text-2xl">
-          Get Coins on the web
-        </h2>
-        <p className="mt-2 max-w-xl text-sm text-[var(--blyp-muted)]">
-          Best value on the web — 1 coin = 1p base, plus bonus coins on every
-          pack. Pay with card or PayPal via Stripe Checkout. Credits go to your
-          shared Blyp wallet.
-        </p>
+        {paypalBuyHint ? (
+          <p className="wal-alert wal-alert-muted">{paypalBuyHint}</p>
+        ) : null}
+        {error ? (
+          <p className="wal-alert wal-alert-err" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {note ? <p className="wal-alert wal-alert-ok">{note}</p> : null}
       </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {WEB_COIN_PACKS.map((pack) => (
-          <button
-            key={pack.id}
-            type="button"
-            disabled={busyId === pack.id}
-            onClick={() => buy(pack.id)}
-            className="rounded-2xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] p-4 text-left transition hover:border-[var(--blyp-teal)] disabled:opacity-60 sm:p-5"
-          >
-            <p className="font-display text-xl font-bold">
-              {pack.coins.toLocaleString()}{" "}
-              <span className="text-sm font-semibold text-[var(--blyp-muted)]">
-                coins
-              </span>
-            </p>
-            <p className="mt-1 text-sm text-[var(--blyp-teal)]">
-              +{pack.bonusCoins.toLocaleString()} bonus coins
-            </p>
-            <p className="mt-1 text-xs text-[var(--blyp-muted)]">
-              {pack.baseCoins.toLocaleString()} base @ 1p
-            </p>
-            <p className="mt-4 text-base font-semibold text-[var(--blyp-gold)]">
-              £{pack.priceGbp.toFixed(2)}
-            </p>
-            <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--blyp-teal)]">
-              {busyId === pack.id
-                ? "Redirecting…"
-                : "Buy · Card or PayPal"}
-            </p>
-          </button>
-        ))}
-      </div>
-
-      {paypalBuyHint ? (
-        <p className="text-sm text-[var(--blyp-muted)]">{paypalBuyHint}</p>
-      ) : null}
-      {error ? (
-        <p className="text-sm text-[var(--blyp-rose)]" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {note ? <p className="text-sm text-[var(--blyp-muted)]">{note}</p> : null}
     </div>
   );
 }

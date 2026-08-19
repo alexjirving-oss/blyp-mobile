@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { SurfaceShell } from "@/components/SurfaceShell";
 import { WalletPanel } from "@/components/WalletPanel";
 
 export const metadata: Metadata = {
@@ -9,9 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function WalletPage() {
-  return (
-    <SurfaceShell eyebrow="Economy" title="Coins">
-      <WalletPanel />
-    </SurfaceShell>
-  );
+  return <WalletPanel />;
 }

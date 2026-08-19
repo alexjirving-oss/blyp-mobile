@@ -75,6 +75,11 @@ export interface Grid9PlayerBase {
   eliminatedAt: string | null;
   eliminatedBy: Grid9Eliminator | null;
   lastDamagedAt: string | null;
+  /**
+   * Face coin value of the action that eliminated this seat (0 if alive).
+   * Knockout tokens = floor(knockoutPayoutFaceCoins * 0.5).
+   */
+  knockoutPayoutFaceCoins: number;
 }
 
 export interface Grid9HumanPlayer extends Grid9PlayerBase {

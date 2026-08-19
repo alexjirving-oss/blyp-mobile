@@ -14,6 +14,9 @@ DIST_CLI = os.path.join(ROOT, "tools", "accountability", "dist", "src", "cli.js"
 VERIFY_TIMEOUT_SECONDS = 900
 VALIDATE_TIMEOUT_SECONDS = 60
 BUILD_TIMEOUT_SECONDS = 120
+# Concurrent WIP can rewrite already-dirty files without changing git status
+# porcelain. Fresh verify+validate retries re-snapshot after those writers settle.
+MAX_STALE_TOUCHED_FILE_RETRIES = 2
 
 
 class StopBlocked(RuntimeError):
@@ -82,13 +85,29 @@ def run_checked(
 
 
 def parse_exact_json(output: str, description: str) -> dict:
-    try:
-        value = json.loads(output)
-    except json.JSONDecodeError as error:
-        raise StopBlocked(f"{description} returned invalid JSON: {error}") from error
-    if not isinstance(value, dict):
-        raise StopBlocked(f"{description} did not return a JSON object")
-    return value
+    text = (output or "").strip()
+    if not text:
+        raise StopBlocked(f"{description} returned empty output")
+    candidates = [text]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        extracted = text[start : end + 1]
+        if extracted != text:
+            candidates.append(extracted)
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError as error:
+            last_error = error
+            continue
+        if isinstance(value, dict):
+            return value
+        last_error = StopBlocked(f"{description} did not return a JSON object")
+    if isinstance(last_error, StopBlocked):
+        raise last_error
+    raise StopBlocked(f"{description} returned invalid JSON: {last_error}") from last_error
 
 
 def validate_receipt_shape(receipt: dict) -> tuple[str, str, str]:
@@ -128,72 +147,104 @@ def main() -> int:
             detail = (build.stderr or build.stdout or "compiled verifier is missing").strip()[-2500:]
             raise StopBlocked(f"accountability controller build failed: {detail}")
 
-        verification = run_checked(
-            [
-                node,
-                DIST_CLI,
-                "verify-session",
-                "--repo",
-                ROOT,
-                "--session",
-                SESSION_PATH,
-            ],
-            timeout=VERIFY_TIMEOUT_SECONDS,
-            environment=environment,
-            description="session verification",
-        )
-        try:
-            receipt = parse_exact_json(verification.stdout.strip(), "session verifier")
-        except StopBlocked as error:
-            detail = (verification.stderr or "no verifier diagnostics").strip()[-2500:]
-            raise StopBlocked(f"{error}; verifier diagnostics: {detail}") from error
-        receipt_id, session_id, verdict = validate_receipt_shape(receipt)
-        receipt_path = os.path.join(
-            ROOT,
-            ".accountability",
-            "sessions",
-            session_id,
-            receipt_id,
-            "receipt.json",
-        )
-        if not os.path.isfile(receipt_path):
-            raise StopBlocked("session verifier claimed a receipt that does not exist")
-
-        validation = run_checked(
-            [
-                node,
-                DIST_CLI,
-                "validate-receipt",
-                receipt_path,
-                "--repo",
-                ROOT,
-                "--session",
-                SESSION_PATH,
-                "--max-age-ms",
-                "120000",
-            ],
-            timeout=VALIDATE_TIMEOUT_SECONDS,
-            environment=environment,
-            description="receipt validation",
-        )
-        validation_result = parse_exact_json(validation.stdout.strip(), "receipt validator")
-        if (
-            validation.returncode != 0
-            or validation_result.get("valid") is not True
-            or validation_result.get("receiptId") != receipt_id
-            or validation_result.get("verdict") != verdict
-        ):
-            detail = (validation.stderr or validation.stdout or "invalid receipt").strip()[-2500:]
-            raise StopBlocked(f"receipt validation failed: {detail}")
-
-        expected_code = 0 if verdict == "PASS" else 2 if verdict == "REJECTED" else 4
-        if verification.returncode != expected_code:
-            raise StopBlocked(
-                f"verifier exit code {verification.returncode} contradicts receipt verdict {verdict}"
+        attempt = 0
+        while True:
+            attempt += 1
+            verification = run_checked(
+                [
+                    node,
+                    DIST_CLI,
+                    "verify-session",
+                    "--repo",
+                    ROOT,
+                    "--session",
+                    SESSION_PATH,
+                ],
+                timeout=VERIFY_TIMEOUT_SECONDS,
+                environment=environment,
+                description="session verification",
             )
-        if verdict != "PASS":
-            detail = (verification.stderr or "mandatory checks did not pass").strip()[-2000:]
-            raise StopBlocked(f"{verdict}: {detail}; receipt={receipt_path}")
+            try:
+                receipt = parse_exact_json(
+                    (verification.stdout or verification.stderr).strip(),
+                    "session verifier",
+                )
+            except StopBlocked as error:
+                detail = (
+                    verification.stderr or verification.stdout or "no verifier diagnostics"
+                ).strip()[-2500:]
+                raise StopBlocked(f"{error}; verifier diagnostics: {detail}") from error
+            if receipt.get("status") == "BLOCKED":
+                raise StopBlocked(str(receipt.get("error") or "session verification blocked"))
+            receipt_id, session_id, verdict = validate_receipt_shape(receipt)
+            receipt_path = os.path.join(
+                ROOT,
+                ".accountability",
+                "sessions",
+                session_id,
+                receipt_id,
+                "receipt.json",
+            )
+            if not os.path.isfile(receipt_path):
+                raise StopBlocked("session verifier claimed a receipt that does not exist")
+
+            validation = run_checked(
+                [
+                    node,
+                    DIST_CLI,
+                    "validate-receipt",
+                    receipt_path,
+                    "--repo",
+                    ROOT,
+                    "--session",
+                    SESSION_PATH,
+                    "--max-age-ms",
+                    "120000",
+                ],
+                timeout=VALIDATE_TIMEOUT_SECONDS,
+                environment=environment,
+                description="receipt validation",
+            )
+            try:
+                validation_result = parse_exact_json(
+                    (validation.stdout or validation.stderr).strip(),
+                    "receipt validator",
+                )
+            except StopBlocked as error:
+                detail = (
+                    validation.stderr or validation.stdout or "no validator diagnostics"
+                ).strip()[-2500:]
+                raise StopBlocked(f"{error}; validator diagnostics: {detail}") from error
+
+            validation_error = str(validation_result.get("error") or "")
+            stale_touched = "touched-file evidence is stale" in validation_error
+            if validation_result.get("status") == "BLOCKED":
+                if stale_touched and attempt <= MAX_STALE_TOUCHED_FILE_RETRIES:
+                    # Re-run full verify so checks bind to the latest quiet tree snapshot.
+                    continue
+                raise StopBlocked(validation_error or "receipt validation blocked")
+            if (
+                validation.returncode != 0
+                or validation_result.get("valid") is not True
+                or validation_result.get("receiptId") != receipt_id
+                or validation_result.get("verdict") != verdict
+            ):
+                detail = (validation.stderr or validation.stdout or "invalid receipt").strip()[
+                    -2500:
+                ]
+                if stale_touched and attempt <= MAX_STALE_TOUCHED_FILE_RETRIES:
+                    continue
+                raise StopBlocked(f"receipt validation failed: {detail}")
+
+            expected_code = 0 if verdict == "PASS" else 2 if verdict == "REJECTED" else 4
+            if verification.returncode != expected_code:
+                raise StopBlocked(
+                    f"verifier exit code {verification.returncode} contradicts receipt verdict {verdict}"
+                )
+            if verdict != "PASS":
+                detail = (verification.stderr or "mandatory checks did not pass").strip()[-2000:]
+                raise StopBlocked(f"{verdict}: {detail}; receipt={receipt_path}")
+            break
     except (StopBlocked, KeyError, OSError, TypeError, ValueError) as error:
         return block(str(error))
 

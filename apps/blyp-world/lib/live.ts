@@ -76,43 +76,52 @@ function normalizeLive(id: string, data: Record<string, unknown>): LiveCard {
 }
 
 export async function fetchLiveDirectory(): Promise<LiveCard[]> {
-  const db = getDb();
-  const snap = await getDocs(collection(db, "liveStreams"));
-  const cards = snap.docs
-    .map((d) => normalizeLive(d.id, d.data() as Record<string, unknown>))
-    .filter(
-      (c) =>
-        c.status.toLowerCase() === "live" &&
-        c.directoryReady &&
-        isFreshHeartbeat(
-          (snap.docs.find((d) => d.id === c.id)?.data() || {}) as Record<
-            string,
-            unknown
-          >,
-        ),
-    )
-    .sort((a, b) => b.viewerCount - a.viewerCount);
-  return cards;
+  try {
+    const db = getDb();
+    const snap = await getDocs(collection(db, "liveStreams"));
+    const cards = snap.docs
+      .map((d) => normalizeLive(d.id, d.data() as Record<string, unknown>))
+      .filter(
+        (c) =>
+          c.status.toLowerCase() === "live" &&
+          c.directoryReady &&
+          isFreshHeartbeat(
+            (snap.docs.find((d) => d.id === c.id)?.data() || {}) as Record<
+              string,
+              unknown
+            >,
+          ),
+      )
+      .sort((a, b) => b.viewerCount - a.viewerCount);
+    return cards;
+  } catch {
+    // Unsigned / permission-denied: directory stays empty. Direct /live/:id
+    // still works via the public program GET.
+    return [];
+  }
 }
 
 export async function fetchLiveById(id: string): Promise<LiveCard | null> {
-  const db = getDb();
-  let snap = await getDoc(doc(db, "liveStreams", id));
-  if (!snap.exists()) {
-    snap = await getDoc(doc(db, "streams", id));
-  }
-  if (!snap.exists()) return null;
-  const card = normalizeLive(snap.id, snap.data() as Record<string, unknown>);
-
-  // Enrich playback from streams doc when liveStreams lacks URL
-  if (!card.playbackUrl) {
-    const alt = await getDoc(doc(db, "streams", id));
-    if (alt.exists()) {
-      const extra = normalizeLive(alt.id, alt.data() as Record<string, unknown>);
-      if (extra.playbackUrl) card.playbackUrl = extra.playbackUrl;
+  try {
+    const db = getDb();
+    let snap = await getDoc(doc(db, "liveStreams", id));
+    if (!snap.exists()) {
+      snap = await getDoc(doc(db, "streams", id));
     }
+    if (!snap.exists()) return null;
+    const card = normalizeLive(snap.id, snap.data() as Record<string, unknown>);
+
+    if (!card.playbackUrl) {
+      const alt = await getDoc(doc(db, "streams", id));
+      if (alt.exists()) {
+        const extra = normalizeLive(alt.id, alt.data() as Record<string, unknown>);
+        if (extra.playbackUrl) card.playbackUrl = extra.playbackUrl;
+      }
+    }
+    return card;
+  } catch {
+    return null;
   }
-  return card;
 }
 
 /** Authenticated mass-join for HLS playback URL when directory lacks one. */
@@ -309,6 +318,19 @@ export async function listGuestRequests(
   return data.requests || [];
 }
 
+/** Viewer → host guest queue (POST /api/live/guest/request). */
+export async function requestGuestSlot(
+  idToken: string,
+  sessionId: string,
+  slotIndexRequested?: number,
+): Promise<void> {
+  const body: Record<string, unknown> = { sessionId };
+  if (typeof slotIndexRequested === "number") {
+    body.slotIndexRequested = slotIndexRequested;
+  }
+  await liveApiFetch("/api/live/guest/request", idToken, body);
+}
+
 export async function inviteGuest(
   idToken: string,
   sessionId: string,
@@ -352,6 +374,19 @@ export async function muteGuest(
     sessionId,
     guestUserId,
     muted,
+  });
+}
+
+export async function setGuestCamera(
+  idToken: string,
+  sessionId: string,
+  guestUserId: string,
+  cameraOff: boolean,
+): Promise<void> {
+  await liveApiFetch("/api/live/guest/camera", idToken, {
+    sessionId,
+    guestUserId,
+    cameraOff,
   });
 }
 
@@ -403,6 +438,154 @@ export async function fetchStreamGiftSummary(
   }
 }
 
+/** Per-recipient coin totals for the session (host/guests). Not sender-ranked. */
+export type StreamGiftTotals = {
+  streamId: string;
+  byUser: Record<string, { coins: number; count: number }>;
+};
+
+export async function fetchStreamGiftTotals(
+  idToken: string,
+  streamId: string,
+): Promise<StreamGiftTotals | null> {
+  try {
+    const res = await fetch(
+      `${liveServiceUrl}/economy/stream/${encodeURIComponent(streamId)}/gift-totals`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${idToken}` },
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as StreamGiftTotals;
+    return {
+      streamId: json.streamId || streamId,
+      byUser: json.byUser && typeof json.byUser === "object" ? json.byUser : {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type SessionEngagementRow = {
+  likes: number;
+  shares: number;
+  comments: number;
+  coinsSpent: number;
+  coinsReceived: number;
+};
+
+/** Redis engagement: coinsSpent ≈ sender spend; coinsReceived ≈ receiver haul. */
+export async function fetchLiveEngagementSession(
+  idToken: string,
+  sessionId: string,
+): Promise<Record<string, SessionEngagementRow> | null> {
+  try {
+    const res = await fetch(
+      `${liveServiceUrl}/live/engagement/session?sessionId=${encodeURIComponent(sessionId)}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${idToken}` },
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      byUser?: Record<string, Partial<SessionEngagementRow>>;
+    };
+    const out: Record<string, SessionEngagementRow> = {};
+    for (const [uid, row] of Object.entries(json.byUser || {})) {
+      out[uid] = {
+        likes: Number(row.likes) || 0,
+        shares: Number(row.shares) || 0,
+        comments: Number(row.comments) || 0,
+        coinsSpent: Number(row.coinsSpent) || 0,
+        coinsReceived: Number(row.coinsReceived) || 0,
+      };
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+export type LiveGiftEventPayload = {
+  streamId: string;
+  giftEventId: string;
+  giftId: string;
+  quantity: number;
+  coinSpent: number;
+  sender?: { userId?: string; handle?: string | null };
+  receiver?: { userId?: string; handle?: string | null };
+  createdAt?: string;
+};
+
+export type TopGifterRow = {
+  userId: string;
+  name: string;
+  coins: number;
+};
+
+/** Rank senders by coins spent (true top gifters). */
+export function rankTopGifters(
+  bySender: Record<string, { coins: number; name?: string }>,
+  limit = 5,
+): TopGifterRow[] {
+  return Object.entries(bySender)
+    .map(([userId, row]) => ({
+      userId,
+      name: (row.name || userId).slice(0, 24),
+      coins: Math.max(0, Number(row.coins) || 0),
+    }))
+    .filter((r) => r.coins > 0)
+    .sort((a, b) => b.coins - a.coins)
+    .slice(0, limit);
+}
+
+/**
+ * Socket.IO gift_event fan-out (same channel as mobile liveGiftSocket).
+ * Soft-fails if socket cannot connect — caller keeps summary aggregates.
+ */
+export async function subscribeLiveGiftEvents(
+  idToken: string,
+  streamId: string,
+  onGift: (payload: LiveGiftEventPayload) => void,
+): Promise<() => void> {
+  const { io } = await import("socket.io-client");
+  const socket = io(liveServiceUrl, {
+    autoConnect: false,
+    transports: ["websocket"],
+    auth: { token: idToken },
+  });
+  const join = () => {
+    try {
+      socket.emit("join", { streamId });
+    } catch {
+      /* ignore */
+    }
+  };
+  const handler = (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return;
+    const p = raw as LiveGiftEventPayload;
+    if (!p.giftEventId && !p.coinSpent) return;
+    onGift(p);
+  };
+  socket.on("connect", join);
+  socket.on("gift_event", handler);
+  socket.connect();
+  return () => {
+    try {
+      socket.off("gift_event", handler);
+      socket.off("connect", join);
+      socket.emit("leave", { streamId });
+      socket.disconnect();
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 export type LiveDirectoryGuest = {
   userId: string;
   displayName?: string;
@@ -425,6 +608,11 @@ export type LiveStudioMirror = {
   guests: LiveDirectoryGuest[];
   lastHeartbeatAt: number | null;
   hostUid: string;
+  /** Host studio broadcast framing — drives web watch / guest layout. */
+  studioOrientation: "portrait" | "landscape" | null;
+  studioLayout: string | null;
+  /** Host program overlays (gifters/chat/goal/…) mirrored for web watch. */
+  studioOverlayFeed: Record<string, unknown> | null;
 };
 
 function normalizeGuest(raw: unknown): LiveDirectoryGuest | null {
@@ -483,6 +671,17 @@ function mirrorFromDoc(
     lastHeartbeatAt = null;
   }
 
+  const orientRaw = pickStr(data.studioOrientation, data.orientation);
+  const studioOrientation =
+    orientRaw === "portrait" || orientRaw === "landscape" ? orientRaw : null;
+  const studioLayout =
+    pickStr(data.studioLayout, data.viewerLayout, data.layoutId) || null;
+  const feedRaw = data.studioOverlayFeed;
+  const studioOverlayFeed =
+    feedRaw && typeof feedRaw === "object" && !Array.isArray(feedRaw)
+      ? (feedRaw as Record<string, unknown>)
+      : null;
+
   return {
     id,
     title: pickStr(data.title) || "LIVE",
@@ -501,6 +700,9 @@ function mirrorFromDoc(
     guests,
     lastHeartbeatAt,
     hostUid: pickStr(data.hostUid, data.userId),
+    studioOrientation,
+    studioLayout,
+    studioOverlayFeed,
   };
 }
 
@@ -530,6 +732,7 @@ export type LiveChatComment = {
   displayName: string;
   text: string;
   createdAt: number;
+  source?: "blyp" | "tiktok";
 };
 
 /** Recent LIVE chat comments (Firestore subcollection). */
@@ -575,6 +778,7 @@ export function subscribeLiveChat(
             pickStr(data.displayName, data.username, data.handle) || "Viewer",
           text: pickStr(data.text, data.message, data.comment) || "",
           createdAt,
+          source: "blyp" as const,
         };
       });
       onData(rows.filter((r) => r.text));
@@ -590,6 +794,10 @@ export async function updateLiveSessionMeta(
     category?: string;
     tags?: string[];
     thumbnailUrl?: string;
+    studioOrientation?: "portrait" | "landscape";
+    studioLayout?: string;
+    /** Cross-machine OBS overlay snapshot (same-origin write; public read if rules allow). */
+    studioOverlayFeed?: Record<string, unknown>;
   },
 ): Promise<void> {
   const db = getDb();
@@ -605,6 +813,18 @@ export async function updateLiveSessionMeta(
   }
   if (typeof patch.thumbnailUrl === "string") {
     payload.thumbnailUrl = patch.thumbnailUrl.trim();
+  }
+  if (
+    patch.studioOrientation === "portrait" ||
+    patch.studioOrientation === "landscape"
+  ) {
+    payload.studioOrientation = patch.studioOrientation;
+  }
+  if (typeof patch.studioLayout === "string" && patch.studioLayout.trim()) {
+    payload.studioLayout = patch.studioLayout.trim();
+  }
+  if (patch.studioOverlayFeed && typeof patch.studioOverlayFeed === "object") {
+    payload.studioOverlayFeed = patch.studioOverlayFeed;
   }
   await updateDoc(doc(db, "liveStreams", sessionId), payload);
 }

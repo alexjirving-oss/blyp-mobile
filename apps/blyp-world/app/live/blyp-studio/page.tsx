@@ -2,15 +2,11 @@ import type { Metadata } from "next";
 import { BlypStudioShell } from "@/components/BlypStudio/BlypStudioShell";
 
 export const metadata: Metadata = {
-  title: "BlypStudio — Control room wireframe",
-  description:
-    "Phase 1 structural wireframe for the Blyp web studio control room.",
+  title: "Grid 9 director — BlypStudio",
+  description: "Grid 9 director room (not the main LIVE Studio booth).",
 };
 
-/**
- * Parallel route: does not replace /live/studio (LiveStudioClient IVS publish).
- * Open: /live/blyp-studio
- */
+/** Grid 9 director — not the homepage booth. Main studio is `/` and `/live/studio`. */
 export default function BlypStudioPage() {
   return <BlypStudioShell />;
 }

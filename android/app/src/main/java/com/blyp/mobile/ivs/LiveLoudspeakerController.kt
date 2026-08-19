@@ -158,8 +158,21 @@ internal class LiveLoudspeakerController(
     fun forceActive(reason: String) {
         runOnMain {
             activeProfile?.let { profile ->
+                val r = reason.lowercase()
+                val viewerSubscribeNoise =
+                    profile == Profile.PLAYBACK &&
+                        (r.contains("subscribe-state") ||
+                            r.contains("publish-state") ||
+                            r.contains("remote-media") ||
+                            r.contains("remote-audio") ||
+                            r.contains("participant-joined") ||
+                            r.contains("participant-left"))
+                if (viewerSubscribeNoise && !isEarpieceSelected()) {
+                    return@let
+                }
                 applyRoute(profile, reason)
                 if (shouldBurstReassert(reason) || isEarpieceSelected()) {
+                    if (profile == Profile.PLAYBACK && viewerSubscribeNoise) return@let
                     scheduleBurstReassert(reason)
                 }
             }

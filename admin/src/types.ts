@@ -250,6 +250,9 @@ export interface OpsControlPlane {
     stripeLiveKeyPresent?: boolean;
     stripeConnectRequired?: boolean;
     stripeNote?: string;
+    paypalConfigured?: boolean;
+    paypalMode?: "absent" | "sandbox" | "live";
+    paypalNote?: string;
     effectivelyEnabled: boolean;
     note: string;
   };

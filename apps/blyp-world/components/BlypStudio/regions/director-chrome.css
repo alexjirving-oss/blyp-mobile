@@ -1,0 +1,350 @@
+/* Grid 9 director chrome only — TopBar / DirectorPanel / SocialPanel.
+   Do not style stage or bottom console. */
+
+.blyp-studio-top.g9-dir,
+.blyp-studio-left.g9-dir,
+.blyp-studio-right.g9-dir {
+  border: 0;
+  color: var(--blyp-fog);
+}
+
+.blyp-studio-top.g9-dir {
+  min-height: 48px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--blyp-line);
+  background: linear-gradient(180deg, #0c0e14 0%, var(--blyp-ink) 100%);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.blyp-studio-left.g9-dir,
+.blyp-studio-right.g9-dir {
+  gap: 8px;
+  padding: 10px 10px 12px;
+  background: var(--blyp-ink);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.blyp-studio-left.g9-dir {
+  border-right: 1px solid var(--blyp-line);
+}
+
+.blyp-studio-right.g9-dir {
+  border-left: 1px solid var(--blyp-line);
+}
+
+.blyp-studio-left.g9-dir::-webkit-scrollbar,
+.blyp-studio-right.g9-dir::-webkit-scrollbar,
+.blyp-studio-top.g9-dir::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.g9-dir .blyp-studio-top-cluster {
+  gap: 8px;
+}
+
+.g9-dir-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.g9-dir-brand-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--blyp-teal);
+  box-shadow: 0 0 10px var(--blyp-teal);
+  transform: translateY(-1px);
+}
+
+.g9-dir-brand-sub {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blyp-teal);
+}
+
+.g9-dir-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--blyp-line);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blyp-muted);
+}
+
+.g9-dir-live.is-live {
+  border-color: rgba(254, 44, 85, 0.55);
+  background: rgba(254, 44, 85, 0.16);
+  color: #fff;
+}
+
+.g9-dir-live.is-live .blyp-studio-live-dot {
+  background: #fe2c55;
+  box-shadow: 0 0 8px #fe2c55;
+}
+
+.g9-dir-live.is-offline .blyp-studio-live-dot {
+  background: #6b7280;
+}
+
+.g9-dir-meta {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--blyp-line);
+  background: rgba(16, 16, 22, 0.85);
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--blyp-fog);
+  white-space: nowrap;
+}
+
+.g9-dir-meta.is-mode {
+  color: var(--blyp-teal);
+  border-color: rgba(0, 210, 190, 0.28);
+  background: rgba(0, 210, 190, 0.1);
+}
+
+.g9-dir .blyp-studio-economy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--blyp-line);
+  border-radius: 999px;
+  background: var(--blyp-ink-elevated);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--blyp-muted);
+}
+
+.g9-dir .blyp-studio-economy-chip strong,
+.g9-dir .blyp-studio-economy-chip .font-display {
+  color: var(--blyp-fog);
+}
+
+.g9-dir-kicker {
+  margin: 0 0 8px;
+  font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--blyp-teal);
+}
+
+.g9-dir-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--blyp-line);
+  border-radius: 12px;
+  background: var(--blyp-ink-elevated);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02);
+  color: var(--blyp-fog);
+}
+
+.g9-dir-card.is-flush {
+  margin-bottom: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.g9-dir-card-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blyp-fog);
+}
+
+.g9-dir-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--blyp-muted);
+}
+
+.g9-dir-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blyp-muted);
+}
+
+.g9-dir-stat-gold {
+  margin-top: 2px;
+  font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--blyp-gold);
+  text-shadow: 0 0 12px rgba(232, 196, 124, 0.28);
+}
+
+.g9-dir-stat-teal {
+  margin-top: 2px;
+  font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--blyp-teal);
+  text-shadow: 0 0 12px rgba(0, 210, 190, 0.28);
+}
+
+.g9-dir-stat-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--blyp-fog);
+}
+
+.g9-dir .blyp-studio-chip-row {
+  gap: 6px;
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-chip,
+.blyp-studio-right.g9-dir .blyp-studio-chip {
+  border: 1px solid var(--blyp-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--blyp-fog);
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-chip:hover,
+.blyp-studio-right.g9-dir .blyp-studio-chip:hover {
+  border-color: rgba(0, 210, 190, 0.4);
+  color: #fff;
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-chip.is-on,
+.blyp-studio-right.g9-dir .blyp-studio-chip.is-on {
+  border-color: transparent;
+  background: rgba(0, 210, 190, 0.16);
+  color: var(--blyp-teal);
+  box-shadow: inset 0 0 0 1px rgba(0, 210, 190, 0.35);
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-mini-btn,
+.blyp-studio-right.g9-dir .blyp-studio-mini-btn {
+  border: 1px solid var(--blyp-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--blyp-fog);
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-mini-btn.is-on,
+.blyp-studio-right.g9-dir .blyp-studio-mini-btn.is-on {
+  border-color: transparent;
+  background: rgba(0, 210, 190, 0.16);
+  color: var(--blyp-teal);
+  box-shadow: inset 0 0 0 1px rgba(0, 210, 190, 0.35);
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-mini-btn.is-danger,
+.blyp-studio-right.g9-dir .blyp-studio-mini-btn.is-danger {
+  border-color: rgba(254, 44, 85, 0.4);
+  color: #ff8aa3;
+  background: rgba(254, 44, 85, 0.08);
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-list-row,
+.blyp-studio-right.g9-dir .blyp-studio-list-row {
+  padding: 4px 0;
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-avatar,
+.blyp-studio-right.g9-dir .blyp-studio-avatar {
+  border-color: rgba(0, 210, 190, 0.45);
+  background: rgba(0, 210, 190, 0.12);
+  color: var(--blyp-teal);
+  box-shadow: 0 0 8px rgba(0, 210, 190, 0.18);
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-mode-toggle {
+  border: 1px solid var(--blyp-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--blyp-fog);
+  padding: 9px 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.blyp-studio-left.g9-dir .blyp-studio-mode-toggle.is-on {
+  border-color: rgba(0, 210, 190, 0.55);
+  background: rgba(0, 210, 190, 0.14);
+  color: var(--blyp-teal);
+  box-shadow: 0 0 16px rgba(0, 210, 190, 0.18);
+}
+
+.blyp-studio-right.g9-dir .blyp-studio-feed {
+  gap: 6px;
+}
+
+.blyp-studio-right.g9-dir .blyp-studio-feed-item {
+  border-left: 3px solid var(--blyp-teal);
+  border-radius: 0 8px 8px 0;
+  background: rgba(0, 210, 190, 0.08);
+  color: var(--blyp-fog);
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.blyp-studio-right.g9-dir .blyp-studio-feed-item strong {
+  color: var(--blyp-teal);
+}
+
+.g9-dir-feed-cap {
+  max-height: 140px;
+}
+
+.g9-dir-gap-sm {
+  margin-top: 8px;
+}
+
+.g9-dir-gap-md {
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.g9-dir-unit {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.g9-dir .blyp-studio-publish-error {
+  color: #ff8aa3;
+  white-space: normal;
+}

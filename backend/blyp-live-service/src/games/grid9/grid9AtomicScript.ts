@@ -117,6 +117,11 @@ if (request.commandType == 'FIRE_WEAPON'
   and currentState.phase ~= 'combat' then
   return reply('REJECTED', 'MATCH_NOT_ACTIVE', currentState.phase)
 end
+if request.commandType == 'BUYBACK'
+  and currentState.phase ~= 'combat'
+  and currentState.phase ~= 'roulette' then
+  return reply('REJECTED', 'MATCH_NOT_ACTIVE', currentState.phase)
+end
 if (request.commandType == 'SEND_ARSENAL_GIFT'
     or request.commandType == 'BUY_INVENTORY_ITEM')
   and currentState.phase ~= 'lobby_waiting'
@@ -164,7 +169,8 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
       actorSlot = index - 1
       if player.status ~= 'alive' or player.mode ~= 'combatant' then
         if request.commandType ~= 'FUND_MERCENARY'
-          and request.commandType ~= 'SEND_ARSENAL_GIFT' then
+          and request.commandType ~= 'SEND_ARSENAL_GIFT'
+          and request.commandType ~= 'BUYBACK' then
           return reply('REJECTED', 'NOT_ELIGIBLE', nil)
         end
       end
@@ -173,7 +179,11 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
   local targetIndex = tonumber(validation.targetSlotIndex)
   local oldTarget = currentState.players[targetIndex + 1]
   local newTarget = newState.players[targetIndex + 1]
-  if not oldTarget or not newTarget or oldTarget.status ~= 'alive' then
+  if request.commandType == 'BUYBACK' then
+    if not oldTarget or not newTarget or oldTarget.status ~= 'eliminated' then
+      return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+    end
+  elseif not oldTarget or not newTarget or oldTarget.status ~= 'alive' then
     return reply('REJECTED', 'TARGET_NOT_ALIVE', nil)
   end
 
@@ -306,8 +316,9 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
     if debit ~= tonumber(item.cost) then
       return reply('REJECTED', 'ITEM_NOT_FOUND', nil)
     end
-    local seatDelta = math.floor(debit * 7000 / 10000)
-    local jackpotDelta = debit - seatDelta
+    -- 100% of face to seat; jackpot += catalog jackpot (floor(F*0.10) platform match).
+    local seatDelta = debit
+    local jackpotDelta = tonumber(item.jackpot)
     if tonumber(ledger.jackpotDeltaCoins) ~= jackpotDelta
       or tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= jackpotDelta
       or tonumber(newTarget.mercenaryBankrollCoins) - tonumber(oldTarget.mercenaryBankrollCoins) ~= seatDelta
@@ -318,6 +329,22 @@ if request.paidValidation ~= cjson.null and request.paidValidation ~= nil then
       if actorSlot == nil or actorSlot ~= targetIndex then
         return reply('REJECTED', 'NOT_ELIGIBLE', nil)
       end
+    end
+  elseif request.commandType == 'BUYBACK' then
+    if actorSlot == nil or actorSlot ~= targetIndex then
+      return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+    end
+    local actorPlayer = currentState.players[actorSlot + 1]
+    if actorPlayer.status ~= 'eliminated' then
+      return reply('REJECTED', 'NOT_ELIGIBLE', nil)
+    end
+    -- Buyback cost is server-constant GRID9_BUYBACK_COST_COINS (500); 100% → jackpot.
+    if debit ~= 500
+      or tonumber(ledger.jackpotDeltaCoins) ~= debit
+      or tonumber(newState.jackpot.currentCoins) - tonumber(currentState.jackpot.currentCoins) ~= debit
+      or newTarget.status ~= 'alive'
+      or tonumber(newTarget.health) ~= tonumber(newState.rules.maxHealth) then
+      return reply('REJECTED', 'INTERNAL_ERROR', 'buyback mismatch')
     end
   end
 end

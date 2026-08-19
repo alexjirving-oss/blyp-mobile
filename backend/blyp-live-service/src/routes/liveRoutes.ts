@@ -499,7 +499,23 @@ router.post('/live/heartbeat', async (req: AuthedRequest, res) => {
       return res.status(400).json({ error: 'sessionId required' });
     }
     await assertSessionHost(sessionId, userId);
-    const touched = await touchLiveDirectoryHeartbeat(sessionId);
+    const body = (req.body || {}) as Record<string, unknown>;
+    const studioOrientation =
+      typeof body.studioOrientation === 'string'
+        ? body.studioOrientation.trim()
+        : undefined;
+    const studioLayout =
+      typeof body.studioLayout === 'string' ? body.studioLayout.trim() : undefined;
+    const touched = await touchLiveDirectoryHeartbeat(sessionId, {
+      studioOrientation,
+      studioLayout,
+    });
+    void getSessionById(sessionId).then((session) => {
+      if (!session) return;
+      void import('../live/programEgress').then(({ refreshCompositionFromAws }) => {
+        void refreshCompositionFromAws(session);
+      });
+    });
     res.json({ ok: touched.ok, sessionId, detail: touched.detail });
   } catch (err: any) {
     const status = err?.code === 'FORBIDDEN' ? 403 : 500;

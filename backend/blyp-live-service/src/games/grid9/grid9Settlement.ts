@@ -27,7 +27,7 @@ import type {
   Grid9SponsorPass,
 } from './state';
 import { toGrid9PublicGameState } from './grid9Projection';
-import { creditGrid9VictoryTokens } from '../../economy/tokenWalletService';
+import { creditGrid9VictoryTokens, creditGrid9KnockoutTokens } from '../../economy/tokenWalletService';
 
 type ReservationRow = {
   reservation_id: string;
@@ -202,14 +202,39 @@ async function payHumanWinner(
 ): Promise<void> {
   const winnerUserId = state.outcome?.winnerUserId;
   const jackpotCoins = state.outcome?.jackpotCoins ?? 0;
-  if (!winnerUserId || jackpotCoins <= 0) return;
-  // Victory pays Tokens @ 50% of jackpot (not raw coins) — Instant convert is the monetization boundary.
+  if (!winnerUserId) return;
+  const winner =
+    state.outcome?.winnerSlotIndex != null
+      ? state.players[state.outcome.winnerSlotIndex]
+      : null;
+  const seatShareCoins =
+    winner && winner.kind === 'human' ? winner.supporterTotalCoins : 0;
+  // Winner: floor(seatShare * 0.5) + floor(jackpot * 0.5) as tokens.
   await creditGrid9VictoryTokens(trx, {
     userId: winnerUserId,
     matchId: state.matchId,
     jackpotCoins,
+    seatShareCoins,
     winnerSlotIndex: state.outcome?.winnerSlotIndex ?? null,
   });
+}
+
+async function payKnockoutConsolations(
+  trx: Knex.Transaction,
+  state: Grid9GameState,
+): Promise<void> {
+  for (const player of state.players) {
+    if (player.kind !== 'human') continue;
+    if (player.status !== 'eliminated') continue;
+    const face = Math.floor(Number(player.knockoutPayoutFaceCoins) || 0);
+    if (face <= 0) continue;
+    await creditGrid9KnockoutTokens(trx, {
+      userId: player.userId,
+      matchId: state.matchId,
+      faceCoins: face,
+      slotIndex: player.slotIndex,
+    });
+  }
 }
 
 async function applySentinelRollover(state: Grid9GameState): Promise<void> {
@@ -300,6 +325,7 @@ export async function settleGrid9Match(
   const escrows = await readGrid9Escrows(current.matchId);
   await db.transaction(async (trx) => {
     await settleReservations(trx, current, escrows);
+    await payKnockoutConsolations(trx, current);
     if (current.outcome?.winnerKind === 'human') {
       await payHumanWinner(trx, current);
     }

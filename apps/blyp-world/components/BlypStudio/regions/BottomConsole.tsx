@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { ensureFirebaseFromCognito } from "@/lib/firebaseBridge";
 import {
@@ -14,14 +14,26 @@ import {
   startIvsWebHostPublish,
   type IvsHostPublishHandle,
 } from "@/lib/ivsWebHost";
+import { nativePublishVideoTrack } from "@/lib/studioDeskMedia";
+import {
+  MUSIC_BEDS,
+  STING_PAD,
+  studioAudio,
+  type MusicBedId,
+  type StingId,
+} from "../audio/StudioAudioEngine";
+import { planPublishAudio } from "@/lib/studioPublishGraph";
+import { armSpotifyTabAudioForLive, isStudioSpotifyLinked, TAB_AUDIO_REQUIRED } from "@/lib/studioSpotify";
+import { useGrid9StudioOverlayFeed } from "../hooks/useGrid9StudioOverlayFeed";
 import { useStudioState } from "../store/StudioStateContext";
 
 /**
- * Master GO LIVE — Phase 4 publishes Clean Feed MediaStream to IVS when possible.
- * Falls back to local preview stream if composite is not ready.
- * END STREAM leaves stage and ends host session (liveHost patterns).
+ * Master GO LIVE — camera/screen getUserMedia to IVS Stage (same path as
+ * /live/studio). Mixer + soundboard ride the audio mix. Never publish the
+ * Clean Feed canvas captureStream.
  */
 export function BottomConsole() {
+  useGrid9StudioOverlayFeed();
   const { session, requireAuth } = useAuth();
   const {
     isLive,
@@ -30,12 +42,16 @@ export function BottomConsole() {
     publishBusy,
     setPublishError,
     setPublishBusy,
-    cleanFeedStreamRef,
     previewStreamRef,
+    setHostSessionId,
+    deskScene,
   } = useStudioState();
 
   const publishRef = useRef<IvsHostPublishHandle | null>(null);
   const hostSessionRef = useRef<LiveHostSession | null>(null);
+  const [micVol, setMicVol] = useState(80);
+  const [musicVol, setMusicVol] = useState(45);
+  const [activeBed, setActiveBed] = useState<MusicBedId | null>(null);
 
   const stopPublish = useCallback(async () => {
     const handle = publishRef.current;
@@ -50,6 +66,7 @@ export function BottomConsole() {
     const host = hostSessionRef.current;
     hostSessionRef.current = null;
     persistActiveHostSession(null);
+    setHostSessionId(null);
     if (host && session?.idToken) {
       try {
         await endLiveHostSession(session.idToken, host.sessionId);
@@ -58,7 +75,36 @@ export function BottomConsole() {
       }
     }
     setIsLive(false);
-  }, [session?.idToken, setIsLive]);
+  }, [session?.idToken, setHostSessionId, setIsLive]);
+
+  useEffect(() => {
+    studioAudio.setMicVolume(micVol / 100);
+  }, [micVol]);
+
+  useEffect(() => {
+    studioAudio.setMusicVolume(musicVol / 100);
+  }, [musicVol]);
+
+  useEffect(() => {
+    return studioAudio.subscribePublishMix((wantMix) => {
+      const handle = publishRef.current;
+      const preview = previewStreamRef.current;
+      if (!handle || !preview) return;
+      studioAudio.buildPublishStream(preview, preview);
+      const mix = studioAudio.mixAudioTrack();
+      const gum = studioAudio.nativeAudioTrack(preview);
+      const source = planPublishAudio({
+        wantMix,
+        mixTrackLive: !!mix && mix.readyState === "live",
+        gumTrackLive: !!gum && gum.readyState === "live",
+      });
+      if (source === "mix" && mix) {
+        handle.setAudioTrack(mix, false);
+        return;
+      }
+      if (gum) handle.setAudioTrack(gum, false);
+    });
+  }, [previewStreamRef]);
 
   useEffect(() => {
     if (!isLive || !hostSessionRef.current?.sessionId || !session?.idToken) {
@@ -116,60 +162,60 @@ export function BottomConsole() {
     setPublishBusy(true);
     setPublishError(null);
     try {
+      const tabAudioOk = await armSpotifyTabAudioForLive();
+      if (isStudioSpotifyLinked() && !tabAudioOk) {
+        setPublishError(TAB_AUDIO_REQUIRED);
+        return;
+      }
       await ensureFirebaseFromCognito({
         cognitoIdToken: session.idToken,
         uid: session.sub,
       });
 
-      const clean = cleanFeedStreamRef.current;
       const preview = previewStreamRef.current;
-      const videoSource = clean?.getVideoTracks().length ? clean : preview;
-      if (!videoSource?.getVideoTracks().length) {
+      if (!preview) {
         throw new Error(
-          "No Clean Feed / camera stream ready. Allow camera on localhost/HTTPS.",
+          "No camera or screen stream ready. Allow camera on localhost/HTTPS.",
         );
       }
-      const audioSource =
-        clean && clean.getAudioTracks().length > 0 ? clean : preview;
-      if (!audioSource?.getAudioTracks().length) {
+      studioAudio.attachMic(preview);
+      const wantMix = studioAudio.shouldPublishMix();
+      const publishStream =
+        (wantMix
+          ? studioAudio.buildPublishStream(preview, preview)
+          : studioAudio.buildNativePublishStream(preview, preview)) || preview;
+      const liveVideo = nativePublishVideoTrack(publishStream);
+      if (!liveVideo) {
+        throw new Error(
+          "Stage video must be the camera or screen — not a canvas",
+        );
+      }
+      if (deskScene === "camera") {
+        const settings = liveVideo.getSettings?.() ?? {};
+        if (!settings.deviceId) {
+          throw new Error(
+            "Camera publish requires a getUserMedia video track",
+          );
+        }
+      }
+      if (!publishStream.getAudioTracks().length) {
         throw new Error("Microphone track missing — check browser permissions.");
       }
 
-      // Fresh stream for publish so we never mutate shared Clean Feed tracks.
-      const mediaStream = new MediaStream([
-        ...videoSource.getVideoTracks(),
-        ...audioSource.getAudioTracks().map((t) => t.clone()),
-      ]);
-
       const host = await startLiveHostSession(
         session.idToken,
-        `${session.username || "Host"} BlypStudio`,
+        `${session.username || "Host"} LIVE`,
       );
       hostSessionRef.current = host;
       persistActiveHostSession(host);
+      setHostSessionId(host.sessionId);
 
       const handle = await startIvsWebHostPublish({
         participantToken: host.hostToken,
-        mediaStream,
+        mediaStream: publishStream,
         retainMediaOnLeave: true,
       });
       publishRef.current = handle;
-      // Stop only the audio clones we added for this publish session on leave.
-      const audioClones = mediaStream.getAudioTracks();
-      const baseLeave = handle.leave;
-      publishRef.current = {
-        localStream: mediaStream,
-        leave: async () => {
-          await baseLeave();
-          audioClones.forEach((t) => {
-            try {
-              t.stop();
-            } catch {
-              /* ignore */
-            }
-          });
-        },
-      };
       setIsLive(true);
 
       try {
@@ -180,11 +226,21 @@ export function BottomConsole() {
     } catch (e) {
       await stopPublish();
       setPublishError(
-        e instanceof Error ? e.message : "Failed to publish Clean Feed to IVS",
+        e instanceof Error ? e.message : "Failed to publish camera to IVS",
       );
     } finally {
       setPublishBusy(false);
     }
+  };
+
+  const onBed = async (id: MusicBedId) => {
+    if (activeBed === id && studioAudio.isMusicPlaying()) {
+      studioAudio.stopMusic();
+      setActiveBed(null);
+      return;
+    }
+    const ok = await studioAudio.playBed(id);
+    setActiveBed(ok ? id : null);
   };
 
   return (
@@ -195,12 +251,49 @@ export function BottomConsole() {
         </p>
         <label className="blyp-studio-slider-row">
           <span>Host Mic</span>
-          <input type="range" min={0} max={100} defaultValue={80} disabled />
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={micVol}
+            onChange={(e) => setMicVol(Number(e.target.value))}
+          />
         </label>
         <label className="blyp-studio-slider-row">
-          <span>Guest Audio</span>
-          <input type="range" min={0} max={100} defaultValue={70} disabled />
+          <span>Music</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={musicVol}
+            onChange={(e) => setMusicVol(Number(e.target.value))}
+          />
         </label>
+        <div className="blyp-studio-chip-row">
+          {MUSIC_BEDS.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              className={`blyp-studio-chip ${activeBed === b.id ? "is-on" : ""}`}
+              onClick={() => void onBed(b.id)}
+            >
+              {b.name}
+            </button>
+          ))}
+        </div>
+        <div className="blyp-studio-chip-row">
+          {STING_PAD.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="blyp-studio-chip"
+              title={`Sting ${s.hint}`}
+              onClick={() => studioAudio.playSting(s.id as StingId)}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
         {publishError && (
           <span className="blyp-studio-publish-error" role="alert">
             {publishError}

@@ -16,7 +16,12 @@ assert.match(describeTokenToCoinRate(), /1 token = 1 coin \+ 15%/);
 
 assert.equal(tokensFromJackpotCoins(100), 50);
 assert.equal(tokensFromJackpotCoins(101), 50);
-assert.deepEqual(splitGrid9AudienceGiftCoins(10), { seatCoins: 7, jackpotCoins: 3 });
-assert.deepEqual(splitGrid9AudienceGiftCoins(15), { seatCoins: 10, jackpotCoins: 5 });
+assert.equal(tokensFromJackpotCoins(500), 250, 'Alex KO example: 500 coins → 250 tokens');
+assert.deepEqual(splitGrid9AudienceGiftCoins(10), { seatCoins: 10, jackpotCoins: 1 });
+assert.deepEqual(splitGrid9AudienceGiftCoins(15), { seatCoins: 15, jackpotCoins: 1 });
+assert.deepEqual(splitGrid9AudienceGiftCoins(500), {
+  seatCoins: 500,
+  jackpotCoins: 50,
+});
 
 console.log('tokenToCoinConvert.test: ok');

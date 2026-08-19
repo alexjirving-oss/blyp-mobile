@@ -46,8 +46,10 @@ export function DeskRoster({
     });
   }, [team.members]);
 
-  const liveCount = team.liveNowCount;
-  const inactiveCount = team.inactiveCount;
+  const liveCount = sorted.filter((m) => m.isLive).length;
+  const inactiveCount = sorted.filter(
+    (m) => m.role !== "leader" && !(m.hoursLive || 0) && !m.isLive,
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -57,8 +59,9 @@ export function DeskRoster({
             {team.isLeader ? "Roster management" : "Team roster"}
           </SectionTitle>
           <p className="mt-[-0.5rem] text-sm text-[var(--blyp-muted)]">
-            {team.memberCount} members · {liveCount} live · {inactiveCount}{" "}
-            quiet
+            {sorted.length} {sorted.length === 1 ? "member" : "members"}
+            {liveCount ? ` · ${liveCount} live` : ""}
+            {inactiveCount ? ` · ${inactiveCount} quiet` : ""}
             {team.isLeader
               ? " — accept joins, nudge hosts, export CSV"
               : " — who’s on your team"}
@@ -88,10 +91,15 @@ export function DeskRoster({
             Join requests
           </SectionTitle>
           {team.joinRequests.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[var(--blyp-line)] px-4 py-6 text-sm text-[var(--blyp-muted)]">
-              None pending. Invite hosts from Recruit & money — they land here
-              for accept / decline.
-            </p>
+            <div className="hub-empty" style={{ padding: "0.85rem 0.5rem" }}>
+              <div className="hub-empty-stage" style={{ minHeight: "5rem" }}>
+                <span>NO REQUESTS</span>
+              </div>
+              <p className="hub-empty-copy">
+                None pending. Invite hosts from Recruit & money — they land here
+                for accept / decline.
+              </p>
+            </div>
           ) : (
             <ul className="space-y-2">
               {team.joinRequests.map((req) => (

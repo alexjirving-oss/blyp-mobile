@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchLiveDirectory, type LiveCard } from "@/lib/live";
+import { StudioLaunchButton } from "./StudioLaunchButton";
 
 export function LiveDirectoryClient({
   initial,
@@ -10,6 +11,10 @@ export function LiveDirectoryClient({
   initial: LiveCard[];
 }) {
   const [lives, setLives] = useState(initial);
+
+  useEffect(() => {
+    setLives(initial);
+  }, [initial]);
 
   useEffect(() => {
     let alive = true;
@@ -32,14 +37,10 @@ export function LiveDirectoryClient({
     return (
       <div className="max-w-xl space-y-4">
         <p className="text-[var(--blyp-muted)]">
-          Nobody is on air right now.
+          Nobody is on air right now. This is an empty directory, not an ended
+          session.
         </p>
-        <Link
-          href="/live/studio"
-          className="inline-flex rounded-full border border-[var(--blyp-line)] px-5 py-2.5 text-sm font-semibold"
-        >
-          Open LIVE Studio
-        </Link>
+        <StudioLaunchButton />
       </div>
     );
   }

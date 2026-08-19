@@ -46,9 +46,19 @@ const HASHTAG_MATCH_WEIGHT = 14;
 const HASHTAG_MATCH_CAP = 36;
 const TOPIC_MATCH_WEIGHT = 8;
 const TOPIC_MATCH_CAP = 24;
-/** Seen recently: strong enough to beat a single niche affinity stack. */
+/** Older-than-window seen: still beats a single niche stack, not a follow+tag pile. */
 const SEEN_PENALTY = -42;
 const UNSEEN_BONUS = 10;
+/** Most recently watched clip — must lose to any unseen alternative. */
+const JUST_WATCHED_PENALTY = -120;
+/** Recency gradient over this many latest impressions (oldest→newest seenOrder). */
+const RECENT_SEEN_WINDOW = 12;
+const RECENT_SEEN_FLOOR = -48;
+/** Same-creator fatigue after a watch in this session. */
+const CREATOR_JUST_WATCHED_PENALTY = -40;
+const CREATOR_RECENT_WINDOW = 3;
+/** Unseen clip from a creator not in the recent watch window. */
+const EXPLORATION_BONUS = 22;
 
 function finiteCount(...values) {
   return Math.max(
@@ -62,6 +72,104 @@ function finiteCount(...values) {
 
 function postOwner(post) {
   return String(post?.userId || post?.uid || post?.authorId || '').trim();
+}
+
+function postId(post) {
+  return post?.id != null ? String(post.id) : '';
+}
+
+/**
+ * Oldest → newest watch/impression ids. Prefer explicit `seenOrder`;
+ * a Set/array of `seenIds` is last-resort (no recency).
+ * @param {string[]|Set<string>|undefined} seenIds
+ * @param {string[]|undefined} seenOrder
+ * @returns {string[]}
+ */
+export function normalizeSeenOrder(seenIds, seenOrder) {
+  if (Array.isArray(seenOrder) && seenOrder.length) {
+    return seenOrder.map((id) => String(id || '')).filter(Boolean);
+  }
+  if (seenIds instanceof Set) {
+    return [...seenIds].map((id) => String(id || '')).filter(Boolean);
+  }
+  if (Array.isArray(seenIds)) {
+    return seenIds.map((id) => String(id || '')).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * Recency-weighted watch penalty. Just-watched is far below unseen;
+ * the last RECENT_SEEN_WINDOW impressions fade toward SEEN_PENALTY.
+ */
+export function seenAdjust(post, seenOrder = []) {
+  const id = postId(post);
+  if (!id || !seenOrder.length) return UNSEEN_BONUS;
+  const idx = seenOrder.lastIndexOf(id);
+  if (idx < 0) return UNSEEN_BONUS;
+  const fromEnd = seenOrder.length - 1 - idx;
+  if (fromEnd >= RECENT_SEEN_WINDOW) return SEEN_PENALTY;
+  const span = Math.max(1, RECENT_SEEN_WINDOW - 1);
+  const t = fromEnd / span;
+  return JUST_WATCHED_PENALTY + t * (RECENT_SEEN_FLOOR - JUST_WATCHED_PENALTY);
+}
+
+/**
+ * Down-rank other clips from a creator the viewer just watched.
+ * @param {any} post
+ * @param {string[]} recentCreators oldest → newest creator ids
+ */
+export function creatorFatigueAdjust(post, recentCreators = []) {
+  const owner = postOwner(post);
+  if (!owner || !recentCreators.length) return 0;
+  const idx = recentCreators.lastIndexOf(owner);
+  if (idx < 0) return 0;
+  const fromEnd = recentCreators.length - 1 - idx;
+  if (fromEnd === 0) return CREATOR_JUST_WATCHED_PENALTY;
+  if (fromEnd < CREATOR_RECENT_WINDOW) {
+    return Math.round(CREATOR_JUST_WATCHED_PENALTY / 2);
+  }
+  return 0;
+}
+
+/** Lift unseen clips whose creator is not in the recent watch window. */
+export function explorationAdjust(post, seenOrder = [], recentCreators = []) {
+  const id = postId(post);
+  if (!id || seenOrder.lastIndexOf(id) >= 0) return 0;
+  const owner = postOwner(post);
+  if (owner && recentCreators.slice(-CREATOR_RECENT_WINDOW).includes(owner)) {
+    return 0;
+  }
+  return EXPLORATION_BONUS;
+}
+
+function recentCreatorsFromSeen(posts, seenOrder, explicit) {
+  if (Array.isArray(explicit) && explicit.length) {
+    return explicit.map((id) => String(id || '').trim()).filter(Boolean);
+  }
+  const ownerById = new Map();
+  for (const p of posts || []) {
+    const id = postId(p);
+    const owner = postOwner(p);
+    if (id && owner) ownerById.set(id, owner);
+  }
+  return seenOrder.map((id) => ownerById.get(String(id))).filter(Boolean);
+}
+
+/** First-occurrence id wins so ranking never re-emits the same clip twice. */
+export function dedupeRankCandidates(posts) {
+  if (!Array.isArray(posts) || posts.length === 0) return posts || [];
+  const out = [];
+  const seen = new Set();
+  for (const p of posts) {
+    const id = postId(p);
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(p);
+  }
+  return out;
 }
 
 /** Normalize a hashtag / interest token for matching. */
@@ -376,7 +484,10 @@ export function filterSuppressedAccounts(posts) {
 export function scorePost(post, context = {}) {
   const terms = context.terms || [];
   const following = context.following || new Set();
-  const seenIds = context.seenIds || new Set();
+  const seenOrder = normalizeSeenOrder(context.seenIds, context.seenOrder);
+  const recentCreators = Array.isArray(context.recentCreators)
+    ? context.recentCreators.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
   const now = Number.isFinite(context.now) ? context.now : Date.now();
   const owner = postOwner(post);
   let score = 0;
@@ -389,7 +500,9 @@ export function scorePost(post, context = {}) {
   score += reachAdjust(post);
   score += feedPriorityAdjust(post);
   score += promoteBoostAdjust(post);
-  score += seenIds.has(post?.id) ? SEEN_PENALTY : UNSEEN_BONUS;
+  score += seenAdjust(post, seenOrder);
+  score += creatorFatigueAdjust(post, recentCreators);
+  score += explorationAdjust(post, seenOrder, recentCreators);
   return score;
 }
 
@@ -597,16 +710,21 @@ export function diversifyRanked(scored, following, opts = {}) {
  * @param {any[]} posts
  * @param {string[]} terms  lowercased interest terms
  * @param {Set<string>} following  ids the user follows
- * @param {{ fairCap?: boolean, seenIds?: Set<string>, now?: number, recentOwners?: string[], recentClusters?: string[], minCreatorGap?: number, minHashtagGap?: number, minTopicGap?: number, topicDensityWindow?: number, maxTopicInWindow?: number, maxSourceStreak?: number }} [opts]
+ * @param {{ fairCap?: boolean, seenIds?: Set<string>|string[], seenOrder?: string[], recentCreators?: string[], now?: number, recentOwners?: string[], recentClusters?: string[], minCreatorGap?: number, minHashtagGap?: number, minTopicGap?: number, topicDensityWindow?: number, maxTopicInWindow?: number, maxSourceStreak?: number }} [opts]
  */
 export function rankPosts(posts, terms = [], following = new Set(), opts = {}) {
   if (!Array.isArray(posts) || posts.length === 0) return posts || [];
-  const visible = filterSuppressedAccounts(posts);
+  const unique = dedupeRankCandidates(posts);
+  const visible = filterSuppressedAccounts(unique);
   const safeFollowing = following instanceof Set ? following : new Set(following || []);
+  const seenOrder = normalizeSeenOrder(opts.seenIds, opts.seenOrder);
+  const recentCreators = recentCreatorsFromSeen(visible, seenOrder, opts.recentCreators);
   const context = {
     terms: (terms || []).map((term) => String(term).trim().toLowerCase()).filter(Boolean),
     following: safeFollowing,
-    seenIds: opts.seenIds instanceof Set ? opts.seenIds : new Set(opts.seenIds || []),
+    seenIds: opts.seenIds instanceof Set ? opts.seenIds : new Set(opts.seenIds || seenOrder),
+    seenOrder,
+    recentCreators,
     now: Number.isFinite(opts.now) ? opts.now : Date.now(),
   };
   const scored = visible
@@ -690,10 +808,12 @@ export function shufflePostsByFeedPriority(posts, opts = {}) {
  * Resolve ranking signals. Prefer `getContext()` after awaits so follows /
  * interests that hydrate during enrichment are not frozen at call start.
  * @param {{
- *   getContext?: () => ({ terms?: string[], following?: Set<string>|string[], seenIds?: Set<string>|string[], now?: number, recentOwners?: string[] }),
+ *   getContext?: () => ({ terms?: string[], following?: Set<string>|string[], seenIds?: Set<string>|string[], seenOrder?: string[], recentCreators?: string[], now?: number, recentOwners?: string[] }),
  *   terms?: string[],
  *   following?: Set<string>|string[],
  *   seenIds?: Set<string>|string[],
+ *   seenOrder?: string[],
+ *   recentCreators?: string[],
  *   now?: number,
  *   recentOwners?: string[],
  *   recentClusters?: string[],
@@ -711,6 +831,8 @@ export function resolveRankContext(opts = {}) {
     terms: live.terms ?? opts.terms ?? [],
     following: live.following ?? opts.following ?? new Set(),
     seenIds: live.seenIds ?? opts.seenIds,
+    seenOrder: live.seenOrder ?? opts.seenOrder,
+    recentCreators: live.recentCreators ?? opts.recentCreators,
     now: live.now ?? opts.now,
     recentOwners: live.recentOwners ?? opts.recentOwners,
     recentClusters: live.recentClusters ?? opts.recentClusters,
@@ -793,6 +915,8 @@ export async function prepareRankedFeed(posts, opts = {}) {
       return rankPosts(visible, ctx.terms, ctx.following, {
         fairCap: opts.fairCap !== false,
         seenIds: ctx.seenIds,
+        seenOrder: ctx.seenOrder,
+        recentCreators: ctx.recentCreators,
         now: ctx.now,
         recentOwners: ctx.recentOwners,
         recentClusters: ctx.recentClusters,
@@ -812,6 +936,8 @@ export async function prepareRankedFeed(posts, opts = {}) {
       return rankPosts(fallback, ctx.terms, ctx.following, {
         fairCap: false,
         seenIds: ctx.seenIds,
+        seenOrder: ctx.seenOrder,
+        recentCreators: ctx.recentCreators,
         now: ctx.now,
         recentOwners: ctx.recentOwners,
         recentClusters: ctx.recentClusters,
@@ -830,6 +956,11 @@ export async function prepareRankedFeed(posts, opts = {}) {
 export default {
   rankPosts,
   scorePost,
+  seenAdjust,
+  creatorFatigueAdjust,
+  explorationAdjust,
+  normalizeSeenOrder,
+  dedupeRankCandidates,
   reachAdjust,
   hashtagAffinityAdjust,
   extractPostHashtags,

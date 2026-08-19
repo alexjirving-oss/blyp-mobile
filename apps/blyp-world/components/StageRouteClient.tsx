@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { StageClient } from "./StageClient";
+import "./stage-profile.css";
 
 export function StageRouteClient() {
   const [username, setUsername] = useState<string | null>(null);
@@ -12,8 +13,11 @@ export function StageRouteClient() {
   }, []);
   if (!username) {
     return (
-      <div className="mx-auto max-w-lg px-5 py-20 text-center text-sm text-[var(--blyp-muted)]">
-        Loading Stage…
+      <div className="stage-web">
+        <div className="stage-web-state">
+          <div className="stage-web-pulse" aria-hidden />
+          <p className="stage-web-copy">Loading Stage…</p>
+        </div>
       </div>
     );
   }

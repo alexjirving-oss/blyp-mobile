@@ -3,13 +3,14 @@ import { createHash, randomBytes } from 'crypto';
 export const GRID9_GAME_ID = 'grid9' as const;
 export const GRID9_SCHEMA_VERSION = 1 as const;
 export const GRID9_PROTOCOL_VERSION = 2 as const;
-export const GRID9_RULES_VERSION = '2026-08-16.5' as const;
+export const GRID9_RULES_VERSION = '2026-08-16.8' as const;
 
 export const GRID9_SLOT_COUNT = 9 as const;
 export const GRID9_SLOT_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
 export type Grid9SlotIndex = (typeof GRID9_SLOT_INDICES)[number];
 
-export const GRID9_MAX_HEALTH = 100 as const;
+/** Alex: each player starts with 1000 health. */
+export const GRID9_MAX_HEALTH = 1000 as const;
 export const GRID9_MAX_SHIELD_POINTS = 100 as const;
 export const GRID9_TOP_SUPPORTERS_PER_SLOT = 10 as const;
 export const GRID9_INVENTORY_CAPACITY = 3 as const;
@@ -29,17 +30,30 @@ export const GRID9_TURN_DURATION_MS = 30_000 as const;
 export const GRID9_SPOTLIGHT_DURATION_MS = 30_000 as const;
 /** Sentinel spotlight auto-act ceiling — do not wait for client intents. */
 export const GRID9_SENTINEL_MAX_REACTION_MS = 1_500 as const;
-export const GRID9_MAX_MATCH_DURATION_MS = 15 * 60 * 1_000;
+/** Alex Redmine: timed match default 60 minutes (last standing may end earlier). */
+export const GRID9_MAX_MATCH_DURATION_MS = 60 * 60 * 1_000;
+/**
+ * KO buyback face cost (invented — Alex did not set a price).
+ * 100% of this amount is added to the match jackpot; seat returns at full HP.
+ */
+export const GRID9_BUYBACK_COST_COINS = 500 as const;
 
 export const GRID9_HOUSE_SEED_COINS = 100 as const;
 
 /**
- * Audience gift split (basis points of gift face coins).
- * Locked: 70% recipient seat bankroll / supporters, 30% match jackpot.
+ * Audience gift / pot funding (Alex 2026-08-16.7):
+ * - Player (recipient seat) gets 100% of gift face F (seat BPS = 10000).
+ * - Jackpot accrues an *additive* +10% of F (not skimmed from the player).
+ * - Viewer wallet debit stays F (existing escrow debit = costCoins). The +10%
+ *   pot is a platform match into the match jackpot, not an extra viewer charge.
  */
-export const GRID9_AUDIENCE_GIFT_SEAT_BPS = 7000 as const;
-export const GRID9_AUDIENCE_GIFT_JACKPOT_BPS = 3000 as const;
-/** Victory: Tokens credited = floor(jackpotCoins * 5000 / 10000). House keeps the rest. */
+export const GRID9_AUDIENCE_GIFT_SEAT_BPS = 10_000 as const;
+export const GRID9_AUDIENCE_GIFT_JACKPOT_BPS = 1000 as const;
+/**
+ * Coins → Tokens settlement rate (Alex): tokens = floor(coins * 0.5).
+ * Used for knockout consolation (finishing face coins) and winner
+ * (seat-share cashout + jackpot), e.g. 500 coins → 250 tokens.
+ */
 export const GRID9_TOKEN_PAYOUT_BPS = 5000 as const;
 /**
  * Tokens → COIN Instant convert bonus (mirrors gems: ceil(tokens * 1.15)).
@@ -60,14 +74,37 @@ export function splitGrid9AudienceGiftCoins(amountCoins: number): {
   if (!Number.isSafeInteger(amount) || amount <= 0) {
     return { seatCoins: 0, jackpotCoins: 0 };
   }
+  // 100% of face to seat; pot match is additive (not amount - seat).
   const seatCoins = Math.floor((amount * GRID9_AUDIENCE_GIFT_SEAT_BPS) / 10_000);
-  return { seatCoins, jackpotCoins: amount - seatCoins };
+  const jackpotCoins = Math.floor(
+    (amount * GRID9_AUDIENCE_GIFT_JACKPOT_BPS) / 10_000,
+  );
+  return { seatCoins, jackpotCoins };
 }
 
-export function tokensFromJackpotCoins(jackpotCoins: number): number {
-  const coins = Math.floor(Number(jackpotCoins) || 0);
+/** tokens = floor(coins * GRID9_TOKEN_PAYOUT_BPS / 10000). */
+export function tokensFromCoins(coinValue: number): number {
+  const coins = Math.floor(Number(coinValue) || 0);
   if (!Number.isSafeInteger(coins) || coins <= 0) return 0;
   return Math.floor((coins * GRID9_TOKEN_PAYOUT_BPS) / 10_000);
+}
+
+/** @deprecated alias — prefer tokensFromCoins */
+export function tokensFromJackpotCoins(jackpotCoins: number): number {
+  return tokensFromCoins(jackpotCoins);
+}
+
+/** Winner tokens = floor(seatShare * 0.5) + floor(jackpot * 0.5). */
+export function winnerTokensFromSettlement(args: {
+  seatShareCoins: number;
+  jackpotCoins: number;
+}): number {
+  return tokensFromCoins(args.seatShareCoins) + tokensFromCoins(args.jackpotCoins);
+}
+
+/** Knockout tokens = floor(finishingFaceCoins * 0.5). */
+export function knockoutTokensFromFaceCoins(finishingFaceCoins: number): number {
+  return tokensFromCoins(finishingFaceCoins);
 }
 
 export const GRID9_MICRO_DROP_COIN_REWARD = 5 as const;

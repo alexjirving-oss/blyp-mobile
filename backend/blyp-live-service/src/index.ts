@@ -11,10 +11,14 @@ import frenemiesRoutes from './routes/frenemiesRoutes';
 import reactionDuelRoutes from './routes/reactionDuelRoutes';
 import battleRoutes from './routes/battleRoutes';
 import grid9Routes from './routes/grid9Routes';
+import liveProgramPublicRoutes from './routes/liveProgramPublicRoutes';
+import broadcastRoutes from './routes/broadcastRoutes';
+import tiktokRoomRoutes from './routes/tiktokRoomRoutes';
 import economyRoutes from './economy/economyRoutes';
 import internalRoutes from './internal/internalRoutes';
 import adminRoutes from './admin/adminRoutes';
 import { ensureAdminSchema } from './admin/adminSchema';
+import { ensureBroadcastSchema } from './live/broadcastSchema';
 import { getEconomyInfra, checkDb, checkRedis } from './economy/infra';
 import { ensureEconomySchema } from './economy/schema';
 import { createSocketServer } from './realtime/socketServer';
@@ -33,6 +37,7 @@ const port = (() => {
 })();
 
 const app = express();
+app.set('trust proxy', 1);
 
 // Wallet polls every few seconds from the app. Express's default weak ETag makes
 // OkHttp send If-None-Match and receive HTTP 304 with an empty body. RN fetch
@@ -158,9 +163,13 @@ app.use(internalRoutes);
 // 401 unauthenticated /api/grid9/* before this router ever sees the request.
 app.use('/api', grid9Routes);
 
+app.use('/api', liveProgramPublicRoutes);
+
 // Economy contracts (auth required inside router)
 app.use(economyRoutes);
 
+app.use('/api', broadcastRoutes);
+app.use('/api', tiktokRoomRoutes);
 app.use('/api', liveRoutes);
 
 // Canonical scheduled Battle Arena registry + server lifecycle.
@@ -209,6 +218,11 @@ async function bootstrapSchemaWithRetry(db: any): Promise<void> {
         await ensureAdminSchema(db);
       } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[startup] admin schema ensure failed');
+      }
+      try {
+        await ensureBroadcastSchema(db);
+      } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[startup] broadcast schema ensure failed');
       }
       logger.info({ attempt }, '[startup] schema bootstrap complete');
       return;

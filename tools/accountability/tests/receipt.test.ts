@@ -123,3 +123,29 @@ test('receipt file validation rejects stale receipts', async (t) => {
     /stale/,
   );
 });
+
+test('touched-file digest is stable across consecutive quiet reads', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'blyp-receipt-digest-'));
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+  const relative = 'sample.txt';
+  await writeFile(path.join(directory, relative), 'quiet-content\n');
+  const {
+    digestTouchedFiles,
+    digestTouchedFilesUntilStable,
+    diffTouchedFileEvidence,
+  } = await import('../src/receipt.js');
+  const first = await digestTouchedFiles(directory, [relative]);
+  const second = await digestTouchedFilesUntilStable(directory, [relative], {
+    maxAttempts: 3,
+    settleDelayMs: 0,
+  });
+  assert.deepEqual(first, second);
+  assert.deepEqual(diffTouchedFileEvidence(first, second), []);
+  await writeFile(path.join(directory, relative), 'mutated\n');
+  const mutated = await digestTouchedFiles(directory, [relative]);
+  const diffs = diffTouchedFileEvidence(first, mutated);
+  assert.equal(diffs.length, 1);
+  assert.match(diffs[0] ?? '', /sample\.txt:/);
+});

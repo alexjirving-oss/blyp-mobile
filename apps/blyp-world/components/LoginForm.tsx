@@ -3,11 +3,12 @@
 import { Suspense, useMemo, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "./AuthProvider";
+import "./login-gate.css";
 
 function safeNextPath(raw: string | null): string {
-  if (!raw) return "/foryou";
+  if (!raw) return "/";
   // Only same-origin relative paths (allow hash for /teams#apply).
-  if (!raw.startsWith("/") || raw.startsWith("//")) return "/foryou";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/";
   return raw;
 }
 
@@ -26,28 +27,25 @@ function LoginFormInner() {
 
   if (session) {
     return (
-      <div className="max-w-md space-y-4">
-        <p className="text-[var(--blyp-muted)]">
-          Signed in as{" "}
-          <span className="text-[var(--blyp-fog)]">
-            {session.email || session.username}
-          </span>
-        </p>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => router.push(nextPath)}
-            className="rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-semibold text-[var(--blyp-ink)]"
-          >
-            Continue
-          </button>
-          <button
-            type="button"
-            onClick={logout}
-            className="rounded-full border border-[var(--blyp-line)] px-5 py-2.5 text-sm font-semibold"
-          >
-            Log out
-          </button>
+      <div className="lgate">
+        <div className="lgate-card">
+          <p className="lgate-kicker">Signed in</p>
+          <h2 className="lgate-title">You&apos;re in</h2>
+          <p className="lgate-who">
+            <strong>{session.email || session.username}</strong>
+          </p>
+          <div className="lgate-actions">
+            <button
+              type="button"
+              onClick={() => router.push(nextPath)}
+              className="lgate-go"
+            >
+              Continue
+            </button>
+            <button type="button" onClick={logout} className="lgate-ghost">
+              Log out
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -72,60 +70,53 @@ function LoginFormInner() {
   };
 
   return (
-    <form onSubmit={onSubmit} className="max-w-md space-y-4">
-      <p className="text-sm text-[var(--blyp-muted)]">
-        Same Cognito pool as the Blyp app (
-        <span className="text-[var(--blyp-fog)]">eu-west-2_ITX07Zvnt</span>).
-      </p>
-      <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-[var(--blyp-muted)]">
-          Email
-        </span>
-        <input
-          type="email"
-          required
-          autoComplete="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] px-4 py-3 text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] focus:ring-2"
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-[var(--blyp-muted)]">
-          Password
-        </span>
-        <input
-          type="password"
-          required
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] px-4 py-3 text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] focus:ring-2"
-        />
-      </label>
-      {error ? (
-        <p className="text-sm text-[var(--blyp-rose)]" role="alert">
-          {error}
+    <div className="lgate">
+      <form onSubmit={onSubmit} className="lgate-card lgate-form">
+        <p className="lgate-kicker">Same account as the app</p>
+        <p className="lgate-copy">
+          Email and password for your Blyp account. Keep watching free without
+          signing in.
         </p>
-      ) : null}
-      <button
-        type="submit"
-        disabled={busy}
-        className="rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-semibold text-[var(--blyp-ink)] disabled:opacity-60"
-      >
-        {busy ? "Signing in…" : "Log in"}
-      </button>
-    </form>
+        <label className="lgate-label">
+          <span>Email</span>
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="lgate-input"
+          />
+        </label>
+        <label className="lgate-label">
+          <span>Password</span>
+          <input
+            type="password"
+            required
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="lgate-input"
+          />
+        </label>
+        {error ? (
+          <p className="lgate-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <div className="lgate-actions">
+          <button type="submit" disabled={busy} className="lgate-go">
+            {busy ? "Signing in…" : "Log in"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
 export function LoginForm() {
   return (
-    <Suspense
-      fallback={
-        <p className="text-sm text-[var(--blyp-muted)]">Loading…</p>
-      }
-    >
+    <Suspense fallback={<p className="lgate-fallback">Loading…</p>}>
       <LoginFormInner />
     </Suspense>
   );

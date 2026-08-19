@@ -29,7 +29,7 @@ function StudioRuntime() {
   useDirectorHotkeys();
   useStudioViewportLock();
   return (
-    <div className="blyp-studio-root" data-blyp-studio="phase-5-socket-resilience">
+    <div className="blyp-studio-root" data-blyp-studio="one-booth-v1">
       <TopBar />
       <DirectorPanel />
       <CenterStage />
@@ -40,8 +40,8 @@ function StudioRuntime() {
 }
 
 /**
- * BlypStudio control room shell.
- * Phase 5: Grid 9 socket bridge (honest protocol map) + hotkeys + capture resilience.
+ * BlypStudio — one command booth on blyp.world.
+ * Working GO LIVE + scenes/overlays/mixer/guests + Grid 9 director.
  */
 export function BlypStudioShell() {
   return (

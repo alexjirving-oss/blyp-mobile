@@ -1080,6 +1080,7 @@ export async function publishFirestoreLiveDirectory(input: {
   streamId: string;
   hostUserId: string;
   title?: string | null;
+  playbackUrl?: string | null;
 }): Promise<{ ok: boolean; detail?: string }> {
   const fs = getFirestore();
   const streamId = String(input.streamId || '').trim();
@@ -1104,6 +1105,7 @@ export async function publishFirestoreLiveDirectory(input: {
   if (!hostDisplayName) hostDisplayName = hostUserId;
 
   const title = str(input.title || '').trim() || 'Live Stream';
+  const playbackUrl = str(input.playbackUrl || '').trim() || undefined;
   const livePayload = {
     streamId,
     userId: hostUserId,
@@ -1122,6 +1124,7 @@ export async function publishFirestoreLiveDirectory(input: {
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
     adminForceEnded: false,
+    ...(playbackUrl ? { playbackUrl } : {}),
   };
 
   try {
@@ -1141,6 +1144,7 @@ export async function publishFirestoreLiveDirectory(input: {
           peakViewerCount: 0,
           totalViews: 0,
           likes: 0,
+          ...(playbackUrl ? { playbackUrl } : {}),
         },
         { merge: true },
       ),
@@ -1290,31 +1294,49 @@ export async function endFirestoreStream(streamId: string): Promise<{ ok: boolea
 /**
  * Host presence ping for web/native studio. Refreshes Firestore discovery
  * heartbeat so status-probe sweeps do not end an otherwise-LIVE Dynamo session.
+ * Optional studioOrientation / studioLayout mirror the host booth framing for
+ * web watchers (native guest/viewer still needs a LIVE unlock to consume).
  */
 export async function touchLiveDirectoryHeartbeat(
   streamId: string,
+  opts?: {
+    studioOrientation?: string;
+    studioLayout?: string;
+  },
 ): Promise<{ ok: boolean; detail?: string }> {
   const fs = getFirestore();
   const id = String(streamId || '').trim();
   if (!fs || !id) return { ok: false, detail: 'unavailable' };
   try {
-    const payload = {
+    const payload: Record<string, unknown> = {
       lastHeartbeatAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
       status: 'live',
       directoryReady: true,
     };
+    const orient = String(opts?.studioOrientation || '').trim();
+    if (orient === 'portrait' || orient === 'landscape') {
+      payload.studioOrientation = orient;
+    }
+    const layout = String(opts?.studioLayout || '').trim();
+    if (layout) {
+      payload.studioLayout = layout.slice(0, 64);
+    }
+    const streamsPayload: Record<string, unknown> = {
+      lastHeartbeatAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      status: 'live',
+      directoryReady: true,
+    };
+    if (payload.studioOrientation) {
+      streamsPayload.studioOrientation = payload.studioOrientation;
+    }
+    if (payload.studioLayout) {
+      streamsPayload.studioLayout = payload.studioLayout;
+    }
     await Promise.all([
       fs.collection('liveStreams').doc(id).set(payload, { merge: true }),
-      fs.collection('streams').doc(id).set(
-        {
-          lastHeartbeatAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-          status: 'live',
-          directoryReady: true,
-        },
-        { merge: true },
-      ),
+      fs.collection('streams').doc(id).set(streamsPayload, { merge: true }),
     ]);
     return { ok: true };
   } catch (e: any) {
@@ -1333,19 +1355,44 @@ export async function sweepStaleLiveDirectory(opts?: {
 }): Promise<{ ok: boolean; swept: number; ids: string[]; detail?: string }> {
   const fs = getFirestore();
   if (!fs) return { ok: false, swept: 0, ids: [], detail: 'unavailable' };
-  const staleMs = Math.max(60_000, Number(opts?.staleMs) || 5 * 60_000);
+  const staleMs = Math.max(60_000, Number(opts?.staleMs) || 90_000);
   const limit = Math.min(100, Math.max(1, Number(opts?.limit) || 40));
   const cutoff = new Date(Date.now() - staleMs);
   const ids: string[] = [];
   try {
-    // status=live without a recent heartbeat — these are unjoinable ghosts.
+    const { endLiveSession } = await import('../live/liveService');
+    const { getSessionById, listLiveSessions } = await import('../live/liveSessionStore');
     const snap = await fs.collection('liveStreams').where('status', '==', 'live').limit(limit).get();
     for (const doc of snap.docs) {
       const data = doc.data() || {};
       const hb = data.lastHeartbeatAt?.toDate?.() as Date | undefined;
-      if (hb && hb.getTime() >= cutoff.getTime()) continue;
-      const result = await endFirestoreStream(doc.id);
-      if (result.ok) ids.push(doc.id);
+      const created = data.createdAt?.toDate?.() as Date | undefined;
+      const stale =
+        (!hb && created && Date.now() - created.getTime() > staleMs) ||
+        (!hb && !created) ||
+        (!!hb && hb.getTime() < cutoff.getTime());
+      if (!stale) continue;
+      const dyn = await getSessionById(doc.id).catch(() => null);
+      if (dyn && dyn.status === 'LIVE') {
+        await endLiveSession(doc.id);
+      } else {
+        const result = await endFirestoreStream(doc.id);
+        if (!result.ok) continue;
+      }
+      ids.push(doc.id);
+    }
+    const liveRows = await listLiveSessions(50);
+    for (const row of liveRows) {
+      if (ids.includes(row.sessionId)) continue;
+      const doc = await fs.collection('liveStreams').doc(row.sessionId).get();
+      const data = doc.exists ? doc.data() || {} : {};
+      const hb = data.lastHeartbeatAt?.toDate?.() as Date | undefined;
+      const missing = !doc.exists;
+      const staleHb = !hb || hb.getTime() < cutoff.getTime();
+      if (missing || staleHb) {
+        await endLiveSession(row.sessionId);
+        ids.push(row.sessionId);
+      }
     }
     logger.warn({ swept: ids.length, staleMs, ids }, '[firestore-admin] sweepStaleLiveDirectory');
     return { ok: true, swept: ids.length, ids };

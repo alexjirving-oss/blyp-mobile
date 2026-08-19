@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, Syne } from "next/font/google";
+import { DM_Sans, Syne, Limelight, Special_Elite } from "next/font/google";
 import { SiteChrome } from "@/components/SiteChrome";
 import "./globals.css";
 
@@ -13,6 +13,18 @@ const dmSans = DM_Sans({
   variable: "--font-dm-sans",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
+});
+
+const limelight = Limelight({
+  variable: "--font-jbx-marquee",
+  subsets: ["latin"],
+  weight: "400",
+});
+
+const specialElite = Special_Elite({
+  variable: "--font-jbx-ticket",
+  subsets: ["latin"],
+  weight: "400",
 });
 
 export const metadata: Metadata = {
@@ -44,7 +56,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${syne.variable} ${dmSans.variable} antialiased`}>
+      <body
+        className={`${syne.variable} ${dmSans.variable} ${limelight.variable} ${specialElite.variable} antialiased`}
+      >
         <SiteChrome>{children}</SiteChrome>
       </body>
     </html>

@@ -2,6 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Scrollable regions without visible grey scrollbars (For You sidebar, studio rails). */
+.blyp-scroll-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.blyp-scroll-hidden::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Header / home Live Studio launch — not another glow pill. */
+.blyp-studio-launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 2.25rem;
+  padding: 0 0.95rem 0 0.7rem;
+  border: none;
+  border-radius: 8px;
+  background: #fe2c55;
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.blyp-studio-launch:hover {
+  background: #ff3b63;
+}
+
+.blyp-studio-launch:active {
+  transform: translateY(1px);
+}
+
+.blyp-studio-launch-compact {
+  height: 1.85rem;
+  padding: 0 0.7rem 0 0.55rem;
+  font-size: 0.6875rem;
+}
+
+.blyp-studio-launch-lg {
+  height: 2.75rem;
+  padding: 0 1.2rem 0 0.95rem;
+  font-size: 0.9375rem;
+}
+
+.blyp-studio-launch-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
+}
+
 :root {
   --blyp-ink: #07070a;
   --blyp-ink-elevated: #101016;

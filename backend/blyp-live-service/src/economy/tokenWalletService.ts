@@ -8,12 +8,12 @@ import {
   TOKEN_TO_COIN_FACE_RATIO,
 } from './tokenToCoinConvert';
 import { allocateTokenConvertDebit } from './tokenConvertDebit';
-import { tokensFromJackpotCoins } from '../games/grid9/constants';
+import { tokensFromCoins, winnerTokensFromSettlement } from '../games/grid9/constants';
 
 /**
- * Credit Grid 9 victory Tokens (50% of jackpot coins). Idempotent via ledger key.
- * Credits wallets.token_available only (not token_pending).
- * Does not touch gem columns or gem convert paths.
+ * Credit Grid 9 victory Tokens.
+ * Alex: tokens = floor(seatShareCoins * 0.5) + floor(jackpotCoins * 0.5).
+ * Idempotent via ledger key. Credits wallets.token_available only.
  */
 export async function creditGrid9VictoryTokens(
   trx: any,
@@ -21,10 +21,15 @@ export async function creditGrid9VictoryTokens(
     userId: string;
     matchId: string;
     jackpotCoins: number;
+    seatShareCoins?: number;
     winnerSlotIndex: number | null;
   },
 ): Promise<{ tokensCredited: number }> {
-  const tokens = tokensFromJackpotCoins(args.jackpotCoins);
+  const seatShareCoins = Math.floor(Number(args.seatShareCoins) || 0);
+  const tokens = winnerTokensFromSettlement({
+    seatShareCoins,
+    jackpotCoins: args.jackpotCoins,
+  });
   if (tokens <= 0) return { tokensCredited: 0 };
   const idempotencyKey = `grid9:token-jackpot:${args.matchId}:${args.userId}`;
   const existing = await trx('ledger_entries')
@@ -49,8 +54,69 @@ export async function creditGrid9VictoryTokens(
     metadata: {
       matchId: args.matchId,
       jackpotCoins: args.jackpotCoins,
+      seatShareCoins,
       winnerSlotIndex: args.winnerSlotIndex,
       tokenPayoutBps: 5000,
+      formula: 'floor(seatShare*0.5)+floor(jackpot*0.5)',
+    },
+  });
+
+  await trx('wallets')
+    .where({ user_id: args.userId })
+    .update({
+      token_available: (
+        BigInt(wallet.token_available || 0) + BigInt(tokens)
+      ).toString(),
+      lifetime_earned_tokens: (
+        BigInt(wallet.lifetime_earned_tokens || 0) + BigInt(tokens)
+      ).toString(),
+      updated_at: trx.fn.now(),
+    });
+
+  return { tokensCredited: tokens };
+}
+
+/**
+ * Knockout consolation: tokens = floor(finishingFaceCoins * 0.5).
+ * Example: 500 coin finishing hit → 250 tokens.
+ */
+export async function creditGrid9KnockoutTokens(
+  trx: any,
+  args: {
+    userId: string;
+    matchId: string;
+    faceCoins: number;
+    slotIndex: number;
+  },
+): Promise<{ tokensCredited: number }> {
+  const tokens = tokensFromCoins(args.faceCoins);
+  if (tokens <= 0) return { tokensCredited: 0 };
+  const idempotencyKey = `grid9:token-ko:${args.matchId}:${args.userId}:${args.slotIndex}`;
+  const existing = await trx('ledger_entries')
+    .where({ idempotency_key: idempotencyKey })
+    .first();
+  if (existing) return { tokensCredited: tokens };
+
+  await trx('wallets').insert({ user_id: args.userId }).onConflict('user_id').ignore();
+  const wallet = await trx('wallets').where({ user_id: args.userId }).forUpdate().first();
+  if (!wallet) throw new Error('Grid 9 knockout wallet missing');
+
+  await trx('ledger_entries').insert({
+    ledger_id: randomUUID(),
+    user_id: args.userId,
+    entry_type: 'GRID9_TOKEN_KNOCKOUT',
+    currency: 'TOKEN',
+    amount: String(tokens),
+    status: 'POSTED',
+    reference_type: 'GRID9_MATCH',
+    reference_id: args.matchId,
+    idempotency_key: idempotencyKey,
+    metadata: {
+      matchId: args.matchId,
+      faceCoins: args.faceCoins,
+      slotIndex: args.slotIndex,
+      tokenPayoutBps: 5000,
+      formula: 'floor(finishingFaceCoins*0.5)',
     },
   });
 

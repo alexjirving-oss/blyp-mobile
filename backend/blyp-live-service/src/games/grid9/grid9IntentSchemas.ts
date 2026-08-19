@@ -168,6 +168,16 @@ const buyInventoryItem = z
   })
   .strict();
 
+const buyback = z
+  .object({
+    ...common,
+    type: z.literal('BUYBACK'),
+    matchId: id,
+    expectedStateVersion: z.number().int().nonnegative(),
+    payload: z.object({ confirm: z.literal(true) }).strict(),
+  })
+  .strict();
+
 const requestSnapshot = z
   .object({
     ...common,
@@ -302,6 +312,7 @@ export const grid9ClientIntentSchema = z.discriminatedUnion('type', [
   fundMercenary,
   sendArsenalGift,
   buyInventoryItem,
+  buyback,
   requestSnapshot,
   ping,
 ]);

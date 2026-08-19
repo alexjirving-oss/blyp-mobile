@@ -12,10 +12,32 @@ import {
   type ReactNode,
 } from "react";
 import { studioAudio } from "../audio/StudioAudioEngine";
+import {
+  defaultOverlays,
+  type LayoutOrientation,
+  type LayoutPreset,
+  type OverlayInstance,
+  type OverlayKind,
+  createOverlay,
+} from "../overlays/catalog";
+import {
+  GRID9_BUYBACK_COST_COINS,
+  GRID9_HOUSE_JACKPOT_SEED,
+  GRID9_MAX_HEALTH,
+  GRID9_MAX_MATCH_DURATION_MS,
+  GRID9_NUKE_DEMO_FACE_COINS,
+  applyHpDelta,
+  formatMatchClock,
+  giftHpDelta,
+  knockoutTokenPayout,
+  pickFinaleWinnerSlotIndex,
+  splitGrid9AudienceGiftCoins,
+} from "@/lib/grid9Economy";
 
 export type StreamHealth = "EXCELLENT" | "WARNING" | "CRITICAL" | "OFFLINE";
 export type ActiveMode = "JUST_CHATTING" | "GRID9";
 export type GridSlotKind = "empty" | "host" | "guest" | "sentinel";
+export type DeskScene = "camera" | "screen" | "screen-pip";
 
 /** @deprecated Phase 2 alias — prefer AuditionApplicant */
 export type QueuedGuest = {
@@ -30,6 +52,12 @@ export type GridSlot = {
   avatarLabel: string | null;
   health: number;
   shields: number;
+  /** Knocked out (HP ≤ 0). */
+  knockedOut: boolean;
+  /** Pending/demo KO token payout (floor(face * 0.5)). */
+  knockoutTokens: number;
+  /** Accumulated seat-share credits (100% of gift faces; demo + live tally). */
+  seatShareCoins: number;
 };
 
 export type AuditionApplicant = {
@@ -45,8 +73,8 @@ export type SocialFeedEvent = {
   createdAt: number;
 };
 
-const HOUSE_JACKPOT_SEED = 100;
-const DEFAULT_HEALTH = 100;
+const HOUSE_JACKPOT_SEED = GRID9_HOUSE_JACKPOT_SEED;
+const DEFAULT_HEALTH = GRID9_MAX_HEALTH;
 const DEFAULT_SHIELDS = 0;
 /** Studio mock roulette duration (~4s decelerating highlight). */
 export const ROULETTE_DURATION_MS = 4000;
@@ -71,10 +99,10 @@ const MOCK_APPLICANTS: AuditionApplicant[] = [
 ];
 
 const MOCK_GIFTS = [
-  { viewer: "viewer_one", gift: "SHIELD", slot: 1, coins: 100 },
-  { viewer: "coin_whale", gift: "BOOST", slot: 3, coins: 50 },
-  { viewer: "chatty_kat", gift: "HEART", slot: 1, coins: 20 },
-  { viewer: "grid_fan", gift: "SHIELD", slot: 5, coins: 100 },
+  { viewer: "viewer_one", gift: "BOMB", slot: 2, coins: 500, kind: "damage" as const },
+  { viewer: "coin_whale", gift: "ARROW", slot: 3, coins: 50, kind: "damage" as const },
+  { viewer: "chatty_kat", gift: "KISS", slot: 1, coins: 100, kind: "heal" as const },
+  { viewer: "grid_fan", gift: "FIREBALL", slot: 5, coins: 25, kind: "damage" as const },
 ] as const;
 
 function emptySlots(): GridSlot[] {
@@ -88,6 +116,9 @@ function emptySlots(): GridSlot[] {
         avatarLabel: "H",
         health: DEFAULT_HEALTH,
         shields: DEFAULT_SHIELDS,
+        knockedOut: false,
+        knockoutTokens: 0,
+        seatShareCoins: 0,
       };
     }
     return {
@@ -97,6 +128,9 @@ function emptySlots(): GridSlot[] {
       avatarLabel: null,
       health: DEFAULT_HEALTH,
       shields: DEFAULT_SHIELDS,
+      knockedOut: false,
+      knockoutTokens: 0,
+      seatShareCoins: 0,
     };
   });
 }
@@ -125,7 +159,10 @@ export type DirectorBackend = {
   autoFillSentinels: () => boolean;
   resetMatch: () => boolean;
   kickPlayer?: (targetUserId: string) => boolean;
+  buyback?: () => boolean;
 };
+
+export type MatchEndReason = "last_standing" | "deadline_finale" | null;
 
 export type StudioState = {
   /**
@@ -135,9 +172,9 @@ export type StudioState = {
   isLive: boolean;
   streamHealth: StreamHealth;
   activeMode: ActiveMode;
-  /** House seed 100 on GRID9 enter / Reset Match. Gift 30% allocations add here. */
+  /** House seed 100 on GRID9 enter / Reset Match. Gift +10% pot match + buybacks add here. */
   jackpotPool: number;
-  /** Gift 70% allocations tally (studio mock) or ARSENAL_GRANTED.seatCoins when live. */
+  /** Gift 100% seat credits (studio mock) or ARSENAL_GRANTED.seatCoins when live. */
   hostGems: number;
   topSupporters: string[];
   /** @deprecated use auditionQueue */
@@ -149,6 +186,13 @@ export type StudioState = {
   focusSlot: number | null;
   rouletteHighlightSlot: number | null;
   isRouletteSpinning: boolean;
+  /** Epoch ms when the 60m mock/live match clock expires; null when idle. */
+  matchDeadlineAt: number | null;
+  /** Remaining ms for UI clock (ticked); null when no active match clock. */
+  matchRemainingMs: number | null;
+  /** Winner seat 1–9 after last-standing or deadline finale. */
+  matchWinnerSlot: number | null;
+  matchEndReason: MatchEndReason;
   publishError: string | null;
   publishBusy: boolean;
   socketStatus: SocketStatus;
@@ -157,9 +201,23 @@ export type StudioState = {
   standBySignal: boolean;
   /** Webcam ended — freeze last frame / show host avatar. */
   cameraFrozen: boolean;
+  /** Active host session id when GO LIVE succeeded (guest/chat poll). */
+  hostSessionId: string | null;
+  /** Program scene: camera / screen / screen+PIP. */
+  deskScene: DeskScene;
+  layoutOrientation: LayoutOrientation;
+  layoutPreset: LayoutPreset;
+  overlays: OverlayInstance[];
   /** Shared refs for Clean Feed → IVS (avoid re-render loops). */
   previewStreamRef: MutableRefObject<MediaStream | null>;
   cleanFeedStreamRef: MutableRefObject<MediaStream | null>;
+  setHostSessionId: (id: string | null) => void;
+  setDeskScene: (scene: DeskScene) => void;
+  setLayoutOrientation: (o: LayoutOrientation) => void;
+  setLayoutPreset: (p: LayoutPreset) => void;
+  toggleOverlay: (id: string) => void;
+  setOverlayCleanFeed: (id: string, visible: boolean) => void;
+  addOverlay: (kind: OverlayKind) => void;
   setIsLive: (next: boolean) => void;
   toggleIsLive: () => void;
   setPublishError: (msg: string | null) => void;
@@ -171,6 +229,8 @@ export type StudioState = {
   resetMatch: () => void;
   promoteToGrid: (applicantId: string) => void;
   kickSlot: (slotIndex: number) => void;
+  /** KO buyback: 500 coins → jackpot, revive at 1000 HP (mock) or emit BUYBACK (live). */
+  buybackSlot: (slotIndex: number) => void;
   setFocusSlot: (slot: number | null) => void;
   setSocketStatus: (s: SocketStatus) => void;
   setEconomySource: (s: EconomySource) => void;
@@ -185,13 +245,45 @@ export type StudioState = {
     jackpotTotal?: number;
     text: string;
     viewer?: string;
+    slotIndex?: number;
+    healthAfter?: number;
+    eliminated?: boolean;
+    knockoutTokens?: number;
+    costCoins?: number;
   }) => void;
+  /** Demo Nuke / weapon strike on a cell (1–9). Returns false if cell already KO. */
+  applyNukeStrike: (slotIndex1to9: number, faceCoins?: number) => boolean;
+  applyLivePlayers: (
+    players: Array<{
+      slotIndex0to8: number;
+      health: number;
+      shields?: number;
+      knockedOut?: boolean;
+      seatShareCoins?: number;
+      knockoutTokens?: number;
+      displayName?: string | null;
+    }>,
+  ) => void;
   applyLiveRouletteStart: (args: {
     selectedSlot: number;
     candidateSlots: number[];
     endsAt: string | null;
   }) => void;
   applyLiveRouletteLand: (spotlightSlot: number | null) => void;
+  applyLiveBuyback: (args: {
+    slotIndex0to8: number;
+    healthAfter: number;
+    jackpotTotal: number;
+    costCoins: number;
+    displayName?: string;
+  }) => void;
+  applyLiveMatchCompleted: (args: {
+    winnerSlot1to9: number | null;
+    reason: MatchEndReason;
+    jackpotCoins?: number;
+  }) => void;
+  applyLiveMatchDeadline: (deadlineIso: string | null) => void;
+  formatMatchClock: typeof formatMatchClock;
 };
 
 const StudioStateContext = createContext<StudioState | null>(null);
@@ -213,12 +305,24 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
     number | null
   >(null);
   const [isRouletteSpinning, setIsRouletteSpinning] = useState(false);
+  const [matchDeadlineAt, setMatchDeadlineAt] = useState<number | null>(null);
+  const [matchRemainingMs, setMatchRemainingMs] = useState<number | null>(null);
+  const [matchWinnerSlot, setMatchWinnerSlot] = useState<number | null>(null);
+  const [matchEndReason, setMatchEndReason] = useState<MatchEndReason>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [socketStatus, setSocketStatus] = useState<SocketStatus>("offline");
   const [economySource, setEconomySource] = useState<EconomySource>("mock");
   const [standBySignal, setStandBySignal] = useState(false);
   const [cameraFrozen, setCameraFrozen] = useState(false);
+  const [hostSessionId, setHostSessionId] = useState<string | null>(null);
+  const [deskScene, setDeskScene] = useState<DeskScene>("camera");
+  const [layoutOrientation, setLayoutOrientation] =
+    useState<LayoutOrientation>("portrait");
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>("solo");
+  const [overlays, setOverlays] = useState<OverlayInstance[]>(() =>
+    defaultOverlays(),
+  );
   const rouletteTimers = useRef<number[]>([]);
   const previewStreamRef = useRef<MediaStream | null>(null);
   const cleanFeedStreamRef = useRef<MediaStream | null>(null);
@@ -244,22 +348,158 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const matchEndReasonRef = useRef<MatchEndReason>(null);
+  matchEndReasonRef.current = matchEndReason;
+
+  const armMatchClock = useCallback((deadlineMs?: number) => {
+    const deadline =
+      typeof deadlineMs === "number" && Number.isFinite(deadlineMs)
+        ? deadlineMs
+        : Date.now() + GRID9_MAX_MATCH_DURATION_MS;
+    setMatchDeadlineAt(deadline);
+    setMatchRemainingMs(Math.max(0, deadline - Date.now()));
+    setMatchWinnerSlot(null);
+    setMatchEndReason(null);
+  }, []);
+
+  const resolveMatchFromSlots = useCallback(
+    (slots: GridSlot[], reason: Exclude<MatchEndReason, null>) => {
+      if (matchEndReasonRef.current) return;
+      const occupied = slots.filter((s) => s.kind !== "empty");
+      if (reason === "last_standing") {
+        const alive = occupied.filter((s) => !s.knockedOut && s.health > 0);
+        if (alive.length !== 1) return;
+        const winner = alive[0]!.index;
+        matchEndReasonRef.current = "last_standing";
+        setMatchWinnerSlot(winner);
+        setMatchEndReason("last_standing");
+        setMatchRemainingMs(0);
+        pushFeed(
+          `🏆 Last standing — Slot ${winner} (${alive[0]!.displayName ?? "player"}) wins.`,
+        );
+        return;
+      }
+      const winner0 = pickFinaleWinnerSlotIndex(
+        occupied.map((s) => ({
+          slotIndex: s.index - 1,
+          health: s.health,
+          shields: s.shields,
+          knockedOut: s.knockedOut,
+        })),
+      );
+      if (winner0 == null) {
+        matchEndReasonRef.current = "deadline_finale";
+        setMatchEndReason("deadline_finale");
+        setMatchRemainingMs(0);
+        pushFeed("⏱ Match clock expired — no survivors.");
+        return;
+      }
+      const winner = winner0 + 1;
+      matchEndReasonRef.current = "deadline_finale";
+      setMatchWinnerSlot(winner);
+      setMatchEndReason("deadline_finale");
+      setMatchRemainingMs(0);
+      const name =
+        occupied.find((s) => s.index === winner)?.displayName ?? "player";
+      pushFeed(
+        `⏱ Deadline finale — Slot ${winner} (${name}) wins (highest HP+shield).`,
+      );
+    },
+    [pushFeed],
+  );
+
+  // Match countdown tick + deadline finale (mock). Live uses MATCH_COMPLETED.
+  useEffect(() => {
+    if (activeMode !== "GRID9" || matchDeadlineAt == null || matchEndReason) {
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.max(0, matchDeadlineAt - Date.now());
+      setMatchRemainingMs(remaining);
+      if (remaining <= 0 && economySource === "mock") {
+        resolveMatchFromSlots(gridSlotsRef.current, "deadline_finale");
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [
+    activeMode,
+    matchDeadlineAt,
+    matchEndReason,
+    economySource,
+    resolveMatchFromSlots,
+  ]);
+
+  const toggleOverlay = useCallback((id: string) => {
+    setOverlays((prev) =>
+      prev.map((o) => (o.id === id ? { ...o, enabled: !o.enabled } : o)),
+    );
+  }, []);
+
+  const setOverlayCleanFeed = useCallback((id: string, visible: boolean) => {
+    setOverlays((prev) =>
+      prev.map((o) =>
+        o.id === id ? { ...o, visibleOnCleanFeed: visible } : o,
+      ),
+    );
+  }, []);
+
+  const addOverlay = useCallback((kind: OverlayKind) => {
+    setOverlays((prev) => {
+      if (prev.some((o) => o.kind === kind && o.enabled)) return prev;
+      return [...prev, createOverlay(kind)];
+    });
+  }, []);
+
   const applyGiftAllocation = useCallback(
-    (coins: number, text: string, viewer?: string) => {
-      const toJackpot = Math.round(coins * 0.3);
-      const toGems = coins - toJackpot;
-      setJackpotPool((p) => p + toJackpot);
-      setHostGems((g) => g + toGems);
+    (
+      coins: number,
+      text: string,
+      viewer?: string,
+      opts?: {
+        slotIndex?: number;
+        kind?: "damage" | "heal";
+      },
+    ) => {
+      const { seatCoins, jackpotCoins } = splitGrid9AudienceGiftCoins(coins);
+      setJackpotPool((p) => p + jackpotCoins);
+      setHostGems((g) => g + seatCoins);
       if (viewer) {
         setTopSupporters((prev) => {
           const next = [viewer, ...prev.filter((v) => v !== viewer)];
           return next.slice(0, 3);
         });
       }
+      const slotIndex = opts?.slotIndex;
+      const kind = opts?.kind ?? "damage";
+      if (typeof slotIndex === "number") {
+        setGridSlots((slots) => {
+          const next = slots.map((s) => {
+            if (s.index !== slotIndex || s.knockedOut) return s;
+            const delta = giftHpDelta(coins, kind);
+            const { health, eliminated } = applyHpDelta(s.health, delta);
+            const koTokens = eliminated ? knockoutTokenPayout(coins) : 0;
+            return {
+              ...s,
+              health,
+              knockedOut: eliminated,
+              knockoutTokens: eliminated ? koTokens : s.knockoutTokens,
+              seatShareCoins: s.seatShareCoins + seatCoins,
+            };
+          });
+          if (economySource === "mock") {
+            queueMicrotask(() =>
+              resolveMatchFromSlots(next, "last_standing"),
+            );
+          }
+          return next;
+        });
+      }
       studioAudio.playGiftDrop();
       pushFeed(text);
     },
-    [pushFeed],
+    [pushFeed, economySource, resolveMatchFromSlots],
   );
 
   // Mock gift drip while in GRID9 — paused when live socket economy is active.
@@ -270,11 +510,16 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
     const id = window.setInterval(() => {
       const g = MOCK_GIFTS[i % MOCK_GIFTS.length];
       i += 1;
-      const jackpotAdd = Math.round(g.coins * 0.3);
+      const { jackpotCoins } = splitGrid9AudienceGiftCoins(g.coins);
+      const hpNote =
+        g.kind === "heal"
+          ? `+${g.coins} HP`
+          : `−${g.coins} HP`;
       applyGiftAllocation(
         g.coins,
-        `[mock] ⚡ @${g.viewer} dropped ${g.gift} on Slot ${g.slot}! (+${jackpotAdd} Coins to Jackpot)`,
+        `[mock] ⚡ @${g.viewer} dropped ${g.gift} on Slot ${g.slot} (${hpNote}; seat +${g.coins} / pot +${jackpotCoins} match)`,
         g.viewer,
+        { slotIndex: g.slot, kind: g.kind },
       );
     }, 7000);
     return () => window.clearInterval(id);
@@ -306,6 +551,11 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       jackpotTotal?: number;
       text: string;
       viewer?: string;
+      slotIndex?: number;
+      healthAfter?: number;
+      eliminated?: boolean;
+      knockoutTokens?: number;
+      costCoins?: number;
     }) => {
       if (typeof args.jackpotTotal === "number") {
         setJackpotPool(args.jackpotTotal);
@@ -319,10 +569,117 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
           return next.slice(0, 3);
         });
       }
+      if (typeof args.slotIndex === "number") {
+        setGridSlots((slots) =>
+          slots.map((s) => {
+            if (s.index !== args.slotIndex) return s;
+            const health =
+              typeof args.healthAfter === "number" ? args.healthAfter : s.health;
+            const eliminated = Boolean(args.eliminated) || health <= 0;
+            return {
+              ...s,
+              health,
+              knockedOut: eliminated,
+              knockoutTokens: eliminated
+                ? (args.knockoutTokens ??
+                  knockoutTokenPayout(args.costCoins ?? 0))
+                : s.knockoutTokens,
+              seatShareCoins: s.seatShareCoins + args.seatCoins,
+            };
+          }),
+        );
+      }
       studioAudio.playGiftDrop();
       pushFeed(args.text);
     },
     [pushFeed],
+  );
+
+  const applyNukeStrike = useCallback(
+    (slotIndex1to9: number, faceCoins = GRID9_NUKE_DEMO_FACE_COINS) => {
+      const slot = gridSlotsRef.current.find((s) => s.index === slotIndex1to9);
+      if (!slot || slot.knockedOut) return false;
+      const { seatCoins, jackpotCoins } = splitGrid9AudienceGiftCoins(faceCoins);
+      setJackpotPool((p) => p + jackpotCoins);
+      setHostGems((g) => g + seatCoins);
+      let didKo = false;
+      let koTokens = 0;
+      setGridSlots((slots) => {
+        const next = slots.map((s) => {
+          if (s.index !== slotIndex1to9 || s.knockedOut) return s;
+          const { health, eliminated } = applyHpDelta(
+            s.health,
+            giftHpDelta(faceCoins, "damage"),
+          );
+          koTokens = eliminated ? knockoutTokenPayout(faceCoins) : 0;
+          didKo = eliminated;
+          return {
+            ...s,
+            health,
+            knockedOut: eliminated,
+            knockoutTokens: eliminated ? koTokens : s.knockoutTokens,
+            seatShareCoins: s.seatShareCoins + seatCoins,
+          };
+        });
+        if (economySource === "mock") {
+          queueMicrotask(() => resolveMatchFromSlots(next, "last_standing"));
+        }
+        return next;
+      });
+      pushFeed(
+        `💥 Nuke −${faceCoins} HP on Slot ${slotIndex1to9} (+${jackpotCoins} pot)` +
+          (didKo ? ` · KO → ${koTokens} tokens` : ""),
+      );
+      return true;
+    },
+    [pushFeed, economySource, resolveMatchFromSlots],
+  );
+
+  const applyLivePlayers = useCallback(
+    (
+      players: Array<{
+        slotIndex0to8: number;
+        health: number;
+        shields?: number;
+        knockedOut?: boolean;
+        seatShareCoins?: number;
+        knockoutTokens?: number;
+        displayName?: string | null;
+      }>,
+    ) => {
+      setGridSlots((slots) =>
+        slots.map((s) => {
+          const p = players.find((x) => x.slotIndex0to8 + 1 === s.index);
+          if (!p) return s;
+          const health = Math.max(0, Math.floor(p.health));
+          const knockedOut = p.knockedOut ?? health <= 0;
+          return {
+            ...s,
+            health,
+            shields:
+              typeof p.shields === "number" ? p.shields : s.shields,
+            knockedOut,
+            seatShareCoins:
+              typeof p.seatShareCoins === "number"
+                ? p.seatShareCoins
+                : s.seatShareCoins,
+            knockoutTokens:
+              typeof p.knockoutTokens === "number"
+                ? p.knockoutTokens
+                : knockedOut
+                  ? s.knockoutTokens
+                  : 0,
+            displayName:
+              p.displayName !== undefined ? p.displayName : s.displayName,
+            kind:
+              s.kind === "empty" && p.displayName
+                ? ("guest" as const)
+                : s.kind,
+          };
+        }),
+      );
+    },
+    [],
   );
 
   const runLocalSpin = useCallback(
@@ -409,8 +766,11 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
     setRouletteHighlightSlot(null);
     setIsRouletteSpinning(false);
     clearRouletteTimers();
-    pushFeed("🎮 Grid 9 lobby armed — house jackpot seeded at 100.");
-  }, [clearRouletteTimers, pushFeed]);
+    armMatchClock();
+    pushFeed(
+      "🎮 Grid 9 lobby armed — house jackpot seeded at 100 · 60:00 match clock.",
+    );
+  }, [clearRouletteTimers, pushFeed, armMatchClock]);
 
   const setActiveMode = useCallback(
     (mode: ActiveMode) => {
@@ -420,6 +780,10 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
         clearRouletteTimers();
         setIsRouletteSpinning(false);
         setRouletteHighlightSlot(null);
+        setMatchDeadlineAt(null);
+        setMatchRemainingMs(null);
+        setMatchWinnerSlot(null);
+        setMatchEndReason(null);
       }
     },
     [clearRouletteTimers, enterGrid9],
@@ -431,15 +795,22 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
         clearRouletteTimers();
         setIsRouletteSpinning(false);
         setRouletteHighlightSlot(null);
+        setMatchDeadlineAt(null);
+        setMatchRemainingMs(null);
+        setMatchWinnerSlot(null);
+        setMatchEndReason(null);
         return "JUST_CHATTING";
       }
       setJackpotPool(HOUSE_JACKPOT_SEED);
       setGridSlots(emptySlots());
       setSpotlightSlot(1);
-      pushFeed("🎮 Grid 9 lobby armed — house jackpot seeded at 100.");
+      armMatchClock();
+      pushFeed(
+        "🎮 Grid 9 lobby armed — house jackpot seeded at 100 · 60:00 match clock.",
+      );
       return "GRID9";
     });
-  }, [clearRouletteTimers, pushFeed]);
+  }, [clearRouletteTimers, pushFeed, armMatchClock]);
 
   const spinRoulette = useCallback(() => {
     if (isRouletteSpinning) return;
@@ -463,6 +834,9 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
           avatarLabel: initials(name),
           health: DEFAULT_HEALTH,
           shields: DEFAULT_SHIELDS,
+          knockedOut: false,
+          knockoutTokens: 0,
+          seatShareCoins: 0,
         };
       });
     });
@@ -481,8 +855,111 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
     setHostGems(0);
     setAuditionQueue(MOCK_APPLICANTS);
     setStandBySignal(false);
-    pushFeed("↺ Match reset — lobby slots cleared, jackpot reseeded to 100.");
-  }, [clearRouletteTimers, pushFeed]);
+    armMatchClock();
+    pushFeed(
+      "↺ Match reset — lobby cleared, jackpot reseeded to 100, clock 60:00.",
+    );
+  }, [clearRouletteTimers, pushFeed, armMatchClock]);
+
+  const buybackSlot = useCallback(
+    (slotIndex: number) => {
+      if (matchEndReasonRef.current) {
+        pushFeed("⚠️ Match already resolved — buyback closed.");
+        return;
+      }
+      const handled = directorBackendRef.current?.buyback?.() === true;
+      if (handled) return;
+      const target = gridSlotsRef.current.find((s) => s.index === slotIndex);
+      if (!target || target.kind === "empty" || !target.knockedOut) {
+        pushFeed("⚠️ Buyback only for knocked-out seats.");
+        return;
+      }
+      setJackpotPool((p) => p + GRID9_BUYBACK_COST_COINS);
+      setGridSlots((slots) =>
+        slots.map((s) =>
+          s.index === slotIndex
+            ? {
+                ...s,
+                health: DEFAULT_HEALTH,
+                shields: DEFAULT_SHIELDS,
+                knockedOut: false,
+                knockoutTokens: 0,
+              }
+            : s,
+        ),
+      );
+      setMatchWinnerSlot(null);
+      setMatchEndReason(null);
+      matchEndReasonRef.current = null;
+      pushFeed(
+        `♻️ Buyback Slot ${slotIndex} — ${GRID9_BUYBACK_COST_COINS} → jackpot · HP ${DEFAULT_HEALTH}`,
+      );
+    },
+    [pushFeed],
+  );
+
+  const applyLiveBuyback = useCallback(
+    (args: {
+      slotIndex0to8: number;
+      healthAfter: number;
+      jackpotTotal: number;
+      costCoins: number;
+      displayName?: string;
+    }) => {
+      setJackpotPool(args.jackpotTotal);
+      const slot1 = args.slotIndex0to8 + 1;
+      setGridSlots((slots) =>
+        slots.map((s) =>
+          s.index === slot1
+            ? {
+                ...s,
+                health: args.healthAfter,
+                shields: 0,
+                knockedOut: false,
+                knockoutTokens: 0,
+              }
+            : s,
+        ),
+      );
+      setMatchWinnerSlot(null);
+      setMatchEndReason(null);
+      matchEndReasonRef.current = null;
+      pushFeed(
+        `♻️ PLAYER_BUYBACK Slot ${slot1}${args.displayName ? ` · ${args.displayName}` : ""} — ${args.costCoins} → pot`,
+      );
+    },
+    [pushFeed],
+  );
+
+  const applyLiveMatchCompleted = useCallback(
+    (args: {
+      winnerSlot1to9: number | null;
+      reason: MatchEndReason;
+      jackpotCoins?: number;
+    }) => {
+      if (typeof args.jackpotCoins === "number") {
+        setJackpotPool(args.jackpotCoins);
+      }
+      setMatchWinnerSlot(args.winnerSlot1to9);
+      setMatchEndReason(args.reason);
+      matchEndReasonRef.current = args.reason;
+      setMatchRemainingMs(0);
+      pushFeed(
+        args.winnerSlot1to9 != null
+          ? `🏆 MATCH_COMPLETED — Slot ${args.winnerSlot1to9} (${args.reason ?? "resolved"})`
+          : `🏆 MATCH_COMPLETED — no winner (${args.reason ?? "resolved"})`,
+      );
+    },
+    [pushFeed],
+  );
+
+  const applyLiveMatchDeadline = useCallback((deadlineIso: string | null) => {
+    if (!deadlineIso) return;
+    const ms = Date.parse(deadlineIso);
+    if (!Number.isFinite(ms)) return;
+    setMatchDeadlineAt(ms);
+    setMatchRemainingMs(Math.max(0, ms - Date.now()));
+  }, []);
 
   const promoteToGrid = useCallback(
     (applicantId: string) => {
@@ -503,6 +980,9 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
                 avatarLabel: applicant.avatarLabel,
                 health: DEFAULT_HEALTH,
                 shields: DEFAULT_SHIELDS,
+                knockedOut: false,
+                knockoutTokens: 0,
+                seatShareCoins: 0,
               }
             : s,
         ),
@@ -532,6 +1012,9 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
                 avatarLabel: null,
                 health: DEFAULT_HEALTH,
                 shields: DEFAULT_SHIELDS,
+                knockedOut: false,
+                knockoutTokens: 0,
+                seatShareCoins: 0,
               }
             : s,
         ),
@@ -563,14 +1046,30 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       focusSlot,
       rouletteHighlightSlot,
       isRouletteSpinning,
+      matchDeadlineAt,
+      matchRemainingMs,
+      matchWinnerSlot,
+      matchEndReason,
       publishError,
       publishBusy,
       socketStatus,
       economySource,
       standBySignal,
       cameraFrozen,
+      hostSessionId,
+      deskScene,
+      layoutOrientation,
+      layoutPreset,
+      overlays,
       previewStreamRef,
       cleanFeedStreamRef,
+      setHostSessionId,
+      setDeskScene,
+      setLayoutOrientation,
+      setLayoutPreset,
+      toggleOverlay,
+      setOverlayCleanFeed,
+      addOverlay,
       setIsLive,
       toggleIsLive,
       setPublishError,
@@ -582,6 +1081,7 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       resetMatch,
       promoteToGrid,
       kickSlot,
+      buybackSlot,
       setFocusSlot,
       setSocketStatus,
       setEconomySource,
@@ -591,8 +1091,14 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       pushFeed,
       applyLiveJackpot,
       applyLiveGift,
+      applyNukeStrike,
+      applyLivePlayers,
       applyLiveRouletteStart,
       applyLiveRouletteLand,
+      applyLiveBuyback,
+      applyLiveMatchCompleted,
+      applyLiveMatchDeadline,
+      formatMatchClock,
     }),
     [
       isLive,
@@ -609,12 +1115,24 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       focusSlot,
       rouletteHighlightSlot,
       isRouletteSpinning,
+      matchDeadlineAt,
+      matchRemainingMs,
+      matchWinnerSlot,
+      matchEndReason,
       publishError,
       publishBusy,
       socketStatus,
       economySource,
       standBySignal,
       cameraFrozen,
+      hostSessionId,
+      deskScene,
+      layoutOrientation,
+      layoutPreset,
+      overlays,
+      toggleOverlay,
+      setOverlayCleanFeed,
+      addOverlay,
       setIsLive,
       toggleIsLive,
       setActiveMode,
@@ -624,12 +1142,18 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       resetMatch,
       promoteToGrid,
       kickSlot,
+      buybackSlot,
       registerDirectorBackend,
       pushFeed,
       applyLiveJackpot,
       applyLiveGift,
+      applyNukeStrike,
+      applyLivePlayers,
       applyLiveRouletteStart,
       applyLiveRouletteLand,
+      applyLiveBuyback,
+      applyLiveMatchCompleted,
+      applyLiveMatchDeadline,
     ],
   );
 

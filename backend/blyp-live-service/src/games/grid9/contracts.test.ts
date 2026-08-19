@@ -74,11 +74,11 @@ describe('Grid 9 phase-one contracts', () => {
         ]),
       ),
       {
-        arrow: [10, 5],
-        fireball: [25, 12],
-        mega_bomb: [50, 25],
-        kiss: [12, 6],
-        basic_shield: [15, 8],
+        arrow: [10, 1],
+        fireball: [25, 2],
+        mega_bomb: [50, 5],
+        kiss: [12, 1],
+        basic_shield: [15, 1],
       },
     );
   });
@@ -252,8 +252,8 @@ describe('Grid 9 phase-one contracts', () => {
         status: 'alive',
         mode: 'combatant',
         connectionState: 'not_applicable',
-        health: 100,
-        maxHealth: 100,
+        health: GRID9_MAX_HEALTH,
+        maxHealth: GRID9_MAX_HEALTH,
         shieldPoints: 0,
         maxShieldPoints: 100,
         inventory: [],
@@ -275,6 +275,7 @@ describe('Grid 9 phase-one contracts', () => {
         eliminatedAt: null,
         eliminatedBy: null,
         lastDamagedAt: null,
+        knockoutPayoutFaceCoins: 0,
         ai: {
           profileId: 'balanced-v1',
           targetStrategy: 'lowest_health',
@@ -400,7 +401,7 @@ describe('Grid 9 phase-one contracts', () => {
   it('keeps the documented canonical Redis JSON executable', () => {
     // Historical Phase-1 JSON sample in ARCHITECTURE.md is v1-shaped.
     // Wave 1 authority is covered by the runtime fixture + engine tests.
-    assert.equal(GRID9_RULES_VERSION, '2026-08-16.5');
+    assert.equal(GRID9_RULES_VERSION, '2026-08-16.8');
     assert.ok(
       readFileSync(resolve(process.cwd(), 'src/games/grid9/ARCHITECTURE.md'), 'utf8').includes(
         'Grid 9 v2',

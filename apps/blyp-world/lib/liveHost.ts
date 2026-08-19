@@ -134,8 +134,22 @@ export async function endLiveHostSession(
 export async function heartbeatLiveHostSession(
   idToken: string,
   sessionId: string,
+  studio?: {
+    studioOrientation?: "portrait" | "landscape";
+    studioLayout?: string;
+  },
 ): Promise<void> {
-  await livePost("/api/live/heartbeat", idToken, { sessionId });
+  const body: Record<string, unknown> = { sessionId };
+  if (
+    studio?.studioOrientation === "portrait" ||
+    studio?.studioOrientation === "landscape"
+  ) {
+    body.studioOrientation = studio.studioOrientation;
+  }
+  if (typeof studio?.studioLayout === "string" && studio.studioLayout.trim()) {
+    body.studioLayout = studio.studioLayout.trim();
+  }
+  await livePost("/api/live/heartbeat", idToken, body);
 }
 
 export async function fetchGuestRequests(

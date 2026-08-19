@@ -22,7 +22,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
-COPY blyp_import_worker.js ./
+# Worker + shared stagger helpers (required at require()-time).
+COPY blyp_import_worker.js publishSchedule.js ./
 
 ENV PROJECT_ID=blyp-master \
     STORAGE_BUCKET=blyp-master.firebasestorage.app \

@@ -1,0 +1,176 @@
+/* Confidence rail — Studio ink/teal, not leftover grey. Scoped overrides. */
+
+aside.tls-confidence-rail {
+  flex-shrink: 0;
+  width: min(176px, 26cqi);
+  min-height: 0;
+  padding: 0.7rem 0.6rem 0.85rem;
+  border-right: 1px solid var(--blyp-line);
+  background: var(--blyp-ink);
+  color: var(--blyp-fog);
+  font-family: var(--font-body);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow-y: auto;
+}
+
+aside.tls-confidence-rail .tls-confidence-kicker {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blyp-teal);
+}
+
+aside.tls-confidence-rail .tls-confidence-lead {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--blyp-fog);
+}
+
+aside.tls-confidence-rail .tls-output-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.38rem;
+  padding: 0.5rem 0.45rem 0.52rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--blyp-line);
+  background: var(--blyp-ink-elevated);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+aside.tls-confidence-rail .tls-output-preview-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blyp-fog);
+}
+
+aside.tls-confidence-rail .tls-output-preview-frame {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--blyp-line);
+}
+
+aside.tls-confidence-rail .tls-output-preview-frame-landscape {
+  aspect-ratio: 16 / 9;
+}
+
+aside.tls-confidence-rail .tls-output-preview-frame-portrait {
+  aspect-ratio: 9 / 16;
+}
+
+aside.tls-confidence-rail .tls-output-preview-frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+aside.tls-confidence-rail .tls-output-crop-guide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+aside.tls-confidence-rail .tls-output-crop-guide-frame {
+  height: 100%;
+  aspect-ratio: 9 / 16;
+  border-radius: 2px;
+  box-shadow:
+    0 0 0 1px rgba(0, 210, 190, 0.75),
+    0 0 12px rgba(0, 210, 190, 0.28),
+    0 0 0 999px rgba(7, 7, 10, 0.38);
+}
+
+aside.tls-confidence-rail .tls-output-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--blyp-fog);
+  background: rgba(16, 16, 22, 0.72);
+  pointer-events: none;
+}
+
+aside.tls-confidence-rail .tls-output-status {
+  margin: 0;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--blyp-line);
+  border-radius: 4px;
+  padding: 0.18rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  color: var(--blyp-fog);
+}
+
+aside.tls-confidence-rail .tls-output-status-ok {
+  color: var(--blyp-teal);
+  border-color: rgba(0, 210, 190, 0.42);
+  background: rgba(0, 210, 190, 0.14);
+  box-shadow: 0 0 12px rgba(0, 210, 190, 0.22);
+}
+
+aside.tls-confidence-rail .tls-output-status-warn {
+  color: var(--blyp-gold);
+  border-color: rgba(232, 196, 124, 0.45);
+  background: rgba(232, 196, 124, 0.12);
+}
+
+aside.tls-confidence-rail .tls-output-status-fail {
+  color: var(--blyp-rose);
+  border-color: rgba(240, 160, 184, 0.45);
+  background: rgba(240, 160, 184, 0.12);
+}
+
+aside.tls-confidence-rail .tls-output-status-muted {
+  color: var(--blyp-fog);
+  border-color: var(--blyp-line);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+aside.tls-confidence-rail
+  .tls-output-preview:has(.tls-output-status-ok)
+  .tls-output-preview-frame {
+  border-color: rgba(0, 210, 190, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(0, 210, 190, 0.18),
+    0 0 14px rgba(0, 210, 190, 0.28);
+}
+
+aside.tls-confidence-rail
+  .tls-output-preview-tiktok:has(.tls-output-status-ok)
+  .tls-output-preview-frame {
+  border-color: rgba(254, 44, 85, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(37, 244, 238, 0.2),
+    0 0 14px rgba(254, 44, 85, 0.32);
+}
+
+@media (max-width: 1100px) {
+  aside.tls-confidence-rail {
+    width: 148px;
+  }
+}

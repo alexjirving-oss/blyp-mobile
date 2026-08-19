@@ -5,9 +5,11 @@ import {
   GRID9_SHIELD_CATALOG,
   GRID9_WEAPON_CATALOG,
 } from './catalog';
+import { GRID9_BUYBACK_COST_COINS, splitGrid9AudienceGiftCoins } from './constants';
 import { grid9CanonicalIntentHash, grid9CanonicalOperationHash } from './canonical';
 import {
   applyGrid9ArsenalGift,
+  applyGrid9Buyback,
   applyGrid9InventoryBuy,
   applyGrid9MercenaryFunding,
   applyGrid9SelectTarget,
@@ -41,6 +43,7 @@ import {
   emitGrid9Room,
 } from './grid9Broadcast';
 import type {
+  Grid9BuybackIntent,
   Grid9BuyInventoryItemIntent,
   Grid9ClientIntent,
   Grid9FireWeaponIntent,
@@ -282,7 +285,7 @@ export async function fireGrid9Weapon(args: {
   const debitCoins = isFree ? 0 : weapon.costCoins;
   const jackpotContributionCoins = isFree
     ? 0
-    : weapon.jackpotContributionCoins;
+    : splitGrid9AudienceGiftCoins(weapon.costCoins).jackpotCoins;
   const fundingSource =
     payment.kind === 'inventory'
       ? ('inventory' as const)
@@ -581,7 +584,7 @@ export async function purchaseGrid9Shield(args: {
   const debitCoins = isFree ? 0 : shield.costCoins;
   const jackpotContributionCoins = isFree
     ? 0
-    : shield.jackpotContributionCoins;
+    : splitGrid9AudienceGiftCoins(shield.costCoins).jackpotCoins;
   const fundingSource =
     payment.kind === 'inventory'
       ? ('inventory' as const)
@@ -794,8 +797,15 @@ export async function sendGrid9ArsenalGift(args: {
         committedAt: now,
       }),
       jackpotTotalCoins: resolution.state.jackpot.currentCoins,
+      healthBefore: resolution.healthBefore,
+      healthAfter: resolution.healthAfter,
+      eliminated: resolution.eliminated,
+      knockoutTokens: resolution.knockoutTokens,
     },
   });
+  const completedGiftEvent = resolution.completed
+    ? completionEvent(resolution.state, args.intent.intentId)
+    : null;
   const committed = await commitGrid9PaidMutation({
     snapshot,
     nextState: resolution.state,
@@ -811,7 +821,13 @@ export async function sendGrid9ArsenalGift(args: {
   return {
     status: committed.status,
     privateReceipt: committed.receipt.privateReceipt ?? receipt,
-    roomEvents: committed.status === 'committed' ? [actionEvent] : [],
+    roomEvents:
+      committed.status === 'committed'
+        ? [
+            actionEvent,
+            ...(completedGiftEvent ? [completedGiftEvent] : []),
+          ]
+        : [],
     state: resolution.state,
   };
 }
@@ -917,6 +933,10 @@ export async function buyGrid9InventoryItem(args: {
         committedAt: now,
       }),
       jackpotTotalCoins: resolution.state.jackpot.currentCoins,
+      healthBefore: resolution.healthBefore,
+      healthAfter: resolution.healthAfter,
+      eliminated: resolution.eliminated,
+      knockoutTokens: resolution.knockoutTokens,
     },
   });
   const committed = await commitGrid9PaidMutation({
@@ -935,6 +955,113 @@ export async function buyGrid9InventoryItem(args: {
     status: committed.status,
     privateReceipt: committed.receipt.privateReceipt ?? receipt,
     roomEvents: committed.status === 'committed' ? [actionEvent] : [],
+    state: resolution.state,
+  };
+}
+
+export async function buybackGrid9Seat(args: {
+  intent: Grid9BuybackIntent;
+  identity: Grid9Identity;
+}): Promise<Grid9CommittedAction> {
+  const canonicalIntentHash = grid9CanonicalIntentHash({
+    authenticatedUserId: args.identity.userId,
+    matchId: args.intent.matchId,
+    type: args.intent.type,
+    payload: args.intent.payload,
+  });
+  const replay = await replayCommittedAction({
+    intent: args.intent,
+    userId: args.identity.userId,
+    canonicalIntentHash,
+  });
+  if (replay) return replay;
+  const snapshot = await readGrid9Aggregate(
+    args.intent.matchId,
+    args.identity.userId,
+  );
+  requireExpectedVersion(snapshot.state, args.intent.expectedStateVersion);
+  const now = new Date().toISOString();
+  const spent = spendEscrow(snapshot.escrow, GRID9_BUYBACK_COST_COINS, now);
+  const ledgerEntryId = randomUUID();
+  const resolution = applyGrid9Buyback({
+    state: snapshot.state,
+    userId: args.identity.userId,
+    intentId: args.intent.intentId,
+    ledgerEntryId,
+    nowMs: Date.parse(now),
+  });
+  const receipt: Grid9LedgerReceipt = {
+    entryId: ledgerEntryId,
+    intentId: args.intent.intentId,
+    kind: 'buyback',
+    debitCoins: resolution.costCoins,
+    creditCoins: 0,
+    jackpotContributionCoins: resolution.jackpotCoins,
+    availableCoinsAfter: spent.wallet.availableCoins,
+    stateVersion: resolution.state.authority.stateVersion,
+    committedAt: now,
+  };
+  const ledger: Grid9LedgerEntry = {
+    schemaVersion: 1,
+    entryId: ledgerEntryId,
+    intentId: args.intent.intentId,
+    matchId: args.intent.matchId,
+    kind: 'buyback',
+    actorUserId: args.identity.userId,
+    beneficiaryUserId: args.identity.userId,
+    sourceSlotIndex: resolution.slotIndex,
+    targetSlotIndex: resolution.slotIndex,
+    itemId: null,
+    fundingSource: 'actor_escrow',
+    fundingBreakdown: {
+      platformReservationCoins: spent.platformCoins,
+      microDropCoins: spent.microDropCoins,
+      mercenaryBankrollCoins: 0,
+      jackpotPoolCoins: resolution.jackpotCoins,
+    },
+    serverOperationId: null,
+    canonicalPayloadHash: canonicalIntentHash,
+    debitCoins: resolution.costCoins,
+    creditCoins: 0,
+    jackpotDeltaCoins: resolution.jackpotCoins,
+    escrowBalanceBefore: snapshot.escrow!.availableCoins,
+    escrowBalanceAfter: spent.wallet.availableCoins,
+    stateVersionBefore: snapshot.state.authority.stateVersion,
+    stateVersionAfter: resolution.state.authority.stateVersion,
+    createdAt: now,
+  };
+  const buybackEvent = createGrid9RoomEvent({
+    type: 'PLAYER_BUYBACK',
+    matchId: args.intent.matchId,
+    sequence: resolution.state.authority.eventSequence,
+    stateVersion: resolution.state.authority.stateVersion,
+    causationIntentId: args.intent.intentId,
+    payload: {
+      slotIndex: resolution.slotIndex,
+      userPublicProfileId: args.identity.publicProfileId,
+      displayName: args.identity.displayName,
+      costCoins: resolution.costCoins,
+      jackpotCoins: resolution.jackpotCoins,
+      jackpotTotalCoins: resolution.state.jackpot.currentCoins,
+      healthAfter: resolution.healthAfter,
+    },
+  });
+  const committed = await commitGrid9PaidMutation({
+    snapshot,
+    nextState: resolution.state,
+    nextEscrow: spent.wallet,
+    intent: args.intent,
+    authenticatedUserId: args.identity.userId,
+    canonicalIntentHash,
+    ledger,
+    privateReceipt: receipt,
+    roomEvent: buybackEvent,
+    timerOutbox: timerOutboxForState(resolution.state),
+  });
+  return {
+    status: committed.status,
+    privateReceipt: committed.receipt.privateReceipt ?? receipt,
+    roomEvents: committed.status === 'committed' ? [buybackEvent] : [],
     state: resolution.state,
   };
 }

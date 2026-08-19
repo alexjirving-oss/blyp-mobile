@@ -23,11 +23,21 @@ import { MAX_STAGE_PUBLISHERS } from '../multiGuestLayout';
 export type IVSConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'disconnected';
 export type IVSViewerTransport = 'realtime' | 'playback';
 
+/** Viewer participant tokens are minted for 60 minutes; re-join before expiry. */
+const VIEWER_TOKEN_REFRESH_MS = 50 * 60 * 1000;
+const VIEWER_RECONNECT_MAX_ATTEMPTS = 5;
+
+function isDeadSessionError(message: string | null | undefined, code?: string): boolean {
+  if (code === 'SESSION_NOT_FOUND') return true;
+  if (!message) return false;
+  return /session_not_found|not found or not live/i.test(message);
+}
+
 type UseIVSViewerSessionArgs = {
   streamId: string;
   enabled: boolean;
   autoJoin?: boolean;
-  /** Prefer HLS/IVS Player playback when the backend provides a playbackUrl. */
+  /** Prefer HLS/IVS Player playback when the backend provides a playbackUrl. Never default for Studio watch. */
   preferPlayback?: boolean;
   /** This viewer's display name, sent on join so chat shows "Alex joined". */
   displayName?: string;
@@ -48,6 +58,7 @@ type UseIVSViewerSessionResult = {
   joinStream: () => Promise<void>;
   leaveStream: () => Promise<void>;
   error: string | null;
+  reconnectExhausted: boolean;
   stageArn?: string;
   token?: string;
   viewerTransport: IVSViewerTransport;
@@ -60,6 +71,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>(NetworkQuality.UNKNOWN);
   const [remoteParticipants, setRemoteParticipants] = useState<StreamParticipant[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reconnectExhausted, setReconnectExhausted] = useState<boolean>(false);
   const [stageArn, setStageArn] = useState<string | undefined>(undefined);
   const [token, setToken] = useState<string | undefined>(undefined);
   const [remoteVideoTracks, setRemoteVideoTracks] = useState<number>(0);
@@ -72,12 +84,20 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
   const hasReceivedVideoRef = useRef<boolean>(false);
   const reconnectAttemptsRef = useRef<number>(0);
   const joinInFlightRef = useRef<boolean>(false);
+  const forceRejoinRef = useRef<boolean>(false);
+  const tokenRefreshRef = useRef<boolean>(false);
+  const leaveInFlightRef = useRef<boolean>(false);
+  const joinStreamRef = useRef<() => Promise<void>>(async () => {});
+  const tokenRef = useRef<string | undefined>(undefined);
+  const stageArnRef = useRef<string | undefined>(undefined);
   const joinedRef = useRef<boolean>(false);
   const lastJoinedSessionIdRef = useRef<string | null>(null);
   const lastSurfaceReadyRef = useRef<boolean>(false);
   const joinRequestedRef = useRef<boolean>(false);
   const lastStreamIdRef = useRef<string | null>(null);
   const participantMetaRef = useRef<Map<string, { isMuted: boolean; role?: string }>>(new Map());
+  tokenRef.current = token;
+  stageArnRef.current = stageArn;
 
   const multiGuestRegistry = useIVSMultiGuestRegistry({
     // Host + 11 guests. Cap of 11 previously dropped the 11th guest when the
@@ -125,6 +145,9 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       return;
     }
 
+    const force = forceRejoinRef.current;
+    forceRejoinRef.current = false;
+
     // Guard against duplicate joins
     if (joinInFlightRef.current) {
       console.log('[IVS_VIEWER][JOIN_SKIPPED] Already joining', {
@@ -134,27 +157,57 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       return;
     }
 
-    if (joinedRef.current && lastJoinedSessionIdRef.current === streamId) {
+    if (!force && joinedRef.current && lastJoinedSessionIdRef.current === streamId) {
       console.log('[VIEWER] already joined same session — skip');
       return;
     }
 
     joinInFlightRef.current = true;
+    let reusedExistingToken = false;
     try {
-      hasReceivedVideoRef.current = false;
-      reconnectAttemptsRef.current = 0;
-      setConnectionState('connecting');
+      const refreshToken = tokenRefreshRef.current;
+      tokenRefreshRef.current = false;
+      const preserveMedia = hasReceivedVideoRef.current && !refreshToken;
       setError(null);
-      remoteVideoCountsRef.current = new Map();
-      setRemoteVideoTracks(0);
-      setRemoteVideoAdded(false);
-      setFirstFrameSeen(false);
-      seenStreamKeysRef.current = new Set();
-      participantMetaRef.current = new Map();
-      resetRegistry();
+      setReconnectExhausted(false);
+      if (!preserveMedia) {
+        setConnectionState('connecting');
+        hasReceivedVideoRef.current = false;
+        remoteVideoCountsRef.current = new Map();
+        setRemoteVideoTracks(0);
+        setRemoteVideoAdded(false);
+        setFirstFrameSeen(false);
+        seenStreamKeysRef.current = new Set();
+        participantMetaRef.current = new Map();
+        resetRegistry();
+      }
 
       console.log('[VIEWER][JOIN_REQUEST]', { sessionId: streamId });
-      console.log('[IVS_VIEWER][JOIN_STREAM]', { streamId, preferPlayback });
+      console.log('[IVS_VIEWER][JOIN_STREAM]', { streamId, preferPlayback, force, refreshToken });
+
+      const existingToken = tokenRef.current;
+      const existingArn = stageArnRef.current;
+      if (force && !refreshToken && existingToken && existingArn) {
+        reusedExistingToken = true;
+        setViewerTransport('realtime');
+        await client.joinAsViewer({
+          sessionId: streamId,
+          stageArn: existingArn,
+          token: existingToken,
+        });
+        try {
+          await client.forceLiveLoudspeaker('viewer-hook-stage-rejoined');
+        } catch (routeErr) {
+          console.warn('[IVS_VIEWER][LOUDSPEAKER_SOFT_FAIL]', routeErr);
+        }
+        markJoined();
+        reconnectAttemptsRef.current = 0;
+        if (preserveMedia) {
+          setConnectionState('connected');
+        }
+        console.log('[IVS_VIEWER][REJOIN_SAME_TOKEN]', { streamId });
+        return;
+      }
 
       let usedPlayback = false;
 
@@ -225,6 +278,10 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         console.warn('[IVS_VIEWER][LOUDSPEAKER_SOFT_FAIL]', routeErr);
       }
       markJoined();
+      reconnectAttemptsRef.current = 0;
+      if (preserveMedia) {
+        setConnectionState('connected');
+      }
       console.log('[IVS_VIEWER][JOIN_COMPLETED]', { streamId });
       console.log('[IVS_VIEWER][STAGE_JOIN_SUCCESS]', {
         sessionId: streamId,
@@ -236,23 +293,39 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       // Preserve structured codes so LiveStreamScreen can map SESSION_NOT_FOUND
       // without treating every failure as a generic "ended" toast.
       const code = (err as any)?.code || (err as any)?.response?.code;
-      const msg =
-        code === 'SESSION_NOT_FOUND' || /session_not_found|not found or not live/i.test(raw)
-          ? `session_not_found: ${raw}`
-          : raw;
-      setError(msg);
-      setConnectionState('disconnected');
-      setStageArn(undefined);
-      setToken(undefined);
+      const dead = isDeadSessionError(raw, code);
+      const msg = dead ? `session_not_found: ${raw}` : raw;
+      joinedRef.current = false;
+      lastJoinedSessionIdRef.current = null;
+      setJoined(false);
+      if (dead) {
+        setError(msg);
+        setConnectionState('disconnected');
+        setStageArn(undefined);
+        setToken(undefined);
+        setReconnectExhausted(true);
+      } else {
+        // Keep last stage credentials so the native RT view stays mounted
+        // while we retry. Wiping token unmounts IVSRealTimeView.
+        console.warn('[IVS_VIEWER][JOIN_TRANSIENT]', { msg, reusedExistingToken });
+        setError(null);
+        setConnectionState('disconnected');
+        if (reusedExistingToken) {
+          tokenRef.current = undefined;
+        }
+      }
     } finally {
       joinInFlightRef.current = false;
     }
   }, [client, displayName, enabled, markJoined, preferPlayback, resetRegistry, streamId, surfaceReady]);
 
+  joinStreamRef.current = joinStream;
+
   // Leave stream
   const leaveStream = useCallback(async () => {
     try {
       console.log('[IVS_VIEWER][LEAVE_STREAM]', { streamId });
+      leaveInFlightRef.current = true;
       
       await client.leaveAsViewer();
       
@@ -260,6 +333,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       setViewerTransport('realtime');
       hasReceivedVideoRef.current = false;
       reconnectAttemptsRef.current = 0;
+      setReconnectExhausted(false);
       resetRegistry();
       setRemoteVideoAdded(false);
       setFirstFrameSeen(false);
@@ -270,6 +344,8 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     } catch (err) {
       console.error('[IVS_VIEWER][LEAVE_ERROR]', err);
       setError(err instanceof Error ? err.message : 'Failed to leave stream');
+    } finally {
+      leaveInFlightRef.current = false;
     }
   }, [client, resetRegistry, streamId]);
 
@@ -300,9 +376,6 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     // Remote participant joined (host or guest)
     const unsubParticipantJoined = client.on('remoteParticipantJoined', (event) => {
       console.log('[IVS_VIEWER][REMOTE_PARTICIPANT_JOINED]', event.payload);
-      void client.forceLiveLoudspeaker('viewer-hook-remote-joined').catch((routeError) => {
-        console.warn('[IVS_VIEWER][LOUDSPEAKER_REASSERT_FAILED]', routeError);
-      });
       setRemoteParticipants((prev) => {
         const payload = event.payload as any;
         participantMetaRef.current.set(payload.participantId, {
@@ -467,11 +540,54 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         return;
       }
 
+      if (isDeadSessionError(message, payload?.code)) {
+        console.error('[IVS_VIEWER][ERROR_DEAD_SESSION]', payload);
+        setError(message);
+        setConnectionState('disconnected');
+        setReconnectExhausted(true);
+        return;
+      }
+
+      // Already watching: treat SDK errors as reconnect triggers, not "ended".
+      if (hasReceivedVideoRef.current || joinedRef.current) {
+        console.warn('[IVS_VIEWER][ERROR_RECONNECT]', { message, fatal });
+        setError(null);
+        if (fatal) {
+          joinedRef.current = false;
+          lastJoinedSessionIdRef.current = null;
+          setJoined(false);
+          setConnectionState('disconnected');
+        }
+        return;
+      }
+
       console.error('[IVS_VIEWER][ERROR]', payload);
       setError(message);
       if (fatal) {
         setConnectionState('disconnected');
       }
+    });
+
+    const unsubBroadcastState = client.on('broadcastStateChanged', (event) => {
+      const state = String((event?.payload as any)?.state || '');
+      if (state !== 'DISCONNECTED') return;
+      if (joinInFlightRef.current || leaveInFlightRef.current) {
+        console.log('[IVS_VIEWER][STAGE_DISCONNECTED_IGNORED]', {
+          streamId,
+          joinInFlight: joinInFlightRef.current,
+          leaveInFlight: leaveInFlightRef.current,
+        });
+        return;
+      }
+      if (!joinedRef.current && !hasReceivedVideoRef.current) return;
+      // Recoverable Stage drop (browser publisher ICE). Keep credentials and
+      // the native TextureView; do not tell LiveStreamScreen the live ended.
+      console.warn('[IVS_VIEWER][STAGE_DISCONNECTED]', { streamId });
+      joinedRef.current = false;
+      lastJoinedSessionIdRef.current = null;
+      setJoined(false);
+      setError(null);
+      setConnectionState('disconnected');
     });
 
     const unsubSurfaceReady = client.on('surfaceReady', (event) => {
@@ -498,12 +614,14 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       unsubRemoteVideoAdded();
       unsubRemoteVideoRemoved();
       unsubError();
+      unsubBroadcastState();
       unsubSurfaceReady();
       unsubFirstFrame();
     };
   }, [
     client,
     enabled,
+    streamId,
     markFirstFrame,
     removeParticipantStreams,
     removeStream,
@@ -529,6 +647,14 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         hasReceivedVideoRef.current = true;
       }
       reconnectAttemptsRef.current = 0;
+      if (reconnectExhausted) {
+        setReconnectExhausted(false);
+      }
+      // Stale track counts can survive a native DISCONNECTED. Reconnect
+      // owns that state until joinStream succeeds again.
+      if (connectionState === 'disconnected') {
+        return;
+      }
       if (connectionState !== 'connected') {
         setConnectionState('connected');
       }
@@ -536,7 +662,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     // NOTE: We do NOT treat "no video yet" as "disconnected"
     // The viewer stays in "connecting" state until video arrives or an error occurs.
     // This prevents premature disconnection before the host joins or sends video.
-  }, [enabled, remoteVideoTracks, connectionState]);
+  }, [enabled, remoteVideoTracks, connectionState, reconnectExhausted]);
 
   useEffect(() => {
     if (connectionState === 'connected') {
@@ -555,15 +681,18 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     }
   }, [surfaceReady]);
 
-  // Auto-reconnect for transient drops when autoJoin is enabled and no fatal error is present
+  // Auto-reconnect for transient drops. Dead sessions (host ended) set error
+  // and reconnectExhausted so the watch UI can leave; everything else retries.
   useEffect(() => {
     if (!enabled || !autoJoin) return;
     if (connectionState !== 'disconnected') return;
-    if (error) return;
+    if (isDeadSessionError(error)) return;
+    if (reconnectExhausted) return;
 
     const nextAttempt = reconnectAttemptsRef.current + 1;
-    if (nextAttempt > 3) {
+    if (nextAttempt > VIEWER_RECONNECT_MAX_ATTEMPTS) {
       console.warn('[IVS_VIEWER][RECONNECT_ABORTED]', { streamId, attempts: reconnectAttemptsRef.current });
+      setReconnectExhausted(true);
       return;
     }
 
@@ -571,12 +700,29 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     console.log('[IVS_VIEWER][RECONNECT_SCHEDULED]', { streamId, attempt: nextAttempt, delayMs });
     const timer = setTimeout(() => {
       reconnectAttemptsRef.current = nextAttempt;
+      forceRejoinRef.current = true;
       console.log('[IVS_VIEWER][RECONNECT_ATTEMPT]', { streamId, attempt: reconnectAttemptsRef.current });
-      void joinStream();
+      void joinStreamRef.current();
     }, delayMs);
 
     return () => clearTimeout(timer);
-  }, [autoJoin, connectionState, enabled, error, joinStream, streamId]);
+  }, [autoJoin, connectionState, enabled, error, reconnectExhausted, streamId]);
+
+  // Re-join with a fresh viewer token before the 60-minute IVS token expires.
+  useEffect(() => {
+    if (!enabled || !autoJoin) return;
+    if (viewerTransport !== 'realtime') return;
+    if (!token) return;
+    const timer = setTimeout(() => {
+      console.log('[IVS_VIEWER][TOKEN_REFRESH_REJOIN]', { streamId });
+      tokenRefreshRef.current = true;
+      forceRejoinRef.current = true;
+      joinedRef.current = false;
+      lastJoinedSessionIdRef.current = null;
+      void joinStreamRef.current();
+    }, VIEWER_TOKEN_REFRESH_MS);
+    return () => clearTimeout(timer);
+  }, [autoJoin, enabled, streamId, token, viewerTransport]);
 
   const canRender = surfaceReady && remoteVideoAdded && visibleStreams.length > 0;
 
@@ -587,6 +733,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     joinStream,
     leaveStream,
     error,
+    reconnectExhausted,
     stageArn,
     token,
     remoteVideoTracks,

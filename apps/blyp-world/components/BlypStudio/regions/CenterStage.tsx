@@ -3,23 +3,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BroadcastErrorBoundary } from "../BroadcastErrorBoundary";
 import { BroadcastComposite } from "../broadcast/BroadcastComposite";
-import { useStreamCapture } from "../broadcast/useStreamCapture";
-import { startLocalPreview, type LocalPreviewHandle } from "../media/localPreview";
+import { openDeskMedia, type DeskMediaHandle } from "@/lib/studioDeskMedia";
+import { isStudioMobileLite } from "@/lib/studioMobileLite";
+import { studioAudio } from "../audio/StudioAudioEngine";
+import { BombStrikeStage } from "../fx/BombStrikeLayer";
+import { playBombStrike } from "../fx/bombStrikeBus";
 import {
   ROULETTE_DURATION_MS,
   useStudioState,
   type GridSlot,
 } from "../store/StudioStateContext";
 
+/** Cycles 0..8 for director “Test strike” demos. */
+let testStrikeCursor = 0;
+
 /**
- * Director monitor (HUD + local preview) + Clean Feed PIP.
- * Phase 2 local preview path preserved; canvas capture feeds IVS Clean Feed.
+ * Director monitor (HUD + local preview) + Clean Feed PIP (local only).
+ * Stage publish uses desk getUserMedia tracks — not this composite canvas.
  */
 export function CenterStage() {
   const videoChatRef = useRef<HTMLVideoElement | null>(null);
   const videoSlot1Ref = useRef<HTMLVideoElement | null>(null);
   const videoSpotRef = useRef<HTMLVideoElement | null>(null);
-  const handleRef = useRef<LocalPreviewHandle | null>(null);
+  const handleRef = useRef<DeskMediaHandle | null>(null);
   const {
     activeMode,
     gridSlots,
@@ -32,41 +38,59 @@ export function CenterStage() {
     autoFillSentinels,
     resetMatch,
     previewStreamRef,
-    cleanFeedStreamRef,
-    standBySignal,
-    cameraFrozen,
     setCameraFrozen,
     setStandBySignal,
     focusSlot,
     pushFeed,
+    applyNukeStrike,
+    layoutOrientation,
+    layoutPreset,
+    deskScene,
+    matchRemainingMs,
+    matchWinnerSlot,
+    matchEndReason,
+    formatMatchClock,
+    buybackSlot,
   } = useStudioState();
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewReady, setPreviewReady] = useState(false);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
+  /** Fold / phone: skip second Clean Feed PIP video + BombStrikeStage. */
+  const mobileLite = useMemo(() => isStudioMobileLite(), []);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
-        const handle = await startLocalPreview(null);
+        handleRef.current?.stop();
+        handleRef.current = null;
+        const handle = await openDeskMedia(deskScene, layoutOrientation);
         if (cancelled) {
           handle.stop();
           return;
         }
         handleRef.current = handle;
-        previewStreamRef.current = handle.stream;
-        setPreviewStream(handle.stream);
+        previewStreamRef.current = handle.publishStream || handle.previewStream;
+        studioAudio.attachMic(handle.previewStream);
+        setPreviewStream(handle.previewStream);
         setPreviewReady(true);
         setPreviewError(null);
         setCameraFrozen(false);
-        const vt = handle.stream.getVideoTracks()[0];
+        const vt = handle.previewStream.getVideoTracks()[0];
         if (vt) {
           vt.addEventListener("ended", () => {
             setCameraFrozen(true);
-            pushFeed("📷 Webcam ended — freezing last frame / host avatar on Slot 1.");
+            pushFeed("📷 Source ended — freezing last frame / host avatar.");
           });
         }
+        pushFeed(
+          deskScene === "camera"
+            ? "Camera scene armed"
+            : deskScene === "screen"
+              ? "Screen share scene armed"
+              : "Screen + PIP scene armed",
+        );
       } catch (e) {
         if (cancelled) return;
         setPreviewReady(false);
@@ -83,10 +107,16 @@ export function CenterStage() {
       previewStreamRef.current = null;
       setPreviewStream(null);
     };
-  }, [previewStreamRef, pushFeed, setCameraFrozen]);
+  }, [
+    deskScene,
+    layoutOrientation,
+    previewStreamRef,
+    pushFeed,
+    setCameraFrozen,
+  ]);
 
   useEffect(() => {
-    const stream = handleRef.current?.stream;
+    const stream = handleRef.current?.previewStream;
     if (!stream || !previewReady) return;
 
     const attach = (el: HTMLVideoElement | null) => {
@@ -99,38 +129,12 @@ export function CenterStage() {
 
     if (activeMode === "GRID9") {
       attach(videoSlot1Ref.current);
-      if (spotlightSlot === 1) attach(videoSpotRef.current);
+      // Fold: never decode the same MediaStream in spotlight + cell at once.
+      if (spotlightSlot === 1 && !mobileLite) attach(videoSpotRef.current);
     } else {
       attach(videoChatRef.current);
     }
-  }, [activeMode, previewReady, spotlightSlot, gridSlots]);
-
-  const captureState = useMemo(
-    () => ({
-      activeMode,
-      gridSlots,
-      spotlightSlot,
-      jackpotPool,
-      topSupporters,
-      standBySignal,
-      cameraFrozen,
-    }),
-    [
-      activeMode,
-      gridSlots,
-      spotlightSlot,
-      jackpotPool,
-      topSupporters,
-      standBySignal,
-      cameraFrozen,
-    ],
-  );
-
-  const { canvasRef } = useStreamCapture({
-    previewStream,
-    state: captureState,
-    cleanFeedStreamRef,
-  });
+  }, [activeMode, previewReady, spotlightSlot, gridSlots, mobileLite]);
 
   const spotlight =
     gridSlots.find((s) => s.index === spotlightSlot) ?? gridSlots[0];
@@ -153,7 +157,7 @@ export function CenterStage() {
               </div>
             )}
             <div className="pointer-events-none absolute bottom-2 left-2 rounded border border-[rgba(232,230,240,0.2)] bg-black/60 px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--blyp-muted)]">
-              Director · Just chatting
+              Director · {layoutPreset} · {layoutOrientation}
             </div>
           </div>
         ) : (
@@ -162,7 +166,7 @@ export function CenterStage() {
               key={`dir-spot-${spotlightSlot}`}
               className="blyp-studio-spotlight blyp-studio-spotlight-glide relative shrink-0 border-b border-[rgba(232,230,240,0.12)]"
             >
-              {spotlight?.kind === "host" && spotlightSlot === 1 ? (
+              {spotlight?.kind === "host" && spotlightSlot === 1 && !mobileLite ? (
                 <video
                   ref={videoSpotRef}
                   className="h-full w-full object-cover"
@@ -177,41 +181,90 @@ export function CenterStage() {
                 Spotlight · Slot {spotlightSlot}
                 {spotlight?.displayName ? ` · ${spotlight.displayName}` : ""}
               </div>
+              {matchRemainingMs != null && (
+                <div className="pointer-events-none absolute right-2 top-2 rounded bg-black/65 px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--blyp-gold)]">
+                  {formatMatchClock(matchRemainingMs)}
+                  {matchWinnerSlot != null
+                    ? ` · WIN S${matchWinnerSlot}`
+                    : ""}
+                </div>
+              )}
+              {matchEndReason && matchWinnerSlot != null && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+                  <span className="rounded border border-[rgba(232,184,48,0.45)] bg-black/75 px-3 py-1 text-[11px] font-semibold text-[var(--blyp-gold)]">
+                    Winner · Slot {matchWinnerSlot}
+                    {matchEndReason === "last_standing"
+                      ? " · last standing"
+                      : " · deadline finale"}
+                  </span>
+                </div>
+              )}
             </div>
 
-            <div className="blyp-studio-grid9 min-h-0 flex-1 p-1.5">
-              {gridSlots.map((slot) => {
-                const hot =
-                  rouletteHighlightSlot === slot.index ||
-                  focusSlot === slot.index ||
-                  (!isRouletteSpinning && spotlightSlot === slot.index);
-                return (
-                  <div
-                    key={slot.index}
-                    className={`blyp-studio-grid-cell ${hot ? "is-hot" : ""} ${slot.kind === "empty" ? "is-empty" : ""}`}
-                  >
-                    {slot.index === 1 && slot.kind === "host" ? (
-                      <video
-                        ref={videoSlot1Ref}
-                        className="h-full w-full object-cover"
-                        muted
-                        playsInline
-                        autoPlay
-                      />
-                    ) : (
-                      <SlotAvatar slot={slot} />
-                    )}
-                    <div className="blyp-studio-grid-meta">
-                      <span>S{slot.index}</span>
-                      <span>
-                        HP {slot.health}
-                        {slot.shields > 0 ? ` · 🛡${slot.shields}` : ""}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <BombStrikeStage className="blyp-studio-grid9-wrap min-h-0 flex-1">
+              <div className="blyp-studio-grid9 min-h-0 flex-1 p-1.5">
+                {gridSlots.map((slot) => {
+                  const cellIndex = slot.index - 1; // studio 1–9 → bomb 0–8
+                  const hot =
+                    rouletteHighlightSlot === slot.index ||
+                    focusSlot === slot.index ||
+                    (!isRouletteSpinning && spotlightSlot === slot.index);
+                  return (
+                    <button
+                      key={slot.index}
+                      type="button"
+                      data-bomb-cell={cellIndex}
+                      title={
+                        slot.knockedOut
+                          ? `Slot ${slot.index} KO · ${slot.knockoutTokens} tokens`
+                          : `Nuke / bomb strike on slot ${slot.index}`
+                      }
+                      className={`blyp-studio-grid-cell ${hot ? "is-hot" : ""} ${slot.kind === "empty" ? "is-empty" : ""} ${slot.knockedOut ? "is-ko" : ""}`}
+                      onClick={() => {
+                        playBombStrike(cellIndex);
+                        if (!slot.knockedOut) {
+                          applyNukeStrike(slot.index);
+                        }
+                      }}
+                    >
+                      {slot.index === 1 && slot.kind === "host" ? (
+                        <video
+                          ref={videoSlot1Ref}
+                          className="h-full w-full object-cover"
+                          muted
+                          playsInline
+                          autoPlay
+                        />
+                      ) : (
+                        <SlotAvatar slot={slot} />
+                      )}
+                      <div className="blyp-studio-grid-meta">
+                        <span>S{slot.index}{slot.knockedOut ? " · KO" : ""}</span>
+                        <span>
+                          HP {slot.health}/1000
+                          {slot.shields > 0 ? ` · 🛡${slot.shields}` : ""}
+                          {slot.knockedOut
+                            ? ` · ${slot.knockoutTokens} tok`
+                            : ""}
+                        </span>
+                        {slot.knockedOut && !matchEndReason && (
+                          <button
+                            type="button"
+                            className="blyp-studio-mini-btn is-on mt-0.5"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              buybackSlot(slot.index);
+                            }}
+                          >
+                            Buy back 500
+                          </button>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </BombStrikeStage>
 
             <div className="blyp-studio-quick-bar">
               <button
@@ -238,37 +291,42 @@ export function CenterStage() {
               >
                 Reset Match
               </button>
+              <button
+                type="button"
+                className="blyp-studio-quick-btn"
+                onClick={() => {
+                  const i = testStrikeCursor % 9;
+                  testStrikeCursor += 1;
+                  playBombStrike(i);
+                  applyNukeStrike(i + 1);
+                }}
+              >
+                Test strike
+              </button>
             </div>
           </>
         )}
 
-        {/* Clean Feed PIP — isolated from director chrome */}
-        <div className="blyp-studio-clean-pip" title="Clean Feed (viewer)">
-          <BroadcastErrorBoundary
-            onFatal={() => {
-              setStandBySignal(true);
-              pushFeed("⚠️ Broadcast composite crashed — Clean Feed STAND BY slate armed.");
-            }}
-          >
-            <BroadcastComposite
-              activeMode={activeMode}
-              gridSlots={gridSlots}
-              spotlightSlot={spotlightSlot}
-              jackpotPool={jackpotPool}
-              topSupporters={topSupporters}
-              previewStream={previewStream}
-            />
-          </BroadcastErrorBoundary>
-        </div>
-
-        {/* Offscreen canvas used for IVS captureStream */}
-        <canvas
-          ref={canvasRef}
-          className="blyp-studio-capture-canvas"
-          width={1280}
-          height={720}
-          aria-hidden
-        />
+        {/* Clean Feed PIP — isolated from director chrome (skip on Fold/phone). */}
+        {!mobileLite ? (
+          <div className="blyp-studio-clean-pip" title="Clean Feed (viewer)">
+            <BroadcastErrorBoundary
+              onFatal={() => {
+                setStandBySignal(true);
+                pushFeed("⚠️ Broadcast composite crashed — Clean Feed STAND BY slate armed.");
+              }}
+            >
+              <BroadcastComposite
+                activeMode={activeMode}
+                gridSlots={gridSlots}
+                spotlightSlot={spotlightSlot}
+                jackpotPool={jackpotPool}
+                topSupporters={topSupporters}
+                previewStream={previewStream}
+              />
+            </BroadcastErrorBoundary>
+          </div>
+        ) : null}
       </div>
     </section>
   );

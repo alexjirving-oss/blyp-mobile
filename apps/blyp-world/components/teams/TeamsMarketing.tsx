@@ -7,6 +7,7 @@ import { siteUrl } from "@/lib/env";
 import { MONEY_CARD_LEAD } from "@/lib/teamEconomy";
 import { useAuth } from "../AuthProvider";
 import { ShareRecruitHub } from "./ShareRecruitHub";
+import "../hub-neon.css";
 const COMPARE = [
   {
     tiktok: "Opaque diamond math + payout fog",
@@ -22,7 +23,7 @@ const COMPARE = [
   },
 ] as const;
 const DAY1 = [
-  "Invite 5 hosts (TikTok DM / Discord / WhatsApp — copy buttons on the desk)",
+  "Invite hosts (TikTok DM / Discord / WhatsApp — copy buttons on the desk)",
   "Paste the Discord announce into your server",
   "Accept join requests same day",
   "Schedule one internal battle",
@@ -95,11 +96,9 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
   }
   if (done) {
     return (
-      <div className="rounded-2xl border border-[var(--blyp-teal)]/40 bg-[rgba(0,210,190,0.08)] px-5 py-6">
-        <p className="font-display text-xl font-bold text-[var(--blyp-teal)]">
-          Application sent
-        </p>
-        <p className="mt-2 text-sm text-[var(--blyp-muted)]">
+      <div className="hub-ok">
+        <p>Application sent</p>
+        <p>
           Same queue as the Blyp app. When approved, this page becomes your desk —
           invite hosts in day one.
         </p>
@@ -108,14 +107,12 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
   }
   if (!session) {
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-[var(--blyp-muted)]">
-          Sign in with Blyp to apply. Verified profiles only.
+      <div className="hub-empty" style={{ alignItems: "flex-start", textAlign: "left" }}>
+        <p className="hub-empty-copy" style={{ marginTop: 0 }}>
+          Sign in with Blyp to apply. Verified profiles only. No sample team is
+          attached to a signed-out session.
         </p>
-        <Link
-          href="/login?next=/teams#apply"
-          className="inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-bold text-[var(--blyp-ink)]"
-        >
+        <Link href="/login?next=/teams#apply" className="hub-go">
           Log in to apply
         </Link>
       </div>
@@ -133,7 +130,7 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
             onChange={(e) => setTeamName(e.target.value)}
             maxLength={80}
             placeholder="e.g. North Star LIVE"
-            className="w-full rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink)] px-3 py-2.5 text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] focus:ring-1"
+            className="hub-input"
           />
         </label>
         <label className="block text-sm">
@@ -144,8 +141,8 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
             value={rosterSize}
             onChange={(e) => setRosterSize(e.target.value)}
             maxLength={40}
-            placeholder="e.g. 12 creators"
-            className="w-full rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink)] px-3 py-2.5 text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] focus:ring-1"
+            placeholder="optional — your current roster"
+            className="hub-input"
           />
         </label>
       </div>
@@ -157,7 +154,7 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
           onChange={(e) => setContactEmail(e.target.value)}
           maxLength={120}
           placeholder="you@agency.com"
-          className="w-full rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink)] px-3 py-2.5 text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] focus:ring-1"
+          className="hub-input"
         />
       </label>
       <label className="block text-sm">
@@ -171,7 +168,7 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
           rows={4}
           maxLength={1000}
           placeholder="Markets, roster, Discord/WhatsApp ops, what you need from the desk…"
-          className="w-full resize-y rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink)] px-3 py-2.5 text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] focus:ring-1"
+          className="hub-area"
         />
       </label>
       {error ? (
@@ -180,7 +177,7 @@ export function ApplyForm({ onApplied }: { onApplied?: () => void }) {
       <button
         type="submit"
         disabled={submitting}
-        className="inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-bold text-[var(--blyp-ink)] disabled:opacity-60"
+        className="hub-go"
       >
         {submitting ? "Sending…" : "Apply to run a team"}
       </button>
@@ -197,14 +194,14 @@ export function ApplicationStatusBanner({
   const st = status.toLowerCase();
   if (st === "approved" || st === "accepted") {
     return (
-      <div className="border-b border-[var(--blyp-teal)]/30 bg-[rgba(0,210,190,0.08)] px-5 py-3 text-center text-sm md:px-8">
+      <div className="hub-banner is-ok">
         Approved{teamName ? ` · ${teamName}` : ""}. Refresh when your desk is live.
       </div>
     );
   }
   if (st === "rejected" || st === "declined") {
     return (
-      <div className="border-b border-[var(--blyp-rose)]/30 bg-[rgba(240,160,184,0.08)] px-5 py-3 text-center text-sm md:px-8">
+      <div className="hub-banner is-bad">
         Declined — update and re-apply, or email{" "}
         <a
           className="font-semibold text-[var(--blyp-teal)]"
@@ -217,7 +214,7 @@ export function ApplicationStatusBanner({
     );
   }
   return (
-    <div className="border-b border-[var(--blyp-gold)]/30 bg-[rgba(232,196,124,0.08)] px-5 py-3 text-center text-sm md:px-8">
+    <div className="hub-banner is-wait">
       Application{" "}
       <span className="font-semibold text-[var(--blyp-gold)]">pending</span>
       {teamName ? ` · ${teamName}` : ""}. We’ll open your desk when approved.
@@ -289,30 +286,18 @@ export function TeamsMarketing({
             Invite hosts where you already work. See who’s live, who’s late,
             battles tonight, money this week. Apply — then operate.
           </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <a
-              href="#apply"
-              className="inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-bold text-[var(--blyp-ink)]"
-            >
+          <div className="hub-actions" style={{ marginTop: "1.5rem" }}>
+            <a href="#apply" className="hub-go">
               Apply to run a team
             </a>
-            <a
-              href="#desk-preview"
-              className="inline-flex rounded-full border border-[var(--blyp-line)] px-6 py-3 text-sm font-semibold text-[var(--blyp-fog)]"
-            >
+            <a href="#desk-preview" className="hub-ghost">
               See the desk
             </a>
-            <a
-              href="#money"
-              className="inline-flex rounded-full border border-[var(--blyp-line)] px-6 py-3 text-sm font-semibold text-[var(--blyp-fog)]"
-            >
+            <a href="#money" className="hub-ghost">
               Your cut
             </a>
             {showDashboardLink ? (
-              <a
-                href="#dashboard"
-                className="inline-flex rounded-full border border-[var(--blyp-teal)]/40 px-6 py-3 text-sm font-semibold text-[var(--blyp-teal)]"
-              >
+              <a href="#dashboard" className="hub-ghost">
                 Open your desk
               </a>
             ) : null}

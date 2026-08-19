@@ -14,6 +14,7 @@ import {
 } from "@/lib/messaging";
 import { hydrateProfiles, type SocialProfile } from "@/lib/social";
 import { useAuth } from "./AuthProvider";
+import "./inbox-client.css";
 
 function formatTime(ms: number) {
   if (!ms) return "";
@@ -174,24 +175,15 @@ export function InboxClient() {
   }, [session, activeId, draft]);
 
   if (loading || threads === null) {
-    return (
-      <div className="px-6 py-16 text-sm text-[var(--blyp-muted)]">
-        Loading Messages…
-      </div>
-    );
+    return <div className="inb-load">Loading Messages…</div>;
   }
 
   if (!session) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <h1 className="font-display text-3xl font-bold">Messages</h1>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          Log in with your Blyp account to read and send DMs.
-        </p>
-        <Link
-          href="/login"
-          className="mt-8 inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-bold text-[var(--blyp-ink)]"
-        >
+      <div className="inb-gate">
+        <h1>Messages</h1>
+        <p>Log in with your Blyp account to read and send DMs.</p>
+        <Link href="/login" className="inb-login">
           Log in
         </Link>
       </div>
@@ -199,28 +191,20 @@ export function InboxClient() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-3.5rem)] max-w-4xl flex-col md:h-[calc(100dvh-4rem)] md:flex-row">
-      <aside
-        className={`w-full border-[var(--blyp-line)] md:w-[320px] md:border-r ${
-          activeId ? "hidden md:flex md:flex-col" : "flex flex-col"
-        }`}
-      >
-        <div className="border-b border-[var(--blyp-line)] px-4 py-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--blyp-teal)]">
-            Inbox
-          </p>
-          <h1 className="font-display mt-1 text-2xl font-bold">Messages</h1>
+    <div className="inb">
+      <aside className={`inb-side${activeId ? " is-hidden" : ""}`}>
+        <div className="inb-side-head">
+          <p className="inb-kicker">Inbox</p>
+          <h1 className="inb-title">Messages</h1>
         </div>
-        {error ? (
-          <p className="px-4 py-3 text-sm text-red-300">{error}</p>
-        ) : null}
+        {error ? <p className="inb-err">{error}</p> : null}
         {!threads.length ? (
-          <div className="px-4 py-10 text-sm text-[var(--blyp-muted)]">
+          <div className="inb-empty">
             No conversations yet. Start a chat from someone’s Stage in the app,
             then it appears here.
           </div>
         ) : (
-          <ul className="flex-1 overflow-y-auto">
+          <ul className="inb-list">
             {threads.map((thread) => {
               const other = otherParticipant(thread, session.sub);
               const profile = profiles[other.userId];
@@ -234,39 +218,29 @@ export function InboxClient() {
                   <button
                     type="button"
                     onClick={() => setActiveId(thread.id)}
-                    className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition hover:bg-white/[0.03] ${
-                      activeId === thread.id ? "bg-white/[0.05]" : ""
-                    }`}
+                    className={`inb-thread${activeId === thread.id ? " is-on" : ""}`}
                   >
-                    <div className="flex h-11 w-11 shrink-0 overflow-hidden rounded-full bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)]">
+                    <div className="inb-avatar">
                       {profile?.photoURL ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={profile.photoURL}
-                          alt=""
-                          className="h-full w-full object-cover"
-                        />
+                        <img src={profile.photoURL} alt="" />
                       ) : (
-                        <span className="flex h-full w-full items-center justify-center">
-                          {(title || "B").slice(0, 1).toUpperCase()}
-                        </span>
+                        <span>{(title || "B").slice(0, 1).toUpperCase()}</span>
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <p className="truncate font-semibold">{title}</p>
-                        <span className="shrink-0 text-[11px] text-[var(--blyp-muted)]">
+                    <div className="inb-thread-meta">
+                      <div className="inb-thread-row">
+                        <p className="inb-thread-name">{title}</p>
+                        <span className="inb-thread-time">
                           {formatTime(thread.lastMessageTimeMs)}
                         </span>
                       </div>
-                      <p className="mt-0.5 truncate text-sm text-[var(--blyp-muted)]">
+                      <p className="inb-thread-preview">
                         {thread.lastMessage || "—"}
                       </p>
                     </div>
                     {thread.unreadCount > 0 ? (
-                      <span className="mt-1 rounded-full bg-[var(--blyp-teal)] px-1.5 text-[10px] font-bold text-[var(--blyp-ink)]">
-                        {thread.unreadCount}
-                      </span>
+                      <span className="inb-unread">{thread.unreadCount}</span>
                     ) : null}
                   </button>
                 </li>
@@ -276,77 +250,57 @@ export function InboxClient() {
         )}
       </aside>
 
-      <section
-        className={`min-w-0 flex-1 flex-col ${
-          activeId ? "flex" : "hidden md:flex"
-        }`}
-      >
+      <section className={`inb-pane${activeId ? " is-open" : ""}`}>
         {!activeThread || !peer ? (
-          <div className="flex flex-1 items-center justify-center px-6 text-sm text-[var(--blyp-muted)]">
-            Select a conversation
-          </div>
+          <div className="inb-placeholder">Select a conversation</div>
         ) : (
           <>
-            <div className="flex items-center gap-3 border-b border-[var(--blyp-line)] px-4 py-3">
+            <div className="inb-chat-head">
               <button
                 type="button"
-                className="text-sm text-[var(--blyp-muted)] md:hidden"
+                className="inb-back"
                 onClick={() => setActiveId(null)}
               >
                 ← Back
               </button>
               {peer.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={peer.photoURL}
-                  alt=""
-                  className="h-9 w-9 rounded-full object-cover"
-                />
+                <div className="inb-avatar inb-avatar-sm">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={peer.photoURL} alt="" />
+                </div>
               ) : (
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--blyp-teal)] text-xs font-bold text-[var(--blyp-ink)]">
+                <div className="inb-avatar inb-avatar-sm">
                   {(peer.displayName || "B").slice(0, 1).toUpperCase()}
                 </div>
               )}
               <Link
                 href={`/u/${encodeURIComponent(peer.username)}`}
-                className="min-w-0 font-semibold"
+                className="inb-peer"
               >
                 {peer.displayName}
-                <span className="ml-2 text-sm font-normal text-[var(--blyp-muted)]">
-                  @{peer.username}
-                </span>
+                <span>@{peer.username}</span>
               </Link>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto px-4 py-4">
+            <div className="inb-messages">
               {messages.map((m) => {
                 const mine = m.senderId === session.sub;
                 return (
                   <div
                     key={m.id}
-                    className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                    className={`inb-row ${mine ? "is-mine" : "is-theirs"}`}
                   >
                     <div
-                      className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${
-                        mine
-                          ? "bg-[var(--blyp-teal)] text-[var(--blyp-ink)]"
-                          : "bg-white/10 text-[var(--blyp-fog)]"
-                      }`}
+                      className={`inb-bubble ${mine ? "inb-bubble-mine" : "inb-bubble-theirs"}`}
                     >
-                      <p className="whitespace-pre-wrap break-words">{m.text}</p>
-                      <p
-                        className={`mt-1 text-[10px] ${
-                          mine ? "text-black/50" : "text-[var(--blyp-muted)]"
-                        }`}
-                      >
-                        {formatTime(m.timestampMs)}
-                      </p>
+                      <p>{m.text}</p>
+                      <p className="inb-stamp">{formatTime(m.timestampMs)}</p>
                     </div>
                   </div>
                 );
               })}
             </div>
             <form
-              className="flex gap-2 border-t border-[var(--blyp-line)] p-3"
+              className="inb-composer"
               onSubmit={(e) => {
                 e.preventDefault();
                 void onSend();
@@ -356,12 +310,12 @@ export function InboxClient() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="Message…"
-                className="min-w-0 flex-1 rounded-full border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] px-4 py-2.5 text-sm outline-none focus:border-[var(--blyp-teal)]"
+                className="inb-input"
               />
               <button
                 type="submit"
                 disabled={sending || !draft.trim()}
-                className="rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)] disabled:opacity-40"
+                className="inb-send"
               >
                 Send
               </button>

@@ -1,0 +1,11 @@
+logLevel: warn
+rtmp: yes
+rtsp: yes
+api: yes
+apiAddress: 127.0.0.1:9997
+
+paths:
+  landscape-internal:
+  portrait-internal:
+  landscape-sink:
+  portrait-sink:

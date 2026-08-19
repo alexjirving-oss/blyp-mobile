@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson, sha256, sha256File } from './canonical.js';
 import { currentHead, repositoryRoot } from './git.js';
 import { EvidenceStore } from './ledger.js';
-import { normalizeRepoPath } from './policy.js';
+import { isExcludedFromSessionReconciliation, normalizeRepoPath } from './policy.js';
 import { runProcess, runVerificationStep, verificationEnvironment } from './process.js';
 import {
   currentBranch,
-  digestTouchedFiles,
+  digestTouchedFilesUntilStable,
   newReceiptId,
   sealVerificationReceipt,
   VERIFICATION_RECEIPT_SCHEMA,
@@ -204,7 +204,9 @@ export async function discoverSessionFiles(
   repository: string,
   session: SessionState,
 ): Promise<{ files: string[]; source: 'session.json' | 'session+worktree' }> {
-  const recorded = new Set(session.files);
+  const recorded = new Set(
+    session.files.filter((file) => !isExcludedFromSessionReconciliation(file)),
+  );
   const tracked = await gitFileList(repository, [
     'diff',
     '--name-only',
@@ -222,7 +224,7 @@ export async function discoverSessionFiles(
   const trackedSet = new Set(tracked);
   const threshold = Date.parse(session.startedAt) - 2_000;
   for (const file of [...tracked, ...untracked]) {
-    if (recorded.has(file)) {
+    if (recorded.has(file) || isExcludedFromSessionReconciliation(file)) {
       continue;
     }
     const absolute = path.join(repository, ...file.split('/'));
@@ -428,7 +430,22 @@ export async function runSessionVerification(
     commands.push(commandReceipt(execution, planned));
   }
 
-  const touchedFiles = await digestTouchedFiles(repository, discovered.files);
+  // Seal only after touched-file content is quiet. git status --porcelain does not
+  // change when an already-dirty file is rewritten, so content digests must settle
+  // independently before we bind worktreeStatusSha256.
+  const touchedFiles = await digestTouchedFilesUntilStable(repository, discovered.files);
+  const headSha = await currentHead(repository);
+  const branch = await currentBranch(repository);
+  const worktreeDigest = await worktreeStatusSha256(repository);
+  const confirmTouched = await digestTouchedFilesUntilStable(repository, discovered.files, {
+    maxAttempts: 4,
+    settleDelayMs: 50,
+  });
+  if (canonicalJson(confirmTouched) !== canonicalJson(touchedFiles)) {
+    throw new Error(
+      'Touched-file evidence drifted while binding the verification receipt; re-run after editors are idle',
+    );
+  }
   const outcome = aggregateVerdict(commands);
   const finishedAt = new Date().toISOString();
   const runningImplementation = fileURLToPath(import.meta.url);
@@ -446,10 +463,10 @@ export async function runSessionVerification(
     },
     binding: {
       repoRoot: repository,
-      headSha: await currentHead(repository),
+      headSha,
       baseSha: session.baseSha,
-      branch: await currentBranch(repository),
-      worktreeStatusSha256: await worktreeStatusSha256(repository),
+      branch,
+      worktreeStatusSha256: worktreeDigest,
       sessionId: session.sessionId,
       taskId: `cursor-session:${session.sessionId}`,
       contractSha256: null,

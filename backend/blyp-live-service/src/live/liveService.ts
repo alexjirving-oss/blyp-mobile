@@ -1,11 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 import { CreateParticipantTokenCommand, CreateStageCommand, DeleteStageCommand } from '@aws-sdk/client-ivs-realtime';
+import { CreateChannelCommand, DeleteChannelCommand } from '@aws-sdk/client-ivs';
 import {
   getIvsRealtimeClient,
   getRegionFromStageArn,
   resolveStageRegion,
   DEFAULT_IVS_REALTIME_REGION,
 } from '../aws/ivsRealtimeClient';
+import { getIvsLowLatencyClient } from '../aws/ivsLowLatencyClient';
 import {
   LiveSession,
   LiveStatus,
@@ -48,6 +50,7 @@ import { attachBattleStage } from '../battles/battleRegistryService';
 import { battleTokenAttributes } from '../battles/battleLifecycle';
 import { endDuel } from '../games/reactionDuel/reactionDuelRoomService';
 import { settleReactionDuelLiveCoins } from '../games/reactionDuel/reactionDuelEconomy';
+import { stopCompositionBestEffort } from './programEgress';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -256,6 +259,46 @@ export async function startLiveSession(hostUserId: string, title: string, region
   const stageArn = await createStageInRegion(safeStageName, region);
   const stageRegion = getRegionFromStageArn(stageArn);
   const client = getIvsRealtimeClient(stageRegion);
+  const ll = getIvsLowLatencyClient(stageRegion);
+
+  const failProgram = async (channelArn?: string) => {
+    if (channelArn) {
+      try {
+        await ll.send(new DeleteChannelCommand({ arn: channelArn }));
+      } catch (e: any) {
+        console.warn('[IVS][DELETE_CHANNEL_ROLLBACK_FAIL]', { sessionId, message: e?.message || String(e) });
+      }
+    }
+    try {
+      await client.send(new DeleteStageCommand({ arn: stageArn }));
+    } catch (e: any) {
+      console.warn('[IVS][DELETE_STAGE_ROLLBACK_FAIL]', { sessionId, message: e?.message || String(e) });
+    }
+    const wrapped: StartLiveSessionError = new Error('IVS_CREATE_PROGRAM_FAILED');
+    wrapped.code = 'IVS_CREATE_PROGRAM_FAILED';
+    wrapped.stageName = safeStageName;
+    throw wrapped;
+  };
+
+  let channelArn = '';
+  let playbackUrl = '';
+  try {
+    const created = await ll.send(new CreateChannelCommand({
+      name: `blyp-prog-${sessionId}`,
+      latencyMode: 'LOW',
+      type: 'ADVANCED_HD',
+      authorized: false,
+    }));
+    channelArn = String(created.channel?.arn || '');
+    playbackUrl = String(created.channel?.playbackUrl || '');
+  } catch (e: any) {
+    console.error('[IVS][CREATE_CHANNEL_FAILED]', { sessionId, message: e?.message || String(e) });
+    await failProgram();
+    throw new Error('IVS_CREATE_PROGRAM_FAILED');
+  }
+  if (!channelArn || !playbackUrl) {
+    await failProgram(channelArn || undefined);
+  }
 
   const createdAt = nowIso();
 
@@ -267,20 +310,25 @@ export async function startLiveSession(hostUserId: string, title: string, region
     title,
     status: 'LIVE',
     createdAt,
+    channelArn,
+    playbackUrl,
+    compositionState: 'UNKNOWN',
   };
 
-  // 2. Persist session (Dynamo is source of truth for joinability).
   await createSession(session);
 
-  // 3. Create host token (same region as the stage).
   const tokenRes = await client.send(new CreateParticipantTokenCommand({
     stageArn,
     userId: hostUserId,
     capabilities: ['PUBLISH', 'SUBSCRIBE'],
-    // Slot 0 is the host primary tile — never a guest box. Visible to every
-    // participant so native can pin the host without arrival-order races.
-    attributes: { role: 'host', slotIndex: '0', sessionId, title },
-    duration: 60, // minutes
+    attributes: {
+      role: 'host',
+      slotIndex: '0',
+      featured: 'true',
+      sessionId,
+      title: String(title || '').slice(0, 80),
+    },
+    duration: 60,
   }));
 
   const hostToken = tokenRes.participantToken?.token;
@@ -300,6 +348,7 @@ export async function startLiveSession(hostUserId: string, title: string, region
       streamId: sessionId,
       hostUserId,
       title,
+      playbackUrl,
     });
     console.log('[LIVE][DIRECTORY_PUBLISH]', {
       sessionId,
@@ -908,9 +957,16 @@ export async function endLiveSession(sessionId: string): Promise<void> {
   await updateSessionStatus(sessionId, 'ENDED', endedAt);
   emitRoomEvent(sessionId, { type: 'room.ended' });
 
-  // Always mirror ENDED into Firestore discovery so viewers stop seeing a
-  // joinable card whose Dynamo session is already dead (cross-account
-  // session_not_found). Best-effort — host client also calls endStream.
+  try {
+    const { broadcastStopForSession } = await import('./broadcastPrepare');
+    await broadcastStopForSession(sessionId);
+  } catch (broadcastErr: any) {
+    console.warn('[LIVE][BROADCAST_STOP_FAIL]', {
+      sessionId,
+      message: broadcastErr?.message || String(broadcastErr),
+    });
+  }
+
   try {
     const { endFirestoreStream } = await import('../admin/firestoreAdmin');
     await endFirestoreStream(sessionId);
@@ -919,6 +975,22 @@ export async function endLiveSession(sessionId: string): Promise<void> {
       sessionId,
       message: fsErr?.message || String(fsErr),
     });
+  }
+
+  const region = session?.region || getRegionFromStageArn(session?.stageArn);
+  await stopCompositionBestEffort(session?.compositionArn, region);
+  if (session?.channelArn) {
+    try {
+      await getIvsLowLatencyClient(region).send(new DeleteChannelCommand({ arn: session.channelArn }));
+      console.log('[IVS][DELETE_CHANNEL_OK]', { sessionId, channelArn: session.channelArn, region });
+    } catch (err: any) {
+      console.error('[IVS][DELETE_CHANNEL_FAILED]', {
+        sessionId,
+        channelArn: session.channelArn,
+        region,
+        message: err?.message || String(err),
+      });
+    }
   }
 
   // Reap the IVS stage so it does not linger and consume the per-region stage

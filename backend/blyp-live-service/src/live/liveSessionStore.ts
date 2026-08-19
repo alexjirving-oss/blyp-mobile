@@ -1,13 +1,24 @@
 import { docClient } from '../aws/dynamoClient';
-import { PutCommand, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 
 export type LiveStatus = 'PENDING' | 'LIVE' | 'ENDED';
+
+export type CompositionState =
+  | 'STARTING'
+  | 'ACTIVE'
+  | 'RECONNECTING'
+  | 'STOPPED'
+  | 'FAILED'
+  | 'UNKNOWN';
 
 export interface LiveSession {
   sessionId: string;
   hostUserId: string;
   stageArn: string;
   channelArn?: string;
+  playbackUrl?: string;
+  compositionArn?: string;
+  compositionState?: CompositionState;
   /**
    * AWS region the stage/channel lives in. Stored explicitly (rather than always
    * re-parsing it from the stage ARN) so the session/registry is region-aware
@@ -97,4 +108,75 @@ export async function updateSessionStatus(sessionId: string, status: LiveStatus,
     ExpressionAttributeNames: exprNames,
     ConditionExpression: 'attribute_exists(sessionId)',
   }));
+}
+
+export async function updateSessionProgram(
+  sessionId: string,
+  fields: {
+    channelArn?: string;
+    playbackUrl?: string;
+    compositionArn?: string;
+    compositionState?: CompositionState;
+  },
+): Promise<void> {
+  const sets: string[] = [];
+  const exprValues: Record<string, unknown> = {};
+  const exprNames: Record<string, string> = {};
+  if (fields.channelArn !== undefined) {
+    sets.push('#channelArn = :channelArn');
+    exprNames['#channelArn'] = 'channelArn';
+    exprValues[':channelArn'] = fields.channelArn;
+  }
+  if (fields.playbackUrl !== undefined) {
+    sets.push('#playbackUrl = :playbackUrl');
+    exprNames['#playbackUrl'] = 'playbackUrl';
+    exprValues[':playbackUrl'] = fields.playbackUrl;
+  }
+  if (fields.compositionArn !== undefined) {
+    sets.push('#compositionArn = :compositionArn');
+    exprNames['#compositionArn'] = 'compositionArn';
+    exprValues[':compositionArn'] = fields.compositionArn;
+  }
+  if (fields.compositionState !== undefined) {
+    sets.push('#compositionState = :compositionState');
+    exprNames['#compositionState'] = 'compositionState';
+    exprValues[':compositionState'] = fields.compositionState;
+  }
+  if (!sets.length) return;
+  await docClient.send(new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { sessionId },
+    UpdateExpression: `SET ${sets.join(', ')}`,
+    ExpressionAttributeValues: exprValues,
+    ExpressionAttributeNames: exprNames,
+    ConditionExpression: 'attribute_exists(sessionId)',
+  }));
+}
+
+export async function getSessionByStageArn(stageArn: string): Promise<LiveSession | null> {
+  const arn = String(stageArn || '').trim();
+  if (!arn) return null;
+  const res = await docClient.send(new QueryCommand({
+    TableName: TABLE_NAME,
+    IndexName: 'stageArn-index',
+    KeyConditionExpression: 'stageArn = :a',
+    ExpressionAttributeValues: { ':a': arn },
+  }));
+  const items = (res.Items || []) as LiveSession[];
+  const live = items.filter((s) => s.status === 'LIVE');
+  if (!live.length) return null;
+  live.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return live[0];
+}
+
+export async function listLiveSessions(limit: number): Promise<LiveSession[]> {
+  const cap = Math.min(50, Math.max(1, Number(limit) || 50));
+  const res = await docClient.send(new ScanCommand({
+    TableName: TABLE_NAME,
+    FilterExpression: '#status = :live',
+    ExpressionAttributeNames: { '#status': 'status' },
+    ExpressionAttributeValues: { ':live': 'LIVE' },
+    Limit: cap,
+  }));
+  return (res.Items || []) as LiveSession[];
 }

@@ -6,9 +6,9 @@ import {
 } from '../constants';
 
 describe('grid9 token + gift constants', () => {
-  it('locks 70% seat / 30% jackpot gift split', () => {
-    expect(GRID9_AUDIENCE_GIFT_SEAT_BPS).toBe(7000);
-    expect(GRID9_AUDIENCE_GIFT_JACKPOT_BPS).toBe(3000);
+  it('locks 100% seat + additive 10% jackpot match', () => {
+    expect(GRID9_AUDIENCE_GIFT_SEAT_BPS).toBe(10_000);
+    expect(GRID9_AUDIENCE_GIFT_JACKPOT_BPS).toBe(1000);
   });
 
   it('credits tokens at 50% of jackpot', () => {

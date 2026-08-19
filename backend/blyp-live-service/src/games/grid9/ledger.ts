@@ -114,6 +114,7 @@ export type Grid9LedgerEntryKind =
   | 'mercenary_funding'
   | 'arsenal_gift'
   | 'inventory_buy'
+  | 'buyback'
   | 'micro_drop_credit'
   | 'action_refund'
   | 'jackpot_payout'

@@ -29,9 +29,9 @@ export const GRID9_PUBLIC_LOBBY_MS = 30_000 as const;
 export const GRID9_TURN_DURATION_MS = 30_000 as const;
 export const GRID9_HOUSE_SEED_COINS = 100 as const;
 
-/** Audience gift: 70% seat bankroll, 30% jackpot (basis points). */
-export const GRID9_AUDIENCE_GIFT_SEAT_BPS = 7000 as const;
-export const GRID9_AUDIENCE_GIFT_JACKPOT_BPS = 3000 as const;
+/** Audience gift: 100% seat bankroll; jackpot += 10% of face as platform match. */
+export const GRID9_AUDIENCE_GIFT_SEAT_BPS = 10_000 as const;
+export const GRID9_AUDIENCE_GIFT_JACKPOT_BPS = 1000 as const;
 /** Victory Tokens = floor(jackpotCoins * 50%). */
 export const GRID9_TOKEN_PAYOUT_BPS = 5000 as const;
 /** Tokens→Coins Instant bonus (+15%), mirrors gems convert. */

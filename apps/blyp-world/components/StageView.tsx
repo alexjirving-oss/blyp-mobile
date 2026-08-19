@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { FeedPost } from "@/lib/feed";
 import type { PastLiveItem, StageModel } from "@/lib/stage";
 import type { SocialProfile } from "@/lib/social";
+import "./stage-profile.css";
 
 function formatCount(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "0";
@@ -34,19 +35,14 @@ function Avatar({
   photoURL,
   name,
   sizeClass,
-  accent,
-  surface,
 }: {
   photoURL: string | null;
   name: string;
   sizeClass: string;
-  accent?: string;
-  surface: string;
 }) {
   return (
     <div
-      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold ${sizeClass}`}
-      style={{ background: surface, color: accent || "#fff" }}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#16161f] text-sm font-bold text-[var(--blyp-teal)] ${sizeClass}`}
     >
       {photoURL ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -62,49 +58,21 @@ function Avatar({
   );
 }
 
-function PostTile({
-  post,
-  surface,
-  accent,
-  fallbackFrom,
-  fallbackTo,
-}: {
-  post: FeedPost;
-  surface: string;
-  accent: string;
-  fallbackFrom: string;
-  fallbackTo: string;
-}) {
+function PostTile({ post }: { post: FeedPost }) {
   const isVideo =
     !!post.videoUrl || String(post.type || "").toLowerCase().includes("video");
   const label = postLabel(post);
   const plays = Math.max(post.views || 0, post.likes || 0);
 
   return (
-    <Link
-      href={`/v/${post.id}`}
-      className="group relative aspect-[9/16] overflow-hidden"
-      style={{ background: surface }}
-    >
+    <Link href={`/v/${post.id}`} className="stage-web-tile group">
       {post.posterUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={post.posterUrl}
-          alt=""
-          className="h-full w-full object-cover object-top transition group-hover:scale-[1.02]"
-        />
+        <img src={post.posterUrl} alt="" />
       ) : (
-        <div
-          className="flex h-full flex-col items-center justify-center gap-1.5 px-2 text-center"
-          style={{
-            background: `linear-gradient(160deg, ${fallbackFrom} 0%, ${surface} 55%, ${fallbackTo}44 100%)`,
-          }}
-        >
+        <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-[linear-gradient(160deg,#0b1f1c_0%,#12121a_55%,rgba(0,210,190,0.28)_100%)] px-2 text-center">
           {isVideo ? (
-            <span
-              className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold"
-              style={{ background: "rgba(0,0,0,0.45)", color: accent }}
-            >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/45 text-sm font-bold text-[var(--blyp-teal)]">
               ▶
             </span>
           ) : null}
@@ -151,89 +119,44 @@ export function StageView({
   followBusy: boolean;
   onFollowToggle: () => void;
 }) {
-  const c = stage.theme.colors;
   const hasCover = !!stage.coverUrl;
   const cover = hasCover
     ? `url(${stage.coverUrl})`
-    : `linear-gradient(120deg, ${c.coverFallback[0]} 0%, ${c.bg} 55%, ${c.coverFallback[1]}22 100%)`;
-
+    : undefined;
   const metaBits = [stage.pronouns, stage.location, stage.vibe].filter(Boolean);
 
   return (
-    <div
-      className="min-h-[calc(100vh-4rem)] overflow-x-hidden"
-      style={{ background: c.bg, color: c.text }}
-    >
-      {/* Compact cover — not a giant empty slab */}
+    <div className="stage-web">
       <div
-        className={`relative w-full overflow-hidden bg-cover bg-center ${
-          hasCover ? "h-28 md:h-40" : "h-16 md:h-20"
+        className={`stage-web-cover ${
+          hasCover ? "stage-web-cover-has" : "stage-web-cover-empty"
         }`}
-        style={{ backgroundImage: cover }}
+        style={cover ? { backgroundImage: cover } : undefined}
       >
-        <div
-          className="absolute inset-0"
-          style={{
-            background: hasCover
-              ? "linear-gradient(to top, rgba(0,0,0,0.65), transparent 60%)"
-              : "linear-gradient(to bottom, transparent, rgba(0,0,0,0.35))",
-          }}
-        />
         {stage.liveStreamId ? (
-          <Link
-            href={`/live/${stage.liveStreamId}`}
-            className="absolute right-4 top-3 z-10 rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em]"
-            style={{ background: c.accent, color: "#07070a" }}
-          >
+          <Link href={`/live/${stage.liveStreamId}`} className="stage-web-live">
             LIVE now
           </Link>
         ) : null}
-        {/* User-facing Stage marker only — never expose internal theme pack ids */}
-        <div className="absolute bottom-2 left-4 z-10">
-          <span
-            className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
-            style={{ background: "rgba(0,0,0,0.45)", color: c.accent }}
-          >
-            Stage
-          </span>
-        </div>
+        <div className="stage-web-mark">Stage</div>
       </div>
 
-      <div className="relative z-10 mx-auto max-w-[720px] px-4 pb-20">
-        {/* Identity */}
-        <div className="-mt-10 flex items-end gap-3 md:-mt-12">
-          <div
-            className="relative z-20 shrink-0 rounded-full border-[3px] shadow-sm"
-            style={{ borderColor: c.bg }}
-          >
+      <div className="stage-web-body">
+        <div className="stage-web-id">
+          <div className="stage-web-avatar">
             <Avatar
               photoURL={stage.photoURL}
               name={stage.displayName}
               sizeClass="h-[84px] w-[84px] text-2xl md:h-24 md:w-24 md:text-3xl"
-              surface={c.surface}
-              accent={c.accent}
             />
           </div>
           <div className="min-w-0 flex-1 pb-1">
-            <h1 className="font-display break-words text-2xl font-extrabold leading-tight md:truncate md:text-3xl">
-              {stage.displayName}
-              {stage.verified ? (
-                <span className="ml-1.5 text-base" style={{ color: c.accent }}>
-                  ✓
-                </span>
-              ) : null}
-            </h1>
-            <p
-              className="break-all text-sm md:truncate"
-              style={{ color: c.textMuted }}
-            >
-              @{stage.username}
-            </p>
+            <h1 className="stage-web-name">{stage.displayName}</h1>
+            <p className="stage-web-handle">@{stage.username}</p>
           </div>
         </div>
 
-        {/* Stats — TikTok density; wrap cleanly on narrow screens */}
-        <div className="mt-5 flex flex-wrap gap-x-5 gap-y-3 text-center sm:gap-8">
+        <div className="stage-web-stats">
           {(
             [
               ["Posts", stage.stats.posts],
@@ -242,66 +165,36 @@ export function StageView({
               ["Likes", stage.stats.likes],
             ] as const
           ).map(([label, value]) => (
-            <div key={label} className="min-w-[3.25rem]">
-              <div className="text-base font-bold tabular-nums md:text-lg">
-                {formatCount(value)}
-              </div>
-              <div
-                className="text-[11px] font-medium uppercase tracking-wide"
-                style={{ color: c.textMuted }}
-              >
-                {label}
-              </div>
+            <div key={label} className="stage-web-stat">
+              <div className="stage-web-stat-n">{formatCount(value)}</div>
+              <div className="stage-web-stat-l">{label}</div>
             </div>
           ))}
         </div>
 
         {metaBits.length ? (
-          <p className="mt-3 break-words text-xs" style={{ color: c.textMuted }}>
-            {metaBits.join(" · ")}
-          </p>
+          <p className="stage-web-meta">{metaBits.join(" · ")}</p>
         ) : null}
 
-        {stage.bio ? (
-          <p className="mt-3 max-w-xl break-words text-sm leading-relaxed opacity-90">
-            {stage.bio}
-          </p>
-        ) : null}
+        {stage.bio ? <p className="stage-web-bio">{stage.bio}</p> : null}
 
         {stage.flair.length ? (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {stage.flair.map((f) => (
-              <span
-                key={f.id}
-                className="max-w-full break-words rounded-full px-2.5 py-1 text-[11px] font-semibold"
-                style={{
-                  background: c.accentSoft,
-                  color: c.accent,
-                  border: `1px solid ${c.border}`,
-                }}
-              >
+              <span key={f.id} className="stage-web-chip">
                 {f.label}
               </span>
             ))}
           </div>
         ) : null}
 
-        {/* Actions */}
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="stage-web-actions">
           {isOwner ? (
             <>
-              <Link
-                href="/live/studio"
-                className="rounded-full px-4 py-2 text-sm font-bold"
-                style={{ background: c.accent, color: "#07070a" }}
-              >
+              <Link href="/live/studio" className="stage-web-btn">
                 Go LIVE
               </Link>
-              <Link
-                href="/upload"
-                className="rounded-full border px-4 py-2 text-sm font-semibold"
-                style={{ borderColor: c.border }}
-              >
+              <Link href="/upload" className="stage-web-ghost">
                 Upload
               </Link>
             </>
@@ -312,46 +205,26 @@ export function StageView({
                   type="button"
                   disabled={followBusy}
                   onClick={onFollowToggle}
-                  className="rounded-full px-5 py-2 text-sm font-bold disabled:opacity-60"
-                  style={
-                    isFollowing
-                      ? {
-                          background: c.surface,
-                          color: c.text,
-                          border: `1px solid ${c.border}`,
-                        }
-                      : { background: c.accent, color: "#07070a" }
+                  className={
+                    isFollowing ? "stage-web-btn stage-web-btn-on" : "stage-web-btn"
                   }
                 >
-                  {followBusy
-                    ? "…"
-                    : isFollowing
-                      ? "Following"
-                      : "Follow"}
+                  {followBusy ? "…" : isFollowing ? "Following" : "Follow"}
                 </button>
               ) : (
-                <Link
-                  href="/login"
-                  className="rounded-full px-5 py-2 text-sm font-bold"
-                  style={{ background: c.accent, color: "#07070a" }}
-                >
+                <Link href="/login" className="stage-web-btn">
                   Follow
                 </Link>
               )}
               {isLoggedIn ? (
                 <Link
                   href={`/inbox?with=${encodeURIComponent(stage.userId)}`}
-                  className="rounded-full border px-4 py-2 text-sm font-semibold"
-                  style={{ borderColor: c.border }}
+                  className="stage-web-ghost"
                 >
                   Message
                 </Link>
               ) : (
-                <Link
-                  href="/login"
-                  className="rounded-full border px-4 py-2 text-sm font-semibold"
-                  style={{ borderColor: c.border }}
-                >
+                <Link href="/login" className="stage-web-ghost">
                   Message
                 </Link>
               )}
@@ -360,8 +233,7 @@ export function StageView({
           {stage.liveStreamId && !isOwner ? (
             <Link
               href={`/live/${stage.liveStreamId}`}
-              className="rounded-full px-4 py-2 text-sm font-bold"
-              style={{ background: "#ef4444", color: "#fff" }}
+              className="stage-web-btn stage-web-watch"
             >
               Watch LIVE
             </Link>
@@ -376,8 +248,8 @@ export function StageView({
                 href={l.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-full border px-3 py-1.5 text-xs font-semibold"
-                style={{ borderColor: c.border }}
+                className="stage-web-ghost"
+                style={{ minHeight: "2rem", fontSize: "0.75rem" }}
               >
                 {l.label}
               </a>
@@ -385,57 +257,32 @@ export function StageView({
           </div>
         ) : null}
 
-        {/* Pinned showcase — with Videos near top */}
         {pinned.length ? (
-          <section className="mt-8">
-            <h2 className="font-display mb-3 text-lg font-bold">Pinned</h2>
-            <div className="grid grid-cols-3 gap-0.5 overflow-hidden rounded-lg">
+          <section className="stage-web-section">
+            <h2 className="stage-web-h">Pinned</h2>
+            <div className="stage-web-grid">
               {pinned.map((p) => (
-                <PostTile
-                  key={p.id}
-                  post={p}
-                  surface={c.surface}
-                  accent={c.accent}
-                  fallbackFrom={c.coverFallback[0]}
-                  fallbackTo={c.coverFallback[1]}
-                />
+                <PostTile key={p.id} post={p} />
               ))}
             </div>
           </section>
         ) : null}
 
-        {/* Videos / posts — up with Past lives content, not under Wall */}
-        <section className="mt-8">
-          <div
-            className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b pb-2"
-            style={{ borderColor: c.border }}
-          >
-            <h2 className="font-display text-lg font-bold">Videos</h2>
-            <span
-              className="text-xs tabular-nums"
-              style={{ color: c.textMuted }}
-            >
-              {stage.stats.posts}
-            </span>
+        <section className="stage-web-section">
+          <div className="stage-web-section-head">
+            <h2 className="stage-web-h" style={{ margin: 0 }}>
+              Videos
+            </h2>
+            <span className="stage-web-count">{stage.stats.posts}</span>
           </div>
           {posts.length ? (
-            <div className="grid grid-cols-3 gap-0.5 overflow-hidden rounded-lg">
+            <div className="stage-web-grid">
               {posts.map((p) => (
-                <PostTile
-                  key={p.id}
-                  post={p}
-                  surface={c.surface}
-                  accent={c.accent}
-                  fallbackFrom={c.coverFallback[0]}
-                  fallbackTo={c.coverFallback[1]}
-                />
+                <PostTile key={p.id} post={p} />
               ))}
             </div>
           ) : (
-            <p
-              className="py-10 text-center text-sm"
-              style={{ color: c.textMuted }}
-            >
+            <p className="stage-web-empty">
               {isOwner
                 ? "No videos on your Stage yet. Upload or Go LIVE."
                 : "No videos on this Stage yet."}
@@ -443,16 +290,15 @@ export function StageView({
           )}
         </section>
 
-        {/* Top Circle */}
-        <section className="mt-8">
-          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="font-display text-lg font-bold">Top Circle</h2>
-            <span className="text-[11px]" style={{ color: c.textMuted }}>
-              People they follow
-            </span>
+        <section className="stage-web-section">
+          <div className="stage-web-section-head">
+            <h2 className="stage-web-h" style={{ margin: 0 }}>
+              Top Circle
+            </h2>
+            <span className="stage-web-count">People they follow</span>
           </div>
           {topCircle.length ? (
-            <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+            <div className="stage-web-row">
               {topCircle.map((p) => (
                 <Link
                   key={p.userId}
@@ -464,11 +310,9 @@ export function StageView({
                       photoURL={p.photoURL}
                       name={p.displayName}
                       sizeClass="h-14 w-14"
-                      surface={c.surface}
-                      accent={c.accent}
                     />
                     {p.isLive ? (
-                      <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 rounded bg-red-500 px-1 text-[8px] font-bold uppercase text-white">
+                      <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 rounded bg-[#fe2c55] px-1 text-[8px] font-bold uppercase text-white">
                         Live
                       </span>
                     ) : null}
@@ -480,22 +324,22 @@ export function StageView({
               ))}
             </div>
           ) : (
-            <p className="text-sm" style={{ color: c.textMuted }}>
-              No Top Circle yet.
-            </p>
+            <p className="stage-web-empty">No Top Circle yet.</p>
           )}
         </section>
 
-        {/* Past lives */}
         {pastLives.length ? (
-          <section className="mt-8">
-            <h2 className="font-display mb-3 text-lg font-bold">Past lives</h2>
-            <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+          <section className="stage-web-section">
+            <h2 className="stage-web-h">Past lives</h2>
+            <div className="stage-web-row">
               {pastLives.map((item) => (
                 <div
                   key={item.id}
-                  className="w-[132px] shrink-0 overflow-hidden rounded-xl border"
-                  style={{ background: c.surface, borderColor: c.border }}
+                  className="w-[132px] shrink-0 overflow-hidden rounded-xl"
+                  style={{
+                    background: "#16161f",
+                    boxShadow: "inset 0 0 0 1px var(--blyp-line)",
+                  }}
                 >
                   <div className="relative aspect-video overflow-hidden">
                     {item.thumbnailUrl ? (
@@ -506,13 +350,10 @@ export function StageView({
                         className="h-full w-full object-cover object-top"
                       />
                     ) : (
-                      <div
-                        className="flex h-full items-center justify-center"
-                        style={{
-                          background: `linear-gradient(135deg, ${c.coverFallback[0]}, ${c.border})`,
-                        }}
-                      >
-                        <span className="text-xs font-bold opacity-60">▶</span>
+                      <div className="flex h-full items-center justify-center bg-[linear-gradient(135deg,#0b1f1c,#12121a)]">
+                        <span className="text-xs font-bold text-[var(--blyp-teal)] opacity-70">
+                          ▶
+                        </span>
                       </div>
                     )}
                     <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
@@ -523,7 +364,7 @@ export function StageView({
                     <p className="truncate text-[11px] font-semibold">
                       {item.title}
                     </p>
-                    <p className="text-[10px]" style={{ color: c.textMuted }}>
+                    <p className="text-[10px] text-[var(--blyp-muted)]">
                       {formatCount(item.peakViewerCount)} peak
                     </p>
                   </div>
@@ -532,20 +373,6 @@ export function StageView({
             </div>
           </section>
         ) : null}
-
-        {/* Wall — desktop only stub; hide empty stub on mobile */}
-        <section className="mt-8 hidden md:block">
-          <h2 className="font-display mb-2 text-lg font-bold">Wall</h2>
-          <div
-            className="rounded-xl border px-4 py-5 text-sm"
-            style={{ borderColor: c.border, background: c.surface }}
-          >
-            <p style={{ color: c.textMuted }}>
-              Followers-only wall notes ship in v1.1. Nothing here yet — no
-              fabricated guestbook.
-            </p>
-          </div>
-        </section>
       </div>
     </div>
   );

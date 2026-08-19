@@ -73,22 +73,36 @@ docker run -d --restart unless-stopped \
 
 ### Fully-managed (Google Cloud Run)
 ```bash
+# Canonical prod region (us-central1). BOTH flags below are mandatory:
+# without them Cloud Run scales to zero after the health check and every
+# in-app import sits forever on "Queued — starting shortly…".
 gcloud run deploy blyp-import-worker \
   --source tools/import \
   --project blyp-master \
-  --region europe-west2 \
+  --region us-central1 \
   --no-allow-unauthenticated \
   --min-instances 1 \
   --no-cpu-throttling \
-  --memory 1Gi
+  --memory 1Gi \
+  --max-instances 1
+
+# Or update an existing revision without rebuilding:
+gcloud run services update blyp-import-worker \
+  --project blyp-master \
+  --region us-central1 \
+  --min-instances 1 \
+  --no-cpu-throttling \
+  --max-instances 1
 ```
 On Cloud Run the worker uses the service's runtime service account (give it
 Firestore + Storage admin), so no key file is needed. `--min-instances 1` keeps
-the poller alive; `--no-cpu-throttling` lets it work between requests.
+the poller alive; `--no-cpu-throttling` allocates CPU between HTTP requests
+so the Firestore poll loop actually runs.
 
-> Decision needed before this goes live in production: where to host (their PC /
-> a VM / Cloud Run) and which service account/credentials to use. Everything
-> above is ready; it just needs a `docker`/`gcloud` run with real credentials.
+**Prod check:** if imports stick on `pending`, describe the service and confirm
+`autoscaling.knative.dev/minScale=1` and `run.googleapis.com/cpu-throttling=false`.
+A cold standby in another region is fine at minScale 0; do **not** run two
+always-on pollers unless you want double cost (claim is transactional either way).
 
 ## Notes
 - Posture: this imports a user's **own** public content onto their **own**

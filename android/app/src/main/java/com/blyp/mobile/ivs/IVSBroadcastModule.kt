@@ -28,7 +28,9 @@ import com.amazonaws.ivs.broadcast.StageRenderer
 import com.amazonaws.ivs.broadcast.StageStream
 import com.amazonaws.ivs.broadcast.StageStream.Type
 import com.amazonaws.ivs.broadcast.StageVideoConfiguration
+import com.amazonaws.ivs.broadcast.JitterBufferConfiguration
 import com.amazonaws.ivs.broadcast.SubscribeConfiguration
+import com.amazonaws.ivs.broadcast.SubscribeSimulcastConfiguration
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Callback
 import com.facebook.react.bridge.LifecycleEventListener
@@ -85,6 +87,8 @@ class IVSBroadcastModule(
     private var localAudioStream: AudioLocalStageStream? = null
     private var stageStrategy: Stage.Strategy? = null
     private var currentSessionId: String? = null
+    private var currentViewerToken: String? = null
+    private var lastStageConnectionState: Stage.ConnectionState? = null
     private var sessionMode: SessionMode = SessionMode.NONE
     private var renderOwner: RenderOwner = RenderOwner.NONE
     private var hostRenderSurface: RenderSurfaceConfig? = null
@@ -93,6 +97,7 @@ class IVSBroadcastModule(
     private val hostPreviewTargetStreamTypes: MutableMap<String, String> = mutableMapOf()
     private val slotSurfaces: MutableMap<Int, RenderSurfaceConfig> = mutableMapOf()
     private val remoteRenderSlots: MutableMap<Int, RenderSlot> = mutableMapOf()
+    private val lastSlotAttachSig: MutableMap<Int, String> = mutableMapOf()
     private val participantToSlot: MutableMap<String, Int> = mutableMapOf()
     private val slotToStreamKey: MutableMap<Int, String> = mutableMapOf()
     private val firstFrameSignalKeys: MutableSet<String> = mutableSetOf()
@@ -829,6 +834,8 @@ class IVSBroadcastModule(
     }
 
     private fun stopSession() {
+        bumpViewerRenderGeneration()
+        lastSlotAttachSig.clear()
         loudspeakerController.stop("stage-session-stop")
         pendingCameraSwitchOpen?.let { mainHandler.removeCallbacks(it) }
         pendingCameraSwitchSettle?.let { mainHandler.removeCallbacks(it) }
@@ -851,6 +858,8 @@ class IVSBroadcastModule(
         localVideoStream = null
         localAudioStream = null
         currentSessionId = null
+        currentViewerToken = null
+        lastStageConnectionState = null
         sessionMode = SessionMode.NONE
         viewerParticipantId = null
         firstFrameSignalKeys.clear()
@@ -935,8 +944,44 @@ class IVSBroadcastModule(
      */
     private fun startViewerSession(stageArn: String, token: String, sessionId: String) {
         Log.d(IVS_TAG, "[VIEWER] startViewerSession() called with stageArn=$stageArn, sessionId=$sessionId")
+
+        val sameSession = sessionMode == SessionMode.VIEWER &&
+            currentSessionId == sessionId &&
+            stage != null
+        val sameToken = currentViewerToken == token
+        val stageLive = lastStageConnectionState == Stage.ConnectionState.CONNECTED ||
+            lastStageConnectionState == Stage.ConnectionState.CONNECTING
+        val stageDropped = lastStageConnectionState == Stage.ConnectionState.DISCONNECTED
+        if (sameSession && sameToken && (stageLive || stageDropped)) {
+            if (stageDropped) {
+                try {
+                    Log.i(IVS_TAG, "[VIEWER] rejoin existing Stage without destroy session=$sessionId")
+                    stage?.join()
+                } catch (e: Exception) {
+                    Log.w(IVS_TAG, "[VIEWER] existing Stage rejoin failed; will recreate: ${e.message}")
+                    stopSession()
+                    // fall through to full create below after this block
+                }
+            }
+            if (stage != null && sessionMode == SessionMode.VIEWER) {
+                Log.d(
+                    IVS_TAG,
+                    "[VIEWER] skip destroy; already subscribed to this session state=$lastStageConnectionState",
+                )
+                emit("IVS_VIEWER_READONLY_JOINED", Arguments.createMap().apply {
+                    putString("sessionId", sessionId)
+                    putString("mode", "viewer")
+                    putBoolean("skippedDestroy", true)
+                })
+                configureStageForRendering("viewer-rejoin-existing")
+                reattachViewerSurfaces("viewer-rejoin-existing")
+                return
+            }
+        }
         
-        // Always destroy any previous session first
+        // Destroy previous stage when session/token actually changed or the
+        // native connection is already dead. Same-token reconnects while still
+        // CONNECTED / recoverable DISCONNECTED must not tear down TextureViews.
         stopSession()
         configureStageAudio(publishing = false, role = "viewer")
 
@@ -969,6 +1014,7 @@ class IVSBroadcastModule(
             loudspeakerController.forceActive("viewer-stage-join-returned")
             
             stage = stageInstance
+            currentViewerToken = token
             Log.d(IVS_TAG, "[VIEWER] Viewer stage joined successfully with new token")
             configureStageForRendering("viewer-joined-stage")
             reattachViewerSurfaces("viewer-joined-stage")
@@ -1011,9 +1057,32 @@ class IVSBroadcastModule(
         }
 
         override fun subscribeConfigrationForParticipant(stage: Stage, participantInfo: ParticipantInfo): SubscribeConfiguration {
-            return SubscribeConfiguration()
+            return viewerSubscribeConfiguration()
         }
 
+    }
+
+    /**
+     * Empty SubscribeConfiguration uses jitter DEFAULT + lowest simulcast layer
+     * then ramp. Browser publishers (Studio, simulcast off, ~900kbps) look like
+     * stall-then-jump on the phone. LOW jitter + highest layer: first frame is
+     * the layer the web host actually sends.
+     */
+    private fun viewerSubscribeConfiguration(): SubscribeConfiguration {
+        val config = SubscribeConfiguration()
+        try {
+            config.jitterBuffer.setMinDelay(JitterBufferConfiguration.JitterBufferDelay.LOW())
+        } catch (e: Throwable) {
+            Log.w(IVS_TAG, "[VIEWER] jitterBuffer LOW not set: ${e.message}")
+        }
+        try {
+            config.simulcast.setInitialLayerPreference(
+                SubscribeSimulcastConfiguration.InitialLayerPreference.HIGHEST_QUALITY,
+            )
+        } catch (e: Throwable) {
+            Log.w(IVS_TAG, "[VIEWER] simulcast initial layer not set: ${e.message}")
+        }
+        return config
     }
 
     private fun emitNetworkQuality(quality: QualityStats.NetworkQuality?, isLocal: Boolean) {
@@ -1053,7 +1122,6 @@ class IVSBroadcastModule(
     }
 
     private fun emit(event: String, params: WritableMap = Arguments.createMap()) {
-        Log.d(IVS_TAG, "[NATIVE] Emitting event '$event' to JS")
         reactApplicationContext
             .getJSModule(RCTDeviceEventEmitter::class.java)
             .emit(event, params)
@@ -1177,6 +1245,12 @@ class IVSBroadcastModule(
     }
 
     private fun logCallTrace(label: String, slot: Int? = null, surface: Surface? = null) {
+        // Stack walks on the TextureView attach path stall the main thread.
+        if (sessionMode == SessionMode.VIEWER &&
+            (label == "setViewerSlotSurface" || label.startsWith("viewer-slot"))
+        ) {
+            return
+        }
         val participant = slot?.let { remoteRenderSlots[it]?.participantId }
         Log.i(
             IVS_TAG,
@@ -1493,9 +1567,17 @@ class IVSBroadcastModule(
 
         participantToSlot[participantId]?.let { return it }
 
-        // Legacy/untagged participants: sticky guest boxes 1..N on every device.
-        // Never skip box 1 (that pushed the first real guest into box 2).
         val used = participantToSlot.values.toSet()
+        // Browser Studio host tokens include role=host; if attributes are missing
+        // the first publisher must still occupy the primary tile, not guest box 1.
+        if (viewerParticipantId == null && !used.contains(0)) {
+            participantToSlot[participantId] = 0
+            viewerParticipantId = participantId
+            Log.w(IVS_TAG, "[IVS_SLOT][UNTAGGED_HOST] participant=$participantId slot=0")
+            return 0
+        }
+
+        // Legacy/untagged guests: sticky boxes 1..N. Never skip box 1.
         fun firstFreeGuestSlot(): Int {
             val free = (1..MAX_REMOTE_VIDEO_STREAMS).firstOrNull { !used.contains(it) }
             if (free != null) return free
@@ -1762,6 +1844,10 @@ class IVSBroadcastModule(
         }
         val safeWidth = if (slot.width > 0) slot.width else 1
         val safeHeight = if (slot.height > 0) slot.height else 1
+        val attachSig = "${surfaceHash(slot.surface)}:${safeWidth}x${safeHeight}:${slot.streamKey}"
+        if (slot.surface != null && lastSlotAttachSig[slot.slotId] == attachSig) {
+            return
+        }
         mainHandler.post {
             try {
                 val surface = slot.surface
@@ -1771,11 +1857,13 @@ class IVSBroadcastModule(
                     "[IVS_SLOT] tryAttach slot=${slot.slotId} surface=$hasSurface track=${slot.streamKey.isNotEmpty()} size=${safeWidth}x${safeHeight} surfaceHash=${surfaceHash(surface)} previewTargetHash=${targetHash(slot.previewTarget)}"
                 )
                 if (!hasSurface) {
+                    lastSlotAttachSig.remove(slot.slotId)
                     slot.previewTarget.clearSurface()
                     Log.d(IVS_TAG, "[IVS_SLOT] detach slot=${slot.slotId} streamKey=${slot.streamKey}")
                     return@post
                 }
                 slot.previewTarget.setSurface(surface, safeWidth, safeHeight)
+                lastSlotAttachSig[slot.slotId] = attachSig
                 Log.d(
                     IVS_TAG,
                     "[IVS_SLOT] ATTACHED slot=${slot.slotId} streamKey=${slot.streamKey} size=${safeWidth}x${safeHeight} surfaceHash=${surfaceHash(surface)} previewTargetHash=${targetHash(slot.previewTarget)}"
@@ -1820,7 +1908,7 @@ class IVSBroadcastModule(
         }
 
         override fun subscribeConfigrationForParticipant(stage: Stage, participantInfo: ParticipantInfo): SubscribeConfiguration {
-            return SubscribeConfiguration()
+            return viewerSubscribeConfiguration()
         }
 
     }
@@ -1828,12 +1916,23 @@ class IVSBroadcastModule(
     private val stageRenderer: StageRenderer = object : StageRenderer {
         override fun onConnectionStateChanged(stage: Stage, state: Stage.ConnectionState, exception: BroadcastException?) {
             Log.d("IVS_STAGE", "[IVS_STAGE] Connection state: $state")
+            lastStageConnectionState = state
             if (state == Stage.ConnectionState.CONNECTING || state == Stage.ConnectionState.CONNECTED) {
                 loudspeakerController.forceActive("stage-state-${state.name.lowercase()}")
             }
-            emit("IVS_BROADCAST_STATE_CHANGED", Arguments.createMap().apply {
-                putString("state", state.name)
-            })
+            // Viewer DISCONNECTED without an exception is a recoverable ICE/token
+            // blip. Emitting it to JS used to map to "Stream has ended" + stopSession.
+            val suppressViewerDisconnect =
+                sessionMode == SessionMode.VIEWER &&
+                    state == Stage.ConnectionState.DISCONNECTED &&
+                    exception == null
+            if (!suppressViewerDisconnect) {
+                emit("IVS_BROADCAST_STATE_CHANGED", Arguments.createMap().apply {
+                    putString("state", state.name)
+                })
+            } else {
+                Log.i(IVS_TAG, "[VIEWER] suppress DISCONNECTED emit (no exception)")
+            }
 
             if (state == Stage.ConnectionState.DISCONNECTED) {
                 stopNetRxDeltaProof("stage_disconnected")
@@ -1846,9 +1945,6 @@ class IVSBroadcastModule(
 
         override fun onParticipantJoined(stage: Stage, participant: ParticipantInfo) {
             Log.d(IVS_TAG, "[IVS_STAGE] Participant joined: id=${participant.participantId}, local=${participant.isLocal}")
-            loudspeakerController.forceActive(
-                if (participant.isLocal) "local-participant-joined" else "remote-participant-joined"
-            )
             if (participant.isLocal) {
                 emitLocalJoined(participant)
             } else {
@@ -1864,9 +1960,11 @@ class IVSBroadcastModule(
 
         override fun onParticipantLeft(stage: Stage, participant: ParticipantInfo) {
             Log.d(IVS_TAG, "[IVS_STAGE] Participant left: id=${participant.participantId}, local=${participant.isLocal}")
-            loudspeakerController.forceActive(
-                if (participant.isLocal) "local-participant-left" else "remote-participant-left"
-            )
+            if (sessionMode != SessionMode.VIEWER) {
+                loudspeakerController.forceActive(
+                    if (participant.isLocal) "local-participant-left" else "remote-participant-left"
+                )
+            }
             if (participant.isLocal) {
                 emit("IVS_HOST_LOCAL_LEFT", Arguments.createMap().apply {
                     putString("participantId", participant.participantId)
@@ -1882,7 +1980,9 @@ class IVSBroadcastModule(
 
         override fun onParticipantPublishStateChanged(stage: Stage, participant: ParticipantInfo, publishState: Stage.PublishState) {
             Log.d(IVS_TAG, "[IVS_STAGE] Publish state changed: id=${participant.participantId}, state=$publishState")
-            loudspeakerController.forceActive("publish-state-${publishState.name.lowercase()}")
+            if (sessionMode != SessionMode.VIEWER) {
+                loudspeakerController.forceActive("publish-state-${publishState.name.lowercase()}")
+            }
             if (participant.isLocal && publishState == Stage.PublishState.PUBLISHED) {
                 if (sessionMode == SessionMode.GUEST) {
                     Log.i(
@@ -1896,7 +1996,9 @@ class IVSBroadcastModule(
 
         override fun onParticipantSubscribeStateChanged(stage: Stage, participant: ParticipantInfo, subscribeState: Stage.SubscribeState) {
             Log.d(IVS_TAG, "[IVS_STAGE] Subscribe state changed: id=${participant.participantId}, state=$subscribeState")
-            loudspeakerController.forceActive("subscribe-state-${subscribeState.name.lowercase()}")
+            if (sessionMode != SessionMode.VIEWER) {
+                loudspeakerController.forceActive("subscribe-state-${subscribeState.name.lowercase()}")
+            }
         }
 
         override fun onStreamsAdded(stage: Stage, participant: ParticipantInfo, streams: List<StageStream>) {
@@ -1912,7 +2014,7 @@ class IVSBroadcastModule(
                 "IVS_REMOTE_STREAMS",
                 "LOG: IVS_REMOTE_STREAMS added count=${streams.size} participants=$participantId streamTypes=$streamTypes"
             )
-            if (streams.any { it.streamType == Type.AUDIO }) {
+            if (streams.any { it.streamType == Type.AUDIO } && sessionMode != SessionMode.VIEWER) {
                 loudspeakerController.forceActive("remote-audio-stream-added")
             }
             Log.d(IVS_TAG, "[IVS_STAGE] Streams added for ${participant.participantId}: count=${streams.size}, isLocal=${participant.isLocal}")
@@ -2075,18 +2177,14 @@ class IVSBroadcastModule(
                     val slot = if (pid != null) participantToSlot[pid] else null
                     val positiveSummary = extractPositiveRtcMetricSummary(stats)
 
-                    if (positiveSummary.isNotEmpty()) {
-                        Log.d(
-                            IVS_TAG,
-                            "[IVS_STAGE][RTC_STATS] mode=$sessionMode participantId=${pid ?: "null"} slot=${slot ?: -1} streamKey=$key summary=$positiveSummary"
+                    if (positiveSummary.isNotEmpty() &&
+                        !participant.isLocal &&
+                        remoteVideoFlowKeys.add("rtc:$key")
+                    ) {
+                        Log.i(
+                            "IVS_PROOF",
+                            "rtcVideoFlow mode=$sessionMode slot=${slot ?: -1} participantId=${pid ?: "null"} streamKey=$key metrics=$positiveSummary"
                         )
-
-                        if (!participant.isLocal && remoteVideoFlowKeys.add("rtc:$key")) {
-                            Log.i(
-                                "IVS_PROOF",
-                                "rtcVideoFlow mode=$sessionMode slot=${slot ?: -1} participantId=${pid ?: "null"} streamKey=$key metrics=$positiveSummary"
-                            )
-                        }
                     }
                 }
 
@@ -2109,11 +2207,6 @@ class IVSBroadcastModule(
                     val pid = participant.participantId
                     val slot = if (pid != null) participantToSlot[pid] else null
                     val positiveSummary = extractPositiveMetricSummary(stats)
-
-                    Log.d(
-                        IVS_TAG,
-                        "[IVS_STAGE][REMOTE_VIDEO_STATS] mode=$sessionMode participantId=${pid ?: "null"} slot=${slot ?: -1} streamKey=$key hasPositive=${positiveSummary.isNotEmpty()} summary=$positiveSummary raw=$stats"
-                    )
 
                     if (!participant.isLocal && positiveSummary.isNotEmpty() && remoteVideoFlowKeys.add(key)) {
                         Log.i(
@@ -2164,6 +2257,10 @@ class IVSBroadcastModule(
     }
 
     private fun extractPositiveMetricSummary(stats: Any): String {
+        if (remoteVideoFlowKeys.isNotEmpty() && sessionMode == SessionMode.VIEWER) {
+            // After first proof, skip reflection — getMethods() on every stats tick janks watch.
+            return ""
+        }
         return try {
             val parts = mutableListOf<String>()
             val methods = stats.javaClass.methods
@@ -2294,6 +2391,13 @@ class IVSBroadcastModule(
     companion object {
         private var sharedInstance: IVSBroadcastModule? = null
         private var safeVideoConfigCtorLogged: Boolean = false
+        @Volatile
+        var viewerRenderGeneration: Int = 0
+            private set
+
+        private fun bumpViewerRenderGeneration() {
+            viewerRenderGeneration += 1
+        }
 
         fun setInstance(instance: IVSBroadcastModule) {
             sharedInstance = instance

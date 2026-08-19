@@ -142,6 +142,7 @@ const commonPlayerShape = {
   eliminatedAt: nullableIsoDate,
   eliminatedBy: eliminatorSchema.nullable(),
   lastDamagedAt: nullableIsoDate,
+  knockoutPayoutFaceCoins: nonNegativeInteger,
 };
 
 const humanPlayerSchema = z
@@ -429,6 +430,7 @@ export const grid9GameStateSchema = z
           'mercenary_funding',
           'arsenal_gift',
           'inventory_buy',
+          'buyback',
         ]),
         weaponId: z.enum(['arrow', 'fireball', 'mega_bomb', 'kiss']).nullable(),
         shieldId: z.literal('basic_shield').nullable(),
@@ -451,6 +453,9 @@ export const grid9GameStateSchema = z
             action.weaponId === null &&
             action.shieldId !== null) ||
           (action.kind === 'mercenary_funding' &&
+            action.weaponId === null &&
+            action.shieldId === null) ||
+          (action.kind === 'buyback' &&
             action.weaponId === null &&
             action.shieldId === null) ||
           ((action.kind === 'arsenal_gift' || action.kind === 'inventory_buy') &&
@@ -616,9 +621,8 @@ export const grid9GameStateSchema = z
 
 /**
  * In-flight Redis matches may still carry older rules literals (e.g. 3.5s
- * roulette / rulesVersion 2026-08-16.3). Rewrite the rules snapshot to the
- * current process constants before Zod literals so the timer loop cannot
- * soft-lock the entire active set after a duration bump.
+ * roulette / rulesVersion 2026-08-16.3 / maxHealth 100). Rewrite the rules
+ * snapshot and player HP ceilings to the current process constants before Zod.
  */
 export function migrateGrid9GameStateInput(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
@@ -626,8 +630,33 @@ export function migrateGrid9GameStateInput(value: unknown): unknown {
   const rules = state.rules;
   if (!rules || typeof rules !== 'object') return value;
   const prev = rules as Record<string, unknown>;
+  const prevMax = Math.floor(Number(prev.maxHealth) || 0);
+  const players = Array.isArray(state.players)
+    ? state.players.map((raw) => {
+        if (!raw || typeof raw !== 'object') return raw;
+        const player = raw as Record<string, unknown>;
+        const oldMax = Math.floor(Number(player.maxHealth) || prevMax || 100);
+        let health = Math.floor(Number(player.health) || 0);
+        if (oldMax > 0 && oldMax !== GRID9_MAX_HEALTH) {
+          health = Math.min(
+            GRID9_MAX_HEALTH,
+            Math.round((health / oldMax) * GRID9_MAX_HEALTH),
+          );
+        }
+        return {
+          ...player,
+          health,
+          maxHealth: GRID9_MAX_HEALTH,
+          knockoutPayoutFaceCoins: Math.max(
+            0,
+            Math.floor(Number(player.knockoutPayoutFaceCoins) || 0),
+          ),
+        };
+      })
+    : state.players;
   return {
     ...state,
+    players,
     rules: {
       ...prev,
       rulesVersion: GRID9_RULES_VERSION,

@@ -9,6 +9,7 @@ import {
 } from "@/lib/activity";
 import { ensureFirebaseFromCognito } from "@/lib/firebaseBridge";
 import { useAuth } from "./AuthProvider";
+import "./hub-neon.css";
 
 function formatWhen(ts: number) {
   if (!ts) return "";
@@ -94,67 +95,69 @@ export function ActivityClient() {
 
   if (loading || items === null) {
     return (
-      <div className="px-6 py-16 text-sm text-[var(--blyp-muted)]">
-        Loading Activity…
+      <div className="hub">
+        <p className="hub-kicker">Inbox</p>
+        <h1 className="hub-title">Activity</h1>
+        <p className="hub-load">Loading follows, likes, and comments…</p>
       </div>
     );
   }
 
   if (!session) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <h1 className="font-display text-3xl font-bold">Activity</h1>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          Log in to see follows, likes, and comments on your posts.
+      <div className="hub">
+        <p className="hub-kicker">Inbox</p>
+        <h1 className="hub-title">Activity</h1>
+        <p className="hub-lead">
+          Follows, likes, and comments on your posts — same sources as the app.
         </p>
-        <Link
-          href="/login"
-          className="mt-6 inline-flex rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
-        >
-          Log in
-        </Link>
+        <div className="hub-card">
+          <div className="hub-empty">
+            <div className="hub-empty-stage">
+              <span>SIGNED OUT</span>
+            </div>
+            <h2>Log in to see activity</h2>
+            <p>This feed stays empty until your account loads. No sample rows.</p>
+            <Link href="/login" className="hub-go">
+              Log in
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-8 md:px-6">
-      <h1 className="font-display text-3xl font-bold">Activity</h1>
-      <p className="mt-1 text-sm text-[var(--blyp-muted)]">
-        Follows, likes, and comments — Circle people first, same sources as the
-        app.
-      </p>
-      {error ? (
-        <p className="mt-4 text-sm text-red-400">{error}</p>
-      ) : null}
+    <div className="hub">
+      <header>
+        <p className="hub-kicker">Inbox</p>
+        <h1 className="hub-title">Activity</h1>
+        <p className="hub-lead">
+          Follows, likes, and comments. Circle people first, when they actually
+          show up in this feed.
+        </p>
+      </header>
+      {error ? <p className="hub-err">{error}</p> : null}
 
       {circleActors.length > 0 ? (
-        <div className="mt-6">
-          <p className="mb-3 text-xs font-bold tracking-wide text-[var(--blyp-teal)]">
-            From your Circle
-          </p>
-          <div className="flex gap-3.5 overflow-x-auto pb-1">
+        <div className="hub-card" style={{ padding: "1rem 1rem 0.85rem" }}>
+          <p className="hub-kicker">From your Circle</p>
+          <div className="hub-circle">
             {circleActors.map((p) => (
               <Link
                 key={p.actorId}
                 href={`/u/${encodeURIComponent(p.username)}`}
-                className="flex w-[72px] shrink-0 flex-col items-center"
+                className="hub-circle-item"
               >
-                {p.avatar ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={p.avatar}
-                    alt=""
-                    className="h-14 w-14 rounded-full border-2 border-[var(--blyp-teal)] object-cover"
-                  />
-                ) : (
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-[var(--blyp-line)] bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)]">
-                    {(p.username || "S").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-                <span className="mt-1.5 w-full truncate text-center text-[11px] font-semibold">
-                  {p.username}
-                </span>
+                <div className="hub-avatar hub-avatar-lg is-circle">
+                  {p.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.avatar} alt="" />
+                  ) : (
+                    <span>{(p.username || "S").slice(0, 1).toUpperCase()}</span>
+                  )}
+                </div>
+                <span>{p.username}</span>
               </Link>
             ))}
           </div>
@@ -162,62 +165,67 @@ export function ActivityClient() {
       ) : null}
 
       {!items.length ? (
-        <p className="mt-10 text-sm text-[var(--blyp-muted)]">
-          No recent activity yet.
-        </p>
-      ) : (
-        <ul className="mt-6 divide-y divide-[var(--blyp-line)]">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-start gap-3 py-3.5">
-              <Link
-                href={`/u/${encodeURIComponent(item.username)}`}
-                className="shrink-0"
-              >
-                {item.avatar ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={item.avatar}
-                    alt=""
-                    className={`h-10 w-10 rounded-full object-cover border-2 ${
-                      item.inTopCircle
-                        ? "border-[var(--blyp-teal)]"
-                        : "border-[var(--blyp-line)]"
-                    }`}
-                  />
-                ) : (
-                  <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-full border-2 bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)] ${
-                      item.inTopCircle
-                        ? "border-[var(--blyp-teal)]"
-                        : "border-[var(--blyp-line)]"
-                    }`}
-                  >
-                    {(item.username || "S").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
+        <div className="hub-card">
+          <div className="hub-empty">
+            <div className="hub-empty-stage">
+              <span>QUIET</span>
+            </div>
+            <h2>No activity yet</h2>
+            <p>
+              When someone follows you, likes a post, or comments, it lands
+              here. Nothing is queued to pad this page.
+            </p>
+            <div className="hub-actions">
+              <Link href="/upload" className="hub-go">
+                Upload a video
               </Link>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm">
-                  <Link
-                    href={`/u/${encodeURIComponent(item.username)}`}
-                    className="font-semibold hover:underline"
-                  >
-                    @{item.username}
-                  </Link>{" "}
-                  <span className="text-[var(--blyp-muted)]">
-                    {activityVerb(item)}
-                  </span>
-                </p>
-                <p className="mt-0.5 flex items-center gap-2 text-xs text-[var(--blyp-muted)]">
-                  <span>{formatWhen(item.ts)}</span>
-                  {item.inTopCircle ? (
-                    <span className="font-bold text-[var(--blyp-teal)]">
-                      Circle
+              <Link href="/explore" className="hub-ghost">
+                Find people
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <ul className="hub-card hub-list">
+          {items.map((item) => (
+            <li key={item.id}>
+              <div className="hub-row">
+                <Link
+                  href={`/u/${encodeURIComponent(item.username)}`}
+                  className={`hub-avatar hub-avatar-md${
+                    item.inTopCircle ? " is-circle" : ""
+                  }`}
+                >
+                  {item.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.avatar} alt="" />
+                  ) : (
+                    <span>
+                      {(item.username || "S").slice(0, 1).toUpperCase()}
                     </span>
-                  ) : item.inFollowing ? (
-                    <span>Following</span>
-                  ) : null}
-                </p>
+                  )}
+                </Link>
+                <div className="hub-row-copy is-wrap">
+                  <p className="hub-row-name">
+                    <Link href={`/u/${encodeURIComponent(item.username)}`}>
+                      @{item.username}
+                    </Link>{" "}
+                    <span style={{ fontWeight: 500, color: "var(--blyp-muted)" }}>
+                      {activityVerb(item)}
+                    </span>
+                  </p>
+                  <p className="hub-row-meta">
+                    {formatWhen(item.ts)}
+                    {item.inTopCircle ? (
+                      <>
+                        {" · "}
+                        <span className="hub-chip">Circle</span>
+                      </>
+                    ) : item.inFollowing ? (
+                      " · Following"
+                    ) : null}
+                  </p>
+                </div>
               </div>
             </li>
           ))}

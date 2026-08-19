@@ -23,6 +23,7 @@ import {
 } from './grid9Matchmaker';
 import { leaveGrid9Match } from './grid9Leave';
 import {
+  buybackGrid9Seat,
   buyGrid9InventoryItem,
   fireGrid9Weapon,
   fundGrid9Mercenary,
@@ -594,8 +595,10 @@ async function handleGrid9Intent(args: {
           ? await fundGrid9Mercenary({ intent, identity })
           : intent.type === 'SEND_ARSENAL_GIFT'
             ? await sendGrid9ArsenalGift({ intent, identity })
-            : intent.type === 'BUY_INVENTORY_ITEM'
-              ? await buyGrid9InventoryItem({ intent, identity })
+          : intent.type === 'BUY_INVENTORY_ITEM'
+            ? await buyGrid9InventoryItem({ intent, identity })
+            : intent.type === 'BUYBACK'
+              ? await buybackGrid9Seat({ intent, identity })
               : await purchaseGrid9Shield({ intent, identity });
     emitGrid9Private(
       socket,

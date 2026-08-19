@@ -238,13 +238,15 @@ export class IVSNativeClient implements LiveStreamingClient {
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_PARTICIPANT_JOINED', (data: any) => {
         console.log('[IVS_CLIENT] Remote participant joined:', data);
-        this.reassertLiveLoudspeaker('remote-participant-joined');
-        // Fold often flips to earpiece after peer connect — keep reasserting.
-        ;[500, 1500, 3500].forEach((ms) => {
-          setTimeout(() => {
-            this.reassertLiveLoudspeaker(`remote-participant-joined-reassert-${ms}`);
-          }, ms);
-        });
+        if (this.isHostOrGuestActive) {
+          this.reassertLiveLoudspeaker('remote-participant-joined');
+          // Fold often flips to earpiece after peer connect — keep reasserting.
+          ;[500, 1500, 3500].forEach((ms) => {
+            setTimeout(() => {
+              this.reassertLiveLoudspeaker(`remote-participant-joined-reassert-${ms}`);
+            }, ms);
+          });
+        }
         const participantId = data.participantId;
         const slotIndex = data.slotIndex;
 
@@ -364,7 +366,9 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Remote video track added/removed events to help viewer diagnostics
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_VIDEO_ADDED', (data: any) => {
-        this.reassertLiveLoudspeaker('remote-media-added');
+        if (this.isHostOrGuestActive) {
+          this.reassertLiveLoudspeaker('remote-media-added');
+        }
         const participantId = data.participantId || 'unknown';
         const current = this.remoteVideoTrackCounts.get(participantId) || 0;
         const next = current + 1;
@@ -674,7 +678,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
   /**
    * Join as a viewer using IVS Player (HLS/low-latency playback).
-   * Production-recommended path for viewers.
+   * Opt-in only — phone watch of a Studio host must use joinAsViewer (Real-Time).
    */
   async joinAsViewerPlayback(params: ViewerPlaybackParams): Promise<void> {
     if (!IVSPlayerModule) {

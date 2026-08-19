@@ -29,6 +29,10 @@ import {
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
+function isDeadWatchError(message) {
+  return /session_not_found|not found or not live/i.test(String(message || ''));
+}
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UnifiedVideo from './UnifiedVideo';
 import { getStreamingBackend } from '../streaming/StreamingBackendFactory';
@@ -170,6 +174,7 @@ const IVSLiveStreamViewer = ({
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [layout, setLayout] = useState({ width: 0, height: 0 });
   const everConnectedRef = useRef(false);
+  const endedNotifiedRef = useRef(false);
   const [guestRequestStatus, setGuestRequestStatus] = useState('idle'); // idle | sending | sent | error
   const [guestMode, setGuestMode] = useState(false);
   const guestModeRef = useRef(false);
@@ -591,9 +596,17 @@ const IVSLiveStreamViewer = ({
   const GUEST_TRAY_HIDDEN_TAB_HEIGHT = 28;
   const GUEST_START_TIMEOUT_MS = 9000;
 
+  const lastGuestResetStreamIdRef = useRef(null);
+
   // If the viewer navigates to a different stream (or remount reuses the component),
   // never carry guest state across sessions.
   useEffect(() => {
+    const prev = lastGuestResetStreamIdRef.current;
+    lastGuestResetStreamIdRef.current = streamId || null;
+    if (!prev || prev === streamId) {
+      return undefined;
+    }
+
     let cancelled = false;
 
     const reset = async () => {
@@ -872,23 +885,48 @@ const IVSLiveStreamViewer = ({
   }, [ivsSession.connectionState, ivsSession.remoteParticipants.length, ivsSession.remoteVideoTracks]);
 
   useEffect(() => {
-    if (ivsSession.error) {
+    if (ivsSession.error && isDeadWatchError(ivsSession.error)) {
       console.error('[IVS_VIEWER] Error:', ivsSession.error);
-      if (onError) onError({ message: ivsSession.error });
+      if (onError && !endedNotifiedRef.current) {
+        endedNotifiedRef.current = true;
+        onError({ message: ivsSession.error });
+      }
       setConnectionStatus('error');
-    } else if (ivsSession.connectionState === 'connected') {
+      return;
+    }
+    if (ivsSession.reconnectExhausted && isDeadWatchError(ivsSession.error)) {
+      if (onError && !endedNotifiedRef.current) {
+        endedNotifiedRef.current = true;
+        onError({ message: ivsSession.error });
+      }
+      setConnectionStatus('error');
+      return;
+    }
+    if (ivsSession.reconnectExhausted && everConnectedRef.current) {
+      // Keep last frame. Transient Stage drops are not "Stream has ended".
+      console.warn('[IVS_VIEWER] reconnect exhausted after live connect; staying on last frame');
+      setConnectionStatus('connected');
+      return;
+    }
+    if (ivsSession.reconnectExhausted && !everConnectedRef.current) {
+      if (onError && !endedNotifiedRef.current) {
+        endedNotifiedRef.current = true;
+        onError({ message: ivsSession.error || 'connection failed' });
+      }
+      setConnectionStatus('error');
+      return;
+    }
+    if (ivsSession.connectionState === 'connected') {
       everConnectedRef.current = true;
       setConnectionStatus('connected');
-    } else if (ivsSession.connectionState === 'disconnected') {
-      setConnectionStatus('disconnected');
-      // Only treat as "ended" if we previously had a live connection. Join
-      // failures also land in disconnected+error (handled above); a bare
-      // disconnected without a prior connect is a failed join, not host end.
-      if (onError && everConnectedRef.current) {
-        onError({ message: 'Stream has ended' });
-      }
+      return;
     }
-  }, [ivsSession.error, ivsSession.connectionState, onError]);
+    if (ivsSession.connectionState === 'disconnected') {
+      // Transient stage drop: keep the watch surface and let the session
+      // hook re-join. Do not paint "Stream ended".
+      setConnectionStatus('connecting');
+    }
+  }, [ivsSession.error, ivsSession.connectionState, ivsSession.reconnectExhausted, onError]);
 
   // Track view count on mount/unmount
   useEffect(() => {
@@ -1132,25 +1170,10 @@ const IVSLiveStreamViewer = ({
   const stageArnForSurface = guestMode && guestStageArn ? guestStageArn : ivsSession.stageArn;
   const tokenForSurface = guestMode && guestToken ? guestToken : ivsSession.token;
   const hasStageCredentials = !!stageArnForSurface && !!tokenForSurface;
-  const showLoading = connectionStatus === 'connecting';
+  const showLoading = connectionStatus === 'connecting' && !ivsSession.canRender && ivsSession.remoteVideoTracks === 0;
   const showError = connectionStatus === 'error';
-  const showDisconnected = connectionStatus === 'disconnected';
-
-  console.log('[IVS_VIEWER][RENDER_PATH]', {
-    hasNativeView: !!NativeIVSRealTimeView,
-    hasCredentials: hasStageCredentials,
-    guestMode,
-    stageArn: stageArnForSurface ? stageArnForSurface.slice(-10) : null,
-    tokenLength: tokenForSurface ? tokenForSurface.length : 0,
-    state: ivsSession.connectionState,
-    remoteTracks: ivsSession.remoteVideoTracks,
-    willRenderRealTime: !!(
-      NativeIVSRealTimeView &&
-      hasStageCredentials &&
-      ivsSession.connectionState === 'connected' &&
-      ivsSession.remoteVideoTracks > 0
-    )
-  });
+  const showDisconnected =
+    connectionStatus === 'disconnected' && isDeadWatchError(ivsSession.error);
 
   // Real-Time surface fed by viewer session credentials
   // Keep the native views mounted once credentials exist; gate visibility by canRender
@@ -1280,6 +1303,7 @@ const IVSLiveStreamViewer = ({
     const pageCount =
       guestsPerPage > 0 ? Math.max(1, Math.ceil(Math.max(1, visibleGuestSlotIds.length) / guestsPerPage)) : 0;
     if (
+      Platform.OS !== 'android' &&
       guestsPerPage > 0 &&
       prevVisibleGuestCountRef.current !== visibleGuestSlotIds.length
     ) {
@@ -1816,7 +1840,7 @@ const IVSLiveStreamViewer = ({
         )}
         {showDisconnected && (
           <View style={styles.loadingOverlay}>
-            <Text style={styles.statusText}>Stream ended</Text>
+            <Text style={styles.statusText}>This live is no longer available</Text>
           </View>
         )}
       </View>

@@ -4,13 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "build": "node scripts/copy-ivs-player-assets.mjs && next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1106.0",
+    "@netlify/blobs": "^11.0.1",
     "amazon-cognito-identity-js": "^6.3.20",
+    "amazon-ivs-player": "^1.55.0",
     "amazon-ivs-web-broadcast": "^1.31.0",
     "firebase": "^12.17.1",
     "hls.js": "^1.6.17",

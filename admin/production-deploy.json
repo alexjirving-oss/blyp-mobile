@@ -2,13 +2,13 @@
     "site_name":  "blyp-admin-console",
     "site_id":  "f31b62f8-deae-4110-afb9-b6863900336c",
     "production_url":  "https://admin.blyp.world",
-    "deploy_id":  "6a7f5d9edcc80713d90490a3",
-    "unique_deploy_url":  "https://6a7f5d9edcc80713d90490a3--blyp-admin-console.netlify.app",
-    "asset_index":  "index-BbkAL4WY.js",
+    "deploy_id":  "6a83ec05227c3768b99869f4",
+    "unique_deploy_url":  "https://6a83ec05227c3768b99869f4--blyp-admin-console.netlify.app",
+    "asset_index":  "index-CKJSxR30.js",
     "git_branch":  "feat/full-tip-package-20260809",
-    "git_sha":  "857749e1",
-    "backend_revision":  "blyp-live-service-00213-cs8",
-    "backend_url":  "https://blyp-live-service-929105034040.us-central1.run.app",
-    "deployed_at":  "2026-08-14",
-    "notes":  "1.0.102: Frenemies jump/life, battles hardening, For You rankPosts. Live-service 00213. Mel admin RBAC retained."
+    "git_sha":  "119b3952",
+    "backend_revision":  "blyp-live-service-00240-47b",
+    "backend_url":  "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
+    "deployed_at":  "2026-08-18",
+    "notes":  "PayPal cash-out ops: Economy Mark paid + method/email columns; PersonDetail Owner launch-test gem credit. Live Payouts API still SENDER_RESTRICTED — Approve is not the settle path until PayPal lifts it."
 }

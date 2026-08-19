@@ -45,7 +45,7 @@
     "accountability:validate": "npm --prefix tools/accountability run start -- validate",
     "accountability": "npm --prefix tools/accountability run start -- run",
     "accountability:verify-ledger": "npm --prefix tools/accountability run start -- verify-ledger",
-    "accountability:verify-session": "npm --prefix tools/accountability run start -- verify-session --repo . --session .cursor/agent/session.json",
+    "accountability:verify-session": "npm run build --prefix tools/accountability && node tools/accountability/dist/src/cli.js verify-session --repo . --session .cursor/agent/session.json",
     "accountability:validate-receipt": "npm --prefix tools/accountability run start -- validate-receipt",
     "accountability:test-hooks": "python -m unittest discover -s tools/accountability/tests-python -p \"test_*.py\"",
     "accountability:acceptance": "npm run accountability:check && npm run accountability:test-hooks",

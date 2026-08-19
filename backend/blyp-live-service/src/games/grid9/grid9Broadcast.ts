@@ -18,6 +18,7 @@ import type {
   Grid9ArsenalGrantedPayload,
   Grid9MicroDropResolvedPayload,
   Grid9PlayerEliminatedPayload,
+  Grid9PlayerBuybackPayload,
   Grid9PlayerConnectionChangedPayload,
   Grid9PongPayload,
   Grid9PrivateRoomStatusPayload,
@@ -60,6 +61,7 @@ type RoomPayloadMap = {
   MICRO_DROP_RESOLVED: Grid9MicroDropResolvedPayload;
   PLAYER_CONNECTION_CHANGED: Grid9PlayerConnectionChangedPayload;
   PLAYER_ELIMINATED: Grid9PlayerEliminatedPayload;
+  PLAYER_BUYBACK: Grid9PlayerBuybackPayload;
   JACKPOT_CHANGED: Grid9JackpotChangedPayload;
   MATCH_COMPLETED: Grid9MatchCompletedPayload;
 };

@@ -439,7 +439,18 @@ export async function commitGrid9PaidMutation(args: {
                           player.userId === args.authenticatedUserId,
                       )?.slotIndex ?? 0,
                   }
-                : null,
+                : args.intent.type === 'BUYBACK'
+                  ? {
+                      ledgerField,
+                      itemId: null,
+                      targetSlotIndex:
+                        args.nextState.players.find(
+                          (player) =>
+                            player.kind === 'human' &&
+                            player.userId === args.authenticatedUserId,
+                        )?.slotIndex ?? 0,
+                    }
+                  : null,
     fields,
   });
   if (result.status === 'REJECTED') {

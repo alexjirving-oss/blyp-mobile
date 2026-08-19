@@ -485,7 +485,7 @@ function BucketCard({
         </span>
       </div>
       {battles.length === 0 ? (
-        <p className="text-sm text-[var(--blyp-muted)]">{empty}</p>
+        <p className="mt-2 text-sm text-[var(--blyp-muted)]">{empty}</p>
       ) : (
         <ul className="space-y-2">
           {battles.slice(0, 5).map((b) => {

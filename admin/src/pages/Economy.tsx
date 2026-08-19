@@ -26,6 +26,9 @@ type WithdrawalRow = {
   currency: string;
   status: string;
   reasons?: unknown;
+  method?: string | null;
+  paypalEmail?: string | null;
+  paypalPayoutBatchId?: string | null;
   stripeTransferId?: string | null;
   createdAt: string | null;
   settledAt?: string | null;
@@ -76,14 +79,64 @@ export default function Economy() {
     }
     const reason = window.prompt("Approval note (recommended for audit):", "Manual review approved");
     if (reason === null) return;
-    if (!window.confirm("Approve this withdrawal? This runs a Stripe Connect transfer when enabled.")) return;
+    const method = String(row.method || "").toLowerCase() === "paypal" ? "paypal" : "stripe";
+    const settleCopy =
+      method === "paypal"
+        ? "Approve calls PayPal Payouts. If PayPal returns SENDER_RESTRICTED, cancel and use Mark paid after a manual PayPal send."
+        : "Approve runs a Stripe Connect transfer when Connect is ready.";
+    if (!window.confirm(`Approve this withdrawal? ${settleCopy}`)) return;
     setBusyId(row.withdrawalId);
     setActionErr(null);
     try {
       const out = await api.post<WithdrawalRow>(`/admin/withdrawals/${encodeURIComponent(row.withdrawalId)}/approve`, {
         reason: reason?.trim() || undefined,
       });
-      toast.push(`Approved → ${out.status}${out.stripeTransferId ? ` (${out.stripeTransferId})` : ""}`, "ok");
+      const railHint = out.paypalPayoutBatchId
+        ? ` (PayPal ${out.paypalPayoutBatchId})`
+        : out.stripeTransferId
+          ? ` (${out.stripeTransferId})`
+          : "";
+      toast.push(`Approved → ${out.status}${railHint}`, "ok");
+      withdrawals.reload();
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message : String(e);
+      setActionErr(
+        `${msg} If PayPal Payouts is restricted, send GBP from PayPal Business then use Mark paid.`,
+      );
+      toast.push(msg, "err");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function markPaidManual(row: WithdrawalRow) {
+    if (!canApprove) {
+      toast.push("Owner-only: missing economy.withdraw.approve", "err");
+      return;
+    }
+    const pounds = (Number(row.netMinor || 0) / 100).toFixed(2);
+    const ccy = String(row.currency || "gbp").toUpperCase();
+    if (
+      !window.confirm(
+        `Mark paid only after you already sent ${ccy} ${pounds} from PayPal Business to the creator. Continue?`,
+      )
+    ) {
+      return;
+    }
+    const note = window.prompt("Ops note (recommended):", "Manual PayPal send");
+    if (note === null) return;
+    const externalReference = window.prompt("PayPal transaction ID (optional):", "") ?? "";
+    setBusyId(row.withdrawalId);
+    setActionErr(null);
+    try {
+      const out = await api.post<WithdrawalRow>(
+        `/admin/withdrawals/${encodeURIComponent(row.withdrawalId)}/mark-paid-manual`,
+        {
+          note: note.trim() || undefined,
+          externalReference: externalReference.trim() || undefined,
+        },
+      );
+      toast.push(`Marked paid → ${out.status}`, "ok");
       withdrawals.reload();
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : String(e);
@@ -171,6 +224,18 @@ export default function Economy() {
               <div style={{ fontWeight: 700 }}>{w.stripeWebhookConfigured ? "yes" : "no"}</div>
             </div>
             <div>
+              <div className="dim" style={{ fontSize: 11 }}>PayPal</div>
+              <div style={{ fontWeight: 700 }}>
+                {w.paypalConfigured
+                  ? w.paypalMode === "live"
+                    ? "live creds"
+                    : w.paypalMode === "sandbox"
+                      ? "sandbox"
+                      : "yes"
+                  : "creds on Cloud Run"}
+              </div>
+            </div>
+            <div>
               <div className="dim" style={{ fontSize: 11 }}>Effective</div>
               <div style={{ fontWeight: 700 }}>{w.effectivelyEnabled ? "enabled" : "disabled"}</div>
             </div>
@@ -187,7 +252,11 @@ export default function Economy() {
             </WarnNote>
           ) : (
             <InfoNote>
-              {w.note}. {w.stripeNote || "Approve executes Stripe Connect transfer; reject restores reserved gems."}
+              {w.note}. PayPal is the creator cash-out rail while Stripe Connect is in review.{" "}
+              <strong>Approve</strong> calls PayPal Payouts (currently SENDER_RESTRICTED on the live app until
+              Payouts is enabled / the Business sender restriction is lifted).{" "}
+              <strong>Mark paid</strong> after you send GBP from PayPal Business. Reject restores reserved gems.
+              {w.paypalNote ? ` ${w.paypalNote}` : ""} {w.stripeNote ? ` Stripe: ${w.stripeNote}` : ""}
             </InfoNote>
           )}
           {dual && (
@@ -253,6 +322,7 @@ export default function Economy() {
                     <th style={{ padding: "8px 6px" }}>User</th>
                     <th style={{ padding: "8px 6px" }}>Gross</th>
                     <th style={{ padding: "8px 6px" }}>Net</th>
+                    <th style={{ padding: "8px 6px" }}>Method</th>
                     <th style={{ padding: "8px 6px" }}>Reasons</th>
                     <th style={{ padding: "8px 6px" }} />
                   </tr>
@@ -276,7 +346,19 @@ export default function Economy() {
                         )}
                       </td>
                       <td style={{ padding: "10px 6px" }}>
-                        {fmtNum(row.netGems)} · {row.netMinor} {String(row.currency || "").toUpperCase()}
+                        {fmtNum(row.netGems)} · {(Number(row.netMinor || 0) / 100).toFixed(2)}{" "}
+                        {String(row.currency || "").toUpperCase()}
+                      </td>
+                      <td style={{ padding: "10px 6px", fontSize: 12 }}>
+                        {String(row.method || "—")}
+                        {row.paypalEmail ? (
+                          <>
+                            <br />
+                            <span className="dim" style={{ fontSize: 11 }}>
+                              {row.paypalEmail}
+                            </span>
+                          </>
+                        ) : null}
                       </td>
                       <td style={{ padding: "10px 6px", maxWidth: 220 }}>
                         <span className="dim" style={{ fontSize: 11 }}>
@@ -291,12 +373,22 @@ export default function Economy() {
                             !canApprove
                               ? "Owner-only permission"
                               : payoutsLive
-                                ? "Approve Stripe transfer"
+                                ? String(row.method || "").toLowerCase() === "paypal"
+                                  ? "Approve PayPal Payouts"
+                                  : "Approve Stripe transfer"
                                 : "Blocked — withdrawals disabled"
                           }
                           onClick={() => approve(row)}
                         >
                           {busyId === row.withdrawalId ? "…" : "Approve"}
+                        </button>{" "}
+                        <button
+                          className="btn ghost tiny"
+                          disabled={busyId === row.withdrawalId || !canApprove}
+                          title={!canApprove ? "Owner-only permission" : "Mark paid after a manual PayPal send"}
+                          onClick={() => markPaidManual(row)}
+                        >
+                          Mark paid
                         </button>{" "}
                         <button
                           className="btn ghost tiny"

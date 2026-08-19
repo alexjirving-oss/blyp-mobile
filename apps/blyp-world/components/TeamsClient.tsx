@@ -16,6 +16,7 @@ import {
   ApplicationStatusBanner,
   TeamsMarketing,
 } from "./teams/TeamsMarketing";
+import "./hub-neon.css";
 
 function friendlyTeamsError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || "");
@@ -103,30 +104,31 @@ export function TeamsClient() {
 
   if (loading || (session && !loaded && !error)) {
     return (
-      <div className="px-6 py-16 text-sm text-[var(--blyp-muted)]">
-        {session ? "Loading Teams…" : "Loading…"}
+      <div className="hub hub-wide">
+        <p className="hub-kicker">Teams</p>
+        <h1 className="hub-title">Teams</h1>
+        <p className="hub-load">
+          {session ? "Loading your desk…" : "Loading…"}
+        </p>
       </div>
     );
   }
 
   if (session && team && view === "desk") {
     return (
-      <div>
-        <div className="border-b border-[var(--blyp-line)] px-5 py-3 text-center text-sm md:px-8">
-          <button
-            type="button"
-            onClick={() => setView("marketing")}
-            className="font-semibold text-[var(--blyp-teal)]"
-          >
+      <div className="hub hub-wide" style={{ paddingTop: 0, maxWidth: "none" }}>
+        <div className="hub-desk-nav">
+          <button type="button" onClick={() => setView("marketing")}>
             How Teams works & apply →
           </button>
         </div>
         {error ? (
-          <p className="px-5 pt-4 text-center text-sm text-[var(--blyp-rose)]">
+          <p className="hub-err" style={{ textAlign: "center", padding: "0 1rem" }}>
             {error}{" "}
             <button
               type="button"
-              className="font-semibold underline"
+              className="hub-ghost"
+              style={{ minHeight: "1.8rem", padding: "0 0.7rem" }}
               onClick={() => void refresh()}
             >
               Retry
@@ -139,14 +141,10 @@ export function TeamsClient() {
   }
 
   return (
-    <div>
+    <div className="hub hub-wide" style={{ paddingTop: 0, maxWidth: "none" }}>
       {session && team ? (
-        <div className="border-b border-[var(--blyp-line)] px-5 py-3 text-center text-sm md:px-8">
-          <button
-            type="button"
-            onClick={() => setView("desk")}
-            className="font-semibold text-[var(--blyp-teal)]"
-          >
+        <div className="hub-desk-nav">
+          <button type="button" onClick={() => setView("desk")}>
             ← Back to your team desk
           </button>
         </div>
@@ -156,6 +154,25 @@ export function TeamsClient() {
           status={application.status}
           teamName={application.teamName}
         />
+      ) : null}
+      {session && !team && !application && !error ? (
+        <div className="hub-banner is-wait">
+          You’re not on a team yet. Apply below, or wait for a host invite —
+          this page does not invent a roster.
+        </div>
+      ) : null}
+      {error ? (
+        <p className="hub-err" style={{ textAlign: "center", padding: "0.75rem 1rem 0" }}>
+          {error}{" "}
+          <button
+            type="button"
+            className="hub-ghost"
+            style={{ minHeight: "1.8rem", padding: "0 0.7rem" }}
+            onClick={() => void refresh()}
+          >
+            Retry
+          </button>
+        </p>
       ) : null}
       <TeamsMarketing showDashboardLink={!!(session && team)} />
     </div>

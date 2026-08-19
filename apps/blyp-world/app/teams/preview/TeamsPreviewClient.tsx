@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { buildDemoTeamBundle } from "@/lib/teams";
 import { TeamDashboard } from "@/components/teams/TeamDashboard";
+import "@/components/hub-neon.css";
 
 /** Interactive desk preview for applicants + screenshot capture. */
 export function TeamsPreviewClient() {
@@ -13,8 +14,8 @@ export function TeamsPreviewClient() {
     [role],
   );
   return (
-    <div>
-      <div className="border-b border-[var(--blyp-gold)]/30 bg-[rgba(232,196,124,0.08)] px-5 py-3 text-center text-sm md:px-8">
+    <div className="hub hub-wide" style={{ paddingTop: 0, maxWidth: "none" }}>
+      <div className="hub-banner is-wait">
         <span className="font-semibold text-[var(--blyp-gold)]">Preview</span>
         {" — "}
         sample roster (not live data).{" "}

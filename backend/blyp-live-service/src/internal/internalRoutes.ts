@@ -461,4 +461,68 @@ router.post('/internal/account/purge', requireInternalSecret, async (req, res) =
   }
 });
 
+router.post('/internal/ivs/participant-published', requireInternalSecret, async (req, res) => {
+  try {
+    const { handleParticipantPublished } = await import('./ivsProgramEvents');
+    const out = await handleParticipantPublished(req.body || {});
+    return res.status(200).json(out);
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[internal] participant-published failed');
+    return res.status(200).json({ ok: true, unmatched: true });
+  }
+});
+
+router.post('/internal/ivs/composition-state', requireInternalSecret, async (req, res) => {
+  try {
+    const { handleCompositionState } = await import('./ivsProgramEvents');
+    const out = await handleCompositionState(req.body || {});
+    return res.status(200).json(out);
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[internal] composition-state failed');
+    return res.status(200).json({ ok: true, unmatched: true });
+  }
+});
+
+router.post('/internal/cron/live-orphan-sweep', requireInternalSecret, async (req, res) => {
+  try {
+    const { handleLiveOrphanSweep } = await import('./ivsProgramEvents');
+    const out = await handleLiveOrphanSweep();
+    return res.status(200).json(out);
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[internal] live-orphan-sweep failed');
+    return res.status(200).json({ ok: false, swept: 0, ids: [] });
+  }
+});
+
+const broadcastWorkerHeartbeatSchema = z
+  .object({
+    workerId: z.string().min(4).max(128),
+    region: z.string().min(2).max(32),
+    baseUrl: z.string().url(),
+    status: z.enum(['idle', 'busy']),
+    sessionId: z.string().optional().nullable(),
+  })
+  .strict();
+
+/** Fan-out worker pool registration + queued job claim. */
+router.post('/internal/broadcast/worker/heartbeat', requireInternalSecret, async (req, res) => {
+  try {
+    const parsed = broadcastWorkerHeartbeatSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+    }
+    const { registerWorkerHeartbeat } = await import('../live/broadcastWorkerPool');
+    const { broadcastClaimQueuedJob } = await import('../live/broadcastPrepare');
+    await registerWorkerHeartbeat(parsed.data);
+    let claimed: { claimed: boolean; sessionId?: string } = { claimed: false };
+    if (parsed.data.status === 'idle') {
+      claimed = await broadcastClaimQueuedJob(parsed.data);
+    }
+    return res.json({ ok: true, claimed: claimed.claimed, sessionId: claimed.sessionId ?? null });
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e) }, '[internal] broadcast worker heartbeat failed');
+    return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+  }
+});
+
 export default router;

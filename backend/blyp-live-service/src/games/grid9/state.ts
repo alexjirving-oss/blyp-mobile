@@ -177,7 +177,7 @@ export interface Grid9ActionSummary {
   intentId: string | null;
   serverOperationId: string | null;
   actor: Grid9PublicActionActor;
-  kind: 'weapon' | 'shield' | 'mercenary_funding' | 'arsenal_gift' | 'inventory_buy';
+  kind: 'weapon' | 'shield' | 'mercenary_funding' | 'arsenal_gift' | 'inventory_buy' | 'buyback';
   weaponId: Grid9WeaponId | null;
   shieldId: Grid9ShieldId | null;
   targetSlotIndex: Grid9SlotIndex;

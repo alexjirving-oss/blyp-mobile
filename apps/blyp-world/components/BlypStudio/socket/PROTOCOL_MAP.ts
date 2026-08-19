@@ -4,12 +4,22 @@
  * Source of truth: backend/blyp-live-service/src/games/grid9/protocol.ts
  * Channel: socket.io event name `grid9` (GRID9_SOCKET_CHANNEL).
  *
+ * Economy (Alex rulesVersion 2026-08-16.8):
+ * - maxHealth 1000; gift/weapon face coins = HP delta
+ * - Player gets 100% of gift face F; jackpot += floor(F*0.10) platform match
+ *   (viewer debit stays F — pot is not skimmed from the player)
+ * - Timed match 60 minutes; last standing wins early; deadline = highest HP+shield
+ * - Buyback 500 coins → 100% jackpot; revive at 1000 HP
+ * - KO tokens = floor(finishingFaceCoins * 0.5)
+ * - Winner tokens = floor(seatShare * 0.5) + floor(jackpot * 0.5)
+ *
  * Alex alias → real protocol (do NOT emit invented names):
  * | Studio / Alex name     | Real client intent / server event                         | Status |
  * |------------------------|-----------------------------------------------------------|--------|
  * | START_ROULETTE         | (none) — server emits ROULETTE_START / ROULETTE_LAND      | listen only; Spin uses mock UI unless host START_PRIVATE_MATCH |
  * | FILL_SENTINELS         | (none) — server fills sentinels in matchmaker/lobby       | mock only |
- * | GRID9_GIFT_DROP        | SEND_ARSENAL_GIFT intent; ARSENAL_GRANTED + JACKPOT_CHANGED | listen |
+ * | GRID9_GIFT_DROP        | SEND_ARSENAL_GIFT intent; ARSENAL_GRANTED (+ HP/KO) + JACKPOT_CHANGED | listen |
+ * | BUYBACK                | BUYBACK intent; PLAYER_BUYBACK                            | emit when KO'd in match |
  * | Reset Match            | MATCH_LEAVE (if in match); no full “reset lobby” intent   | partial |
  * | Kick                   | KICK_PLAYER (owner only)                                  | emit if host |
  * | Start private match    | START_PRIVATE_MATCH (owner only)                          | emit if host |
@@ -40,7 +50,13 @@ export const STUDIO_TO_GRID9_MAP = {
     alexAlias: "GRID9_GIFT_DROP",
     emit: "SEND_ARSENAL_GIFT",
     listen: ["ARSENAL_GRANTED", "JACKPOT_CHANGED"] as const,
-    note: "Economy updates from ARSENAL_GRANTED.seatCoins/jackpotCoins + JACKPOT_CHANGED.",
+    note: "Economy updates from ARSENAL_GRANTED.seatCoins/jackpotCoins/health + JACKPOT_CHANGED.",
+  },
+  buyback: {
+    alexAlias: "BUYBACK",
+    emit: "BUYBACK",
+    listen: ["PLAYER_BUYBACK", "MATCH_COMPLETED"] as const,
+    note: "KO buyback: 500 coins → jackpot 100%; revive at maxHealth.",
   },
   resetMatch: {
     alexAlias: "RESET_MATCH",

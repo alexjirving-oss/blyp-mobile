@@ -1,0 +1,23 @@
+/* OBS / clean-feed only. Keep now-playing as a lower-third, never the booth cabinet. */
+
+.tls-overlay-source .jbx-cabinet,
+.tls-overlay-source .jbx-house,
+.tls-overlay-source .jbx-rail,
+.tls-overlay-source .jbx:not(.jbx-ov) {
+  display: none !important;
+}
+
+.tls-overlay-source-stage .tls-ov.tls-ov-jukebox,
+.tls-overlay-source-stage .tls-ov.tls-ov-jukebox.jbx-ov,
+.tls-overlay-source-stage .tls-ov.tls-ov-jukebox.jbx-ov:hover,
+.tls-overlay-source-stage .tls-ov.tls-ov-jukebox.jbx-ov.tls-ov-dragging {
+  width: 13.25rem;
+  max-width: 34vw;
+  max-height: 14vh;
+  padding: 0.26rem 0.3rem 0.22rem;
+  overflow: hidden;
+}
+
+.tls-overlay-source-stage .jbx-ov-mark {
+  font-size: 0.58rem;
+}

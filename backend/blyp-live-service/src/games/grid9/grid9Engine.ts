@@ -6,6 +6,7 @@ import {
   GRID9_MATCH_TTL_SECONDS,
   GRID9_MAX_HEALTH,
   GRID9_MAX_MATCH_DURATION_MS,
+  GRID9_BUYBACK_COST_COINS,
   GRID9_MAX_MERCENARY_FUND_COINS,
   GRID9_MAX_SHIELD_POINTS,
   GRID9_MICRO_DROP_COIN_REWARD,
@@ -22,6 +23,7 @@ import {
   GRID9_TURN_DURATION_MS,
   grid9EntropyCommitment,
   splitGrid9AudienceGiftCoins,
+  knockoutTokensFromFaceCoins,
   type Grid9SlotIndex,
 } from './constants';
 import {
@@ -138,6 +140,21 @@ export interface Grid9ArsenalGrantResolution {
   inventoryAfter: Grid9ArsenalItemId[];
   droppedItemId: Grid9ArsenalItemId | null;
   selfBuy: boolean;
+  /** Instant HP after gift detonation (Alex: gifts = weapons). */
+  healthBefore: number;
+  healthAfter: number;
+  eliminated: boolean;
+  /** Pending KO tokens = floor(face * 0.5); 0 if not eliminated. */
+  knockoutTokens: number;
+  completed: boolean;
+}
+
+export interface Grid9BuybackResolution {
+  state: Grid9GameState;
+  slotIndex: Grid9SlotIndex;
+  costCoins: number;
+  jackpotCoins: number;
+  healthAfter: number;
 }
 
 export interface Grid9KickResolution {
@@ -370,6 +387,7 @@ function createHuman(
     eliminatedAt: null,
     eliminatedBy: null,
     lastDamagedAt: null,
+    knockoutPayoutFaceCoins: 0,
     queueTicketId: seed.queueTicketId,
     sponsorPassId: seed.sponsorPassId,
     entryFeePaidCoins: 0,
@@ -1094,8 +1112,15 @@ export function applyGrid9Weapon(args: {
   requireCombat(args.state);
   requireActorEligible(args.state, args.actor);
   requireActiveCombatantTurn(args.state, args.actor, args.sourceSlotIndex);
-  const weapon = GRID9_WEAPON_CATALOG[args.weaponId];
-  if (!weapon) throw new Grid9Error('ITEM_NOT_FOUND', 'Unknown Grid 9 weapon');
+  const weaponCatalog = GRID9_WEAPON_CATALOG[args.weaponId];
+  if (!weaponCatalog) throw new Grid9Error('ITEM_NOT_FOUND', 'Unknown Grid 9 weapon');
+  /** Alex: coin face = HP effect (damage or heal). */
+  const faceCoins = Math.max(0, Math.floor(weaponCatalog.costCoins));
+  const weapon: Grid9Weapon = {
+    ...weaponCatalog,
+    directDamage: weaponCatalog.healHealth > 0 ? 0 : faceCoins,
+    healHealth: weaponCatalog.healHealth > 0 ? faceCoins : 0,
+  };
   const target = args.state.players[args.targetSlotIndex];
   if (!target || target.status !== 'alive') {
     throw new Grid9Error('TARGET_NOT_ALIVE', 'Target box is eliminated', {
@@ -1250,6 +1275,7 @@ export function applyGrid9Weapon(args: {
       player.mode = player.kind === 'human' ? 'sabotage' : 'inactive';
       player.eliminatedAt = now;
       player.eliminatedBy = eliminator;
+      player.knockoutPayoutFaceCoins = faceCoins;
       eliminatedSlotIndices.push(player.slotIndex);
     }
   }
@@ -1272,9 +1298,10 @@ export function applyGrid9Weapon(args: {
     state.turn.attacksUsedThisTurn += 1;
   }
   if (!isFree) {
-    state.jackpot.purchaseContributionCoins +=
-      weapon.jackpotContributionCoins;
-    state.jackpot.currentCoins += weapon.jackpotContributionCoins;
+    const { jackpotCoins: jackpotContributionCoins } =
+      splitGrid9AudienceGiftCoins(weapon.costCoins);
+    state.jackpot.purchaseContributionCoins += jackpotContributionCoins;
+    state.jackpot.currentCoins += jackpotContributionCoins;
   }
   state.authority.cooldowns[cooldownKey] = {
     actorKey,
@@ -1516,9 +1543,10 @@ export function applyGrid9Shield(args: {
     state.turn.defensesUsedThisTurn += 1;
   }
   if (!isFree) {
-    state.jackpot.purchaseContributionCoins +=
-      shield.jackpotContributionCoins;
-    state.jackpot.currentCoins += shield.jackpotContributionCoins;
+    const { jackpotCoins: jackpotContributionCoins } =
+      splitGrid9AudienceGiftCoins(shield.costCoins);
+    state.jackpot.purchaseContributionCoins += jackpotContributionCoins;
+    state.jackpot.currentCoins += jackpotContributionCoins;
   }
   state.authority.cooldowns[cooldownKey] = {
     actorKey,
@@ -1674,9 +1702,13 @@ export function markGrid9Connection(
 }
 
 /**
- * Audience (or any non-arsenal path) gifts a catalog arsenal item into a living seat.
- * Debit face cost externally; here: 70% seat bankroll, 30% jackpot, item → inventory (FIFO overflow).
- * Does not remote-detonate — recipient fires on their next active turn from inventory.
+ * Audience gifts a catalog arsenal item onto a living seat.
+ * Debit face cost externally. Here (Alex rulesVersion 2026-08-16.7):
+ * - 100% of face F to seat bankroll / supporters
+ * - Jackpot += floor(F * 0.10) platform match (not skimmed from player)
+ * - Weapons/heals detonate immediately: HP delta = costCoins
+ * - Shields apply shield points immediately (no inventory stock from gifts)
+ * - Knockout: knockoutPayoutFaceCoins = costCoins → tokens at settlement
  */
 export function applyGrid9ArsenalGift(args: {
   state: Grid9GameState;
@@ -1698,11 +1730,15 @@ export function applyGrid9ArsenalGift(args: {
       stateVersion: args.state.authority.stateVersion,
     });
   }
-  const { seatCoins, jackpotCoins } = splitGrid9AudienceGiftCoins(item.costCoins);
+  const faceCoins = Math.max(0, Math.floor(item.costCoins));
+  const { seatCoins, jackpotCoins } = splitGrid9AudienceGiftCoins(faceCoins);
   const state = cloneState(args.state);
   const nextRecipient = state.players[args.recipientSlotIndex];
-  const granted = grantGrid9InventoryItem(nextRecipient.inventory, args.itemId);
-  nextRecipient.inventory = granted.inventory;
+  const healthBefore = nextRecipient.health;
+  let healthAfter = healthBefore;
+  let eliminated = false;
+  let knockoutTokens = 0;
+
   creditSeatBankrollAndSupporters({
     beneficiary: nextRecipient,
     seatCoins,
@@ -1711,11 +1747,57 @@ export function applyGrid9ArsenalGift(args: {
   });
   state.jackpot.currentCoins += jackpotCoins;
   state.jackpot.purchaseContributionCoins += jackpotCoins;
+
+  if (item.kind === 'weapon') {
+    if (item.healHealth > 0) {
+      const maxHp = Math.max(
+        1,
+        Math.floor(Number(nextRecipient.maxHealth) || GRID9_MAX_HEALTH),
+      );
+      const healed = Math.min(faceCoins, Math.max(0, maxHp - nextRecipient.health));
+      nextRecipient.health += healed;
+      healthAfter = nextRecipient.health;
+    } else {
+      const allocation = allocateGrid9Damage({
+        rawDamage: faceCoins,
+        shieldBefore: nextRecipient.shieldPoints,
+        shieldPierceBps: 0,
+      });
+      const healthDamage = Math.min(nextRecipient.health, allocation.healthDamage);
+      nextRecipient.shieldPoints = allocation.shieldAfter;
+      nextRecipient.health = Math.max(0, nextRecipient.health - healthDamage);
+      nextRecipient.stats.damageReceived += healthDamage + allocation.shieldDamage;
+      nextRecipient.lastDamagedAt = now;
+      healthAfter = nextRecipient.health;
+      if (healthAfter <= 0) {
+        eliminated = true;
+        nextRecipient.status = 'eliminated';
+        nextRecipient.mode =
+          nextRecipient.kind === 'human' ? 'sabotage' : 'inactive';
+        nextRecipient.eliminatedAt = now;
+        nextRecipient.eliminatedBy = {
+          kind: 'human',
+          userId: args.sender.userId,
+          publicProfileId: args.sender.publicProfileId,
+          displayName: args.sender.displayName,
+        };
+        nextRecipient.knockoutPayoutFaceCoins = faceCoins;
+        knockoutTokens = knockoutTokensFromFaceCoins(faceCoins);
+      }
+    }
+  } else {
+    nextRecipient.shieldPoints = Math.min(
+      nextRecipient.maxShieldPoints,
+      nextRecipient.shieldPoints + item.shieldPoints,
+    );
+    healthAfter = nextRecipient.health;
+  }
+
   const seatedSender = state.players.find(
     (player): player is Grid9HumanPlayer =>
       player.kind === 'human' && player.userId === args.sender.userId,
   );
-  if (seatedSender) seatedSender.stats.coinsSpent += item.costCoins;
+  if (seatedSender) seatedSender.stats.coinsSpent += faceCoins;
   const isWeapon = item.kind === 'weapon';
   state.lastAction = {
     intentId: args.intentId,
@@ -1733,22 +1815,31 @@ export function applyGrid9ArsenalGift(args: {
     ledgerEntryId: args.ledgerEntryId,
     committedAt: now,
   };
+  const completed = eliminated
+    ? maybeCompleteAfterDamage(state, nowMs)
+    : false;
+  const done = mutationDone(state, args.state, now, completed ? 2 : 1);
   return {
-    state: mutationDone(state, args.state, now, 1),
+    state: done,
     recipientSlotIndex: args.recipientSlotIndex,
     itemId: args.itemId,
-    costCoins: item.costCoins,
+    costCoins: faceCoins,
     seatCoins,
     jackpotCoins,
-    inventoryAfter: granted.inventory,
-    droppedItemId: granted.droppedItemId,
+    inventoryAfter: [...done.players[args.recipientSlotIndex].inventory],
+    droppedItemId: null,
     selfBuy: false,
+    healthBefore,
+    healthAfter,
+    eliminated,
+    knockoutTokens,
+    completed,
   };
 }
 
 /**
  * Combatant self-buy into inventory (not instant fire).
- * Same 70/30 as gifts: 70% stays on own bankroll, 30% jackpot, item stocked for a later turn.
+ * Same gift accounting: 100% of face stays on own bankroll; jackpot += floor(F*0.10) match.
  */
 export function applyGrid9InventoryBuy(args: {
   state: Grid9GameState;
@@ -1818,6 +1909,88 @@ export function applyGrid9InventoryBuy(args: {
     inventoryAfter: granted.inventory,
     droppedItemId: granted.droppedItemId,
     selfBuy: true,
+    healthBefore: nextBuyer.health,
+    healthAfter: nextBuyer.health,
+    eliminated: false,
+    knockoutTokens: 0,
+    completed: false,
+  };
+}
+
+/**
+ * KO buyback: eliminated human pays GRID9_BUYBACK_COST_COINS (debit externally).
+ * 100% of cost → jackpot. Seat revives at full HP / combatant mode.
+ * Clears pending knockout face so settlement does not pay KO tokens after revive.
+ */
+export function applyGrid9Buyback(args: {
+  state: Grid9GameState;
+  userId: string;
+  intentId: string;
+  ledgerEntryId: string;
+  nowMs?: number;
+}): Grid9BuybackResolution {
+  const nowMs = args.nowMs ?? Date.now();
+  const now = iso(nowMs);
+  if (args.state.phase !== 'combat' && args.state.phase !== 'roulette') {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Buyback is only available in combat', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  if (nowMs >= Date.parse(args.state.authority.matchDeadlineAt)) {
+    throw new Grid9Error('MATCH_NOT_ACTIVE', 'Match clock has expired', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  const player = args.state.players.find(
+    (p): p is Grid9HumanPlayer =>
+      p.kind === 'human' && p.userId === args.userId,
+  );
+  if (!player) {
+    throw new Grid9Error('PLAYER_NOT_FOUND', 'No seat for buyback', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  if (player.status !== 'eliminated') {
+    throw new Grid9Error('NOT_ELIGIBLE', 'Only knocked-out players can buy back', {
+      stateVersion: args.state.authority.stateVersion,
+    });
+  }
+  const costCoins = GRID9_BUYBACK_COST_COINS;
+  const state = cloneState(args.state);
+  const next = state.players[player.slotIndex] as Grid9HumanPlayer;
+  next.status = 'alive';
+  next.mode = 'combatant';
+  next.health = GRID9_MAX_HEALTH;
+  next.maxHealth = GRID9_MAX_HEALTH;
+  next.shieldPoints = 0;
+  next.eliminatedAt = null;
+  next.eliminatedBy = null;
+  next.knockoutPayoutFaceCoins = 0;
+  next.lastDamagedAt = null;
+  state.jackpot.currentCoins += costCoins;
+  state.jackpot.purchaseContributionCoins += costCoins;
+  state.lastAction = {
+    intentId: args.intentId,
+    serverOperationId: null,
+    actor: {
+      kind: 'human_player',
+      publicProfileId: next.publicProfileId,
+      displayName: next.displayName,
+    },
+    kind: 'buyback',
+    weaponId: null,
+    shieldId: null,
+    targetSlotIndex: next.slotIndex,
+    affectedSlotIndices: [next.slotIndex],
+    ledgerEntryId: args.ledgerEntryId,
+    committedAt: now,
+  };
+  return {
+    state: mutationDone(state, args.state, now, 1),
+    slotIndex: next.slotIndex,
+    costCoins,
+    jackpotCoins: costCoins,
+    healthAfter: next.health,
   };
 }
 

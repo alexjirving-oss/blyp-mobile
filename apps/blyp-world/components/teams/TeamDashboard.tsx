@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ensureFirebaseFromCognito } from "@/lib/firebaseBridge";
 import {
   teamDeepLink,
@@ -22,6 +22,7 @@ import { DeskBattles } from "./panels/DeskBattles";
 import { DeskLinks } from "./panels/DeskLinks";
 import { DeskBoards } from "./panels/DeskBoards";
 import { DeskRecruit } from "./panels/DeskRecruit";
+import "../hub-neon.css";
 
 export function TeamDashboard({
   team,
@@ -38,6 +39,11 @@ export function TeamDashboard({
   const [toast, setToast] = useState<string | null>(null);
   const tabs = useMemo(() => deskTabsForRole(team.isLeader), [team.isLeader]);
   const [tab, setTab] = useState<DeskTabId>("overview");
+
+  useEffect(() => {
+    const raw = window.location.hash.replace(/^#/, "") as DeskTabId;
+    if (raw && tabs.some((t) => t.id === raw)) setTab(raw);
+  }, [tabs]);
 
   // If role flips (preview toggle), keep tab valid
   const activeTab = tabs.some((t) => t.id === tab) ? tab : "overview";
@@ -96,15 +102,15 @@ export function TeamDashboard({
         <div className="flex min-w-0 items-start gap-3">
           <Avatar name={team.name} photoURL={team.crestUrl} size={52} />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--blyp-teal)]">
+            <p className="hub-kicker">
               {team.isLeader ? "Teams desk · Boss" : "Teams desk · Member"}
             </p>
-            <h1 className="font-display mt-1 truncate text-3xl font-bold tracking-tight md:text-4xl">
+            <h1 className="hub-title" style={{ fontSize: "clamp(1.6rem, 3vw, 2.35rem)" }}>
               {team.name}
             </h1>
-            <p className="mt-1 text-sm text-[var(--blyp-muted)]">
-              Led by {team.leaderName} · {team.memberCount}{" "}
-              {team.memberCount === 1 ? "member" : "members"}
+            <p className="hub-lead" style={{ marginTop: "0.4rem" }}>
+              Led by {team.leaderName} · {team.members.length}{" "}
+              {team.members.length === 1 ? "member" : "members"}
             </p>
           </div>
         </div>
@@ -113,7 +119,8 @@ export function TeamDashboard({
             <button
               type="button"
               onClick={() => setTab("recruit")}
-              className="rounded-lg bg-[var(--blyp-teal)] px-3.5 py-2 text-xs font-bold text-[var(--blyp-ink)]"
+              className="hub-go"
+              style={{ minHeight: "2.2rem", padding: "0 0.9rem", fontSize: "0.75rem" }}
             >
               Invite hosts
             </button>
@@ -121,7 +128,8 @@ export function TeamDashboard({
             <button
               type="button"
               onClick={() => setTab("battles")}
-              className="rounded-lg bg-[var(--blyp-teal)] px-3.5 py-2 text-xs font-bold text-[var(--blyp-ink)]"
+              className="hub-go"
+              style={{ minHeight: "2.2rem", padding: "0 0.9rem", fontSize: "0.75rem" }}
             >
               Open Battles
             </button>
@@ -132,7 +140,8 @@ export function TeamDashboard({
               exportRosterCsv(team);
               showToast("Roster CSV downloaded");
             }}
-            className="rounded-lg border border-[var(--blyp-line)] px-3.5 py-2 text-xs font-semibold"
+            className="hub-ghost"
+            style={{ minHeight: "2.2rem", padding: "0 0.9rem", fontSize: "0.75rem" }}
           >
             Export CSV
           </button>
@@ -141,7 +150,8 @@ export function TeamDashboard({
               type="button"
               onClick={() => void onRefresh()}
               disabled={busy}
-              className="rounded-lg border border-[var(--blyp-line)] px-3.5 py-2 text-xs font-semibold disabled:opacity-50"
+              className="hub-ghost"
+              style={{ minHeight: "2.2rem", padding: "0 0.9rem", fontSize: "0.75rem" }}
             >
               Refresh
             </button>

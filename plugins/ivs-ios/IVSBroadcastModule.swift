@@ -33,6 +33,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
 
     private var role: Role = .idle
     private var currentSessionId: String?
+    private var currentViewerToken: String?
     private var localParticipantId: String?
     private var hasEmittedLocalJoined = false
 
@@ -252,11 +253,23 @@ final class IVSBroadcastModule: RCTEventEmitter {
     // MARK: - Session lifecycle
 
     private func beginSession(role: Role, token: String, sessionId: String, publish: Bool) throws {
+        if role == .viewer,
+           self.role == .viewer,
+           currentSessionId == sessionId,
+           currentViewerToken == token,
+           let existing = stage {
+            try existing.join()
+            forceSystemLoudspeaker(publishing: false, reason: "viewer-rejoin-existing")
+            emit("IVS_BROADCAST_STATE_CHANGED", ["state": "CONNECTING"])
+            return
+        }
+
         // Tear down any prior session first.
         teardownStage(reason: "begin_\(role.rawValue)")
 
         self.role = role
         self.currentSessionId = sessionId
+        if role == .viewer { currentViewerToken = token } else { currentViewerToken = nil }
         self.hasEmittedLocalJoined = false
         self.participantsWithVideo.removeAll()
         BlypIVSRenderRegistry.shared.setCurrentSessionId(sessionId)
@@ -448,6 +461,7 @@ final class IVSBroadcastModule: RCTEventEmitter {
         deviceDiscovery = nil
         role = .idle
         localParticipantId = nil
+        currentViewerToken = nil
         hasEmittedLocalJoined = false
         participantsWithVideo.removeAll()
         BlypIVSRenderRegistry.shared.reset()

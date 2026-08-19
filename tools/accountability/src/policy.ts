@@ -13,6 +13,22 @@ export const CONTROL_PLANE_PATHS = [
   '.accountability/**',
 ] as const;
 
+/** Paths excluded from session worktree reconciliation (build junk / regenerateable artifacts). */
+export const SESSION_RECONCILIATION_EXCLUDES = [
+  '**/.netlify/**',
+  '**/.next/**',
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.turbo/**',
+  '**/coverage/**',
+  '**/.accountability/**',
+  '**/_inspect/**',
+  '**/_inspect/**/**',
+  'apps/blyp-world/public/studio/fx/_inspect/**',
+  'apps/blyp-world/.netlify/**',
+] as const;
+
 export interface PathPolicyResult {
   allowed: boolean;
   normalizedFiles: string[];
@@ -70,6 +86,23 @@ export function globMatches(patternValue: string, fileValue: string): boolean {
 
 function matchesAny(patterns: readonly string[], file: string): boolean {
   return patterns.some((pattern) => globMatches(pattern, file));
+}
+
+export function isExcludedFromSessionReconciliation(fileValue: string): boolean {
+  const file = normalizeRepoPath(fileValue);
+  if (matchesAny(SESSION_RECONCILIATION_EXCLUDES, file)) {
+    return true;
+  }
+  // Segment-level junk that may appear mid-path (e.g. public/studio/fx/_inspect/qa/foo.png).
+  return file.split('/').some((segment) =>
+    segment === '.netlify' ||
+    segment === '.next' ||
+    segment === 'node_modules' ||
+    segment === '.turbo' ||
+    segment === 'coverage' ||
+    segment === '_inspect' ||
+    segment === '.accountability',
+  );
 }
 
 export function evaluateChangedPaths(

@@ -198,6 +198,7 @@ export function createGrid9Sentinel(
     eliminatedAt: null,
     eliminatedBy: null,
     lastDamagedAt: null,
+    knockoutPayoutFaceCoins: 0,
     ai: { ...template.ai },
   };
 }

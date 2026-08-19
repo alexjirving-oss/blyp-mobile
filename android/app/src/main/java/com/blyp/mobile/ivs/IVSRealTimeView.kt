@@ -36,7 +36,7 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         if (sessionId.isNullOrEmpty() || pid.isNullOrEmpty()) return null
         // Do NOT include remoteTrackCount: session-wide track totals change whenever
         // any guest joins/leaves and would force every tile to re-attach (flicker).
-        return "$sessionId|$pid|$slotId"
+        return "$sessionId|$pid|$slotId|g${IVSBroadcastModule.viewerRenderGeneration}"
     }
 
     private fun attemptAttach(reason: String) {
@@ -45,7 +45,6 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         val h = height
         val ready = surfaceReady && surface != null && surface.isValid && w > 0 && h > 0
         val layoutReady = isLaidOut
-        val sessionId = IVSBroadcastModule.getCurrentSessionId()
         val pid = participantId
         val key = attachKey()
         val tracks = remoteTrackCount
@@ -53,15 +52,12 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         val surfaceCreated = surfaceReady
         val streamAssigned = !pid.isNullOrBlank() && tracks > 0
         val didAttach = streamAssigned && ready && key != null && layoutReady && key != lastAttachedKey
-        Log.i(
-            "IVS_TILE_ATTACH",
-            "LOG: IVS_TILE_ATTACH slot=$slotId surfaceCreated=$surfaceCreated streamAssigned=$streamAssigned didAttach=$didAttach"
-        )
-
-        Log.i(
-            "IVS_PROOF",
-            "[ATTACH_DECISION] reason=$reason sessionId=${sessionId ?: "null"} participantId=${pid ?: "null"} slot=$slotId tracks=$tracks surfaceReady=$ready isShown=$isShown layoutReady=$layoutReady size=${w}x${h} surfaceHash=${surfaceHash(surface)} lastKey=${lastAttachedKey ?: "null"} nextKey=${key ?: "null"} zoom=${zoom}"
-        )
+        if (didAttach) {
+            Log.i(
+                "IVS_TILE_ATTACH",
+                "LOG: IVS_TILE_ATTACH slot=$slotId surfaceCreated=$surfaceCreated streamAssigned=$streamAssigned didAttach=$didAttach"
+            )
+        }
 
         if (pid.isNullOrBlank() || tracks <= 0) {
             return
@@ -72,7 +68,6 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         }
 
         if (key == lastAttachedKey) {
-            Log.i("IVS_PROOF", "attachSkipped reason=alreadyAttached key=$key")
             return
         }
 
@@ -162,13 +157,14 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
                     // ignore
                 }
                 surfaceReady = true
-                lastAttachedKey = null
-                FirstFrameProbe.markSurfaceReady(
-                    "viewer",
-                    "surfaceSizeChanged slot=$slotId size=${width}x${height} surfaceHash=${surfaceHash(currentSurface)}"
-                )
                 applyZoomTransform("surfaceSizeChanged")
-                post { attemptAttach("surfaceSizeChanged") }
+                // Do not clear lastAttachedKey: overlay/tray layout ticks used to
+                // rebind EGL here and the Studio watch surface stalled then jumped.
+                if (lastAttachedKey == null) {
+                    post { attemptAttach("surfaceSizeChanged") }
+                } else if (currentSurface != null && currentSurface!!.isValid) {
+                    IVSBroadcastModule.setViewerSlotSurface(slotId, currentSurface, width, height)
+                }
             }
 
             override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {

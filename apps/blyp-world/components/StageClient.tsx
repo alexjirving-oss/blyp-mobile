@@ -15,6 +15,7 @@ import {
   isFollowingUser,
   unfollowUser,
 } from "@/lib/social";
+import "./stage-profile.css";
 
 export function StageClient({ username }: { username: string }) {
   const { session, me, requireAuth } = useAuth();
@@ -130,22 +131,28 @@ export function StageClient({ username }: { username: string }) {
 
   if (missing) {
     return (
-      <div className="mx-auto max-w-lg px-5 py-20 text-center">
-        <p className="font-display text-3xl font-bold">@{username}</p>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          No Stage found for this username yet.
-        </p>
-        {error ? (
-          <p className="mt-2 text-xs text-red-400">{error}</p>
-        ) : null}
+      <div className="stage-web">
+        <div className="stage-web-state">
+          <div className="stage-web-card">
+            <p className="stage-web-kicker">Stage</p>
+            <p className="stage-web-title">@{username}</p>
+            <p className="stage-web-copy">
+              No Stage found for this username yet.
+            </p>
+            {error ? <p className="stage-web-err">{error}</p> : null}
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!stage) {
     return (
-      <div className="mx-auto max-w-lg px-5 py-20 text-center text-sm text-[var(--blyp-muted)]">
-        Loading Stage…
+      <div className="stage-web">
+        <div className="stage-web-state">
+          <div className="stage-web-pulse" aria-hidden />
+          <p className="stage-web-copy">Loading Stage…</p>
+        </div>
       </div>
     );
   }
@@ -153,10 +160,8 @@ export function StageClient({ username }: { username: string }) {
   return (
     <>
       {error ? (
-        <div className="mx-auto max-w-[720px] px-4 pt-3">
-          <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">
-            {error}
-          </p>
+        <div className="stage-web-warn">
+          <p>{error}</p>
         </div>
       ) : null}
       <StageView

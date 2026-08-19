@@ -253,9 +253,9 @@ const isValidFeedPost = (p) => isForYouFeedPost(p);
 const isPlayableVideoPost = (p) => isVideoWithSoundPost(p);
 
 /**
- * For You order: rankPosts via prepareRankedFeed, then ~12% exploration mix,
- * then demote recently-seen off the head (cross-session variety). Fail-open
- * to variety shuffle. Order/prefs only — no player/shorts thrash.
+ * For You order: rankPosts via prepareRankedFeed (recency + creator fatigue
+ * + unseen exploration live inside the ranker), then demote recently-seen
+ * off the head. Fail-open to variety shuffle. Order/prefs only — no player/shorts.
  */
 async function prepareForYouOrder(posts, opts = {}) {
   const candidates = Array.isArray(posts) ? posts : [];
@@ -267,8 +267,6 @@ async function prepareForYouOrder(posts, opts = {}) {
     remember: opts.remember !== false,
     avoidFirstIds: opts.avoidFirstIds,
   };
-  const explorationRate = Number.isFinite(opts.explorationRate) ? opts.explorationRate : 0.12;
-  const finish = (ordered) => demoteAvoidedPosts(ordered, shuffleOpts);
   try {
     const ranked = await prepareRankedFeed(candidates, {
       mode: 'rank',
@@ -278,28 +276,7 @@ async function prepareForYouOrder(posts, opts = {}) {
     if (!ranked?.length) {
       return shufflePostsVaried(candidates, shuffleOpts);
     }
-    const exploreN = Math.max(
-      0,
-      Math.min(ranked.length, Math.round(ranked.length * explorationRate)),
-    );
-    if (exploreN <= 0 || ranked.length < 4) return finish(ranked);
-    const pool = shufflePostsVaried(ranked, { ...shuffleOpts, remember: false });
-    const out = ranked.slice();
-    for (let i = 0; i < exploreN; i += 1) {
-      const src = pool[i % pool.length];
-      if (!src?.id) continue;
-      const swapIdx = Math.min(
-        out.length - 1,
-        Math.max(1, Math.floor(((i + 1) / (exploreN + 1)) * out.length)),
-      );
-      const from = out.findIndex((p) => p?.id === src.id);
-      if (from >= 0 && from !== swapIdx) {
-        const tmp = out[swapIdx];
-        out[swapIdx] = out[from];
-        out[from] = tmp;
-      }
-    }
-    return finish(out);
+    return demoteAvoidedPosts(ranked, shuffleOpts);
   } catch (_) {
     try {
       const withAccount = await attachAccountFeedPriority(candidates);
@@ -579,9 +556,11 @@ const HomeScreen = ({ navigation, route }) => {
   useEffect(() => { ribbonPagesRef.current = ribbonPages; }, [ribbonPages]);
 
   const followingRef = useRef(new Set());
-  // Local impression history — used to prefer unseen / less-recently-seen clips.
+  // Local impression history — recency-ordered (oldest → newest). Move-to-end
+  // on every view so the ranker can penalize just-watched, not a frozen first-seen set.
   const forYouRecentlySeenIdsRef = useRef(new Set());
   const forYouRecentlySeenOrderRef = useRef([]);
+  const forYouRecentlySeenCreatorsRef = useRef([]);
   const prefsRef = useRef(null);
   prefsRef.current = prefs;
 
@@ -591,16 +570,23 @@ const HomeScreen = ({ navigation, route }) => {
       avoidFirstIds: seenOrder.length ? seenOrder : undefined,
       avoidCount: varietyAvoidCount(poolSize, extra.avoidCount),
       remember: extra.remember !== false,
-      explorationRate: 0.12,
       getContext: () => {
         const labels = interestLabels(prefsRef.current?.interests || []);
         const terms = (labels || [])
           .map((t) => String(t || '').trim().toLowerCase())
           .filter(Boolean);
+        const list = randomPostsRef.current || [];
+        const recentOwners = list
+          .slice(-4)
+          .map((p) => String(p?.userId || p?.uid || p?.authorId || '').trim())
+          .filter(Boolean);
         return {
           terms,
           following: followingRef.current || new Set(),
           seenIds: forYouRecentlySeenIdsRef.current || new Set(),
+          seenOrder: forYouRecentlySeenOrderRef.current || [],
+          recentCreators: forYouRecentlySeenCreatorsRef.current || [],
+          recentOwners,
         };
       },
     };
@@ -1577,20 +1563,27 @@ const HomeScreen = ({ navigation, route }) => {
         !forYouAllHasMoreRef.current &&
         (randomPostsRef.current || []).length > 0
       ) {
-        // Corpus exhausted: reshuffle unique clips into a new cycle (new feedKeys)
-        // so scroll continues with a different order — prefer less-recently-seen.
+        // Corpus exhausted: re-rank unique clips (recency + fatigue) into a new
+        // cycle so scroll continues — not the same top-N shuffle of the prior pass.
         forYouCycleRef.current += 1;
         const cycle = forYouCycleRef.current;
-        const continuation = buildCycleContinuation(randomPostsRef.current, {
-          cycle,
-          recentlySeenIds: forYouRecentlySeenOrderRef.current,
-        });
+        const unique = dedupePostsById(randomPostsRef.current);
+        let continuation = await prepareForYouOrder(
+          unique,
+          seenAvoidOpts(unique.length, { remember: true }),
+        );
+        if (!continuation.length) {
+          continuation = buildCycleContinuation(unique, {
+            cycle,
+            recentlySeenIds: forYouRecentlySeenOrderRef.current,
+          });
+        }
         if (continuation.length) {
           const stamped = buildForYouList(continuation, cycle);
           setRandomPosts((prev) => {
             const next = [...(Array.isArray(prev) ? prev : []), ...stamped];
             randomPostsRef.current = next;
-            logForYouInventory('cycle-reshuffle', next);
+            logForYouInventory('cycle-rerank', next);
             return next;
           });
           seedLikeSnapshot(continuation);
@@ -1615,6 +1608,7 @@ const HomeScreen = ({ navigation, route }) => {
     appendFeedPosts,
     buildForYouList,
     seedLikeSnapshot,
+    seenAvoidOpts,
   ]);
 
   // Keep the first screen full even when the opening Firestore page is mostly images.
@@ -1792,13 +1786,20 @@ const HomeScreen = ({ navigation, route }) => {
     viewableItems.forEach((vi) => {
       const p = vi?.item;
       if (!p?.id) return;
-      if (!forYouRecentlySeenIdsRef.current.has(p.id)) {
-        forYouRecentlySeenIdsRef.current.add(p.id);
-        forYouRecentlySeenOrderRef.current.push(p.id);
-        if (forYouRecentlySeenOrderRef.current.length > 200) {
-          const expired = forYouRecentlySeenOrderRef.current.shift();
-          if (expired) forYouRecentlySeenIdsRef.current.delete(expired);
-        }
+      const id = String(p.id);
+      const prevOrder = forYouRecentlySeenOrderRef.current || [];
+      const nextOrder = prevOrder.filter((x) => String(x) !== id);
+      nextOrder.push(id);
+      if (nextOrder.length > 200) {
+        nextOrder.splice(0, nextOrder.length - 200);
+      }
+      forYouRecentlySeenOrderRef.current = nextOrder;
+      forYouRecentlySeenIdsRef.current = new Set(nextOrder);
+      const creator = String(p.userId || p.uid || p.authorId || '').trim();
+      if (creator) {
+        const creators = (forYouRecentlySeenCreatorsRef.current || []).filter((c) => c !== creator);
+        creators.push(creator);
+        forYouRecentlySeenCreatorsRef.current = creators.slice(-24);
       }
       if (uidRef.current) recordForYouSeen(uidRef.current, p.id);
       const authorId = p.userId || p.uid || p.authorId;

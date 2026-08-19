@@ -1,3 +1,5 @@
+import { splitGrid9AudienceGiftCoins } from './constants';
+
 export type Grid9WeaponId = 'arrow' | 'fireball' | 'mega_bomb' | 'kiss';
 export type Grid9ShieldId = 'basic_shield';
 export type Grid9ArsenalItemId = Grid9WeaponId | Grid9ShieldId;
@@ -10,9 +12,14 @@ export interface Grid9Weapon {
   displayName: string;
   description: string;
   costCoins: number;
+  /** Paid purchase jackpot share — matches splitGrid9AudienceGiftCoins().jackpotCoins. */
   jackpotContributionCoins: number;
+  /**
+   * Direct HP damage. Alex: coin amount = health effect.
+   * Engine also enforces directDamage = costCoins for paid/gift resolve.
+   */
   directDamage: number;
-  /** When > 0, weapon heals the target seat instead of dealing damage. */
+  /** When > 0, weapon heals the target seat by coin face (healHealth = costCoins). */
   healHealth: number;
   adjacentDamage: number;
   splashPattern: Grid9SplashPattern;
@@ -33,15 +40,19 @@ export interface Grid9Shield {
   turnCooldownTurns: number;
 }
 
+function jackpotShare(cost: number): number {
+  return splitGrid9AudienceGiftCoins(cost).jackpotCoins;
+}
+
 export const GRID9_WEAPON_CATALOG = {
   arrow: {
     id: 'arrow',
     kind: 'weapon',
     displayName: 'Arrow',
-    description: 'A fast direct strike against one surviving box.',
+    description: 'Direct strike — damage equals coin face (10).',
     costCoins: 10,
-    jackpotContributionCoins: 5,
-    directDamage: 20,
+    jackpotContributionCoins: jackpotShare(10),
+    directDamage: 10,
     healHealth: 0,
     adjacentDamage: 0,
     splashPattern: 'none',
@@ -53,12 +64,12 @@ export const GRID9_WEAPON_CATALOG = {
     id: 'fireball',
     kind: 'weapon',
     displayName: 'Fireball',
-    description: 'A strike that scorches orthogonally adjacent boxes.',
+    description: 'Direct strike equal to coin face (25); light orthogonal splash.',
     costCoins: 25,
-    jackpotContributionCoins: 12,
-    directDamage: 40,
+    jackpotContributionCoins: jackpotShare(25),
+    directDamage: 25,
     healHealth: 0,
-    adjacentDamage: 10,
+    adjacentDamage: 5,
     splashPattern: 'orthogonal',
     shieldPierceBps: 0,
     cooldownMs: 30_000,
@@ -68,10 +79,10 @@ export const GRID9_WEAPON_CATALOG = {
     id: 'mega_bomb',
     kind: 'weapon',
     displayName: 'Mega Bomb',
-    description: 'A major single-target blast.',
+    description: 'Major blast — damage equals coin face (50).',
     costCoins: 50,
-    jackpotContributionCoins: 25,
-    directDamage: 60,
+    jackpotContributionCoins: jackpotShare(50),
+    directDamage: 50,
     healHealth: 0,
     adjacentDamage: 0,
     splashPattern: 'none',
@@ -83,12 +94,11 @@ export const GRID9_WEAPON_CATALOG = {
     id: 'kiss',
     kind: 'weapon',
     displayName: 'Kiss',
-    description: 'A support gift that restores +20 HP to one surviving box (capped at max HP).',
-    /** Cheap support gift — between Arrow and Shield; 50% to jackpot like Arrow. */
+    description: 'Heal gift — restores HP equal to coin face (12).',
     costCoins: 12,
-    jackpotContributionCoins: 6,
+    jackpotContributionCoins: jackpotShare(12),
     directDamage: 0,
-    healHealth: 20,
+    healHealth: 12,
     adjacentDamage: 0,
     splashPattern: 'none',
     shieldPierceBps: 0,
@@ -104,7 +114,7 @@ export const GRID9_SHIELD_CATALOG = {
     displayName: 'Shield',
     description: 'Adds 30 shield points to one surviving box, up to the shield cap.',
     costCoins: 15,
-    jackpotContributionCoins: 8,
+    jackpotContributionCoins: jackpotShare(15),
     shieldPoints: 30,
     cooldownMs: 0,
     turnCooldownTurns: 0,

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { GridSlot } from "../store/StudioStateContext";
 import { RollingNumber } from "../ui/RollingNumber";
+import { BombStrikeStage } from "../fx/BombStrikeLayer";
 
 type Props = {
   activeMode: "JUST_CHATTING" | "GRID9";
@@ -16,7 +17,7 @@ type Props = {
 /**
  * Clean Feed only — no Spin / Kick / Promote / director chrome.
  * Director HUD lives in CenterStage overlays; this mirrors viewer layout.
- * IVS publish uses canvas capture (useStreamCapture), not html2canvas of this DOM.
+ * Local PIP only — IVS Stage publishes camera/screen tracks, not this DOM.
  */
 export function BroadcastComposite({
   activeMode,
@@ -86,28 +87,34 @@ export function BroadcastComposite({
               {spotlight?.displayName ? ` · ${spotlight.displayName}` : ""}
             </div>
           </div>
-          <div className="blyp-studio-clean-grid">
-            {gridSlots.map((slot) => (
-              <div
-                key={slot.index}
-                className={`blyp-studio-clean-cell ${
-                  slot.index === spotlightSlot ? "is-spotlight-target" : ""
-                } ${slot.kind === "empty" ? "is-empty" : ""}`}
-              >
-                {slot.index === 1 && slot.kind === "host" ? (
-                  <div className="flex h-full w-full items-center justify-center bg-black text-[10px] text-[var(--blyp-muted)]">
-                    HOST
+          <BombStrikeStage className="blyp-studio-clean-grid-wrap">
+            <div className="blyp-studio-clean-grid">
+              {gridSlots.map((slot) => (
+                <div
+                  key={slot.index}
+                  data-bomb-cell={slot.index - 1}
+                  className={`blyp-studio-clean-cell ${
+                    slot.index === spotlightSlot ? "is-spotlight-target" : ""
+                  } ${slot.kind === "empty" ? "is-empty" : ""}`}
+                >
+                  {slot.index === 1 && slot.kind === "host" ? (
+                    <div className="flex h-full w-full items-center justify-center bg-black text-[10px] text-[var(--blyp-muted)]">
+                      HOST
+                    </div>
+                  ) : (
+                    <CleanSlotFace slot={slot} />
+                  )}
+                  <div className="blyp-studio-grid-meta">
+                    <span>S{slot.index}</span>
+                    <span>
+                      HP {slot.health}/1000
+                      {slot.knockedOut ? " · KO" : ""}
+                    </span>
                   </div>
-                ) : (
-                  <CleanSlotFace slot={slot} />
-                )}
-                <div className="blyp-studio-grid-meta">
-                  <span>S{slot.index}</span>
-                  <span>HP {slot.health}</span>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </BombStrikeStage>
         </>
       )}
     </div>

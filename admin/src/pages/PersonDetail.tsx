@@ -506,14 +506,21 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 }
 
 function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
-  const { can } = useAuth();
+  const { can, role } = useAuth();
   const canCredit = can("economy.credit");
+  const canCreditGems = canCredit && role === "owner";
   const [coins, setCoins] = useState("");
   const [reason, setReason] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [gems, setGems] = useState("1000");
+  const [gemReason, setGemReason] = useState("owner_launch_test_withdraw");
+  const [gemConfirming, setGemConfirming] = useState(false);
+  const [gemBusy, setGemBusy] = useState(false);
+  const [gemMsg, setGemMsg] = useState<string | null>(null);
+  const [gemErr, setGemErr] = useState<string | null>(null);
   const dual = useAsync<{ dualControlUi?: { creditCoinsWarnAt: number; note: string } }>(
     () => api.get("/admin/ops/control-plane"),
     [],
@@ -557,6 +564,44 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
     }
   }
 
+  const gemAmount = Math.floor(Number(gems));
+  const validGems = Number.isFinite(gemAmount) && gemAmount >= 1 && gemAmount <= 5000;
+
+  async function submitGems() {
+    if (!canCreditGems) {
+      setGemErr("Launch-test gem credit is Owner-only");
+      return;
+    }
+    if (!validGems) return;
+    setGemBusy(true); setGemErr(null); setGemMsg(null);
+    try {
+      const idempotencyKey =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `admin-gem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const res = await api.post<{
+        gemsCredited: number;
+        gemAvailable: number;
+        gemPending?: number;
+        ledgerId?: string;
+        replay?: boolean;
+      }>(`/admin/users/${encodeURIComponent(u.userId)}/credit-gems`, {
+        gems: gemAmount,
+        reason: gemReason || undefined,
+        idempotencyKey,
+      });
+      setGemMsg(
+        `${res.replay ? "Replay — " : ""}Credited ${res.gemsCredited.toLocaleString()} withdrawable gems. Available: ${res.gemAvailable.toLocaleString()}.${res.ledgerId ? ` Ledger: ${res.ledgerId}` : ""}`,
+      );
+      setGemConfirming(false);
+      reload();
+    } catch (e) {
+      setGemErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setGemBusy(false);
+    }
+  }
+
   if (!canCredit) {
     return (
       <div className="card stack">
@@ -569,6 +614,7 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   }
 
   return (
+    <div className="stack" style={{ gap: 16 }}>
     <div className="card stack">
       <h3 className="panel-title">Wallet · add bonus coins</h3>
       <p className="dim" style={{ fontSize: 12.5, marginTop: 0, lineHeight: 1.5 }}>
@@ -614,6 +660,59 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
           </div>
         </div>
       )}
+    </div>
+
+    {canCreditGems ? (
+      <div className="card stack">
+        <h3 className="panel-title">Wallet · launch-test gems (withdrawable)</h3>
+        <p className="dim" style={{ fontSize: 12.5, marginTop: 0, lineHeight: 1.5 }}>
+          Owner-only. Credits <strong>gem_available</strong> (cashable). Does <em>not</em> credit purchased coins.
+          Cap 5,000 per request. Use this so cash-out can be tested without a 7-day gift hold.
+        </p>
+        {gemMsg && <div style={{ color: "var(--success)", fontSize: 13 }}>{gemMsg}</div>}
+        {gemErr && <ErrorNote>{gemErr}</ErrorNote>}
+        <div className="row" style={{ gap: 12 }}>
+          <div className="grow">
+            <label>Gems to add</label>
+            <input
+              type="number"
+              min={1}
+              max={5000}
+              value={gems}
+              onChange={(e) => { setGems(e.target.value); setGemConfirming(false); }}
+              placeholder="1000"
+            />
+          </div>
+          <div className="grow">
+            <label>Reason</label>
+            <input value={gemReason} onChange={(e) => setGemReason(e.target.value)} placeholder="Recorded in audit log" />
+          </div>
+        </div>
+        {!gemConfirming ? (
+          <button className="btn" disabled={!validGems} onClick={() => { setGemErr(null); setGemMsg(null); setGemConfirming(true); }}>
+            Add withdrawable gems
+          </button>
+        ) : (
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Confirm crediting <strong>{gemAmount.toLocaleString()}</strong> withdrawable gems to {u.displayName || u.username || u.userId}.
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn" disabled={gemBusy} onClick={submitGems}>
+                {gemBusy ? "Crediting…" : "Confirm & add gems"}
+              </button>
+              <button className="btn ghost" disabled={gemBusy} onClick={() => setGemConfirming(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    ) : (
+      <InfoNote>
+        Launch-test gem credit is Owner-only. Bonus coins above are spendable but never withdrawable.
+      </InfoNote>
+    )}
     </div>
   );
 }

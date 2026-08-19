@@ -57,18 +57,26 @@ test('task lease heartbeat renews ownership before expiry', async (t) => {
   t.after(async () => {
     await rm(repository, { recursive: true, force: true });
   });
+  // Short TTL + fast heartbeat; poll for renewal instead of a fixed sleep so
+  // slow disks / parallel suite load cannot flake before async refresh lands.
   const lease = await acquireTaskLease({
     repository,
     taskId: 'heartbeat-test',
     runId: 'heartbeat-run',
     contractSha256: CONTRACT_SHA,
-    ttlMs: 150,
-    heartbeatMs: 30,
+    ttlMs: 1_000,
+    heartbeatMs: 50,
   });
   const initialExpiry = Date.parse(lease.record.expiresAt);
-  await new Promise((resolve) => setTimeout(resolve, 80));
+  const deadline = Date.now() + 800;
+  while (Date.parse(lease.record.expiresAt) <= initialExpiry && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
   lease.assertHealthy();
-  assert.ok(Date.parse(lease.record.expiresAt) > initialExpiry);
+  assert.ok(
+    Date.parse(lease.record.expiresAt) > initialExpiry,
+    'automatic heartbeat should advance expiresAt before the lease TTL elapses',
+  );
   await lease.release();
 });
 

@@ -1,13 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { runSearch, type SearchResults } from "@/lib/search";
+import "./search-page.css";
+
+type Tab = "all" | "people" | "videos" | "teams";
+
+const EMPTY: SearchResults = { users: [], posts: [], teams: [] };
 
 function formatCount(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return String(n);
+}
+
+function syncQueryParam(term: string) {
+  try {
+    const url = new URL(window.location.href);
+    if (term) url.searchParams.set("q", term);
+    else url.searchParams.delete("q");
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    const now = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (next !== now) window.history.replaceState({}, "", next);
+  } catch {
+    /* ignore */
+  }
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden
+    >
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m16 16 4 4" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export function SearchClient() {
@@ -16,204 +51,266 @@ export function SearchClient() {
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("all");
+
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get("q");
+      if (q) setQuery(q);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(query.trim()), 280);
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const search = useCallback(async (term: string) => {
-    if (term.length < 2) {
+  useEffect(() => {
+    syncQueryParam(debounced);
+  }, [debounced]);
+
+  useEffect(() => {
+    if (debounced.length < 2) {
       setResults(null);
       setError(null);
       setLoading(false);
       return;
     }
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    try {
-      const next = await runSearch(term);
-      setResults(next);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Search failed");
-      setResults({ users: [], posts: [], teams: [] });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    void (async () => {
+      try {
+        const next = await runSearch(debounced);
+        if (!cancelled) setResults(next);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Search failed");
+          setResults(EMPTY);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced]);
 
-  useEffect(() => {
-    void search(debounced);
-  }, [debounced, search]);
+  const submit = useCallback((e: FormEvent) => {
+    e.preventDefault();
+    setDebounced(query.trim());
+  }, [query]);
 
+  const counts = useMemo(() => {
+    const users = results?.users.length || 0;
+    const posts = results?.posts.length || 0;
+    const teams = results?.teams.length || 0;
+    return { users, posts, teams, all: users + posts + teams };
+  }, [results]);
+
+  const showPeople = tab === "all" || tab === "people";
+  const showVideos = tab === "all" || tab === "videos";
+  const showTeams = tab === "all" || tab === "teams";
+  const idle = debounced.length === 0;
+  const tooShort = debounced.length > 0 && debounced.length < 2;
   const empty =
-    results &&
-    !results.users.length &&
-    !results.posts.length &&
-    !results.teams.length;
+    !!results &&
+    !loading &&
+    ((tab === "all" && counts.all === 0) ||
+      (tab === "people" && counts.users === 0) ||
+      (tab === "videos" && counts.posts === 0) ||
+      (tab === "teams" && counts.teams === 0));
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 pb-24 md:px-8">
-      <header className="mb-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--blyp-teal)]">
-          Discover
-        </p>
-        <h1 className="font-display mt-1 text-3xl font-bold">Search</h1>
-        <p className="mt-2 text-sm text-[var(--blyp-muted)]">
-          People, videos, and teams — same Firestore data as the app.
-        </p>
-      </header>
+    <div className="search-page">
+      <div className="search-page-inner">
+        <header className="search-hero">
+          <p className="search-kicker">Discover</p>
+          <h1>Search</h1>
+          <p className="search-hero-copy">
+            People, videos, and teams — live Firestore, same as the app.
+          </p>
+          <form className="search-field" onSubmit={submit} role="search">
+            <SearchIcon />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Search blyp"
+              aria-label="Search people, videos, and teams"
+            />
+          </form>
+          {error ? (
+            <p className="search-status is-error">{error}</p>
+          ) : loading ? (
+            <p className="search-status">Searching live results…</p>
+          ) : tooShort ? (
+            <p className="search-status">Type at least 2 characters.</p>
+          ) : null}
+        </header>
 
-      <form
-        className="relative"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void search(query.trim());
-        }}
-      >
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoFocus
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="Search @username, caption, team…"
-          className="w-full rounded-2xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] px-5 py-3.5 text-[15px] text-[var(--blyp-fog)] outline-none ring-[var(--blyp-teal)] placeholder:text-[var(--blyp-muted)] focus:ring-2"
-        />
-      </form>
+        {results && !idle && !tooShort ? (
+          <div className="search-tabs" role="tablist" aria-label="Result type">
+            {(
+              [
+                ["all", "All", counts.all],
+                ["people", "People", counts.users],
+                ["videos", "Videos", counts.posts],
+                ["teams", "Teams", counts.teams],
+              ] as const
+            ).map(([id, label, n]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                className={`search-tab${tab === id ? " is-on" : ""}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+                <span className="search-tab-n">{n}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
-      {error ? (
-        <p className="mt-6 text-sm text-[var(--blyp-rose)]">{error}</p>
-      ) : null}
+        {loading ? (
+          <section className="search-card" aria-hidden>
+            <div className="search-pulse" style={{ width: "28%", marginBottom: 14 }} />
+            <div className="search-pulse" style={{ width: "72%", marginBottom: 10 }} />
+            <div className="search-pulse" style={{ width: "54%" }} />
+          </section>
+        ) : null}
 
-      {loading ? (
-        <p className="mt-8 text-sm text-[var(--blyp-muted)]">Searching…</p>
-      ) : null}
+        {idle && !loading ? (
+          <section className="search-card">
+            <div className="search-idle">
+              <div className="search-idle-mark">
+                <SearchIcon />
+              </div>
+              <div className="search-empty">
+                <strong>Type to search</strong>
+                <p>At least 2 characters. Matches come from live users, posts, and teams.</p>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
-      {!loading && debounced.length > 0 && debounced.length < 2 ? (
-        <p className="mt-8 text-sm text-[var(--blyp-muted)]">
-          Type at least 2 characters.
-        </p>
-      ) : null}
+        {!loading && empty ? (
+          <section className="search-card">
+            <div className="search-empty">
+              <strong>No matches</strong>
+              <p>
+                Nothing in live data for “{debounced}”
+                {tab !== "all" ? ` in ${tab}` : ""}.
+              </p>
+            </div>
+          </section>
+        ) : null}
 
-      {!loading && empty ? (
-        <p className="mt-8 text-sm text-[var(--blyp-muted)]">
-          No matches for “{debounced}”.
-        </p>
-      ) : null}
+        {results && !loading ? (
+          <>
+            {showPeople && results.users.length ? (
+              <section className="search-card">
+                <div className="search-card-head">
+                  <h2>People</h2>
+                  <span>{results.users.length}</span>
+                </div>
+                <ul className="search-people">
+                  {results.users.map((u) => (
+                    <li key={u.id}>
+                      <Link
+                        href={`/u/${encodeURIComponent(u.username)}`}
+                        className="search-row"
+                      >
+                        {u.photoURL ? (
+                          <span className="search-avatar">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={u.photoURL} alt="" />
+                          </span>
+                        ) : (
+                          <span className="search-avatar">
+                            {(u.username || "U").slice(0, 1).toUpperCase()}
+                          </span>
+                        )}
+                        <span className="search-row-copy">
+                          <p className="search-row-title">{u.displayName}</p>
+                          <p className="search-row-meta">@{u.username}</p>
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
 
-      {results && !loading ? (
-        <div className="mt-8 space-y-10">
-          {results.users.length ? (
-            <section>
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--blyp-muted)]">
-                People
-              </h2>
-              <ul className="divide-y divide-[var(--blyp-line)] rounded-2xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)]">
-                {results.users.map((u) => (
-                  <li key={u.id}>
+            {showVideos && results.posts.length ? (
+              <section className="search-card">
+                <div className="search-card-head">
+                  <h2>Videos</h2>
+                  <span>{results.posts.length}</span>
+                </div>
+                <div className="search-clips">
+                  {results.posts.map((p) => (
                     <Link
-                      href={`/u/${encodeURIComponent(u.username)}`}
-                      className="flex items-center gap-3 px-4 py-3 transition hover:bg-white/[0.03]"
+                      key={p.id}
+                      href={`/v/${encodeURIComponent(p.id)}`}
+                      className="search-clip"
                     >
-                      {u.photoURL ? (
+                      {p.posterUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={u.photoURL}
-                          alt=""
-                          className="h-11 w-11 rounded-full object-cover"
-                        />
+                        <img src={p.posterUrl} alt="" />
                       ) : (
-                        <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)]">
-                          {(u.username || "U").slice(0, 1).toUpperCase()}
+                        <div className="search-clip-fallback">
+                          {p.caption.slice(0, 80) || `@${p.username}`}
                         </div>
                       )}
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold">
-                          {u.displayName}
-                        </p>
-                        <p className="truncate text-sm text-[var(--blyp-muted)]">
-                          @{u.username}
-                        </p>
+                      <div className="search-clip-meta">
+                        <p>@{p.username}</p>
+                        <span>♥ {formatCount(p.likes)}</span>
                       </div>
                     </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
-          {results.posts.length ? (
-            <section>
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--blyp-muted)]">
-                Videos
-              </h2>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {results.posts.map((p) => (
-                  <Link
-                    key={p.id}
-                    href={`/v/${encodeURIComponent(p.id)}`}
-                    className="group relative aspect-[9/16] overflow-hidden rounded-xl bg-black"
-                  >
-                    {p.posterUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={p.posterUrl}
-                        alt=""
-                        className="h-full w-full object-cover transition group-hover:scale-[1.03]"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center bg-gradient-to-b from-[#1a1a22] to-black p-3 text-center text-xs text-[var(--blyp-muted)]">
-                        {p.caption.slice(0, 80) || `@${p.username}`}
-                      </div>
-                    )}
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2.5 pt-10">
-                      <p className="truncate text-xs font-semibold text-white">
-                        @{p.username}
-                      </p>
-                      <p className="mt-0.5 text-[11px] text-white/75">
-                        ♥ {formatCount(p.likes)}
-                      </p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {results.teams.length ? (
-            <section>
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--blyp-muted)]">
-                Teams
-              </h2>
-              <ul className="divide-y divide-[var(--blyp-line)] rounded-2xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)]">
-                {results.teams.map((t) => (
-                  <li key={t.id}>
-                    <Link
-                      href="/teams"
-                      className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-white/[0.03]"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold">{t.name}</p>
-                        <p className="truncate text-sm text-[var(--blyp-muted)]">
-                          {t.leaderName}
-                          {t.memberCount
-                            ? ` · ${t.memberCount} members`
-                            : ""}
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-xs font-semibold text-[var(--blyp-teal)]">
-                        Open
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </div>
-      ) : null}
+            {showTeams && results.teams.length ? (
+              <section className="search-card">
+                <div className="search-card-head">
+                  <h2>Teams</h2>
+                  <span>{results.teams.length}</span>
+                </div>
+                <ul className="search-teams">
+                  {results.teams.map((t) => (
+                    <li key={t.id}>
+                      <Link href="/teams" className="search-row">
+                        <span className="search-avatar">
+                          {t.name.slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="search-row-copy">
+                          <p className="search-row-title">{t.name}</p>
+                          <p className="search-row-meta">
+                            {t.leaderName}
+                            {t.memberCount ? ` · ${t.memberCount} members` : ""}
+                          </p>
+                        </span>
+                        <span className="search-row-go">Open</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

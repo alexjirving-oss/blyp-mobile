@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ForYouPlayer } from "./ForYouPlayer";
 import { fetchForYouFeed, fetchPostById, type FeedPost } from "@/lib/feed";
+import "./foryou-web.css";
 
 export function ForYouClient({ startId }: { startId?: string }) {
   const [posts, setPosts] = useState<FeedPost[] | null>(null);
@@ -36,44 +37,57 @@ export function ForYouClient({ startId }: { startId?: string }) {
 
   if (error) {
     return (
-      <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center px-5 text-center">
-        <p className="font-display text-2xl font-bold">Couldn’t load For You</p>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">{error}</p>
-        <button
-          type="button"
-          className="mt-6 rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
-          onClick={() => window.location.reload()}
-        >
-          Retry
-        </button>
+      <div className="fy-web">
+        <div className="fy-web-state">
+          <div className="fy-web-state-card">
+            <p className="fy-web-kicker">For You</p>
+            <p className="fy-web-title">Couldn’t load For You</p>
+            <p className="fy-web-copy">{error}</p>
+            <button
+              type="button"
+              className="fy-web-go"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!posts) {
     return (
-      <div className="flex h-full items-center justify-center bg-black">
-        <div className="h-8 w-8 animate-pulse rounded-full bg-[var(--blyp-teal)]/40" />
+      <div className="fy-web">
+        <div className="fy-web-state">
+          <div className="fy-web-pulse" aria-hidden />
+        </div>
       </div>
     );
   }
 
   if (!posts.length) {
     return (
-      <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center px-5 text-center">
-        <p className="font-display text-2xl font-bold">No videos yet</p>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          The feed is empty right now. Browse Explore while creators post.
-        </p>
-        <Link
-          href="/explore"
-          className="mt-6 inline-flex rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
-        >
-          Open Explore
-        </Link>
+      <div className="fy-web">
+        <div className="fy-web-state">
+          <div className="fy-web-state-card">
+            <p className="fy-web-kicker">For You</p>
+            <p className="fy-web-title">No videos yet</p>
+            <p className="fy-web-copy">
+              The feed is empty right now. Browse Explore while creators post.
+            </p>
+            <Link href="/explore" className="fy-web-go">
+              Open Explore
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
-  return <ForYouPlayer initialPosts={posts} startId={startId} />;
+  return (
+    <div className="fy-web">
+      <ForYouPlayer initialPosts={posts} startId={startId} />
+    </div>
+  );
 }

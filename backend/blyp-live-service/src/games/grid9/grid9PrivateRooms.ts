@@ -241,6 +241,7 @@ function joinHumanIntoPrivateLobby(
     eliminatedAt: null,
     eliminatedBy: null,
     lastDamagedAt: null,
+    knockoutPayoutFaceCoins: 0,
     queueTicketId: `private-join-${intentId}`,
     sponsorPassId: null,
   } satisfies Grid9HumanPlayer;

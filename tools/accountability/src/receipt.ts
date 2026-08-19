@@ -520,11 +520,13 @@ export async function digestTouchedFiles(
       if (metadata.isSymbolicLink() || !metadata.isFile()) {
         throw new Error(`Touched path is not a regular file: ${relativePath}`);
       }
+      // Read once so bytes + sha256 come from the same snapshot (avoids size/hash TOCTOU).
+      const contents = await readFile(absolute);
       evidence.push({
         path: relativePath,
         exists: true,
-        sha256: await sha256File(absolute),
-        bytes: metadata.size,
+        sha256: sha256(contents),
+        bytes: contents.byteLength,
       });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -534,6 +536,65 @@ export async function digestTouchedFiles(
     }
   }
   return evidence;
+}
+
+export function diffTouchedFileEvidence(
+  expected: TouchedFileEvidence[],
+  actual: TouchedFileEvidence[],
+): string[] {
+  const diffs: string[] = [];
+  const actualByPath = new Map(actual.map((file) => [file.path, file]));
+  for (const file of expected) {
+    const current = actualByPath.get(file.path);
+    if (!current) {
+      diffs.push(`${file.path}: missing on disk`);
+      continue;
+    }
+    actualByPath.delete(file.path);
+    if (
+      current.exists !== file.exists ||
+      current.sha256 !== file.sha256 ||
+      current.bytes !== file.bytes
+    ) {
+      diffs.push(
+        `${file.path}: expected ${file.exists ? `${file.bytes}b/${file.sha256}` : 'absent'} ` +
+          `got ${current.exists ? `${current.bytes}b/${current.sha256}` : 'absent'}`,
+      );
+    }
+  }
+  for (const pathValue of actualByPath.keys()) {
+    diffs.push(`${pathValue}: unexpected path in live digest`);
+  }
+  return diffs;
+}
+
+/**
+ * Digest touched files, then re-digest until two consecutive snapshots match.
+ * Concurrent editors can change already-dirty files without altering `git status
+ * --porcelain`, so sealing must wait for a quiet content window.
+ */
+export async function digestTouchedFilesUntilStable(
+  repository: string,
+  values: string[],
+  options: { maxAttempts?: number; settleDelayMs?: number } = {},
+): Promise<TouchedFileEvidence[]> {
+  const maxAttempts = options.maxAttempts ?? 8;
+  const settleDelayMs = options.settleDelayMs ?? 150;
+  let previous: TouchedFileEvidence[] | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const current = await digestTouchedFiles(repository, values);
+    if (previous !== null && canonicalJson(previous) === canonicalJson(current)) {
+      return current;
+    }
+    previous = current;
+    if (attempt < maxAttempts && settleDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, settleDelayMs));
+    }
+  }
+  throw new Error(
+    'Touched-file evidence did not stabilize before receipt seal ' +
+      `(concurrent writes still in flight after ${maxAttempts} attempts)`,
+  );
 }
 
 export interface ReceiptValidationOptions {
@@ -603,7 +664,12 @@ export async function readAndValidateVerificationReceipt(
       receipt.touchedFiles.files.map((file) => file.path),
     );
     if (canonicalJson(currentFiles) !== canonicalJson(receipt.touchedFiles.files)) {
-      throw new Error('Verification receipt touched-file evidence is stale');
+      const diffs = diffTouchedFileEvidence(receipt.touchedFiles.files, currentFiles);
+      const detail = diffs.slice(0, 12).join('; ');
+      throw new Error(
+        `Verification receipt touched-file evidence is stale` +
+          (detail.length > 0 ? ` (${detail})` : ''),
+      );
     }
   }
 

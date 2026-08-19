@@ -44,3 +44,23 @@ export async function startLocalPreview(
     },
   };
 }
+
+/** Display capture (game / desktop) — fail-soft at the call site. */
+export async function startScreenShare(): Promise<LocalPreviewHandle> {
+  if (typeof window === "undefined") {
+    throw new Error("Screen share only runs in the browser");
+  }
+  if (typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+    throw new Error("Screen share is not available in this browser");
+  }
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: { frameRate: { ideal: 30 } },
+    audio: false,
+  });
+  return {
+    stream,
+    stop: () => {
+      stream.getTracks().forEach((t) => t.stop());
+    },
+  };
+}

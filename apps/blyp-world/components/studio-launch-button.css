@@ -1,0 +1,106 @@
+/* Studio launch CTA — mock red Live Studio / Go Live energy. */
+
+button.blyp-studio-launch,
+a.blyp-studio-launch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 2.25rem;
+  padding: 0 1.05rem 0 0.8rem;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(98deg, #ff3d8a 0%, #fe2c55 52%, #ff4b3d 100%);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.16) inset,
+    0 8px 22px rgba(254, 44, 85, 0.42);
+  transition:
+    filter 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+button.blyp-studio-launch:hover,
+a.blyp-studio-launch:hover {
+  background: linear-gradient(98deg, #ff58a0 0%, #ff3b63 50%, #ff6350 100%);
+  filter: brightness(1.06);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.22) inset,
+    0 10px 28px rgba(254, 44, 85, 0.55);
+}
+
+button.blyp-studio-launch:active,
+a.blyp-studio-launch:active {
+  transform: translateY(1px);
+  filter: brightness(0.97);
+}
+
+button.blyp-studio-launch:focus-visible,
+a.blyp-studio-launch:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.blyp-studio-launch-compact {
+  height: 1.85rem;
+  padding: 0 0.75rem 0 0.55rem;
+  font-size: 0.6875rem;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.14) inset,
+    0 6px 16px rgba(254, 44, 85, 0.36);
+}
+
+.blyp-studio-launch-lg {
+  height: 2.75rem;
+  padding: 0 1.25rem 0 1rem;
+  border-radius: 12px;
+  font-size: 0.9375rem;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+    0 12px 28px rgba(254, 44, 85, 0.48);
+}
+
+.blyp-studio-launch-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.28);
+  animation: blyp-studio-launch-pulse 1.6s ease-in-out infinite;
+}
+
+.blyp-studio-launch-wave {
+  flex-shrink: 0;
+  display: block;
+  color: #fff;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
+}
+
+@keyframes blyp-studio-launch-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.28);
+  }
+  50% {
+    opacity: 0.72;
+    box-shadow: 0 0 0 6px rgba(255, 255, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blyp-studio-launch-dot {
+    animation: none;
+  }
+}

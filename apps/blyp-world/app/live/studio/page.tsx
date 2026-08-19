@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { LiveStudioClient } from "@/components/LiveStudioClient";
 
 export const metadata: Metadata = {
-  title: "LIVE Studio — Host operator desk",
+  title: "LIVE Studio — Host booth",
   description:
-    "Create LIVE sessions, share watch links, manage guests, track gifts, and go on air from the Blyp app.",
+    "Blyp LIVE Studio — sources, guests, chat, gifts, Go LIVE.",
 };
 
 export default function LiveStudioPage() {

@@ -6,7 +6,8 @@ import { fetchFollowingPosts, type FeedPost } from "@/lib/feed";
 import { getFollowingIds } from "@/lib/social";
 import { ensureFirebaseFromCognito } from "@/lib/firebaseBridge";
 import { useAuth } from "./AuthProvider";
-import { ForYouPlayer } from "./ForYouPlayer";
+import { ExploreFollowingGrid } from "./ExploreFollowingGrid";
+import "./explore-following.css";
 
 export function FollowingClient() {
   const { session, loading, requireAuth } = useAuth();
@@ -52,81 +53,109 @@ export function FollowingClient() {
 
   if (loading || posts === null) {
     return (
-      <div className="mx-auto flex h-[calc(100dvh-4rem)] max-w-[480px] items-center justify-center">
-        <p className="text-sm text-[var(--blyp-muted)]">Loading Following…</p>
+      <div className="neon-feed is-follow">
+        <div className="neon-feed-status">
+          <p>Loading Following…</p>
+        </div>
       </div>
     );
   }
 
   if (!session) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <h1 className="font-display text-3xl font-bold">Following</h1>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          Log in to watch posts from accounts you follow.
-        </p>
-        <Link
-          href="/login"
-          className="mt-8 inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-bold text-[var(--blyp-ink)]"
-        >
-          Log in
-        </Link>
+      <div className="neon-feed is-follow">
+        <section className="neon-feed-hero">
+          <p className="neon-feed-kicker">Following</p>
+          <h1>Log in to watch</h1>
+          <p className="neon-feed-lede">
+            Log in to watch posts from accounts you follow.
+          </p>
+          <div className="neon-feed-actions">
+            <Link href="/login" className="neon-feed-btn is-teal">
+              Log in
+            </Link>
+          </div>
+        </section>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <p className="font-display text-2xl font-bold">Couldn’t load Following</p>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">{error}</p>
+      <div className="neon-feed is-follow">
+        <section className="neon-feed-panel">
+          <p className="neon-feed-kicker">Following</p>
+          <h1>Couldn’t load Following</h1>
+          <p className="neon-feed-lede">{error}</p>
+        </section>
       </div>
     );
   }
 
   if (!followingCount) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <h1 className="font-display text-3xl font-bold">No follows yet</h1>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          Follow creators on Stage or For You — their videos show up here.
-        </p>
-        <div className="mt-8 flex justify-center gap-3">
-          <Link
-            href="/explore"
-            className="rounded-full border border-[var(--blyp-line)] px-5 py-2.5 text-sm font-semibold"
-          >
-            Explore
-          </Link>
-          <Link
-            href="/foryou"
-            className="rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
-          >
-            For You
-          </Link>
-        </div>
+      <div className="neon-feed is-follow">
+        <section className="neon-feed-hero">
+          <p className="neon-feed-kicker">Following</p>
+          <h1>No follows yet</h1>
+          <p className="neon-feed-lede">
+            Follow creators on Stage or For You — their videos show up here.
+          </p>
+          <div className="neon-feed-actions">
+            <Link href="/explore" className="neon-feed-btn is-ghost">
+              Explore
+            </Link>
+            <Link href="/foryou" className="neon-feed-btn is-teal">
+              For You
+            </Link>
+          </div>
+        </section>
       </div>
     );
   }
 
   if (!posts.length) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <h1 className="font-display text-3xl font-bold">Nothing new</h1>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          You’re following {followingCount}{" "}
-          {followingCount === 1 ? "account" : "accounts"}, but none have recent
-          videos in the feed window.
-        </p>
-        <Link
-          href="/friends"
-          className="mt-8 inline-flex rounded-full border border-[var(--blyp-line)] px-5 py-2.5 text-sm font-semibold"
-        >
-          Open Friends
-        </Link>
+      <div className="neon-feed is-follow">
+        <section className="neon-feed-hero">
+          <p className="neon-feed-kicker">Following</p>
+          <h1>Nothing new</h1>
+          <p className="neon-feed-lede">
+            You’re following {followingCount}{" "}
+            {followingCount === 1 ? "account" : "accounts"}, but none have recent
+            videos in the feed window.
+          </p>
+          <div className="neon-feed-actions">
+            <Link href="/friends" className="neon-feed-btn is-ghost">
+              Open Friends
+            </Link>
+          </div>
+        </section>
       </div>
     );
   }
 
-  return <ForYouPlayer initialPosts={posts} />;
+  return (
+    <div className="neon-feed is-follow">
+      <section className="neon-feed-hero">
+        <p className="neon-feed-kicker">Following</p>
+        <h1>From people you follow</h1>
+        <p className="neon-feed-lede">
+          Recent videos from accounts you follow.
+        </p>
+        <div className="neon-feed-chips">
+          <span className="neon-feed-chip">
+            <span className="neon-feed-chip-dot" />
+            {followingCount} {followingCount === 1 ? "account" : "accounts"}
+          </span>
+          <span className="neon-feed-chip">
+            {posts.length} {posts.length === 1 ? "video" : "videos"}
+          </span>
+        </div>
+      </section>
+      <div className="neon-feed-grid-wrap">
+        <ExploreFollowingGrid posts={posts} />
+      </div>
+    </div>
+  );
 }

@@ -34,6 +34,7 @@ export type Grid9ClientIntentType =
   | 'FUND_MERCENARY'
   | 'SEND_ARSENAL_GIFT'
   | 'BUY_INVENTORY_ITEM'
+  | 'BUYBACK'
   | 'REQUEST_SNAPSHOT'
   | 'MATCH_LEAVE'
   | 'PING';
@@ -50,6 +51,7 @@ export type Grid9ServerEventType =
   | 'SHIELD_RESOLVED'
   | 'MERCENARY_FUNDED'
   | 'ARSENAL_GRANTED'
+  | 'PLAYER_BUYBACK'
   | 'TURN_ADVANCED'
   | 'TURN_TICK'
   | 'ROULETTE_START'
@@ -192,6 +194,11 @@ export interface Grid9BuyInventoryItemPayload {
   itemId: Grid9WeaponId | Grid9ShieldId;
 }
 
+/** Confirm buyback at GRID9_BUYBACK_COST_COINS (server-authoritative price). */
+export interface Grid9BuybackPayload {
+  confirm: true;
+}
+
 export interface Grid9RequestSnapshotPayload {
   lastSeenStateVersion: number | null;
   lastSeenSequence: number | null;
@@ -293,6 +300,10 @@ export type Grid9BuyInventoryItemIntent = Grid9MatchCommandEnvelope<
   'BUY_INVENTORY_ITEM',
   Grid9BuyInventoryItemPayload
 >;
+export type Grid9BuybackIntent = Grid9MatchCommandEnvelope<
+  'BUYBACK',
+  Grid9BuybackPayload
+>;
 export type Grid9RequestSnapshotIntent = Grid9MatchAdmissionIntentEnvelope<
   'REQUEST_SNAPSHOT',
   Grid9RequestSnapshotPayload
@@ -346,6 +357,7 @@ export type Grid9ClientIntent =
   | Grid9FundMercenaryIntent
   | Grid9SendArsenalGiftIntent
   | Grid9BuyInventoryItemIntent
+  | Grid9BuybackIntent
   | Grid9RequestSnapshotIntent
   | Grid9PingIntent;
 
@@ -467,6 +479,10 @@ export interface Grid9ArsenalGrantedPayload {
   inventoryAfter: Array<Grid9WeaponId | Grid9ShieldId>;
   receipt: Grid9PublicPurchaseReceipt;
   jackpotTotalCoins: number;
+  healthBefore: number;
+  healthAfter: number;
+  eliminated: boolean;
+  knockoutTokens: number;
 }
 
 export interface Grid9TurnAdvancedPayload {
@@ -505,6 +521,16 @@ export interface Grid9PlayerEliminatedPayload {
   humanEnteredSabotageMode: boolean;
 }
 
+export interface Grid9PlayerBuybackPayload {
+  slotIndex: Grid9SlotIndex;
+  userPublicProfileId: string;
+  displayName: string;
+  costCoins: number;
+  jackpotCoins: number;
+  jackpotTotalCoins: number;
+  healthAfter: number;
+}
+
 export interface Grid9PlayerConnectionChangedPayload {
   slotIndex: Grid9SlotIndex;
   connectionState: 'connected' | 'reconnecting' | 'disconnected';
@@ -516,7 +542,7 @@ export interface Grid9PlayerConnectionChangedPayload {
 export interface Grid9JackpotChangedPayload {
   jackpot: Grid9PublicJackpotState;
   deltaCoins: number;
-  reason: 'purchase' | 'opening_rollover' | 'payout' | 'rollover';
+  reason: 'purchase' | 'opening_rollover' | 'payout' | 'rollover' | 'buyback';
 }
 
 export interface Grid9MatchCompletedPayload {
@@ -638,6 +664,10 @@ export type Grid9PlayerEliminatedEvent = Grid9RoomServerEventEnvelope<
   'PLAYER_ELIMINATED',
   Grid9PlayerEliminatedPayload
 >;
+export type Grid9PlayerBuybackEvent = Grid9RoomServerEventEnvelope<
+  'PLAYER_BUYBACK',
+  Grid9PlayerBuybackPayload
+>;
 export type Grid9PlayerConnectionChangedEvent =
   Grid9RoomServerEventEnvelope<
     'PLAYER_CONNECTION_CHANGED',
@@ -688,6 +718,7 @@ export type Grid9RoomServerEvent =
   | Grid9MicroDropResolvedEvent
   | Grid9PlayerConnectionChangedEvent
   | Grid9PlayerEliminatedEvent
+  | Grid9PlayerBuybackEvent
   | Grid9JackpotChangedEvent
   | Grid9MatchCompletedEvent;
 

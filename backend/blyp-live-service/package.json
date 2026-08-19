@@ -13,12 +13,13 @@
     "worker:start": "node ./scripts/not-implemented.cjs worker:start",
     "migrate": "npm run build && node dist/scripts/ensureSchemaCli.js",
     "migrate:rollback": "node ./scripts/not-implemented.cjs migrate:rollback",
-    "test": "npm run build && node --test dist/auth/cognitoClaims.test.js dist/auth/cognitoSub.test.js dist/battles/battleFirestoreMirror.test.js dist/battles/battleLifecycle.test.js dist/economy/withdrawalGuard.test.js dist/economy/connectStatus.test.js dist/economy/postGiftNotification.test.js dist/economy/creatorInsightsService.test.js dist/economy/houseGamePrizeMint.test.js dist/economy/tokenToCoinConvert.test.js dist/economy/treasureChestLogic.test.js dist/games/grid9/contracts.test.js dist/games/grid9/grid9Backend.test.js dist/games/grid9/grid9Engine.test.js dist/games/grid9/grid9MatchDirectory.test.js dist/games/marble/engine.test.js dist/games/frenemies/frenemiesEconomy.test.js dist/games/frenemies/frenemiesDefaults.test.js dist/games/frenemies/frenemiesSeatQueue.test.js dist/games/reactionDuel/reactionDuelEngine.test.js dist/games/reactionDuel/reactionDuelEconomy.test.js dist/live/guestSlotAllocator.test.js dist/live/liveDisplayName.test.js",
+    "test": "npm run build && node --test dist/auth/cognitoClaims.test.js dist/auth/cognitoSub.test.js dist/battles/battleFirestoreMirror.test.js dist/battles/battleLifecycle.test.js dist/economy/withdrawalGuard.test.js dist/economy/connectStatus.test.js dist/economy/postGiftNotification.test.js dist/economy/creatorInsightsService.test.js dist/economy/houseGamePrizeMint.test.js dist/economy/tokenToCoinConvert.test.js dist/economy/treasureChestLogic.test.js dist/games/grid9/contracts.test.js dist/games/grid9/grid9Backend.test.js dist/games/grid9/grid9Engine.test.js dist/games/grid9/grid9MatchDirectory.test.js dist/games/marble/engine.test.js dist/games/frenemies/frenemiesEconomy.test.js dist/games/frenemies/frenemiesDefaults.test.js dist/games/frenemies/frenemiesSeatQueue.test.js dist/games/reactionDuel/reactionDuelEngine.test.js dist/games/reactionDuel/reactionDuelEconomy.test.js dist/live/guestSlotAllocator.test.js dist/live/liveDisplayName.test.js dist/live/programEgress.test.js dist/live/broadcastPrepare.test.js dist/live/tiktokRoomRead.test.js dist/routes/liveProgramPublicRoutes.test.js dist/internal/ivsProgramInternal.test.js",
     "lint": "echo 'add eslint if needed'"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1006.0",
     "@aws-sdk/client-dynamodb": "^3.624.0",
+    "@aws-sdk/client-ivs": "^3.1112.0",
     "@aws-sdk/client-ivs-realtime": "^3.624.0",
     "@aws-sdk/lib-dynamodb": "^3.624.0",
     "@socket.io/redis-adapter": "^8.3.0",
@@ -36,7 +37,9 @@
     "pino": "^9.4.0",
     "socket.io": "^4.8.1",
     "stripe": "^17.4.0",
+    "tiktok-live-connector": "^2.4.3",
     "uuid": "^9.0.1",
+    "ws": "^8.21.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -46,6 +49,7 @@
     "@types/node": "^20.10.6",
     "@types/pg": "^8.11.10",
     "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.18.1",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }

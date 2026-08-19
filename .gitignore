@@ -200,6 +200,9 @@ scripts/forensics/
 forensic/
 __pycache__/
 _inspect*.py
+# Local FX / rembg inspect dumps (regenerateable; must not inflate session reconciliation)
+apps/blyp-world/public/studio/**/_inspect/
+apps/blyp-world/public/studio/fx/_inspect/
 _measure_shots.py
 build_dossier*.py
 build_dossier*.py.bak*

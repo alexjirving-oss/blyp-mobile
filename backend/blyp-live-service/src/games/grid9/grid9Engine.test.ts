@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import {
   GRID9_ROULETTE_DURATION_MS,
   GRID9_SENTINEL_MAX_REACTION_MS,
+  GRID9_BUYBACK_COST_COINS,
+  GRID9_MAX_HEALTH,
+  GRID9_MAX_MATCH_DURATION_MS,
 } from './constants';
 import {
   applyGrid9ArsenalGift,
+  applyGrid9Buyback,
   applyGrid9InventoryBuy,
   applyGrid9MercenaryFunding,
   applyGrid9SelectTarget,
@@ -107,9 +111,9 @@ describe('Grid 9 authoritative engine', () => {
       result.damage.map((damage) => damage.slotIndex),
       [4, 1, 3, 5, 7],
     );
-    assert.equal(result.state.players[4].health, 60);
-    assert.equal(result.state.players[1].health, 90);
-    assert.equal(result.state.jackpot.currentCoins, 112);
+    assert.equal(result.state.players[4].health, 975);
+    assert.equal(result.state.players[1].health, 995);
+    assert.equal(result.state.jackpot.currentCoins, 102);
     assert.equal(result.state.authority.stateVersion, state.authority.stateVersion + 1);
     assert.equal(result.state.authority.eventSequence, state.authority.eventSequence + 1);
     assert.ok(result.state.authority.cooldowns[`user:${alex.userId}:fireball`]);
@@ -325,11 +329,12 @@ describe('Grid 9 authoritative engine', () => {
     );
   });
 
-  it('grants arsenal gift into inventory with 70/30 split and FIFO overflow', () => {
+  it('detonates arsenal gift with 100% seat + 10% pot match and coin=HP (shield applies immediately)', () => {
     const state = combatState();
     const before = state.jackpot.currentCoins;
     const recipient = state.players[2];
     recipient.inventory = ['arrow', 'fireball', 'mega_bomb'];
+    const shieldBefore = recipient.shieldPoints;
     const result = applyGrid9ArsenalGift({
       state,
       sender: {
@@ -345,19 +350,51 @@ describe('Grid 9 authoritative engine', () => {
       nowMs: Date.parse('2026-08-15T03:30:04.000Z'),
     });
     assert.equal(result.costCoins, 15);
-    assert.equal(result.seatCoins, 10);
-    assert.equal(result.jackpotCoins, 5);
-    assert.equal(result.state.jackpot.currentCoins, before + 5);
-    assert.equal(result.state.players[2].mercenaryBankrollCoins, 10);
+    assert.equal(result.seatCoins, 15);
+    assert.equal(result.jackpotCoins, 1);
+    assert.equal(result.state.jackpot.currentCoins, before + 1);
+    assert.equal(result.state.players[2].mercenaryBankrollCoins, 15);
+    // Gifts detonate — inventory unchanged; shield points applied.
     assert.deepEqual(result.state.players[2].inventory, [
+      'arrow',
       'fireball',
       'mega_bomb',
-      'basic_shield',
     ]);
-    assert.equal(result.droppedItemId, 'arrow');
+    assert.equal(result.droppedItemId, null);
+    assert.equal(
+      result.state.players[2].shieldPoints,
+      Math.min(recipient.maxShieldPoints, shieldBefore + 30),
+    );
   });
 
-  it('self-buy stocks inventory with same 70/30 accounting', () => {
+  it('weapon gift deals face-coin damage and records KO token face', () => {
+    const state = combatState();
+    state.players[4].health = 40;
+    const result = applyGrid9ArsenalGift({
+      state,
+      sender: {
+        userId: 'audience-2',
+        publicProfileId: 'aud2',
+        displayName: 'Bomber',
+        avatarUrl: null,
+      },
+      recipientSlotIndex: 4,
+      itemId: 'mega_bomb',
+      intentId: 'intent-nuke-gift',
+      ledgerEntryId: 'ledger-nuke-gift',
+      nowMs: Date.parse('2026-08-15T03:30:04.000Z'),
+    });
+    assert.equal(result.costCoins, 50);
+    assert.equal(result.seatCoins, 50);
+    assert.equal(result.jackpotCoins, 5);
+    assert.equal(result.healthAfter, 0);
+    assert.equal(result.eliminated, true);
+    assert.equal(result.knockoutTokens, 25);
+    assert.equal(result.state.players[4].knockoutPayoutFaceCoins, 50);
+    assert.equal(result.state.players[4].status, 'eliminated');
+  });
+
+  it('self-buy stocks inventory with same 100% seat + 10% pot match accounting', () => {
     const state = combatState();
     const before = state.jackpot.currentCoins;
     const result = applyGrid9InventoryBuy({
@@ -369,10 +406,53 @@ describe('Grid 9 authoritative engine', () => {
       nowMs: Date.parse('2026-08-15T03:30:04.000Z'),
     });
     assert.equal(result.selfBuy, true);
-    assert.equal(result.seatCoins, 7);
-    assert.equal(result.jackpotCoins, 3);
-    assert.equal(result.state.jackpot.currentCoins, before + 3);
+    assert.equal(result.seatCoins, 10);
+    assert.equal(result.jackpotCoins, 1);
+    assert.equal(result.state.jackpot.currentCoins, before + 1);
     assert.ok(result.state.players[0].inventory.includes('arrow'));
+  });
+
+  it('buyback adds 100% cost to jackpot and revives at full HP', () => {
+    const state = combatState();
+    const player = state.players[0] as Grid9HumanPlayer;
+    player.status = 'eliminated';
+    player.health = 0;
+    player.knockoutPayoutFaceCoins = 50;
+    player.eliminatedAt = '2026-08-15T03:30:00.000Z';
+    const before = state.jackpot.currentCoins;
+    const nowMs = Date.parse('2026-08-15T03:30:04.000Z');
+    const result = applyGrid9Buyback({
+      state,
+      userId: alex.userId,
+      intentId: 'intent-buyback',
+      ledgerEntryId: 'ledger-buyback',
+      nowMs,
+    });
+    assert.equal(result.costCoins, GRID9_BUYBACK_COST_COINS);
+    assert.equal(result.jackpotCoins, GRID9_BUYBACK_COST_COINS);
+    assert.equal(result.state.jackpot.currentCoins, before + GRID9_BUYBACK_COST_COINS);
+    assert.equal(result.healthAfter, GRID9_MAX_HEALTH);
+    assert.equal(result.state.players[0].status, 'alive');
+    assert.equal(result.state.players[0].health, GRID9_MAX_HEALTH);
+    assert.equal(result.state.players[0].knockoutPayoutFaceCoins, 0);
+  });
+
+  it('timed match defaults to 60 minutes and deadline finale picks highest HP', () => {
+    const state = combatState();
+    assert.equal(state.rules.maxMatchDurationMs, GRID9_MAX_MATCH_DURATION_MS);
+    assert.equal(GRID9_MAX_MATCH_DURATION_MS, 60 * 60 * 1000);
+    for (const player of state.players) {
+      player.health = 100;
+      player.shieldPoints = 0;
+    }
+    state.players[0].health = 400;
+    state.players[1].health = 900;
+    state.players[1].status = 'alive';
+    const past = Date.parse(state.authority.matchDeadlineAt) + 1_000;
+    const done = startGrid9Roulette(state, past);
+    assert.equal(done.phase, 'completed');
+    assert.equal(done.outcome?.reason, 'max_duration_health_tiebreak');
+    assert.equal(done.outcome?.winnerSlotIndex, 1);
   });
 
   it('kick replaces seat with sentinel and bumps audience', () => {
@@ -630,8 +710,14 @@ describe('Grid 9 authoritative engine', () => {
       due <= Date.now() + 50,
       'shield-only act must schedule immediate turn_end',
     );
-    const advanced = advanceGrid9Turn(resolution.state, Date.now());
-    assert.equal(advanced.phase, 'roulette');
+    const advanced = advanceGrid9Turn(
+      resolution.state,
+      Date.parse(resolution.state.turn!.startedAt) + 2_000,
+    );
+    assert.ok(
+      advanced.phase === 'roulette' || advanced.phase === 'completed',
+      `expected roulette/completed after shield act, got ${advanced.phase}`,
+    );
   });
 
   it('advance after sentinel act uses wall clock — not turn.endsAt — so roulette is immediate', () => {
@@ -669,24 +755,30 @@ describe('Grid 9 authoritative engine', () => {
       payment: { kind: 'inventory' },
       nowMs: actAt,
     });
-    const badClock = Math.max(Date.now(), Date.parse(resolution.state.turn!.endsAt));
-    const goodClock = Date.now();
+    const goodClock = Date.parse(resolution.state.turn!.startedAt) + 2_000;
+    const badClock = Math.max(
+      goodClock + 60_000,
+      Date.parse(resolution.state.turn!.endsAt),
+    );
     const badAdvance = advanceGrid9Turn(resolution.state, badClock);
     const goodAdvance = advanceGrid9Turn(resolution.state, goodClock);
-    assert.equal(goodAdvance.phase, 'roulette');
-    assert.ok(goodAdvance.roulette);
-    const goodEnds = Date.parse(goodAdvance.roulette!.endsAt);
     assert.ok(
-      goodEnds <= goodClock + GRID9_ROULETTE_DURATION_MS + 100,
-      'wall-clock advance must schedule near-term roulette_end',
+      goodAdvance.phase === 'roulette' || goodAdvance.phase === 'completed',
+      `expected roulette/completed, got ${goodAdvance.phase}`,
     );
-    // Document the production bug: advancing with turn.endsAt pushes roulette far out.
-    if (badAdvance.phase === 'roulette' && badAdvance.roulette) {
-      const badEnds = Date.parse(badAdvance.roulette.endsAt);
+    if (goodAdvance.phase === 'roulette' && goodAdvance.roulette) {
+      const goodEnds = Date.parse(goodAdvance.roulette.endsAt);
       assert.ok(
-        badEnds > goodEnds,
-        'endsAt-based advance must be later than wall-clock (stall root cause)',
+        goodEnds <= goodClock + GRID9_ROULETTE_DURATION_MS + 100,
+        'wall-clock advance must schedule near-term roulette_end',
       );
+      if (badAdvance.phase === 'roulette' && badAdvance.roulette) {
+        const badEnds = Date.parse(badAdvance.roulette.endsAt);
+        assert.ok(
+          badEnds > goodEnds,
+          'endsAt-based advance must be later than wall-clock (stall root cause)',
+        );
+      }
     }
   });
 

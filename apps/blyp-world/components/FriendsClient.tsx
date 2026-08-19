@@ -10,6 +10,7 @@ import {
   type SocialProfile,
 } from "@/lib/social";
 import { useAuth } from "./AuthProvider";
+import "./hub-neon.css";
 
 type Tab = "friends" | "following";
 
@@ -18,24 +19,14 @@ function Avatar({ profile }: { profile: SocialProfile }) {
     .slice(0, 1)
     .toUpperCase();
   return (
-    <div className="relative shrink-0">
+    <div className="hub-avatar hub-avatar-lg">
       {profile.photoURL ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={profile.photoURL}
-          alt=""
-          className="h-12 w-12 rounded-full object-cover"
-        />
+        <img src={profile.photoURL} alt="" />
       ) : (
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)]">
-          {letter}
-        </div>
+        <span>{letter}</span>
       )}
-      {profile.isLive ? (
-        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-red-500 px-1 text-[9px] font-bold uppercase tracking-wide text-white">
-          Live
-        </span>
-      ) : null}
+      {profile.isLive ? <span className="hub-live">LIVE</span> : null}
     </div>
   );
 }
@@ -89,33 +80,44 @@ export function FriendsClient() {
 
   if (loading || friends === null || following === null) {
     return (
-      <div className="px-6 py-16 text-sm text-[var(--blyp-muted)]">
-        Loading Friends…
+      <div className="hub">
+        <p className="hub-kicker">Social</p>
+        <h1 className="hub-title">Friends</h1>
+        <p className="hub-load">Loading your follows…</p>
       </div>
     );
   }
 
   if (!session) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <h1 className="font-display text-3xl font-bold">Friends</h1>
-        <p className="mt-3 text-sm text-[var(--blyp-muted)]">
-          Log in to see mutual follows and people you follow.
+      <div className="hub">
+        <p className="hub-kicker">Social</p>
+        <h1 className="hub-title">Friends</h1>
+        <p className="hub-lead">
+          Mutual follows and people you follow — same graph as the Blyp app.
         </p>
-        <Link
-          href="/login"
-          className="mt-8 inline-flex rounded-full bg-[var(--blyp-teal)] px-6 py-3 text-sm font-bold text-[var(--blyp-ink)]"
-        >
-          Log in
-        </Link>
+        <div className="hub-card">
+          <div className="hub-empty">
+            <div className="hub-empty-stage">
+              <span>SIGNED OUT</span>
+            </div>
+            <h2>Log in to see friends</h2>
+            <p>Nothing is listed here until your account loads.</p>
+            <Link href="/login" className="hub-go">
+              Log in
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="mx-auto max-w-md px-5 py-20 text-center">
-        <p className="text-sm text-red-300">{error}</p>
+      <div className="hub">
+        <p className="hub-kicker">Social</p>
+        <h1 className="hub-title">Friends</h1>
+        <p className="hub-err">{error}</p>
       </div>
     );
   }
@@ -123,55 +125,58 @@ export function FriendsClient() {
   const list = tab === "friends" ? friends : following;
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-6 pb-24 md:px-6">
-      <header className="mb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--blyp-teal)]">
-          Social
-        </p>
-        <h1 className="font-display mt-1 text-3xl font-bold">Friends</h1>
-        <p className="mt-2 text-sm text-[var(--blyp-muted)]">
-          Friends are mutual follows. Following is everyone you follow.
+    <div className="hub">
+      <header>
+        <p className="hub-kicker">Social</p>
+        <h1 className="hub-title">Friends</h1>
+        <p className="hub-lead">
+          Friends are mutual follows. Following is everyone you follow. Counts
+          come from your graph — not placeholders.
         </p>
       </header>
 
-      <div className="mb-5 flex gap-2">
+      <div className="hub-tabs">
         {(
           [
-            ["friends", `Friends (${friends.length})`],
-            ["following", `Following (${following.length})`],
+            ["friends", "Friends", friends.length],
+            ["following", "Following", following.length],
           ] as const
-        ).map(([key, label]) => (
+        ).map(([key, label, count]) => (
           <button
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              tab === key
-                ? "bg-[var(--blyp-teal)] text-[var(--blyp-ink)]"
-                : "border border-[var(--blyp-line)] text-[var(--blyp-fog)]"
-            }`}
+            className={`hub-tab${tab === key ? " is-on" : ""}`}
           >
             {label}
+            {count > 0 ? <span className="hub-count">{count}</span> : null}
           </button>
         ))}
       </div>
 
       {!list.length ? (
-        <div className="rounded-2xl border border-[var(--blyp-line)] px-5 py-10 text-center">
-          <p className="text-sm text-[var(--blyp-muted)]">
-            {tab === "friends"
-              ? "No mutual follows yet. Follow someone who follows you back."
-              : "You’re not following anyone yet."}
-          </p>
-          <Link
-            href="/explore"
-            className="mt-5 inline-flex rounded-full bg-[var(--blyp-teal)] px-5 py-2.5 text-sm font-bold text-[var(--blyp-ink)]"
-          >
-            Find people on Explore
-          </Link>
+        <div className="hub-card">
+          <div className="hub-empty">
+            <div className="hub-empty-stage">
+              <span>{tab === "friends" ? "NO MUTUALS" : "NONE YET"}</span>
+            </div>
+            <h2>
+              {tab === "friends"
+                ? "No mutual follows yet"
+                : "You’re not following anyone"}
+            </h2>
+            <p>
+              {tab === "friends"
+                ? "When someone you follow follows you back, they show up here."
+                : "Follow people from Explore or a Stage. This list stays empty until you do."}
+            </p>
+            <Link href="/explore" className="hub-go">
+              Find people on Explore
+            </Link>
+          </div>
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--blyp-line)] border-y border-[var(--blyp-line)]">
+        <ul className="hub-card hub-list">
           {list.map((profile) => (
             <li key={profile.userId}>
               <Link
@@ -180,16 +185,14 @@ export function FriendsClient() {
                     ? `/live/${encodeURIComponent(profile.liveStreamId)}`
                     : `/u/${encodeURIComponent(profile.username)}`
                 }
-                className="flex items-center gap-3 px-1 py-3.5 transition hover:bg-white/[0.03]"
+                className="hub-row"
               >
                 <Avatar profile={profile} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold">{profile.displayName}</p>
-                  <p className="truncate text-sm text-[var(--blyp-muted)]">
-                    @{profile.username}
-                  </p>
+                <div className="hub-row-copy">
+                  <p className="hub-row-name">{profile.displayName}</p>
+                  <p className="hub-row-meta">@{profile.username}</p>
                 </div>
-                <span className="text-xs text-[var(--blyp-muted)]">
+                <span className="hub-row-aside">
                   {profile.isLive ? "Watch" : "Stage"}
                 </span>
               </Link>

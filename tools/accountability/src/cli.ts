@@ -201,15 +201,17 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(
-    JSON.stringify(
-      {
-        status: 'BLOCKED',
-        error: error instanceof Error ? error.message : String(error),
-      },
-      null,
-      2,
-    ),
+  // Always emit machine-readable JSON on stdout so stop-hook parsers never see empty body.
+  const payload = JSON.stringify(
+    {
+      valid: false,
+      status: 'BLOCKED',
+      error: error instanceof Error ? error.message : String(error),
+    },
+    null,
+    2,
   );
+  console.log(payload);
+  console.error(payload);
   process.exitCode = 4;
 });

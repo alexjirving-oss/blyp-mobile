@@ -126,7 +126,9 @@ function ActionButton({
     <button
       type="button"
       onClick={onClick}
-      className="group flex flex-col items-center gap-0.5"
+      className={`group fy-action flex flex-col items-center gap-0.5${
+        accent ? " fy-action-gift" : ""
+      }`}
       aria-label={label}
     >
       <span
@@ -153,7 +155,7 @@ function CreatorAvatar({
   photoURL?: string | null;
 }) {
   return (
-    <span className="relative mb-1 flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)] shadow-lg">
+    <span className="fy-avatar relative mb-1 flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-[var(--blyp-teal)] text-sm font-bold text-[var(--blyp-ink)] shadow-lg">
       {photoURL ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={photoURL} alt="" className="h-full w-full object-cover" />
@@ -662,7 +664,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
   return (
     <div
       ref={scrollerRef}
-      className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black"
+      className="fy-player relative flex h-full w-full items-center justify-center overflow-hidden bg-black"
       onPointerDown={unlockAudio}
     >
       <PeekStrip
@@ -685,7 +687,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
       {/* Composed column: tall stage + rail glued + chevrons (TikTok desktop density). */}
       <div className="relative z-[2] flex h-full max-h-full w-full items-center justify-center px-0 md:gap-3 md:px-3 md:py-2 lg:gap-4">
         <div
-          className={`relative h-full w-full shrink-0 overflow-hidden bg-black transition-transform duration-200 md:h-[min(100dvh-1rem,960px)] md:w-auto md:max-h-full md:aspect-[9/16] md:rounded-lg md:shadow-[0_0_0_1px_rgba(255,255,255,0.08)] ${
+          className={`fy-stage relative h-full w-full shrink-0 overflow-hidden bg-black transition-transform duration-200 md:h-[min(100dvh-1rem,960px)] md:w-auto md:max-h-full md:aspect-[9/16] md:rounded-lg md:shadow-[0_0_0_1px_rgba(255,255,255,0.08)] ${
             slideDir === 1
               ? "translate-y-[-4px] md:translate-y-[-6px]"
               : slideDir === -1
@@ -755,7 +757,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
               unlockAudio();
               go(-1);
             }}
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 backdrop-blur transition hover:bg-white/20 disabled:opacity-30"
+            className="fy-chev flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 backdrop-blur transition hover:bg-white/20 disabled:opacity-30"
           >
             <IconChevron dir="up" />
           </button>
@@ -767,7 +769,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
               unlockAudio();
               go(1);
             }}
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 backdrop-blur transition hover:bg-white/20 disabled:opacity-30"
+            className="fy-chev flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 backdrop-blur transition hover:bg-white/20 disabled:opacity-30"
           >
             <IconChevron dir="down" />
           </button>
@@ -781,7 +783,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
             unlockedAudio.current = true;
             setMuted(false);
           }}
-          className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/20 backdrop-blur md:top-5"
+          className="fy-unmute absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/20 backdrop-blur md:top-5"
         >
           Tap for sound
         </button>
@@ -797,7 +799,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
       ) : null}
 
       {giftsOpen ? (
-        <div className="absolute inset-x-0 bottom-14 z-20 border-t border-white/10 bg-[rgba(7,7,10,0.96)] p-4 backdrop-blur-md md:bottom-4 md:left-1/2 md:max-w-[420px] md:-translate-x-1/2 md:rounded-2xl md:border">
+        <div className="fy-gifts absolute inset-x-0 bottom-14 z-20 border-t border-white/10 bg-[rgba(7,7,10,0.96)] p-4 backdrop-blur-md md:bottom-4 md:left-1/2 md:max-w-[420px] md:-translate-x-1/2 md:rounded-2xl md:border">
           <div className="mb-3 flex items-center justify-between">
             <p className="text-sm font-semibold">Send a gift</p>
             <button
@@ -815,7 +817,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
                 type="button"
                 disabled={giftBusy}
                 onClick={() => void onGift(g)}
-                className="rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] px-2 py-3 text-center transition hover:border-[var(--blyp-teal)] disabled:opacity-50"
+                className="fy-gift-tile rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] px-2 py-3 text-center transition hover:border-[var(--blyp-teal)] disabled:opacity-50"
               >
                 <div className="text-xl">{g.emoji || "✦"}</div>
                 <div className="mt-1 text-[11px] font-semibold">{g.name}</div>
@@ -829,7 +831,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
       ) : null}
 
       {toast ? (
-        <div className="absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-full bg-[var(--blyp-teal)] px-4 py-2 text-sm font-semibold text-[var(--blyp-ink)]">
+        <div className="fy-toast absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-full bg-[var(--blyp-teal)] px-4 py-2 text-sm font-semibold text-[var(--blyp-ink)]">
           {toast}
         </div>
       ) : null}

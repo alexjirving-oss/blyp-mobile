@@ -60,37 +60,42 @@ export function DeskOverview({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 divide-x divide-y divide-[var(--blyp-line)] overflow-hidden rounded-xl border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
-        <Kpi label="Roster" value={String(team.memberCount)} />
+      <div className="grid grid-cols-2 overflow-hidden rounded-[20px] bg-[#12121a] shadow-[0_0_0_1px_var(--blyp-line)] sm:grid-cols-3 lg:grid-cols-6">
+        <Kpi label="Roster" value={String(team.members.length)} />
         <Kpi
           label="Who’s live"
-          value={String(team.liveNowCount)}
-          hint="Across your roster"
+          value={liveMembers.length ? String(liveMembers.length) : "—"}
+          hint={liveMembers.length ? "Across your roster" : "Nobody live"}
         />
         <Kpi
           label="Hours this week"
           value={hoursWeek != null ? fmt(hoursWeek) : "—"}
+          hint={hoursWeek == null ? "No hours logged" : undefined}
         />
         {team.isLeader ? (
           <Kpi
             label="Agency cut"
-            value={fmt(team.agencyEarningsDisplay)}
+            value={
+              team.agencyEarningsIsEstimate
+                ? "—"
+                : fmt(team.agencyEarningsDisplay)
+            }
             hint={
               team.agencyEarningsIsEstimate
-                ? `Est. ${Math.round(AGENCY_RATE_BASE * 100)}% of Blyp half`
+                ? "No live cut yet — not estimated here"
                 : `${Math.round(AGENCY_RATE_BASE * 100)}% from Blyp half`
             }
           />
         ) : (
           <Kpi
             label="Pending battles"
-            value={String(pendingBattles)}
+            value={pendingBattles ? String(pendingBattles) : "—"}
             hint="Awaiting accept / start"
           />
         )}
         <Kpi
           label="Roster gifts"
-          value={fmt(team.teamTotalGems || team.estimatedGiftSpend / 2)}
+          value={team.teamTotalGems ? fmt(team.teamTotalGems) : "—"}
           hint="Creator half"
         />
         <Kpi
@@ -102,9 +107,7 @@ export function DeskOverview({
                 ? String(pendingBattles)
                 : team.teamBattles.length
                   ? String(team.teamBattles.length)
-                  : team.battles
-                    ? String(team.battles)
-                    : "—"
+                  : "—"
           }
           hint={liveBattles > 0 ? "Active now" : "Scheduled / arranged"}
         />
@@ -170,10 +173,16 @@ export function DeskOverview({
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <QuickStat
               label="Team battles"
-              value={String(team.teamBattles.length)}
+              value={team.teamBattles.length ? String(team.teamBattles.length) : "—"}
             />
-            <QuickStat label="Pending" value={String(pendingBattles)} />
-            <QuickStat label="LIVE now" value={String(team.liveNowCount)} />
+            <QuickStat
+              label="Pending"
+              value={pendingBattles ? String(pendingBattles) : "—"}
+            />
+            <QuickStat
+              label="LIVE now"
+              value={liveMembers.length ? String(liveMembers.length) : "—"}
+            />
           </div>
         </div>
       ) : null}
@@ -214,10 +223,15 @@ export function DeskOverview({
             LIVE roster
           </SectionTitle>
           {liveMembers.length === 0 ? (
-            <p className="text-sm text-[var(--blyp-muted)]">
-              Nobody live right now.
-              {team.isLeader ? " Nudge offline hosts on Roster." : ""}
-            </p>
+            <div className="hub-empty" style={{ padding: "0.5rem 0 0.25rem" }}>
+              <div className="hub-empty-stage" style={{ minHeight: "5.5rem" }}>
+                <span>NOBODY LIVE</span>
+              </div>
+              <p className="hub-empty-copy">
+                Nobody on this roster is live right now.
+                {team.isLeader ? " Nudge offline hosts on Roster." : ""}
+              </p>
+            </div>
           ) : (
             <ul className="space-y-2.5">
               {liveMembers.map((m) => (
@@ -246,11 +260,16 @@ export function DeskOverview({
             {team.isLeader ? "Active & pending battles" : "Your match feed"}
           </SectionTitle>
           {team.teamBattles.length === 0 ? (
-            <p className="text-sm text-[var(--blyp-muted)]">
-              {team.isLeader
-                ? "None set yet. Schedule an internal match on Battles."
-                : "No battles yet — open Battles to pick a roster or linked-agency opponent."}
-            </p>
+            <div className="hub-empty" style={{ padding: "0.5rem 0 0.25rem" }}>
+              <div className="hub-empty-stage" style={{ minHeight: "5.5rem" }}>
+                <span>NO BATTLES</span>
+              </div>
+              <p className="hub-empty-copy">
+                {team.isLeader
+                  ? "None set yet. Schedule an internal match on Battles."
+                  : "No battles yet — open Battles to pick a roster or linked-agency opponent."}
+              </p>
+            </div>
           ) : (
             <ul className="space-y-2">
               {team.teamBattles.slice(0, 6).map((b) => {

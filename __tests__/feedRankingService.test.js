@@ -12,6 +12,8 @@ jest.mock('../src/services/promoteBoostService', () => ({
 
 import {
   countFollowedPosts,
+  creatorFatigueAdjust,
+  dedupeRankCandidates,
   ensureFollowMixCandidates,
   extractPostHashtags,
   hashtagAffinityAdjust,
@@ -20,6 +22,7 @@ import {
   rankPosts,
   resolveRankContext,
   scorePost,
+  seenAdjust,
 } from '../src/services/feedRankingService';
 import { attachPromoteBoost } from '../src/services/promoteBoostService';
 
@@ -357,5 +360,98 @@ describe('For You v1 ranking', () => {
     await expect(
       ensureFollowMixCandidates(organic, following),
     ).resolves.toEqual(organic);
+  });
+
+  it('applies a recency gradient: just-watched is worse than older-seen and unseen', () => {
+    const just = post('just');
+    const older = post('older-seen');
+    const unseen = post('unseen');
+    const seenOrder = ['older-seen', 'just'];
+    expect(seenAdjust(just, seenOrder)).toBeLessThan(seenAdjust(older, seenOrder));
+    expect(seenAdjust(older, seenOrder)).toBeLessThan(seenAdjust(unseen, seenOrder));
+    expect(rankPosts([just, older, unseen], [], new Set(), {
+      now: NOW,
+      fairCap: false,
+      seenOrder,
+    })[0].id).toBe('unseen');
+  });
+
+  it('does not emit the same top-N when watch history changes', () => {
+    const pool = Array.from({ length: 10 }, (_, i) =>
+      post(`p${i + 1}`, { userId: `c${i + 1}`, likeCount: 100 - i * 5 }),
+    );
+    const first = rankPosts(pool, [], new Set(), { now: NOW, fairCap: false });
+    const firstTop = first.slice(0, 5).map((item) => item.id);
+    expect(firstTop).toHaveLength(5);
+
+    const second = rankPosts(pool, [], new Set(), {
+      now: NOW,
+      fairCap: false,
+      seenOrder: firstTop,
+    });
+    const secondTop = second.slice(0, 5).map((item) => item.id);
+    expect(secondTop).not.toEqual(firstTop);
+    expect(secondTop[0]).not.toBe(firstTop[firstTop.length - 1]);
+    const overlap = secondTop.filter((id) => firstTop.includes(id));
+    expect(overlap.length).toBeLessThan(5);
+
+    const third = rankPosts(pool, [], new Set(), {
+      now: NOW,
+      fairCap: false,
+      seenOrder: [...firstTop, ...secondTop],
+    });
+    expect(third.slice(0, 5).map((item) => item.id)).not.toEqual(secondTop);
+  });
+
+  it('fatigues a just-watched creator so their next clip is not first', () => {
+    expect(creatorFatigueAdjust(
+      post('a-next', { userId: 'creator-a' }),
+      ['creator-a'],
+    )).toBeLessThan(0);
+
+    const ranked = rankPosts([
+      post('a-hot', { userId: 'creator-a', likeCount: 200 }),
+      post('a-next', { userId: 'creator-a', likeCount: 180 }),
+      post('b1', { userId: 'creator-b', likeCount: 20 }),
+      post('c1', { userId: 'creator-c', likeCount: 18 }),
+    ], [], new Set(), {
+      now: NOW,
+      fairCap: false,
+      seenOrder: ['a-hot'],
+      recentCreators: ['creator-a'],
+    });
+    expect(ranked[0].id).not.toBe('a-hot');
+    expect(ranked[0].id).not.toBe('a-next');
+  });
+
+  it('just-watched high-signal clip loses to unseen even with follow+tags', () => {
+    const watched = post('watched', {
+      userId: 'f1',
+      likeCount: 80,
+      hashtags: ['gaming'],
+    });
+    const unseen = post('fresh', { userId: 'd1', likeCount: 2 });
+    const ranked = rankPosts([watched, unseen], ['gaming'], new Set(['f1']), {
+      now: NOW,
+      fairCap: false,
+      seenOrder: ['watched'],
+      recentCreators: ['f1'],
+    });
+    expect(ranked[0].id).toBe('fresh');
+  });
+
+  it('dedupes identical ids before ranking', () => {
+    const ranked = rankPosts([
+      post('dup', { userId: 'a', likeCount: 10 }),
+      post('dup', { userId: 'a', likeCount: 99 }),
+      post('other', { userId: 'b' }),
+    ], [], new Set(), { now: NOW, fairCap: false });
+    expect(dedupeRankCandidates([
+      post('dup'),
+      post('dup'),
+      post('other'),
+    ]).map((item) => item.id)).toEqual(['dup', 'other']);
+    expect(ranked.filter((item) => item.id === 'dup')).toHaveLength(1);
+    expect(new Set(ranked.map((item) => item.id)).size).toBe(ranked.length);
   });
 });

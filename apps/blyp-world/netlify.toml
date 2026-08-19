@@ -8,13 +8,11 @@
   NODE_VERSION = "22"
   NEXT_TELEMETRY_DISABLED = "1"
 
+[functions]
+  external_node_modules = ["@netlify/blobs"]
 
-# App home is For You (static export cannot emit Next redirect as HTTP).
-[[redirects]]
-  from = "/"
-  to = "/foryou/"
-  status = 302
-  force = true
+
+# `/` is LIVE Studio (static export). Do not force-redirect home to For You.
 # Share links (/p/:id) → OG function (crawlers) / 302 to /v/:id (humans).
 # Must stay above the static /p shell rewrite.
 [[redirects]]
@@ -41,6 +39,25 @@
   status = 200
 
 # Watch shells for /live/:sessionId (exclude directory + studio via specificity)
+# Pretty routes → static shells (client reads the real path segment).
+[[redirects]]
+  from = "/live/studio/cam-test"
+  to = "/live/studio/cam-test/"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/live/studio/overlay"
+  to = "/live/studio/overlay/"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/live/studio/deck"
+  to = "/live/studio/deck/"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/live/studio"
   to = "/live/studio/"
@@ -73,9 +90,41 @@
   to = "/.netlify/functions/mint-firebase-token"
   status = 200
 
+[[redirects]]
+  from = "/api/spotify"
+  to = "/.netlify/functions/spotify-link"
+  status = 200
+
+[[redirects]]
+  from = "/api/spotify/*"
+  to = "/.netlify/functions/spotify-link"
+  status = 200
+
+[[redirects]]
+  from = "/api/live/overlay-feed"
+  to = "/.netlify/functions/overlay-feed"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/ivs/*/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/ivs/*/*.wasm"
+  [headers.values]
+    Content-Type = "application/wasm"
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/amazon-ivs-service-worker-loader.js"
+  [headers.values]
+    Service-Worker-Allowed = "/"
+    Cache-Control = "no-cache"

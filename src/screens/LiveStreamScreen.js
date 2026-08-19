@@ -56,6 +56,7 @@ import {
 } from '../config/LiveGamesFlags';
 import { useLockPortraitWhileFocused } from '../utils/lockPortraitWhileFocused';
 import LiveStreamViewer from '../components/LiveStreamViewer';
+import StudioWatchOverlays from '../components/studio/StudioWatchOverlays';
 import CommentsModal from '../components/CommentsModal';
 import GiftSystem from '../components/GiftSystem';
 import LiveGiftOverlay from '../components/live/LiveGiftOverlay';
@@ -1975,12 +1976,17 @@ const LiveStreamScreen = (props) => {
           });
         }
       });
-      setLiveGuests(Array.from(byUser.values()));
+      const guests = Array.from(byUser.values());
+      const guestSig = guests.map((g) => `${g.userId}:${g.slotIndex}:${g.status || ''}`).sort().join('|');
+      setLiveGuests((prev) => {
+        const prevSig = (prev || []).map((g) => `${g.userId}:${g.slotIndex}:${g.status || ''}`).sort().join('|');
+        return guestSig === prevSig ? prev : guests;
+      });
       if (data && data.guestLayoutMode) {
         setGuestLayoutMode(normalizeLiveLayoutMode(data.guestLayoutMode));
       }
       const bid = data?.activeBattleId ? String(data.activeBattleId) : null;
-      setMirroredBattleId(bid);
+      setMirroredBattleId((prev) => (prev === bid ? prev : bid));
     });
     return () => { try { unsub && unsub(); } catch { /* ignore */ } };
   }, [isViewer, routeStreamId, streamId]);
@@ -2896,6 +2902,33 @@ const LiveStreamScreen = (props) => {
       navigation.navigate('LiveSummary', params);
     }
   }, [navigation, summaryStreamId, buildSummaryParams]);
+
+  const handleViewerPlaybackError = useCallback((error) => {
+    console.error('Viewer playback error:', error);
+    const errorMsg = error?.message || 'Unable to load stream';
+    let userMsg = 'This stream is not available right now.';
+
+    if (errorMsg.includes('ended') || errorMsg.includes('Stream has ended')) {
+      userMsg = 'This stream has ended.';
+    } else if (
+      errorMsg.includes('not found') ||
+      errorMsg.includes('does not exist') ||
+      errorMsg.includes('not live') ||
+      errorMsg.includes('session_not_found')
+    ) {
+      userMsg = 'This stream is no longer available. Pull to refresh the Live list.';
+    } else if (errorMsg.includes('connection') || errorMsg.includes('network')) {
+      userMsg = 'Connection error. Please check your internet and try again.';
+    } else if (errorMsg.includes('COGNITO') || errorMsg.includes('401') || errorMsg.includes('Invalid token')) {
+      userMsg = 'Sign in again, then retry joining the live.';
+    }
+
+    Alert.alert(
+      'Stream Unavailable',
+      userMsg,
+      [{ text: 'OK', onPress: () => goToSummary() }]
+    );
+  }, [goToSummary]);
 
   const _handleConfirmExit = useCallback(async () => {
     setShowExitConfirm(false);
@@ -3917,33 +3950,17 @@ const LiveStreamScreen = (props) => {
           style={styles.viewerVideo}
           overlayBottomInset={(viewerCommentsOverlayHeight || 0) + 8}
           onGuestPagerLayout={setViewerGuestPagerHeight}
-          onError={(error) => {
-            console.error('âŒ Viewer playback error:', error);
-            const errorMsg = error?.message || 'Unable to load stream';
-            let userMsg = 'This stream is not available right now.';
+          onError={handleViewerPlaybackError}
+        />
 
-            // Map structured errors to user messages
-            if (errorMsg.includes('ended') || errorMsg.includes('Stream has ended')) {
-              userMsg = 'This stream has ended.';
-            } else if (
-              errorMsg.includes('not found') ||
-              errorMsg.includes('does not exist') ||
-              errorMsg.includes('not live') ||
-              errorMsg.includes('session_not_found')
-            ) {
-              userMsg = 'This stream is no longer available. Pull to refresh the Live list.';
-            } else if (errorMsg.includes('connection') || errorMsg.includes('network')) {
-              userMsg = 'Connection error. Please check your internet and try again.';
-            } else if (errorMsg.includes('COGNITO') || errorMsg.includes('401') || errorMsg.includes('Invalid token')) {
-              userMsg = 'Sign in again, then retry joining the live.';
-            }
-
-            Alert.alert(
-              'Stream Unavailable',
-              userMsg,
-              [{ text: 'OK', onPress: () => goToSummary() }]
-            );
-          }}
+        <StudioWatchOverlays
+          streamId={routeStreamId}
+          topInset={LIVE_TOP_INSET + 50}
+          bottomInset={
+            (viewerCommentsOverlayHeight || 0) +
+            (viewerGuestPagerHeight || 0) +
+            (viewerLiveChatHeight || 0)
+          }
         />
 
         {/* Tap anywhere on the video to send a like (single tap, per product).
