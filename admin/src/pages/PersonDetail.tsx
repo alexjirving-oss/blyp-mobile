@@ -74,7 +74,7 @@ export default function PersonDetail() {
             ))}
           </div>
 
-          {tab === "overview" && <Overview u={u} />}
+          {tab === "overview" && <Overview u={u} reload={detail.reload} />}
           {tab === "360" && <User360 userId={userId} u={u} />}
           {tab === "controls" && (
             <Controls
@@ -100,10 +100,11 @@ function Field({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function Overview({ u }: { u: AdminUserDetail }) {
+function Overview({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
   const location = [u.address, u.city, u.region, u.postcode, u.country].filter(Boolean).join(", ");
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <AccountStatusCard u={u} reload={reload} />
       <div className="card">
         <h3 className="panel-title">Identity</h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -265,6 +266,101 @@ function User360({ userId, u }: { userId: string; u: AdminUserDetail }) {
   );
 }
 
+function AccountStatusCard({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
+  const { can } = useAuth();
+  const canToggle = can("users.capabilities");
+  const isDisabled = u.enabled === false;
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function toggleEnabled(nextEnabled: boolean) {
+    if (!canToggle) {
+      setErr("Missing users.capabilities permission");
+      return;
+    }
+    if (!nextEnabled && !reason.trim()) {
+      setErr("Reason required when disabling an account");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      await api.post(`/admin/users/${encodeURIComponent(u.userId)}/enabled`, {
+        enabled: nextEnabled,
+        reason: reason.trim() || null,
+      });
+      setMsg(nextEnabled ? "Account enabled — user can sign in again." : "Account disabled — Cognito sign-in blocked.");
+      setReason("");
+      reload();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card stack" style={{ gridColumn: "1 / -1" }}>
+      <div className="row spread wrap" style={{ gap: 12 }}>
+        <div>
+          <h3 className="panel-title" style={{ marginBottom: 6 }}>Account status</h3>
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            {u.isBanned ? (
+              <Badge kind="err">Banned</Badge>
+            ) : isDisabled ? (
+              <Badge kind="warn">Disabled — cannot sign in</Badge>
+            ) : (
+              <Badge kind="ok">Active — can sign in</Badge>
+            )}
+            <span className="muted" style={{ fontSize: 13 }}>
+              Cognito: {u.userStatus || "—"} · Enabled: {isDisabled ? "No" : "Yes"}
+            </span>
+          </div>
+        </div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          {isDisabled ? (
+            <button
+              className="btn success"
+              disabled={busy || !canToggle}
+              title={!canToggle ? "Missing users.capabilities" : undefined}
+              onClick={() => toggleEnabled(true)}
+            >
+              {busy ? "Working…" : "Enable account"}
+            </button>
+          ) : (
+            <button
+              className="btn danger"
+              disabled={busy || !canToggle}
+              title={!canToggle ? "Missing users.capabilities" : undefined}
+              onClick={() => toggleEnabled(false)}
+            >
+              {busy ? "Working…" : "Disable account"}
+            </button>
+          )}
+        </div>
+      </div>
+      {!canToggle && (
+        <InfoNote>Enable/disable requires <code>users.capabilities</code> (Owner or Administrator).</InfoNote>
+      )}
+      {!isDisabled && canToggle && (
+        <div>
+          <label>Disable reason (required to disable)</label>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Why is this account being disabled? (audited)"
+          />
+        </div>
+      )}
+      {msg && <div style={{ color: "var(--success)", fontSize: 13 }}>{msg}</div>}
+      {err && <ErrorNote>{err}</ErrorNote>}
+    </div>
+  );
+}
+
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <label className="row" style={{ gap: 8, cursor: "pointer", margin: 0 }}>
@@ -315,6 +411,7 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 
   return (
     <div className="stack" style={{ gap: 16 }}>
+      <AccountStatusCard u={u} reload={reload} />
       {msg && <div style={{ color: "var(--success)", fontSize: 13 }}>{msg}</div>}
       {err && <ErrorNote>{err}</ErrorNote>}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -506,9 +603,9 @@ function Controls({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 }
 
 function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
-  const { can, role } = useAuth();
+  const { can } = useAuth();
   const canCredit = can("economy.credit");
-  const canCreditGems = canCredit && role === "owner";
+  const canCreditGems = canCredit;
   const [coins, setCoins] = useState("");
   const [reason, setReason] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -569,7 +666,7 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
 
   async function submitGems() {
     if (!canCreditGems) {
-      setGemErr("Launch-test gem credit is Owner-only");
+      setGemErr("Launch-test gem credit requires economy.credit (Owner or Administrator)");
       return;
     }
     if (!validGems) return;
@@ -666,7 +763,7 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
       <div className="card stack">
         <h3 className="panel-title">Wallet · launch-test gems (withdrawable)</h3>
         <p className="dim" style={{ fontSize: 12.5, marginTop: 0, lineHeight: 1.5 }}>
-          Owner-only. Credits <strong>gem_available</strong> (cashable). Does <em>not</em> credit purchased coins.
+          Owner or Administrator (Mel). Credits <strong>gem_available</strong> (cashable). Does <em>not</em> credit purchased coins.
           Cap 5,000 per request. Use this so cash-out can be tested without a 7-day gift hold.
         </p>
         {gemMsg && <div style={{ color: "var(--success)", fontSize: 13 }}>{gemMsg}</div>}
@@ -710,7 +807,7 @@ function Wallet({ u, reload }: { u: AdminUserDetail; reload: () => void }) {
       </div>
     ) : (
       <InfoNote>
-        Launch-test gem credit is Owner-only. Bonus coins above are spendable but never withdrawable.
+        Launch-test gem credit requires <code>economy.credit</code> (Owner or Administrator). Credits withdrawable <strong>gem_available</strong>.
       </InfoNote>
     )}
     </div>

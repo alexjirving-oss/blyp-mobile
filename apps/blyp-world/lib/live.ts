@@ -733,6 +733,7 @@ export type LiveChatComment = {
   text: string;
   createdAt: number;
   source?: "blyp" | "tiktok";
+  kind?: "chat" | "gift";
 };
 
 /** Recent LIVE chat comments (Firestore subcollection). */

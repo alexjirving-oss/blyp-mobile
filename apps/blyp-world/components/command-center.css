@@ -3140,6 +3140,23 @@
   background: linear-gradient(135deg, #25f4ee 0%, #fe2c55 100%);
 }
 
+.tls-chat-gift {
+  display: inline-block;
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(135deg, #f5a623 0%, #e85d04 100%);
+}
+
+.tls-chat-gift-row {
+  color: #ffd89b;
+}
+
 .tls-guests li {
   display: flex;
   align-items: center;
@@ -4448,6 +4465,91 @@ button.tls-dest-logo-btn:hover {
 
 .tls-dest-expand-panel-kick {
   border-color: rgba(83, 252, 24, 0.42);
+}
+
+.tls-dest-connect-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin-bottom: 0.55rem;
+}
+
+.tls-dest-connect-btn {
+  min-width: 9.5rem;
+}
+
+.tls-dest-connected {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #052e1f;
+  background: #34d399;
+}
+
+.tls-dest-connect-hint {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  color: var(--blyp-muted);
+  line-height: 1.45;
+}
+
+.tls-dest-connect-phase {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #25f4ee;
+  line-height: 1.35;
+  max-width: 14rem;
+}
+
+.tls-dest-companion-offline {
+  margin: 0 0 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(255, 143, 143, 0.45);
+  background: rgba(255, 143, 143, 0.08);
+}
+
+.tls-dest-companion-offline-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #ff8f8f;
+}
+
+.tls-dest-companion-cmd {
+  display: block;
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.45rem;
+  font-size: 0.72rem;
+  color: #e5eefc;
+  background: rgba(0, 0, 0, 0.35);
+  word-break: break-all;
+}
+
+.tls-dest-paste-fallback {
+  margin: 0 0 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px dashed rgba(37, 244, 238, 0.35);
+  background: rgba(37, 244, 238, 0.06);
+}
+
+.tls-dest-paste-fallback-copy {
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  color: var(--blyp-muted);
+  line-height: 1.45;
+}
+
+.tls-dest-paste-save {
+  width: 100%;
 }
 
 .tls-dest-compact {

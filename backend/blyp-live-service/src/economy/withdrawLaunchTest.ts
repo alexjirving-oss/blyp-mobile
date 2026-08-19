@@ -16,6 +16,11 @@ const OWNER_BOOTSTRAP_SUBS = new Set<string>([
   '26522274-e001-70aa-51b6-bcbbdffc43bb', // Alex
 ]);
 
+/** Explicit QA subs for withdrawal / gem-credit testing (also set WITHDRAW_TEST_SUBS on Cloud Run). */
+const LAUNCH_TEST_QA_SUBS = new Set<string>([
+  'd64232e4-30c1-701b-6463-4940bb1bc208', // melody.skull.queen — withdrawal QA
+]);
+
 function parseSubCsv(raw: string | undefined | null): Set<string> {
   const out = new Set<string>();
   for (const part of String(raw || '')
@@ -34,6 +39,7 @@ export function isWithdrawLaunchTestUser(userId: string): boolean {
   if (parseSubCsv(process.env.WITHDRAW_TEST_SUBS).has(id)) return true;
   if (parseSubCsv(process.env.ADMIN_ALLOWLIST_SUBS).has(id)) return true;
   if (OWNER_BOOTSTRAP_SUBS.has(id)) return true;
+  if (LAUNCH_TEST_QA_SUBS.has(id)) return true;
 
   return false;
 }

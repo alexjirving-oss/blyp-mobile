@@ -8,6 +8,15 @@ import {
   YOUTUBE_DEFAULT_RTMP,
   validateTikTokRtmpCredentials,
 } from "@/lib/studioBroadcast";
+import {
+  companionBlockingHint,
+  companionHealth,
+  companionPhaseLabel,
+  companionSubmitCredentials,
+  connectTikTokViaCompanion,
+  TIKTOK_COMPANION_START_CMD,
+  type TikTokCompanionStatus,
+} from "@/lib/studioTikTokCompanion";
 import { normalizeTikTokUniqueId } from "@/lib/studioTikTokRoom";
 
 export type DestinationDockProps = {
@@ -221,6 +230,13 @@ export function DestinationDock({
   const [draftUrl, setDraftUrl] = useState("");
   const [draftKey, setDraftKey] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const [companionBusy, setCompanionBusy] = useState(false);
+  const [companionHint, setCompanionHint] = useState<string | null>(null);
+  const [companionStatus, setCompanionStatus] =
+    useState<TikTokCompanionStatus | null>(null);
+  const [companionOffline, setCompanionOffline] = useState(false);
+  const [showPasteFallback, setShowPasteFallback] = useState(false);
+  const [pasteBusy, setPasteBusy] = useState(false);
 
   const seedUrl =
     open === "youtube"
@@ -249,6 +265,10 @@ export function DestinationDock({
     setTtKey(initialTikTokStreamKey);
     setTtHandle(initialTikTokUniqueId);
     setLocalError(null);
+    setCompanionHint(null);
+    setCompanionStatus(null);
+    setCompanionOffline(false);
+    setShowPasteFallback(false);
   }, [open, initialTikTokRtmpUrl, initialTikTokStreamKey, initialTikTokUniqueId]);
 
   useEffect(() => {
@@ -260,6 +280,21 @@ export function DestinationDock({
 
   const toggle = (id: Exclude<OpenId, null>) => {
     setOpen((cur) => (cur === id ? null : id));
+    setLocalError(null);
+  };
+
+  const saveTikTokCredentials = (input: {
+    rtmpUrl: string;
+    streamKey: string;
+    uniqueId: string;
+  }) => {
+    onTikTokSaved({
+      rtmpUrl: input.rtmpUrl.trim().replace(/\/+$/, ""),
+      streamKey: input.streamKey.trim(),
+      uniqueId: input.uniqueId,
+    });
+    setOpen(null);
+    setCompanionHint(null);
     setLocalError(null);
   };
 
@@ -275,12 +310,137 @@ export function DestinationDock({
       setLocalError("Add your TikTok @handle");
       return;
     }
-    onTikTokSaved({
-      rtmpUrl: ttUrl.trim().replace(/\/+$/, ""),
-      streamKey: ttKey.trim(),
+    saveTikTokCredentials({
+      rtmpUrl: ttUrl,
+      streamKey: ttKey,
       uniqueId: handle,
     });
-    setOpen(null);
+  };
+
+  const applyCompanionCredentials = (status: TikTokCompanionStatus) => {
+    const nextUrl = status.rtmpUrl || "";
+    const nextKey = status.streamKey || "";
+    const nextHandle = status.handle || ttHandle;
+
+    setTtUrl(nextUrl);
+    setTtKey(nextKey);
+    if (status.handle) setTtHandle(status.handle);
+
+    const handle = normalizeTikTokUniqueId(nextHandle);
+    if (!handle) {
+      setCompanionHint("RTMP ready — add your @handle below, then click OK.");
+      setShowPasteFallback(false);
+      return;
+    }
+
+    const v = validateTikTokRtmpCredentials(nextUrl, nextKey);
+    if (!v.ok) {
+      setLocalError(v.message);
+      setShowPasteFallback(true);
+      return;
+    }
+
+    saveTikTokCredentials({
+      rtmpUrl: nextUrl,
+      streamKey: nextKey,
+      uniqueId: handle,
+    });
+  };
+
+  const onConnectTikTok = async () => {
+    if (companionBusy || busy) return;
+    setCompanionBusy(true);
+    setLocalError(null);
+    setCompanionHint(null);
+    setCompanionOffline(false);
+    setShowPasteFallback(false);
+    setCompanionStatus(null);
+
+    const healthy = await companionHealth();
+    if (!healthy) {
+      setCompanionOffline(true);
+      setLocalError(`Companion not running on this PC`);
+      setCompanionBusy(false);
+      return;
+    }
+
+    try {
+      const result = await connectTikTokViaCompanion({
+        timeoutMs: 120_000,
+        onStatus: (status) => {
+          setCompanionStatus(status);
+          if (status.phase === "watching") {
+            setShowPasteFallback(true);
+          }
+        },
+      });
+
+      if (result.status) setCompanionStatus(result.status);
+
+      if (!result.ok) {
+        if (result.reason === "companion_offline") {
+          setCompanionOffline(true);
+          setLocalError("Companion not running on this PC");
+          return;
+        }
+        if (result.reason === "error") {
+          setLocalError(result.message);
+          if (result.status?.phase === "watching") {
+            setShowPasteFallback(true);
+            setCompanionHint(companionBlockingHint(result.status));
+          }
+          return;
+        }
+        if (result.reason === "timeout") {
+          setShowPasteFallback(true);
+          setCompanionHint(
+            companionBlockingHint(result.status || null) || result.message,
+          );
+          return;
+        }
+        setLocalError(result.message);
+        return;
+      }
+
+      applyCompanionCredentials(result.status);
+    } finally {
+      setCompanionBusy(false);
+    }
+  };
+
+  const onPasteCredentials = async () => {
+    if (pasteBusy || busy) return;
+    setPasteBusy(true);
+    setLocalError(null);
+    try {
+      const healthy = await companionHealth();
+      if (!healthy) {
+        setCompanionOffline(true);
+        setLocalError(`Companion not running on this PC`);
+        return;
+      }
+
+      const v = validateTikTokRtmpCredentials(ttUrl, ttKey);
+      if (!v.ok) {
+        setLocalError(v.message);
+        return;
+      }
+
+      const status = await companionSubmitCredentials({
+        rtmpUrl: ttUrl.trim().replace(/\/+$/, ""),
+        streamKey: ttKey.trim(),
+        handle: ttHandle.trim() || undefined,
+      });
+      if (!status?.connected) {
+        setLocalError(status?.error || "Could not save credentials to companion");
+        return;
+      }
+
+      setCompanionStatus(status);
+      applyCompanionCredentials(status);
+    } finally {
+      setPasteBusy(false);
+    }
   };
 
   const onKeyPasteOk = (id: KeyPasteId) => {
@@ -349,6 +509,53 @@ export function DestinationDock({
             onTikTokOk();
           }}
         >
+          <div className="tls-dest-connect-row">
+            <button
+              type="button"
+              className="tls-go tls-dest-connect-btn"
+              disabled={busy || companionBusy || pasteBusy}
+              onClick={() => void onConnectTikTok()}
+            >
+              {companionBusy ? "Connecting…" : "Connect TikTok"}
+            </button>
+            {tiktokReady ? (
+              <span className="tls-dest-connected" role="status">
+                Connected
+              </span>
+            ) : companionStatus?.connected ? (
+              <span className="tls-dest-connected" role="status">
+                Connected
+              </span>
+            ) : companionBusy ? (
+              <span className="tls-dest-connect-phase" role="status">
+                {companionStatus
+                  ? companionPhaseLabel(companionStatus)
+                  : "Connecting…"}
+              </span>
+            ) : null}
+          </div>
+          {companionOffline ? (
+            <div className="tls-dest-companion-offline" role="alert">
+              <p className="tls-dest-companion-offline-title">Companion not running</p>
+              <p className="tls-dest-connect-hint">
+                Start the local helper on this PC, then click Connect TikTok again.
+              </p>
+              <code className="tls-dest-companion-cmd">{TIKTOK_COMPANION_START_CMD}</code>
+            </div>
+          ) : null}
+          {companionHint ? (
+            <p className="tls-dest-connect-hint" role="status">
+              {companionHint}
+            </p>
+          ) : null}
+          {!companionOffline &&
+          companionStatus &&
+          !companionStatus.connected &&
+          (companionBusy || showPasteFallback) ? (
+            <p className="tls-dest-connect-hint" role="status">
+              {companionPhaseLabel(companionStatus)}
+            </p>
+          ) : null}
           <label className="tls-preflight-field">
             <span>TikTok @handle</span>
             <input
@@ -385,6 +592,21 @@ export function DestinationDock({
               disabled={busy}
             />
           </label>
+          {showPasteFallback && !companionOffline ? (
+            <div className="tls-dest-paste-fallback">
+              <p className="tls-dest-paste-fallback-copy">
+                Or paste Server URL + Stream key from TikTok Live Studio manually, then Save.
+              </p>
+              <button
+                type="button"
+                className="tls-go tls-dest-paste-save"
+                disabled={busy || pasteBusy || companionBusy}
+                onClick={() => void onPasteCredentials()}
+              >
+                {pasteBusy ? "Saving…" : "Save TikTok credentials"}
+              </button>
+            </div>
+          ) : null}
           {localError ? (
             <p className="tls-preflight-error" role="alert">
               {localError}

@@ -1409,6 +1409,9 @@ const IVSLiveStreamViewer = ({
       slotUserIdBySlot,
     } = slotLayout;
 
+    const renderableStreams = ivsSession.visibleStreams || [];
+    const hasRenderableStreams = renderableStreams.length > 0;
+
     if (
       Platform.OS !== 'android' &&
       guestsPerPage > 0 &&

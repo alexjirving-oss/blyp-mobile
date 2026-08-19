@@ -2,6 +2,8 @@ import {
     CognitoIdentityProviderClient,
     ListUsersCommand,
     AdminDeleteUserCommand,
+    AdminEnableUserCommand,
+    AdminDisableUserCommand,
     type UserType,
 } from '@aws-sdk/client-cognito-identity-provider';
 import ENV from '../config/env';
@@ -151,6 +153,48 @@ export async function findDirectoryUser(inputUserId: string): Promise<DirectoryU
             .filter(Boolean)
             .some((value) => String(value).toLowerCase() === lowered);
     }) || null;
+}
+
+async function resolveCognitoUsernameBySub(sub: string): Promise<string | null> {
+    const client = getClient();
+    const userPoolId = getPoolId();
+    const uid = String(sub || '').trim();
+    if (!client || !userPoolId || !uid) {
+        return null;
+    }
+    const out = await client.send(new ListUsersCommand({
+        UserPoolId: userPoolId,
+        Filter: `sub = "${uid}"`,
+        Limit: 1,
+    }));
+    return String(out.Users?.[0]?.Username || '').trim() || null;
+}
+
+/** Enable or disable Cognito sign-in for a user identified by `sub`. */
+export async function setCognitoUserEnabledBySub(
+    sub: string,
+    enabled: boolean,
+): Promise<{ ok: boolean; username?: string; detail?: string }> {
+    const client = getClient();
+    const userPoolId = getPoolId();
+    const uid = String(sub || '').trim();
+    if (!client || !userPoolId || !uid) {
+        return { ok: false, detail: 'cognito_unconfigured' };
+    }
+    try {
+        const username = await resolveCognitoUsernameBySub(uid);
+        if (!username) {
+            return { ok: false, detail: 'user_not_found' };
+        }
+        if (enabled) {
+            await client.send(new AdminEnableUserCommand({ UserPoolId: userPoolId, Username: username }));
+        } else {
+            await client.send(new AdminDisableUserCommand({ UserPoolId: userPoolId, Username: username }));
+        }
+        return { ok: true, username };
+    } catch (e: any) {
+        return { ok: false, detail: e?.message || String(e) };
+    }
 }
 
 /** Delete a Cognito user by `sub` (used by internal account purge). */

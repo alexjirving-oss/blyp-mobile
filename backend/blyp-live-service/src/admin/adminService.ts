@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import type { Knex } from 'knex';
 import { checkDb, checkRedis, getEconomyInfra } from '../economy/infra';
 import { logger } from '../config/logger';
-import { findDirectoryUser, listDirectoryUsers, type DirectoryUser } from './adminCognitoDirectory';
+import { findDirectoryUser, listDirectoryUsers, setCognitoUserEnabledBySub, type DirectoryUser } from './adminCognitoDirectory';
 import {
     syncUserRoleToFirestore,
     syncAvatarFrameToFirestore,
@@ -635,6 +635,31 @@ export async function banUserByAdmin(input: {
             bannedUntil: input.bannedUntil,
         },
     });
+}
+
+export async function setUserEnabledByAdmin(input: {
+    actorUserId: string;
+    targetUserId: string;
+    enabled: boolean;
+    reason: string | null;
+}): Promise<{ enabled: boolean; username?: string }> {
+    const out = await setCognitoUserEnabledBySub(input.targetUserId, input.enabled === true);
+    if (!out.ok) {
+        throw new Error(out.detail || 'COGNITO_ENABLE_FAILED');
+    }
+
+    await writeAdminAudit({
+        actorUserId: input.actorUserId,
+        action: input.enabled ? 'user_enable' : 'user_disable',
+        targetType: 'user',
+        targetId: input.targetUserId,
+        metadata: {
+            reason: input.reason,
+            cognitoUsername: out.username || null,
+        },
+    });
+
+    return { enabled: input.enabled === true, username: out.username };
 }
 
 export async function unbanUserByAdmin(input: {

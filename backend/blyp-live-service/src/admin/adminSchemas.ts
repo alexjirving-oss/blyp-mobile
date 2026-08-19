@@ -22,6 +22,11 @@ export const unbanUserSchema = z.object({
     reason: z.string().trim().min(1).max(500).nullable().optional(),
 });
 
+export const adminSetUserEnabledSchema = z.object({
+    enabled: z.coerce.boolean(),
+    reason: z.string().trim().min(1).max(500).nullable().optional(),
+});
+
 export const adminListAuditSchema = z.object({
     q: z.string().trim().max(120).optional(),
     action: z.string().trim().max(80).optional(),

@@ -62,6 +62,7 @@ import {
     adminFeedPrioritySchema,
     adminAccountFeedPrioritySchema,
     unbanUserSchema,
+    adminSetUserEnabledSchema,
     adminListScheduledPostsSchema,
     adminScheduledPostActionSchema,
     adminCreateSocialImportSchema,
@@ -86,6 +87,7 @@ import {
     setAdminUserCapabilities,
     setFeedPriorityByAdmin,
     setAccountFeedPriorityByAdmin,
+    setUserEnabledByAdmin,
     unbanUserByAdmin,
     writeAdminAudit,
 } from './adminService';
@@ -706,11 +708,11 @@ router.post('/admin/users/:userId/credit-gems', requireAdmin, requirePermission(
     try {
         const actorUserId = String(req.user?.sub || '').trim();
         const actorRole = String(req.user?.adminRole || '') as AdminRole;
-        if (actorRole !== 'owner') {
+        if (actorRole !== 'owner' && actorRole !== 'admin') {
             return res.status(403).json({
                 error: 'FORBIDDEN',
-                code: 'OWNER_ONLY',
-                detail: 'Launch-test gem credit is Owner-only',
+                code: 'ELEVATED_ROLE_REQUIRED',
+                detail: 'Launch-test gem credit requires Owner or Administrator',
             });
         }
 
@@ -1321,6 +1323,37 @@ router.post('/admin/users/:userId/unban', requireAdmin, requirePermission('users
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/unban failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/users/:userId/enabled', requireAdmin, requirePermission('users.capabilities'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!isCanonicalSub(targetUserId)) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminSetUserEnabledSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await setUserEnabledByAdmin({
+            actorUserId,
+            targetUserId,
+            enabled: parsed.data.enabled,
+            reason: parsed.data.reason || null,
+        });
+
+        return res.json({ ok: true, userId: targetUserId, enabled: out.enabled, username: out.username || null });
+    } catch (e: any) {
+        const detail = String(e?.message || e || 'INTERNAL');
+        logger.error({ err: detail }, '[admin] /admin/users/:userId/enabled failed');
+        if (detail === 'user_not_found' || detail === 'COGNITO_ENABLE_FAILED') {
+            return res.status(404).json({ error: 'NOT_FOUND', code: 'USER_NOT_FOUND', detail });
+        }
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL', detail });
     }
 });
 

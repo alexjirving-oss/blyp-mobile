@@ -56,7 +56,8 @@
     "verify:proof": "powershell -ExecutionPolicy Bypass -File scripts\\verify_report.ps1",
     "icons:android": "node scripts/generate-android-launcher-icons.mjs assets/icon.png",
     "play:upload": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/UPLOAD_PLAY_AAB.ps1",
-    "play:bake": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/BUILD_RELEASE_CANDIDATE.ps1"
+    "play:bake": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/release/BUILD_RELEASE_CANDIDATE.ps1",
+    "tiktok:companion": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/blyp-tiktok-companion/start-companion.ps1"
   },
   "dependencies": {
     "@aws-amplify/react-native": "^1.0.4",

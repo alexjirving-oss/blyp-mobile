@@ -1,14 +1,14 @@
 {
-    "site_name":  "blyp-admin-console",
-    "site_id":  "f31b62f8-deae-4110-afb9-b6863900336c",
-    "production_url":  "https://admin.blyp.world",
-    "deploy_id":  "6a83ec05227c3768b99869f4",
-    "unique_deploy_url":  "https://6a83ec05227c3768b99869f4--blyp-admin-console.netlify.app",
-    "asset_index":  "index-CKJSxR30.js",
-    "git_branch":  "feat/full-tip-package-20260809",
-    "git_sha":  "119b3952",
-    "backend_revision":  "blyp-live-service-00240-47b",
-    "backend_url":  "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
-    "deployed_at":  "2026-08-18",
-    "notes":  "PayPal cash-out ops: Economy Mark paid + method/email columns; PersonDetail Owner launch-test gem credit. Live Payouts API still SENDER_RESTRICTED — Approve is not the settle path until PayPal lifts it."
+    "site_name": "blyp-admin-console",
+    "site_id": "f31b62f8-deae-4110-afb9-b6863900336c",
+    "production_url": "https://admin.blyp.world",
+    "deploy_id": "6a862c045637e468aa78f380",
+    "unique_deploy_url": "https://6a862c045637e468aa78f380--blyp-admin-console.netlify.app",
+    "asset_index": "index-Cuy8uIrV.js",
+    "git_branch": "feat/full-tip-package-20260809",
+    "git_sha": "e27d2c71",
+    "backend_revision": "blyp-live-service-00241-7sh",
+    "backend_url": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
+    "deployed_at": "2026-08-19",
+    "notes": "People profile: Account status Enable/Disable card (Overview + Controls). Mel can use launch-test gem credit UI (backend deploy pending). melody.skull.queen credited 2000 gem_available via ops script."
 }

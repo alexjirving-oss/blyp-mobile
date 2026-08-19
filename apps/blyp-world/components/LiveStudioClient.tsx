@@ -114,6 +114,7 @@ function tiktokEventsToComments(events: TikTokRoomEvent[]): LiveChatComment[] {
     text: ev.text,
     createdAt: ev.createdAt,
     source: "tiktok" as const,
+    kind: ev.kind,
   }));
 }
 
@@ -617,6 +618,8 @@ export function LiveStudioClient() {
   const lastGiftCoinsRef = useRef(0);
   const lastChatIdRef = useRef<string | null>(null);
   const lastGuestCountRef = useRef(0);
+  const seenTikTokGiftIdsRef = useRef<Set<string>>(new Set());
+  const tiktokGiftBootRef = useRef(false);
   const topGiftersRef = useRef<Record<string, { coins: number; name: string }>>(
     {},
   );
@@ -1126,33 +1129,6 @@ export function LiveStudioClient() {
   }, [active?.sessionId]);
 
   useEffect(() => {
-    if (!active?.sessionId || !session?.idToken || !tiktokUniqueId) {
-      setTiktokChat([]);
-      return;
-    }
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const out = await fetchTikTokRoomEvents(
-          session.idToken,
-          active.sessionId,
-        );
-        if (cancelled) return;
-        setTiktokRoomStatus(out.status);
-        setTiktokChat(tiktokEventsToComments(out.events || []));
-      } catch {
-        /* best-effort */
-      }
-    };
-    void tick();
-    const id = window.setInterval(() => void tick(), 2500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [active?.sessionId, session?.idToken, tiktokUniqueId]);
-
-  useEffect(() => {
     if (!active?.sessionId || !session?.idToken) {
       setGifts(null);
       return;
@@ -1287,6 +1263,64 @@ export function LiveStudioClient() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!active?.sessionId || !session?.idToken || !tiktokUniqueId) {
+      setTiktokChat([]);
+      seenTikTokGiftIdsRef.current.clear();
+      tiktokGiftBootRef.current = false;
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const out = await fetchTikTokRoomEvents(
+          session.idToken,
+          active.sessionId,
+        );
+        if (cancelled) return;
+        setTiktokRoomStatus(out.status);
+        setTiktokChat(tiktokEventsToComments(out.events || []));
+
+        const giftEvents = (out.events || []).filter((ev) => ev.kind === "gift");
+        if (!tiktokGiftBootRef.current) {
+          for (const ev of giftEvents) seenTikTokGiftIdsRef.current.add(ev.id);
+          tiktokGiftBootRef.current = true;
+        } else {
+          for (const ev of giftEvents) {
+            if (seenTikTokGiftIdsRef.current.has(ev.id)) continue;
+            seenTikTokGiftIdsRef.current.add(ev.id);
+            const who = ev.displayName || ev.uniqueId;
+            const alert = `${who} ${ev.text}`;
+            pushFeedEvent(alert);
+            queueStudioAlert({
+              kind: "gift",
+              text: alert,
+              stingId: giftAlertMap.defaultSting,
+            });
+            if (giftAlertMap.flashGiftOverlay) {
+              setOverlayState((prev) => ({ ...prev, gifts: true }));
+            }
+          }
+        }
+      } catch {
+        /* best-effort */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [
+    active?.sessionId,
+    session?.idToken,
+    tiktokUniqueId,
+    pushFeedEvent,
+    queueStudioAlert,
+    giftAlertMap,
+  ]);
 
   const alertQueueRef = useRef(alertQueue);
   alertQueueRef.current = alertQueue;
@@ -2338,8 +2372,19 @@ export function LiveStudioClient() {
         tiktokRtmpUrl: input.rtmpUrl,
         tiktokStreamKey: input.streamKey,
       });
+      if (active?.sessionId && session?.idToken) {
+        seenTikTokGiftIdsRef.current.clear();
+        tiktokGiftBootRef.current = false;
+        void startTikTokRoom(session.idToken, active.sessionId, input.uniqueId)
+          .then((room) => setTiktokRoomStatus(room.status))
+          .catch((roomErr) => {
+            const msg =
+              roomErr instanceof Error ? roomErr.message : "TikTok chat failed";
+            pushToast(`TikTok comments: ${msg}`);
+          });
+      }
     },
-    [pushToast, commitFanout],
+    [active?.sessionId, session?.idToken, pushToast, commitFanout],
   );
 
   const handleYouTubeSaved = useCallback(
@@ -5485,9 +5530,12 @@ export function LiveStudioClient() {
             ) : (
               <ul className="tls-chat">
                 {railChat.map((c) => (
-                  <li key={c.id}>
+                  <li key={c.id} className={c.kind === "gift" ? "tls-chat-gift-row" : undefined}>
                     {c.source === "tiktok" ? (
                       <span className="tls-chat-src">TikTok</span>
+                    ) : null}
+                    {c.kind === "gift" ? (
+                      <span className="tls-chat-gift">Gift</span>
                     ) : null}
                     <strong>{c.displayName || c.username}</strong> {c.text}
                   </li>
