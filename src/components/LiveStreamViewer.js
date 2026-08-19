@@ -20,6 +20,7 @@ import {
   TouchableOpacity,
   PanResponder,
   AppState,
+  InteractionManager,
   Image,
   LayoutAnimation,
   Platform,
@@ -841,12 +842,15 @@ const IVSLiveStreamViewer = ({
   }, [guestMode]);
 
   useEffect(() => {
-    console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_MOUNT]');
-    return () => console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_UNMOUNT]');
+    if (__DEV__) console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_MOUNT]');
+    return () => {
+      if (__DEV__) console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_UNMOUNT]');
+    };
   }, []);
 
   // Centralized IVS viewer session observability
   useEffect(() => {
+    if (!__DEV__) return;
     console.log('[LIVE][IVS_VIEWER_SESSION]', {
       backend: 'ivs',
       streamId,
@@ -875,7 +879,7 @@ const IVSLiveStreamViewer = ({
 
   useEffect(() => {
     if (ivsSession.connectionState === 'connected') {
-      console.log('[IVS_VIEWER][MEDIA_STATE]', {
+      if (__DEV__) console.log('[IVS_VIEWER][MEDIA_STATE]', {
         connectionState: ivsSession.connectionState,
         remoteParticipants: ivsSession.remoteParticipants.length,
         remoteVideoTracks: ivsSession.remoteVideoTracks,
@@ -1027,7 +1031,9 @@ const IVSLiveStreamViewer = ({
       try {
         appStateSub?.remove?.();
       } catch { }
-      decrementOnce('unmount').catch(() => { });
+      InteractionManager.runAfterInteractions(() => {
+        decrementOnce('unmount').catch(() => { });
+      });
     };
   }, [streamId, uid]);
 
@@ -1039,41 +1045,43 @@ const IVSLiveStreamViewer = ({
 
   // Clean up IVS viewer session ONLY on real unmount (not on re-renders)
   useEffect(() => {
-    console.log('[IVS_VIEWER][MOUNT] Component initialized');
+    if (__DEV__) console.log('[IVS_VIEWER][MOUNT] Component initialized');
     return () => {
-      console.log('[IVS_VIEWER][UNMOUNT] Leaving viewer session');
+      InteractionManager.runAfterInteractions(() => {
+        if (__DEV__) console.log('[IVS_VIEWER][UNMOUNT] Leaving viewer session');
 
-      // Best-effort cleanup: if we were a guest (or had a pending request), notify backend so
-      // re-join doesn't get blocked by a stale LIVE/REQUESTED record.
-      try {
-        const status = guestRequestStatusRef.current;
-        const needsCleanup = guestModeRef.current || status === 'sent' || status === 'sending';
-        const sid = guestSessionIdRef.current;
-        if (needsCleanup && streamId && sid) {
-          leaveGuest(streamId, sid, true).catch((e) => {
-            console.warn('[IVS_VIEWER][UNMOUNT_LEAVE_GUEST_FAILED]', e?.message || String(e));
+        // Best-effort cleanup: if we were a guest (or had a pending request), notify backend so
+        // re-join doesn't get blocked by a stale LIVE/REQUESTED record.
+        try {
+          const status = guestRequestStatusRef.current;
+          const needsCleanup = guestModeRef.current || status === 'sent' || status === 'sending';
+          const sid = guestSessionIdRef.current;
+          if (needsCleanup && streamId && sid) {
+            leaveGuest(streamId, sid, true).catch((e) => {
+              console.warn('[IVS_VIEWER][UNMOUNT_LEAVE_GUEST_FAILED]', e?.message || String(e));
+            });
+
+            try {
+              const nativeClient = getIVSNativeClient();
+              Promise.resolve(nativeClient.stopGuestSession()).catch(() => { });
+            } catch { }
+          }
+        } catch { }
+
+        const leaveFn = leaveStreamRef.current;
+        if (typeof leaveFn === 'function') {
+          Promise.resolve(leaveFn()).catch((err) => {
+            console.error('[IVS_VIEWER][UNMOUNT_LEAVE_ERROR]', err);
           });
-
-          try {
-            const nativeClient = getIVSNativeClient();
-            Promise.resolve(nativeClient.stopGuestSession()).catch(() => { });
-          } catch { }
         }
-      } catch { }
-
-      const leaveFn = leaveStreamRef.current;
-      if (typeof leaveFn === 'function') {
-        Promise.resolve(leaveFn()).catch(err => {
-          console.error('[IVS_VIEWER][UNMOUNT_LEAVE_ERROR]', err);
-        });
-      }
+      });
     };
   }, []); // Empty deps = mount/unmount only
 
   const requestToJoinAsGuest = useCallback(
     async (slotId) => {
       if (!streamId) return;
-      console.log('[IVS_VIEWER][REQUEST_JOIN]', { streamId, slotId, guestRequestStatus, guestMode });
+      if (__DEV__) console.log('[IVS_VIEWER][REQUEST_JOIN]', { streamId, slotId, guestRequestStatus, guestMode });
       if (guestRequestStatus === 'sending') return;
       if (guestRequestStatus === 'sent') {
         // Retry publish (cannot re-request due to backend conditional write).
@@ -1175,31 +1183,31 @@ const IVSLiveStreamViewer = ({
   const showDisconnected =
     connectionStatus === 'disconnected' && isDeadWatchError(ivsSession.error);
 
-  // Real-Time surface fed by viewer session credentials
-  // Keep the native views mounted once credentials exist; gate visibility by canRender
-  if (NativeIVSRealTimeView && hasStageCredentials) {
+  // Heavy slot/roster derivation can make the JS thread janky when parent re-renders
+  // (e.g. hearts/likes). Memoize so it only recomputes when the stream roster/participants
+  // or layout mode changes.
+  const slotLayout = useMemo(() => {
+    if (!NativeIVSRealTimeView || !hasStageCredentials) return null;
+
     const renderableStreams = ivsSession.visibleStreams || [];
-    const hasRenderableStreams = renderableStreams.length > 0;
-    const showVideo = ivsSession.canRender && hasRenderableStreams;
 
     const hostStream =
       renderableStreams.find((s) => s?.isHost) ||
       renderableStreams.find((s) => typeof s?.slotIndex === 'number' && s.slotIndex === 0) ||
       renderableStreams[0] ||
       null;
-    // Exclude the host both by object identity AND participantId, so a duplicate
-    // stream entry for the host (a second streamKey for the same participant) can
-    // never render a second copy of the host feed inside a guest tile mid-screen.
-    // Host is never a guest box — slot 0 / isHost must not occupy Join CTA box 1.
+
+    // Exclude host both by object identity AND participantId so duplicates can't
+    // render as multiple guest tiles.
     const guestStreams = renderableStreams.filter(
       (s) =>
         s &&
         s !== hostStream &&
         !s.isHost &&
         !(typeof s.slotIndex === 'number' && s.slotIndex === 0) &&
-        (!hostStream || !s.participantId || s.participantId !== hostStream.participantId)
+        (!hostStream || !s.participantId || s.participantId !== hostStream.participantId),
     );
-    // Guest slots are capped at the IVS publisher limit (host + 11 guests).
+
     const guestLayoutMode = normalizeLiveLayoutMode(guestLayoutModeProp);
     const guestSlotsTotal = MAX_GUEST_SLOTS;
     const useBottomTray = layoutUsesBottomTray(guestLayoutMode);
@@ -1209,20 +1217,9 @@ const IVSLiveStreamViewer = ({
         : guestTrayMode === 'expanded'
           ? 'expanded'
           : 'collapsed';
-    const guestsPerPage =
-      useBottomTray && guestTrayMode !== 'hidden'
-        ? guestsPerTrayPage(guestLayoutMode, trayDensity)
-        : 0;
+    const guestsPerPage = useBottomTray && guestTrayMode !== 'hidden' ? guestsPerTrayPage(guestLayoutMode, trayDensity) : 0;
 
-    // Slot-aware tile mapping (single source of truth): place each guest in the
-    // box matching its host-assigned slotIndex so the host and all viewers agree.
-    // Falls back to legacy array-index mapping if no stream carries a slotIndex
-    // (older native that didn't surface the token slot) — never blanks the grid.
-    // AUTHORITATIVE placement: the host mirrors a roster (userId -> slotIndex) to
-    // Firestore that is identical on every device. Resolve each guest's box from
-    // that shared roster so the host and ALL viewers render the same guest in the
-    // same box. Falls back to the per-device native slotIndex (today's behavior)
-    // when the roster doesn't yet know this user, so it can never render worse.
+    // Roster mappings: userId <-> slotIndex plus photo.
     const rosterSlotByUser = new Map();
     const userBySlotIndex = new Map();
     const photoByUserId = new Map();
@@ -1237,57 +1234,81 @@ const IVSLiveStreamViewer = ({
       }
     });
     if (uid && selfPhotoUrl) photoByUserId.set(String(uid), String(selfPhotoUrl));
+
     const effectiveSelfCamOn = selfCamOn && !cameraOffByHost;
     const effectiveSelfMicOn = selfMicOn && !mutedByHost;
+
     const userByParticipant = new Map();
     (ivsSession.remoteParticipants || []).forEach((p) => {
       if (p && p.participantId && p.userId) userByParticipant.set(p.participantId, String(p.userId));
     });
-    const effectiveSlot = (s) => {
-      if (!s) return undefined;
+
+    // participantId lookup for roster->native stream fallback.
+    const participantIdByUserId = new Map();
+    userByParticipant.forEach((userId, participantId) => participantIdByUserId.set(userId, participantId));
+
+    // Effective slot for each participant: prefer roster slot, then native slotIndex.
+    const effectiveSlotByParticipantId = new Map();
+    guestStreams.forEach((s) => {
+      if (!s?.participantId) return;
       const userId = userByParticipant.get(s.participantId);
       const rosterSlot = userId ? rosterSlotByUser.get(userId) : undefined;
-      if (typeof rosterSlot === 'number') return rosterSlot;
-      return typeof s.slotIndex === 'number' && s.slotIndex >= 1 ? s.slotIndex : undefined;
-    };
-    const anySlotIndexed = guestStreams.some((s) => typeof effectiveSlot(s) === 'number');
-    const streamForSlot = (slot) => {
-      // Sticky placement only — never compact by array index when a middle box leaves.
-      if (anySlotIndexed) {
-        return guestStreams.find((s) => s && effectiveSlot(s) === slot) || null;
+      const effectiveSlot =
+        typeof rosterSlot === 'number'
+          ? rosterSlot
+          : typeof s.slotIndex === 'number' && s.slotIndex >= 1
+            ? s.slotIndex
+            : undefined;
+      if (typeof effectiveSlot === 'number' && effectiveSlot >= 1) {
+        effectiveSlotByParticipantId.set(s.participantId, effectiveSlot);
       }
-      // Roster can still place guests when native attrs are missing.
-      const rosterUserId = userBySlotIndex.get(slot);
-      if (rosterUserId) {
-        const pid = Array.from(userByParticipant.entries()).find(([, uid]) => uid === rosterUserId)?.[0];
-        if (pid) return guestStreams.find((s) => s && s.participantId === pid) || null;
-      }
-      return null;
-    };
+    });
+
+    const anySlotIndexed = guestStreams.some((s) => effectiveSlotByParticipantId.has(s?.participantId));
+
+    // streamBySlot: O(1) lookups during tile rendering (no find/filter scans).
+    const streamBySlot = new Map();
+    if (anySlotIndexed) {
+      guestStreams.forEach((s) => {
+        const slot = effectiveSlotByParticipantId.get(s?.participantId);
+        if (typeof slot === 'number' && slot >= 1) streamBySlot.set(slot, s);
+      });
+    } else {
+      const streamByParticipantId = new Map(guestStreams.filter((s) => s?.participantId).map((s) => [s.participantId, s]));
+      userBySlotIndex.forEach((rosterUserId, slot) => {
+        if (typeof slot !== 'number' || slot < 1) return;
+        const pid = participantIdByUserId.get(rosterUserId);
+        if (!pid) return;
+        const st = streamByParticipantId.get(pid);
+        if (st) streamBySlot.set(slot, st);
+      });
+    }
+
+    // Occupied slots drive tray pagination + join CTA.
     const occupiedSlots = new Set();
     if (typeof guestSlotId === 'number' && guestSlotId >= 1) occupiedSlots.add(guestSlotId);
-    guestStreams.forEach((s) => {
-      const es = effectiveSlot(s);
-      if (typeof es === 'number' && es >= 1) occupiedSlots.add(es);
+    effectiveSlotByParticipantId.forEach((slot) => {
+      if (typeof slot === 'number' && slot >= 1) occupiedSlots.add(slot);
     });
     userBySlotIndex.forEach((_, slot) => {
       if (typeof slot === 'number' && slot >= 1) occupiedSlots.add(slot);
     });
+
     const firstEmptySlot = (() => {
       for (let i = 1; i <= guestSlotsTotal; i += 1) {
         if (!occupiedSlots.has(i)) return i;
       }
       return null;
     })();
-    // Join CTA always sits in the first empty guest box (box 1 when the panel is empty).
+
     const firstJoinSlotId = guestMode ? null : firstEmptySlot;
 
-    // Fluid tray: only paint occupied / joining / join-CTA slots so tiles reflow
-    // as guests join and leave (sticky slotIndex still binds media).
+    // Fluid tray paints only roster/occupied/join-CTA.
     const reservedSlotsForTray = new Set();
     userBySlotIndex.forEach((_, slot) => {
       if (typeof slot === 'number' && slot >= 1) reservedSlotsForTray.add(slot);
     });
+
     const visibleGuestSlotIds =
       guestsPerPage > 0
         ? buildVisibleGuestSlotIds({
@@ -1297,11 +1318,97 @@ const IVSLiveStreamViewer = ({
             joinSlotId: firstJoinSlotId,
           })
         : [];
+
     if (guestsPerPage > 0 && !guestMode && firstJoinSlotId == null && visibleGuestSlotIds.length === 0) {
       visibleGuestSlotIds.push(1);
     }
-    const pageCount =
-      guestsPerPage > 0 ? Math.max(1, Math.ceil(Math.max(1, visibleGuestSlotIds.length) / guestsPerPage)) : 0;
+
+    const pageCount = guestsPerPage > 0 ? Math.max(1, Math.ceil(Math.max(1, visibleGuestSlotIds.length) / guestsPerPage)) : 0;
+
+    const guestBottomStripHeight = guestTrayMode === 'hidden' ? 0 : 16;
+
+    // slotUserIdBySlot: what user to show in a given slot.
+    const slotUserIdBySlot = new Map();
+    for (let slot = 1; slot <= guestSlotsTotal; slot += 1) {
+      if (guestMode && guestSlotId === slot) {
+        if (uid) slotUserIdBySlot.set(slot, uid);
+        continue;
+      }
+
+      const rosterUserId = userBySlotIndex.get(slot);
+      if (rosterUserId) {
+        slotUserIdBySlot.set(slot, rosterUserId);
+        continue;
+      }
+
+      const st = streamBySlot.get(slot);
+      if (st?.participantId) {
+        const userId = userByParticipant.get(st.participantId);
+        if (userId) slotUserIdBySlot.set(slot, userId);
+      }
+    }
+
+    return {
+      hostStream,
+      guestStreams,
+      guestLayoutMode,
+      guestSlotsTotal,
+      useBottomTray,
+      guestsPerPage,
+      visibleGuestSlotIds,
+      pageCount,
+      firstJoinSlotId,
+      guestBottomStripHeight,
+      effectiveSelfCamOn,
+      effectiveSelfMicOn,
+      userBySlotIndex,
+      photoByUserId,
+      userByParticipant,
+      streamBySlot,
+      effectiveSlotByParticipantId,
+      slotUserIdBySlot,
+    };
+  }, [
+    hasStageCredentials,
+    ivsSession.visibleStreams,
+    ivsSession.remoteParticipants,
+    guestRoster,
+    guestLayoutModeProp,
+    guestTrayMode,
+    guestMode,
+    guestSlotId,
+    uid,
+    selfPhotoUrl,
+    selfCamOn,
+    cameraOffByHost,
+    selfMicOn,
+    mutedByHost,
+  ]);
+
+  // Real-Time surface fed by viewer session credentials
+  // Keep the native views mounted once credentials exist; gate visibility by canRender
+  if (NativeIVSRealTimeView && hasStageCredentials && slotLayout) {
+    const {
+      hostStream,
+      guestStreams,
+      guestLayoutMode,
+      guestSlotsTotal,
+      useBottomTray,
+      guestsPerPage,
+      visibleGuestSlotIds,
+      pageCount,
+      firstJoinSlotId,
+      guestBottomStripHeight,
+      effectiveSelfCamOn,
+      effectiveSelfMicOn,
+      userBySlotIndex,
+      photoByUserId,
+      userByParticipant,
+      streamBySlot,
+      effectiveSlotByParticipantId,
+      slotUserIdBySlot,
+    } = slotLayout;
+
     if (
       Platform.OS !== 'android' &&
       guestsPerPage > 0 &&
@@ -1311,9 +1418,6 @@ const IVSLiveStreamViewer = ({
       prevVisibleGuestCountRef.current = visibleGuestSlotIds.length;
     }
 
-    // Keep a solid footer-colored band under the tiles so the area directly above
-    // the comments overlay never shows the black hostStage background.
-    const guestBottomStripHeight = guestTrayMode === 'hidden' ? 0 : 16;
     // Coins gifted to a given user THIS stream (session tally from gift_event / server snapshot).
     const coinsForUser = (userId) => coinsFromGiftTotals(giftTotalsByUser, userId);
     // TikTok-style 1v1 battle: host | opponent side-by-side, no guest tray.
@@ -1361,7 +1465,11 @@ const IVSLiveStreamViewer = ({
                   stageArn={stageArnForSurface}
                   token={tokenForSurface}
                   sessionId={streamId}
-                  slotId={typeof effectiveSlot(opponentStream) === 'number' ? effectiveSlot(opponentStream) : 1}
+                  slotId={
+                    typeof effectiveSlotByParticipantId.get(opponentStream.participantId) === 'number'
+                      ? effectiveSlotByParticipantId.get(opponentStream.participantId)
+                      : 1
+                  }
                   participantId={opponentStream.participantId}
                   remoteTrackCount={ivsSession.remoteVideoTracks}
                   zoom={1.0}
@@ -1411,14 +1519,9 @@ const IVSLiveStreamViewer = ({
       >
         {Array.from({ length: guestSlotsTotal }, (_, i) => {
           const globalSlotId = i + 1;
-          const stream =
-            !(guestMode && guestSlotId === globalSlotId) ? streamForSlot(globalSlotId) : null;
+          const stream = !(guestMode && guestSlotId === globalSlotId) ? streamBySlot.get(globalSlotId) || null : null;
           const tileUserId =
-            guestMode && guestSlotId === globalSlotId
-              ? uid
-              : userBySlotIndex.get(globalSlotId) ||
-                (stream ? userByParticipant.get(stream.participantId) : null) ||
-                null;
+            guestMode && guestSlotId === globalSlotId ? uid : slotUserIdBySlot.get(globalSlotId) || null;
           const isSelfTile = !!(guestMode && guestSlotId === globalSlotId);
           const remoteCamOff = !!(stream && stream.isCameraDisabled);
           const showAvatar =
@@ -1644,17 +1747,9 @@ const IVSLiveStreamViewer = ({
                         {slotsOnPage.map((globalSlotId) => {
                           // Place the guest whose host-assigned slotIndex matches this box,
                           // so the same guest lands in the same box on host + every viewer.
-                          const stream =
-                            !(guestMode && guestSlotId === globalSlotId)
-                              ? streamForSlot(globalSlotId)
-                              : null;
-
+                          const stream = !(guestMode && guestSlotId === globalSlotId) ? streamBySlot.get(globalSlotId) || null : null;
                           const tileUserId =
-                            guestMode && guestSlotId === globalSlotId
-                              ? uid
-                              : userBySlotIndex.get(globalSlotId) ||
-                                (stream ? userByParticipant.get(stream.participantId) : null) ||
-                                null;
+                            guestMode && guestSlotId === globalSlotId ? uid : slotUserIdBySlot.get(globalSlotId) || null;
                           const isSelfTile = !!(guestMode && guestSlotId === globalSlotId);
                           const tilePhoto =
                             (tileUserId && photoByUserId.get(String(tileUserId))) || null;
@@ -3161,4 +3256,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default LiveStreamViewer;
+export default React.memo(LiveStreamViewer);

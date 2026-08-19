@@ -154,6 +154,9 @@ import { useLiveStreamRouteParams } from './live/useLiveStreamRouteParams';
 import Toast from 'react-native-toast-message';
 
 function BLYP_nativeLog(message, level = 1) {
+  // Render-path logs can be extremely expensive on Android (hearts/likes re-render).
+  // Keep them dev-only to protect the live JS thread.
+  if (!__DEV__) return;
   try {
     const msg = typeof message === 'string' ? message : JSON.stringify(message);
     if (level >= 2) {
@@ -218,18 +221,21 @@ const LiveStreamScreen = (props) => {
   const NativeIVSRealTimeView = getNativeIVSRealTimeView();
   // Keep live video feed portrait-stable; MainActivity itself is fullSensor for Fold.
   useLockPortraitWhileFocused();
-  BLYP_nativeLog('[LIVE][RENDER] LiveStreamScreen render', 1);
-  BLYP_nativeLog(
-    '[LIVE][PROPS_AT_MOUNT] ' +
-    JSON.stringify({ hasProps: !!props, keys: props ? Object.keys(props) : null }),
-    1
-  );
+  if (__DEV__) {
+    BLYP_nativeLog('[LIVE][RENDER] LiveStreamScreen render', 1);
+    BLYP_nativeLog(
+      '[LIVE][PROPS_AT_MOUNT] ' + JSON.stringify({ hasProps: !!props, keys: props ? Object.keys(props) : null }),
+      1
+    );
+  }
 
   const { navigation, route } = props || {};
 
-  console.log('[LIVE][RAW_ROUTE_OBJECT]', route);
-  console.log('[LIVE][ROUTE_PARAMS]', route?.params);
-  console.log('='.repeat(60));
+  if (__DEV__) {
+    console.log('[LIVE][RAW_ROUTE_OBJECT]', route);
+    console.log('[LIVE][ROUTE_PARAMS]', route?.params);
+    console.log('='.repeat(60));
+  }
 
   // Bridge test removed to allow normal flow
 
@@ -510,27 +516,29 @@ const LiveStreamScreen = (props) => {
   }, [isHost, uid]);
 
   // CRITICAL DEBUG: Log decision
-  console.log('[LIVE][DECISION_MADE]', {
-    routeMode,
-    routeHostUid,
-    routeStreamId,
-    routeSource,
-    isViewerRoute,
-    mode,
-    isViewer,
-    isHost,
-  });
+  if (__DEV__) {
+    console.log('[LIVE][DECISION_MADE]', {
+      routeMode,
+      routeHostUid,
+      routeStreamId,
+      routeSource,
+      isViewerRoute,
+      mode,
+      isViewer,
+      isHost,
+    });
 
-  console.log('[LIVE][RECEIVED_ROUTE_PARAMS]', {
-    normalizedParams,
-    routeMode,
-    routeHostUid,
-    routeStreamId,
-    routeHostDisplayName,
-    routeSource,
-    isViewerRoute,
-    finalMode: mode,
-  });
+    console.log('[LIVE][RECEIVED_ROUTE_PARAMS]', {
+      normalizedParams,
+      routeMode,
+      routeHostUid,
+      routeStreamId,
+      routeHostDisplayName,
+      routeSource,
+      isViewerRoute,
+      finalMode: mode,
+    });
+  }
 
   // STEP 2: Safe public display-name resolution. Auth fallbacks can be the
   // Cognito sub; never let that identifier become a user-facing live label.
@@ -573,14 +581,16 @@ const LiveStreamScreen = (props) => {
           ? hostUserDoc.avatarUrl.trim()
           : null;
 
-  console.log('[LIVE][MODE_RESOLVED]', {
-    mode,
-    isViewer,
-    isHost,
-    hostUid,
-    hostDisplayName,
-    uid,
-  });
+  if (__DEV__) {
+    console.log('[LIVE][MODE_RESOLVED]', {
+      mode,
+      isViewer,
+      isHost,
+      hostUid,
+      hostDisplayName,
+      uid,
+    });
+  }
 
   const [isStreaming, setIsStreaming] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -1053,6 +1063,11 @@ const LiveStreamScreen = (props) => {
   const userNameCacheRef = useRef(new Map());
   const userNameLookupsInFlightRef = useRef(new Set());
   const userPhotoCacheRef = useRef(new Map());
+  // Negative-caching: if a lookup yields empty username/photo, avoid
+  // re-querying the same user for a short TTL (gift socket can spam).
+  const USER_PROFILE_MISSING_TTL_MS = 120000; // 2 minutes
+  const userNameMissingUntilRef = useRef(new Map()); // userId -> epochMs
+  const userPhotoMissingUntilRef = useRef(new Map()); // userId -> epochMs
 
   const pickBestUsernameFromUserDoc = (userData, fallbackUserId) => {
     const username = toTrimmedString(userData?.username || userData?.handle || userData?.userName);
@@ -1089,8 +1104,15 @@ const LiveStreamScreen = (props) => {
 
     const cachedUsername = userNameCacheRef.current.get(id) || '';
     const cachedPhotoUrl = userPhotoCacheRef.current.get(id) || '';
-    if (cachedUsername && cachedPhotoUrl) {
-      return { username: cachedUsername, photoUrl: cachedPhotoUrl };
+    if (cachedUsername && cachedPhotoUrl) return { username: cachedUsername, photoUrl: cachedPhotoUrl };
+
+    const now = Date.now();
+    const nameMissingUntil = userNameMissingUntilRef.current.get(id) || 0;
+    const photoMissingUntil = userPhotoMissingUntilRef.current.get(id) || 0;
+    const nameMissingFresh = !cachedUsername && nameMissingUntil && now < nameMissingUntil;
+    const photoMissingFresh = !cachedPhotoUrl && photoMissingUntil && now < photoMissingUntil;
+    if (nameMissingFresh && photoMissingFresh) {
+      return { username: '', photoUrl: '' };
     }
 
     try {
@@ -1142,8 +1164,18 @@ const LiveStreamScreen = (props) => {
 
       if (username) userNameCacheRef.current.set(id, username);
       if (photoUrl) userPhotoCacheRef.current.set(id, photoUrl);
+
+      // Negative-cache missing fields separately so subsequent gifts don't
+      // repeat expensive multi-collection reads.
+      if (!username) userNameMissingUntilRef.current.set(id, now + USER_PROFILE_MISSING_TTL_MS);
+      if (!photoUrl) userPhotoMissingUntilRef.current.set(id, now + USER_PROFILE_MISSING_TTL_MS);
+
       return { username, photoUrl };
     } catch (_e) {
+      // Treat failures as "missing" for a short TTL to avoid hot-looping.
+      const nowFail = Date.now();
+      userNameMissingUntilRef.current.set(id, nowFail + USER_PROFILE_MISSING_TTL_MS);
+      userPhotoMissingUntilRef.current.set(id, nowFail + USER_PROFILE_MISSING_TTL_MS);
       return { username: '', photoUrl: '' };
     }
   };
@@ -1710,7 +1742,7 @@ const LiveStreamScreen = (props) => {
 
     (async () => {
       try {
-        sub = await subscribeToGiftEvents(String(activeStreamId), async (payload) => {
+        sub = await subscribeToGiftEvents(String(activeStreamId), (payload) => {
           // In a battle, a gift also adds gift-weighted score to the receiving side.
           attributeBattleGift(payload);
           // Tally gifts per recipient this session (for the Guest Control sheet).
@@ -1750,46 +1782,64 @@ const LiveStreamScreen = (props) => {
               };
             });
           }
-          // The backend only sends sender.userId (handle/avatar are null), so the
-          // overlay was showing a generic "Someone". Resolve the real sender's
-          // name + avatar from their userId before forwarding to the overlay so
-          // it shows who actually sent the gift.
-          let enriched = payload;
-          try {
-            const sid = payload?.sender?.userId;
-            if (sid && !payload?.sender?.handle) {
-              const prof = await fetchUserProfileForUserId(sid);
-              enriched = {
-                ...payload,
-                sender: {
-                  ...(payload.sender || {}),
-                  handle: prof?.username || payload?.sender?.handle || null,
-                  avatarUrl: prof?.photoUrl || payload?.sender?.avatarUrl || null,
-                },
-              };
+
+          // IMPORTANT: drive <LiveGiftOverlay /> immediately with the raw socket
+          // payload. Profile enrichment can be slow on Android; we must not block
+          // gesture responsiveness waiting for it.
+          //
+          // Identity keys (giftEventId/sequenceNo) are preserved by cloning below,
+          // so the overlay can skip expensive re-processing for the same event.
+          setIncomingGiftEvent(payload);
+
+          // Fire-and-forget enrichment; never await before updating overlay UI.
+          (async () => {
+            try {
+              let enriched = payload;
+              let didEnrich = false;
+
+              const sid = payload?.sender?.userId;
+              if (sid && !payload?.sender?.handle) {
+                const prof = await fetchUserProfileForUserId(sid);
+                const curHandle = payload?.sender?.handle ?? null;
+                const curAvatar = payload?.sender?.avatarUrl ?? null;
+                const nextHandle = prof?.username || payload?.sender?.handle || null;
+                const nextAvatar = prof?.photoUrl || payload?.sender?.avatarUrl || null;
+                didEnrich = didEnrich || nextHandle !== curHandle || nextAvatar !== curAvatar;
+                enriched = {
+                  ...payload,
+                  sender: {
+                    ...(payload.sender || {}),
+                    handle: nextHandle,
+                    avatarUrl: nextAvatar,
+                  },
+                };
+              }
+
+              const rid2 = payload?.receiver?.userId;
+              if (rid2 && !payload?.receiver?.handle) {
+                const rprof = await fetchUserProfileForUserId(rid2);
+                const curHandle = payload?.receiver?.handle ?? null;
+                const curAvatar = payload?.receiver?.avatarUrl ?? null;
+                const nextHandle = rprof?.username || payload?.receiver?.handle || null;
+                const nextAvatar = rprof?.photoUrl || payload?.receiver?.avatarUrl || null;
+                didEnrich = didEnrich || nextHandle !== curHandle || nextAvatar !== curAvatar;
+                enriched = {
+                  ...enriched,
+                  receiver: {
+                    ...(payload.receiver || {}),
+                    handle: nextHandle,
+                    avatarUrl: nextAvatar,
+                  },
+                };
+              }
+
+              if (cancelled) return;
+              if (!didEnrich) return;
+              setIncomingGiftEvent(enriched);
+            } catch {
+              // best-effort; keep raw payload already displayed
             }
-          } catch {
-            // fall back to the raw payload
-          }
-          // Also resolve the RECEIVER's name/avatar so the overlay can show who
-          // the gift was sent TO (the backend sends receiver.handle = null too).
-          try {
-            const rid2 = payload?.receiver?.userId;
-            if (rid2 && !payload?.receiver?.handle) {
-              const rprof = await fetchUserProfileForUserId(rid2);
-              enriched = {
-                ...enriched,
-                receiver: {
-                  ...(payload.receiver || {}),
-                  handle: rprof?.username || payload?.receiver?.handle || null,
-                  avatarUrl: rprof?.photoUrl || payload?.receiver?.avatarUrl || null,
-                },
-              };
-            }
-          } catch {
-            // keep whatever receiver info we already have
-          }
-          setIncomingGiftEvent(enriched);
+          })();
         });
       } catch (e) {
         if (cancelled) return;
