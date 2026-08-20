@@ -63,6 +63,11 @@ export const adminAccountFeedPrioritySchema = z.object({
     reason: z.string().trim().min(1).max(500).optional(),
 });
 
+export const adminSetSubscriptionSchema = z.object({
+    freeAccess: z.coerce.boolean(),
+    reason: z.string().trim().max(500).nullable().optional(),
+});
+
 export const adminSetCapabilitiesSchema = z.object({
     verified: z.coerce.boolean().default(false),
     role: z.enum(['user', 'admin', 'manager']).optional(),

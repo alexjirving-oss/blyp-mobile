@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import android.net.TrafficStats
 import android.view.Surface
@@ -38,6 +39,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule.RCTDeviceEventEmitter
+import com.blyp.mobile.BuildConfig
 
 private const val IVS_TAG = "IVS_NATIVE"
 private const val IVS_HOST_NATIVE_TAG = "IVS_HOST_NATIVE"
@@ -89,6 +91,7 @@ class IVSBroadcastModule(
     private var currentViewerToken: String? = null
     private var lastStageConnectionState: Stage.ConnectionState? = null
     private var viewerReachedStableConnection: Boolean = false
+    private var lastViewerAudioReassertMs: Long = 0L
     private var sessionMode: SessionMode = SessionMode.NONE
     private var renderOwner: RenderOwner = RenderOwner.NONE
     private var hostRenderSurface: RenderSurfaceConfig? = null
@@ -229,20 +232,24 @@ class IVSBroadcastModule(
                     }
 
                     // Deterministic CI proof: traffic should be non-zero during active remote video windows.
-                    Log.i(
-                        "IVS_PROOF",
-                        "[IVS_PROOF][netRxTick] role=$netRxRole slot=$netRxSlot tick=$netRxTicks deltaBytes=$deltaRx totalBytes=$netRxAccumBytes txDeltaBytes=$deltaTx txTotalBytes=$netTxAccumBytes"
-                    )
+                    if (BuildConfig.DEBUG) {
+                        Log.i(
+                            "IVS_PROOF",
+                            "[IVS_PROOF][netRxTick] role=$netRxRole slot=$netRxSlot tick=$netRxTicks deltaBytes=$deltaRx totalBytes=$netRxAccumBytes txDeltaBytes=$deltaTx txTotalBytes=$netTxAccumBytes"
+                        )
+                    }
 
                     mainHandler.postDelayed(this, NETRX_INTERVAL_MS)
                 }
             }
 
             netRxTicker = tick
-            Log.i(
-                "IVS_PROOF",
-                "[IVS_PROOF][netRxStart] intervalMs=$NETRX_INTERVAL_MS role=$netRxRole slot=$netRxSlot reason=$reason startRxBytes=$netRxLastRxBytes startTxBytes=$netRxLastTxBytes"
-            )
+            if (BuildConfig.DEBUG) {
+                Log.i(
+                    "IVS_PROOF",
+                    "[IVS_PROOF][netRxStart] intervalMs=$NETRX_INTERVAL_MS role=$netRxRole slot=$netRxSlot reason=$reason startRxBytes=$netRxLastRxBytes startTxBytes=$netRxLastTxBytes"
+                )
+            }
             mainHandler.postDelayed(tick, NETRX_INTERVAL_MS)
         }
     }
@@ -277,10 +284,12 @@ class IVSBroadcastModule(
         }
         if (tickerToStop != null) {
             mainHandler.removeCallbacks(tickerToStop)
-            Log.i(
-                "IVS_PROOF",
-                "[IVS_PROOF][netRxStop] role=$roleAtStop slot=$slotAtStop reason=$reason ticks=$ticksAtStop totalBytes=$rxAtStop txTotalBytes=$txAtStop stalled=$stalledAtStop"
-            )
+            if (BuildConfig.DEBUG) {
+                Log.i(
+                    "IVS_PROOF",
+                    "[IVS_PROOF][netRxStop] role=$roleAtStop slot=$slotAtStop reason=$reason ticks=$ticksAtStop totalBytes=$rxAtStop txTotalBytes=$txAtStop stalled=$stalledAtStop"
+                )
+            }
         }
     }
 
@@ -1083,6 +1092,9 @@ class IVSBroadcastModule(
     /** Re-pin media loudspeaker when viewer subscribe receives playable audio. */
     private fun reassertViewerPlaybackAudio(reason: String) {
         if (sessionMode != SessionMode.VIEWER) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastViewerAudioReassertMs < 750L) return
+        lastViewerAudioReassertMs = now
         loudspeakerController.force(LiveLoudspeakerController.Profile.PLAYBACK, reason)
     }
 
@@ -2015,6 +2027,7 @@ class IVSBroadcastModule(
             if (sessionMode == SessionMode.VIEWER && !participant.isLocal &&
                 subscribeState == Stage.SubscribeState.SUBSCRIBED
             ) {
+                // Pin loudspeaker once per participant; avoid force() log/route churn every tick.
                 reassertViewerPlaybackAudio("viewer-subscribed-${participant.participantId}")
             } else if (sessionMode != SessionMode.VIEWER) {
                 loudspeakerController.forceActive("subscribe-state-${subscribeState.name.lowercase()}")

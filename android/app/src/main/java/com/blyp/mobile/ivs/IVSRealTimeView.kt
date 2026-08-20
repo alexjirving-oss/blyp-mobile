@@ -6,6 +6,7 @@ import android.util.Log
 import android.view.Surface
 import android.view.TextureView
 import android.graphics.SurfaceTexture
+import com.blyp.mobile.BuildConfig
 
 /**
  * IVS Real-Time View
@@ -52,7 +53,7 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         val surfaceCreated = surfaceReady
         val streamAssigned = !pid.isNullOrBlank() && tracks > 0
         val didAttach = streamAssigned && ready && key != null && layoutReady && key != lastAttachedKey
-        if (didAttach) {
+        if (didAttach && BuildConfig.DEBUG) {
             Log.i(
                 "IVS_TILE_ATTACH",
                 "LOG: IVS_TILE_ATTACH slot=$slotId surfaceCreated=$surfaceCreated streamAssigned=$streamAssigned didAttach=$didAttach"
@@ -71,7 +72,9 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
             return
         }
 
-        Log.i("IVS_PROOF", "[ATTACH_EXEC] reason=$reason key=$key surfaceHash=${surfaceHash(surface)} size=${w}x${h}")
+        if (BuildConfig.DEBUG) {
+            Log.i("IVS_PROOF", "[ATTACH_EXEC] reason=$reason key=$key surfaceHash=${surfaceHash(surface)} size=${w}x${h}")
+        }
         IVSBroadcastModule.setViewerSlotSurface(slotId, surface, w, h)
         FirstFrameProbe.markAttach("viewer", "setViewerSlotSurface slot=$slotId size=${w}x${h}")
         lastAttachedKey = key
@@ -125,7 +128,9 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
         m.setScale(z, z, w / 2f, h / 2f)
         setTransform(m)
         invalidate()
-        Log.i("IVS_PROOF", "[ZOOM_APPLIED] reason=$reason slot=$slotId zoom=$z size=${w.toInt()}x${h.toInt()}")
+        if (BuildConfig.DEBUG) {
+            Log.i("IVS_PROOF", "[ZOOM_APPLIED] reason=$reason slot=$slotId zoom=$z size=${w.toInt()}x${h.toInt()}")
+        }
     }
 
     init {

@@ -27,6 +27,15 @@ export type IVSViewerTransport = 'realtime' | 'playback';
 const VIEWER_TOKEN_REFRESH_MS = 50 * 60 * 1000;
 const VIEWER_RECONNECT_MAX_ATTEMPTS = 5;
 
+function devLog(message: string, payload?: unknown): void {
+  if (!__DEV__) return;
+  if (payload === undefined) {
+    console.log(message);
+    return;
+  }
+  console.log(message, payload);
+}
+
 function isDeadSessionError(message: string | null | undefined, code?: string): boolean {
   if (code === 'SESSION_NOT_FOUND') return true;
   if (!message) return false;
@@ -132,14 +141,14 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
 
   // Fetch token and join as viewer (Real-Time stage participant, subscribe-only)
   const joinStream = useCallback(async () => {
-    console.log('[ASSERT][VIEWER] joinStream called', {
+    devLog('[ASSERT][VIEWER] joinStream called', {
       joined: joinedRef.current,
       inFlight: joinInFlightRef.current,
       surfaceReady,
     });
     joinRequestedRef.current = true;
     if (!surfaceReady) {
-      console.log('[IVS_VIEWER][JOIN_ALLOWED_NO_SURFACE]', { streamId });
+      devLog('[IVS_VIEWER][JOIN_ALLOWED_NO_SURFACE]', { streamId });
     }
     if (!enabled) {
       setError('Viewer session not enabled');
@@ -151,7 +160,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
 
     // Guard against duplicate joins
     if (joinInFlightRef.current) {
-      console.log('[IVS_VIEWER][JOIN_SKIPPED] Already joining', {
+      devLog('[IVS_VIEWER][JOIN_SKIPPED] Already joining', {
         inFlight: joinInFlightRef.current,
         joined: joinedRef.current,
       });
@@ -159,7 +168,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     }
 
     if (!force && joinedRef.current && lastJoinedSessionIdRef.current === streamId) {
-      console.log('[VIEWER] already joined same session — skip');
+      devLog('[VIEWER] already joined same session — skip');
       return;
     }
 
@@ -183,8 +192,8 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         resetRegistry();
       }
 
-      console.log('[VIEWER][JOIN_REQUEST]', { sessionId: streamId });
-      console.log('[IVS_VIEWER][JOIN_STREAM]', { streamId, preferPlayback, force, refreshToken });
+      devLog('[VIEWER][JOIN_REQUEST]', { sessionId: streamId });
+      devLog('[IVS_VIEWER][JOIN_STREAM]', { streamId, preferPlayback, force, refreshToken });
 
       const existingToken = tokenRef.current;
       const existingArn = stageArnRef.current;
@@ -206,7 +215,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         if (preserveMedia) {
           setConnectionState('connected');
         }
-        console.log('[IVS_VIEWER][REJOIN_SAME_TOKEN]', { streamId });
+        devLog('[IVS_VIEWER][REJOIN_SAME_TOKEN]', { streamId });
         return;
       }
 
@@ -216,7 +225,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         try {
           const mass = await joinLiveMass(streamId, displayName);
           if (mass?.mode === 'playback' && mass.playbackUrl) {
-            console.log('[IVS_VIEWER][JOIN_PLAYBACK]', { streamId, playbackUrlLength: mass.playbackUrl.length });
+            devLog('[IVS_VIEWER][JOIN_PLAYBACK]', { streamId, playbackUrlLength: mass.playbackUrl.length });
             await client.joinAsViewerPlayback({
               sessionId: streamId,
               playbackUrl: mass.playbackUrl,
@@ -233,7 +242,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
             setConnectionState('connected');
             setRemoteVideoAdded(true);
             setFirstFrameSeen(true);
-            console.log('[IVS_VIEWER][JOIN_PLAYBACK_COMPLETED]', { streamId });
+            devLog('[IVS_VIEWER][JOIN_PLAYBACK_COMPLETED]', { streamId });
           }
         } catch (massErr) {
           console.warn('[IVS_VIEWER][JOIN_PLAYBACK_FALLBACK]', massErr);
@@ -249,7 +258,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       // 1. Fetch viewer participant token from backend (stage subscriber)
       const response = await joinLiveRealtime(streamId, displayName);
 
-      console.log('[IVS_VIEWER][TOKEN_RECEIVED]', {
+      devLog('[IVS_VIEWER][TOKEN_RECEIVED]', {
         stageArn: response.stageArn,
         tokenLength: response.token?.length || 0,
       });
@@ -283,8 +292,8 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       if (preserveMedia) {
         setConnectionState('connected');
       }
-      console.log('[IVS_VIEWER][JOIN_COMPLETED]', { streamId });
-      console.log('[IVS_VIEWER][STAGE_JOIN_SUCCESS]', {
+      devLog('[IVS_VIEWER][JOIN_COMPLETED]', { streamId });
+      devLog('[IVS_VIEWER][STAGE_JOIN_SUCCESS]', {
         sessionId: streamId,
         stageArn: response.stageArn,
       });
@@ -325,7 +334,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
   // Leave stream
   const leaveStream = useCallback(async () => {
     try {
-      console.log('[IVS_VIEWER][LEAVE_STREAM]', { streamId });
+      devLog('[IVS_VIEWER][LEAVE_STREAM]', { streamId });
       leaveInFlightRef.current = true;
       
       await client.leaveAsViewer();
@@ -341,7 +350,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       joinedRef.current = false;
       setJoined(false);
       lastJoinedSessionIdRef.current = null;
-      console.log('[IVS_VIEWER][LEFT]');
+      devLog('[IVS_VIEWER][LEFT]');
     } catch (err) {
       console.error('[IVS_VIEWER][LEAVE_ERROR]', err);
       setError(err instanceof Error ? err.message : 'Failed to leave stream');
@@ -362,7 +371,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       joinedRef.current = false;
       setJoined(false);
       lastJoinedSessionIdRef.current = null;
-      console.log('[VIEWER] reset joined state on stream change', {
+      devLog('[VIEWER] reset joined state on stream change', {
         from: lastStreamIdRef.current,
         to: streamId,
       });
@@ -376,7 +385,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
 
     // Remote participant joined (host or guest)
     const unsubParticipantJoined = client.on('remoteParticipantJoined', (event) => {
-      console.log('[IVS_VIEWER][REMOTE_PARTICIPANT_JOINED]', event.payload);
+      devLog('[IVS_VIEWER][REMOTE_PARTICIPANT_JOINED]', event.payload);
       setRemoteParticipants((prev) => {
         const payload = event.payload as any;
         participantMetaRef.current.set(payload.participantId, {
@@ -404,41 +413,57 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
 
     // Remote participant updated
     const unsubParticipantUpdated = client.on('remoteParticipantUpdated', (event) => {
-      console.log('[IVS_VIEWER][REMOTE_PARTICIPANT_UPDATED]', event.payload);
-      setRemoteParticipants((prev) =>
-        prev.map((p) => {
-          const payload = event.payload as any;
-          if (payload.participantId && payload.isMuted !== undefined) {
-            participantMetaRef.current.set(payload.participantId, {
-              isMuted: payload.isMuted,
-              role: participantMetaRef.current.get(payload.participantId)?.role,
-            });
-            updateParticipantMuted(payload.participantId, payload.isMuted);
-          }
-          if (payload.participantId && payload.isCameraDisabled !== undefined) {
-            updateParticipantCameraDisabled(payload.participantId, !!payload.isCameraDisabled);
-          }
-          if (payload.participantId && payload.role) {
-            const existing = participantMetaRef.current.get(payload.participantId);
-            participantMetaRef.current.set(payload.participantId, {
-              isMuted: existing?.isMuted ?? false,
-              role: payload.role,
-            });
-            updateParticipantRole(payload.participantId, payload.role);
-          }
-          if (p.participantId !== payload.participantId) return p;
-          return {
-            ...p,
-            isMuted: payload.isMuted ?? p.isMuted,
-            isCameraDisabled: payload.isCameraDisabled ?? p.isCameraDisabled,
-          };
-        })
-      );
+      devLog('[IVS_VIEWER][REMOTE_PARTICIPANT_UPDATED]', event.payload);
+      setRemoteParticipants((prev) => {
+        const payload = event.payload as any;
+        const participantId = payload?.participantId;
+        if (!participantId) return prev;
+        const idx = prev.findIndex((p) => p.participantId === participantId);
+        if (idx < 0) return prev;
+        const current = prev[idx];
+        const nextMuted =
+          payload.isMuted !== undefined ? payload.isMuted : current.isMuted;
+        const nextCamDisabled =
+          payload.isCameraDisabled !== undefined
+            ? !!payload.isCameraDisabled
+            : current.isCameraDisabled;
+        if (payload.isMuted !== undefined) {
+          participantMetaRef.current.set(participantId, {
+            isMuted: payload.isMuted,
+            role: participantMetaRef.current.get(participantId)?.role,
+          });
+          updateParticipantMuted(participantId, payload.isMuted);
+        }
+        if (payload.isCameraDisabled !== undefined) {
+          updateParticipantCameraDisabled(participantId, !!payload.isCameraDisabled);
+        }
+        if (payload.role) {
+          const existing = participantMetaRef.current.get(participantId);
+          participantMetaRef.current.set(participantId, {
+            isMuted: existing?.isMuted ?? false,
+            role: payload.role,
+          });
+          updateParticipantRole(participantId, payload.role);
+        }
+        if (
+          nextMuted === current.isMuted &&
+          nextCamDisabled === current.isCameraDisabled
+        ) {
+          return prev;
+        }
+        const next = prev.slice();
+        next[idx] = {
+          ...current,
+          isMuted: nextMuted,
+          isCameraDisabled: nextCamDisabled,
+        };
+        return next;
+      });
     });
 
     // Remote participant left
     const unsubParticipantLeft = client.on('remoteParticipantLeft', (event) => {
-      console.log('[IVS_VIEWER][REMOTE_PARTICIPANT_LEFT]', event.payload);
+      devLog('[IVS_VIEWER][REMOTE_PARTICIPANT_LEFT]', event.payload);
       const payload = event.payload as any;
       if (payload?.participantId) {
         const counts = new Map(remoteVideoCountsRef.current);
@@ -498,7 +523,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
           seenStreamKeysRef.current.add(payload.streamKey);
           setRemoteVideoAdded(true);
         }
-        console.log('[IVS_VIEWER][REMOTE_VIDEO_ADDED]', { total, participantId: payload.participantId });
+        devLog('[IVS_VIEWER][REMOTE_VIDEO_ADDED]', { total, participantId: payload.participantId });
       }
     });
 
@@ -519,7 +544,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         if (payload.streamKey) {
           removeStream(payload.streamKey);
         }
-        console.log('[IVS_VIEWER][REMOTE_VIDEO_REMOVED]', { total, participantId: payload.participantId });
+        devLog('[IVS_VIEWER][REMOTE_VIDEO_REMOVED]', { total, participantId: payload.participantId });
       }
     });
 
@@ -575,7 +600,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
       const state = String((event?.payload as any)?.state || '');
       if (state !== 'DISCONNECTED') return;
       if (joinInFlightRef.current || leaveInFlightRef.current) {
-        console.log('[IVS_VIEWER][STAGE_DISCONNECTED_IGNORED]', {
+        devLog('[IVS_VIEWER][STAGE_DISCONNECTED_IGNORED]', {
           streamId,
           joinInFlight: joinInFlightRef.current,
           leaveInFlight: leaveInFlightRef.current,
@@ -668,18 +693,17 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
   }, [enabled, remoteVideoTracks, connectionState, reconnectExhausted]);
 
   useEffect(() => {
-    if (connectionState === 'connected') {
-      console.log('[IVS_VIEWER][MEDIA_STATE]', {
-        connectionState,
-        remoteParticipants: remoteParticipants.length,
-        remoteVideoTracks,
-      });
-    }
+    if (!__DEV__ || connectionState !== 'connected') return;
+    devLog('[IVS_VIEWER][MEDIA_STATE]', {
+      connectionState,
+      remoteParticipants: remoteParticipants.length,
+      remoteVideoTracks,
+    });
   }, [connectionState, remoteParticipants.length, remoteVideoTracks]);
 
   useEffect(() => {
     if (lastSurfaceReadyRef.current !== surfaceReady) {
-      console.log('[IVS_VIEWER][SURFACE_STATE]', { ready: surfaceReady });
+      devLog('[IVS_VIEWER][SURFACE_STATE]', { ready: surfaceReady });
       lastSurfaceReadyRef.current = surfaceReady;
     }
   }, [surfaceReady]);
@@ -700,11 +724,11 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     }
 
     const delayMs = 1000 * nextAttempt;
-    console.log('[IVS_VIEWER][RECONNECT_SCHEDULED]', { streamId, attempt: nextAttempt, delayMs });
+    devLog('[IVS_VIEWER][RECONNECT_SCHEDULED]', { streamId, attempt: nextAttempt, delayMs });
     const timer = setTimeout(() => {
       reconnectAttemptsRef.current = nextAttempt;
       forceRejoinRef.current = true;
-      console.log('[IVS_VIEWER][RECONNECT_ATTEMPT]', { streamId, attempt: reconnectAttemptsRef.current });
+      devLog('[IVS_VIEWER][RECONNECT_ATTEMPT]', { streamId, attempt: reconnectAttemptsRef.current });
       void joinStreamRef.current();
     }, delayMs);
 
@@ -717,7 +741,7 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
     if (viewerTransport !== 'realtime') return;
     if (!token) return;
     const timer = setTimeout(() => {
-      console.log('[IVS_VIEWER][TOKEN_REFRESH_REJOIN]', { streamId });
+      devLog('[IVS_VIEWER][TOKEN_REFRESH_REJOIN]', { streamId });
       tokenRefreshRef.current = true;
       forceRejoinRef.current = true;
       joinedRef.current = false;

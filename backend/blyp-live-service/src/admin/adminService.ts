@@ -7,6 +7,9 @@ import {
     syncUserRoleToFirestore,
     syncAvatarFrameToFirestore,
     getFirestoreUserPublicFields,
+    getFirestoreEntitlement,
+    setComplimentaryEntitlement,
+    type EntitlementSnapshot,
     setPostFeedPriorityFs,
     setUserFeedPriorityFs,
     setPostModerationHiddenFs,
@@ -86,6 +89,7 @@ type AdminUserDetail = {
     avatarFrame: string | null;
     photoURL: string | null;
     feedPriorityAccount: AccountFeedPriority;
+    subscription: EntitlementSnapshot;
     createdAt: string | null;
     updatedAt: string | null;
     recentActions: Array<{
@@ -1309,7 +1313,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
     const metadata = parseJson(state?.metadata);
     const directoryUser = await findDirectoryUser(userId);
 
-    const [actionsRs, messagesRs, publicFields] = await Promise.all([
+    const [actionsRs, messagesRs, publicFields, subscription] = await Promise.all([
         db.raw(
             `
             SELECT action, target_type, target_id, metadata, created_at
@@ -1334,6 +1338,18 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
             avatarFrame: null,
             photoURL: null,
             feedPriorityAccount: 'standard' as AccountFeedPriority,
+        })),
+        getFirestoreEntitlement(userId).catch(() => ({
+            available: false,
+            tier: null,
+            effectiveTier: 'free',
+            status: null,
+            store: null,
+            isComplimentary: false,
+            hasPaidStore: false,
+            currentPeriodEnd: null,
+            trialEndsAt: null,
+            detail: 'firestore_unavailable',
         })),
     ]);
 
@@ -1394,6 +1410,7 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
         avatarFrame: publicFields.avatarFrame || null,
         photoURL: publicFields.photoURL || null,
         feedPriorityAccount,
+        subscription,
         createdAt: toIso(state?.created_at) || directoryUser?.createdAt || null,
         updatedAt: toIso(state?.updated_at) || directoryUser?.updatedAt || null,
         recentActions,
@@ -1514,6 +1531,34 @@ export async function setAdminUserCapabilities(input: {
     });
 
     return getAdminUserDetail(input.targetUserId);
+}
+
+export async function setComplimentarySubscriptionByAdmin(input: {
+    actorUserId: string;
+    targetUserId: string;
+    freeAccess: boolean;
+    reason?: string | null;
+}): Promise<{ ok: boolean; detail?: string; subscription: EntitlementSnapshot }> {
+    const out = await setComplimentaryEntitlement({
+        userId: input.targetUserId,
+        enabled: input.freeAccess === true,
+        actorUserId: input.actorUserId,
+        reason: input.reason || null,
+    });
+    if (out.ok) {
+        await writeAdminAudit({
+            actorUserId: input.actorUserId,
+            action: input.freeAccess ? 'subscription_complimentary_grant' : 'subscription_complimentary_revoke',
+            targetType: 'user',
+            targetId: input.targetUserId,
+            metadata: { reason: input.reason || null, subscription: out.subscription || null },
+        });
+    }
+    return {
+        ok: out.ok,
+        detail: out.detail,
+        subscription: out.subscription || (await getFirestoreEntitlement(input.targetUserId)),
+    };
 }
 
 export async function queueAdminUserMessage(input: {

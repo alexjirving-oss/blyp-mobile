@@ -2,13 +2,13 @@
     "site_name": "blyp-admin-console",
     "site_id": "f31b62f8-deae-4110-afb9-b6863900336c",
     "production_url": "https://admin.blyp.world",
-    "deploy_id": "6a862c045637e468aa78f380",
-    "unique_deploy_url": "https://6a862c045637e468aa78f380--blyp-admin-console.netlify.app",
-    "asset_index": "index-Cuy8uIrV.js",
+    "deploy_id": "6a86379f5b62013fac5af63a",
+    "unique_deploy_url": "https://6a86379f5b62013fac5af63a--blyp-admin-console.netlify.app",
+    "asset_index": "index-C8xQLLCL.js",
+    "person_detail_asset": "PersonDetail-BnfcdmLw.js",
     "git_branch": "feat/full-tip-package-20260809",
-    "git_sha": "e27d2c71",
-    "backend_revision": "blyp-live-service-00241-7sh",
+    "backend_revision": "pending — subscription API needs live-service deploy",
     "backend_url": "https://blyp-live-service-innn3d7yqq-uc.a.run.app",
     "deployed_at": "2026-08-19",
-    "notes": "People profile: Account status Enable/Disable card (Overview + Controls). Mel can use launch-test gem credit UI (backend deploy pending). melody.skull.queen credited 2000 gem_available via ops script."
+    "notes": "People profile cleanup: Overview Actions/Identity/Account status cards; user ID once with copy; free subscriber toggle + subscription in user detail (backend route added, deploy live-service to activate)."
 }

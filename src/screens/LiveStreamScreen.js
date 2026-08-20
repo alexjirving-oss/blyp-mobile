@@ -242,7 +242,7 @@ const LiveStreamScreen = (props) => {
   useRenderTimer('LiveStreamScreen');
   // Real mount-only log
   useEffect(() => {
-    console.log('[LIVE][COMPONENT_MOUNT] LiveStreamScreen mounted');
+    BLYP_nativeLog('[LIVE][COMPONENT_MOUNT] LiveStreamScreen mounted');
     try {
       const { pauseSpotifyForBlypAudio } = require('../services/spotifyAudioCoordinator');
       pauseSpotifyForBlypAudio('live_join').catch(() => {});
@@ -638,6 +638,22 @@ const LiveStreamScreen = (props) => {
   const [incomingGiftEvent, setIncomingGiftEvent] = useState(null);
   const [viewerGuestPagerHeight, setViewerGuestPagerHeight] = useState(0);
   const [viewerLiveChatHeight, setViewerLiveChatHeight] = useState(0);
+  /** Debounced inset so chat/tray layout ticks do not resize IVS TextureViews every frame. */
+  const [viewerOverlayBottomInset, setViewerOverlayBottomInset] = useState(8);
+  const viewerOverlayBottomInsetRef = useRef(8);
+  useEffect(() => {
+    const next = Math.max(8, (viewerCommentsOverlayHeight || 0) + 8);
+    if (next === viewerOverlayBottomInsetRef.current) return undefined;
+    const t = setTimeout(() => {
+      viewerOverlayBottomInsetRef.current = next;
+      setViewerOverlayBottomInset(next);
+    }, 120);
+    return () => clearTimeout(t);
+  }, [viewerCommentsOverlayHeight]);
+  const onViewerGuestPagerLayout = useCallback((height) => {
+    const h = Math.max(0, Number(height) || 0);
+    setViewerGuestPagerHeight((prev) => (prev === h ? prev : h));
+  }, []);
   const [hostCommentsOverlayHeight, setHostCommentsOverlayHeight] = useState(0);
   const [hostGuestTrayHeight, setHostGuestTrayHeight] = useState(0);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -1319,23 +1335,17 @@ const LiveStreamScreen = (props) => {
 
   // IVS Architecture Integration (feature-flagged, default OFF)
   const backend = streamingConfig.backend;
-  console.log('[LIVE][BACKEND_SELECTED]', backend);
+  BLYP_nativeLog(`[LIVE][BACKEND_SELECTED] ${backend}`);
 
   useEffect(() => {
     if (backend === 'ivs' && goLiveStartedRef.current) {
-      console.log('[ASSERT][HOST] Go Live pressed — waiting for native IVS start');
+      BLYP_nativeLog('[ASSERT][HOST] Go Live pressed — waiting for native IVS start');
     }
   }, [backend]);
 
   // IVS Host Session (active if backend === IVS and isHost)
   const ivsHostEnabled = backend === StreamingBackend.IVS && isHost === true && !LIVE_UI_PREVIEW;
-  console.log('[LIVE][IVS_HOST_ENABLED_DEBUG]', {
-    ivsHostEnabled,
-    backendIsIVS: backend === StreamingBackend.IVS,
-    backendValue: backend,
-    isHostValue: isHost,
-    StreamingBackendIVS: StreamingBackend.IVS,
-  });
+  BLYP_nativeLog('[LIVE][IVS_HOST_ENABLED_DEBUG]', 1);
 
   // Cache the battle's two participant uids so we can attribute gifts to a side.
   // Scoring only applies once the match clock has started (liveStartedAt).
@@ -1509,14 +1519,9 @@ const LiveStreamScreen = (props) => {
     }
   }, [backend, isHost, cameraReady, ivsHostSession?.connectionState, ivsHostSession?.sessionId]);
 
-  console.log('[LIVE][IVS_HOST_SESSION]', {
-    enabled: ivsHostEnabled,
-    backend,
-    connectionState: ivsHostSession.connectionState,
-    participants: ivsHostSession.participants.length,
-    networkQuality: ivsHostSession.networkQuality,
-    error: ivsHostSession.error,
-  });
+  BLYP_nativeLog(
+    `[LIVE][IVS_HOST_SESSION] enabled=${ivsHostEnabled} state=${ivsHostSession.connectionState} participants=${ivsHostSession.participants.length}`,
+  );
 
   // STEP 3 + Guard: Validate viewer route params and enforce single source of truth
   useEffect(() => {
@@ -1878,7 +1883,10 @@ const LiveStreamScreen = (props) => {
         const data = snapData(snap);
         const nextCount = typeof data?.viewerCount === 'number' ? data.viewerCount : 0;
         // Never display a negative viewer count (transient during decrements).
-        setViewCount(Math.max(0, nextCount));
+        setViewCount((prev) => {
+          const next = Math.max(0, nextCount);
+          return next === prev ? prev : next;
+        });
       },
       (err) => {
         console.warn('[LIVE][IVS][VIEWER_COUNT_SUBSCRIBE_ERROR]', err);
@@ -3998,8 +4006,8 @@ const LiveStreamScreen = (props) => {
           giftTotalsByUser={giftTotalsByUser}
           battleMode={!!activeBattleId}
           style={styles.viewerVideo}
-          overlayBottomInset={(viewerCommentsOverlayHeight || 0) + 8}
-          onGuestPagerLayout={setViewerGuestPagerHeight}
+          overlayBottomInset={viewerOverlayBottomInset}
+          onGuestPagerLayout={onViewerGuestPagerLayout}
           onError={handleViewerPlaybackError}
         />
 

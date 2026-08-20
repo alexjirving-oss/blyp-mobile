@@ -27,7 +27,7 @@ import {
   UIManager,
 } from 'react-native';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+if (Platform.OS === 'ios' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
@@ -174,6 +174,8 @@ const IVSLiveStreamViewer = ({
   }, [getDisplayName, uid, viewerUserDoc]);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [layout, setLayout] = useState({ width: 0, height: 0 });
+  const surfaceReadyMarkedRef = useRef(false);
+  const markSurfaceReadyRef = useRef(() => {});
   const everConnectedRef = useRef(false);
   const endedNotifiedRef = useRef(false);
   const [guestRequestStatus, setGuestRequestStatus] = useState('idle'); // idle | sending | sent | error
@@ -808,7 +810,17 @@ const IVSLiveStreamViewer = ({
 
   useEffect(() => {
     ivsSessionRef.current = ivsSession;
+    markSurfaceReadyRef.current = ivsSession.markSurfaceReady;
   }, [ivsSession]);
+
+  const handleViewerContainerLayout = useCallback((e) => {
+    if (!surfaceReadyMarkedRef.current) {
+      surfaceReadyMarkedRef.current = true;
+      markSurfaceReadyRef.current?.();
+    }
+    const { width, height } = e.nativeEvent.layout;
+    setLayout((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+  }, []);
 
   // Real guest count = participants on stage excluding the host. Used to gate the
   // guest tray so it only occupies the screen when there's actually someone to show.
@@ -848,7 +860,7 @@ const IVSLiveStreamViewer = ({
     };
   }, []);
 
-  // Centralized IVS viewer session observability
+  // Centralized IVS viewer session observability (dev-only — prod log spam janks JS thread).
   useEffect(() => {
     if (!__DEV__) return;
     console.log('[LIVE][IVS_VIEWER_SESSION]', {
@@ -1432,11 +1444,7 @@ const IVSLiveStreamViewer = ({
       return (
         <View
           style={[styles.container, style]}
-          onLayout={(e) => {
-            ivsSession.markSurfaceReady();
-            setLayout(e.nativeEvent.layout);
-            if (typeof onGuestPagerLayout === 'function') onGuestPagerLayout(0);
-          }}
+          onLayout={handleViewerContainerLayout}
         >
           <View style={styles.battleStage}>
             <View style={styles.battlePane}>
@@ -1574,8 +1582,8 @@ const IVSLiveStreamViewer = ({
       <View
         style={[styles.container, style]}
         onLayout={(e) => {
-          ivsSession.markSurfaceReady();
-          setLayout(e.nativeEvent.layout);
+          handleViewerContainerLayout(e);
+          if (typeof onGuestPagerLayout === 'function') onGuestPagerLayout(0);
         }}
       >
         {/* Host stays prominent + fixed; only guests page (or compose for Equal/Split). */}

@@ -1987,3 +1987,145 @@ export async function listSocialImportsFs(limitN = 40): Promise<
     return [];
   }
 }
+
+export type EntitlementSnapshot = {
+  available: boolean;
+  tier: string | null;
+  effectiveTier: string;
+  status: string | null;
+  store: string | null;
+  isComplimentary: boolean;
+  hasPaidStore: boolean;
+  currentPeriodEnd: string | null;
+  trialEndsAt: string | null;
+  detail?: string;
+};
+
+const PAID_STATUS_BLOCKS = new Set(['revoked', 'expired', 'on_hold', 'paused', 'inactive']);
+
+function computeEffectiveEntitlementTier(doc: Record<string, unknown>): string {
+  const now = Date.now();
+  const tier = String(doc.tier || 'free');
+  const trialEndsAt = Number(doc.trialEndsAt || 0);
+  const currentPeriodEnd = Number(doc.currentPeriodEnd || 0);
+  const status = String(doc.status || '');
+
+  if (tier === 'plus' || tier === 'plus_coins') {
+    const periodActive = currentPeriodEnd > now;
+    const statusOk = !PAID_STATUS_BLOCKS.has(status);
+    return periodActive && statusOk ? tier : 'free';
+  }
+  if (trialEndsAt && now < trialEndsAt) return 'trial';
+  return 'free';
+}
+
+/** Read entitlements/{uid} for admin People profile (Play + complimentary). */
+export async function getFirestoreEntitlement(userId: string): Promise<EntitlementSnapshot> {
+  const fs = getFirestore();
+  const empty: EntitlementSnapshot = {
+    available: false,
+    tier: null,
+    effectiveTier: 'free',
+    status: null,
+    store: null,
+    isComplimentary: false,
+    hasPaidStore: false,
+    currentPeriodEnd: null,
+    trialEndsAt: null,
+  };
+  if (!fs) return { ...empty, detail: 'firestore_unavailable' };
+
+  const id = String(userId || '').trim();
+  if (!id) return { ...empty, detail: 'invalid_user_id' };
+
+  try {
+    const snap = await fs.collection('entitlements').doc(id).get();
+    if (!snap.exists) {
+      return { ...empty, available: true };
+    }
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    const store = data.store != null ? String(data.store) : null;
+    return {
+      available: true,
+      tier: data.tier != null ? String(data.tier) : null,
+      effectiveTier: computeEffectiveEntitlementTier(data),
+      status: data.status != null ? String(data.status) : null,
+      store,
+      isComplimentary: store === 'admin_complimentary',
+      hasPaidStore: store === 'google' || store === 'apple',
+      currentPeriodEnd:
+        data.currentPeriodEnd && Number(data.currentPeriodEnd) > 0
+          ? new Date(Number(data.currentPeriodEnd)).toISOString()
+          : null,
+      trialEndsAt:
+        data.trialEndsAt && Number(data.trialEndsAt) > 0
+          ? new Date(Number(data.trialEndsAt)).toISOString()
+          : null,
+    };
+  } catch (e: any) {
+    return { ...empty, detail: e?.message || String(e) };
+  }
+}
+
+const COMPLIMENTARY_PERIOD_MS = 10 * 365 * 86400000;
+
+/** Grant or revoke admin complimentary Plus (does not touch Play-paid subs). */
+export async function setComplimentaryEntitlement(input: {
+  userId: string;
+  enabled: boolean;
+  actorUserId: string;
+  reason?: string | null;
+}): Promise<{ ok: boolean; detail?: string; subscription?: EntitlementSnapshot }> {
+  const fs = getFirestore();
+  if (!fs) return { ok: false, detail: 'firestore_unavailable' };
+
+  const id = String(input.userId || '').trim();
+  if (!id) return { ok: false, detail: 'invalid_user_id' };
+
+  try {
+    const ref = fs.collection('entitlements').doc(id);
+    const existing = await ref.get();
+    const data = existing.exists ? ((existing.data() || {}) as Record<string, unknown>) : {};
+    const store = data.store != null ? String(data.store) : null;
+    const now = Date.now();
+
+    if (input.enabled) {
+      if (store === 'google' || store === 'apple') {
+        return { ok: false, detail: 'has_paid_store_subscription', subscription: await getFirestoreEntitlement(id) };
+      }
+      await ref.set(
+        {
+          tier: 'plus',
+          status: 'active',
+          store: 'admin_complimentary',
+          currentPeriodEnd: now + COMPLIMENTARY_PERIOD_MS,
+          autoRenewing: false,
+          grantedBy: input.actorUserId,
+          grantReason: input.reason ? String(input.reason).slice(0, 500) : null,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+    } else {
+      if (store !== 'admin_complimentary') {
+        return { ok: false, detail: 'not_complimentary', subscription: await getFirestoreEntitlement(id) };
+      }
+      await ref.set(
+        {
+          tier: 'free',
+          status: 'inactive',
+          store: FieldValue.delete(),
+          currentPeriodEnd: 0,
+          autoRenewing: false,
+          revokedBy: input.actorUserId,
+          revokeReason: input.reason ? String(input.reason).slice(0, 500) : null,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+    }
+    return { ok: true, subscription: await getFirestoreEntitlement(id) };
+  } catch (e: any) {
+    return { ok: false, detail: e?.message || String(e) };
+  }
+}

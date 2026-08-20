@@ -24,6 +24,7 @@ import {
         adminQueueUserMessageSchema,
     adminSetAppVersionPolicySchema,
     adminSetCapabilitiesSchema,
+    adminSetSubscriptionSchema,
     adminCreditCoinsBodySchema,
     adminCreditGemsBodySchema,
     adminListReportsSchema,
@@ -85,6 +86,7 @@ import {
     removePostByAdmin,
     restorePostByAdmin,
     setAdminUserCapabilities,
+    setComplimentarySubscriptionByAdmin,
     setFeedPriorityByAdmin,
     setAccountFeedPriorityByAdmin,
     setUserEnabledByAdmin,
@@ -602,6 +604,43 @@ router.post('/admin/users/:userId/capabilities', requireAdmin, requirePermission
         return res.json({ ok: true, userId: targetUserId, detail: out });
     } catch (e: any) {
         logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/capabilities failed');
+        return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
+    }
+});
+
+router.post('/admin/users/:userId/subscription', requireAdmin, requirePermission('users.capabilities'), async (req: AuthedRequest, res: Response) => {
+    try {
+        const actorUserId = String(req.user?.sub || '').trim();
+        const targetUserId = String(req.params?.userId || '').trim();
+        if (!isCanonicalSub(targetUserId)) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT' });
+        }
+
+        const parsed = adminSetSubscriptionSchema.safeParse(req.body);
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'INVALID_INPUT', code: 'INVALID_INPUT', detail: parsed.error.issues });
+        }
+
+        const out = await setComplimentarySubscriptionByAdmin({
+            actorUserId,
+            targetUserId,
+            freeAccess: parsed.data.freeAccess,
+            reason: parsed.data.reason || null,
+        });
+
+        if (!out.ok) {
+            const status =
+                out.detail === 'has_paid_store_subscription' || out.detail === 'not_complimentary' ? 409 : 503;
+            return res.status(status).json({
+                error: 'SUBSCRIPTION_UPDATE_FAILED',
+                code: out.detail || 'FAILED',
+                subscription: out.subscription,
+            });
+        }
+
+        return res.json({ ok: true, subscription: out.subscription });
+    } catch (e: any) {
+        logger.error({ err: e?.message || String(e) }, '[admin] /admin/users/:userId/subscription failed');
         return res.status(500).json({ error: 'INTERNAL', code: 'INTERNAL' });
     }
 });
