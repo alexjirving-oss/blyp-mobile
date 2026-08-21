@@ -1,5 +1,7 @@
 const FS_FLAG = "blyp-studio-fs";
 
+export const STUDIO_MAXIMIZED_CLASS = "tls-booth-maximized";
+
 export function markStudioFullscreenIntent(): void {
   try {
     sessionStorage.setItem(FS_FLAG, "1");
@@ -18,10 +20,7 @@ export function consumeStudioFullscreenIntent(): boolean {
   }
 }
 
-export async function requestStudioFullscreen(): Promise<void> {
-  if (typeof document === "undefined") return;
-  if (document.fullscreenElement) return;
-  const el = document.documentElement;
+function requestElementFullscreen(el: HTMLElement): Promise<void> {
   const req =
     el.requestFullscreen?.bind(el) ||
     (
@@ -29,16 +28,49 @@ export async function requestStudioFullscreen(): Promise<void> {
         webkitRequestFullscreen?: () => Promise<void> | void;
       }
     ).webkitRequestFullscreen?.bind(el);
-  if (!req) return;
+  if (!req) return Promise.resolve();
+  return Promise.resolve(req());
+}
+
+export function setStudioMaximizedClass(
+  on: boolean,
+  root?: HTMLElement | null,
+): void {
+  if (typeof document === "undefined") return;
+  const el = root ?? document.querySelector<HTMLElement>(".tls-booth");
+  if (!el) return;
+  el.classList.toggle(STUDIO_MAXIMIZED_CLASS, on);
+}
+
+export function isStudioMaximized(root?: HTMLElement | null): boolean {
+  if (typeof document === "undefined") return false;
+  const el = root ?? document.querySelector<HTMLElement>(".tls-booth");
+  if (!el) return false;
+  return (
+    document.fullscreenElement === el ||
+    el.classList.contains(STUDIO_MAXIMIZED_CLASS)
+  );
+}
+
+/** Browser fullscreen on the studio root (falls back to documentElement). */
+export async function requestStudioFullscreen(
+  root?: HTMLElement | null,
+): Promise<void> {
+  if (typeof document === "undefined") return;
+  const el = root ?? document.documentElement;
+  if (document.fullscreenElement === el) return;
   try {
-    await req();
+    await requestElementFullscreen(el);
   } catch {
-    /* browser may reject without a gesture */
+    /* browser may reject without a gesture — CSS class fallback handles layout */
   }
 }
 
-export async function exitStudioFullscreen(): Promise<void> {
+export async function exitStudioFullscreen(
+  root?: HTMLElement | null,
+): Promise<void> {
   if (typeof document === "undefined") return;
+  setStudioMaximizedClass(false, root);
   if (!document.fullscreenElement) return;
   try {
     await document.exitFullscreen();

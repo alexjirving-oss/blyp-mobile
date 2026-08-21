@@ -258,7 +258,10 @@
 
 /* TikTok Live Studio–like booth (Blyp chrome). */
 .tls-booth {
+  width: 100%;
   height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -266,6 +269,12 @@
   color: var(--blyp-fog);
   font-family: var(--font-body);
   font-size: 0.9375rem;
+}
+
+/* Theater desk fills the viewport — header + three columns, no void bands. */
+.tls-booth.tls-booth-theater {
+  width: 100vw;
+  max-width: 100vw;
 }
 
 /* Nested under SiteChrome main (For You–matched product shell). */
@@ -302,36 +311,42 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
-/* Portrait theater: phone chassis fills column height, keeps 9:16. */
+/* Portrait theater: program column owns all pixels — no floating phone island. */
 .tls-booth-theater.tls-booth-portrait .tls-stage-wrap {
   padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
 }
 
 .tls-booth-theater.tls-booth-portrait .tls-stage-wrap > .tls-device-phone {
-  height: min(100cqb, 100%);
-  width: min(100%, calc(100cqb * 9 / 16));
-  max-width: 100%;
-  max-height: 100%;
-  margin: 0 auto;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  margin: 0;
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
+  flex: 1 1 0;
 }
 
-/* Landscape: 16:9 tablet/monitor chassis — never stretch to the tall column. */
+/* Landscape theater: program column fills height and width. */
 .tls-booth-theater.tls-booth-landscape .tls-stage-wrap {
   padding: 0;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
 }
 
-.tls-booth-landscape .tls-stage-wrap > .tls-device.tls-device-tablet {
-  width: min(100cqi, calc(100cqb * 16 / 9)) !important;
-  height: min(100cqb, calc(100cqi * 9 / 16)) !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  aspect-ratio: 16 / 9 !important;
-  flex: 0 0 auto !important;
-  align-self: center !important;
+.tls-booth-theater.tls-booth-landscape .tls-stage-wrap > .tls-device.tls-device-tablet {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  aspect-ratio: auto !important;
+  flex: 1 1 0 !important;
+  align-self: stretch !important;
+  margin: 0 !important;
 }
 
 .tls-left,
@@ -3906,18 +3921,59 @@ body:has(.tls-overlay-source) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .tls-booth-theater.tls-booth-portrait .tls-stage-wrap > .tls-device-phone,
+  .tls-booth-theater .tls-stage-wrap > .tls-device-phone,
   .tls-device-phone,
+  .tls-booth-theater .tls-stage-wrap > .tls-device.tls-device-tablet,
   .tls-booth-landscape .tls-stage-wrap > .tls-device-phone,
   .tls-phone-check .tls-phone {
-    width: min(100%, calc(100cqb * 9 / 16));
-    height: min(100cqb, calc(100cqi * 16 / 9));
-    max-width: 100%;
-    max-height: 100%;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: auto;
     min-width: 0;
     min-height: 0;
-    flex-shrink: 1;
-    align-self: center;
+    flex: 1 1 0;
+    align-self: stretch;
+    margin: 0;
+  }
+
+  /* Theater keeps the three-column desk — no stacked phone island. */
+  .tls-booth-theater {
+    overflow: hidden;
+  }
+
+  .tls-booth-theater .tls-body,
+  .tls-booth-theater.tls-booth-portrait .tls-body,
+  .tls-booth-theater.tls-booth-team-desk .tls-body {
+    display: grid;
+    flex-direction: row;
+    flex: 1 1 0;
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(180px, 220px);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .tls-booth-theater .tls-center {
+    order: 0;
+    flex: 1 1 0;
+    width: auto;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+
+  .tls-booth-theater .tls-left,
+  .tls-booth-theater .tls-right {
+    flex: 0 1 auto;
+    width: auto;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 }
 
@@ -5488,4 +5544,62 @@ button.tls-dest-card:hover {
 .tls-booth .tls-layout-tile-on .tls-lg-host-bottom > i:nth-child(3),
 .tls-booth .tls-layout-tile-on .tls-lg-host-bottom-9 > i:nth-child(9) {
   background: rgba(255, 77, 109, 0.55) !important;
+}
+
+/* —— Maximize / full-screen theater (API + CSS fallback) —— */
+.tls-booth-maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: 100vw;
+  max-height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.tls-booth-maximized .tls-body,
+.tls-booth-maximized.tls-booth-portrait .tls-body,
+.tls-booth-maximized.tls-booth-team-desk .tls-body {
+  display: grid !important;
+  flex: 1 1 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(220px, 280px) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  overflow: hidden !important;
+}
+
+.tls-booth-maximized .tls-center {
+  order: 0 !important;
+  flex: 1 1 0 !important;
+  width: auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+.tls-booth-maximized .tls-left,
+.tls-booth-maximized .tls-right {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.tls-top-maximize {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tls-top-maximize-on {
+  color: var(--blyp-coral);
+  border-color: rgba(255, 77, 109, 0.45);
+  background: rgba(255, 77, 109, 0.1);
 }

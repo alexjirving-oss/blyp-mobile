@@ -78,7 +78,10 @@ import {
 import {
   consumeStudioFullscreenIntent,
   exitStudioFullscreen,
+  isStudioMaximized,
   requestStudioFullscreen,
+  setStudioMaximizedClass,
+  STUDIO_MAXIMIZED_CLASS,
 } from "@/lib/enterLiveStudio";
 import { ConfidenceRail } from "./studio/ConfidenceRail";
 import { DestinationDock } from "./studio/DestinationDock";
@@ -738,6 +741,8 @@ export function LiveStudioClient() {
     sessionId: string;
     idToken: string;
   } | null>(null);
+  const boothRootRef = useRef<HTMLDivElement | null>(null);
+  const [studioMaximized, setStudioMaximized] = useState(false);
 
   const [spotifyStatus, setSpotifyStatus] = useState<SpotifyLinkStatus | null>(
     null,
@@ -818,8 +823,45 @@ export function LiveStudioClient() {
   };
 
   useEffect(() => {
+    if (loading) return;
+    const root = boothRootRef.current;
+    if (!root) return;
     if (!consumeStudioFullscreenIntent()) return;
-    void requestStudioFullscreen();
+    setStudioMaximizedClass(true, root);
+    setStudioMaximized(true);
+    void requestStudioFullscreen(root);
+  }, [loading]);
+
+  useEffect(() => {
+    const syncMaximized = () => {
+      const root = boothRootRef.current;
+      if (!root) return;
+      if (document.fullscreenElement === root) {
+        setStudioMaximizedClass(true, root);
+        setStudioMaximized(true);
+        return;
+      }
+      if (!document.fullscreenElement) {
+        setStudioMaximizedClass(false, root);
+        setStudioMaximized(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", syncMaximized);
+    return () => document.removeEventListener("fullscreenchange", syncMaximized);
+  }, []);
+
+  const toggleStudioMaximize = useCallback(async () => {
+    const root = boothRootRef.current;
+    if (!root) return;
+    const maximized = isStudioMaximized(root);
+    if (maximized) {
+      await exitStudioFullscreen(root);
+      setStudioMaximized(false);
+      return;
+    }
+    setStudioMaximizedClass(true, root);
+    setStudioMaximized(true);
+    await requestStudioFullscreen(root);
   }, []);
 
   const pushToast = useCallback((msg: string) => {
@@ -3777,12 +3819,14 @@ export function LiveStudioClient() {
 
   return (
     <div
+      ref={boothRootRef}
       className={
-        boothMode === "team-desk"
+        (boothMode === "team-desk"
           ? "tls-booth tls-booth-theater tls-booth-team-desk"
           : orientation === "portrait"
             ? "tls-booth tls-booth-theater tls-booth-portrait"
-            : "tls-booth tls-booth-theater tls-booth-landscape"
+            : "tls-booth tls-booth-theater tls-booth-landscape") +
+        (studioMaximized ? ` ${STUDIO_MAXIMIZED_CLASS}` : "")
       }
     >
       <header className="tls-top">
@@ -3791,13 +3835,31 @@ export function LiveStudioClient() {
           className="tls-logo"
           aria-label="blyp home"
           onClick={() => {
-            void exitStudioFullscreen();
+            void exitStudioFullscreen(boothRootRef.current);
+            setStudioMaximized(false);
           }}
         >
           <span className="tls-logo-word">blyp</span>
           <span className="tls-logo-dot" aria-hidden />
         </Link>
         <span className="tls-top-label">LIVE Studio</span>
+        <button
+          type="button"
+          className={
+            studioMaximized
+              ? "tls-pill tls-top-maximize tls-top-maximize-on"
+              : "tls-pill tls-top-maximize"
+          }
+          aria-pressed={studioMaximized}
+          title={
+            studioMaximized
+              ? "Exit full screen (Esc)"
+              : "Maximize studio to full screen"
+          }
+          onClick={() => void toggleStudioMaximize()}
+        >
+          {studioMaximized ? "Exit full screen" : "Maximize"}
+        </button>
         <span className={isLive ? "tls-badge tls-badge-live" : "tls-badge"}>
           {isLive ? "LIVE" : "Offline"}
         </span>
