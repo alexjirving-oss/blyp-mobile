@@ -155,23 +155,25 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
             }
 
             override fun onSurfaceTextureSizeChanged(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+                // Live buffer resize + zoom matrix on layout ticks drops P-frames
+                // until the next keyframe (~1 HD still/sec). 1.0.109 skipped
+                // setSurface only; leave an attached valid Surface untouched.
                 Log.d("IVS_REALTIME_VIEW", "Texture sizeChanged ${width}x${height}")
+                val surface = currentSurface
+                val live = lastAttachedKey != null && surface != null && surface.isValid
+                if (live) {
+                    return
+                }
+                surfaceReady = true
                 try {
                     surfaceTexture.setDefaultBufferSize(width, height)
                 } catch (_: Throwable) {
                     // ignore
                 }
-                surfaceReady = true
                 applyZoomTransform("surfaceSizeChanged")
-                // Do not clear lastAttachedKey and do not rebind on pure WxH thrash:
-                // setViewerSlotSurface → attachSurfaceToSlot used to call setSurface
-                // whenever attachSig's WxH changed, flashing the phone tile.
-                // Same class as approved reattach cure: skip unless not yet attached
-                // or the Surface is dead.
-                val surface = currentSurface
                 if (lastAttachedKey == null) {
                     post { attemptAttach("surfaceSizeChanged") }
-                } else if (surface == null || !surface.isValid) {
+                } else {
                     lastAttachedKey = null
                     post { attemptAttach("surfaceSizeChanged-dead") }
                 }
