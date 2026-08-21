@@ -1,213 +1,143 @@
 package com.blyp.mobile.ivs
 
 import android.content.Context
-import android.graphics.Matrix
+import android.graphics.Color
 import android.util.Log
-import android.view.Surface
-import android.view.TextureView
-import android.graphics.SurfaceTexture
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import com.amazonaws.ivs.broadcast.ImagePreviewView
 import com.blyp.mobile.BuildConfig
 
 /**
- * IVS Real-Time View
+ * Viewer tile for an IVS Real-Time remote stream.
  *
- * Provides a TextureView that the IVS Stage renderer can draw into for viewer mode.
- * Mirrors the behaviour of IVSBroadcastViewManager but dedicated to viewer playback.
- *
- * NOTE:
- * We use TextureView instead of SurfaceView so transforms + clipping work reliably
- * (needed for guest-tile zoom / center-crop).
+ * Homemade TextureView + ImagePreviewSurfaceTarget.setSurface (1.0.109–110)
+ * showed ~1 HD keyframe/sec while the same Stage looked smooth on web
+ * `<video>`. Amazon's SDK TextureView (`getPreviewTextureView`) owns the
+ * SurfaceTexture lifecycle and buffer size. Keep this as a FrameLayout so
+ * React Native overlays still composite on top (SurfaceView punches a hole).
  */
-class IVSRealTimeView(context: Context) : TextureView(context) {
-    private var slotId: Int = 0
-    private var surfaceReady: Boolean = false
-    private var lastAttachedKey: String? = null
+class IVSRealTimeView(context: Context) : FrameLayout(context) {
+    private var slotId: Int = -1
     private var participantId: String? = null
     private var remoteTrackCount: Int = 0
     private var zoom: Float = 1.0f
-    private var currentSurface: Surface? = null
+    private var sdkPreview: ImagePreviewView? = null
 
-    private fun surfaceHash(surface: Surface?): String = surface?.let {
-        "0x${Integer.toHexString(System.identityHashCode(it))}"
-    } ?: "null"
-
-    private fun attachKey(): String? {
-        val sessionId = IVSBroadcastModule.getCurrentSessionId()
-        val pid = participantId
-        if (sessionId.isNullOrEmpty() || pid.isNullOrEmpty()) return null
-        // Do NOT include remoteTrackCount: session-wide track totals change whenever
-        // any guest joins/leaves and would force every tile to re-attach (flicker).
-        return "$sessionId|$pid|$slotId|g${IVSBroadcastModule.viewerRenderGeneration}"
+    init {
+        setBackgroundColor(Color.BLACK)
+        clipChildren = true
+        clipToPadding = true
+        clipToOutline = true
+        Log.i("IVS_PROOF", "[VIEW_INIT] type=SdkPreviewHost")
     }
 
-    private fun attemptAttach(reason: String) {
-        val surface = currentSurface
-        val w = width
-        val h = height
-        val ready = surfaceReady && surface != null && surface.isValid && w > 0 && h > 0
-        val layoutReady = isLaidOut
-        val pid = participantId
-        val key = attachKey()
-        val tracks = remoteTrackCount
+    fun currentPreview(): ImagePreviewView? = sdkPreview
 
-        val surfaceCreated = surfaceReady
-        val streamAssigned = !pid.isNullOrBlank() && tracks > 0
-        val didAttach = streamAssigned && ready && key != null && layoutReady && key != lastAttachedKey
-        if (didAttach && BuildConfig.DEBUG) {
+    fun attachSdkPreview(preview: ImagePreviewView) {
+        if (sdkPreview === preview && preview.parent === this) {
+            applyZoomTransform("alreadyAttached")
+            return
+        }
+        detachSdkPreview()
+        (preview.parent as? ViewGroup)?.removeView(preview)
+        try {
+            preview.setMirrored(false)
+        } catch (_: Throwable) {
+            // ignore
+        }
+        sdkPreview = preview
+        val lp = LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            Gravity.CENTER,
+        )
+        addView(preview, lp)
+        applyZoomTransform("sdkPreviewAttached")
+        FirstFrameProbe.markAttach(
+            "viewer",
+            "sdkPreviewTextureView slot=$slotId preview=${preview.javaClass.simpleName}",
+        )
+        FirstFrameProbe.startPixelCopyProbe(this, "viewer", slotId)
+        if (BuildConfig.DEBUG) {
             Log.i(
-                "IVS_TILE_ATTACH",
-                "LOG: IVS_TILE_ATTACH slot=$slotId surfaceCreated=$surfaceCreated streamAssigned=$streamAssigned didAttach=$didAttach"
+                "IVS_PROOF",
+                "[ATTACH_EXEC] reason=sdkPreview slot=$slotId pid=$participantId tracks=$remoteTrackCount",
             )
         }
+    }
 
-        if (pid.isNullOrBlank() || tracks <= 0) {
-            return
+    fun detachSdkPreview() {
+        val preview = sdkPreview ?: return
+        if (preview.parent === this) {
+            removeView(preview)
         }
-
-        if (!ready || key == null || !layoutReady) {
-            return
-        }
-
-        if (key == lastAttachedKey) {
-            return
-        }
-
-        if (BuildConfig.DEBUG) {
-            Log.i("IVS_PROOF", "[ATTACH_EXEC] reason=$reason key=$key surfaceHash=${surfaceHash(surface)} size=${w}x${h}")
-        }
-        IVSBroadcastModule.setViewerSlotSurface(slotId, surface, w, h)
-        FirstFrameProbe.markAttach("viewer", "setViewerSlotSurface slot=$slotId size=${w}x${h}")
-        lastAttachedKey = key
-        FirstFrameProbe.startPixelCopyProbe(this@IVSRealTimeView, "viewer", slotId)
+        sdkPreview = null
     }
 
     fun setSlotId(id: Int) {
         if (slotId == id) return
+        if (slotId >= 0) {
+            IVSBroadcastModule.unregisterViewerSlotView(slotId, this)
+        }
+        detachSdkPreview()
         slotId = id
-        lastAttachedKey = null
-        // Keep surfaceReady: TextureView is still valid; clearing it without a
-        // re-attach left tiles black until the next surface callback.
-        FirstFrameProbe.reset("viewer slotId=$slotId")
-        post { attemptAttach("slotIdChanged") }
+        if (isAttachedToWindow && slotId >= 0) {
+            IVSBroadcastModule.registerViewerSlotView(slotId, this)
+        }
     }
 
     fun setParticipantId(id: String?) {
         if (participantId == id) return
         participantId = id
-        lastAttachedKey = null
-        post { attemptAttach("participantChanged") }
     }
 
     fun setRemoteTrackCount(count: Int) {
         if (remoteTrackCount == count) return
-        val wasAssignable = remoteTrackCount > 0
         remoteTrackCount = count
-        // Only (re)attach when tracks first become available for this tile.
-        // Mid-session global count bumps must not tear down a healthy attach.
-        if (!wasAssignable && count > 0) {
-            lastAttachedKey = null
-            post { attemptAttach("trackCountBecamePositive") }
-        } else if (wasAssignable && count <= 0) {
-            lastAttachedKey = null
-        }
     }
 
     fun setZoom(value: Float) {
         val next = if (value.isFinite() && value > 0f) value else 1.0f
         if (zoom == next) return
         zoom = next
-        post { applyZoomTransform("zoomChanged") }
+        applyZoomTransform("zoomChanged")
     }
 
     private fun applyZoomTransform(reason: String) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        if (w <= 0f || h <= 0f) return
-        val m = Matrix()
+        val preview = sdkPreview ?: return
         val z = if (zoom.isFinite() && zoom > 0f) zoom else 1.0f
-        m.setScale(z, z, w / 2f, h / 2f)
-        setTransform(m)
-        invalidate()
+        preview.scaleX = z
+        preview.scaleY = z
         if (BuildConfig.DEBUG) {
-            Log.i("IVS_PROOF", "[ZOOM_APPLIED] reason=$reason slot=$slotId zoom=$z size=${w.toInt()}x${h.toInt()}")
+            Log.i(
+                "IVS_PROOF",
+                "[ZOOM_APPLIED] reason=$reason slot=$slotId zoom=$z size=${width}x${height}",
+            )
         }
     }
 
-    init {
-        surfaceTextureListener = object : SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
-                Log.d("IVS_REALTIME_VIEW", "Texture available ${width}x${height}")
-                try {
-                    surfaceTexture.setDefaultBufferSize(width, height)
-                } catch (_: Throwable) {
-                    // ignore
-                }
-                currentSurface?.release()
-                currentSurface = Surface(surfaceTexture)
-                surfaceReady = true
-                lastAttachedKey = null
-                FirstFrameProbe.markSurfaceReady(
-                    "viewer",
-                    "surfaceAvailable slot=$slotId size=${width}x${height} surfaceHash=${surfaceHash(currentSurface)}"
-                )
-                applyZoomTransform("surfaceAvailable")
-                post { attemptAttach("surfaceAvailable") }
-            }
-
-            override fun onSurfaceTextureSizeChanged(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
-                // Live buffer resize + zoom matrix on layout ticks drops P-frames
-                // until the next keyframe (~1 HD still/sec). 1.0.109 skipped
-                // setSurface only; leave an attached valid Surface untouched.
-                Log.d("IVS_REALTIME_VIEW", "Texture sizeChanged ${width}x${height}")
-                val surface = currentSurface
-                val live = lastAttachedKey != null && surface != null && surface.isValid
-                if (live) {
-                    return
-                }
-                surfaceReady = true
-                try {
-                    surfaceTexture.setDefaultBufferSize(width, height)
-                } catch (_: Throwable) {
-                    // ignore
-                }
-                applyZoomTransform("surfaceSizeChanged")
-                if (lastAttachedKey == null) {
-                    post { attemptAttach("surfaceSizeChanged") }
-                } else {
-                    lastAttachedKey = null
-                    post { attemptAttach("surfaceSizeChanged-dead") }
-                }
-            }
-
-            override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
-                Log.d("IVS_REALTIME_VIEW", "Texture destroyed")
-                surfaceReady = false
-                lastAttachedKey = null
-                IVSBroadcastModule.clearViewerSlotSurfaceImmediately(slotId, "textureDestroyed")
-                try {
-                    currentSurface?.release()
-                } catch (_: Throwable) {
-                    // ignore
-                }
-                currentSurface = null
-                return true
-            }
-
-            override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) {
-                // no-op
-            }
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (slotId >= 0) {
+            IVSBroadcastModule.registerViewerSlotView(slotId, this)
         }
-
-        setWillNotDraw(false)
-        Log.i("IVS_PROOF", "[VIEW_INIT] type=TextureView alpha=$alpha visibility=$visibility isShown=$isShown")
     }
 
     override fun onDetachedFromWindow() {
-        // Detach as early as possible: waiting for SurfaceTextureDestroyed can be too late
-        // (the IVS renderer may still touch the SurfaceTexture and crash with updateTexImage).
-        surfaceReady = false
-        lastAttachedKey = null
-        IVSBroadcastModule.clearViewerSlotSurfaceImmediately(slotId, "viewDetached")
+        if (slotId >= 0) {
+            IVSBroadcastModule.unregisterViewerSlotView(slotId, this)
+        }
+        detachSdkPreview()
         super.onDetachedFromWindow()
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        val preview = sdkPreview ?: return
+        preview.pivotX = preview.width / 2f
+        preview.pivotY = preview.height / 2f
+        if (changed) applyZoomTransform("layout")
     }
 }

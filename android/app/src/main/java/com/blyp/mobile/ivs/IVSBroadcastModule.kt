@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.net.TrafficStats
 import android.view.Surface
+import android.view.ViewGroup
 import com.amazonaws.ivs.broadcast.AudioLocalStageStream
 import com.amazonaws.ivs.broadcast.BroadcastException
 import com.amazonaws.ivs.broadcast.BroadcastConfiguration
@@ -17,7 +18,9 @@ import com.amazonaws.ivs.broadcast.Device.Descriptor.DeviceType
 import com.amazonaws.ivs.broadcast.DeviceDiscovery
 import com.amazonaws.ivs.broadcast.ImageLocalStageStream
 import com.amazonaws.ivs.broadcast.ImagePreviewSurfaceTarget
+import com.amazonaws.ivs.broadcast.ImagePreviewView
 import com.amazonaws.ivs.broadcast.ImageStageStream
+import java.lang.ref.WeakReference
 import com.amazonaws.ivs.broadcast.LocalStageStream
 import com.amazonaws.ivs.broadcast.ParticipantInfo
 import com.amazonaws.ivs.broadcast.QualityStats
@@ -31,7 +34,6 @@ import com.amazonaws.ivs.broadcast.StageStream.Type
 import com.amazonaws.ivs.broadcast.StageVideoConfiguration
 import com.amazonaws.ivs.broadcast.JitterBufferConfiguration
 import com.amazonaws.ivs.broadcast.SubscribeConfiguration
-import com.amazonaws.ivs.broadcast.SubscribeSimulcastConfiguration
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Callback
 import com.facebook.react.bridge.LifecycleEventListener
@@ -69,10 +71,7 @@ class IVSBroadcastModule(
         val slotId: Int,
         val streamKey: String,
         val participantId: String,
-        val previewTarget: ImagePreviewSurfaceTarget,
-        var surface: Surface? = null,
-        var width: Int = 0,
-        var height: Int = 0,
+        val previewView: ImagePreviewView,
     )
 
     // UI supports 16 remote slots (2 pages of 8). Slot 1 is reserved by the JS UX.
@@ -102,6 +101,7 @@ class IVSBroadcastModule(
     private val slotSurfaces: MutableMap<Int, RenderSurfaceConfig> = mutableMapOf()
     private val remoteRenderSlots: MutableMap<Int, RenderSlot> = mutableMapOf()
     private val lastSlotAttachSig: MutableMap<Int, String> = mutableMapOf()
+    private val viewerSlotViews: MutableMap<Int, WeakReference<IVSRealTimeView>> = mutableMapOf()
     private val participantToSlot: MutableMap<String, Int> = mutableMapOf()
     private val slotToStreamKey: MutableMap<Int, String> = mutableMapOf()
     private val firstFrameSignalKeys: MutableSet<String> = mutableSetOf()
@@ -1089,9 +1089,10 @@ class IVSBroadcastModule(
     }
 
     /**
-     * Phone Stage watch: default SDK starts on LOWEST_QUALITY and ramps (slideshow).
-     * 1.0.109/110 TextureView rebind bakes did not touch this. AWS: MEDIUM jitter
-     * for packet-loss resilience; HIGHEST_QUALITY so the first layer is the HD one.
+     * Phone Stage watch: Studio publishes simulcast disabled (ivsWebHost).
+     * Do not set InitialLayerPreference — asking for HIGHEST/LOWEST when the
+     * publisher has no layers makes the Android SDK wait on keyframes.
+     * MEDIUM jitter is packet-loss resilience only.
      */
     private fun viewerSubscribeConfiguration(): SubscribeConfiguration {
         val config = SubscribeConfiguration()
@@ -1100,19 +1101,15 @@ class IVSBroadcastModule(
         } catch (e: Throwable) {
             Log.w(IVS_TAG, "[VIEWER] jitterBuffer MEDIUM not set: ${e.message}")
         }
-        try {
-            config.simulcast.setInitialLayerPreference(
-                SubscribeSimulcastConfiguration.InitialLayerPreference.HIGHEST_QUALITY,
-            )
-        } catch (e: Throwable) {
-            Log.w(IVS_TAG, "[VIEWER] simulcast HIGHEST_QUALITY not set: ${e.message}")
-        }
         return config
     }
 
     private fun preferredHighestVideoLayer(stream: RemoteStageStream): RemoteStageStream.Layer? {
         return try {
-            stream.highestQualityLayer
+            // Studio publishes simulcast disabled. Picking a layer object when
+            // the publisher has none makes the Android SDK stall on I-frames.
+            val layers = stream.layers
+            if (layers.isNullOrEmpty()) null else stream.highestQualityLayer
         } catch (e: Throwable) {
             Log.w(IVS_TAG, "[VIEWER] preferred highest layer unavailable: ${e.message}")
             null
@@ -1203,24 +1200,49 @@ class IVSBroadcastModule(
         }
     }
 
-    private fun scheduleSlotClearSurface(slotId: Int, slot: RenderSlot, reason: String) {
-        cancelPendingSlotClear(slotId)
-        val runnable = Runnable {
-            // Only clear if we still have no surface staged for this slot.
-            val stillMissing = slotSurfaces[slotId]?.surface == null
-            if (!stillMissing) return@Runnable
-            try {
-                Log.i(
-                    IVS_TAG,
-                    "[IVS_SLOT][CLEAR_SURFACE_DEBOUNCED] slot=$slotId streamKey=${slot.streamKey} reason=$reason previewTargetHash=${targetHash(slot.previewTarget)}"
-                )
-                slot.previewTarget.clearSurface()
-            } catch (_: Exception) {
-                // ignore
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
+
+    private fun sdkTexturePreview(stream: StageStream): ImagePreviewView? {
+        return try {
+            stream.getPreviewTextureView()
+        } catch (e: Exception) {
+            Log.e(IVS_TAG, "[IVS_PREVIEW] previewTextureView failed: ${e.message}", e)
+            null
+        }
+    }
+
+    private fun detachSlotPreview(slot: RenderSlot) {
+        lastSlotAttachSig.remove(slot.slotId)
+        runOnMain {
+            val preview = slot.previewView
+            (preview.parent as? ViewGroup)?.removeView(preview)
+            viewerSlotViews[slot.slotId]?.get()?.let { host ->
+                if (host.currentPreview() === preview) host.detachSdkPreview()
             }
         }
-        pendingSlotSurfaceClears[slotId] = runnable
-        mainHandler.postDelayed(runnable, 350)
+    }
+
+    fun registerViewerSlotViewInternal(slotId: Int, view: IVSRealTimeView) {
+        runOnMain {
+            viewerSlotViews[slotId] = WeakReference(view)
+            remoteRenderSlots[slotId]?.let { attachSdkPreviewToSlot(it) }
+        }
+    }
+
+    fun unregisterViewerSlotViewInternal(slotId: Int, view: IVSRealTimeView) {
+        runOnMain {
+            val current = viewerSlotViews[slotId]?.get()
+            if (current === view) {
+                view.detachSdkPreview()
+                viewerSlotViews.remove(slotId)
+            }
+        }
     }
 
     private fun clearSlotSurfaceImmediately(slotId: Int, reason: String) {
@@ -1231,24 +1253,8 @@ class IVSBroadcastModule(
             logBindingState("viewer-slot-$slotId-cleared-immediate")
             return
         }
-
-        slot.surface = null
-        slot.width = 0
-        slot.height = 0
-
-        // Clear immediately to avoid TextureView teardown crashes where the SurfaceTexture becomes
-        // invalid while the IVS renderer thread is still running.
-        mainHandler.post {
-            try {
-                Log.i(
-                    IVS_TAG,
-                    "[IVS_SLOT][CLEAR_SURFACE_IMMEDIATE] slot=$slotId streamKey=${slot.streamKey} reason=$reason previewTargetHash=${targetHash(slot.previewTarget)}"
-                )
-                slot.previewTarget.clearSurface()
-            } catch (_: Exception) {
-                // ignore
-            }
-        }
+        Log.i(IVS_TAG, "[IVS_SLOT][DETACH_SDK_PREVIEW] slot=$slotId streamKey=${slot.streamKey} reason=$reason")
+        detachSlotPreview(slot)
         logBindingState("viewer-slot-$slotId-cleared-immediate")
     }
 
@@ -1368,47 +1374,12 @@ class IVSBroadcastModule(
     }
 
     private fun updateViewerRenderSurfaceForSlot(slotId: Int, surface: Surface?, width: Int, height: Int) {
-        val hash = surfaceHash(surface)
-        if (sessionMode != SessionMode.VIEWER && sessionMode != SessionMode.HOST && sessionMode != SessionMode.GUEST) {
-            Log.w(IVS_TAG, "[IVS_BIND][VIEWER_SLOT][GUARD] Ignoring viewer slot surface while mode=$sessionMode slot=$slotId surfaceHash=$hash")
-            return
-        }
-
-        // Any new surface update cancels a pending clear for this slot.
-        if (surface != null) {
-            cancelPendingSlotClear(slotId)
-        }
-
-        if (surface == null) {
-            slotSurfaces.remove(slotId)
-            remoteRenderSlots[slotId]?.let { slot ->
-                slot.surface = null
-                // Debounce clear to avoid SurfaceTexture updateTexImage races inside broadcastcore.
-                scheduleSlotClearSurface(slotId, slot, "surface-null")
-                Log.d(IVS_TAG, "[IVS_SLOT] surfaceDestroyed slot=$slotId streamKey=${slot.streamKey} surfaceHash=$hash")
-            }
-            logBindingState("viewer-slot-$slotId-cleared")
-            emit("IVS_SURFACE_READY", Arguments.createMap().apply {
-                putBoolean("ready", false)
-                putInt("width", 0)
-                putInt("height", 0)
-            })
-            return
-        }
-        slotSurfaces[slotId] = RenderSurfaceConfig(surface, width, height)
-        val slot = remoteRenderSlots[slotId]
-        if (slot == null) {
-            Log.d(IVS_TAG, "[IVS_SLOT] surfaceAvailable slot=$slotId but no track yet; awaiting track assignment surfaceHash=$hash size=${width}x${height}")
-            logBindingState("viewer-slot-$slotId-staged")
-            return
-        }
-
-        slot.surface = surface
-        slot.width = width
-        slot.height = height
-        Log.d(IVS_TAG, "[IVS_SLOT] surfaceAvailable slot=$slotId streamKey=${slot.streamKey} size=${width}x${height} surfaceHash=$hash")
-        logBindingState("viewer-slot-$slotId-bound")
-        attachSurfaceToSlot(slot)
+        // Homemade TextureView surfaces are no longer used for remote Stage watch.
+        // SDK ImagePreviewView is parented onto IVSRealTimeView instead.
+        Log.d(
+            IVS_TAG,
+            "[IVS_SLOT] ignoring homemade surface slot=$slotId hasSurface=${surface != null} size=${width}x${height}",
+        )
     }
 
     private fun selectDefaultDevices(cameraPosition: String?) {
@@ -1637,17 +1608,6 @@ class IVSBroadcastModule(
 
     private fun registerPreviewTarget(participant: ParticipantInfo, stream: StageStream): Boolean {
         if (stream.streamType != Type.VIDEO) return false
-        val previewTarget = when (stream) {
-            is ImageStageStream -> stream.previewSurfaceTarget
-            is ImageLocalStageStream -> stream.previewSurfaceTarget
-            else -> {
-                Log.e(
-                    IVS_TAG,
-                    "[IVS_PREVIEW] Expected ImageStageStream/ImageLocalStageStream for video but got ${stream.javaClass.simpleName}; preview surface not attached"
-                )
-                return false
-            }
-        }
         val key = streamKey(participant, stream)
 
         // Host/guest devices already attach the local camera stream via the dedicated local preview key
@@ -1660,27 +1620,43 @@ class IVSBroadcastModule(
         }
 
         if (!participant.isLocal && (sessionMode == SessionMode.VIEWER || sessionMode == SessionMode.HOST || sessionMode == SessionMode.GUEST)) {
+            val previewView = sdkTexturePreview(stream)
+            if (previewView == null) {
+                Log.e(
+                    IVS_TAG,
+                    "[IVS_PREVIEW] Expected ImageStageStream previewTextureView but got ${stream.javaClass.simpleName}",
+                )
+                return false
+            }
             val slotId = assignSlot(participant.participantId ?: "unknown", participant.attributes)
+            remoteRenderSlots.remove(slotId)?.let { old ->
+                if (old.previewView !== previewView) detachSlotPreview(old)
+            }
             val slot = RenderSlot(
                 slotId = slotId,
                 streamKey = key,
                 participantId = participant.participantId ?: "unknown",
-                previewTarget = previewTarget,
+                previewView = previewView,
             )
 
             remoteRenderSlots[slotId] = slot
             slotToStreamKey[slotId] = key
 
-            // Attach immediately if a surface already exists for this slot
-            slotSurfaces[slotId]?.let { surfaceConfig ->
-                slot.surface = surfaceConfig.surface
-                slot.width = surfaceConfig.width
-                slot.height = surfaceConfig.height
-            }
-
             Log.d(IVS_TAG, "[IVS_SLOT] trackAdded participant=${participant.participantId} slot=$slotId streamKey=$key")
-            attachSurfaceToSlot(slot)
+            attachSdkPreviewToSlot(slot)
             return true
+        }
+
+        val previewTarget = when (stream) {
+            is ImageStageStream -> stream.previewSurfaceTarget
+            is ImageLocalStageStream -> stream.previewSurfaceTarget
+            else -> {
+                Log.e(
+                    IVS_TAG,
+                    "[IVS_PREVIEW] Expected ImageStageStream/ImageLocalStageStream for video but got ${stream.javaClass.simpleName}; preview surface not attached"
+                )
+                return false
+            }
         }
 
         hostPreviewTargets[key] = previewTarget
@@ -1703,11 +1679,7 @@ class IVSBroadcastModule(
             val slotId = participantToSlot[participant.participantId]
             if (slotId != null) {
                 remoteRenderSlots.remove(slotId)?.let { slot ->
-                    try {
-                        slot.previewTarget.clearSurface()
-                    } catch (_: Exception) {
-                        // ignore
-                    }
+                    detachSlotPreview(slot)
                 }
                 slotToStreamKey.remove(slotId)
                 // Only the pinned PRIMARY tile (slot 0 = host) is preserved so it can never be
@@ -1850,14 +1822,11 @@ class IVSBroadcastModule(
 
     private fun clearRemoteRenderSlots() {
         remoteRenderSlots.values.forEach { slot ->
-            try {
-                slot.previewTarget.clearSurface()
-            } catch (_: Exception) {
-                // ignore
-            }
+            detachSlotPreview(slot)
         }
         remoteRenderSlots.clear()
         slotSurfaces.clear()
+        lastSlotAttachSig.clear()
         participantToSlot.clear()
         slotToStreamKey.clear()
         firstFrameSignalKeys.clear()
@@ -1873,61 +1842,41 @@ class IVSBroadcastModule(
             return
         }
         Log.d(IVS_TAG, "[IVS_VIEWER][RENDER_SLOT] Reattaching ${slots.size} slots (reason=$reason)")
-        slots.forEach { attachSurfaceToSlot(it) }
+        slots.forEach { attachSdkPreviewToSlot(it) }
     }
 
-    /** True when any bound remote slot has a null/invalid Surface (safe to reattach). */
+    /** True when a remote SDK preview is not parented to its RN tile. */
     private fun viewerSlotSurfacesNeedReattach(): Boolean {
         if (remoteRenderSlots.isEmpty()) return false
         return remoteRenderSlots.values.any { slot ->
-            val surface = slot.surface ?: slotSurfaces[slot.slotId]?.surface
-            surface == null || !surface.isValid
+            val host = viewerSlotViews[slot.slotId]?.get()
+            host == null || host.currentPreview() !== slot.previewView
         }
     }
 
-    private fun attachSurfaceToSlot(slot: RenderSlot) {
-        slotSurfaces[slot.slotId]?.let { config ->
-            if (slot.surface == null) {
-                slot.surface = config.surface
-                slot.width = config.width
-                slot.height = config.height
+    private fun attachSdkPreviewToSlot(slot: RenderSlot) {
+        if (lastSlotAttachSig[slot.slotId] == slot.streamKey) {
+            val host = viewerSlotViews[slot.slotId]?.get()
+            if (host != null && host.currentPreview() === slot.previewView) {
+                return
             }
         }
-        val safeWidth = if (slot.width > 0) slot.width else 1
-        val safeHeight = if (slot.height > 0) slot.height else 1
-        // Identity + streamKey only — ignore pure WxH thrash from TextureView
-        // sizeChanged (layout ticks). Including size forced setSurface and flashed
-        // the viewer tile (audit 41b164d3 residual after reattach cure).
-        val attachSig = "${surfaceHash(slot.surface)}:${slot.streamKey}"
-        if (slot.surface != null && lastSlotAttachSig[slot.slotId] == attachSig) {
-            return
-        }
-        mainHandler.post {
+        runOnMain {
             try {
-                val surface = slot.surface
-                val hasSurface = surface != null
-                Log.d(
-                    IVS_TAG,
-                    "[IVS_SLOT] tryAttach slot=${slot.slotId} surface=$hasSurface track=${slot.streamKey.isNotEmpty()} size=${safeWidth}x${safeHeight} surfaceHash=${surfaceHash(surface)} previewTargetHash=${targetHash(slot.previewTarget)}"
-                )
-                if (!hasSurface) {
-                    lastSlotAttachSig.remove(slot.slotId)
-                    slot.previewTarget.clearSurface()
-                    Log.d(IVS_TAG, "[IVS_SLOT] detach slot=${slot.slotId} streamKey=${slot.streamKey}")
-                    return@post
+                val host = viewerSlotViews[slot.slotId]?.get()
+                if (host == null) {
+                    Log.d(
+                        IVS_TAG,
+                        "[IVS_SLOT] sdk preview waiting for view slot=${slot.slotId} streamKey=${slot.streamKey}",
+                    )
+                    return@runOnMain
                 }
-                slot.previewTarget.setSurface(surface, safeWidth, safeHeight)
-                lastSlotAttachSig[slot.slotId] = attachSig
-                Log.d(
-                    IVS_TAG,
-                    "[IVS_SLOT] ATTACHED slot=${slot.slotId} streamKey=${slot.streamKey} size=${safeWidth}x${safeHeight} surfaceHash=${surfaceHash(surface)} previewTargetHash=${targetHash(slot.previewTarget)}"
-                )
+                host.attachSdkPreview(slot.previewView)
+                lastSlotAttachSig[slot.slotId] = slot.streamKey
                 Log.i(
                     IVS_TAG,
-                    "[IVS_NATIVE][REMOTE_VIDEO_BOUND] slot=${slot.slotId} trackId=${slot.streamKey} participantId=${slot.participantId} surfaceHash=${surfaceHash(surface)} size=${safeWidth}x${safeHeight}"
+                    "[IVS_NATIVE][REMOTE_VIDEO_BOUND] slot=${slot.slotId} trackId=${slot.streamKey} participantId=${slot.participantId} sdkPreview=true",
                 )
-
-                // Deterministic CI proof: viewer-side expected video should flow once slot 0 is bound.
                 if (slot.slotId == 0) {
                     startNetRxDeltaProofIfNeeded("viewer", 0, "REMOTE_VIDEO_BOUND_SLOT0")
                 }
@@ -1939,11 +1888,11 @@ class IVSBroadcastModule(
                 }
                 emit("IVS_SURFACE_READY", Arguments.createMap().apply {
                     putBoolean("ready", true)
-                    putInt("width", safeWidth)
-                    putInt("height", safeHeight)
+                    putInt("width", host.width)
+                    putInt("height", host.height)
                 })
             } catch (e: Exception) {
-                Log.e(IVS_TAG, "[IVS_VIEWER][RENDER_SLOT] Failed to attach surface for streamKey=${slot.streamKey}: ${e.message}", e)
+                Log.e(IVS_TAG, "[IVS_VIEWER][RENDER_SLOT] Failed to attach sdk preview for streamKey=${slot.streamKey}: ${e.message}", e)
             }
         }
     }
@@ -2577,6 +2526,14 @@ class IVSBroadcastModule(
             return sharedInstance?.viewerParticipantId
         }
 
+        fun registerViewerSlotView(slotId: Int, view: IVSRealTimeView) {
+            sharedInstance?.registerViewerSlotViewInternal(slotId, view)
+        }
+
+        fun unregisterViewerSlotView(slotId: Int, view: IVSRealTimeView) {
+            sharedInstance?.unregisterViewerSlotViewInternal(slotId, view)
+        }
+
     }
 
     private fun configureStageForRendering(reason: String? = null) {
@@ -2588,8 +2545,8 @@ class IVSBroadcastModule(
 
         val surfaceConfig = activeRenderSurface()
         if (renderOwner == RenderOwner.VIEWER_REMOTE) {
-            val anySlot = slotSurfaces.isNotEmpty()
-            Log.d(IVS_TAG, "[IVS_SURFACE][VIEWER] configureStageForRendering reason=${reason ?: "n/a"} slots=${slotSurfaces.size}")
+            val anySlot = remoteRenderSlots.isNotEmpty()
+            Log.d(IVS_TAG, "[IVS_SURFACE][VIEWER] configureStageForRendering reason=${reason ?: "n/a"} slots=${remoteRenderSlots.size}")
             emit("IVS_SURFACE_READY", Arguments.createMap().apply {
                 putBoolean("ready", anySlot)
                 putInt("width", surfaceConfig?.width ?: 0)
