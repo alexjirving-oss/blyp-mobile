@@ -23,7 +23,6 @@ import {
   type OverlayFeedSnapshot,
 } from "@/lib/studioOverlayFeed";
 import { fetchLiveProgram, fetchWatchToken, type LiveProgram } from "@/lib/liveProgram";
-import { startWatchPresence } from "@/lib/watchPresence";
 import { useLatencyBuffered } from "@/lib/latencyBuffer";
 import { useAuth } from "./AuthProvider";
 import { IvsAudiencePlayer } from "./IvsAudiencePlayer";
@@ -152,14 +151,6 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
       );
     });
   }, [streamId]);
-
-  useEffect(() => {
-    if (!streamId || ended) return;
-    return startWatchPresence(streamId, {
-      cognitoIdToken: session?.idToken,
-      uid: session?.sub,
-    });
-  }, [streamId, ended, session?.idToken, session?.sub]);
 
   useEffect(() => {
     if (!streamId || ended) return;

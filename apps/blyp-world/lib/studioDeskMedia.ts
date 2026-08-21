@@ -19,21 +19,13 @@ export const DESK_PUBLISH_MAX_WIDTH = 1280;
 export const DESK_PUBLISH_MAX_HEIGHT = 1280;
 
 /**
- * Stage publish is the native camera or screen track — never the program
- * canvas (that already paints Host+9 boxes for the director chassis).
- * Tab Display Media is forbidden on preview / jukebox / GO LIVE because
- * Chrome share banners cannot be hidden.
+ * Stage video must be getUserMedia / getDisplayMedia — never canvas.captureStream.
+ * Canvas tracks have no deviceId and no displaySurface (phone then stalls / still-frames).
  */
-export function isLivePublishVideoTrack(
-  track: MediaStreamTrack | null | undefined,
-): track is MediaStreamTrack {
-  return !!track && track.kind === "video" && track.readyState === "live";
-}
-
 export function isNativePublishVideoTrack(
   track: MediaStreamTrack | null | undefined,
 ): track is MediaStreamTrack {
-  if (!isLivePublishVideoTrack(track)) {
+  if (!track || track.kind !== "video" || track.readyState !== "live") {
     return false;
   }
   const settings = track.getSettings?.() ?? {};
@@ -49,46 +41,6 @@ export function nativePublishVideoTrack(
   stream: MediaStream | null | undefined,
 ): MediaStreamTrack | null {
   return stream?.getVideoTracks().find(isNativePublishVideoTrack) ?? null;
-}
-
-export function livePublishVideoTrack(
-  stream: MediaStream | null | undefined,
-): MediaStreamTrack | null {
-  return stream?.getVideoTracks().find(isLivePublishVideoTrack) ?? null;
-}
-
-function isCanvasCaptureVideoTrack(
-  track: MediaStreamTrack | null | undefined,
-): boolean {
-  if (!track || track.kind !== "video") return false;
-  return /canvas/i.test(track.label || "");
-}
-
-function firstNonCanvasLiveVideo(
-  stream: MediaStream | null | undefined,
-): MediaStreamTrack | null {
-  return (
-    stream?.getVideoTracks().find(
-      (t) => isLivePublishVideoTrack(t) && !isCanvasCaptureVideoTrack(t),
-    ) ?? null
-  );
-}
-
-/**
- * IVS Stage video: desk.publishStream camera/screen first.
- * Never canvas.captureStream of the Host+9 program composite.
- * Preview is fallback only so a live screen share is not replaced by camera.
- */
-export function pickStagePublishVideoTrack(
-  publishStream?: MediaStream | null,
-  previewStream?: MediaStream | null,
-): MediaStreamTrack | null {
-  return (
-    nativePublishVideoTrack(publishStream) ||
-    firstNonCanvasLiveVideo(publishStream) ||
-    nativePublishVideoTrack(previewStream) ||
-    firstNonCanvasLiveVideo(previewStream)
-  );
 }
 
 export type DeskMediaHandle = {
@@ -255,14 +207,6 @@ function forgetDeskScreenStream(stream: MediaStream | null | undefined): void {
   if (stream && bag.screen === stream) {
     bag.screen = null;
   }
-}
-
-/** Stop leftover getDisplayMedia tracks. Does not touch the camera. */
-export function releaseStudioDisplayCapture(): boolean {
-  const bag = camBag();
-  const screen = bag.screen;
-  bag.screen = null;
-  return stopStreamTracks(screen);
 }
 
 function parseStudioCamLockMsg(raw: unknown): StudioCamLockMsg | null {
@@ -781,15 +725,8 @@ type DisplayMediaOptions = DisplayMediaStreamOptions & {
  * Screen/tab capture that keeps focus on Live Studio.
  * Chrome otherwise jumps to the shared Chrome tab after Share.
  */
-type StudioDisplayCaptureOptions = DisplayMediaStreamOptions & {
-  systemAudio?: "include" | "exclude";
-  selfBrowserSurface?: "include" | "exclude";
-  preferCurrentTab?: boolean;
-  surfaceSwitching?: "include" | "exclude";
-};
-
 async function getDisplayMediaStayInStudio(
-  options: StudioDisplayCaptureOptions,
+  options: DisplayMediaStreamOptions,
 ): Promise<MediaStream> {
   const devices = requireDevices();
   if (typeof devices.getDisplayMedia !== "function") {
@@ -819,21 +756,7 @@ async function getDisplayMediaStayInStudio(
     opts.controller = controller;
   }
 
-  let stream: MediaStream;
-  try {
-    stream = rememberDeskScreenStream(await devices.getDisplayMedia(opts));
-  } catch (err) {
-    const name =
-      (err instanceof DOMException && err.name) ||
-      (err instanceof Error && err.name) ||
-      "";
-    if (name === "NotAllowedError" || name === "AbortError") {
-      throw new Error(
-        "Screen share was cancelled or blocked. Staying on the current source — not the camera.",
-      );
-    }
-    throw err instanceof Error ? err : new Error(String(err));
-  }
+  const stream = rememberDeskScreenStream(await devices.getDisplayMedia(opts));
   prepareDisplayAudioTracks(stream);
 
   try {
@@ -973,11 +896,11 @@ function isDisplayCaptureStream(stream: MediaStream | null | undefined): boolean
 async function captureDisplayStayInStudio(): Promise<MediaStream> {
   return getDisplayMediaStayInStudio({
     video: DISPLAY_VIDEO_CONSTRAINTS,
+    // Boolean `audio: true` is what makes Chrome show “Share tab audio”.
+    // Constraint objects here can drop the track (viewers then get mic only).
     audio: true,
-    systemAudio: "include",
-    selfBrowserSurface: "exclude",
-    preferCurrentTab: false,
-    surfaceSwitching: "exclude",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...({ systemAudio: "include" } as any),
   });
 }
 

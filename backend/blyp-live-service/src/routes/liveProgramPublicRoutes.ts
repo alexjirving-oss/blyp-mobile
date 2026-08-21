@@ -34,8 +34,7 @@ export function applyProgramCors(req: Request, res: Response): boolean {
   }
   res.set('Access-Control-Allow-Origin', origin);
   res.set('Vary', 'Origin');
-  res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Methods', 'GET,OPTIONS');
   res.set('Access-Control-Max-Age', '600');
   return true;
 }
@@ -136,43 +135,6 @@ router.get('/live/watch/:sessionId', async (req, res) => {
   } catch (e: any) {
     logger.error({ err: e?.message || String(e), sessionId }, '[live-watch] GET failed');
     return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
-  }
-});
-
-router.options('/live/watch/:sessionId/presence', (req, res) => {
-  if (!applyProgramCors(req, res)) return;
-  return res.status(204).end();
-});
-
-router.post('/live/watch/:sessionId/presence', async (req, res) => {
-  if (!applyProgramCors(req, res)) return;
-  if (!(await rateLimit(req, res, 'live:watch-presence', 20))) return;
-  const sessionId = String(req.params.sessionId || req.body?.sessionId || '').trim();
-  const presenceId = String(req.body?.presenceId || '').trim();
-  const action = req.body?.action === 'leave' ? 'leave' : 'join';
-  if (!sessionId || !/^[A-Za-z0-9._:-]{8,128}$/.test(sessionId)) {
-    return res.status(400).json({ error: 'INVALID_SESSION', code: 'INVALID_SESSION' });
-  }
-  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(presenceId)) {
-    return res.status(400).json({ error: 'INVALID_PRESENCE', code: 'INVALID_PRESENCE' });
-  }
-  try {
-    const session = await getSessionById(sessionId);
-    if (!session || session.status !== 'LIVE') {
-      return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
-    }
-    const { claimWebWatchLease, releaseWebWatchLease } = await import('../admin/firestoreAdmin');
-    const result =
-      action === 'leave'
-        ? await releaseWebWatchLease(sessionId, presenceId)
-        : await claimWebWatchLease(sessionId, presenceId);
-    return res.status(result.ok ? 200 : 502).json({
-      ok: result.ok,
-      counted: result.counted,
-    });
-  } catch (e: any) {
-    logger.error({ err: e?.message || String(e), sessionId }, '[live-watch] presence failed');
-    return res.status(502).json({ error: 'PRESENCE_FAILED', code: 'PRESENCE_FAILED' });
   }
 });
 

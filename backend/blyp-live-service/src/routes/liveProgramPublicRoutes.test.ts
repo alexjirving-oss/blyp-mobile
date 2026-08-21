@@ -53,7 +53,6 @@ describe('GET /live/program CORS', () => {
     const ok = applyProgramCors(req, res);
     assert.equal(ok, true);
     assert.equal(res.headers['access-control-allow-origin'], 'https://blyp.world');
-    assert.equal(res.headers['access-control-allow-methods'], 'GET,POST,OPTIONS');
   });
 
   it('allows missing Origin (curl)', () => {

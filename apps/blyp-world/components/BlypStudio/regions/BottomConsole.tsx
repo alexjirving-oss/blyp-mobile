@@ -14,12 +14,7 @@ import {
   startIvsWebHostPublish,
   type IvsHostPublishHandle,
 } from "@/lib/ivsWebHost";
-import { livePublishVideoTrack } from "@/lib/studioDeskMedia";
-import {
-  buildProgramPublishStream,
-  getOrCreateStudioProgramComposite,
-} from "@/lib/studioProgramComposite";
-import { releaseStudioTabCapture } from "@/lib/studioSpotify";
+import { nativePublishVideoTrack } from "@/lib/studioDeskMedia";
 import {
   MUSIC_BEDS,
   STING_PAD,
@@ -28,12 +23,14 @@ import {
   type StingId,
 } from "../audio/StudioAudioEngine";
 import { planPublishAudio } from "@/lib/studioPublishGraph";
+import { armSpotifyTabAudioForLive, isStudioSpotifyLinked, TAB_AUDIO_REQUIRED } from "@/lib/studioSpotify";
 import { useGrid9StudioOverlayFeed } from "../hooks/useGrid9StudioOverlayFeed";
 import { useStudioState } from "../store/StudioStateContext";
 
 /**
- * Master GO LIVE — studio program canvas.captureStream to IVS Stage.
- * Never getDisplayMedia of this tab (Chrome share banners).
+ * Master GO LIVE — camera/screen getUserMedia to IVS Stage (same path as
+ * /live/studio). Mixer + soundboard ride the audio mix. Never publish the
+ * Clean Feed canvas captureStream.
  */
 export function BottomConsole() {
   useGrid9StudioOverlayFeed();
@@ -47,7 +44,7 @@ export function BottomConsole() {
     setPublishBusy,
     previewStreamRef,
     setHostSessionId,
-    layoutOrientation,
+    deskScene,
   } = useStudioState();
 
   const publishRef = useRef<IvsHostPublishHandle | null>(null);
@@ -165,7 +162,11 @@ export function BottomConsole() {
     setPublishBusy(true);
     setPublishError(null);
     try {
-      releaseStudioTabCapture();
+      const tabAudioOk = await armSpotifyTabAudioForLive();
+      if (isStudioSpotifyLinked() && !tabAudioOk) {
+        setPublishError(TAB_AUDIO_REQUIRED);
+        return;
+      }
       await ensureFirebaseFromCognito({
         cognitoIdToken: session.idToken,
         uid: session.sub,
@@ -174,30 +175,28 @@ export function BottomConsole() {
       const preview = previewStreamRef.current;
       if (!preview) {
         throw new Error(
-          "No camera stream ready. Allow camera on localhost/HTTPS.",
+          "No camera or screen stream ready. Allow camera on localhost/HTTPS.",
         );
       }
       studioAudio.attachMic(preview);
       const wantMix = studioAudio.shouldPublishMix();
-      const mixAudio = studioAudio.mixAudioTrack();
-      const gum = studioAudio.nativeAudioTrack(preview);
-      const audio =
-        wantMix && mixAudio && mixAudio.readyState === "live" ? mixAudio : gum;
-      const orient =
-        layoutOrientation === "landscape" ? "landscape" : "portrait";
-      const composite = getOrCreateStudioProgramComposite(orient);
-      const publishStream = buildProgramPublishStream(
-        composite,
-        {
-          orientation: orient,
-          publishStream: preview,
-          previewStream: preview,
-        },
-        audio,
-      );
-      const liveVideo = livePublishVideoTrack(publishStream);
+      const publishStream =
+        (wantMix
+          ? studioAudio.buildPublishStream(preview, preview)
+          : studioAudio.buildNativePublishStream(preview, preview)) || preview;
+      const liveVideo = nativePublishVideoTrack(publishStream);
       if (!liveVideo) {
-        throw new Error("Could not capture studio program");
+        throw new Error(
+          "Stage video must be the camera or screen — not a canvas",
+        );
+      }
+      if (deskScene === "camera") {
+        const settings = liveVideo.getSettings?.() ?? {};
+        if (!settings.deviceId) {
+          throw new Error(
+            "Camera publish requires a getUserMedia video track",
+          );
+        }
       }
       if (!publishStream.getAudioTracks().length) {
         throw new Error("Microphone track missing — check browser permissions.");

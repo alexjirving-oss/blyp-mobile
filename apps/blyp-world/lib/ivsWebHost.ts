@@ -1,14 +1,10 @@
-import {
-  isLivePublishVideoTrack,
-  mixDeskAudioTracks,
-  pickStagePublishVideoTrack,
-} from "@/lib/studioDeskMedia";
+import { isNativePublishVideoTrack, mixDeskAudioTracks } from "@/lib/studioDeskMedia";
 
 /**
  * IVS Real-Time host publish for desktop Chrome/Edge.
- * Studio GO LIVE publishes the native camera or screen track
- * plus Web Audio / getUserMedia mic. Do not publish Display Media of this tab
- * or the program canvas that already paints Host+9 boxes.
+ * Amazon web-broadcast host pattern: one camera video + one mic audio
+ * LocalStageStream from getUserMedia. Do not publish a canvas captureStream
+ * on the camera path — phones then get audio + a still frame.
  */
 
 export type IvsHostPublishHandle = {
@@ -77,8 +73,8 @@ export async function startIvsWebHostPublish(opts: {
   participantToken: string;
   videoEl?: HTMLVideoElement | null;
   /**
-   * Prebuilt MediaStream for Stage. Must be native camera or screen —
-   * never canvas.captureStream of the Host+9 program composite.
+   * Prebuilt MediaStream (LIVE Studio camera/screen). Camera mode must be
+   * getUserMedia tracks — not a canvas captureStream.
    */
   mediaStream?: MediaStream | null;
   /**
@@ -144,12 +140,15 @@ export async function startIvsWebHostPublish(opts: {
     .getAudioTracks()
     .filter((t) => t.readyState === "live");
   const videoTrack =
-    pickStagePublishVideoTrack(media) ??
-    media.getVideoTracks().find(isLivePublishVideoTrack) ??
+    media.getVideoTracks().find(isNativePublishVideoTrack) ??
     media.getVideoTracks()[0];
   if (!videoTrack) {
     if (ownsMedia) media.getTracks().forEach((t) => t.stop());
     throw new Error("Video track missing");
+  }
+  if (!isNativePublishVideoTrack(videoTrack)) {
+    if (ownsMedia) media.getTracks().forEach((t) => t.stop());
+    throw new Error("Stage video must be the camera or screen — not a canvas");
   }
   // IVS Real-Time requires one audio LocalStageStream. If capture has mic +
   // tab/display audio, mix them — publishing [0] alone drops YouTube sound.

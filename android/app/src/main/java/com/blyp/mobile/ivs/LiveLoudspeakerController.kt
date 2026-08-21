@@ -150,31 +150,19 @@ internal class LiveLoudspeakerController(
 
     fun force(profile: Profile, reason: String) {
         runOnMain {
-            // Watch leftover JS pins must not yank guest/host off MODE_IN_COMMUNICATION
-            // (Samsung then keeps VIDEO_CHAT on the earpiece).
-            val resolved =
-                if (activeProfile == Profile.PUBLISHING && profile == Profile.PLAYBACK) {
-                    Log.w(
-                        logTag,
-                        "[IVS_AUDIO_ROUTE] ignore playback force while publishing reason=$reason",
-                    )
-                    Profile.PUBLISHING
-                } else {
-                    profile
-                }
             // Keep owner profile aligned with JS force calls (guest join path).
             if (activeProfile == null) {
-                activeProfile = resolved
+                activeProfile = profile
                 registerCommunicationDeviceListener()
                 mainHandler.removeCallbacks(watchdog)
                 mainHandler.postDelayed(watchdog, INITIAL_REASSERT_DELAY_MS)
-            } else if (activeProfile != resolved) {
-                activeProfile = resolved
+            } else if (activeProfile != profile) {
+                activeProfile = profile
             }
-            if (resolved == Profile.PLAYBACK && playbackRouteAlreadyGood() && !isEarpieceSelected()) {
+            if (profile == Profile.PLAYBACK && playbackRouteAlreadyGood() && !isEarpieceSelected()) {
                 return@runOnMain
             }
-            applyRoute(resolved, reason)
+            applyRoute(profile, reason)
             if (shouldBurstReassert(reason) || isEarpieceSelected()) {
                 scheduleBurstReassert(reason)
             }
@@ -259,7 +247,6 @@ internal class LiveLoudspeakerController(
             r.contains("remote-media") ||
             r.contains("subscribe-state") ||
             r.contains("publish-state") ||
-            r.contains("local-published") ||
             r.contains("stage-join") ||
             r.contains("stage-state") ||
             r.contains("streams-added") ||
@@ -367,9 +354,6 @@ internal class LiveLoudspeakerController(
             if (profile == Profile.PUBLISHING && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 try {
                     val stageAudio = StageAudioManager.getInstance(appContext)
-                    // VIDEO_CHAT / WebRTC publish re-enables SDK mode ownership and
-                    // selects the receiver. Keep mode+device on this controller.
-                    stageAudio.setAudioModeManagementEnabled(false)
                     stageAudio.enableEchoCancellation(true)
                     aec = if (stageAudio.isEchoCancellationEnabled) "on" else "off-after-enable"
                     usage = stageAudio.usage.name
@@ -397,7 +381,7 @@ internal class LiveLoudspeakerController(
             // snaps, and the 500ms watchdog froze likes/leave.
             if (profile == Profile.PUBLISHING &&
                 isEarpieceSelected() &&
-                findConnectedHeadset() == null
+                findHeadset(commDevices()) == null
             ) {
                 Log.w(logTag, "[IVS_AUDIO_ROUTE] earpiece still selected after route; sandwich pin")
                 pinBuiltinSpeaker(sandwich = true)
@@ -415,15 +399,6 @@ internal class LiveLoudspeakerController(
             }
 
             val volumeControlStream = bindVolumeControlStream(profile)
-
-            // Last write: WebRTC publish often clears speakerphone after we pin.
-            if (profile == Profile.PUBLISHING && findConnectedHeadset() == null) {
-                if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-                }
-                @Suppress("DEPRECATION")
-                run { audioManager.isSpeakerphoneOn = true }
-            }
 
             @Suppress("DEPRECATION")
             val speakerOn = audioManager.isSpeakerphoneOn
@@ -458,20 +433,19 @@ internal class LiveLoudspeakerController(
 
     private fun selectPublishingCommunicationDevice(): CommSelection {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // availableCommunicationDevices lists *possible* BT/wired on Fold even when
-            // nothing is plugged in. Selecting those turns speakerphone off and Samsung
-            // falls back to the earpiece for MODE_IN_COMMUNICATION.
-            val headset = findConnectedHeadset()
-            if (headset != null) {
+            val devices = commDevices()
+            val bt = devices.firstOrNull { isBluetoothCommDevice(it.type) }
+            val wired = devices.firstOrNull { isWiredCommDevice(it.type) }
+            if (bt != null || wired != null) {
+                val chosen = bt ?: wired!!
                 try {
-                    audioManager.setCommunicationDevice(headset)
+                    audioManager.setCommunicationDevice(chosen)
                 } catch (_: Exception) {
                 }
                 @Suppress("DEPRECATION")
                 run { audioManager.isSpeakerphoneOn = false }
                 val deviceLabel = currentCommDeviceLabel()
-                val label =
-                    if (isBluetoothCommDevice(headset.type)) "bt-headset" else "wired-headset"
+                val label = if (bt != null) "bt-headset" else "wired-headset"
                 return CommSelection(label, deviceLabel)
             }
 
@@ -776,19 +750,10 @@ internal class LiveLoudspeakerController(
         }
     }
 
-    private fun findConnectedHeadset(): AudioDeviceInfo? {
-        // Fold lists paired BT/BLE in getDevices() even when nothing is in the ear.
-        // Selecting those turns speakerphone off and MODE_IN_COMMUNICATION uses the
-        // receiver. Only a physically plugged jack or active SCO is a headset.
-        @Suppress("DEPRECATION")
-        if (audioManager.isWiredHeadsetOn) {
-            commDevices().firstOrNull { isWiredCommDevice(it.type) }?.let { return it }
+    private fun findHeadset(devices: List<AudioDeviceInfo>): AudioDeviceInfo? {
+        return devices.firstOrNull {
+            isBluetoothCommDevice(it.type) || isWiredCommDevice(it.type)
         }
-        @Suppress("DEPRECATION")
-        if (audioManager.isBluetoothScoOn) {
-            commDevices().firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }?.let { return it }
-        }
-        return null
     }
 
     private fun isEarpieceSelected(): Boolean {

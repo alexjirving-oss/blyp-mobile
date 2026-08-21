@@ -46,7 +46,7 @@ export const OVERLAY_CATALOG: OverlayCatalogItem[] = [
   },
   {
     kind: "top-gifters",
-    label: "Top gifters / Daily Top 3",
+    label: "Top gifters",
     blurb: "Leaderboard of coin supporters",
     defaultAnchor: "tr",
     defaultX: 68,
@@ -79,7 +79,7 @@ export const OVERLAY_CATALOG: OverlayCatalogItem[] = [
   },
   {
     kind: "gift-alerts",
-    label: "Gift alerts / gift rail",
+    label: "Gift alerts",
     blurb: "Recent gift toasts",
     defaultAnchor: "br",
     defaultX: 62,
@@ -87,7 +87,7 @@ export const OVERLAY_CATALOG: OverlayCatalogItem[] = [
   },
   {
     kind: "chat-ticker",
-    label: "Chat ticker / phone chat",
+    label: "Chat ticker",
     blurb: "Scrolling live-feed line",
     defaultAnchor: "bottom",
     defaultX: 2,

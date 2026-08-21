@@ -792,10 +792,7 @@ class IVSBroadcastModule(
     private fun startGuestPublishingSession(stageArn: String, token: String, sessionId: String, cameraPosition: String?) {
         Log.d(IVS_TAG, "[GUEST] startGuestPublishingSession() stageArn=$stageArn sessionId=$sessionId")
 
-        // Viewer teardown used to call stop() which sets speakerphone off, then
-        // VIDEO_CHAT starts MODE_IN_COMMUNICATION on the earpiece. Keep the
-        // loudspeaker pin across this handoff — watch already had it on.
-        stopSession(keepLiveAudioRoute = true)
+        stopSession()
         configureStageAudio(publishing = true, role = "guest")
 
         sessionMode = SessionMode.GUEST
@@ -849,13 +846,11 @@ class IVSBroadcastModule(
         }
     }
 
-    private fun stopSession(keepLiveAudioRoute: Boolean = false) {
+    private fun stopSession() {
         bumpViewerRenderGeneration()
         lastSlotAttachSig.clear()
         slotNeedsFreshPreview.clear()
-        if (!keepLiveAudioRoute) {
-            loudspeakerController.stop("stage-session-stop")
-        }
+        loudspeakerController.stop("stage-session-stop")
         pendingCameraSwitchOpen?.let { mainHandler.removeCallbacks(it) }
         pendingCameraSwitchSettle?.let { mainHandler.removeCallbacks(it) }
         pendingCameraSwitchOpen = null
@@ -894,9 +889,7 @@ class IVSBroadcastModule(
         deviceDiscovery?.release()
         deviceDiscovery = null
         guestSlotIndex = null
-        if (!keepLiveAudioRoute) {
-            configureStageAudio(publishing = false, role = "idle")
-        }
+        configureStageAudio(publishing = false, role = "idle")
     }
 
     /**
@@ -940,11 +933,6 @@ class IVSBroadcastModule(
                 // Watch-only Stage: media usage so Samsung routes to the loudspeaker.
                 audioManager.setPreset(StageAudioManager.UseCasePreset.SUBSCRIBE_ONLY)
             }
-            // setPreset can re-enable SDK AudioManager ownership (earpiece after guest
-            // WebRTC publish). Active sessions keep mode+device on LiveLoudspeakerController.
-            if (!isIdle) {
-                audioManager.setAudioModeManagementEnabled(false)
-            }
 
             Log.i(
                 IVS_TAG,
@@ -952,7 +940,7 @@ class IVSBroadcastModule(
                     "usage=${audioManager.usage} source=${audioManager.source} " +
                     "contentType=${audioManager.contentType} " +
                     "aec=${audioManager.isEchoCancellationEnabled} " +
-                    "modeMgmt=${if (isIdle) "sdk" else "app"}",
+                    "modeMgmt=${isIdle}",
             )
         } catch (e: Exception) {
             Log.e(
@@ -2047,20 +2035,7 @@ class IVSBroadcastModule(
         override fun onParticipantPublishStateChanged(stage: Stage, participant: ParticipantInfo, publishState: Stage.PublishState) {
             Log.d(IVS_TAG, "[IVS_STAGE] Publish state changed: id=${participant.participantId}, state=$publishState")
             if (sessionMode != SessionMode.VIEWER) {
-                if (participant.isLocal && publishState == Stage.PublishState.PUBLISHED) {
-                    // WebRTC publish resets MODE_IN_COMMUNICATION to the earpiece. Re-pin
-                    // after the SDK returns, not only before join.
-                    loudspeakerController.force(
-                        LiveLoudspeakerController.Profile.PUBLISHING,
-                        if (sessionMode == SessionMode.GUEST) {
-                            "guest-local-published"
-                        } else {
-                            "host-local-published"
-                        },
-                    )
-                } else {
-                    loudspeakerController.forceActive("publish-state-${publishState.name.lowercase()}")
-                }
+                loudspeakerController.forceActive("publish-state-${publishState.name.lowercase()}")
             }
             if (participant.isLocal && publishState == Stage.PublishState.PUBLISHED) {
                 if (sessionMode == SessionMode.GUEST) {

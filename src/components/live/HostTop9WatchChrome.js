@@ -15,26 +15,24 @@ export function formatWatchCount(n) {
   return String(v);
 }
 
-export function HostTop9DailyExploreRow({ top3 = [], onPressExplore, hideBoard = false }) {
+export function HostTop9DailyExploreRow({ top3 = [], onPressExplore }) {
   return (
     <View style={styles.subRow}>
-      {hideBoard ? null : (
-        <View style={styles.dailyCard}>
-          <Text style={styles.dailyTitle} allowFontScaling={false}>
-            Daily Top 3
+      <View style={styles.dailyCard}>
+        <Text style={styles.dailyTitle} allowFontScaling={false}>
+          Daily Top 3
+        </Text>
+        {top3.map((row, i) => (
+          <Text
+            key={row.userId || `top-${i}`}
+            style={[styles.dailyLine, row.empty && styles.dailyEmpty]}
+            numberOfLines={1}
+            allowFontScaling={false}
+          >
+            {i + 1}. {row.empty ? '—' : `${row.name}${row.coins ? ` · ${formatWatchCount(row.coins)}` : ''}`}
           </Text>
-          {top3.map((row, i) => (
-            <Text
-              key={row.userId || `top-${i}`}
-              style={[styles.dailyLine, row.empty && styles.dailyEmpty]}
-              numberOfLines={1}
-              allowFontScaling={false}
-            >
-              {i + 1}. {row.empty ? '—' : `${row.name}${row.coins ? ` · ${formatWatchCount(row.coins)}` : ''}`}
-            </Text>
-          ))}
-        </View>
-      )}
+        ))}
+      </View>
       <TouchableOpacity
         style={styles.exploreBtn}
         onPress={onPressExplore}
@@ -97,9 +95,6 @@ export default function HostTop9WatchChrome({
   dailyTop3 = [],
   onPressExplore,
   expanded = false,
-  showDailyTop3 = true,
-  showChat = true,
-  showGiftRail = true,
 }) {
   const [box, setBox] = useState({ w: 0, h: 0 });
   const layout = useMemo(
@@ -110,11 +105,7 @@ export default function HostTop9WatchChrome({
   return (
     <View style={[styles.root, { paddingTop: topInset }]}>
       {header}
-      <HostTop9DailyExploreRow
-        top3={dailyTop3}
-        hideBoard={!showDailyTop3}
-        onPressExplore={onPressExplore}
-      />
+      <HostTop9DailyExploreRow top3={dailyTop3} onPressExplore={onPressExplore} />
       <View
         style={styles.content}
         onLayout={(e) => {
@@ -126,8 +117,8 @@ export default function HostTop9WatchChrome({
         <View style={{ height: layout.hostH + layout.gridH }}>{stage(layout)}</View>
         {layout.chatH > 0 ? (
           <View style={[styles.chatGiftRow, { height: layout.chatH }]}>
-            {showChat ? <View style={styles.chatCol}>{chat}</View> : null}
-            {showGiftRail ? <View style={styles.giftCol}>{giftRail}</View> : null}
+            <View style={styles.chatCol}>{chat}</View>
+            <View style={styles.giftCol}>{giftRail}</View>
           </View>
         ) : null}
       </View>

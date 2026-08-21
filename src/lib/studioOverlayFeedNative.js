@@ -5,31 +5,7 @@
  * Shared shape with Firestore `liveStreams/{id}.studioOverlayFeed`.
  */
 
-/** Floating widgets StudioWatchOverlays can paint. Chat/gifts/viewers bind Host+9 chrome. */
-const PHONE_IDS = [
-  'jukebox',
-  'gifters',
-  'goal',
-  'events',
-  'chat',
-  'gifts',
-  'timer',
-  'viewers',
-  'qr',
-];
-
-/** Host+9 chrome defaults when studioOverlayFeed is absent (menu not mirrored yet). */
-export const HOST_TOP9_DEFAULT_OVERLAYS = {
-  gifters: true,
-  goal: true,
-  chat: true,
-  gifts: true,
-  jukebox: false,
-  events: true,
-  timer: true,
-  viewers: true,
-  qr: false,
-};
+const PHONE_IDS = ['jukebox', 'gifters', 'goal', 'events'];
 
 /** Same S-preset origins as web program overlays. Do not shift jukebox off-stage. */
 const FALLBACK_POS = {
@@ -37,11 +13,6 @@ const FALLBACK_POS = {
   goal: { x: 2, y: 78, scale: 0.52 },
   jukebox: { x: 3, y: 86, scale: 0.52 },
   events: { x: 2, y: 48, scale: 0.52 },
-  chat: { x: 62, y: 78, scale: 0.52 },
-  gifts: { x: 72, y: 62, scale: 0.52 },
-  timer: { x: 78, y: 2, scale: 0.52 },
-  viewers: { x: 40, y: 2, scale: 0.52 },
-  qr: { x: 78, y: 40, scale: 0.52 },
 };
 
 const WEB_SCALE_S = 0.52;
@@ -119,24 +90,10 @@ export function phoneOverlayAspect(width, height) {
 
 export const pickPhoneOverlayAspect = phoneOverlayAspect;
 
-const FLOATING_IDS = ['jukebox', 'gifters', 'goal', 'events', 'timer', 'qr'];
-
-export function hasNativeOverlayWidgets(feed, omit) {
+export function hasNativeOverlayWidgets(feed) {
   const o = feed?.overlays;
   if (!o) return false;
-  const skip = omit instanceof Set ? omit : new Set(Array.isArray(omit) ? omit : []);
-  return FLOATING_IDS.some((id) => !skip.has(id) && o[id] === true);
-}
-
-/** Studio menu flags for Host+9 chrome. Raw feed; missing keys keep defaults. */
-export function hostTop9OverlayFlags(rawFeed) {
-  const base = { ...HOST_TOP9_DEFAULT_OVERLAYS };
-  const flags = rawFeed?.overlays;
-  if (!flags || typeof flags !== 'object') return base;
-  for (const id of Object.keys(base)) {
-    if (typeof flags[id] === 'boolean') base[id] = flags[id];
-  }
-  return base;
+  return PHONE_IDS.some((id) => o[id] === true);
 }
 
 /**
@@ -196,11 +153,11 @@ export function parseStudioOverlayFeedNative(raw, opts) {
     gifters: flags.gifters === true,
     goal: flags.goal === true,
     events: flags.events === true,
-    chat: flags.chat === true,
-    gifts: flags.gifts === true,
-    timer: flags.timer === true,
-    viewers: flags.viewers === true,
-    qr: flags.qr === true,
+    chat: false,
+    gifts: false,
+    timer: false,
+    viewers: false,
+    qr: false,
   };
 
   const posMap =
@@ -234,33 +191,6 @@ export function parseStudioOverlayFeedNative(raw, opts) {
     jukeboxNext: typeof raw.jukeboxNext === 'string' ? raw.jukeboxNext : '',
     jukeboxPaused: raw.jukeboxPaused === true,
     events: parseEvents(raw.events),
-    timerLabel:
-      typeof raw.timerLabel === 'string' && raw.timerLabel.trim()
-        ? raw.timerLabel.trim().slice(0, 16)
-        : '00:00:00',
-    viewers:
-      typeof raw.viewers === 'number' && Number.isFinite(raw.viewers)
-        ? Math.max(0, Math.floor(raw.viewers))
-        : 0,
-    watchUrl:
-      typeof raw.watchUrl === 'string' && /^https:\/\//i.test(raw.watchUrl.trim())
-        ? raw.watchUrl.trim().slice(0, 240)
-        : '',
-    giftsLabel:
-      typeof raw.giftsLabel === 'string' && raw.giftsLabel.trim()
-        ? raw.giftsLabel.trim().slice(0, 48)
-        : 'Gift alerts',
-    chatLines: parseGifters(
-      Array.isArray(raw.chatLines)
-        ? raw.chatLines.map((c) => {
-            if (!c || typeof c !== 'object') return '';
-            const name = typeof c.name === 'string' ? c.name.trim() : '';
-            const text = typeof c.text === 'string' ? c.text.trim() : '';
-            if (!text) return '';
-            return name ? `${name}: ${text}` : text;
-          })
-        : [],
-    ),
   };
 }
 

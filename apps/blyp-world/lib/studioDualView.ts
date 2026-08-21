@@ -16,10 +16,10 @@ export const STUDIO_OVERLAYS: {
   id: StudioOverlayId;
   label: string;
 }[] = [
-  { id: "gifters", label: "Top gifters / Daily Top 3" },
+  { id: "gifters", label: "Top gifters" },
   { id: "goal", label: "Goal" },
   { id: "chat", label: "Chat dock" },
-  { id: "gifts", label: "Gift alerts / gift rail" },
+  { id: "gifts", label: "Gift alerts" },
   { id: "jukebox", label: "Jukebox" },
   { id: "events", label: "Recent events" },
   { id: "timer", label: "Session timer" },

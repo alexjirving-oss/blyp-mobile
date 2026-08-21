@@ -15,8 +15,6 @@ import {
   companionSubmitCredentials,
   connectTikTokViaCompanion,
   TIKTOK_COMPANION_DOWNLOAD_URL,
-  TIKTOK_COMPANION_SHA256,
-  TIKTOK_COMPANION_SIGNED,
   TIKTOK_LIVE_STUDIO_DOWNLOAD_URL,
   type TikTokCompanionStatus,
 } from "@/lib/studioTikTokCompanion";
@@ -563,8 +561,9 @@ export function DestinationDock({
                   looks for that app — Blyp cannot invent a stream key.
                 </li>
                 <li>
-                  Download <strong>Blyp TikTok Companion</strong> (the{" "}
-                  <code>.exe</code>, not npm), run it, and leave the window open.
+                  Download <strong>Blyp TikTok Companion</strong>, run it, and leave
+                  the window open. Windows may warn that it is unsigned — choose More
+                  info, then Run anyway.
                 </li>
                 <li>
                   Come back here and click <strong>Connect TikTok</strong>.
@@ -587,26 +586,6 @@ export function DestinationDock({
                   Get TikTok LIVE Studio
                 </a>
               </div>
-              {TIKTOK_COMPANION_SIGNED ? (
-                <p className="tls-dest-companion-chrome-note">
-                  Run <strong>BlypTikTokCompanion-win.exe</strong> and leave it open.
-                  Do not use npm.
-                </p>
-              ) : (
-                <p className="tls-dest-companion-chrome-note">
-                  Windows/Chrome will warn because the helper is not yet
-                  Microsoft-signed. Click <strong>Keep</strong> /{" "}
-                  <strong>Download suspicious file</strong>, then run the exe. Do not
-                  use npm. After that, Windows SmartScreen may show More info → Run
-                  anyway.
-                </p>
-              )}
-              {TIKTOK_COMPANION_SHA256 ? (
-                <p className="tls-dest-companion-sha">
-                  SHA-256{" "}
-                  <code>{TIKTOK_COMPANION_SHA256}</code>
-                </p>
-              ) : null}
               <p className="tls-dest-connect-hint">
                 Skip the helper: paste Server URL + Stream key from TikTok LIVE Studio
                 (Go LIVE → Stream settings) below and click OK.

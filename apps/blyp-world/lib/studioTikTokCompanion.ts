@@ -6,8 +6,6 @@
 
  */
 
-import tiktokCompanionRelease from "@/lib/tiktokCompanionRelease.json";
-
 
 
 export type TikTokCompanionPhase =
@@ -68,12 +66,7 @@ export const TIKTOK_COMPANION_BASE =
 
 /** Hosted Windows helper (double-click .exe). Not an npm script. */
 export const TIKTOK_COMPANION_DOWNLOAD_URL =
-  tiktokCompanionRelease.downloadPath || "/downloads/BlypTikTokCompanion-win.exe";
-
-/** SHA-256 of the currently packed helper (pack-win.ps1). Unsigned until Authenticode. */
-export const TIKTOK_COMPANION_SHA256 = tiktokCompanionRelease.sha256;
-
-export const TIKTOK_COMPANION_SIGNED = tiktokCompanionRelease.signed === true;
+  "/downloads/BlypTikTokCompanion-win.exe";
 
 /** TikTok’s own Windows app. Auto-connect reads its local cache. */
 export const TIKTOK_LIVE_STUDIO_DOWNLOAD_URL =

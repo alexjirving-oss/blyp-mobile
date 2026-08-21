@@ -1,15 +1,14 @@
 /**
- * OBS-style program burn-in for LIVE Studio director preview / restreams.
+ * OBS-style program burn-in for LIVE Studio restreams.
  * Draws host + on-stage guest <video> tiles and overlay widgets into one
  * canvas MediaStream (portrait 720×1280 / landscape 1280×720).
  * Does not use html2canvas. Invite / director chrome is not drawn.
- * IVS Stage publish is the native camera/screen — not this canvas — so the
- * phone Host+9 tile is camera-only and the 3×3 stays a native grid.
+ * Do not pass this canvas to Stage / startIvsWebHostPublish — camera
+ * publish must be getUserMedia tracks. Overlay burn-in is local only.
  */
 
 import {
   DESK_PUBLISH_FPS,
-  pickStagePublishVideoTrack,
   type DeskOrientation,
 } from "@/lib/studioDeskMedia";
 
@@ -364,52 +363,9 @@ export function createStudioProgramComposite(
   };
 }
 
-let sharedProgramComposite: StudioProgramCompositeHandle | null = null;
-
-/** One program canvas per Studio tab — director 9:16 chassis only. */
-export function getOrCreateStudioProgramComposite(
-  orientation: DeskOrientation,
-): StudioProgramCompositeHandle {
-  if (typeof document === "undefined") {
-    throw new Error("Studio program canvas only runs in the browser");
-  }
-  if (!sharedProgramComposite) {
-    sharedProgramComposite = createStudioProgramComposite(orientation);
-  } else {
-    sharedProgramComposite.setOrientation(orientation);
-  }
-  return sharedProgramComposite;
-}
-
 export function buildProgramPublishStream(
-  composite: StudioProgramCompositeHandle,
-  desk: {
-    orientation: DeskOrientation;
-    publishStream: MediaStream;
-    previewStream?: MediaStream;
-  },
-  audioTrack?: MediaStreamTrack | null,
+  _composite: StudioProgramCompositeHandle,
+  desk: { orientation: DeskOrientation; publishStream: MediaStream },
 ): MediaStream {
-  composite.setOrientation(desk.orientation);
-  const preview = desk.previewStream || desk.publishStream;
-  // Keep the 9:16 director chassis painting locally. Do not publish it.
-  composite.setDeskStream(preview);
-  const video = pickStagePublishVideoTrack(desk.publishStream, desk.previewStream);
-  if (!video || video.readyState !== "live") {
-    throw new Error("Stage video must be the camera or screen — not a canvas");
-  }
-  const out = new MediaStream([video]);
-  if (audioTrack && audioTrack.readyState === "live") {
-    out.addTrack(audioTrack);
-  } else {
-    preview.getAudioTracks().forEach((t) => {
-      if (t.readyState === "live") out.addTrack(t);
-    });
-    desk.publishStream.getAudioTracks().forEach((t) => {
-      if (t.readyState === "live" && !out.getAudioTracks().includes(t)) {
-        out.addTrack(t);
-      }
-    });
-  }
-  return out;
+  return desk.publishStream;
 }

@@ -44,18 +44,6 @@ describe('LiveStreamViewer production regression', () => {
     );
   });
 
-  it('Host+9 featured tile uses pickHostWatchStream; 3x3 is a sibling grid', () => {
-    const source = fs.readFileSync(liveStreamViewerPath, 'utf8');
-    expect(source).toMatch(/pickHostWatchStream\(renderableStreams\)/);
-    expect(source).toMatch(/ivs-realtime-host-top-9/);
-    expect(source).toMatch(/isHostTop9 && !hostExpanded \? renderHostTop9Grid\(\)/);
-    const hostTile = source.indexOf('ivs-realtime-host-top-9');
-    const gridCall = source.lastIndexOf('renderHostTop9Grid()');
-    expect(hostTile).toBeGreaterThan(0);
-    expect(gridCall).toBeGreaterThan(hostTile);
-    expect(source).not.toMatch(/studioProgramComposite/);
-  });
-
   it('keeps the host IVS tile in one tree across Studio solo / host-top-9 swaps', () => {
     const source = fs.readFileSync(liveStreamViewerPath, 'utf8');
     expect(source).toMatch(/Keep slot 0 in this tree/);

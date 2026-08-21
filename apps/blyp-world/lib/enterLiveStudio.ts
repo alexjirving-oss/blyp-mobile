@@ -2,17 +2,6 @@ const FS_FLAG = "blyp-studio-fs";
 
 export const STUDIO_MAXIMIZED_CLASS = "tls-booth-maximized";
 
-type WebkitDocument = Document & {
-  webkitFullscreenElement?: Element | null;
-  webkitExitFullscreen?: () => Promise<void> | void;
-};
-
-type WebkitElement = HTMLElement & {
-  webkitRequestFullscreen?: () => Promise<void> | void;
-};
-
-let requestInFlight: Promise<boolean> | null = null;
-
 export function markStudioFullscreenIntent(): void {
   try {
     sessionStorage.setItem(FS_FLAG, "1");
@@ -31,29 +20,16 @@ export function consumeStudioFullscreenIntent(): boolean {
   }
 }
 
-/** YouTube-style target: <html>. Load-time auto-fullscreen is blocked without a gesture. */
-export function studioFullscreenTarget(): HTMLElement | null {
-  if (typeof document === "undefined") return null;
-  return document.documentElement;
-}
-
-export function getStudioFullscreenElement(): Element | null {
-  if (typeof document === "undefined") return null;
-  const doc = document as WebkitDocument;
-  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
-}
-
-export function isNativeStudioFullscreen(): boolean {
-  return getStudioFullscreenElement() != null;
-}
-
 function requestElementFullscreen(el: HTMLElement): Promise<void> {
-  if (typeof el.requestFullscreen === "function") {
-    return el.requestFullscreen({ navigationUI: "hide" });
-  }
-  const webkit = (el as WebkitElement).webkitRequestFullscreen;
-  if (webkit) return Promise.resolve(webkit.call(el));
-  return Promise.reject(new Error("Fullscreen API unavailable"));
+  const req =
+    el.requestFullscreen?.bind(el) ||
+    (
+      el as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void> | void;
+      }
+    ).webkitRequestFullscreen?.bind(el);
+  if (!req) return Promise.resolve();
+  return Promise.resolve(req());
 }
 
 export function setStudioMaximizedClass(
@@ -66,58 +42,27 @@ export function setStudioMaximizedClass(
   el.classList.toggle(STUDIO_MAXIMIZED_CLASS, on);
 }
 
-/** True only when the Fullscreen API is active — never CSS-only maximize. */
-export function isStudioMaximized(): boolean {
-  return isNativeStudioFullscreen();
+export function isStudioMaximized(root?: HTMLElement | null): boolean {
+  if (typeof document === "undefined") return false;
+  const el = root ?? document.querySelector<HTMLElement>(".tls-booth");
+  if (!el) return false;
+  return (
+    document.fullscreenElement === el ||
+    el.classList.contains(STUDIO_MAXIMIZED_CLASS)
+  );
 }
 
-export function subscribeStudioFullscreenChange(handler: () => void): () => void {
-  if (typeof document === "undefined") return () => undefined;
-  const events = ["fullscreenchange", "webkitfullscreenchange"];
-  for (const ev of events) {
-    document.addEventListener(ev, handler);
-  }
-  return () => {
-    for (const ev of events) {
-      document.removeEventListener(ev, handler);
-    }
-  };
-}
-
-/**
- * YouTube-style Fullscreen API on document.documentElement so Chrome tabs and
- * the address bar hide. Browsers reject this on page load without a user gesture.
- * Do not call this on the same click as getDisplayMedia — it consumes that
- * activation and can end an active display capture.
- * Returns whether native fullscreen is active after the attempt.
- */
+/** Browser fullscreen on the studio root (falls back to documentElement). */
 export async function requestStudioFullscreen(
   root?: HTMLElement | null,
-): Promise<boolean> {
-  if (typeof document === "undefined") return false;
-  if (getStudioFullscreenElement()) return true;
-  if (requestInFlight) return requestInFlight;
-
-  requestInFlight = (async () => {
-    const targets: HTMLElement[] = [];
-    const html = studioFullscreenTarget();
-    if (html) targets.push(html);
-    if (root && root !== html) targets.push(root);
-    for (const el of targets) {
-      try {
-        await requestElementFullscreen(el);
-        if (getStudioFullscreenElement()) return true;
-      } catch {
-        /* NotAllowedError without a gesture, or capture/policy denial */
-      }
-    }
-    return getStudioFullscreenElement() != null;
-  })();
-
+): Promise<void> {
+  if (typeof document === "undefined") return;
+  const el = root ?? document.documentElement;
+  if (document.fullscreenElement === el) return;
   try {
-    return await requestInFlight;
-  } finally {
-    requestInFlight = null;
+    await requestElementFullscreen(el);
+  } catch {
+    /* browser may reject without a gesture — CSS class fallback handles layout */
   }
 }
 
@@ -126,20 +71,15 @@ export async function exitStudioFullscreen(
 ): Promise<void> {
   if (typeof document === "undefined") return;
   setStudioMaximizedClass(false, root);
-  if (!getStudioFullscreenElement()) return;
-  const doc = document as WebkitDocument;
+  if (!document.fullscreenElement) return;
   try {
-    if (typeof document.exitFullscreen === "function") {
-      await document.exitFullscreen();
-    } else if (doc.webkitExitFullscreen) {
-      await Promise.resolve(doc.webkitExitFullscreen());
-    }
+    await document.exitFullscreen();
   } catch {
     /* ignore */
   }
 }
 
-/** User-gesture entry: request native fullscreen, then open the booth. */
+/** User-gesture entry: hide browser chrome, then open the booth. */
 export async function enterLiveStudio(push?: (href: string) => void): Promise<void> {
   markStudioFullscreenIntent();
   await requestStudioFullscreen();

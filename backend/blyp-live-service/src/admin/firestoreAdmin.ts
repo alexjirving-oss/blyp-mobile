@@ -674,56 +674,6 @@ export async function getFirestoreStream(streamId: string): Promise<FsStream | n
   }
 }
 
-/** Same counter as mobile `LiveService.incrementViewer`. */
-export async function incrementLiveViewerCount(
-  streamId: string,
-  delta: number,
-): Promise<{ ok: boolean; viewerCount?: number }> {
-  const fs = getFirestore();
-  const id = String(streamId || '').trim();
-  if (!fs || !id || !Number.isFinite(delta) || delta === 0) {
-    return { ok: false };
-  }
-  const update: Record<string, unknown> = {
-    viewerCount: FieldValue.increment(delta),
-  };
-  if (delta > 0) update.totalViews = FieldValue.increment(delta);
-  try {
-    await fs.collection('streams').doc(id).update(update);
-  } catch (e: any) {
-    logger.warn(
-      { err: e?.message || String(e), streamId: id },
-      '[firestore-admin] incrementLiveViewerCount streams update failed',
-    );
-    return { ok: false };
-  }
-  try {
-    const snap = await fs.collection('streams').doc(id).get();
-    const data = snap.data() || {};
-    const rawCount = typeof data.viewerCount === 'number' ? data.viewerCount : 0;
-    const clamped = Math.max(0, rawCount);
-    const peak = typeof data.peakViewerCount === 'number' ? data.peakViewerCount : 0;
-    const corrections: Record<string, unknown> = {};
-    if (rawCount !== clamped) corrections.viewerCount = clamped;
-    if (clamped > peak) corrections.peakViewerCount = clamped;
-    if (Object.keys(corrections).length > 0) {
-      await fs.collection('streams').doc(id).update(corrections);
-    }
-    await fs.collection('liveStreams').doc(id).update({
-      viewerCount: clamped,
-      ...(clamped > peak ? { peakViewerCount: clamped } : {}),
-      ...(delta > 0 ? { totalViews: FieldValue.increment(delta) } : {}),
-    });
-    return { ok: true, viewerCount: clamped };
-  } catch (e: any) {
-    logger.warn(
-      { err: e?.message || String(e), streamId: id },
-      '[firestore-admin] incrementLiveViewerCount liveStreams mirror failed',
-    );
-    return { ok: true };
-  }
-}
-
 export type FsTeam = {
   teamId: string;
   name: string;
@@ -1395,81 +1345,6 @@ export async function touchLiveDirectoryHeartbeat(
       '[firestore-admin] touchLiveDirectoryHeartbeat failed',
     );
     return { ok: false, detail: e?.message || String(e) };
-  }
-}
-
-const WATCH_LEASE_RE = /^[A-Za-z0-9._:-]{8,128}$/;
-
-export function isWebWatchLeaseId(leaseId: string): boolean {
-  return WATCH_LEASE_RE.test(String(leaseId || '').trim());
-}
-
-/**
- * Incognito / unsigned web watch presence. First claim increments viewerCount;
- * remints with the same lease do not. Leave decrements once.
- */
-export async function claimWebWatchLease(
-  streamId: string,
-  leaseId: string,
-): Promise<{ ok: boolean; counted: boolean }> {
-  const fs = getFirestore();
-  const id = String(streamId || '').trim();
-  const lease = String(leaseId || '').trim();
-  if (!fs || !id || !isWebWatchLeaseId(lease)) return { ok: false, counted: false };
-  const leaseRef = fs.collection('liveStreams').doc(id).collection('watchLeases').doc(lease);
-  try {
-    const counted = await fs.runTransaction(async (tx) => {
-      const snap = await tx.get(leaseRef);
-      if (snap.exists) {
-        tx.set(leaseRef, { lastSeenAt: FieldValue.serverTimestamp() }, { merge: true });
-        return false;
-      }
-      tx.set(leaseRef, {
-        source: 'web-watch',
-        createdAt: FieldValue.serverTimestamp(),
-        lastSeenAt: FieldValue.serverTimestamp(),
-      });
-      return true;
-    });
-    if (counted) {
-      await incrementLiveViewerCount(id, 1);
-    }
-    return { ok: true, counted };
-  } catch (e: any) {
-    logger.warn(
-      { err: e?.message || String(e), streamId: id },
-      '[firestore-admin] claimWebWatchLease failed',
-    );
-    return { ok: false, counted: false };
-  }
-}
-
-export async function releaseWebWatchLease(
-  streamId: string,
-  leaseId: string,
-): Promise<{ ok: boolean; counted: boolean }> {
-  const fs = getFirestore();
-  const id = String(streamId || '').trim();
-  const lease = String(leaseId || '').trim();
-  if (!fs || !id || !isWebWatchLeaseId(lease)) return { ok: false, counted: false };
-  const leaseRef = fs.collection('liveStreams').doc(id).collection('watchLeases').doc(lease);
-  try {
-    const counted = await fs.runTransaction(async (tx) => {
-      const snap = await tx.get(leaseRef);
-      if (!snap.exists) return false;
-      tx.delete(leaseRef);
-      return true;
-    });
-    if (counted) {
-      await incrementLiveViewerCount(id, -1);
-    }
-    return { ok: true, counted };
-  } catch (e: any) {
-    logger.warn(
-      { err: e?.message || String(e), streamId: id },
-      '[firestore-admin] releaseWebWatchLease failed',
-    );
-    return { ok: false, counted: false };
   }
 }
 
