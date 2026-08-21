@@ -4617,6 +4617,41 @@ button.tls-dest-logo-btn:hover {
   word-break: break-all;
 }
 
+.tls-dest-companion-steps {
+  margin: 0.45rem 0 0.55rem;
+  padding-left: 1.15rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--blyp-fog, #d6d6d0);
+}
+
+.tls-dest-companion-steps li {
+  margin: 0.28rem 0;
+}
+
+.tls-dest-companion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0.45rem 0 0.55rem;
+}
+
+a.tls-dest-companion-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  min-width: 9rem;
+}
+
+a.tls-dest-companion-ttstudio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 .tls-dest-paste-fallback {
   margin: 0 0 0.65rem;
   padding: 0.65rem 0.75rem;

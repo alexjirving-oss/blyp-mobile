@@ -14,7 +14,8 @@ import {
   companionPhaseLabel,
   companionSubmitCredentials,
   connectTikTokViaCompanion,
-  TIKTOK_COMPANION_START_CMD,
+  TIKTOK_COMPANION_DOWNLOAD_URL,
+  TIKTOK_LIVE_STUDIO_DOWNLOAD_URL,
   type TikTokCompanionStatus,
 } from "@/lib/studioTikTokCompanion";
 import { normalizeTikTokUniqueId } from "@/lib/studioTikTokRoom";
@@ -267,8 +268,19 @@ export function DestinationDock({
     setLocalError(null);
     setCompanionHint(null);
     setCompanionStatus(null);
-    setCompanionOffline(false);
     setShowPasteFallback(false);
+    let cancelled = false;
+    const probe = async () => {
+      const ok = await companionHealth();
+      if (cancelled) return;
+      setCompanionOffline(!ok);
+    };
+    void probe();
+    const id = window.setInterval(() => void probe(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, [open, initialTikTokRtmpUrl, initialTikTokStreamKey, initialTikTokUniqueId]);
 
   useEffect(() => {
@@ -352,17 +364,16 @@ export function DestinationDock({
     setCompanionBusy(true);
     setLocalError(null);
     setCompanionHint(null);
-    setCompanionOffline(false);
     setShowPasteFallback(false);
     setCompanionStatus(null);
 
     const healthy = await companionHealth();
     if (!healthy) {
       setCompanionOffline(true);
-      setLocalError(`Companion not running on this PC`);
       setCompanionBusy(false);
       return;
     }
+    setCompanionOffline(false);
 
     try {
       const result = await connectTikTokViaCompanion({
@@ -380,7 +391,6 @@ export function DestinationDock({
       if (!result.ok) {
         if (result.reason === "companion_offline") {
           setCompanionOffline(true);
-          setLocalError("Companion not running on this PC");
           return;
         }
         if (result.reason === "error") {
@@ -416,7 +426,6 @@ export function DestinationDock({
       const healthy = await companionHealth();
       if (!healthy) {
         setCompanionOffline(true);
-        setLocalError(`Companion not running on this PC`);
         return;
       }
 
@@ -535,14 +544,52 @@ export function DestinationDock({
             ) : null}
           </div>
           {companionOffline ? (
-            <div className="tls-dest-companion-offline" role="alert">
-              <p className="tls-dest-companion-offline-title">Companion not running</p>
-              <p className="tls-dest-connect-hint">
-                Auto-connect needs the local helper. Start it, then click Connect TikTok
-                again — or paste Server URL + Stream key from TikTok Live Studio (Go LIVE →
-                Stream settings) below and click OK.
+            <div className="tls-dest-companion-offline" role="status">
+              <p className="tls-dest-companion-offline-title">
+                Blyp helper is not running on this PC
               </p>
-              <code className="tls-dest-companion-cmd">{TIKTOK_COMPANION_START_CMD}</code>
+              <p className="tls-dest-connect-hint">
+                Auto-connect needs a small Blyp program on this computer. It reads
+                Server URL + Stream key from TikTok LIVE Studio’s files on this PC
+                and sends them only to this browser tab. It does not log into TikTok
+                for you.
+              </p>
+              <ol className="tls-dest-companion-steps">
+                <li>
+                  Install <strong>TikTok LIVE Studio</strong> (TikTok’s own Windows
+                  app) if it is not already on this PC, then sign in. Auto-connect
+                  looks for that app — Blyp cannot invent a stream key.
+                </li>
+                <li>
+                  Download <strong>Blyp TikTok Companion</strong>, run it, and leave
+                  the window open. Windows may warn that it is unsigned — choose More
+                  info, then Run anyway.
+                </li>
+                <li>
+                  Come back here and click <strong>Connect TikTok</strong>.
+                </li>
+              </ol>
+              <div className="tls-dest-companion-actions">
+                <a
+                  className="tls-go tls-dest-companion-download"
+                  href={TIKTOK_COMPANION_DOWNLOAD_URL}
+                  download="BlypTikTokCompanion-win.exe"
+                >
+                  Download Blyp helper
+                </a>
+                <a
+                  className="tls-pill tls-dest-companion-ttstudio"
+                  href={TIKTOK_LIVE_STUDIO_DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Get TikTok LIVE Studio
+                </a>
+              </div>
+              <p className="tls-dest-connect-hint">
+                Skip the helper: paste Server URL + Stream key from TikTok LIVE Studio
+                (Go LIVE → Stream settings) below and click OK.
+              </p>
             </div>
           ) : null}
           {companionHint ? (

@@ -64,7 +64,13 @@ export const TIKTOK_COMPANION_BASE =
 
 
 
-export const TIKTOK_COMPANION_START_CMD = "npm run tiktok:companion";
+/** Hosted Windows helper (double-click .exe). Not an npm script. */
+export const TIKTOK_COMPANION_DOWNLOAD_URL =
+  "/downloads/BlypTikTokCompanion-win.exe";
+
+/** TikTok’s own Windows app. Auto-connect reads its local cache. */
+export const TIKTOK_LIVE_STUDIO_DOWNLOAD_URL =
+  "https://www.tiktok.com/studio/download";
 
 
 

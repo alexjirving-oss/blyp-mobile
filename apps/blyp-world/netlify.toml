@@ -128,3 +128,9 @@
   [headers.values]
     Service-Worker-Allowed = "/"
     Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/downloads/*"
+  [headers.values]
+    Content-Disposition = "attachment"
+    Cache-Control = "no-cache"

@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Gift cinema MP4s copied from repo assets/ at build/dev time
 /public/gifts/cinema/*.mp4
+
+# Windows companion binaries from tools/blyp-tiktok-companion/pack-win.ps1
+/public/downloads/
