@@ -1987,33 +1987,18 @@ class IVSBroadcastModule(
                 reassertViewerPlaybackAudio("viewer-stage-connected")
             }
             // Recoverable viewer ICE blips must not reach JS: stopSession there
-            // tears down TextureViews and triggers reconnect storms (slideshow +
-            // frozen UI). Native re-join keeps the same Stage + surfaces.
+            // tears down TextureViews (slideshow + frozen UI).
+            // 1.0.111 still jittered: the 400ms native join() on every
+            // DISCONNECTED was itself the reconnect slideshow (~1 keyframe/sec).
             val recoverableViewerDisconnect =
                 sessionMode == SessionMode.VIEWER &&
                     state == Stage.ConnectionState.DISCONNECTED &&
                     exception == null
             if (recoverableViewerDisconnect) {
-                // Look-back (016b586a): native join without JS emit is fine; unconditional
-                // reattachViewerSurfaces was the black-flash infection (setSurface on live tiles).
-                Log.i(IVS_TAG, "[VIEWER] recoverable DISCONNECTED; native rejoin (no JS emit)")
-                mainHandler.postDelayed({
-                    if (sessionMode != SessionMode.VIEWER || stage == null) return@postDelayed
-                    try {
-                        stage?.join()
-                        reassertViewerPlaybackAudio("viewer-auto-rejoin")
-                        if (viewerSlotSurfacesNeedReattach()) {
-                            reattachViewerSurfaces("viewer-auto-rejoin-dead-surface")
-                        } else {
-                            Log.i(
-                                IVS_TAG,
-                                "[VIEWER] skip reattach after recoverable rejoin; surfaces still valid",
-                            )
-                        }
-                    } catch (e: Exception) {
-                        Log.w(IVS_TAG, "[VIEWER] auto-rejoin failed: ${e.message}")
-                    }
-                }, 400)
+                Log.i(
+                    IVS_TAG,
+                    "[VIEWER] recoverable DISCONNECTED; not auto-rejoining",
+                )
             } else {
                 emit("IVS_BROADCAST_STATE_CHANGED", Arguments.createMap().apply {
                     putString("state", state.name)
