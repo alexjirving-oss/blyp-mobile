@@ -31,6 +31,7 @@ import com.amazonaws.ivs.broadcast.StageStream.Type
 import com.amazonaws.ivs.broadcast.StageVideoConfiguration
 import com.amazonaws.ivs.broadcast.JitterBufferConfiguration
 import com.amazonaws.ivs.broadcast.SubscribeConfiguration
+import com.amazonaws.ivs.broadcast.SubscribeSimulcastConfiguration
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Callback
 import com.facebook.react.bridge.LifecycleEventListener
@@ -1077,22 +1078,45 @@ class IVSBroadcastModule(
             return viewerSubscribeConfiguration()
         }
 
+        override fun preferredLayerForStream(
+            stage: Stage,
+            participantInfo: ParticipantInfo,
+            stream: RemoteStageStream,
+        ): RemoteStageStream.Layer? {
+            return preferredHighestVideoLayer(stream)
+        }
+
     }
 
     /**
-     * Web Studio publishes a single non-simulcast layer (~900kbps / 24fps).
-     * Default SDK subscribe picks lowest simulcast layer then ramps (slideshow).
-     * Do NOT set simulcast layer preference — there is only one layer. LOW jitter
-     * keeps latency tight without waiting for layer adaptation.
+     * Phone Stage watch: default SDK starts on LOWEST_QUALITY and ramps (slideshow).
+     * 1.0.109/110 TextureView rebind bakes did not touch this. AWS: MEDIUM jitter
+     * for packet-loss resilience; HIGHEST_QUALITY so the first layer is the HD one.
      */
     private fun viewerSubscribeConfiguration(): SubscribeConfiguration {
         val config = SubscribeConfiguration()
         try {
-            config.jitterBuffer.setMinDelay(JitterBufferConfiguration.JitterBufferDelay.LOW())
+            config.jitterBuffer.setMinDelay(JitterBufferConfiguration.JitterBufferDelay.MEDIUM())
         } catch (e: Throwable) {
-            Log.w(IVS_TAG, "[VIEWER] jitterBuffer LOW not set: ${e.message}")
+            Log.w(IVS_TAG, "[VIEWER] jitterBuffer MEDIUM not set: ${e.message}")
+        }
+        try {
+            config.simulcast.setInitialLayerPreference(
+                SubscribeSimulcastConfiguration.InitialLayerPreference.HIGHEST_QUALITY,
+            )
+        } catch (e: Throwable) {
+            Log.w(IVS_TAG, "[VIEWER] simulcast HIGHEST_QUALITY not set: ${e.message}")
         }
         return config
+    }
+
+    private fun preferredHighestVideoLayer(stream: RemoteStageStream): RemoteStageStream.Layer? {
+        return try {
+            stream.highestQualityLayer
+        } catch (e: Throwable) {
+            Log.w(IVS_TAG, "[VIEWER] preferred highest layer unavailable: ${e.message}")
+            null
+        }
     }
 
     /** Re-pin media loudspeaker when viewer subscribe receives playable audio. */
@@ -1939,6 +1963,14 @@ class IVSBroadcastModule(
 
         override fun subscribeConfigrationForParticipant(stage: Stage, participantInfo: ParticipantInfo): SubscribeConfiguration {
             return viewerSubscribeConfiguration()
+        }
+
+        override fun preferredLayerForStream(
+            stage: Stage,
+            participantInfo: ParticipantInfo,
+            stream: RemoteStageStream,
+        ): RemoteStageStream.Layer? {
+            return preferredHighestVideoLayer(stream)
         }
 
     }

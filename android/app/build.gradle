@@ -93,8 +93,8 @@ android {
         applicationId 'com.blyp.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2026334594
-        versionName "1.0.110"
+        versionCode 2026334627
+        versionName "1.0.111"
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
