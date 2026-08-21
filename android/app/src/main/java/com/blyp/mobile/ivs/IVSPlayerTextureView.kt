@@ -3,23 +3,38 @@ package com.blyp.mobile.ivs
 import android.content.Context
 import android.graphics.Color
 import android.graphics.SurfaceTexture
+import android.view.Gravity
 import android.view.TextureView
+import android.view.ViewGroup
+import android.widget.FrameLayout
 
 /**
- * Phone mass-watch surface for IVS Player (HLS / low-latency HLS).
+ * Phone mass-watch host for IVS Player (HLS).
  *
- * Stage WebRTC on this screen starved the UI thread (slideshow video, 10s leave,
- * dead like button). Player decode is hardware and cheap. TextureView keeps RN
- * Studio overlays compositing on top — PlayerView is SurfaceView and punches a hole.
+ * React Native 0.81 cannot safely style a bare TextureView as the native view
+ * root (process crash on mount). Shorts uses the same pattern: FrameLayout
+ * parent, TextureView child. RN styles land on this FrameLayout; overlays
+ * still composite on top of TextureView.
  *
- * Do not rebind [TextureView.SurfaceTextureListener.onSurfaceTextureSizeChanged];
- * that class of rebind was the Stage slideshow (1.0.109–110).
+ * Do not rebind on size ticks — that class was the Stage slideshow.
  */
-class IVSPlayerTextureView(context: Context) : TextureView(context), TextureView.SurfaceTextureListener {
+class IVSPlayerTextureView(context: Context) : FrameLayout(context), TextureView.SurfaceTextureListener {
+    private val textureView = TextureView(context)
+
     init {
-        isOpaque = true
         setBackgroundColor(Color.BLACK)
-        surfaceTextureListener = this
+        clipChildren = true
+        clipToPadding = true
+        textureView.isOpaque = true
+        textureView.surfaceTextureListener = this
+        addView(
+            textureView,
+            LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER,
+            ),
+        )
     }
 
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
@@ -27,7 +42,7 @@ class IVSPlayerTextureView(context: Context) : TextureView(context), TextureView
     }
 
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-        // Keep the existing Surface. Size-tick rebinds hitch the compositor.
+        // Keep the existing Surface.
     }
 
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {

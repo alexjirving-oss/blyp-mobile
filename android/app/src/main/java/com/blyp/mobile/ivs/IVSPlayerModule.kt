@@ -97,7 +97,7 @@ class IVSPlayerModule(
                     putString("state", player?.state?.name ?: "UNKNOWN")
                 })
                 callback.invoke()
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 callback.invoke(errorMap("VIEWER_JOIN_FAILED", e.message ?: "Failed to join viewer"))
             }
         }
@@ -240,21 +240,27 @@ class IVSPlayerModule(
 
     private val playerListener: Player.Listener = object : Player.Listener() {
         override fun onStateChanged(state: Player.State) {
-            if (state == Player.State.READY || state == Player.State.PLAYING) {
-                loudspeakerController.forceActive("player-state-${state.name.lowercase()}")
+            val name = state.name
+            mainHandler.post {
+                if (state == Player.State.READY || state == Player.State.PLAYING) {
+                    loudspeakerController.forceActive("player-state-${name.lowercase()}")
+                }
+                emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
+                    putString("state", name)
+                    putString("sessionId", currentSessionId)
+                })
             }
-            emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
-                putString("state", state.name)
-                putString("sessionId", currentSessionId)
-            })
         }
 
         override fun onError(exception: PlayerException) {
-            emit("IVS_PLAYER_ERROR", Arguments.createMap().apply {
-                putString("code", "PLAYER_ERROR")
-                putString("message", exception.message)
-                putBoolean("fatal", true)
-            })
+            val message = exception.message
+            mainHandler.post {
+                emit("IVS_PLAYER_ERROR", Arguments.createMap().apply {
+                    putString("code", "PLAYER_ERROR")
+                    putString("message", message)
+                    putBoolean("fatal", true)
+                })
+            }
         }
 
         override fun onDurationChanged(duration: Long) {
@@ -262,10 +268,12 @@ class IVSPlayerModule(
         }
 
         override fun onVideoSizeChanged(width: Int, height: Int) {
-            emit("IVS_PLAYER_VIDEO_SIZE_CHANGED", Arguments.createMap().apply {
-                putInt("width", width)
-                putInt("height", height)
-            })
+            mainHandler.post {
+                emit("IVS_PLAYER_VIDEO_SIZE_CHANGED", Arguments.createMap().apply {
+                    putInt("width", width)
+                    putInt("height", height)
+                })
+            }
         }
 
         override fun onCue(cue: com.amazonaws.ivs.player.Cue) {
@@ -273,9 +281,11 @@ class IVSPlayerModule(
         }
 
         override fun onRebuffering() {
-            emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
-                putString("state", Player.State.BUFFERING.name)
-            })
+            mainHandler.post {
+                emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
+                    putString("state", Player.State.BUFFERING.name)
+                })
+            }
         }
 
         override fun onSeekCompleted(position: Long) {
@@ -283,22 +293,32 @@ class IVSPlayerModule(
         }
 
         override fun onQualityChanged(quality: com.amazonaws.ivs.player.Quality) {
-            emit("IVS_PLAYER_QUALITY_CHANGED", Arguments.createMap().apply {
-                putString("name", quality.name)
-                putInt("bitrate", quality.bitrate)
-            })
+            val qualityName = quality.name
+            val bitrate = quality.bitrate
+            mainHandler.post {
+                emit("IVS_PLAYER_QUALITY_CHANGED", Arguments.createMap().apply {
+                    putString("name", qualityName)
+                    putInt("bitrate", bitrate)
+                })
+            }
         }
 
         override fun onVideoFirstFrame(position: Long) {
-            loudspeakerController.forceActive("player-first-frame")
-            emit("IVS_PLAYER_FIRST_FRAME", Arguments.createMap())
+            mainHandler.post {
+                loudspeakerController.forceActive("player-first-frame")
+                emit("IVS_PLAYER_FIRST_FRAME", Arguments.createMap())
+            }
         }
     }
 
     private fun emit(event: String, map: WritableMap = Arguments.createMap()) {
-        reactApplicationContext
-            .getJSModule(RCTDeviceEventEmitter::class.java)
-            .emit(event, map)
+        try {
+            if (!reactApplicationContext.hasActiveReactInstance()) return
+            reactApplicationContext
+                .getJSModule(RCTDeviceEventEmitter::class.java)
+                .emit(event, map)
+        } catch (_: Exception) {
+        }
     }
 
     private fun errorMap(code: String, message: String): WritableMap =

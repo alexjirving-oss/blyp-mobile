@@ -1409,7 +1409,7 @@ const IVSLiveStreamViewer = ({
         style={[styles.container, style]}
         onLayout={handleViewerContainerLayout}
       >
-        <NativeIVSPlayerView style={styles.playerView} />
+        <NativeIVSPlayerView collapsable={false} style={styles.playerView} />
         {showLoading && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color="#fff" />
