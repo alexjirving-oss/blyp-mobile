@@ -7,6 +7,7 @@ import {
   type StudioOverlayId,
 } from "@/lib/studioDualView";
 import type { GiftCinemaCue } from "@/lib/giftCinemaClips";
+import { PORTRAIT_DEFAULT_LAYOUT } from "@/lib/studioStageLayouts";
 
 export type OverlayFeedEvent = {
   id: string;
@@ -75,6 +76,7 @@ export const DEFAULT_OVERLAY_FEED: OverlayFeedSnapshot = {
   viewers: 0,
   watchUrl: "",
   gifters: ["Waiting…", "—", "—"],
+  layoutPortrait: PORTRAIT_DEFAULT_LAYOUT,
   themeCss: "",
   sessionId: "",
   updatedAt: 0,
@@ -203,7 +205,11 @@ export function normalizeFeed(
       ? normalizeOverlayPositions(parsed.positionsLandscape)
       : undefined,
     layoutPortrait:
-      typeof parsed?.layoutPortrait === "string" ? parsed.layoutPortrait : undefined,
+      typeof parsed?.layoutPortrait === "string" &&
+      parsed.layoutPortrait.trim() &&
+      parsed.layoutPortrait !== "solo"
+        ? parsed.layoutPortrait
+        : PORTRAIT_DEFAULT_LAYOUT,
     layoutLandscape:
       typeof parsed?.layoutLandscape === "string" ? parsed.layoutLandscape : undefined,
     themeCss: typeof parsed?.themeCss === "string" ? parsed.themeCss.slice(0, 12_000) : "",

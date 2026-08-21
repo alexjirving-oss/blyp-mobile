@@ -191,12 +191,15 @@ function streamDeviceId(stream: MediaStream | null | undefined): string | null {
 
 const PIP_SAME_CAM_TOAST =
   "Need a second camera for PIP — this one is already Main. Pick another cam, or put a screen in the corner.";
+
 import {
   coerceLayout,
   defaultLayoutFor,
   isStrikeLayout,
   layoutDef,
   layoutsForOrientation,
+  portraitLayoutOnLoad,
+  PORTRAIT_DEFAULT_LAYOUT,
   type StageLayoutId,
   type StageTile,
 } from "@/lib/studioStageLayouts";
@@ -224,6 +227,7 @@ import {
   formatSessionTimer,
   loadOverlayState,
   overlayBrowserSourcePath,
+  readOverlayFeed,
   saveOverlayState,
   writeOverlayFeed,
   publishOverlayFeedRemote,
@@ -326,6 +330,11 @@ import {
   type TeamBundle,
 } from "@/lib/teams";
 import "./command-center.css";
+
+function initialPortraitStudioLayout(): StageLayoutId {
+  if (typeof window === "undefined") return PORTRAIT_DEFAULT_LAYOUT;
+  return portraitLayoutOnLoad(readOverlayFeed().layoutPortrait);
+}
 
 type StudioBoothMode = "portrait" | "landscape" | "team-desk";
 const STUDIO_BOOTH_CYCLE: StudioBoothMode[] = [
@@ -638,7 +647,7 @@ export function LiveStudioClient() {
   const [studioTeamBusy, setStudioTeamBusy] = useState(false);
   const [studioTeamError, setStudioTeamError] = useState<string | null>(null);
   const [viewerLayout, setViewerLayout] = useState<StageLayoutId>(
-    defaultLayoutFor("portrait"),
+    initialPortraitStudioLayout,
   );
   const [overlayState, setOverlayState] = useState<OverlayState>(loadOverlayState);
   const [overlayMaps, setOverlayMaps] = useState<OverlayPositionsByAspect>(() => ({
@@ -732,7 +741,7 @@ export function LiveStudioClient() {
     defaultLayoutFor("landscape"),
   );
   const lastPortraitLayoutRef = useRef<StageLayoutId>(
-    defaultLayoutFor("portrait"),
+    PORTRAIT_DEFAULT_LAYOUT,
   );
   const overlayFeedSnapRef = useRef<OverlayFeedSnapshot | null>(null);
   const overlayRemoteDebounceRef = useRef<number | null>(null);
@@ -742,6 +751,7 @@ export function LiveStudioClient() {
     idToken: string;
   } | null>(null);
   const boothRootRef = useRef<HTMLDivElement | null>(null);
+  const maximizeNativeRef = useRef(false);
   const [studioMaximized, setStudioMaximized] = useState(false);
 
   const [spotifyStatus, setSpotifyStatus] = useState<SpotifyLinkStatus | null>(
@@ -837,11 +847,13 @@ export function LiveStudioClient() {
       const root = boothRootRef.current;
       if (!root) return;
       if (document.fullscreenElement === root) {
+        maximizeNativeRef.current = true;
         setStudioMaximizedClass(true, root);
         setStudioMaximized(true);
         return;
       }
-      if (!document.fullscreenElement) {
+      if (maximizeNativeRef.current) {
+        maximizeNativeRef.current = false;
         setStudioMaximizedClass(false, root);
         setStudioMaximized(false);
       }
@@ -855,6 +867,7 @@ export function LiveStudioClient() {
     if (!root) return;
     const maximized = isStudioMaximized(root);
     if (maximized) {
+      maximizeNativeRef.current = false;
       await exitStudioFullscreen(root);
       setStudioMaximized(false);
       return;
@@ -862,6 +875,17 @@ export function LiveStudioClient() {
     setStudioMaximizedClass(true, root);
     setStudioMaximized(true);
     await requestStudioFullscreen(root);
+    maximizeNativeRef.current = document.fullscreenElement === root;
+  }, []);
+
+  /** First paint guard — portrait never opens as Solo from stale storage/deck echo. */
+  useEffect(() => {
+    const boot = initialPortraitStudioLayout();
+    setViewerLayout((cur) =>
+      orientation === "portrait" && cur === "solo" ? boot : cur,
+    );
+    lastPortraitLayoutRef.current =
+      lastPortraitLayoutRef.current === "solo" ? boot : lastPortraitLayoutRef.current;
   }, []);
 
   const pushToast = useCallback((msg: string) => {
@@ -1837,8 +1861,14 @@ export function LiveStudioClient() {
       positions: overlayPositions,
       positionsPortrait: overlayMaps.portrait,
       positionsLandscape: overlayMaps.landscape,
-      layoutPortrait: lastPortraitLayoutRef.current,
-      layoutLandscape: lastLandscapeLayoutRef.current,
+      layoutPortrait:
+        orientation === "portrait"
+          ? coerceLayout(viewerLayout, "portrait")
+          : lastPortraitLayoutRef.current,
+      layoutLandscape:
+        orientation === "landscape"
+          ? coerceLayout(viewerLayout, "landscape")
+          : lastLandscapeLayoutRef.current,
       chatLines,
       giftsLabel,
       giftCinema: giftCinemaCue,
@@ -1889,6 +1919,8 @@ export function LiveStudioClient() {
     giftersLines,
     themeCss,
     active?.sessionId,
+    orientation,
+    viewerLayout,
     scheduleOverlayFeedRemote,
   ]);
 
@@ -2845,7 +2877,7 @@ export function LiveStudioClient() {
 
     autoPreviewStartedRef.current = true;
     setBoothMode("portrait");
-    setViewerLayout(defaultLayoutFor("portrait"));
+    setViewerLayout(initialPortraitStudioLayout());
     setMainSource("laptop");
     setPipOn(false);
     setPipSource("laptop");

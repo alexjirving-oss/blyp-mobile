@@ -35,6 +35,9 @@ export type StageLayoutDef = {
   hostInGrid?: boolean;
 };
 
+/** Portrait first paint — Host band + 3×3 guests (never Solo on load). */
+export const PORTRAIT_DEFAULT_LAYOUT: StageLayoutId = "host-top-9";
+
 export const STAGE_LAYOUTS: StageLayoutDef[] = [
   {
     id: "host-top-9",
@@ -158,7 +161,16 @@ export function layoutDef(id: StageLayoutId): StageLayoutDef {
 export function defaultLayoutFor(
   orientation: DeskOrientation,
 ): StageLayoutId {
-  return orientation === "landscape" ? "solo" : "host-top-9";
+  return orientation === "landscape" ? "solo" : PORTRAIT_DEFAULT_LAYOUT;
+}
+
+/** Portrait open must never silently restore Solo from storage/session echo. */
+export function portraitLayoutOnLoad(stored?: string | null): StageLayoutId {
+  const id = (stored || "").trim() as StageLayoutId;
+  if (id && id !== "solo" && layoutDef(id).orientations.includes("portrait")) {
+    return id;
+  }
+  return PORTRAIT_DEFAULT_LAYOUT;
 }
 
 export function coerceLayout(
