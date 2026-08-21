@@ -1,12 +1,12 @@
 /**
  * IVS Viewer Session Tests
  *
- * Covers both viewer transports:
- * - playback: joinLiveMass → IVS Player (HLS) when backend returns playbackUrl
- * - realtime: joinLiveRealtime → stage subscriber (interactive / fallback)
+ * Watchers join the Real-Time stage. HLS is only a program copy after
+ * composition is ACTIVE — see viewerJoinPlan.test.ts.
  */
 
 import { ViewerPlaybackParams } from '../../../streaming/LiveStreamingClient';
+import { planViewerJoin } from '../viewerJoinPlan';
 
 describe('IVS Viewer transports', () => {
   describe('playback path (mass viewer)', () => {
@@ -92,23 +92,14 @@ describe('IVS Viewer transports', () => {
   });
 
   describe('Viewer playback integration points', () => {
-    it('should use IVS Player (HLS) not stage-based rendering for viewers', () => {
-      // Architecture decision: viewers use IVS Player SDK for HLS playback
-      // This is simpler, more proven, and more scalable than stage-based rendering
-      const viewerApproach = 'IVS Player (HLS/low-latency playback)';
-      expect(viewerApproach).toContain('Player');
-      expect(viewerApproach).toContain('HLS');
+    it('uses Real-Time stage for watchers, not HLS as the default', () => {
+      expect(planViewerJoin({ preferPlayback: false }).transport).toBe('realtime');
     });
 
-    it('should separate host/guest (stage-based) from viewer (playback-based) paths', () => {
-      // Hosts and guests use IVS Real-Time stage
-      // Viewers use IVS Player for HLS
+    it('keeps host/guest and watcher on the same stage', () => {
       const hostPath = 'IVS Real-Time stage';
-      const viewerPath = 'IVS Player (HLS)';
-      
-      expect(hostPath).not.toEqual(viewerPath);
-      expect(hostPath).toContain('stage');
-      expect(viewerPath).toContain('Player');
+      const viewerPath = 'IVS Real-Time stage';
+      expect(hostPath).toEqual(viewerPath);
     });
 
     it('should require backend to provide playbackUrl for viewers', () => {
@@ -164,10 +155,15 @@ describe('IVS Viewer transports', () => {
     });
   });
 
-  describe('realtime path (stage subscriber fallback)', () => {
-    it('documents that useIVSViewerSession falls back to joinLiveRealtime when no playbackUrl', () => {
-      const massResponse = { sessionId: 's1', mode: 'realtime' as const };
-      expect(massResponse.mode).toBe('realtime');
+  describe('realtime path (stage subscriber)', () => {
+    it('falls through to Real-Time when HLS is not an ACTIVE program', () => {
+      expect(
+        planViewerJoin({
+          preferPlayback: true,
+          compositionState: 'STARTING',
+          playbackUrl: 'https://example.com/live.m3u8',
+        }).transport,
+      ).toBe('realtime');
     });
   });
 });

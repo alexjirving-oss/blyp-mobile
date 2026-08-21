@@ -113,11 +113,18 @@ internal class LiveLoudspeakerController(
     private val watchdog = object : Runnable {
         override fun run() {
             val profile = activeProfile ?: return
+            if (profile == Profile.PLAYBACK && playbackRouteAlreadyGood()) {
+                mainHandler.postDelayed(this, WATCHDOG_PLAYBACK_INTERVAL_MS)
+                return
+            }
             applyRoute(profile, "watchdog")
             if (activeProfile == profile) {
-                // Faster tick while earpiece is still selected — guest-join OEM races.
-                val interval =
-                    if (isEarpieceSelected()) WATCHDOG_EARPIECE_INTERVAL_MS else WATCHDOG_INTERVAL_MS
+                val interval = when {
+                    profile == Profile.PUBLISHING && isEarpieceSelected() ->
+                        WATCHDOG_EARPIECE_INTERVAL_MS
+                    profile == Profile.PLAYBACK -> WATCHDOG_PLAYBACK_INTERVAL_MS
+                    else -> WATCHDOG_INTERVAL_MS
+                }
                 mainHandler.postDelayed(this, interval)
             }
         }
@@ -147,6 +154,9 @@ internal class LiveLoudspeakerController(
                 mainHandler.postDelayed(watchdog, INITIAL_REASSERT_DELAY_MS)
             } else if (activeProfile != profile) {
                 activeProfile = profile
+            }
+            if (profile == Profile.PLAYBACK && playbackRouteAlreadyGood() && !isEarpieceSelected()) {
+                return@runOnMain
             }
             applyRoute(profile, reason)
             if (shouldBurstReassert(reason) || isEarpieceSelected()) {
@@ -251,13 +261,18 @@ internal class LiveLoudspeakerController(
      */
     private fun scheduleBurstReassert(reason: String) {
         val token = ++burstToken
-        val delays = longArrayOf(80L, 200L, 450L, 900L, 1600L, 3200L, 5500L, 9000L)
+        val profile = activeProfile ?: return
+        // Watch-only: 8 AudioManager mutations on the UI thread is what froze likes/leave.
+        val delays =
+            if (profile == Profile.PLAYBACK) longArrayOf(250L, 1200L)
+            else longArrayOf(80L, 200L, 450L, 900L, 1600L, 3200L, 5500L, 9000L)
         for (delay in delays) {
             mainHandler.postDelayed(
                 {
                     if (token != burstToken) return@postDelayed
-                    val profile = activeProfile ?: return@postDelayed
-                    applyRoute(profile, "burst-$delay-$reason")
+                    val active = activeProfile ?: return@postDelayed
+                    if (active == Profile.PLAYBACK && playbackRouteAlreadyGood()) return@postDelayed
+                    applyRoute(active, "burst-$delay-$reason")
                 },
                 delay,
             )
@@ -292,6 +307,10 @@ internal class LiveLoudspeakerController(
 
     private fun applyRoute(profile: Profile, reason: String) {
         try {
+            if (profile == Profile.PLAYBACK && reason == "watchdog" && playbackRouteAlreadyGood()) {
+                return
+            }
+
             val desiredMode =
                 if (profile == Profile.PUBLISHING) {
                     // Required for the voice-processed microphone/AEC path.
@@ -315,12 +334,15 @@ internal class LiveLoudspeakerController(
             } else {
                 abandonPublishAudioFocus()
                 stopBluetoothScoIfNeeded()
-                // Samsung: clearCommunicationDevice() alone leaves TYPE_BUILTIN_EARPIECE.
-                // Pin builtin SPEAKER explicitly so Stage/HLS subscribe is not quiet.
+                // Never sandwich PLAYBACK into MODE_IN_COMMUNICATION — that
+                // makes OEM treat watch as a call, earpiece snaps, 500ms loop.
                 val pinned = pinBuiltinSpeaker(sandwich = false)
                 communicationDevice = currentCommDeviceLabel()
                 @Suppress("DEPRECATION")
                 run { audioManager.isSpeakerphoneOn = true }
+                if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
                 routeChoice = if (pinned) "media-speaker-pinned" else "media-speaker"
             }
 
@@ -348,17 +370,31 @@ internal class LiveLoudspeakerController(
                 }
             }
 
-            // Last-chance: if OEM still selected earpiece, sandwich-pin speaker.
-            if (isEarpieceSelected() && findHeadset(commDevices()) == null) {
+            // Last-chance sandwich is host/guest only. Watch-only sandwich
+            // flips MODE_IN_COMMUNICATION, OEM treats it as a call, earpiece
+            // snaps, and the 500ms watchdog froze likes/leave.
+            if (profile == Profile.PUBLISHING &&
+                isEarpieceSelected() &&
+                findHeadset(commDevices()) == null
+            ) {
                 Log.w(logTag, "[IVS_AUDIO_ROUTE] earpiece still selected after route; sandwich pin")
                 pinBuiltinSpeaker(sandwich = true)
-                if (profile == Profile.PUBLISHING && audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+                if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
                     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
                 }
                 @Suppress("DEPRECATION")
                 run { audioManager.isSpeakerphoneOn = true }
                 communicationDevice = currentCommDeviceLabel()
                 routeChoice = "$routeChoice+sandwich"
+            } else if (profile == Profile.PLAYBACK && isEarpieceSelected()) {
+                pinBuiltinSpeaker(sandwich = false)
+                if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
+                @Suppress("DEPRECATION")
+                run { audioManager.isSpeakerphoneOn = true }
+                communicationDevice = currentCommDeviceLabel()
+                routeChoice = "$routeChoice+playback-pin"
             }
 
             val volumeControlStream = bindVolumeControlStream(profile)
@@ -641,10 +677,27 @@ internal class LiveLoudspeakerController(
         }
     }
 
+    /**
+     * True when watch-only audio is already on the media speaker path.
+     * Mutating AudioManager in that state (clear/set communication device)
+     * retriggers OEM earpiece snaps and UI-thread stalls.
+     */
+    private fun playbackRouteAlreadyGood(): Boolean {
+        if (isEarpieceSelected()) return false
+        if (audioManager.mode == AudioManager.MODE_IN_COMMUNICATION) return false
+        val comm = currentCommDeviceLabel().lowercase()
+        if (comm.contains("earpiece")) return false
+        @Suppress("DEPRECATION")
+        if (audioManager.isSpeakerphoneOn) return true
+        return comm.contains("speaker") || comm == "legacy" || comm == "none"
+    }
+
     private companion object {
         const val INITIAL_REASSERT_DELAY_MS = 250L
         const val WATCHDOG_INTERVAL_MS = 2_000L
-        /** While earpiece is stuck, hammer the route harder (Fold guest-join race). */
+        /** Watch-only: cheap check, do not hammer AudioManager. */
+        const val WATCHDOG_PLAYBACK_INTERVAL_MS = 5_000L
+        /** While earpiece is stuck on a publish session, hammer the route harder. */
         const val WATCHDOG_EARPIECE_INTERVAL_MS = 500L
         const val VOLUME_CONTROL_UNAVAILABLE = Int.MIN_VALUE
         /** Some OEM builds report speaker as type 24. */

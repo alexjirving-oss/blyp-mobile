@@ -50,7 +50,7 @@ import { attachBattleStage } from '../battles/battleRegistryService';
 import { battleTokenAttributes } from '../battles/battleLifecycle';
 import { endDuel } from '../games/reactionDuel/reactionDuelRoomService';
 import { settleReactionDuelLiveCoins } from '../games/reactionDuel/reactionDuelEconomy';
-import { stopCompositionBestEffort } from './programEgress';
+import { massJoinMode, stopCompositionBestEffort } from './programEgress';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -856,9 +856,8 @@ export async function joinLiveRealtime(
 }
 
 /**
- * Mass viewer join — HLS program URL when the session has playback.
- * Phone watch uses IVS Player on that URL so Stage WebRTC does not freeze
- * the Android UI thread. Web Studio watch stays on /api/live/watch (Stage).
+ * Mass viewer join. Watchers belong on the Real-Time stage.
+ * HLS is only a real program after SSC is ACTIVE — CreateChannel URLs are not.
  */
 export async function joinLiveMass(
   sessionId: string,
@@ -876,14 +875,18 @@ export async function joinLiveMass(
     displayName: safeLiveDisplayName(displayName, viewerUserId),
   });
 
-  const fromSession = String(session.playbackUrl || '').trim();
-  if (fromSession) {
-    return { sessionId, playbackUrl: fromSession, mode: 'playback' };
+  const fromSession = massJoinMode(session);
+  if (fromSession.mode === 'playback') {
+    return { sessionId, playbackUrl: fromSession.playbackUrl, mode: 'playback' };
   }
 
   const firestore = await getStreamPlaybackForViewer(sessionId);
-  if (firestore.playbackUrl) {
-    return { sessionId, playbackUrl: firestore.playbackUrl, mode: 'playback' };
+  const fromMirror = massJoinMode({
+    playbackUrl: firestore.playbackUrl,
+    compositionState: session.compositionState,
+  });
+  if (fromMirror.mode === 'playback') {
+    return { sessionId, playbackUrl: fromMirror.playbackUrl, mode: 'playback' };
   }
 
   return { sessionId, mode: 'realtime' };

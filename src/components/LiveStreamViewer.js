@@ -799,8 +799,6 @@ const IVSLiveStreamViewer = ({
     }
   }, [streamId, guestMode, guestSlotId, generateGuestSessionId, leaveAsGuestAndCleanup]);
 
-  const usePlayerWatch = Platform.OS === 'android' && !guestMode && !!NativeIVSPlayerView;
-
   const ivsSession = useIVSViewerSession({
     streamId: streamId || '',
     enabled: !!streamId,
@@ -808,9 +806,11 @@ const IVSLiveStreamViewer = ({
     // module; suspend auto-join until the guest session ends.
     autoJoin: !suspendViewerAutoJoin && !guestMode,
     displayName: viewerDisplayName,
-    // Android mass-watch: IVS Player (HLS) so Stage WebRTC does not freeze likes/leave.
-    preferPlayback: usePlayerWatch,
+    // Same Stage the website watches. HLS is a second delayed copy.
+    preferPlayback: false,
   });
+  const usePlayerWatch =
+    !guestMode && ivsSession.viewerTransport === 'playback' && !!NativeIVSPlayerView;
 
   useEffect(() => {
     ivsSessionRef.current = ivsSession;
@@ -1984,8 +1984,8 @@ const IVSLiveStreamViewer = ({
     );
   }
 
-  // Fallback: legacy IVS Player (HLS) view
-  if (NativeIVSPlayerView) {
+  // HLS only when this session actually joined playback.
+  if (usePlayerWatch && NativeIVSPlayerView) {
     return (
       <View style={[styles.container, style]}>
         <NativeIVSPlayerView style={styles.playerView} />

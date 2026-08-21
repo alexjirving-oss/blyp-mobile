@@ -13,6 +13,7 @@
 
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
 import { getIVSEnv } from '../config/IVSEnv';
+import { shouldSkipViewerLoudspeakerReassert } from '../live/ivs/watchAudioPolicy';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Constants = require('expo-constants');
 import {
@@ -61,6 +62,7 @@ export class IVSNativeClient implements LiveStreamingClient {
   private isViewerActive = false;
   private activeAudioPath: NativeAudioPath | null = null;
   private currentSessionId: string | null = null;
+  private lastViewerLoudspeakerMs = 0;
   private ivsEnv = getIVSEnv();
 
   constructor() {
@@ -127,6 +129,15 @@ export class IVSNativeClient implements LiveStreamingClient {
   }
 
   private reassertLiveLoudspeaker(reason: string) {
+    const viewing =
+      this.activeAudioPath === 'stage-viewing' || this.activeAudioPath === 'player-viewing';
+    if (viewing) {
+      const now = Date.now();
+      if (shouldSkipViewerLoudspeakerReassert(this.lastViewerLoudspeakerMs, now)) {
+        return;
+      }
+      this.lastViewerLoudspeakerMs = now;
+    }
     void this.forceLiveLoudspeaker(reason).catch((error) => {
       console.warn('[IVS_AUDIO_ROUTE][JS_REASSERT_FAILED]', {
         reason,
@@ -685,7 +696,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
   /**
    * Join as a viewer using IVS Player (HLS/low-latency playback).
-   * Android Studio watch uses this so Stage WebRTC does not freeze the UI thread.
+   * Used only when composition is ACTIVE — mass watch uses Real-Time stage.
    */
   async joinAsViewerPlayback(params: ViewerPlaybackParams): Promise<void> {
     if (!IVSPlayerModule) {

@@ -6,6 +6,7 @@ import {
   isProgramReadyForFanout,
   mapAwsCompositionState,
   mapFromGetComposition,
+  massJoinMode,
   PROGRAM_SSC_LAYOUT,
 } from './programEgress';
 
@@ -80,6 +81,28 @@ describe('isProgramReadyForFanout', () => {
         channelLive: true,
       }),
       true,
+    );
+  });
+});
+
+describe('massJoinMode', () => {
+  it('does not send watchers to HLS on a CreateChannel URL', () => {
+    assert.deepEqual(
+      massJoinMode({
+        playbackUrl: 'https://example.live-video.net/out.m3u8',
+        compositionState: 'UNKNOWN',
+      }),
+      { mode: 'realtime' },
+    );
+  });
+
+  it('allows HLS only after composition is ACTIVE', () => {
+    assert.deepEqual(
+      massJoinMode({
+        playbackUrl: 'https://example.live-video.net/out.m3u8',
+        compositionState: 'ACTIVE',
+      }),
+      { mode: 'playback', playbackUrl: 'https://example.live-video.net/out.m3u8' },
     );
   });
 });

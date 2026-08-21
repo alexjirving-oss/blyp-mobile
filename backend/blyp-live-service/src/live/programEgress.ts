@@ -72,6 +72,21 @@ export function isProgramReadyForFanout(input: {
   return input.channelLive === true;
 }
 
+/**
+ * `/api/live/join` watch mode. CreateChannel always has a playbackUrl;
+ * that is not a live picture. HLS only after composition is ACTIVE.
+ */
+export function massJoinMode(session: {
+  playbackUrl?: string | null;
+  compositionState?: CompositionState | null;
+}): { mode: 'playback' | 'realtime'; playbackUrl?: string } {
+  const playbackUrl = String(session.playbackUrl || '').trim();
+  if (session.compositionState === 'ACTIVE' && playbackUrl) {
+    return { mode: 'playback', playbackUrl };
+  }
+  return { mode: 'realtime' };
+}
+
 function sessionRegion(session: LiveSession): string {
   return session.region || getRegionFromStageArn(session.stageArn);
 }

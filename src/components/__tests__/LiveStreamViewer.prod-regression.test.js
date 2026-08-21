@@ -35,4 +35,12 @@ describe('LiveStreamViewer production regression', () => {
     const hits = unboundAfterProdTransform(['hasRenderableStreams', 'renderableStreams']);
     expect(hits).toEqual({});
   });
+
+  it('does not force Android mass watch onto HLS', () => {
+    const source = fs.readFileSync(liveStreamViewerPath, 'utf8');
+    expect(source).toMatch(/preferPlayback:\s*false/);
+    expect(source).not.toMatch(
+      /Platform\.OS === 'android' && !guestMode && !!NativeIVSPlayerView/,
+    );
+  });
 });
