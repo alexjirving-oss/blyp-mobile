@@ -95,6 +95,7 @@ import TileCoinBadge, {
   coinsFromGiftTotals,
   tileCoinPositions,
 } from './live/TileCoinBadge';
+import { applyGuestLiveSpeaker, releaseGuestLiveSpeaker } from '../services/blypAudioRoute';
 
 const LiveStreamViewer = ({
   streamId,
@@ -226,6 +227,7 @@ const IVSLiveStreamViewer = ({
   // Guest's own media preferences (honored unless host has forced mute/cam-off).
   const [selfMicOn, setSelfMicOn] = useState(true);
   const [selfCamOn, setSelfCamOn] = useState(true);
+  const [guestSpeakerOn, setGuestSpeakerOn] = useState(false);
   const selfMicOnRef = useRef(true);
   const selfCamOnRef = useRef(true);
   const [selfPhotoUrl, setSelfPhotoUrl] = useState(null);
@@ -286,6 +288,28 @@ const IVSLiveStreamViewer = ({
     });
   }, [applyLocalMedia]);
 
+  const toggleGuestSpeaker = useCallback(() => {
+    if (!guestModeRef.current) return;
+    setGuestSpeakerOn((prev) => {
+      const next = !prev;
+      setTimeout(() => {
+        void (async () => {
+          await applyGuestLiveSpeaker(next);
+          if (!next || !guestModeRef.current) return;
+          try {
+            const nativeClient = getIVSNativeClient();
+            if (nativeClient && typeof nativeClient.forceLiveLoudspeaker === 'function') {
+              await nativeClient.forceLiveLoudspeaker('guest-speaker-on');
+            }
+          } catch {
+            /* IVS pin is extra; call route already applied. */
+          }
+        })();
+      }, 0);
+      return next;
+    });
+  }, []);
+
   // Load this user's profile photo for the cam-off avatar tile.
   useEffect(() => {
     if (!uid || !firebaseEnabled || !db || typeof db.collection !== 'function') return undefined;
@@ -312,6 +336,7 @@ const IVSLiveStreamViewer = ({
   const guestPagerScrollRef = useRef(null);
   const ivsSessionRef = useRef(null);
 
+  const prevGuestModeForSpeakerRef = useRef(false);
   useEffect(() => {
     guestModeRef.current = guestMode;
     if (!guestMode) {
@@ -319,9 +344,14 @@ const IVSLiveStreamViewer = ({
       setCameraOffByHost(false);
       setSelfMicOn(true);
       setSelfCamOn(true);
+      setGuestSpeakerOn(false);
       selfMicOnRef.current = true;
       selfCamOnRef.current = true;
+      if (prevGuestModeForSpeakerRef.current) {
+        void releaseGuestLiveSpeaker();
+      }
     }
+    prevGuestModeForSpeakerRef.current = guestMode;
   }, [guestMode]);
 
   const guestRequestStatusRef = useRef('idle');
@@ -781,13 +811,7 @@ const IVSLiveStreamViewer = ({
       });
 
       await Promise.race([startPromise, timeoutPromise]);
-      await nativeClient.forceLiveLoudspeaker('guest-join-flow-complete');
-      // Fold OEM often snaps earpiece after WebRTC peer connect — reassert past join.
-      ;[400, 1200, 2800, 5000].forEach((ms) => {
-        setTimeout(() => {
-          void nativeClient.forceLiveLoudspeaker(`guest-join-reassert-${ms}`).catch(() => {});
-        }, ms);
-      });
+      // Speaker stays off (earpiece) until the guest taps the Speaker button.
 
       guestModeRef.current = true;
       setGuestMode(true);
@@ -1570,6 +1594,13 @@ const IVSLiveStreamViewer = ({
                 >
                   <Icon name={(!selfCamOn || cameraOffByHost) ? 'videocam-off' : 'videocam'} size={16} color="#fff" />
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.guestMediaBtn, !guestSpeakerOn && styles.guestMediaBtnOff]}
+                  onPress={toggleGuestSpeaker}
+                  accessibilityLabel={guestSpeakerOn ? 'Speaker on' : 'Speaker off'}
+                >
+                  <Icon name={guestSpeakerOn ? 'volume-high' : 'volume-low'} size={16} color="#fff" />
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
                   <Text style={styles.leaveGuestText}>Leave</Text>
                 </TouchableOpacity>
@@ -1861,6 +1892,14 @@ const IVSLiveStreamViewer = ({
                       size={16}
                       color="#fff"
                     />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.guestMediaBtn, !guestSpeakerOn && styles.guestMediaBtnOff]}
+                    onPress={toggleGuestSpeaker}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel={guestSpeakerOn ? 'Speaker on' : 'Speaker off'}
+                  >
+                    <Icon name={guestSpeakerOn ? 'volume-high' : 'volume-low'} size={16} color="#fff" />
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
                     <Text style={styles.leaveGuestText}>Leave guest</Text>

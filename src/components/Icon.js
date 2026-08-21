@@ -59,6 +59,7 @@ const map = {
   upload: 'Upload',
   download: 'Download',
   'volume-high': 'Volume2',
+  'volume-low': 'Volume1',
   'volume-mute': 'VolumeX',
   'volume-off': 'VolumeX',
   volume: 'Volume2',
