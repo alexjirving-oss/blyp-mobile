@@ -271,10 +271,11 @@
   font-size: 0.9375rem;
 }
 
-/* Theater desk fills the viewport — header + three columns, no void bands. */
+/* Theater desk fills the product shell — header + three columns.
+   Use 100% (not 100vw) so a classic scrollbar cannot clip the jukebox rail. */
 .tls-booth.tls-booth-theater {
-  width: 100vw;
-  max-width: 100vw;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* Nested under SiteChrome main (For You–matched product shell). */
@@ -311,42 +312,42 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
-/* Portrait theater: program column owns all pixels — no floating phone island. */
+/* Portrait theater: 9:16 phone chassis centered in the program column. */
 .tls-booth-theater.tls-booth-portrait .tls-stage-wrap {
   padding: 0;
-  align-items: stretch;
-  justify-content: stretch;
+  align-items: center;
+  justify-content: center;
 }
 
 .tls-booth-theater.tls-booth-portrait .tls-stage-wrap > .tls-device-phone {
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  max-height: none;
-  aspect-ratio: auto;
-  margin: 0;
-  align-self: stretch;
+  height: min(100cqb, 100%);
+  width: min(100%, calc(100cqb * 9 / 16));
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 9 / 16;
+  margin: 0 auto;
+  align-self: center;
   min-width: 0;
   min-height: 0;
-  flex: 1 1 0;
+  flex: 0 0 auto;
 }
 
-/* Landscape theater: program column fills height and width. */
+/* Landscape: 16:9 tablet/monitor chassis — never stretch to the tall column. */
 .tls-booth-theater.tls-booth-landscape .tls-stage-wrap {
   padding: 0;
-  align-items: stretch;
-  justify-content: stretch;
+  align-items: center;
+  justify-content: center;
 }
 
 .tls-booth-theater.tls-booth-landscape .tls-stage-wrap > .tls-device.tls-device-tablet {
-  width: 100% !important;
-  height: 100% !important;
-  max-width: none !important;
-  max-height: none !important;
-  aspect-ratio: auto !important;
-  flex: 1 1 0 !important;
-  align-self: stretch !important;
-  margin: 0 !important;
+  width: min(100cqi, calc(100cqb * 16 / 9)) !important;
+  height: min(100cqb, calc(100cqi * 9 / 16)) !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  aspect-ratio: 16 / 9 !important;
+  flex: 0 0 auto !important;
+  align-self: center !important;
+  margin: 0 auto !important;
 }
 
 .tls-left,
@@ -490,6 +491,15 @@
   flex-direction: column;
   gap: 0.28rem;
   min-width: 0;
+  flex: 0 0 auto;
+}
+
+/* Jukebox owns leftover right-rail height so it cannot flex-collapse to 0. */
+.tls-rail-slot:has(.tls-rail-jukebox) {
+  flex: 1 1 auto;
+  min-height: 20rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tls-rail-slot-bar {
@@ -1026,8 +1036,8 @@
   height: 100%;
   width: 100%;
   display: flex;
-  /* Program only in center column — no deck sibling under the feed. */
-  align-items: stretch;
+  /* Program only in center column — 9:16 phone island, not a stretched stage. */
+  align-items: center;
   justify-content: center;
   gap: 0;
   container-type: size;
@@ -1181,7 +1191,7 @@
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
 }
 
-/* Program canvas fills the screen inset — sizing lives on .tls-device. */
+/* Inner program fills the 9:16 device screen. Chassis ratio lives on .tls-device-phone. */
 .tls-device .tls-phone,
 .tls-device .bomb-strike-stage.tls-phone,
 .tls-booth-theater .tls-device .tls-phone,
@@ -3007,8 +3017,8 @@
 }
 
 .tls-rail-jukebox {
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 18rem;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -3921,24 +3931,24 @@ body:has(.tls-overlay-source) {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .tls-booth-theater .tls-stage-wrap > .tls-device-phone,
+  .tls-booth-theater.tls-booth-portrait .tls-stage-wrap > .tls-device-phone,
   .tls-device-phone,
-  .tls-booth-theater .tls-stage-wrap > .tls-device.tls-device-tablet,
   .tls-booth-landscape .tls-stage-wrap > .tls-device-phone,
   .tls-phone-check .tls-phone {
-    width: 100%;
-    height: 100%;
-    max-width: none;
-    max-height: none;
-    aspect-ratio: auto;
+    width: min(100%, calc(100cqb * 9 / 16));
+    height: min(100cqb, calc(100cqi * 16 / 9));
+    max-width: 100%;
+    max-height: 100%;
+    aspect-ratio: 9 / 16;
     min-width: 0;
     min-height: 0;
-    flex: 1 1 0;
-    align-self: stretch;
-    margin: 0;
+    flex: 0 0 auto;
+    flex-shrink: 1;
+    align-self: center;
+    margin: 0 auto;
   }
 
-  /* Theater keeps the three-column desk — no stacked phone island. */
+  /* Theater keeps the three-column desk; right column is the jukebox rail. */
   .tls-booth-theater {
     overflow: hidden;
   }
@@ -3951,7 +3961,7 @@ body:has(.tls-overlay-source) {
     flex: 1 1 0;
     height: 100%;
     min-height: 0;
-    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(180px, 220px);
+    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr) minmax(260px, 320px);
     grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
   }
@@ -3975,6 +3985,10 @@ body:has(.tls-overlay-source) {
     overflow-x: hidden;
     overflow-y: auto;
   }
+
+  .tls-booth-theater .tls-right {
+    min-width: 16rem;
+  }
 }
 
 @media (min-width: 1200px) {
@@ -3984,7 +3998,7 @@ body:has(.tls-overlay-source) {
   }
 
   .tls-booth-portrait .tls-body {
-    grid-template-columns: minmax(248px, 280px) minmax(0, 1fr) minmax(248px, 280px);
+    grid-template-columns: minmax(248px, 280px) minmax(0, 1fr) minmax(280px, 340px);
   }
 
   .tls-booth-team-desk .tls-body {
@@ -4016,10 +4030,8 @@ body:has(.tls-overlay-source) {
     overflow-y: auto;
   }
 
-  .tls-left,
-  .tls-center,
-  .tls-right {
-    order: 0;
+  .tls-booth-theater .tls-right {
+    min-width: 16rem;
   }
 }
 
@@ -5484,14 +5496,14 @@ button.tls-dest-card:hover {
 }
 
 .tls-booth .tls-rail-jukebox {
-  min-height: 0;
-  flex: 1 1 0;
-  max-height: 100%;
+  min-height: 18rem;
+  flex: 1 1 auto;
+  max-height: none;
   overflow: hidden;
 }
 
 .tls-booth .jbx-cabinet {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -5601,7 +5613,7 @@ button.tls-dest-card:hover {
   flex: 1 1 0 !important;
   height: 100% !important;
   min-height: 0 !important;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(220px, 280px) !important;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 340px) !important;
   grid-template-rows: minmax(0, 1fr) !important;
   overflow: hidden !important;
 }
@@ -5622,6 +5634,27 @@ button.tls-dest-card:hover {
   max-height: none !important;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.tls-booth-maximized .tls-right {
+  min-width: 16rem;
+}
+
+/* Maximize fills the booth; preview stays a 9:16 phone island. */
+.tls-booth-maximized.tls-booth-portrait .tls-stage-wrap {
+  align-items: center;
+  justify-content: center;
+}
+
+.tls-booth-maximized.tls-booth-portrait .tls-stage-wrap > .tls-device-phone {
+  height: min(100cqb, 100%);
+  width: min(100%, calc(100cqb * 9 / 16));
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 9 / 16;
+  flex: 0 0 auto;
+  align-self: center;
+  margin: 0 auto;
 }
 
 .tls-top-maximize {
