@@ -1,9 +1,8 @@
 /**
- * Watch-only audio: Stage WebRTC snaps the Fold to earpiece, then the
- * loudspeaker watchdog used to clear/set the communication device on the
- * UI thread every 500ms. Likes and leave share that thread, so the app
- * looked crashed. Throttle JS reasserts; native PLAYBACK must not sandwich
- * into MODE_IN_COMMUNICATION.
+ * Throttle JS loudspeaker reasserts on watch paths.
+ * Stage watch must use native PUBLISHING (call mode + speaker), same as guest.
+ * PLAYBACK / MODE_NORMAL is HLS only. Forcing MODE_NORMAL onto a live Stage
+ * fight Samsung's earpiece snap on the UI thread until the user publishes.
  */
 
 export const VIEWER_LOUDSPEAKER_MIN_INTERVAL_MS = 2500;

@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { getDb } from "./firebase";
 import { liveServiceUrl } from "./env";
+import { phoneLayoutModeFromStudio } from "./studioStageLayouts";
 
 export type LiveCard = {
   id: string;
@@ -838,6 +839,10 @@ export async function updateLiveSessionMeta(
   }
   if (typeof patch.studioLayout === "string" && patch.studioLayout.trim()) {
     payload.studioLayout = patch.studioLayout.trim();
+    // Phone watchers apply guestLayoutMode. Mirror Studio's program layout so
+    // the app does not stay on the default bottom tray.
+    const phoneMode = phoneLayoutModeFromStudio(payload.studioLayout as string);
+    if (phoneMode) payload.guestLayoutMode = phoneMode;
   }
   if (patch.studioOverlayFeed && typeof patch.studioOverlayFeed === "object") {
     payload.studioOverlayFeed = patch.studioOverlayFeed;

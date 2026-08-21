@@ -71,6 +71,47 @@ export function normalizeLiveLayoutMode(raw: unknown): LiveLayoutMode {
   return LIVE_LAYOUT_MODES.BOTTOM_GRID;
 }
 
+/**
+ * Studio program layouts (`apps/blyp-world/lib/studioStageLayouts.ts`).
+ * Keep ids in sync with STAGE_LAYOUTS. Phone has four compositional modes;
+ * this is the closest match so a Studio host's Split/Focus/Grid shows on the phone
+ * instead of always defaulting to bottom tray.
+ */
+const STUDIO_LAYOUT_TO_LIVE: Record<string, LiveLayoutMode> = {
+  solo: LIVE_LAYOUT_MODES.BOTTOM_GRID,
+  'host-top': LIVE_LAYOUT_MODES.HOST_FOCUS,
+  'host-top-9': LIVE_LAYOUT_MODES.EQUAL_GRID,
+  'split-stack': LIVE_LAYOUT_MODES.EQUAL_GRID,
+  'host-bottom': LIVE_LAYOUT_MODES.HOST_FOCUS,
+  'host-bottom-9': LIVE_LAYOUT_MODES.EQUAL_GRID,
+  'side-by-side': LIVE_LAYOUT_MODES.SIDE_BY_SIDE,
+  'focus-rail': LIVE_LAYOUT_MODES.HOST_FOCUS,
+  'tri-stack': LIVE_LAYOUT_MODES.EQUAL_GRID,
+  quad: LIVE_LAYOUT_MODES.EQUAL_GRID,
+  'cinema-bar': LIVE_LAYOUT_MODES.HOST_FOCUS,
+  'split-dual': LIVE_LAYOUT_MODES.SIDE_BY_SIDE,
+  'host-left-rail': LIVE_LAYOUT_MODES.SIDE_BY_SIDE,
+  'focus-plus-4': LIVE_LAYOUT_MODES.HOST_FOCUS,
+  'grid-3x3': LIVE_LAYOUT_MODES.EQUAL_GRID,
+};
+
+export function mapStudioLayoutToLiveLayoutMode(raw: unknown): LiveLayoutMode | null {
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  if (!id) return null;
+  return STUDIO_LAYOUT_TO_LIVE[id] || null;
+}
+
+/** Studio host layout wins over a phone host's guestLayoutMode when both exist. */
+export function resolveLiveLayoutMode(input: {
+  studioLayout?: unknown;
+  guestLayoutMode?: unknown;
+}): LiveLayoutMode {
+  return (
+    mapStudioLayoutToLiveLayoutMode(input.studioLayout) ||
+    normalizeLiveLayoutMode(input.guestLayoutMode)
+  );
+}
+
 export type StickySlotEntry<T> = {
   slotId: number;
   occupant: T | null;

@@ -170,6 +170,36 @@ export function coerceLayout(
   return ok ? id : defaultLayoutFor(orientation);
 }
 
+/** Phone compositional modes — keep in sync with src/live/ivs/multiGuestLayout.ts */
+export type PhoneLiveLayoutMode =
+  | "bottom_grid"
+  | "host_focus"
+  | "equal_grid"
+  | "side_by_side";
+
+const STUDIO_TO_PHONE: Record<StageLayoutId, PhoneLiveLayoutMode> = {
+  solo: "bottom_grid",
+  "host-top": "host_focus",
+  "host-top-9": "equal_grid",
+  "split-stack": "equal_grid",
+  "host-bottom": "host_focus",
+  "host-bottom-9": "equal_grid",
+  "side-by-side": "side_by_side",
+  "focus-rail": "host_focus",
+  "tri-stack": "equal_grid",
+  quad: "equal_grid",
+  "cinema-bar": "host_focus",
+  "split-dual": "side_by_side",
+  "host-left-rail": "side_by_side",
+  "focus-plus-4": "host_focus",
+  "grid-3x3": "equal_grid",
+};
+
+export function phoneLayoutModeFromStudio(raw: string): PhoneLiveLayoutMode | null {
+  const id = raw.trim() as StageLayoutId;
+  return STUDIO_TO_PHONE[id] || null;
+}
+
 /** Host+9 / 9+host / Grid 3×3 — bomb-strike (Nukemonkey) is armed. */
 export function isStrikeLayout(layout: StageLayoutDef): boolean {
   return layout.guestSlots === 9 || Boolean(layout.hostInGrid);

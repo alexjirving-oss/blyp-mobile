@@ -135,7 +135,7 @@ import {
 import {
   LIVE_LAYOUT_MODES,
   LIVE_LAYOUT_OPTIONS,
-  normalizeLiveLayoutMode,
+  resolveLiveLayoutMode,
   layoutUsesBottomTray,
   guestsPerTrayPage,
   buildVisibleGuestSlotIds,
@@ -2040,8 +2040,13 @@ const LiveStreamScreen = (props) => {
         const prevSig = (prev || []).map((g) => `${g.userId}:${g.slotIndex}:${g.status || ''}`).sort().join('|');
         return guestSig === prevSig ? prev : guests;
       });
-      if (data && data.guestLayoutMode) {
-        setGuestLayoutMode(normalizeLiveLayoutMode(data.guestLayoutMode));
+      if (data && (data.studioLayout || data.guestLayoutMode)) {
+        setGuestLayoutMode(
+          resolveLiveLayoutMode({
+            studioLayout: data.studioLayout,
+            guestLayoutMode: data.guestLayoutMode,
+          }),
+        );
       }
       const bid = data?.activeBattleId ? String(data.activeBattleId) : null;
       setMirroredBattleId((prev) => (prev === bid ? prev : bid));
