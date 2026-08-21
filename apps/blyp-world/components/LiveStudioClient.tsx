@@ -346,17 +346,11 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 function pendingRequests(rows: GuestRequestRow[]): GuestRequestRow[] {
-  return rows.filter((r) =>
-    ["PENDING", "REQUESTED", "WAITING"].includes(
-      String(r.status || "").toUpperCase(),
-    ),
-  );
+  return rows.filter((r) => isPendingGuest(r.status));
 }
 
 function invitedOrLive(rows: GuestRequestRow[]): GuestRequestRow[] {
-  return rows.filter((r) =>
-    ["INVITED", "LIVE", "ACCEPTED"].includes(String(r.status || "").toUpperCase()),
-  );
+  return rows.filter((r) => isSeatedGuest(r.status));
 }
 
 /** Prefer @handle over raw Cognito UUID in guest lists. */
@@ -374,6 +368,34 @@ function isAlreadyOnStageError(msg: string): boolean {
   return /guest session already active|already (on stage|invited|live)/i.test(
     msg,
   );
+}
+
+function isPendingGuest(status: unknown): boolean {
+  return ["PENDING", "REQUESTED", "WAITING"].includes(
+    String(status || "").toUpperCase(),
+  );
+}
+
+function isSeatedGuest(status: unknown): boolean {
+  return ["INVITED", "LIVE", "ACCEPTED"].includes(
+    String(status || "").toUpperCase(),
+  );
+}
+
+/** Old /guest/requests only returned REQUESTED. Keep accepted seats across that poll. */
+function mergeGuestPanel(
+  prev: GuestRequestRow[],
+  polled: GuestRequestRow[],
+): GuestRequestRow[] {
+  const polledSeated = polled.filter((r) => isSeatedGuest(r.status));
+  if (polledSeated.length > 0) return polled;
+  const seated = prev.filter((r) => isSeatedGuest(r.status));
+  if (seated.length === 0) return polled;
+  const seatedIds = new Set(seated.map((r) => r.userId));
+  return [
+    ...polled.filter((r) => !seatedIds.has(r.userId)),
+    ...seated,
+  ];
 }
 
 type FanoutSnap = {
@@ -1128,7 +1150,7 @@ export function LiveStudioClient() {
           active.sessionId,
         );
         if (!cancelled) {
-          setGuestRows(rows);
+          setGuestRows((prev) => mergeGuestPanel(prev, rows));
           setGuestPollError(null);
         }
       } catch (e) {
@@ -3468,8 +3490,40 @@ export function LiveStudioClient() {
     try {
       if (action === "accept") {
         try {
-          await inviteGuest(session.idToken, active.sessionId, guestUserId);
-          pushToast("Guest invited — they join from the app");
+          const invited = await inviteGuest(
+            session.idToken,
+            active.sessionId,
+            guestUserId,
+          );
+          setGuestRows((prev) => {
+            const next = prev.map((r) =>
+              r.userId === guestUserId
+                ? {
+                    ...r,
+                    status: "INVITED",
+                    slotIndex:
+                      typeof invited.slotIndex === "number"
+                        ? invited.slotIndex
+                        : r.slotIndex,
+                  }
+                : r,
+            );
+            if (!next.some((r) => r.userId === guestUserId)) {
+              next.push({
+                userId: guestUserId,
+                status: "INVITED",
+                slotIndex:
+                  typeof invited.slotIndex === "number" ? invited.slotIndex : null,
+              });
+            }
+            return next;
+          });
+          try {
+            publishRef.current?.refreshStrategy?.();
+          } catch {
+            /* ignore */
+          }
+          pushToast("Guest accepted — waiting for them on stage");
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           // Already seated: treat as success so Accept isn't a red failure loop.
@@ -3484,7 +3538,13 @@ export function LiveStudioClient() {
         session.idToken,
         active.sessionId,
       );
-      setGuestRows(rows);
+      setGuestRows((prev) => {
+        const base =
+          action === "reject"
+            ? prev.filter((r) => r.userId !== guestUserId)
+            : prev;
+        return mergeGuestPanel(base, rows);
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Guest action failed");
     } finally {
@@ -3543,7 +3603,7 @@ export function LiveStudioClient() {
       setInviteSlotKey(null);
       setInviteQuery("");
       const rows = await fetchGuestRequests(session.idToken, active.sessionId);
-      setGuestRows(rows);
+      setGuestRows((prev) => mergeGuestPanel(prev, rows));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invite failed");
     } finally {
@@ -3605,7 +3665,12 @@ export function LiveStudioClient() {
         session.idToken,
         active.sessionId,
       );
-      setGuestRows(rows);
+      setGuestRows((prev) =>
+        mergeGuestPanel(
+          prev.filter((r) => r.userId !== guestUserId),
+          rows,
+        ),
+      );
       pushToast("Guest removed");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Guest kick failed");

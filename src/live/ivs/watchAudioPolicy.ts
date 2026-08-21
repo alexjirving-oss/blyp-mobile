@@ -1,8 +1,7 @@
 /**
  * Throttle JS loudspeaker reasserts on watch paths.
- * Stage watch must use native PUBLISHING (call mode + speaker), same as guest.
- * PLAYBACK / MODE_NORMAL is HLS only. Forcing MODE_NORMAL onto a live Stage
- * fight Samsung's earpiece snap on the UI thread until the user publishes.
+ * Native Stage watch uses PLAYBACK (media/speaker). Do not hammer AudioManager
+ * from JS — that is what froze likes/leave on Samsung.
  */
 
 export const VIEWER_LOUDSPEAKER_MIN_INTERVAL_MS = 2500;

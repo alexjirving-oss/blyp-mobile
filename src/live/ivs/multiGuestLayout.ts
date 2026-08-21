@@ -19,6 +19,10 @@ export const LIVE_LAYOUT_MODES = {
   HOST_FOCUS: 'host_focus',
   EQUAL_GRID: 'equal_grid',
   SIDE_BY_SIDE: 'side_by_side',
+  /** Studio Solo, portrait: host fills the 9:16 phone. */
+  SOLO: 'solo',
+  /** Studio Host + 9: 16:9 host band on top, 3×3 guest boxes under. */
+  HOST_TOP_9: 'host_top_9',
 } as const;
 
 export type LiveLayoutMode = (typeof LIVE_LAYOUT_MODES)[keyof typeof LIVE_LAYOUT_MODES];
@@ -64,7 +68,9 @@ export function normalizeLiveLayoutMode(raw: unknown): LiveLayoutMode {
     value === LIVE_LAYOUT_MODES.HOST_FOCUS ||
     value === LIVE_LAYOUT_MODES.EQUAL_GRID ||
     value === LIVE_LAYOUT_MODES.SIDE_BY_SIDE ||
-    value === LIVE_LAYOUT_MODES.BOTTOM_GRID
+    value === LIVE_LAYOUT_MODES.BOTTOM_GRID ||
+    value === LIVE_LAYOUT_MODES.SOLO ||
+    value === LIVE_LAYOUT_MODES.HOST_TOP_9
   ) {
     return value;
   }
@@ -78,9 +84,9 @@ export function normalizeLiveLayoutMode(raw: unknown): LiveLayoutMode {
  * instead of always defaulting to bottom tray.
  */
 const STUDIO_LAYOUT_TO_LIVE: Record<string, LiveLayoutMode> = {
-  solo: LIVE_LAYOUT_MODES.BOTTOM_GRID,
+  solo: LIVE_LAYOUT_MODES.SOLO,
   'host-top': LIVE_LAYOUT_MODES.HOST_FOCUS,
-  'host-top-9': LIVE_LAYOUT_MODES.EQUAL_GRID,
+  'host-top-9': LIVE_LAYOUT_MODES.HOST_TOP_9,
   'split-stack': LIVE_LAYOUT_MODES.EQUAL_GRID,
   'host-bottom': LIVE_LAYOUT_MODES.HOST_FOCUS,
   'host-bottom-9': LIVE_LAYOUT_MODES.EQUAL_GRID,
@@ -153,6 +159,13 @@ export function firstEmptyStickySlot(
 /** Whether this layout uses the bottom guest tray chrome (pager + swipe). */
 export function layoutUsesBottomTray(mode: LiveLayoutMode): boolean {
   return mode === LIVE_LAYOUT_MODES.BOTTOM_GRID || mode === LIVE_LAYOUT_MODES.HOST_FOCUS;
+}
+
+/** Guest boxes this Studio layout paints (not the IVS publisher cap). */
+export function guestBoxesForLayout(mode: LiveLayoutMode): number {
+  if (mode === LIVE_LAYOUT_MODES.SOLO) return 0;
+  if (mode === LIVE_LAYOUT_MODES.HOST_TOP_9) return 9;
+  return MAX_GUEST_SLOTS;
 }
 
 /**

@@ -13,16 +13,20 @@ export type IvsHostPublishHandle = {
   /** Swap the published audio track (gum ↔ mix dest). Video stays put. */
   setAudioTrack: (track: MediaStreamTrack, muted?: boolean) => void;
   setAudioMuted: (muted: boolean) => void;
+  /** Re-evaluate guest subscribe after someone is accepted onto the stage. */
+  refreshStrategy: () => void;
 };
 
 type StageParticipantLike = {
   isLocal?: boolean;
+  isPublishing?: boolean;
+  id?: string;
   userId?: string;
   attributes?: Record<string, unknown>;
 };
 
 type StageStreamLike = {
-  streamType?: string;
+  streamType?: string | number;
   mediaStreamTrack?: MediaStreamTrack;
 };
 
@@ -216,24 +220,38 @@ export async function startIvsWebHostPublish(opts: {
   };
 
   const guestUserId = (participant: StageParticipantLike): string =>
-    String(participant.userId || "").trim();
+    String(
+      participant.userId ||
+        participant.attributes?.userId ||
+        participant.attributes?.uid ||
+        "",
+    ).trim();
 
-  const isGuest = (participant: StageParticipantLike): boolean => {
+  const isGuestPublisher = (participant: StageParticipantLike): boolean => {
     if (participant.isLocal) return false;
-    return String(participant.attributes?.role || "") === "guest";
+    const role = String(participant.attributes?.role || "").toLowerCase();
+    if (role === "guest") return true;
+    if (role === "host" || role === "viewer") return false;
+    return Boolean(participant.isPublishing);
+  };
+
+  const streamKind = (stream: StageStreamLike, track: MediaStreamTrack): string => {
+    const raw = String(stream.streamType || "").toLowerCase();
+    if (raw === "video" || raw === "audio") return raw;
+    return String(track.kind || "").toLowerCase();
   };
 
   const attachGuestStreams = (
     participant: StageParticipantLike,
     streams: StageStreamLike[],
   ) => {
-    if (!isGuest(participant)) return;
+    if (!isGuestPublisher(participant)) return;
     const userId = guestUserId(participant);
     if (!userId) return;
     for (const stream of streams) {
       const track = stream.mediaStreamTrack;
       if (!track) continue;
-      const kind = stream.streamType || track.kind;
+      const kind = streamKind(stream, track);
       if (kind === "video") {
         guestVideo.set(userId, track);
       } else if (kind === "audio") {
@@ -255,7 +273,7 @@ export async function startIvsWebHostPublish(opts: {
     shouldPublishParticipant: () => true,
     shouldSubscribeToParticipant: (participant: StageParticipantLike) => {
       if (!opts.subscribeGuests) return SubscribeType.NONE;
-      return isGuest(participant)
+      return isGuestPublisher(participant)
         ? SubscribeType.AUDIO_VIDEO
         : SubscribeType.NONE;
     },
@@ -349,6 +367,13 @@ export async function startIvsWebHostPublish(opts: {
     setAudioMuted: (muted: boolean) => {
       audioMuted = muted;
       audioLss.setMuted?.(muted);
+    },
+    refreshStrategy: () => {
+      try {
+        stage.refreshStrategy?.();
+      } catch {
+        /* strategy refresh is best-effort */
+      }
     },
     leave: async () => {
       try {

@@ -45,4 +45,9 @@ class IVSRealTimeViewManager : SimpleViewManager<IVSRealTimeView>() {
     fun setZoom(view: IVSRealTimeView, value: Float) {
         view.setZoom(value)
     }
+
+    @ReactProp(name = "contentFit")
+    fun setContentFit(view: IVSRealTimeView, value: String?) {
+        view.setContentFit(value)
+    }
 }

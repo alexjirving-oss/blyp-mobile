@@ -178,8 +178,13 @@ export async function inviteGuest(
   idToken: string,
   sessionId: string,
   guestUserId: string,
-): Promise<void> {
-  await livePost("/api/live/guest/invite", idToken, { sessionId, guestUserId });
+): Promise<{ slotIndex?: number }> {
+  const out = await livePost<{ slotIndex?: number }>(
+    "/api/live/guest/invite",
+    idToken,
+    { sessionId, guestUserId },
+  );
+  return out || {};
 }
 
 export async function rejectGuest(

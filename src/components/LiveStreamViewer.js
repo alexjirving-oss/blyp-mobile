@@ -72,6 +72,7 @@ import {
   normalizeLiveLayoutMode,
   layoutUsesBottomTray,
   guestsPerTrayPage,
+  guestBoxesForLayout,
   buildVisibleGuestSlotIds,
   guestTileWidthPercent,
   guestTileHorizontalMarginPercent,
@@ -858,6 +859,12 @@ const IVSLiveStreamViewer = ({
   }, [guestMode]);
 
   useEffect(() => {
+    const mode = normalizeLiveLayoutMode(guestLayoutModeProp);
+    if (mode !== LIVE_LAYOUT_MODES.SOLO && mode !== LIVE_LAYOUT_MODES.HOST_TOP_9) return;
+    if (typeof onGuestPagerLayout === 'function') onGuestPagerLayout(0);
+  }, [guestLayoutModeProp, onGuestPagerLayout]);
+
+  useEffect(() => {
     if (__DEV__) console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_MOUNT]');
     return () => {
       if (__DEV__) console.log('[IVS_VIEWER][NATIVE_VIEW_CONTAINER_UNMOUNT]');
@@ -1225,7 +1232,7 @@ const IVSLiveStreamViewer = ({
     );
 
     const guestLayoutMode = normalizeLiveLayoutMode(guestLayoutModeProp);
-    const guestSlotsTotal = MAX_GUEST_SLOTS;
+    const guestSlotsTotal = guestBoxesForLayout(guestLayoutMode);
     const useBottomTray = layoutUsesBottomTray(guestLayoutMode);
     const trayDensity =
       guestLayoutMode === LIVE_LAYOUT_MODES.HOST_FOCUS
@@ -1547,6 +1554,156 @@ const IVSLiveStreamViewer = ({
               </View>
             </View>
           )}
+        </View>
+      );
+    }
+
+    const isQueuedJoin = guestRequestStatus === 'sent' && !guestJoinError;
+    const isSendingJoin = guestRequestStatus === 'sending';
+
+    if (guestLayoutMode === LIVE_LAYOUT_MODES.SOLO) {
+      return (
+        <View
+          style={[styles.container, style]}
+          onLayout={handleViewerContainerLayout}
+        >
+          {hostStream ? (
+            <NativeIVSRealTimeView
+              style={styles.realTimeView}
+              stageArn={stageArnForSurface}
+              token={tokenForSurface}
+              sessionId={streamId}
+              slotId={0}
+              participantId={hostStream.participantId}
+              remoteTrackCount={1}
+              zoom={1.0}
+              contentFit="cover"
+              testID="ivs-realtime-solo-host"
+            />
+          ) : (
+            <View style={styles.hostPlaceholder}>
+              <Text style={styles.placeholderText}>Waiting for host…</Text>
+            </View>
+          )}
+          <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinPositions.host} />
+          {!guestMode ? (
+            <TouchableOpacity
+              style={[styles.soloJoinChip, isQueuedJoin && styles.joinTileQueued]}
+              activeOpacity={0.85}
+              onPress={() => requestToJoinAsGuest(1)}
+              disabled={isSendingJoin || isQueuedJoin}
+            >
+              <Text style={[styles.soloJoinChipText, isQueuedJoin && styles.joinLabelTextQueued]}>
+                {isSendingJoin ? 'REQUESTING…' : isQueuedJoin ? 'IN QUEUE' : guestJoinError ? 'RETRY' : 'JOIN'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.guestModeBanner, { top: 12 }]}>
+              <Text style={styles.guestModeText}>On stage</Text>
+              <TouchableOpacity style={styles.leaveGuestButton} onPress={leaveGuestMode}>
+                <Text style={styles.leaveGuestText}>Leave</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      );
+    }
+
+    if (guestLayoutMode === LIVE_LAYOUT_MODES.HOST_TOP_9) {
+      return (
+        <View
+          style={[styles.container, style]}
+          onLayout={handleViewerContainerLayout}
+        >
+          <View style={styles.hostTop9Stage}>
+            <View style={styles.hostTop9HostBand}>
+              {hostStream ? (
+                <NativeIVSRealTimeView
+                  style={styles.realTimeView}
+                  stageArn={stageArnForSurface}
+                  token={tokenForSurface}
+                  sessionId={streamId}
+                  slotId={0}
+                  participantId={hostStream.participantId}
+                  remoteTrackCount={1}
+                  zoom={1.0}
+                  testID="ivs-realtime-host-top-9"
+                />
+              ) : (
+                <View style={styles.hostPlaceholder}>
+                  <Text style={styles.placeholderText}>Waiting for host…</Text>
+                </View>
+              )}
+              <TileCoinBadge coins={coinsForUser(hostUid)} style={tileCoinPositions.host} />
+            </View>
+            <View style={styles.hostTop9Grid}>
+              {[0, 1, 2].map((row) => (
+                <View key={`host-top-9-row-${row}`} style={styles.hostTop9Row}>
+                  {[0, 1, 2].map((col) => {
+                    const globalSlotId = row * 3 + col + 1;
+                const stream =
+                  !(guestMode && guestSlotId === globalSlotId)
+                    ? streamBySlot.get(globalSlotId) || null
+                    : null;
+                const tileUserId =
+                  guestMode && guestSlotId === globalSlotId
+                    ? uid
+                    : slotUserIdBySlot.get(globalSlotId) || null;
+                const isSelfTile = !!(guestMode && guestSlotId === globalSlotId);
+                const remoteCamOff = !!(stream && stream.isCameraDisabled);
+                const showAvatar =
+                  (isSelfTile && !effectiveSelfCamOn) || (!isSelfTile && remoteCamOff);
+                const isJoinBox = !guestMode && globalSlotId === firstJoinSlotId;
+                return (
+                  <View key={`host-top-9-${globalSlotId}`} style={styles.hostTop9Tile}>
+                    <TileCoinBadge coins={coinsForUser(tileUserId)} style={tileCoinPositions.guest} />
+                    {isSelfTile ? (
+                      NativeIVSBroadcastView ? (
+                        <View style={styles.tileVideoSurface}>
+                          {!showAvatar ? (
+                            <NativeIVSBroadcastView zoom={GUEST_TILE_ZOOM} style={StyleSheet.absoluteFill} />
+                          ) : null}
+                        </View>
+                      ) : (
+                        <View style={styles.tilePlaceholder}>
+                          <Text style={styles.placeholderText}>Camera unavailable</Text>
+                        </View>
+                      )
+                    ) : stream && !showAvatar ? (
+                      <NativeIVSRealTimeView
+                        style={styles.realTimeView}
+                        stageArn={stageArnForSurface}
+                        token={tokenForSurface}
+                        sessionId={streamId}
+                        slotId={globalSlotId}
+                        participantId={stream.participantId}
+                        remoteTrackCount={1}
+                        zoom={GUEST_TILE_ZOOM}
+                        testID={`ivs-realtime-host-top-9-guest-${globalSlotId}`}
+                      />
+                    ) : isJoinBox ? (
+                      <TouchableOpacity
+                        style={[styles.joinTile, isQueuedJoin && styles.joinTileQueued]}
+                        activeOpacity={0.85}
+                        onPress={() => requestToJoinAsGuest(globalSlotId)}
+                        disabled={isSendingJoin || isQueuedJoin}
+                      >
+                        <Text style={[styles.joinLabelText, isQueuedJoin && styles.joinLabelTextQueued]}>
+                          {isSendingJoin ? 'REQUESTING…' : isQueuedJoin ? 'IN QUEUE' : guestJoinError ? 'RETRY' : 'JOIN'}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.emptyTile}>
+                        <View style={styles.emptyTileInner} />
+                      </View>
+                    )}
+                  </View>
+                );
+                  })}
+                </View>
+              ))}
+            </View>
+          </View>
         </View>
       );
     }
@@ -2831,6 +2988,47 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     backgroundColor: '#000',
+  },
+  hostTop9Stage: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#000',
+  },
+  hostTop9HostBand: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    backgroundColor: '#000',
+    overflow: 'hidden',
+  },
+  hostTop9Grid: {
+    flex: 1,
+    backgroundColor: '#0A0A0C',
+  },
+  hostTop9Row: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  hostTop9Tile: {
+    flex: 1,
+    overflow: 'hidden',
+    backgroundColor: '#111114',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0, 210, 190, 0.22)',
+  },
+  soloJoinChip: {
+    position: 'absolute',
+    right: 12,
+    bottom: 88,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0, 210, 190, 0.92)',
+  },
+  soloJoinChipText: {
+    color: '#0A0A0C',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.4,
   },
   composeSide: {
     flexDirection: 'row',

@@ -61,6 +61,8 @@ internal class LiveLoudspeakerController(
     private var lastSignature: String? = null
     private var publishFocusRequest: AudioFocusRequest? = null
     private var publishFocusHeld: Boolean = false
+    private var playbackFocusRequest: AudioFocusRequest? = null
+    private var playbackFocusHeld: Boolean = false
     private var burstToken: Long = 0L
     private var deviceListenerRegistered: Boolean = false
 
@@ -122,6 +124,8 @@ internal class LiveLoudspeakerController(
                 val interval = when {
                     profile == Profile.PUBLISHING && isEarpieceSelected() ->
                         WATCHDOG_EARPIECE_INTERVAL_MS
+                    profile == Profile.PLAYBACK && isEarpieceSelected() ->
+                        WATCHDOG_PLAYBACK_EARPIECE_INTERVAL_MS
                     profile == Profile.PLAYBACK -> WATCHDOG_PLAYBACK_INTERVAL_MS
                     else -> WATCHDOG_INTERVAL_MS
                 }
@@ -197,6 +201,7 @@ internal class LiveLoudspeakerController(
             unregisterCommunicationDeviceListener()
             try {
                 abandonPublishAudioFocus()
+                abandonPlaybackAudioFocus()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     audioManager.clearCommunicationDevice()
                 }
@@ -327,6 +332,7 @@ internal class LiveLoudspeakerController(
             var communicationDevice = "legacy"
             var routeChoice = "legacy"
             if (profile == Profile.PUBLISHING) {
+                abandonPlaybackAudioFocus()
                 ensurePublishAudioFocus()
                 val selection = selectPublishingCommunicationDevice()
                 routeChoice = selection.label
@@ -334,16 +340,10 @@ internal class LiveLoudspeakerController(
             } else {
                 abandonPublishAudioFocus()
                 stopBluetoothScoIfNeeded()
-                // Never sandwich PLAYBACK into MODE_IN_COMMUNICATION — that
-                // makes OEM treat watch as a call, earpiece snaps, 500ms loop.
-                val pinned = pinBuiltinSpeaker(sandwich = false)
+                ensurePlaybackAudioFocus()
+                val pinned = pinWatchLoudspeaker()
                 communicationDevice = currentCommDeviceLabel()
-                @Suppress("DEPRECATION")
-                run { audioManager.isSpeakerphoneOn = true }
-                if (audioManager.mode != AudioManager.MODE_NORMAL) {
-                    audioManager.mode = AudioManager.MODE_NORMAL
-                }
-                routeChoice = if (pinned) "media-speaker-pinned" else "media-speaker"
+                routeChoice = if (pinned) "media-loudspeaker" else "media-loudspeaker-unverified"
             }
 
             // Watchdog/route churn can leave StageAudioManager without AEC after a prior
@@ -368,6 +368,12 @@ internal class LiveLoudspeakerController(
                     aec = "failed:${aecError.message}"
                     Log.w(logTag, "[IVS_AUDIO_ROUTE] AEC reassert failed reason=$reason", aecError)
                 }
+            } else if (profile == Profile.PLAYBACK && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                try {
+                    val stageAudio = StageAudioManager.getInstance(appContext)
+                    usage = stageAudio.usage.name
+                } catch (_: Throwable) {
+                }
             }
 
             // Last-chance sandwich is host/guest only. Watch-only sandwich
@@ -387,14 +393,9 @@ internal class LiveLoudspeakerController(
                 communicationDevice = currentCommDeviceLabel()
                 routeChoice = "$routeChoice+sandwich"
             } else if (profile == Profile.PLAYBACK && isEarpieceSelected()) {
-                pinBuiltinSpeaker(sandwich = false)
-                if (audioManager.mode != AudioManager.MODE_NORMAL) {
-                    audioManager.mode = AudioManager.MODE_NORMAL
-                }
-                @Suppress("DEPRECATION")
-                run { audioManager.isSpeakerphoneOn = true }
+                val pinned = pinWatchLoudspeaker()
                 communicationDevice = currentCommDeviceLabel()
-                routeChoice = "$routeChoice+playback-pin"
+                routeChoice = if (pinned) "$routeChoice+watch-repin" else "$routeChoice+watch-repin-fail"
             }
 
             val volumeControlStream = bindVolumeControlStream(profile)
@@ -541,6 +542,50 @@ internal class LiveLoudspeakerController(
         return !isEarpieceSelected()
     }
 
+    /**
+     * Watch-only loudspeaker. Media audio (SUBSCRIBE_ONLY) must not stay on
+     * setCommunicationDevice(SPEAKER) — Samsung then treats watch as a call
+     * and the earpiece wins. Clear the communication device, MODE_NORMAL,
+     * speakerphone on. If the OEM already snapped to earpiece, pin speaker
+     * once, then keep speakerphone.
+     */
+    private fun pinWatchLoudspeaker(): Boolean {
+        if (audioManager.mode != AudioManager.MODE_NORMAL) {
+            audioManager.mode = AudioManager.MODE_NORMAL
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                audioManager.clearCommunicationDevice()
+            } catch (_: Exception) {
+            }
+        }
+        @Suppress("DEPRECATION")
+        run { audioManager.isSpeakerphoneOn = true }
+        if (!isEarpieceSelected()) {
+            Log.i(
+                logTag,
+                "[IVS_AUDIO_ROUTE] watch loudspeaker mode=${audioManager.mode} comm=${currentCommDeviceLabel()}",
+            )
+            return true
+        }
+        Log.w(logTag, "[IVS_AUDIO_ROUTE] watch still earpiece after media pin; speaker device")
+        pinBuiltinSpeaker(sandwich = true)
+        if (audioManager.mode != AudioManager.MODE_NORMAL) {
+            audioManager.mode = AudioManager.MODE_NORMAL
+        }
+        @Suppress("DEPRECATION")
+        run { audioManager.isSpeakerphoneOn = true }
+        if (!isEarpieceSelected()) return true
+        Log.w(logTag, "[IVS_AUDIO_ROUTE] watch media path lost; communication speaker")
+        pinBuiltinSpeaker(sandwich = true)
+        if (audioManager.mode != AudioManager.MODE_IN_COMMUNICATION) {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        }
+        @Suppress("DEPRECATION")
+        run { audioManager.isSpeakerphoneOn = true }
+        return !isEarpieceSelected()
+    }
+
     private fun isBluetoothCommDevice(type: Int): Boolean {
         if (type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -611,6 +656,48 @@ internal class LiveLoudspeakerController(
         }
     }
 
+    private fun ensurePlaybackAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val existing = playbackFocusRequest
+            if (existing != null && playbackFocusHeld) return
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attrs)
+                .setAcceptsDelayedFocusGain(true)
+                .build()
+            val result = audioManager.requestAudioFocus(request)
+            playbackFocusRequest = request
+            playbackFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else if (!playbackFocusHeld) {
+            @Suppress("DEPRECATION")
+            val result = audioManager.requestAudioFocus(
+                null,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN,
+            )
+            playbackFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+    }
+
+    private fun abandonPlaybackAudioFocus() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                playbackFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            } else if (playbackFocusHeld) {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(null)
+            }
+        } catch (error: Throwable) {
+            Log.w(logTag, "[IVS_AUDIO_ROUTE] abandon playback focus failed", error)
+        } finally {
+            playbackFocusRequest = null
+            playbackFocusHeld = false
+        }
+    }
+
     /**
      * Samsung Fold (and some OEMs) key volume off AudioAttributes.Usage / the Activity
      * volume-control stream more strictly than MODE_IN_COMMUNICATION alone. Keep keys on
@@ -649,8 +736,18 @@ internal class LiveLoudspeakerController(
     }
 
     private fun findBuiltinSpeaker(devices: List<AudioDeviceInfo>): AudioDeviceInfo? {
-        return devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-            ?: devices.firstOrNull { it.type == TYPE_BUILTIN_SPEAKER_SAFE }
+        val fromList =
+            devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                ?: devices.firstOrNull { it.type == TYPE_BUILTIN_SPEAKER_SAFE }
+        if (fromList != null) return fromList
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
+        return try {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER || it.type == TYPE_BUILTIN_SPEAKER_SAFE
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun findHeadset(devices: List<AudioDeviceInfo>): AudioDeviceInfo? {
@@ -684,12 +781,11 @@ internal class LiveLoudspeakerController(
      */
     private fun playbackRouteAlreadyGood(): Boolean {
         if (isEarpieceSelected()) return false
-        if (audioManager.mode == AudioManager.MODE_IN_COMMUNICATION) return false
         val comm = currentCommDeviceLabel().lowercase()
         if (comm.contains("earpiece")) return false
         @Suppress("DEPRECATION")
         if (audioManager.isSpeakerphoneOn) return true
-        return comm.contains("speaker") || comm == "legacy" || comm == "none"
+        return comm.contains("speaker")
     }
 
     private companion object {
@@ -697,6 +793,8 @@ internal class LiveLoudspeakerController(
         const val WATCHDOG_INTERVAL_MS = 2_000L
         /** Watch-only: cheap check, do not hammer AudioManager. */
         const val WATCHDOG_PLAYBACK_INTERVAL_MS = 5_000L
+        /** Watch-only while earpiece is stuck — slower than publish so likes/leave stay alive. */
+        const val WATCHDOG_PLAYBACK_EARPIECE_INTERVAL_MS = 2_000L
         /** While earpiece is stuck on a publish session, hammer the route harder. */
         const val WATCHDOG_EARPIECE_INTERVAL_MS = 500L
         const val VOLUME_CONTROL_UNAVAILABLE = Int.MIN_VALUE

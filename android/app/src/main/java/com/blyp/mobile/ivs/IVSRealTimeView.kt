@@ -23,6 +23,7 @@ class IVSRealTimeView(context: Context) : FrameLayout(context) {
     private var participantId: String? = null
     private var remoteTrackCount: Int = 0
     private var zoom: Float = 1.0f
+    private var contentFitCover: Boolean = false
     private var sdkPreview: ImagePreviewView? = null
 
     init {
@@ -98,6 +99,13 @@ class IVSRealTimeView(context: Context) : FrameLayout(context) {
         remoteTrackCount = count
     }
 
+    fun setContentFit(value: String?) {
+        val cover = value.equals("cover", ignoreCase = true)
+        if (contentFitCover == cover) return
+        contentFitCover = cover
+        applyZoomTransform("contentFitChanged")
+    }
+
     fun setZoom(value: Float) {
         val next = if (value.isFinite() && value > 0f) value else 1.0f
         if (zoom == next) return
@@ -108,12 +116,32 @@ class IVSRealTimeView(context: Context) : FrameLayout(context) {
     private fun applyZoomTransform(reason: String) {
         val preview = sdkPreview ?: return
         val z = if (zoom.isFinite() && zoom > 0f) zoom else 1.0f
-        preview.scaleX = z
-        preview.scaleY = z
+        val bw = width.toFloat()
+        val bh = height.toFloat()
+        val pw = preview.width.toFloat()
+        val ph = preview.height.toFloat()
+        val coverScale =
+            if (contentFitCover && bw > 1f && bh > 1f && pw > 1f && ph > 1f) {
+                val looksFilled = kotlin.math.abs(pw - bw) < 2f && kotlin.math.abs(ph - bh) < 2f
+                if (looksFilled) {
+                    // SDK letterboxes 16:9 inside MATCH_PARENT. Scale so the
+                    // picture fills a 9:16 phone instead of sitting as a band.
+                    val contentAspect = 16f / 9f
+                    val boxAspect = bw / bh
+                    if (contentAspect > boxAspect) contentAspect / boxAspect else boxAspect / contentAspect
+                } else {
+                    kotlin.math.max(bw / pw, bh / ph)
+                }
+            } else {
+                1f
+            }
+        preview.scaleX = z * coverScale
+        preview.scaleY = z * coverScale
         if (BuildConfig.DEBUG) {
             Log.i(
                 "IVS_PROOF",
-                "[ZOOM_APPLIED] reason=$reason slot=$slotId zoom=$z size=${width}x${height}",
+                "[ZOOM_APPLIED] reason=$reason slot=$slotId zoom=$z cover=$contentFitCover " +
+                    "coverScale=$coverScale size=${width}x${height} preview=${preview.width}x${preview.height}",
             )
         }
     }
@@ -138,6 +166,6 @@ class IVSRealTimeView(context: Context) : FrameLayout(context) {
         val preview = sdkPreview ?: return
         preview.pivotX = preview.width / 2f
         preview.pivotY = preview.height / 2f
-        if (changed) applyZoomTransform("layout")
+        applyZoomTransform("layout")
     }
 }

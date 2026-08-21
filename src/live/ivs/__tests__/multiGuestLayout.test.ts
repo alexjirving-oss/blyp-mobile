@@ -9,6 +9,7 @@ import {
   mapStudioLayoutToLiveLayoutMode,
   resolveLiveLayoutMode,
   layoutUsesBottomTray,
+  guestBoxesForLayout,
   MAX_GUEST_SLOTS,
 } from '../multiGuestLayout';
 
@@ -54,6 +55,10 @@ describe('multiGuestLayout sticky slots', () => {
     expect(normalizeLiveLayoutMode('nope')).toBe(LIVE_LAYOUT_MODES.BOTTOM_GRID);
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.BOTTOM_GRID)).toBe(true);
     expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.EQUAL_GRID)).toBe(false);
+    expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.SOLO)).toBe(false);
+    expect(layoutUsesBottomTray(LIVE_LAYOUT_MODES.HOST_TOP_9)).toBe(false);
+    expect(guestBoxesForLayout(LIVE_LAYOUT_MODES.SOLO)).toBe(0);
+    expect(guestBoxesForLayout(LIVE_LAYOUT_MODES.HOST_TOP_9)).toBe(9);
     expect(MAX_GUEST_SLOTS).toBe(11);
   });
 
@@ -63,7 +68,8 @@ describe('multiGuestLayout sticky slots', () => {
     expect(mapStudioLayoutToLiveLayoutMode('host-top')).toBe(LIVE_LAYOUT_MODES.HOST_FOCUS);
     expect(mapStudioLayoutToLiveLayoutMode('quad')).toBe(LIVE_LAYOUT_MODES.EQUAL_GRID);
     expect(mapStudioLayoutToLiveLayoutMode('grid-3x3')).toBe(LIVE_LAYOUT_MODES.EQUAL_GRID);
-    expect(mapStudioLayoutToLiveLayoutMode('solo')).toBe(LIVE_LAYOUT_MODES.BOTTOM_GRID);
+    expect(mapStudioLayoutToLiveLayoutMode('solo')).toBe(LIVE_LAYOUT_MODES.SOLO);
+    expect(mapStudioLayoutToLiveLayoutMode('host-top-9')).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
     expect(mapStudioLayoutToLiveLayoutMode('nope')).toBeNull();
   });
 
@@ -74,6 +80,18 @@ describe('multiGuestLayout sticky slots', () => {
         guestLayoutMode: 'bottom_grid',
       }),
     ).toBe(LIVE_LAYOUT_MODES.SIDE_BY_SIDE);
+    expect(
+      resolveLiveLayoutMode({
+        studioLayout: 'solo',
+        guestLayoutMode: 'bottom_grid',
+      }),
+    ).toBe(LIVE_LAYOUT_MODES.SOLO);
+    expect(
+      resolveLiveLayoutMode({
+        studioLayout: 'host-top-9',
+        guestLayoutMode: 'equal_grid',
+      }),
+    ).toBe(LIVE_LAYOUT_MODES.HOST_TOP_9);
     expect(
       resolveLiveLayoutMode({
         guestLayoutMode: 'equal_grid',

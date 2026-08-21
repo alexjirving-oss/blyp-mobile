@@ -688,12 +688,9 @@ class IVSBroadcastModule(
         mainHandler.post {
             try {
                 val profile = when (sessionMode) {
-                    // Stage subscribe is still a WebRTC call. PLAYBACK/MODE_NORMAL
-                    // is only for the HLS player. Watch-only Stage must match host/guest
-                    // or Samsung fights earpiece vs speaker on the UI thread.
-                    SessionMode.HOST, SessionMode.GUEST, SessionMode.VIEWER ->
+                    SessionMode.HOST, SessionMode.GUEST ->
                         LiveLoudspeakerController.Profile.PUBLISHING
-                    SessionMode.NONE ->
+                    SessionMode.VIEWER, SessionMode.NONE ->
                         LiveLoudspeakerController.Profile.PLAYBACK
                 }
                 loudspeakerController.force(profile, "js:$reason")
@@ -901,11 +898,9 @@ class IVSBroadcastModule(
      * speakerphone played on the call path (reverb/screech).
      *
      * StageAudioManager's attributes do not select a physical output device. Disable its
-     * AudioManager-mode ownership while active, then let LiveLoudspeakerController own
-     * MODE_IN_COMMUNICATION + the built-in speaker for any Stage session (host, guest,
-     * and subscribe-only watch). MODE_NORMAL / SUBSCRIBE_ONLY is HLS player only —
-     * using it on Stage watch fights IVS and freezes likes/leave until the user
-     * publishes as a guest.
+     * AudioManager-mode ownership while active. Watch-only uses SUBSCRIBE_ONLY (media /
+     * loudspeaker). Host/guest use VIDEO_CHAT. LiveLoudspeakerController owns the
+     * physical speaker pin.
      */
     private fun configureStageAudio(publishing: Boolean, role: String) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
@@ -931,7 +926,7 @@ class IVSBroadcastModule(
                 // Explicitly restore AEC so speaker output does not feed the mic.
                 audioManager.enableEchoCancellation(true)
             } else {
-                // Idle / after stopSession only. Never use this for a live Stage watch.
+                // Watch-only Stage: media usage so Samsung routes to the loudspeaker.
                 audioManager.setPreset(StageAudioManager.UseCasePreset.SUBSCRIBE_ONLY)
             }
 
@@ -1006,15 +1001,14 @@ class IVSBroadcastModule(
         // native connection is already dead. Same-token reconnects while still
         // CONNECTED / recoverable DISCONNECTED must not tear down TextureViews.
         stopSession()
-        // VIDEO_CHAT even though we do not publish camera/mic. Subscribe-only
-        // Stage is still a call; SUBSCRIBE_ONLY + PLAYBACK is what made watch
-        // judder until the user tapped Join as guest.
-        configureStageAudio(publishing = true, role = "viewer")
+        // VIDEO_CHAT sends watch audio down the call/earpiece path. Watch-only
+        // stays SUBSCRIBE_ONLY (media/speaker). Host/guest still use VIDEO_CHAT.
+        configureStageAudio(publishing = false, role = "viewer")
 
         sessionMode = SessionMode.VIEWER
         viewerReachedStableConnection = false
         loudspeakerController.start(
-            LiveLoudspeakerController.Profile.PUBLISHING,
+            LiveLoudspeakerController.Profile.PLAYBACK,
             "viewer-before-stage-create",
         )
         renderOwner = RenderOwner.VIEWER_REMOTE
@@ -1125,13 +1119,13 @@ class IVSBroadcastModule(
         }
     }
 
-    /** Re-pin Stage call-mode speaker when viewer subscribe receives playable audio. */
+    /** Re-pin media speaker when viewer subscribe receives playable audio. */
     private fun reassertViewerPlaybackAudio(reason: String) {
         if (sessionMode != SessionMode.VIEWER) return
         val now = SystemClock.elapsedRealtime()
         if (now - lastViewerAudioReassertMs < 750L) return
         lastViewerAudioReassertMs = now
-        loudspeakerController.force(LiveLoudspeakerController.Profile.PUBLISHING, reason)
+        loudspeakerController.force(LiveLoudspeakerController.Profile.PLAYBACK, reason)
     }
 
     private fun emitNetworkQuality(quality: QualityStats.NetworkQuality?, isLocal: Boolean) {

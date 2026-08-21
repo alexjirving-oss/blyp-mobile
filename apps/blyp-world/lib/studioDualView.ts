@@ -253,11 +253,23 @@ export function stageFrameClass(
 
 export function buildStageTiles(
   layout: StageLayoutDef,
-  onStage: { userId: string; status: string }[],
+  onStage: { userId: string; status: string; slotIndex?: number | null }[],
 ): StageTile[] {
+  const bySlot = new Map<number, (typeof onStage)[number]>();
+  const unslotted: typeof onStage = [];
+  for (const g of onStage) {
+    const slot =
+      typeof g.slotIndex === "number" && g.slotIndex >= 1 ? g.slotIndex : 0;
+    if (slot >= 1 && slot <= layout.guestSlots && !bySlot.has(slot)) {
+      bySlot.set(slot, g);
+    } else {
+      unslotted.push(g);
+    }
+  }
+  let nextUnslotted = 0;
   const tiles: StageTile[] = [];
   for (let i = 0; i < layout.guestSlots; i += 1) {
-    const g = onStage[i];
+    const g = bySlot.get(i + 1) ?? unslotted[nextUnslotted++];
     if (g) {
       tiles.push({
         key: g.userId,

@@ -26,7 +26,6 @@ import {
   leaveGuestSession,
   setGuestMuted,
   setGuestCameraOff,
-  listGuestRequests as listGuestRequestsStore,
   listGuests as listGuestsStore,
   getGuest as getGuestStore,
   inviteGuest as inviteGuestStore,
@@ -516,9 +515,13 @@ export async function listGuestRequests(sessionId: string, requesterUserId?: str
   if (requesterUserId && session.hostUserId !== requesterUserId) {
     throw forbidden('Only the host can list guest requests');
   }
-  const rows = await listGuestRequestsStore(sessionId);
-  // Never surface the host as a pending guest (legacy rows + self-request races).
-  return rows.filter((r) => r.userId !== session.hostUserId);
+  const rows = await listGuestsStore(sessionId);
+  // Studio splits this list: REQUESTED = queue, INVITED/LIVE = boxes.
+  // Returning REQUESTED-only made Accept drop the guest from every tile.
+  const panel = new Set(['REQUESTED', 'INVITED', 'LIVE']);
+  return rows.filter(
+    (r) => r.userId !== session.hostUserId && panel.has(r.state),
+  );
 }
 
 export async function getGuest(sessionId: string, guestUserId: string) {

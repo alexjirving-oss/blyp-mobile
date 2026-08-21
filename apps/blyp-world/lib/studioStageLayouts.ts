@@ -175,12 +175,14 @@ export type PhoneLiveLayoutMode =
   | "bottom_grid"
   | "host_focus"
   | "equal_grid"
-  | "side_by_side";
+  | "side_by_side"
+  | "solo"
+  | "host_top_9";
 
 const STUDIO_TO_PHONE: Record<StageLayoutId, PhoneLiveLayoutMode> = {
-  solo: "bottom_grid",
+  solo: "solo",
   "host-top": "host_focus",
-  "host-top-9": "equal_grid",
+  "host-top-9": "host_top_9",
   "split-stack": "equal_grid",
   "host-bottom": "host_focus",
   "host-bottom-9": "equal_grid",
