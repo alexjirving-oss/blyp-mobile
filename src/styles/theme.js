@@ -3,37 +3,37 @@ import { responsiveFont, responsiveSize } from '../utils/scaleUtils';
 
 // Common color palette — unified with the design system's DARK scheme
 // (see src/styles/designSystem/palettes.ts). Keep these keys in sync with the
-// dark scheme so legacy screens importing COLORS match the new look.
+// dark scheme so legacy screens importing COLORS match the warm-night look.
 export const COLORS = {
-  // Brand signal accent — Mercedes-AMG PETRONAS teal (used sparingly)
-  primary: '#00D2BE',
-  primaryDark: '#00A89E',
-  primaryLight: '#7FEDE2',
+  // Brand signal — coral (CTA / LIVE / active chrome; sparingly)
+  primary: '#FF4D6D',
+  primaryDark: '#E83D5C',
+  primaryLight: '#FF7A92',
 
-  // Secondary (kept on-brand). Cyan is the cool highlight via `electric`.
-  secondary: '#00D2BE',
-  secondaryDark: '#00A89E',
-  secondaryLight: '#7FEDE2',
+  // Secondary stays on brand coral; warm taupe is the soft highlight via `electric`.
+  secondary: '#FF4D6D',
+  secondaryDark: '#E83D5C',
+  secondaryLight: '#FF7A92',
 
-  // Electric cyan highlight + glow
-  electric: '#67E8F9',
-  electricSoft: 'rgba(103,232,249,0.14)',
-  glow: '#00D2BE',
+  // Warm taupe secondary (demoted off neon cyan) + soft coral wash
+  electric: '#C4B5A5',
+  electricSoft: 'rgba(255,77,109,0.14)',
+  glow: '#FF4D6D',
 
-  // Background colors (editorial near-black, neutral)
-  background: '#0A0A0C',
-  backgroundLight: '#141418',
-  backgroundCard: '#121216',
+  // Background colors (warm charcoal)
+  background: '#12141A',
+  backgroundLight: '#1A1C24',
+  backgroundCard: '#16181F',
   // Page background
-  pageBackground: '#0A0A0C',
+  pageBackground: '#12141A',
   // Input / tab-strip surface
-  tabStripBackground: 'rgba(255,255,255,0.06)',
+  tabStripBackground: 'rgba(236,234,240,0.06)',
 
-  // Text colors (neutral zinc ramp)
-  textPrimary: '#F5F5F7',
-  textSecondary: '#A1A1AA',
-  textMuted: '#71717A',
-  textDisabled: '#52525B',
+  // Text colors (warm fog / muted)
+  textPrimary: '#ECEAF0',
+  textSecondary: '#9A97A6',
+  textMuted: '#9A97A6',
+  textDisabled: '#6B6878',
 
   // Status colors
   success: '#34D399',
@@ -46,23 +46,23 @@ export const COLORS = {
   black: '#000000',
   transparent: 'transparent',
 
-  // Gradient colors (kept on-brand; gradients are used minimally now)
-  gradientStart: '#00D2BE',
-  gradientMiddle: '#00D2BE',
-  gradientEnd: '#00A89E',
+  // Gradient colors (coral; used sparingly)
+  gradientStart: '#FF4D6D',
+  gradientMiddle: '#FF4D6D',
+  gradientEnd: '#E83D5C',
 
-  // Screen background — flat near-black (no colour wash).
-  screenGradientTop: '#0A0A0C',
-  screenGradientMid: '#0A0A0C',
-  screenGradientBot: '#0A0A0C',
+  // Screen background — flat warm charcoal (no neon wash).
+  screenGradientTop: '#12141A',
+  screenGradientMid: '#12141A',
+  screenGradientBot: '#12141A',
 
   // Premium extras
-  border: 'rgba(255,255,255,0.08)',
-  borderStrong: 'rgba(255,255,255,0.16)',
-  divider: 'rgba(255,255,255,0.06)',
-  cardGlass: '#121216',
-  surface: '#141418',
-  surfaceAlt: '#1C1C22',
+  border: 'rgba(236,234,240,0.12)',
+  borderStrong: 'rgba(236,234,240,0.20)',
+  divider: 'rgba(236,234,240,0.08)',
+  cardGlass: '#16181F',
+  surface: '#1A1C24',
+  surfaceAlt: '#22242E',
 };
 
 // Common spacing values
@@ -96,7 +96,7 @@ export const BORDER_RADIUS = {
   round: responsiveSize(50),
 };
 
-// Soft layered depth + restrained teal tint (not neon)
+// Soft layered depth + restrained coral tint (not neon)
 export const SURFACE_DEPTH = {
   highlightBorder: 'rgba(255,255,255,0.12)',
   highlightBorderStrong: 'rgba(255,255,255,0.18)',
@@ -249,9 +249,9 @@ export const COMMON_STYLES = StyleSheet.create({
   },
 });
 
-// Canonical screen background — flat near-black (editorial, no colour wash).
+// Canonical screen background — flat warm charcoal (no neon wash).
 // Import this wherever a full-page background is needed.
-export const SCREEN_GRADIENT_COLORS = ['#0A0A0C', '#0A0A0C', '#0A0A0C'];
+export const SCREEN_GRADIENT_COLORS = ['#12141A', '#12141A', '#12141A'];
 
 export default {
   COLORS,

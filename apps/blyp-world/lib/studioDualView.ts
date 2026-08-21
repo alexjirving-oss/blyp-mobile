@@ -168,8 +168,9 @@ export function saveOverlayPositionsByAspect(
 }
 
 /**
- * Web watch: phone / Fold cover → portrait program.
- * Desktop / iPad → landscape. Host PORTRAIT/LANDSCAPE is director layout only.
+ * Web watch: phone / Fold cover → portrait program (phone chrome).
+ * Desktop / iPad → landscape (PC/tablet chrome).
+ * Host PORTRAIT/LANDSCAPE is director layout only — never forces viewer aspect.
  */
 export function watchProgramAspectFromViewport(
   width?: number,

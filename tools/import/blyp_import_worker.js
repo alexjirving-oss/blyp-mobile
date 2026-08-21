@@ -61,6 +61,15 @@ const ITEM_TIMEOUT_MS = Number(process.env.ITEM_TIMEOUT_MS || 5 * 60 * 1000);
 const PROBE_TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS || 2 * 60 * 1000);
 const ONCE = process.env.ONCE === '1';
 const STAGGER_FORCE_OFF = process.env.STAGGER_FORCE_OFF === '1';
+// Cloud Run sets K_SERVICE. On Cloud Run we prefer request-driven wakes
+// (scale-to-zero + CPU throttling) unless KEEP_POLLING=1 restores the old
+// always-on poller. Local docker / VM keeps the poll loop by default.
+const IS_CLOUD_RUN = Boolean(process.env.K_SERVICE);
+const REQUEST_DRIVEN =
+  process.env.REQUEST_DRIVEN === '1' ||
+  (IS_CLOUD_RUN && process.env.KEEP_POLLING !== '1' && process.env.REQUEST_DRIVEN !== '0');
+// Leave headroom under Cloud Run request timeout (default 300s).
+const WAKE_BUDGET_MS = Number(process.env.WAKE_BUDGET_MS || 240000);
 
 admin.initializeApp({ projectId: PROJECT_ID, storageBucket: STORAGE_BUCKET });
 const db = admin.firestore();
@@ -468,24 +477,88 @@ async function processJob(ref) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 }
 
-// Cloud Run (and most managed runtimes) require the container to listen on
-// $PORT. The worker itself is a background poller, so we expose a tiny health
-// endpoint just to satisfy the platform's startup probe.
+/** Claim+process until idle or budget exhausted. Used by /wake and ONCE. */
+async function processAvailableJobs(budgetMs) {
+  const deadline = Date.now() + Math.max(1000, Number(budgetMs) || WAKE_BUDGET_MS);
+  let processed = 0;
+  while (Date.now() < deadline) {
+    let ref = null;
+    try {
+      ref = await claimNext();
+    } catch (e) {
+      log('claim error:', e.message);
+      break;
+    }
+    if (!ref) break;
+    try {
+      await processJob(ref);
+      processed += 1;
+    } catch (e) {
+      log('job failed:', e.message);
+      try {
+        await ref.update({ status: 'error', message: e.message || 'Import failed.', updatedAt: Date.now() });
+      } catch { /* ignore */ }
+    }
+    if (ONCE) break;
+  }
+  return processed;
+}
+
+// Cloud Run requires listening on $PORT. Startup probe is TCP; HTTP /wake
+// does the real work under CPU throttling (no always-on poller bill).
 function startHealthServer() {
   const port = Number(process.env.PORT || 8080);
   try {
     http
-      .createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('blyp-import-worker ok'); })
-      .listen(port, () => log(`health server listening on :${port}`));
+      .createServer(async (req, res) => {
+        const pathOnly = String(req.url || '/').split('?')[0];
+        if (pathOnly === '/healthz') {
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.end('ok');
+          return;
+        }
+        if (REQUEST_DRIVEN && (pathOnly === '/' || pathOnly === '/wake')) {
+          try {
+            const n = await processAvailableJobs(WAKE_BUDGET_MS);
+            res.writeHead(200, { 'Content-Type': 'text/plain' });
+            res.end(`blyp-import-worker wake processed=${n}\n`);
+          } catch (e) {
+            log('wake error:', e.message);
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end(`error: ${e.message || 'wake failed'}\n`);
+          }
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('blyp-import-worker ok\n');
+      })
+      .listen(port, () => log(`health server listening on :${port} requestDriven=${REQUEST_DRIVEN}`));
   } catch (e) {
     log('health server failed (continuing):', e.message);
   }
 }
 
 async function main() {
-  log(`started. project=${PROJECT_ID} bucket=${STORAGE_BUCKET} poll=${POLL_MS}ms once=${ONCE}`);
+  log(
+    `started. project=${PROJECT_ID} bucket=${STORAGE_BUCKET} poll=${POLL_MS}ms once=${ONCE}` +
+      ` cloudRun=${IS_CLOUD_RUN} requestDriven=${REQUEST_DRIVEN}`,
+  );
   if (!ONCE) startHealthServer();
   fs.mkdirSync(TMP_ROOT, { recursive: true });
+
+  if (ONCE) {
+    const n = await processAvailableJobs(WAKE_BUDGET_MS);
+    log(`ONCE finished processed=${n}`);
+    process.exit(0);
+  }
+
+  if (REQUEST_DRIVEN) {
+    // Scale-to-zero friendly: no background poll. Cloud Scheduler (or any
+    // authenticated invoker) hits /wake; cold start is OK for imports.
+    log('request-driven mode; idle until /wake');
+    await new Promise(() => {});
+  }
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
     let ref = null;
@@ -495,7 +568,6 @@ async function main() {
       log('claim error:', e.message);
     }
     if (!ref) {
-      if (ONCE) { log('no pending jobs; exiting (ONCE).'); break; }
       await sleep(POLL_MS);
       continue;
     }
@@ -507,9 +579,7 @@ async function main() {
         await ref.update({ status: 'error', message: e.message || 'Import failed.', updatedAt: Date.now() });
       } catch { /* ignore */ }
     }
-    if (ONCE) break;
   }
-  process.exit(0);
 }
 
 main().catch((e) => { console.error('[import-worker] FATAL', e); process.exit(1); });

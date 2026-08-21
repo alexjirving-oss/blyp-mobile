@@ -984,7 +984,13 @@ class IVSBroadcastModule(
                     putBoolean("skippedDestroy", true)
                 })
                 configureStageForRendering("viewer-rejoin-existing")
-                reattachViewerSurfaces("viewer-rejoin-existing")
+                // Same-token rejoin: do not rebind live TextureViews (black flash).
+                // Only attach when a slot has a dead/missing surface.
+                if (viewerSlotSurfacesNeedReattach()) {
+                    reattachViewerSurfaces("viewer-rejoin-existing-dead-surface")
+                } else {
+                    Log.i(IVS_TAG, "[VIEWER] skip reattach on existing session; surfaces still valid")
+                }
                 return
             }
         }
@@ -1542,15 +1548,14 @@ class IVSBroadcastModule(
 
     private fun getCurrentLocalStreams(): List<LocalStageStream> = listOfNotNull(localVideoStream, localAudioStream)
 
+    /**
+     * Stable identity for a participant media track across Stage rejoin.
+     * Remotes have no Device; Object.hashCode() changes per StageStream instance
+     * and forces tile/registry churn + surface rebinds after recoverable ICE.
+     */
     private fun streamKey(participant: ParticipantInfo, stream: StageStream): String {
         val participantId = participant.participantId ?: "unknown"
-        val deviceId = try {
-            stream.getDevice().descriptor.deviceId ?: "device"
-        } catch (e: Exception) {
-            // Remote streams don't have a device, use stream hashcode instead
-            stream.hashCode().toString()
-        }
-        return "$participantId:${stream.streamType}:$deviceId"
+        return "$participantId:${stream.streamType}"
     }
 
     private fun assignSlot(participantId: String, attributes: Map<String, String>? = null): Int {
@@ -1847,6 +1852,15 @@ class IVSBroadcastModule(
         slots.forEach { attachSurfaceToSlot(it) }
     }
 
+    /** True when any bound remote slot has a null/invalid Surface (safe to reattach). */
+    private fun viewerSlotSurfacesNeedReattach(): Boolean {
+        if (remoteRenderSlots.isEmpty()) return false
+        return remoteRenderSlots.values.any { slot ->
+            val surface = slot.surface ?: slotSurfaces[slot.slotId]?.surface
+            surface == null || !surface.isValid
+        }
+    }
+
     private fun attachSurfaceToSlot(slot: RenderSlot) {
         slotSurfaces[slot.slotId]?.let { config ->
             if (slot.surface == null) {
@@ -1857,7 +1871,10 @@ class IVSBroadcastModule(
         }
         val safeWidth = if (slot.width > 0) slot.width else 1
         val safeHeight = if (slot.height > 0) slot.height else 1
-        val attachSig = "${surfaceHash(slot.surface)}:${safeWidth}x${safeHeight}:${slot.streamKey}"
+        // Identity + streamKey only — ignore pure WxH thrash from TextureView
+        // sizeChanged (layout ticks). Including size forced setSurface and flashed
+        // the viewer tile (audit 41b164d3 residual after reattach cure).
+        val attachSig = "${surfaceHash(slot.surface)}:${slot.streamKey}"
         if (slot.surface != null && lastSlotAttachSig[slot.slotId] == attachSig) {
             return
         }
@@ -1945,13 +1962,22 @@ class IVSBroadcastModule(
                     state == Stage.ConnectionState.DISCONNECTED &&
                     exception == null
             if (recoverableViewerDisconnect) {
+                // Look-back (016b586a): native join without JS emit is fine; unconditional
+                // reattachViewerSurfaces was the black-flash infection (setSurface on live tiles).
                 Log.i(IVS_TAG, "[VIEWER] recoverable DISCONNECTED; native rejoin (no JS emit)")
                 mainHandler.postDelayed({
                     if (sessionMode != SessionMode.VIEWER || stage == null) return@postDelayed
                     try {
                         stage?.join()
                         reassertViewerPlaybackAudio("viewer-auto-rejoin")
-                        reattachViewerSurfaces("viewer-auto-rejoin")
+                        if (viewerSlotSurfacesNeedReattach()) {
+                            reattachViewerSurfaces("viewer-auto-rejoin-dead-surface")
+                        } else {
+                            Log.i(
+                                IVS_TAG,
+                                "[VIEWER] skip reattach after recoverable rejoin; surfaces still valid",
+                            )
+                        }
                     } catch (e: Exception) {
                         Log.w(IVS_TAG, "[VIEWER] auto-rejoin failed: ${e.message}")
                     }

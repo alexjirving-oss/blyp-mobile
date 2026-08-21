@@ -1126,3 +1126,93 @@
     animation: none;
   }
 }
+
+/* Warm night desk — flatten skeuomorph inside Live Studio booth only. */
+.tls-booth .jbx-rail.tls-rail-jukebox {
+  padding: 0;
+  background: transparent;
+}
+
+.tls-booth .jbx-cabinet,
+.tls-booth .jbx-cabinet::before,
+.tls-booth .jbx-cabinet::after {
+  background: none !important;
+  box-shadow: none !important;
+}
+
+.tls-booth .jbx,
+.tls-booth .jbx-house,
+.tls-booth .jbx-expand {
+  background: #1e2128 !important;
+  border: 1px solid rgba(236, 234, 240, 0.12) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+
+.tls-booth .jbx-marquee,
+.tls-booth .jbx-marquee span,
+.tls-booth .jbx-plaque,
+.tls-booth .jbx-ticket,
+.tls-booth .jbx-now,
+.tls-booth .jbx-label {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  color: #eceaf0 !important;
+  text-shadow: none !important;
+  letter-spacing: 0.02em;
+}
+
+.tls-booth .jbx-compact,
+.tls-booth .jbx-gear-btn,
+.tls-booth .jbx-key,
+.tls-booth .jbx-play {
+  background: rgba(255, 255, 255, 0.06) !important;
+  background-image: none !important;
+  color: #eceaf0 !important;
+  border: 1px solid rgba(236, 234, 240, 0.16) !important;
+  box-shadow: none !important;
+  border-radius: 8px !important;
+}
+
+.tls-booth .jbx-compact.is-on,
+.tls-booth .jbx-play.is-on {
+  background: rgba(255, 77, 109, 0.14) !important;
+  border-color: rgba(255, 77, 109, 0.45) !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.tls-booth .jbx-disc,
+.tls-booth .jbx-bubbler,
+.tls-booth .jbx-strip,
+.tls-booth .jbx-lamp {
+  display: none !important;
+}
+
+/* Kill western fire / orange neon title glow — calm warm type only */
+.tls-booth .jbx-title,
+.tls-booth .jbx-meta .jbx-title,
+.tls-booth .jbx-marquee,
+.tls-booth .jbx-marquee span,
+.tls-booth .jbx-plaque,
+.tls-booth .jbx-ticket,
+.tls-booth .jbx-now,
+.tls-booth .jbx-label,
+.tls-booth .jbx-artist {
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif !important;
+  color: #f5f5f2 !important;
+  text-shadow: none !important;
+  filter: none !important;
+  background: none !important;
+  background-image: none !important;
+  -webkit-text-fill-color: #f5f5f2 !important;
+}
+
+.tls-booth .jbx-progress,
+.tls-booth .jbx-progress > i,
+.tls-booth .jbx-meter,
+.tls-booth .jbx-key.is-on,
+.tls-booth .jbx-arcade {
+  box-shadow: none !important;
+  filter: none !important;
+}

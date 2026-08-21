@@ -14,7 +14,7 @@
   height: 0;
 }
 
-/* Header / home Live Studio launch — not another glow pill. */
+/* Header / home Live Studio launch — coral CTA, no glow pill. */
 .blyp-studio-launch {
   display: inline-flex;
   align-items: center;
@@ -23,7 +23,7 @@
   padding: 0 0.95rem 0 0.7rem;
   border: none;
   border-radius: 8px;
-  background: #fe2c55;
+  background: var(--blyp-coral);
   color: #fff;
   font-family: var(--font-body);
   font-size: 0.8125rem;
@@ -35,7 +35,7 @@
 }
 
 .blyp-studio-launch:hover {
-  background: #ff3b63;
+  background: var(--blyp-coral-deep);
 }
 
 .blyp-studio-launch:active {
@@ -62,17 +62,23 @@
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
 }
 
+/* Warm night (ChatGPT mockup) — charcoal + coral sparingly.
+   --blyp-teal is muted secondary text only (never a border/fill paint). */
 :root {
-  --blyp-ink: #07070a;
-  --blyp-ink-elevated: #101016;
-  --blyp-fog: #e8e6f0;
-  --blyp-muted: #9a97a8;
-  --blyp-teal: #00d2be;
-  --blyp-teal-deep: #00a89e;
-  --blyp-gold: #e8c47c;
-  --blyp-rose: #f0a0b8;
-  --blyp-line: rgba(232, 230, 240, 0.12);
-  --blyp-glow: rgba(0, 210, 190, 0.18);
+  --blyp-ink: #12141a;
+  --blyp-ink-elevated: #1e2128;
+  --blyp-panel: #2a2e36;
+  --blyp-fog: #f5f5f2;
+  --blyp-muted: #a1a4ae;
+  --blyp-coral: #ff4d6d;
+  --blyp-coral-deep: #e83d5c;
+  --blyp-coral-soft: rgba(255, 77, 109, 0.14);
+  --blyp-teal: #a1a4ae;
+  --blyp-teal-deep: #7a7e88;
+  --blyp-gold: #e0c090;
+  --blyp-rose: #e8a8b4;
+  --blyp-line: rgba(245, 245, 242, 0.12);
+  --blyp-glow: rgba(255, 77, 109, 0.04);
   --font-display: var(--font-syne), ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
   --background: var(--blyp-ink);
@@ -104,9 +110,8 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(55% 45% at 85% -10%, var(--blyp-glow), transparent 60%),
-    radial-gradient(40% 35% at 5% 15%, rgba(240, 160, 184, 0.08), transparent 55%),
-    radial-gradient(50% 40% at 50% 100%, rgba(232, 196, 124, 0.06), transparent 50%),
+    radial-gradient(50% 40% at 90% -8%, var(--blyp-glow), transparent 62%),
+    radial-gradient(45% 35% at 0% 100%, rgba(224, 192, 144, 0.04), transparent 55%),
     var(--blyp-ink);
 }
 
@@ -116,7 +121,7 @@ a {
 }
 
 ::selection {
-  background: rgba(0, 210, 190, 0.35);
+  background: rgba(255, 77, 109, 0.28);
   color: var(--blyp-fog);
 }
 

@@ -538,7 +538,9 @@ export function DestinationDock({
             <div className="tls-dest-companion-offline" role="alert">
               <p className="tls-dest-companion-offline-title">Companion not running</p>
               <p className="tls-dest-connect-hint">
-                Start the local helper on this PC, then click Connect TikTok again.
+                Auto-connect needs the local helper. Start it, then click Connect TikTok
+                again — or paste Server URL + Stream key from TikTok Live Studio (Go LIVE →
+                Stream settings) below and click OK.
               </p>
               <code className="tls-dest-companion-cmd">{TIKTOK_COMPANION_START_CMD}</code>
             </div>
@@ -595,7 +597,8 @@ export function DestinationDock({
           {showPasteFallback && !companionOffline ? (
             <div className="tls-dest-paste-fallback">
               <p className="tls-dest-paste-fallback-copy">
-                Or paste Server URL + Stream key from TikTok Live Studio manually, then Save.
+                Live Studio has not written credentials yet. Open TikTok Live Studio → Go LIVE →
+                Stream settings, or paste Server URL + Stream key here and Save / OK.
               </p>
               <button
                 type="button"

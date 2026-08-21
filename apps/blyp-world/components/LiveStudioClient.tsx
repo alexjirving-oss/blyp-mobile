@@ -34,6 +34,12 @@ import {
   type TopGifterRow,
 } from "@/lib/live";
 import {
+  forceRefreshSession,
+  loadStoredSession,
+  refreshSessionIfNeeded,
+} from "@/lib/cognito";
+import { loadMeProfile } from "@/lib/profile";
+import {
   endLiveHostSession,
   fetchGuestRequests,
   heartbeatLiveHostSession,
@@ -46,6 +52,10 @@ import {
   type GuestRequestRow,
   type LiveHostSession,
 } from "@/lib/liveHost";
+import {
+  formatLiveAuthError,
+  SESSION_EXPIRED_MSG,
+} from "@/lib/liveServiceAuth";
 import {
   FACEBOOK_DEFAULT_RTMP,
   fetchBroadcastStatus,
@@ -301,6 +311,8 @@ import {
 } from "@/components/BlypStudio/audio/StudioAudioEngine";
 import { BombStrikeStage } from "@/components/BlypStudio/fx/BombStrikeLayer";
 import { playBombStrike } from "@/components/BlypStudio/fx/bombStrikeBus";
+import { GiftCinemaLayer } from "@/components/GiftCinemaLayer";
+import { makeGiftCinemaCue, type GiftCinemaCue } from "@/lib/giftCinemaClips";
 import { StudioProgramOverlays } from "@/components/StudioProgramOverlays";
 import { TeamDashboard } from "@/components/teams/TeamDashboard";
 import { getFirebaseAuth } from "@/lib/firebase";
@@ -344,6 +356,23 @@ function pendingRequests(rows: GuestRequestRow[]): GuestRequestRow[] {
 function invitedOrLive(rows: GuestRequestRow[]): GuestRequestRow[] {
   return rows.filter((r) =>
     ["INVITED", "LIVE", "ACCEPTED"].includes(String(r.status || "").toUpperCase()),
+  );
+}
+
+/** Prefer @handle over raw Cognito UUID in guest lists. */
+function formatGuestLabel(
+  userId: string,
+  labels: Record<string, string>,
+): string {
+  const hit = labels[userId]?.trim();
+  if (hit) return hit.startsWith("@") ? hit : `@${hit}`;
+  if (userId.length > 14) return `${userId.slice(0, 8)}…`;
+  return userId;
+}
+
+function isAlreadyOnStageError(msg: string): boolean {
+  return /guest session already active|already (on stage|invited|live)/i.test(
+    msg,
   );
 }
 
@@ -572,6 +601,7 @@ export function LiveStudioClient() {
     "idle" | "publishing" | "live" | "error"
   >("idle");
   const [guestRows, setGuestRows] = useState<GuestRequestRow[]>([]);
+  const [guestLabels, setGuestLabels] = useState<Record<string, string>>({});
   const [guestPollError, setGuestPollError] = useState<string | null>(null);
   const [mediaMode, setMediaMode] = useState<DeskMediaMode>("camera");
   /** Director overlay/layout aspect — both portrait and landscape stay live for viewers. */
@@ -603,6 +633,7 @@ export function LiveStudioClient() {
   const [liveStartedAt, setLiveStartedAt] = useState<number | null>(null);
   const [timerLabel, setTimerLabel] = useState("00:00:00");
   const [feedEvents, setFeedEvents] = useState<OverlayFeedEvent[]>([]);
+  const [giftCinemaCue, setGiftCinemaCue] = useState<GiftCinemaCue | null>(null);
   const [jukeboxQueue, setJukeboxQueue] = useState<JukeboxTrack[]>([]);
   const [jukeboxNow, setJukeboxNow] = useState("Queue empty");
   const [jukeboxArt, setJukeboxArt] = useState<string | null>(null);
@@ -818,6 +849,8 @@ export function LiveStudioClient() {
     for (const stream of streams) {
       stream?.getAudioTracks().forEach((t) => {
         if (mixId && t.id === mixId) return;
+        // Display/tab/mix tracks have no mic deviceId — Host Mic must not mute YouTube.
+        if (!t.getSettings?.()?.deviceId) return;
         t.enabled = !micMuted;
       });
     }
@@ -1151,6 +1184,35 @@ export function LiveStudioClient() {
 
   const pending = useMemo(() => pendingRequests(guestRows), [guestRows]);
   const onStage = useMemo(() => invitedOrLive(guestRows), [guestRows]);
+
+  useEffect(() => {
+    const ids = Array.from(
+      new Set(guestRows.map((r) => r.userId).filter(Boolean)),
+    );
+    if (ids.length === 0) {
+      setGuestLabels({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const next: Record<string, string> = {};
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const p = await loadMeProfile(id);
+            const handle = (p?.username || p?.displayName || "").trim();
+            if (handle) next[id] = handle;
+          } catch {
+            /* keep short id fallback */
+          }
+        }),
+      );
+      if (!cancelled) setGuestLabels(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [guestRows]);
   const watchUrl = active ? watchUrlForSession(active.sessionId) : "";
   const phoneLayout = useMemo(
     () => layoutDef(coerceLayout(viewerLayout, orientation)),
@@ -1511,6 +1573,11 @@ export function LiveStudioClient() {
         const coins = Number(payload.coinSpent) || 0;
         const sting = resolveGiftSting(coins, giftAlertMap) || "gift";
         queueStudioAlert({ kind: "gift", text: alert, stingId: sting });
+        const cinema = makeGiftCinemaCue(
+          String(payload.giftId || ""),
+          payload.giftEventId,
+        );
+        if (cinema) setGiftCinemaCue(cinema);
         if (giftAlertMap.flashGiftOverlay) {
           setOverlayState((prev) => ({ ...prev, gifts: true }));
         }
@@ -1584,6 +1651,9 @@ export function LiveStudioClient() {
         maps: overlayMaps,
         chat: chatLines,
         giftsLabel,
+        giftCinema: giftCinemaCue
+          ? `${giftCinemaCue.giftEventId}:${giftCinemaCue.giftId}`
+          : "",
         goalPct,
         goalTarget,
         jukeboxNow,
@@ -1605,6 +1675,7 @@ export function LiveStudioClient() {
       overlayMaps,
       chatLines,
       giftsLabel,
+      giftCinemaCue,
       goalPct,
       goalTarget,
       jukeboxNow,
@@ -1699,6 +1770,7 @@ export function LiveStudioClient() {
       layoutLandscape: lastLandscapeLayoutRef.current,
       chatLines,
       giftsLabel,
+      giftCinema: giftCinemaCue,
       goalPct,
       goalLabel: `Goal ${goalPct}% · ${goalTarget.toLocaleString()}`,
       jukeboxNow,
@@ -1728,6 +1800,7 @@ export function LiveStudioClient() {
     overlayMaps,
     chatLines,
     giftsLabel,
+    giftCinemaCue,
     goalPct,
     goalTarget,
     jukeboxNow,
@@ -2069,18 +2142,33 @@ export function LiveStudioClient() {
     setBusy(true);
     setError(null);
     try {
+      // AuthProvider only refreshes on mount — force a Cognito refresh before
+      // /api/live/start so a long Studio tab does not send a dead JWT.
+      const stored = loadStoredSession();
+      const fresh = stored?.refreshToken
+        ? (await forceRefreshSession(stored)) ||
+          (await refreshSessionIfNeeded(stored))
+        : null;
+      const idToken = fresh?.idToken || session.idToken;
+      const sub = fresh?.sub || session.sub;
+      const username = fresh?.username || session.username;
+      if (!idToken) {
+        requireAuth(SESSION_EXPIRED_MSG);
+        setError(SESSION_EXPIRED_MSG);
+        return;
+      }
       const tabAudioOk = await armSpotifyTabAudioForLive();
       if (isStudioSpotifyLinked() && !tabAudioOk) {
         setError(TAB_AUDIO_REQUIRED);
         return;
       }
       await ensureFirebaseFromCognito({
-        cognitoIdToken: session.idToken,
-        uid: session.sub,
+        cognitoIdToken: idToken,
+        uid: sub,
       });
       const host = await startLiveHostSession(
-        session.idToken,
-        title.trim() || `${session.username || "Host"} LIVE`,
+        idToken,
+        title.trim() || `${username || "Host"} LIVE`,
       );
       setActive(host);
       const published = await beginPublish(host, mediaMode);
@@ -2088,7 +2176,7 @@ export function LiveStudioClient() {
         return;
       }
       try {
-        await heartbeatLiveHostSession(session.idToken, host.sessionId, {
+        await heartbeatLiveHostSession(idToken, host.sessionId, {
           studioOrientation: orientation,
           studioLayout: coerceLayout(viewerLayout, orientation),
         });
@@ -2100,12 +2188,12 @@ export function LiveStudioClient() {
       if (fanoutDests.length > 0) {
         try {
           await prepareBroadcast(
-            session.idToken,
+            idToken,
             host.sessionId,
             fanoutDests,
           );
           const fanout = await startBroadcastFanoutWhenReady(
-            session.idToken,
+            idToken,
             host.sessionId,
           );
           setBroadcastView(fanout.view);
@@ -2140,7 +2228,7 @@ export function LiveStudioClient() {
       if (tiktokUniqueId) {
         try {
           const room = await startTikTokRoom(
-            session.idToken,
+            idToken,
             host.sessionId,
             tiktokUniqueId,
           );
@@ -2154,7 +2242,12 @@ export function LiveStudioClient() {
 
       pushToast("Session live — publishing from this browser");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to start LIVE");
+      const raw = e instanceof Error ? e.message : "Failed to start LIVE";
+      const msg = formatLiveAuthError(raw);
+      if (msg === SESSION_EXPIRED_MSG) {
+        requireAuth(SESSION_EXPIRED_MSG);
+      }
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -3291,7 +3384,11 @@ export function LiveStudioClient() {
         return;
       }
       onSwitchViewerOrientation(mode);
-      pushToast(mode === "portrait" ? "Portrait program" : "Landscape program");
+      pushToast(
+        mode === "portrait"
+          ? "Portrait · phone watch chrome (one stream)"
+          : "Landscape · PC/tablet watch chrome (one stream)",
+      );
     },
     [onSwitchViewerOrientation, pushToast, refreshStudioTeam],
   );
@@ -3370,8 +3467,15 @@ export function LiveStudioClient() {
     setError(null);
     try {
       if (action === "accept") {
-        await inviteGuest(session.idToken, active.sessionId, guestUserId);
-        pushToast("Guest invited — they join from the app");
+        try {
+          await inviteGuest(session.idToken, active.sessionId, guestUserId);
+          pushToast("Guest invited — they join from the app");
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          // Already seated: treat as success so Accept isn't a red failure loop.
+          if (!isAlreadyOnStageError(msg)) throw e;
+          pushToast("Guest already on stage");
+        }
       } else {
         await rejectGuest(session.idToken, active.sessionId, guestUserId);
         pushToast("Guest rejected");
@@ -3625,13 +3729,40 @@ export function LiveStudioClient() {
         <span className={isLive ? "tls-badge tls-badge-live" : "tls-badge"}>
           {isLive ? "LIVE" : "Offline"}
         </span>
-        <span className="tls-badge tls-booth-mode" title="← / → cycle booth">
-          {boothMode === "team-desk"
-            ? "Team desk"
-            : boothMode === "landscape"
-              ? "Landscape"
-              : "Portrait"}
-        </span>
+        <div
+          className="tls-orient-seg"
+          role="group"
+          aria-label="Program aspect"
+          title="← / → cycle booth"
+        >
+          <button
+            type="button"
+            className={
+              boothMode === "portrait"
+                ? "tls-orient-seg-btn tls-orient-seg-on"
+                : "tls-orient-seg-btn"
+            }
+            aria-pressed={boothMode === "portrait"}
+            onClick={() => applyBoothMode("portrait")}
+          >
+            PORTRAIT
+          </button>
+          <button
+            type="button"
+            className={
+              boothMode === "landscape"
+                ? "tls-orient-seg-btn tls-orient-seg-on"
+                : "tls-orient-seg-btn"
+            }
+            aria-pressed={boothMode === "landscape"}
+            onClick={() => applyBoothMode("landscape")}
+          >
+            LANDSCAPE
+          </button>
+          {boothMode === "team-desk" ? (
+            <span className="tls-orient-seg-note">Team desk</span>
+          ) : null}
+        </div>
         <div className="tls-health" aria-label="Connection health">
           <span className="tls-health-item">
             {healthFps || "—"}
@@ -3707,7 +3838,9 @@ export function LiveStudioClient() {
                 <ul className="tls-guests tls-guests-hand">
                   {pending.map((g) => (
                     <li key={`top-p-${g.userId}`}>
-                      <span className="tls-guest-id">{g.userId}</span>
+                      <span className="tls-guest-id" title={g.userId}>
+                        {formatGuestLabel(g.userId, guestLabels)}
+                      </span>
                       <span className="tls-guest-actions">
                         <button
                           type="button"
@@ -3728,7 +3861,9 @@ export function LiveStudioClient() {
                   ))}
                   {onStage.map((g) => (
                     <li key={`top-s-${g.userId}`}>
-                      <span className="tls-guest-id">{g.userId}</span>
+                      <span className="tls-guest-id" title={g.userId}>
+                        {formatGuestLabel(g.userId, guestLabels)}
+                      </span>
                       <span className="tls-guest-actions">
                         <button
                           type="button"
@@ -3845,6 +3980,19 @@ export function LiveStudioClient() {
               onKickSaved={handleKickSaved}
             />
             </StudioRailSlot>
+          ) : null}
+          {studioPhase === "broadcast" && boothMode !== "team-desk" ? (
+            <ConfidenceRail
+              previewStream={
+                publishState === "live" || publishState === "publishing"
+                  ? null
+                  : confidencePreviewStream
+              }
+              tiktokReady={tiktokPreflightReady}
+              broadcastPhase={broadcastView?.phase ?? null}
+              broadcastMessage={tiktokStatusMessage}
+              publishState={publishState}
+            />
           ) : null}
           <StudioRailSlot {...leftSlotProps("program")}>
           <section className="tls-section tls-host-hand-sources">
@@ -4192,8 +4340,8 @@ export function LiveStudioClient() {
                     ? "tls-deck-icon tls-deck-btn-on"
                     : "tls-deck-icon"
                 }
-                title="Portrait 9:16 (← → cycle)"
-                aria-label="Portrait 9:16"
+                title="Portrait · phone watch chrome · one stream (← → cycle)"
+                aria-label="Portrait phone watch chrome"
                 onClick={() => applyBoothMode("portrait")}
               >
                 <span className="tls-orient-portrait" aria-hidden />
@@ -4205,8 +4353,8 @@ export function LiveStudioClient() {
                     ? "tls-deck-icon tls-deck-btn-on"
                     : "tls-deck-icon"
                 }
-                title="Landscape 16:9 (← → cycle)"
-                aria-label="Landscape 16:9"
+                title="Landscape · PC/tablet watch chrome · one stream (← → cycle)"
+                aria-label="Landscape PC tablet watch chrome"
                 onClick={() => applyBoothMode("landscape")}
               >
                 <span className="tls-orient-landscape" aria-hidden />
@@ -5157,26 +5305,7 @@ export function LiveStudioClient() {
               ) : null}
             </div>
           ) : (
-          <div
-            className={
-              studioPhase === "broadcast"
-                ? "tls-center-broadcast"
-                : "tls-center-program"
-            }
-          >
-            {studioPhase === "broadcast" ? (
-              <ConfidenceRail
-                previewStream={
-                  publishState === "live" || publishState === "publishing"
-                    ? null
-                    : confidencePreviewStream
-                }
-                tiktokReady={tiktokPreflightReady}
-                broadcastPhase={broadcastView?.phase ?? null}
-                broadcastMessage={tiktokStatusMessage}
-                publishState={publishState}
-              />
-            ) : null}
+          <div className="tls-center-program">
           <div className="tls-stage-wrap">
             <div
               className={
@@ -5188,6 +5317,7 @@ export function LiveStudioClient() {
               <div className="tls-device-island" aria-hidden />
               <div className="tls-device-screen" data-program-root>
             <BombStrikeStage className={stageFrameClass(orientation, phoneLayout.id)}>
+              <GiftCinemaLayer cue={giftCinemaCue} />
               {!phoneLayout.hostInGrid ? (
                 <div className="tls-program-host">
                   <video
@@ -5562,7 +5692,9 @@ export function LiveStudioClient() {
               <ul className="tls-guests">
                 {pending.map((g) => (
                   <li key={`p-${g.userId}`}>
-                    <span className="tls-guest-id">{g.userId}</span>
+                    <span className="tls-guest-id" title={g.userId}>
+                      {formatGuestLabel(g.userId, guestLabels)}
+                    </span>
                     <span className="tls-guest-actions">
                       <button
                         type="button"
@@ -5583,7 +5715,9 @@ export function LiveStudioClient() {
                 ))}
                 {onStage.map((g) => (
                   <li key={`s-${g.userId}`}>
-                    <span className="tls-guest-id">{g.userId}</span>
+                    <span className="tls-guest-id" title={g.userId}>
+                      {formatGuestLabel(g.userId, guestLabels)}
+                    </span>
                     <span className="tls-muted">{g.status}</span>
                   </li>
                 ))}

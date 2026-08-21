@@ -757,6 +757,7 @@ async function getDisplayMediaStayInStudio(
   }
 
   const stream = rememberDeskScreenStream(await devices.getDisplayMedia(opts));
+  prepareDisplayAudioTracks(stream);
 
   try {
     const surface = stream.getVideoTracks()[0]?.getSettings()?.displaySurface;
@@ -796,6 +797,25 @@ function createSilentAudioTrack(): MediaStreamTrack {
   return track;
 }
 
+function prepareDisplayAudioTracks(stream: MediaStream): void {
+  for (const track of stream.getAudioTracks()) {
+    try {
+      (track as MediaStreamTrack & { contentHint?: string }).contentHint =
+        "music";
+    } catch {
+      /* ignore */
+    }
+    if (typeof track.applyConstraints !== "function") continue;
+    void track
+      .applyConstraints({
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      })
+      .catch(() => undefined);
+  }
+}
+
 /** Mix mic + optional tab/system audio into one publish track. */
 function mixAudioTracks(tracks: MediaStreamTrack[]): {
   track: MediaStreamTrack;
@@ -828,6 +848,11 @@ function mixAudioTracks(tracks: MediaStreamTrack[]): {
   }
   void ctx.resume().catch(() => undefined);
   const mixed = dest.stream.getAudioTracks()[0];
+  try {
+    (mixed as MediaStreamTrack & { contentHint?: string }).contentHint = "music";
+  } catch {
+    /* ignore */
+  }
   return {
     track: mixed,
     stop: () => {
@@ -871,12 +896,9 @@ function isDisplayCaptureStream(stream: MediaStream | null | undefined): boolean
 async function captureDisplayStayInStudio(): Promise<MediaStream> {
   return getDisplayMediaStayInStudio({
     video: DISPLAY_VIDEO_CONSTRAINTS,
-    audio: {
-      // Chrome: check “Share tab audio” for webpage / YouTube sound
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-    } as MediaTrackConstraints,
+    // Boolean `audio: true` is what makes Chrome show “Share tab audio”.
+    // Constraint objects here can drop the track (viewers then get mic only).
+    audio: true,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ...({ systemAudio: "include" } as any),
   });
@@ -1026,10 +1048,13 @@ async function openScreen(
     mic = null;
   }
 
-  const stream = new MediaStream([
-    ...screen.getVideoTracks(),
+  const audioMix = mixAudioTracks([
     ...screen.getAudioTracks(),
     ...(mic?.getAudioTracks() ?? []),
+  ]);
+  const stream = new MediaStream([
+    ...screen.getVideoTracks(),
+    audioMix.track,
   ]);
   return {
     mode: "screen",
@@ -1038,6 +1063,7 @@ async function openScreen(
     publishStream: stream,
     screenStream: screen,
     stop: (opts) => {
+      audioMix.stop();
       if (opts?.keepScreen) {
         mic?.getTracks().forEach((t) => t.stop());
         return;
@@ -1265,11 +1291,7 @@ export async function listVideoInputDevices(
       await withDeskMediaLock(async () => {
         const probe = await devices.getUserMedia({
           audio: false,
-          video: {
-            width: { ideal: 640, max: 1280 },
-            height: { ideal: 360, max: 720 },
-            frameRate: { ideal: DESK_PUBLISH_FPS, max: DESK_PUBLISH_FPS },
-          },
+          video: cameraVideoConstraints(),
         });
         probe.getTracks().forEach((t) => t.stop());
         // USB webcams often need a beat after stop before reopen.
@@ -1313,4 +1335,12 @@ export async function openDeskMedia(
 
 export function screenStreamIsLive(stream: MediaStream | null | undefined): boolean {
   return !!stream?.getVideoTracks().some((t) => t.readyState === "live");
+}
+
+/** Mix mic + display/tab audio into one track (IVS publishes a single audio LSS). */
+export function mixDeskAudioTracks(tracks: MediaStreamTrack[]): {
+  track: MediaStreamTrack;
+  stop: () => void;
+} {
+  return mixAudioTracks(tracks);
 }

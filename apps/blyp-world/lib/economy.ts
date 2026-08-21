@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  forceRefreshSession,
+  loadStoredSession,
+  refreshSessionIfNeeded,
+} from "./cognito";
 import { liveServiceUrl } from "./env";
 export { WEB_COIN_PACKS } from "./coinPacks";
 
@@ -9,6 +14,8 @@ export type WalletBalance = {
   gems: number;
   gemAvailable: number;
   gemPending: number;
+  /** Immediate convert total (available + pending). Withdraw still uses gemAvailable. */
+  gemConvertible: number;
 };
 
 export type GiftItem = {
@@ -80,28 +87,60 @@ export const FALLBACK_GIFTS: GiftItem[] = [
   { giftId: "revive", name: "Revive", coinCost: 30, emoji: "🛟" },
   { giftId: "crown", name: "Crown", coinCost: 50, emoji: "👑" },
   { giftId: "rocket", name: "Rocket", coinCost: 100, emoji: "🚀" },
+  { giftId: "mad_hearts", name: "Mad Hearts", coinCost: 100, emoji: "💖" },
+  { giftId: "mad_confetti", name: "Mad Confetti", coinCost: 100, emoji: "🎊" },
+  { giftId: "mad_rose", name: "Mad Rose", coinCost: 200, emoji: "🌹" },
+  { giftId: "mad_donut", name: "Mad Donut", coinCost: 200, emoji: "🍩" },
+  { giftId: "mad_thanks_gift", name: "Thanks Gift", coinCost: 300, emoji: "🎁" },
+  { giftId: "mad_thanks_likes", name: "Thanks Likes", coinCost: 300, emoji: "👍" },
+  { giftId: "mad_thanks_share", name: "Thanks Share", coinCost: 500, emoji: "🔗" },
+  { giftId: "mad_gift_avalanche", name: "Gift Avalanche", coinCost: 750, emoji: "🎁" },
+  { giftId: "lion_baby", name: "Baby Lion", coinCost: 1000, emoji: "🦁" },
+  { giftId: "lion_big", name: "Big Lion", coinCost: 5000, emoji: "🦁" },
 ];
+
+async function resolveBearerToken(idToken: string): Promise<string> {
+  const stored = loadStoredSession();
+  if (!stored?.idToken) return idToken;
+  const fresh = await refreshSessionIfNeeded(stored);
+  return fresh?.idToken || stored.idToken || idToken;
+}
 
 async function economyFetch<T>(
   path: string,
   idToken: string,
   method: "GET" | "POST" = "GET",
   body?: Record<string, unknown>,
+  retried = false,
 ): Promise<T> {
+  const token = retried ? idToken : await resolveBearerToken(idToken);
   let url = `${liveServiceUrl}${path}`;
   if (method === "GET") {
     url += (url.includes("?") ? "&" : "?") + `_ts=${Date.now()}`;
   }
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-      "Cache-Control": "no-cache",
-    },
-    cache: "no-store",
-    body: method === "GET" ? undefined : JSON.stringify(body || {}),
-  });
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Cache-Control": "no-cache",
+  };
+  // Avoid Content-Type on GET — it forces a CORS preflight for no benefit.
+  if (method !== "GET") {
+    headers["Content-Type"] = "application/json";
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      cache: "no-store",
+      body: method === "GET" ? undefined : JSON.stringify(body || {}),
+    });
+  } catch (e) {
+    throw new Error(
+      e instanceof Error && e.message
+        ? `Wallet network error: ${e.message}`
+        : "Wallet network error",
+    );
+  }
   const json = await res.json().catch(() => ({}));
   // Mobile treats idempotent gift replays as success (same payload, HTTP 409).
   if (
@@ -111,6 +150,15 @@ async function economyFetch<T>(
     return json as T;
   }
   if (!res.ok) {
+    if (res.status === 401 && !retried) {
+      const stored = loadStoredSession();
+      if (stored?.refreshToken) {
+        const fresh = await forceRefreshSession(stored);
+        if (fresh?.idToken) {
+          return economyFetch<T>(path, fresh.idToken, method, body, true);
+        }
+      }
+    }
     const detail = (json as { detail?: unknown })?.detail;
     const detailMsg =
       detail && typeof detail === "object" && detail !== null
@@ -148,6 +196,7 @@ export async function fetchWallet(idToken: string): Promise<WalletBalance> {
     gems?: number;
     gemAvailable?: number;
     gemPending?: number;
+    gemConvertible?: number;
   }>("/wallet", idToken);
 
   let coins: number;
@@ -166,12 +215,17 @@ export async function fetchWallet(idToken: string): Promise<WalletBalance> {
     data.gemAvailable != null || data.gemPending != null
       ? gemAvailable + gemPending
       : Number(data.gems) || 0;
+  const gemConvertible =
+    data.gemConvertible != null && Number.isFinite(Number(data.gemConvertible))
+      ? Number(data.gemConvertible)
+      : gemAvailable + gemPending;
 
   return {
     coins: Number.isFinite(coins) ? coins : 0,
     gems: Number.isFinite(gems) ? gems : 0,
     gemAvailable: Number.isFinite(gemAvailable) ? gemAvailable : 0,
     gemPending: Number.isFinite(gemPending) ? gemPending : 0,
+    gemConvertible: Number.isFinite(gemConvertible) ? gemConvertible : 0,
   };
 }
 
@@ -222,6 +276,30 @@ export async function requestWithdrawGems(opts: {
     idempotencyKey,
     method: opts.method,
     ...(opts.paypalEmail ? { paypalEmail: opts.paypalEmail } : {}),
+  });
+}
+
+/** Convert earned gems (available+pending, immediate) → spendable COIN at ceil(gems * 1.15). */
+export async function convertGemsToCoins(opts: {
+  idToken: string;
+  amountGems: number;
+}): Promise<{
+  kind: "ok" | "replay";
+  gemsDebited: number;
+  coinsCredited: number;
+  rate: string;
+  wallet: {
+    coinBalance: number;
+    bonusCoinBalance: number;
+    gemAvailable: number;
+    gemPending: number;
+    gemConvertible?: number;
+  };
+}> {
+  const idempotencyKey = `web_gem_to_coin_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return economyFetch("/wallet/convert-gems", opts.idToken, "POST", {
+    amountGems: opts.amountGems,
+    idempotencyKey,
   });
 }
 

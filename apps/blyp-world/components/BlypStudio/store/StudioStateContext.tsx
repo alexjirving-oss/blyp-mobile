@@ -16,6 +16,7 @@ import {
   defaultOverlays,
   type LayoutOrientation,
   type LayoutPreset,
+  type OverlayAnchor,
   type OverlayInstance,
   type OverlayKind,
   createOverlay,
@@ -33,6 +34,43 @@ import {
   pickFinaleWinnerSlotIndex,
   splitGrid9AudienceGiftCoins,
 } from "@/lib/grid9Economy";
+
+/** Per-aspect overlay xy/anchor snap so Portrait ≠ Landscape publish maps. */
+type OverlayPosSnap = Partial<
+  Record<OverlayKind, { x: number; y: number; anchor: OverlayAnchor }>
+>;
+
+function snapshotOverlayPos(overlays: OverlayInstance[]): OverlayPosSnap {
+  const out: OverlayPosSnap = {};
+  for (const o of overlays) {
+    out[o.kind] = { x: o.x, y: o.y, anchor: o.anchor };
+  }
+  return out;
+}
+
+function applyOverlayPosSnap(
+  overlays: OverlayInstance[],
+  snap: OverlayPosSnap | undefined,
+): OverlayInstance[] {
+  if (!snap) return overlays;
+  return overlays.map((o) => {
+    const s = snap[o.kind];
+    if (!s) return o;
+    return { ...o, x: s.x, y: s.y, anchor: s.anchor };
+  });
+}
+
+function emptyAspectLayouts(): Record<LayoutOrientation, LayoutPreset> {
+  return { portrait: "solo", landscape: "solo" };
+}
+
+function emptyAspectOverlaySnaps(): Record<LayoutOrientation, OverlayPosSnap> {
+  const base = snapshotOverlayPos(defaultOverlays());
+  return {
+    portrait: { ...base },
+    landscape: { ...base },
+  };
+}
 
 export type StreamHealth = "EXCELLENT" | "WARNING" | "CRITICAL" | "OFFLINE";
 export type ActiveMode = "JUST_CHATTING" | "GRID9";
@@ -317,12 +355,16 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
   const [cameraFrozen, setCameraFrozen] = useState(false);
   const [hostSessionId, setHostSessionId] = useState<string | null>(null);
   const [deskScene, setDeskScene] = useState<DeskScene>("camera");
-  const [layoutOrientation, setLayoutOrientation] =
+  const [layoutOrientation, setLayoutOrientationRaw] =
     useState<LayoutOrientation>("portrait");
-  const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>("solo");
+  const [layoutPreset, setLayoutPresetRaw] = useState<LayoutPreset>("solo");
   const [overlays, setOverlays] = useState<OverlayInstance[]>(() =>
     defaultOverlays(),
   );
+  const layoutOrientationRef = useRef<LayoutOrientation>("portrait");
+  const layoutByAspectRef = useRef(emptyAspectLayouts());
+  const overlaySnapByAspectRef = useRef(emptyAspectOverlaySnaps());
+  layoutOrientationRef.current = layoutOrientation;
   const rouletteTimers = useRef<number[]>([]);
   const previewStreamRef = useRef<MediaStream | null>(null);
   const cleanFeedStreamRef = useRef<MediaStream | null>(null);
@@ -331,6 +373,22 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
   const auditionQueueRef = useRef(auditionQueue);
   gridSlotsRef.current = gridSlots;
   auditionQueueRef.current = auditionQueue;
+
+  const setLayoutOrientation = useCallback((next: LayoutOrientation) => {
+    const cur = layoutOrientationRef.current;
+    if (next === cur) return;
+    setOverlays((prev) => {
+      overlaySnapByAspectRef.current[cur] = snapshotOverlayPos(prev);
+      return applyOverlayPosSnap(prev, overlaySnapByAspectRef.current[next]);
+    });
+    setLayoutPresetRaw(layoutByAspectRef.current[next]);
+    setLayoutOrientationRaw(next);
+  }, []);
+
+  const setLayoutPreset = useCallback((preset: LayoutPreset) => {
+    layoutByAspectRef.current[layoutOrientationRef.current] = preset;
+    setLayoutPresetRaw(preset);
+  }, []);
 
   const clearRouletteTimers = useCallback(() => {
     rouletteTimers.current.forEach((id) => window.clearTimeout(id));
@@ -1130,6 +1188,8 @@ export function StudioStateProvider({ children }: { children: ReactNode }) {
       layoutOrientation,
       layoutPreset,
       overlays,
+      setLayoutOrientation,
+      setLayoutPreset,
       toggleOverlay,
       setOverlayCleanFeed,
       addOverlay,

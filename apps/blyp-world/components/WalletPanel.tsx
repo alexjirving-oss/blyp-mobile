@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   WEB_COIN_PACKS,
+  convertGemsToCoins,
   createCheckoutSession,
   fetchWallet,
   fetchWithdrawEligibility,
@@ -13,6 +14,10 @@ import {
   type WithdrawEligibility,
   type WithdrawPayoutMethod,
 } from "@/lib/economy";
+import {
+  coinsFromGemsConvert,
+  describeGemToCoinRate,
+} from "@/lib/gemToCoinConvert";
 import { useAuth } from "./AuthProvider";
 import "./wallet-panel.css";
 
@@ -22,14 +27,17 @@ export function WalletPanel() {
   const [gems, setGems] = useState<number | null>(null);
   const [gemAvailable, setGemAvailable] = useState<number | null>(null);
   const [gemPending, setGemPending] = useState<number | null>(null);
+  const [gemConvertible, setGemConvertible] = useState<number | null>(null);
   const [eligibility, setEligibility] = useState<WithdrawEligibility | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [convertBusy, setConvertBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [withdrawMethod, setWithdrawMethod] =
     useState<WithdrawPayoutMethod>("paypal");
   const [amountGems, setAmountGems] = useState("");
+  const [convertAmountGems, setConvertAmountGems] = useState("");
   const [paypalEmail, setPaypalEmail] = useState("");
   const [paypalBuyHint, setPaypalBuyHint] = useState<string | null>(null);
 
@@ -39,6 +47,7 @@ export function WalletPanel() {
       setGems(null);
       setGemAvailable(null);
       setGemPending(null);
+      setGemConvertible(null);
       setEligibility(null);
       return;
     }
@@ -48,9 +57,14 @@ export function WalletPanel() {
       setGems(w.gems);
       setGemAvailable(w.gemAvailable);
       setGemPending(w.gemPending);
-    } catch {
-      setCoins(null);
-      setGems(null);
+      setGemConvertible(w.gemConvertible);
+      setConvertAmountGems((prev) => prev || String(w.gemConvertible || ""));
+      setError(null);
+    } catch (e) {
+      // Keep last good balances if we had them (same as HeaderWalletChip).
+      setError(
+        e instanceof Error ? e.message : "Could not load wallet balances",
+      );
     }
     try {
       const elig = await fetchWithdrawEligibility(session.idToken);
@@ -58,7 +72,7 @@ export function WalletPanel() {
       if (elig.paypal?.email) setPaypalEmail(elig.paypal.email);
       setAmountGems((prev) => prev || String(elig.minPayoutGems || 1000));
     } catch {
-      setEligibility(null);
+      // Keep last good eligibility on transient fail.
     }
   }, [session]);
 
@@ -67,6 +81,7 @@ export function WalletPanel() {
     if (!session?.idToken) {
       setCoins(null);
       setGems(null);
+      setGemConvertible(null);
       return;
     }
     void (async () => {
@@ -77,10 +92,15 @@ export function WalletPanel() {
         setGems(w.gems);
         setGemAvailable(w.gemAvailable);
         setGemPending(w.gemPending);
-      } catch {
+        setGemConvertible(w.gemConvertible);
+        setConvertAmountGems((prev) => prev || String(w.gemConvertible || ""));
+        setError(null);
+      } catch (e) {
         if (alive) {
-          setCoins(null);
-          setGems(null);
+          // Keep last good balances if we had them (same as HeaderWalletChip).
+          setError(
+            e instanceof Error ? e.message : "Could not load wallet balances",
+          );
         }
       }
       try {
@@ -90,7 +110,7 @@ export function WalletPanel() {
         if (elig.paypal?.email) setPaypalEmail(elig.paypal.email);
         setAmountGems((prev) => prev || String(elig.minPayoutGems || 1000));
       } catch {
-        if (alive) setEligibility(null);
+        // Keep last good eligibility on transient fail.
       }
     })();
     return () => {
@@ -251,11 +271,54 @@ export function WalletPanel() {
     }
   };
 
+  const convert = async () => {
+    if (requireAuth("Log in to convert gems")) return;
+    if (!session) return;
+    const amount = Math.floor(Number(convertAmountGems));
+    const convertible = Math.max(0, Math.floor(Number(gemConvertible ?? gems) || 0));
+    if (!Number.isFinite(amount) || amount < 1) {
+      setError("Enter a valid gem amount to convert");
+      return;
+    }
+    if (amount > convertible) {
+      setError("You do not have that many gems to convert.");
+      return;
+    }
+    setConvertBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const out = await convertGemsToCoins({
+        idToken: session.idToken,
+        amountGems: amount,
+      });
+      const debited = Number(out.gemsDebited || 0);
+      const credited = Number(out.coinsCredited || 0);
+      if (out.kind === "replay" && debited === 0) {
+        setNote(
+          "That convert request was already applied. Gem balance refreshed.",
+        );
+      } else {
+        setNote(
+          `Converted ${(debited || amount).toLocaleString()} gems → ${(credited || coinsFromGemsConvert(amount)).toLocaleString()} coins. ${describeGemToCoinRate()}.`,
+        );
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Convert failed");
+    } finally {
+      setConvertBusy(false);
+    }
+  };
+
   const minPayout = eligibility?.minPayoutGems ?? 1000;
   const feePct = eligibility?.platformFeePercent ?? 30;
   const paypalConfigured = eligibility?.paypal?.configured ?? false;
   const paypalReady = Boolean(eligibility?.paypal?.email);
   const bankReady = Boolean(eligibility?.connect?.payoutsEnabled);
+  const convertPreview = coinsFromGemsConvert(
+    Math.floor(Number(convertAmountGems) || 0),
+  );
 
   return (
     <div className="wal">
@@ -264,7 +327,7 @@ export function WalletPanel() {
         <h1 className="wal-title">Coins & Gems</h1>
         <p className="wal-lead">
           Same shared wallet as the Blyp app. Buy coins with card or PayPal;
-          cash out cleared gem earnings.
+          convert gems to coins instantly, or cash out cleared gem earnings.
         </p>
       </header>
 
@@ -275,7 +338,9 @@ export function WalletPanel() {
             <p className="wal-stat-value">
               {session
                 ? coins == null
-                  ? "…"
+                  ? error
+                    ? "—"
+                    : "…"
                   : coins.toLocaleString()
                 : "—"}
               <span className="wal-stat-unit">coins</span>
@@ -287,7 +352,9 @@ export function WalletPanel() {
             <p className="wal-stat-value">
               {session
                 ? gems == null
-                  ? "…"
+                  ? error
+                    ? "—"
+                    : "…"
                   : gems.toLocaleString()
                 : "—"}
               <span className="wal-stat-unit">gems</span>
@@ -296,7 +363,7 @@ export function WalletPanel() {
               {session && gemAvailable != null
                 ? `${gemAvailable.toLocaleString()} available${
                     gemPending ? ` · ${gemPending.toLocaleString()} pending` : ""
-                  }`
+                  } · ${(gemConvertible ?? gems ?? 0).toLocaleString()} convertible`
                 : "Creator earnings from gifts"}
             </p>
           </div>
@@ -309,6 +376,52 @@ export function WalletPanel() {
             to see your ledger balance from live-service.
           </p>
         ) : null}
+
+        <section className="wal-card">
+          <h2 className="wal-h2">Convert gems → coins</h2>
+          <p className="wal-copy">
+            {describeGemToCoinRate()}. Converts immediately from your full gem
+            wallet (cleared + pending). Coins are never cashable. Withdraw still
+            waits ~7 days on cleared gems only.
+          </p>
+
+          {!session ? (
+            <p className="wal-copy">
+              <Link href="/login" className="wal-link">
+                Log in
+              </Link>{" "}
+              to convert.
+            </p>
+          ) : (
+            <div className="wal-body">
+              <label className="wal-field">
+                Amount (convertible{" "}
+                {(gemConvertible ?? gems ?? 0).toLocaleString()} gems)
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={convertAmountGems}
+                  onChange={(e) => setConvertAmountGems(e.target.value)}
+                  className="wal-input wal-input-sm"
+                />
+              </label>
+              <p className="wal-copy">
+                You receive ≈ {convertPreview.toLocaleString()} coins
+              </p>
+              <div className="wal-actions">
+                <button
+                  type="button"
+                  disabled={convertBusy || (gemConvertible ?? 0) < 1}
+                  onClick={() => void convert()}
+                  className="wal-btn wal-btn-teal"
+                >
+                  {convertBusy ? "Converting…" : "Convert to coins"}
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="wal-card">
           <h2 className="wal-h2">Withdraw gems</h2>

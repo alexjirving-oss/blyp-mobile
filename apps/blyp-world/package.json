@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "node scripts/copy-ivs-player-assets.mjs && next build",
+    "dev": "node scripts/copy-gift-cinema-assets.mjs && next dev --turbopack",
+    "build": "node scripts/copy-ivs-player-assets.mjs && node scripts/copy-gift-cinema-assets.mjs && next build",
+    "copy:gift-cinema": "node scripts/copy-gift-cinema-assets.mjs",
     "start": "next start",
     "lint": "next lint"
   },

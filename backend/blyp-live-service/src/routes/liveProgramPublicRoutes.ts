@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { randomUUID } from 'crypto';
 import { getSessionById } from '../live/liveSessionStore';
 import { refreshCompositionFromAws } from '../live/programEgress';
 import { getEconomyInfra } from '../economy/infra';
@@ -38,14 +39,19 @@ export function applyProgramCors(req: Request, res: Response): boolean {
   return true;
 }
 
-async function rateLimit(req: Request, res: Response): Promise<boolean> {
+async function rateLimit(
+  req: Request,
+  res: Response,
+  keyPrefix: string,
+  maxPerMin: number,
+): Promise<boolean> {
   try {
     const redis = getEconomyInfra().redis;
     const ip = String(req.ip || req.socket?.remoteAddress || 'unknown');
-    const key = `live:prog:${ip}`;
+    const key = `${keyPrefix}:${ip}`;
     const n = await redis.incr(key);
     if (n === 1) await redis.expire(key, 60);
-    if (n > 30) {
+    if (n > maxPerMin) {
       res.status(429).json({ error: 'RATE_LIMIT', code: 'RATE_LIMIT' });
       return false;
     }
@@ -62,7 +68,7 @@ router.options('/live/program/:sessionId', (req, res) => {
 
 router.get('/live/program/:sessionId', async (req, res) => {
   if (!applyProgramCors(req, res)) return;
-  if (!(await rateLimit(req, res))) return;
+  if (!(await rateLimit(req, res, 'live:prog', 30))) return;
   const sessionId = String(req.params.sessionId || '').trim();
   if (!sessionId) {
     return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
@@ -98,6 +104,36 @@ router.get('/live/program/:sessionId', async (req, res) => {
     });
   } catch (e: any) {
     logger.error({ err: e?.message || String(e), sessionId }, '[live-program] GET failed');
+    return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
+  }
+});
+
+router.options('/live/watch/:sessionId', (req, res) => {
+  if (!applyProgramCors(req, res)) return;
+  return res.status(204).end();
+});
+
+router.get('/live/watch/:sessionId', async (req, res) => {
+  if (!applyProgramCors(req, res)) return;
+  if (!(await rateLimit(req, res, 'live:watch', 12))) return;
+  const sessionId = String(req.params.sessionId || '').trim();
+  if (!sessionId) {
+    return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
+  }
+  try {
+    const session = await getSessionById(sessionId);
+    if (!session || session.status !== 'LIVE' || !session.stageArn) {
+      return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
+    }
+    const { createViewerToken } = await import('../live/liveService');
+    const minted = await createViewerToken(sessionId, `web-${randomUUID()}`);
+    return res.status(200).json({
+      sessionId,
+      token: minted.token,
+      stageArn: minted.stageArn,
+    });
+  } catch (e: any) {
+    logger.error({ err: e?.message || String(e), sessionId }, '[live-watch] GET failed');
     return res.status(404).json({ error: 'NOT_LIVE', code: 'NOT_LIVE' });
   }
 });

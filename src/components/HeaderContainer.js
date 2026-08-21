@@ -49,7 +49,7 @@ const HeaderContainer = ({
 
 const styles = StyleSheet.create({
   header: {
-    backgroundColor: '#0A0A0C',
+    backgroundColor: COLORS.background,
     paddingTop: HEADER_PADDING_TOP,
     paddingBottom: 1,
     borderBottomLeftRadius: 22,

@@ -20,6 +20,37 @@ function readErrorCode(body: unknown): string {
   return "";
 }
 
+export type LiveWatchToken = {
+  token: string;
+  stageArn: string;
+  sessionId: string;
+};
+
+/** Public subscribe token so unsigned / incognito watch can join the Stage. */
+export async function fetchWatchToken(
+  sessionId: string,
+): Promise<LiveWatchToken | null> {
+  try {
+    const res = await fetch(
+      liveServiceUrl + "/api/live/watch/" + encodeURIComponent(sessionId),
+      { method: "GET", cache: "no-store" },
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as Partial<LiveWatchToken>;
+    if (typeof json.token !== "string" || !json.token.trim()) return null;
+    return {
+      token: json.token,
+      stageArn: typeof json.stageArn === "string" ? json.stageArn : "",
+      sessionId:
+        typeof json.sessionId === "string" && json.sessionId
+          ? json.sessionId
+          : sessionId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchLiveProgram(
   sessionId: string,
 ): Promise<LiveProgramFetch> {

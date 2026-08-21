@@ -180,16 +180,31 @@ async function liveApiFetch<T>(
   return json as T;
 }
 
+/** @returns true only when /health is OK after short retries (429 ≠ down). */
 export async function checkLiveServiceHealth(): Promise<boolean> {
-  try {
-    const res = await fetch(`${liveServiceUrl}/health`, {
-      method: "GET",
-      cache: "no-store",
-    });
-    return res.ok;
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${liveServiceUrl}/health`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (res.ok) return true;
+      // Rate-limited: service is up — do not treat as offline.
+      if (res.status === 429) return true;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        continue;
+      }
+      return false;
+    } catch {
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        continue;
+      }
+      return false;
+    }
   }
+  return false;
 }
 
 /** Create a LIVE session via the same `/api/live/start` the mobile host uses. */

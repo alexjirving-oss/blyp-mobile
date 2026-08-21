@@ -105,7 +105,7 @@ function BLYP_nativeLog(message, level = 1) {
 }
 
 import Toast from 'react-native-toast-message';
-import BlypLogo, { BLYP_LOGO_GRADIENT_COLORS } from './src/components/BlypLogo';
+import BlypLogo from './src/components/BlypLogo';
 import { PerformanceProvider } from './src/performance/PerformanceStore';
 import { COLORS } from './src/styles/theme';
 import { ThemeProvider } from './src/styles/ThemeProvider';
@@ -334,14 +334,14 @@ function MainTabs() {
           bottom: 0,
           height: tabBarHeight,
           borderTopWidth: 1,
-          borderTopColor: 'rgba(255,255,255,0.08)',
+          borderTopColor: COLORS.border,
           borderTopLeftRadius: 22,
           borderTopRightRadius: 22,
           borderBottomLeftRadius: 0,
           borderBottomRightRadius: 0,
           paddingTop: 6,
           paddingBottom: bottomPad,
-          backgroundColor: 'rgba(10,10,12,0.98)',
+          backgroundColor: COLORS.background,
           shadowColor: '#000000',
           shadowOpacity: 0.34,
           shadowRadius: 10,
@@ -362,8 +362,8 @@ function MainTabs() {
           marginTop: 1,
         },
         tabBarLabelPosition: 'below-icon',
-        tabBarActiveTintColor: BLYP_LOGO_GRADIENT_COLORS[1],
-        tabBarInactiveTintColor: 'rgba(148,163,184,0.88)',
+        tabBarActiveTintColor: COLORS.primary,
+        tabBarInactiveTintColor: COLORS.textMuted,
       }}
     >
       <Tab.Screen
@@ -1485,7 +1485,7 @@ function AppInner() {
           onPress={() => setAppError(null)}
           style={{ marginTop: 18, backgroundColor: COLORS.primary, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 }}
         >
-          <Text style={{ color: COLORS.black, fontWeight: '700' }}>Continue</Text>
+          <Text style={{ color: COLORS.white, fontWeight: '700' }}>Continue</Text>
         </TouchableOpacity>
       </View>
     );

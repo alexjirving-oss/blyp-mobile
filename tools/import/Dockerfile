@@ -1,8 +1,9 @@
 # Blyp social-import worker — container image.
 #
 # Bundles Node + ffmpeg + yt-dlp so the worker can download and re-host a user's
-# own public videos. Runs the poller continuously: works with plain `docker run`
-# on any always-on host, or on Cloud Run (set --min-instances=1 --no-cpu-throttling).
+# own public videos. Local/VM: continuous poller. Cloud Run: request-driven /wake
+# with scale-to-zero (min-instances=0, cpu-throttling); set KEEP_POLLING=1 only if
+# you intentionally want an always-on poller bill.
 #
 # Build:  docker build -t blyp-import-worker tools/import
 # Run:    docker run -e PROJECT_ID=blyp-master \

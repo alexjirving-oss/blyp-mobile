@@ -26,7 +26,9 @@ import { isPostLikedBy, togglePostLike } from "@/lib/likes";
 import { ensureFirebaseFromCognito } from "@/lib/firebaseBridge";
 import { useAuth } from "./AuthProvider";
 import { CommentsPanel } from "./CommentsPanel";
+import { GiftCinemaLayer } from "./GiftCinemaLayer";
 import { VideoPlayer } from "./VideoPlayer";
+import { makeGiftCinemaCue, type GiftCinemaCue } from "@/lib/giftCinemaClips";
 
 type Props = {
   initialPosts: FeedPost[];
@@ -217,6 +219,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
   const [giftsOpen, setGiftsOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [giftBusy, setGiftBusy] = useState(false);
+  const [giftCinemaCue, setGiftCinemaCue] = useState<GiftCinemaCue | null>(null);
   const [likeBusy, setLikeBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -567,6 +570,8 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
       })) as { coinSpent?: number };
       const spent = Number(out?.coinSpent || gift.coinCost || 0);
       showToast(`Sent ${gift.name}${spent ? ` · −${spent} coins` : ""}`, 2400);
+      const cinema = makeGiftCinemaCue(gift.giftId);
+      if (cinema) setGiftCinemaCue(cinema);
       setGiftsOpen(false);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Gift failed", 2800);
@@ -667,6 +672,7 @@ export function ForYouPlayer({ initialPosts, startId }: Props) {
       className="fy-player relative flex h-full w-full items-center justify-center overflow-hidden bg-black"
       onPointerDown={unlockAudio}
     >
+      <GiftCinemaLayer cue={giftCinemaCue} />
       <PeekStrip
         post={prevPost}
         side="left"

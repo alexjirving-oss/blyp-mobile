@@ -2,7 +2,7 @@
  * Blyp Theme Provider
  *
  * Provides the product theme to the whole app. Chrome is dark-only
- * (near-black #0A0A0C + PETRONAS teal / aqua). `useTheme()` returns a rich
+ * (warm charcoal #12141A + coral #FF4D6D sparingly). `useTheme()` returns a rich
  * theme object whose `.colors` and `.spacing` shape is backward-compatible
  * with the previous `blypTheme`.
  */
@@ -74,7 +74,7 @@ const defaultTheme = buildTheme('dark', 'system', () => {}, () => {});
 const ThemeContext = createContext<BlypTheme>(defaultTheme);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Product chrome is dark-only: PETRONAS teal + aqua on near-black (#0A0A0C).
+  // Product chrome is dark-only: coral on warm charcoal (#12141A).
   // Light / system preferences used to flip some screens to grey/white while
   // others stayed black — that mismatch is gone. setMode is kept for API
   // compatibility but always resolves to dark.

@@ -163,12 +163,17 @@ class IVSRealTimeView(context: Context) : TextureView(context) {
                 }
                 surfaceReady = true
                 applyZoomTransform("surfaceSizeChanged")
-                // Do not clear lastAttachedKey: overlay/tray layout ticks used to
-                // rebind EGL here and the Studio watch surface stalled then jumped.
+                // Do not clear lastAttachedKey and do not rebind on pure WxH thrash:
+                // setViewerSlotSurface → attachSurfaceToSlot used to call setSurface
+                // whenever attachSig's WxH changed, flashing the phone tile.
+                // Same class as approved reattach cure: skip unless not yet attached
+                // or the Surface is dead.
+                val surface = currentSurface
                 if (lastAttachedKey == null) {
                     post { attemptAttach("surfaceSizeChanged") }
-                } else if (currentSurface != null && currentSurface!!.isValid) {
-                    IVSBroadcastModule.setViewerSlotSurface(slotId, currentSurface, width, height)
+                } else if (surface == null || !surface.isValid) {
+                    lastAttachedKey = null
+                    post { attemptAttach("surfaceSizeChanged-dead") }
                 }
             }
 

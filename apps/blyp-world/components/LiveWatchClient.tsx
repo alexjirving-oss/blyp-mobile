@@ -22,15 +22,21 @@ import {
   normalizeFeed,
   type OverlayFeedSnapshot,
 } from "@/lib/studioOverlayFeed";
-import { fetchLiveProgram, type LiveProgram } from "@/lib/liveProgram";
+import { fetchLiveProgram, fetchWatchToken, type LiveProgram } from "@/lib/liveProgram";
 import { useLatencyBuffered } from "@/lib/latencyBuffer";
 import { useAuth } from "./AuthProvider";
 import { IvsAudiencePlayer } from "./IvsAudiencePlayer";
+import { IvsRealtimeAudience } from "./IvsRealtimeAudience";
 import { StudioProgramOverlays } from "./StudioProgramOverlays";
+import { GiftCinemaLayer } from "./GiftCinemaLayer";
 import "./command-center.css";
 
+/**
+ * Option 1: viewer chrome from aspect layout fields only.
+ * Never inherit host `studioLayout` — that is director-echo and pollutes the
+ * inactive aspect when the host is editing the other program.
+ */
 function resolveWatchFraming(
-  mirror: LiveStudioMirror | null,
   feed: OverlayFeedSnapshot,
   aspect: DeskOrientation,
 ): {
@@ -39,7 +45,7 @@ function resolveWatchFraming(
 } {
   const layoutRaw =
     aspect === "portrait"
-      ? feed.layoutPortrait || mirror?.studioLayout || "solo"
+      ? feed.layoutPortrait || "solo"
       : feed.layoutLandscape || "solo";
   return {
     orientation: aspect,
@@ -72,6 +78,9 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
   const [chatLines, setChatLines] = useState<{ name: string; text: string }[]>([]);
   const [mirror, setMirror] = useState<LiveStudioMirror | null>(null);
   const [lastGoodProgram, setLastGoodProgram] = useState<LiveProgram | null>(null);
+  const [watchToken, setWatchToken] = useState<string | null>(null);
+  const [rtFatal, setRtFatal] = useState(false);
+  const [rtReady, setRtReady] = useState(false);
   const [playerGen, setPlayerGen] = useState(0);
   const [fatal, setFatal] = useState(false);
   const [liveLatencySec, setLiveLatencySec] = useState(4);
@@ -146,6 +155,22 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
   useEffect(() => {
     if (!streamId || ended) return;
     let alive = true;
+    setWatchToken(null);
+    setRtFatal(false);
+    setRtReady(false);
+    void (async () => {
+      const tok = await fetchWatchToken(streamId);
+      if (!alive) return;
+      if (tok?.token) setWatchToken(tok.token);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [streamId, ended, playerGen]);
+
+  useEffect(() => {
+    if (!streamId || ended) return;
+    let alive = true;
     const poll = async () => {
       const result = await fetchLiveProgram(streamId);
       if (!alive) return;
@@ -216,6 +241,7 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
   const jukeboxDur = useLatencyBuffered(overlayFeed.jukeboxDur ?? 0, delayMs);
   const jukeboxPaused = useLatencyBuffered(overlayFeed.jukeboxPaused ?? true, delayMs);
   const giftsLabel = useLatencyBuffered(overlayFeed.giftsLabel, delayMs);
+  const giftCinema = useLatencyBuffered(overlayFeed.giftCinema ?? null, delayMs);
   const overlayChat = useLatencyBuffered(overlayFeed.chatLines, delayMs);
   const events = useLatencyBuffered(overlayFeed.events, delayMs);
   const timerLabel = useLatencyBuffered(overlayFeed.timerLabel, delayMs);
@@ -223,8 +249,8 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
   const delayedChat = useLatencyBuffered(chatLines, delayMs);
 
   const framing = useMemo(
-    () => resolveWatchFraming(mirror, overlayFeed, watchAspect),
-    [mirror, overlayFeed, watchAspect],
+    () => resolveWatchFraming(overlayFeed, watchAspect),
+    [overlayFeed, watchAspect],
   );
   const layout = useMemo(() => layoutDef(framing.layoutId), [framing.layoutId]);
   const isPortrait = framing.orientation === "portrait";
@@ -257,13 +283,16 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
   const playerSrc = lastGoodProgram?.playbackUrl;
   const compositionState = lastGoodProgram?.compositionState || "";
   const playerActive = compositionState === "ACTIVE" && !!playerSrc;
-  const drainAfterEnd = programGoneAt != null && playerActive && !ended;
-  const playableLive = playerActive && !ended;
+  const useRealtime = !!watchToken && !rtFatal && !ended;
+  const drainAfterEnd = programGoneAt != null && playerActive && !ended && !useRealtime;
+  const playableLive = !ended && (rtReady || playerActive);
   const badgeLabel = ended
     ? "ENDED"
     : playableLive
       ? "LIVE"
-      : compositionState || "CONNECTING";
+      : useRealtime
+        ? "LIVE"
+        : compositionState || "CONNECTING";
 
   const renderHostProgram = () => {
     if (ended) {
@@ -273,6 +302,19 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
             This session may have ended
           </p>
         </div>
+      );
+    }
+    if (useRealtime && watchToken) {
+      return (
+        <IvsRealtimeAudience
+          key={`rt-${playerGen}`}
+          token={watchToken}
+          muted={viewerMuted}
+          objectFit="cover"
+          onFirstFrame={() => setRtReady(true)}
+          onFatal={() => setRtFatal(true)}
+          onLatency={setLiveLatencySec}
+        />
       );
     }
     if (drainAfterEnd && playerSrc) {
@@ -297,6 +339,7 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
             className="relative mt-3 rounded-full bg-[var(--blyp-teal)] px-5 py-2 text-sm font-semibold text-[var(--blyp-ink)]"
             onClick={() => {
               setFatal(false);
+              setRtFatal(false);
               setPlayerGen((n) => n + 1);
             }}
           >
@@ -399,7 +442,9 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
           <div className="tls-program-host">
             {renderHostProgram()}
             {!ended ? (
-              <StudioProgramOverlays
+              <>
+                <GiftCinemaLayer cue={giftCinema} />
+                <StudioProgramOverlays
                 overlayState={overlays}
                 overlayPositions={overlayPositions}
                 gifters={gifters}
@@ -420,6 +465,7 @@ export function LiveWatchClient({ live }: { live: LiveCard }) {
                 viewers={viewers}
                 watchUrl={watchUrl}
               />
+              </>
             ) : null}
           </div>
         </div>

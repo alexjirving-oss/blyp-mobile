@@ -1,7 +1,7 @@
 import React from "react";
 import { View, TouchableOpacity, StyleSheet, Text } from "react-native";
 import HeaderContainer, { HEADER_ICON_COLOR } from "./HeaderContainer";
-import BlypLogo from "./BlypLogo";
+import { BlypWordmark } from "./BlypWordmark";
 import HeaderMenuTabs from "./HeaderMenuTabs";
 import Icon from "./Icon";
 import { COLORS } from "../styles/theme";
@@ -77,7 +77,7 @@ export default function BlypHeaderFlow({
                     style={flowStyles.logoOverlay}
                     pointerEvents="none"
                 >
-                    <BlypLogo useGradientBackground={true} />
+                    <BlypWordmark />
                 </View>
 
                 <View testID={`${base}_header_right`} style={[flowStyles.sideSlot, flowStyles.sideSlotRight]}>

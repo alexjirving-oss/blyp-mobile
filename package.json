@@ -13,7 +13,7 @@
     "eas-build-pre-install": "node scripts/write-google-services.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify:forward": "npm run lint && npm run typecheck && npm test -- --ci --runInBand && npm --prefix backend/blyp-live-service run test && npm --prefix functions run build && npm --prefix admin run lint && npm --prefix admin run build",
-    "verify:session": "npm run verify:forward",
+    "verify:session": "npm run accountability:verify-session",
     "verify:live": "node scripts/verified-forward-gate.js --live-only",
     "test:hooks": "powershell -ExecutionPolicy Bypass -File tools/agent/test-hooks.ps1",
     "test:acceptance": "powershell -ExecutionPolicy Bypass -File tools/agent/acceptance.ps1",

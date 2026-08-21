@@ -16,11 +16,13 @@ export function HeaderWalletChip({
   const { session } = useAuth();
   const [coins, setCoins] = useState<number | null>(null);
   const [gems, setGems] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session?.idToken) {
       setCoins(null);
       setGems(null);
+      setLoadError(null);
       return;
     }
     let alive = true;
@@ -30,9 +32,14 @@ export function HeaderWalletChip({
           if (!alive) return;
           setCoins(w.coins);
           setGems(w.gems);
+          setLoadError(null);
         })
-        .catch(() => {
-          /* keep last */
+        .catch((e) => {
+          if (!alive) return;
+          // Keep last good balances if we had them; never swallow forever as "…"
+          setLoadError(
+            e instanceof Error ? e.message : "Wallet unavailable",
+          );
         });
     };
     load();
@@ -58,15 +65,24 @@ export function HeaderWalletChip({
     );
   }
 
-  const coinLabel = coins == null ? "…" : coins.toLocaleString();
-  const gemLabel = gems == null ? "…" : gems.toLocaleString();
+  const coinLabel =
+    coins == null ? (loadError ? "—" : "…") : coins.toLocaleString();
+  const gemLabel =
+    gems == null ? (loadError ? "—" : "…") : gems.toLocaleString();
+  const title = loadError
+    ? `Wallet error: ${loadError}`
+    : `${coinLabel} coins · ${gemLabel} gems`;
 
   return (
     <Link
       href="/wallet"
       className={className}
-      aria-label={`Wallet: ${coinLabel} coins, ${gemLabel} gems`}
-      title={`${coinLabel} coins · ${gemLabel} gems`}
+      aria-label={
+        loadError
+          ? `Wallet error: ${loadError}`
+          : `Wallet: ${coinLabel} coins, ${gemLabel} gems`
+      }
+      title={title}
     >
       {compact ? (
         <span>

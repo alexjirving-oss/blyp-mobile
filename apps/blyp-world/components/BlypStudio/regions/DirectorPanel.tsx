@@ -20,9 +20,17 @@ const PRESETS: { id: LayoutPreset; label: string }[] = [
   { id: "side-by-side", label: "Side-by-side" },
 ];
 
-const ORIENTATIONS: { id: LayoutOrientation; label: string }[] = [
-  { id: "portrait", label: "9:16" },
-  { id: "landscape", label: "16:9" },
+const ORIENTATIONS: { id: LayoutOrientation; label: string; title: string }[] = [
+  {
+    id: "portrait",
+    label: "Phone",
+    title: "Portrait · phone watch chrome (one stream)",
+  },
+  {
+    id: "landscape",
+    label: "PC / tablet",
+    title: "Landscape · PC/tablet watch chrome (one stream)",
+  },
 ];
 
 export function DirectorPanel() {
@@ -74,7 +82,7 @@ export function DirectorPanel() {
           ))}
         </div>
         <div className="g9-dir-stat-label g9-dir-gap-md">
-          Layout
+          Layout · one stream, two chrome truths
         </div>
         <div className="blyp-studio-chip-row">
           {ORIENTATIONS.map((o) => (
@@ -82,6 +90,7 @@ export function DirectorPanel() {
               key={o.id}
               type="button"
               className={`blyp-studio-chip ${layoutOrientation === o.id ? "is-on" : ""}`}
+              title={o.title}
               onClick={() => setLayoutOrientation(o.id)}
             >
               {o.label}

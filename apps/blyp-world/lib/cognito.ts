@@ -61,9 +61,48 @@ export function persistSession(session: BlypSession | null) {
   if (typeof window === "undefined") return;
   if (!session) {
     localStorage.removeItem(STORAGE_KEY);
-    return;
+  } else {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  // Let AuthProvider (and any listeners) pick up mid-session refreshes
+  // from economyFetch 401 retry without a full page reload.
+  try {
+    window.dispatchEvent(
+      new CustomEvent("blyp:session", { detail: session }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Force Cognito refresh (used after live-service 401), ignoring expiresAt skew. */
+export function forceRefreshSession(
+  previous: BlypSession,
+): Promise<BlypSession | null> {
+  const user =
+    pool().getCurrentUser() ||
+    new CognitoUser({
+      Username: previous.email || previous.username,
+      Pool: pool(),
+    });
+  return new Promise((resolve) => {
+    try {
+      const token = new CognitoRefreshToken({
+        RefreshToken: previous.refreshToken,
+      });
+      user.refreshSession(token, (err, fresh) => {
+        if (err || !fresh) {
+          resolve(null);
+          return;
+        }
+        const blyp = sessionToBlyp(fresh);
+        persistSession(blyp);
+        resolve(blyp);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 export function signInWithPassword(

@@ -287,12 +287,22 @@ function Avatar({
   );
 }
 
-function WalletPills({ wallet }: { wallet: WalletBalance | null }) {
+function WalletPills({
+  wallet,
+  loadError,
+}: {
+  wallet: WalletBalance | null;
+  loadError?: string | null;
+}) {
   if (!wallet) {
     return (
       <Link href={appHref("/wallet")} className="home-wallet-row">
-        <span className="home-wallet-pill">Coins</span>
-        <span className="home-wallet-pill is-gem">Gems</span>
+        <span className="home-wallet-pill">
+          {loadError ? "—" : "Coins"}
+        </span>
+        <span className="home-wallet-pill is-gem">
+          {loadError ? "—" : "Gems"}
+        </span>
       </Link>
     );
   }
@@ -306,15 +316,42 @@ function WalletPills({ wallet }: { wallet: WalletBalance | null }) {
   );
 }
 
-function HeaderWalletPills({ wallet }: { wallet: WalletBalance | null }) {
-  const coins = wallet ? wallet.coins.toLocaleString() : "…";
-  const gems = wallet ? wallet.gems.toLocaleString() : "…";
+function HeaderWalletPills({
+  wallet,
+  loadError,
+}: {
+  wallet: WalletBalance | null;
+  loadError?: string | null;
+}) {
+  const coins = wallet
+    ? wallet.coins.toLocaleString()
+    : loadError
+      ? "—"
+      : "…";
+  const gems = wallet
+    ? wallet.gems.toLocaleString()
+    : loadError
+      ? "—"
+      : "…";
+  const title = loadError
+    ? `Wallet error: ${loadError}`
+    : wallet
+      ? `${coins} coins · ${gems} gems`
+      : "Loading wallet";
   return (
     <>
-      <Link href={appHref("/wallet")} className="home-wallet-pill" title="Coins">
+      <Link
+        href={appHref("/wallet")}
+        className="home-wallet-pill"
+        title={title}
+      >
         {coins}
       </Link>
-      <Link href={appHref("/wallet")} className="home-wallet-pill is-gem" title="Gems">
+      <Link
+        href={appHref("/wallet")}
+        className="home-wallet-pill is-gem"
+        title={title}
+      >
         {gems}
       </Link>
     </>
@@ -424,6 +461,7 @@ export function CommandCenterClient() {
   const [staffError, setStaffError] = useState<string | null>(null);
   const [staffProbed, setStaffProbed] = useState(false);
   const [wallet, setWallet] = useState<WalletBalance | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
 
   const signedIn = !!session;
   const who = me?.displayName || me?.username || session?.username || "there";
@@ -466,6 +504,7 @@ export function CommandCenterClient() {
       setStaffError(null);
       setStaffProbed(false);
       setWallet(null);
+      setWalletError(null);
       return;
     }
     let alive = true;
@@ -541,9 +580,17 @@ export function CommandCenterClient() {
 
       try {
         const w = await fetchWallet(session.idToken);
-        if (alive) setWallet(w);
-      } catch {
-        if (alive) setWallet(null);
+        if (alive) {
+          setWallet(w);
+          setWalletError(null);
+        }
+      } catch (e) {
+        if (alive) {
+          setWallet(null);
+          setWalletError(
+            e instanceof Error ? e.message : "Wallet unavailable",
+          );
+        }
       }
     })();
     return () => {
@@ -617,7 +664,9 @@ export function CommandCenterClient() {
               </span>
             </Link>
           )}
-          {signedIn ? <WalletPills wallet={wallet} /> : null}
+          {signedIn ? (
+            <WalletPills wallet={wallet} loadError={walletError} />
+          ) : null}
           {signedIn ? (
             <button type="button" className="home-logout" onClick={logout}>
               Log out
@@ -654,7 +703,7 @@ export function CommandCenterClient() {
               </button>
             )}
             {signedIn ? (
-              <HeaderWalletPills wallet={wallet} />
+              <HeaderWalletPills wallet={wallet} loadError={walletError} />
             ) : (
               <Link href={appHref("/wallet")} className="home-wallet-pill">
                 Coins

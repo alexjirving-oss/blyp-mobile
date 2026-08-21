@@ -73,36 +73,39 @@ docker run -d --restart unless-stopped \
 
 ### Fully-managed (Google Cloud Run)
 ```bash
-# Canonical prod region (us-central1). BOTH flags below are mandatory:
-# without them Cloud Run scales to zero after the health check and every
-# in-app import sits forever on "Queued — starting shortly…".
+# Canonical prod region (us-central1). Cost-safe default: scale-to-zero.
+# The worker is request-driven on Cloud Run (/wake). A Cloud Scheduler job
+# (blyp-import-worker-wake, every 5 minutes) invokes it with OIDC so pending
+# imports start within ~5m after a cold start — not instant, but no always-on bill.
 gcloud run deploy blyp-import-worker \
   --source tools/import \
   --project blyp-master \
   --region us-central1 \
   --no-allow-unauthenticated \
-  --min-instances 1 \
-  --no-cpu-throttling \
+  --min-instances 0 \
+  --cpu-throttling \
   --memory 1Gi \
-  --max-instances 1
+  --max-instances 1 \
+  --timeout 300
 
-# Or update an existing revision without rebuilding:
+# Or update flags without rebuilding:
 gcloud run services update blyp-import-worker \
   --project blyp-master \
   --region us-central1 \
-  --min-instances 1 \
-  --no-cpu-throttling \
+  --min-instances 0 \
+  --cpu-throttling \
   --max-instances 1
 ```
 On Cloud Run the worker uses the service's runtime service account (give it
-Firestore + Storage admin), so no key file is needed. `--min-instances 1` keeps
-the poller alive; `--no-cpu-throttling` allocates CPU between HTTP requests
-so the Firestore poll loop actually runs.
+Firestore + Storage admin), so no key file is needed. `--min-instances 0` +
+`--cpu-throttling` scales to zero when idle. Do **not** set `--min-instances 1`
+/`--no-cpu-throttling` unless you explicitly want an always-on poller bill
+(set `KEEP_POLLING=1` on the service as well).
 
-**Prod check:** if imports stick on `pending`, describe the service and confirm
-`autoscaling.knative.dev/minScale=1` and `run.googleapis.com/cpu-throttling=false`.
-A cold standby in another region is fine at minScale 0; do **not** run two
-always-on pollers unless you want double cost (claim is transactional either way).
+**Prod check:** describe the service — expect `minScale` absent or `0`, and
+`run.googleapis.com/cpu-throttling=true`. Confirm scheduler job
+`blyp-import-worker-wake` is ENABLED. A cold standby in another region is fine
+at minScale 0; do **not** run two always-on pollers.
 
 ## Notes
 - Posture: this imports a user's **own** public content onto their **own**

@@ -70,6 +70,13 @@ function panelFull(message: string): Error & { code: string } {
   return err;
 }
 
+/** Host cannot occupy a guest box on their own stage (maps to HTTP 400). */
+function hostCannotBeGuest(message: string): Error & { code: string } {
+  const err = new Error(message) as Error & { code: string };
+  err.code = 'HOST_CANNOT_BE_GUEST';
+  return err;
+}
+
 /**
  * Load a LIVE session and assert the caller is its host. Used to gate host-only
  * actions (end, guest invite/reject/kick, listing pending guests) so that any
@@ -490,6 +497,11 @@ export async function requestGuestSlot(sessionId: string, guestUserId: string, s
   if (!session || session.status !== 'LIVE') {
     throw new Error('Live session not found or not live');
   }
+  // Host is already the stage publisher — never create a guest REQUESTED row for them
+  // (Studio was listing + Accepting that ghost row → invite 500).
+  if (guestUserId === session.hostUserId) {
+    throw hostCannotBeGuest('Host cannot request a guest slot on their own stream');
+  }
 
   // Create the guest request record. This is required before guest-token can transition to LIVE.
   await requestGuestSlotStore(sessionId, guestUserId, nowIso(), slotIndexRequested);
@@ -504,7 +516,9 @@ export async function listGuestRequests(sessionId: string, requesterUserId?: str
   if (requesterUserId && session.hostUserId !== requesterUserId) {
     throw forbidden('Only the host can list guest requests');
   }
-  return listGuestRequestsStore(sessionId);
+  const rows = await listGuestRequestsStore(sessionId);
+  // Never surface the host as a pending guest (legacy rows + self-request races).
+  return rows.filter((r) => r.userId !== session.hostUserId);
 }
 
 export async function getGuest(sessionId: string, guestUserId: string) {
@@ -521,7 +535,7 @@ export async function inviteGuest(sessionId: string, guestUserId: string, reques
     throw forbidden('Only the host can invite guests');
   }
   if (guestUserId === session.hostUserId) {
-    throw new Error('Host cannot be invited as a guest');
+    throw hostCannotBeGuest('Host cannot be invited as a guest');
   }
 
   const allGuests = await expireStaleInvites(sessionId, await listGuestsStore(sessionId));
@@ -537,10 +551,69 @@ export async function inviteGuest(sessionId: string, guestUserId: string, reques
   }
 
   const record = await getGuestStore(sessionId, guestUserId);
+
+  // Idempotent re-accept: already INVITED → return existing slot (no Dynamo race 500).
+  if (record?.state === 'INVITED' && typeof record.slotIndex === 'number' && record.slotIndex >= 1) {
+    emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex: record.slotIndex });
+    return { slotIndex: record.slotIndex, stageArn: session.stageArn };
+  }
+
+  // Active LIVE guest cannot be re-invited via approve path.
+  if (record?.state === 'LIVE' && !isGuestStale(record)) {
+    const err: any = new Error('Guest session already active');
+    err.code = 'GUEST_SESSION_ACTIVE';
+    throw err;
+  }
+
   const preferred = typeof record?.slotIndexRequested === 'number' ? record.slotIndexRequested : undefined;
   const slotIndex = pickSlotIndex(used, preferred);
+  const now = nowIso();
 
-  await inviteGuestStore(sessionId, guestUserId, slotIndex, nowIso());
+  // inviteGuestStore requires state=REQUESTED. Missing / terminal / stale-LIVE
+  // used to throw ConditionalCheckFailedException → opaque HTTP 500. Fall through
+  // to host-invite upsert (same seating outcome, durable record).
+  const seatViaHostInvite = async (): Promise<{ slotIndex: number; stageArn: string } | null> => {
+    try {
+      await hostInviteGuestStore(sessionId, guestUserId, slotIndex, now);
+      return null;
+    } catch (err: any) {
+      if (err?.name !== 'ConditionalCheckFailedException') throw err;
+      const again = await getGuestStore(sessionId, guestUserId);
+      if (again?.state === 'INVITED' && typeof again.slotIndex === 'number' && again.slotIndex >= 1) {
+        emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex: again.slotIndex });
+        return { slotIndex: again.slotIndex, stageArn: session.stageArn };
+      }
+      if (again?.state === 'LIVE' && !isGuestStale(again)) {
+        const active: any = new Error('Guest session already active');
+        active.code = 'GUEST_SESSION_ACTIVE';
+        throw active;
+      }
+      // Stale LIVE / unexpected race: force-clear then upsert once.
+      await leaveGuestSession(sessionId, guestUserId, now, { force: true });
+      await hostInviteGuestStore(sessionId, guestUserId, slotIndex, now);
+      return null;
+    }
+  };
+
+  if (record?.state === 'REQUESTED') {
+    try {
+      await inviteGuestStore(sessionId, guestUserId, slotIndex, now);
+    } catch (err: any) {
+      if (err?.name !== 'ConditionalCheckFailedException') throw err;
+      // Race: another accept won, or state flipped — upsert or return current.
+      const again = await getGuestStore(sessionId, guestUserId);
+      if (again?.state === 'INVITED' && typeof again.slotIndex === 'number' && again.slotIndex >= 1) {
+        emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex: again.slotIndex });
+        return { slotIndex: again.slotIndex, stageArn: session.stageArn };
+      }
+      const early = await seatViaHostInvite();
+      if (early) return early;
+    }
+  } else {
+    const early = await seatViaHostInvite();
+    if (early) return early;
+  }
+
   // Push the state change to connected clients in real time (additive to the
   // existing poll/Firestore-mirror path).
   emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex });
@@ -563,7 +636,7 @@ export async function forceSeatGuest(args: {
     throw new Error('Live session not found or not live');
   }
   if (args.guestUserId === session.hostUserId) {
-    throw new Error('Host cannot be seated as a guest');
+    throw hostCannotBeGuest('Host cannot be seated as a guest');
   }
 
   try {
@@ -624,7 +697,7 @@ export async function hostInviteGuest(
     throw forbidden('Only the host can invite guests');
   }
   if (guestUserId === session.hostUserId) {
-    throw new Error('Host cannot invite themselves as a guest');
+    throw hostCannotBeGuest('Host cannot invite themselves as a guest');
   }
 
   const allGuests = await expireStaleInvites(sessionId, await listGuestsStore(sessionId));
@@ -636,8 +709,36 @@ export async function hostInviteGuest(
     throw panelFull(`Guest panel is full (max ${MAX_GUEST_SLOTS} guests)`);
   }
 
+  const prior = await getGuestStore(sessionId, guestUserId);
+  if (prior?.state === 'INVITED' && typeof prior.slotIndex === 'number' && prior.slotIndex >= 1) {
+    emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex: prior.slotIndex });
+    return { slotIndex: prior.slotIndex, stageArn: session.stageArn };
+  }
+  if (prior?.state === 'LIVE' && !isGuestStale(prior)) {
+    const err: any = new Error('Guest session already active');
+    err.code = 'GUEST_SESSION_ACTIVE';
+    throw err;
+  }
+
   const slotIndex = pickSlotIndex(used);
-  await hostInviteGuestStore(sessionId, guestUserId, slotIndex, nowIso());
+  const now = nowIso();
+  try {
+    await hostInviteGuestStore(sessionId, guestUserId, slotIndex, now);
+  } catch (err: any) {
+    if (err?.name !== 'ConditionalCheckFailedException') throw err;
+    const again = await getGuestStore(sessionId, guestUserId);
+    if (again?.state === 'INVITED' && typeof again.slotIndex === 'number' && again.slotIndex >= 1) {
+      emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex: again.slotIndex });
+      return { slotIndex: again.slotIndex, stageArn: session.stageArn };
+    }
+    if (again?.state === 'LIVE' && !isGuestStale(again)) {
+      const active: any = new Error('Guest session already active');
+      active.code = 'GUEST_SESSION_ACTIVE';
+      throw active;
+    }
+    await leaveGuestSession(sessionId, guestUserId, now, { force: true });
+    await hostInviteGuestStore(sessionId, guestUserId, slotIndex, now);
+  }
   emitRoomEvent(sessionId, { type: 'guest.invited', guestUserId, slotIndex });
   // Durable push/inbox ping so off-stream followers still get the invite.
   void enqueueGuestInviteNotification({
@@ -755,8 +856,10 @@ export async function joinLiveRealtime(
 }
 
 /**
- * Mass viewer join — returns an HLS playback URL when the stream doc has one.
- * Otherwise the client should fall back to joinLiveRealtime (stage subscriber).
+ * Mass viewer join — Stage subscribe when the session has a stage.
+ * HLS playbackUrl is the composition/RTMP copy; sending phones there is what
+ * made Studio preview look fine while watchers stall-then-jumped.
+ * App clients already fall back to joinLiveRealtime when mode !== playback.
  */
 export async function joinLiveMass(
   sessionId: string,
@@ -768,13 +871,18 @@ export async function joinLiveMass(
     throw new Error('Live session not found or not live');
   }
 
+  emitRoomEvent(sessionId, {
+    type: 'viewer.joined',
+    viewerUserId,
+    displayName: safeLiveDisplayName(displayName, viewerUserId),
+  });
+
+  if (session.stageArn) {
+    return { sessionId, mode: 'realtime' };
+  }
+
   const firestore = await getStreamPlaybackForViewer(sessionId);
   if (firestore.playbackUrl) {
-    emitRoomEvent(sessionId, {
-      type: 'viewer.joined',
-      viewerUserId,
-      displayName: safeLiveDisplayName(displayName, viewerUserId),
-    });
     return { sessionId, playbackUrl: firestore.playbackUrl, mode: 'playback' };
   }
 

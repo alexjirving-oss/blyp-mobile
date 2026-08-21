@@ -31,7 +31,6 @@ import {
 } from '../games/reactionDuel/reactionDuelRoomService';
 
 const router = Router();
-router.use(cognitoJwtMiddleware);
 
 function reactionDuelEnabled(): boolean {
   const raw = String(
@@ -40,12 +39,17 @@ function reactionDuelEnabled(): boolean {
   return !/^(0|false|no|off)$/i.test(raw);
 }
 
+function isReactionDuelPath(req: { path?: string }): boolean {
+  return String(req.path || '').startsWith('/live-game/reaction-duel');
+}
+
+// Scope kill-switch + Cognito to reaction-duel paths only — do not auth-gate sibling games.
 router.use((req, res, next) => {
-  if (!req.path.startsWith('/live-game/reaction-duel')) return next();
+  if (!isReactionDuelPath(req)) return next();
   if (!reactionDuelEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }
-  next();
+  return cognitoJwtMiddleware(req as AuthedRequest, res, next);
 });
 
 const startSchema = z.object({

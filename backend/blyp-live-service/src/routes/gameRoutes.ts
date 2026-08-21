@@ -17,23 +17,22 @@ import type { Outcome } from '../games/artillery/engine';
 
 const router = Router();
 
-router.use(cognitoJwtMiddleware);
-
 function artilleryEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(String(process.env.LIVE_ARTILLERY_ENABLED || '').trim());
 }
 
-// Only gate artillery paths. This router is mounted at `/api` alongside marble
-// and frenemies; a blanket DISABLED here would 404 those sibling games when
-// LIVE_ARTILLERY_ENABLED=0 (authed clients never fall through).
+function isArtilleryPath(req: { path?: string }): boolean {
+  return String(req.path || '').startsWith('/live-game/artillery');
+}
+
+// Scope kill-switch + Cognito to artillery paths only. This router is mounted at
+// `/api` alongside marble/frenemies; blanket auth or DISABLED would block siblings.
 router.use((req, res, next) => {
-  if (!req.path.startsWith('/live-game/artillery')) {
-    return next();
-  }
+  if (!isArtilleryPath(req)) return next();
   if (!artilleryEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }
-  next();
+  return cognitoJwtMiddleware(req as AuthedRequest, res, next);
 });
 
 const startSchema = z.object({

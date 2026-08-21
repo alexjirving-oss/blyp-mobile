@@ -101,7 +101,12 @@ class StopHookTests(unittest.TestCase):
         os.makedirs(os.path.dirname(self.session_path), exist_ok=True)
         os.makedirs(os.path.dirname(self.dist_cli), exist_ok=True)
         Path(self.session_path).write_text("{}\n", encoding="utf-8")
-        Path(self.dist_cli).write_text("// test\n", encoding="utf-8")
+        # Must look like the real accountability CLI so compiled_cli_is_ready() passes.
+        Path(self.dist_cli).write_text(
+            "// test stub\nexport async function runSessionVerification() {}\n"
+            + ("// verify-session entry\n" * 8),
+            encoding="utf-8",
+        )
         self.patches = [
             mock.patch.object(stop, "ROOT", self.root),
             mock.patch.object(stop, "SESSION_PATH", self.session_path),
@@ -209,6 +214,47 @@ class StopHookTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertEqual(output, {})
+
+    def test_empty_dist_cli_is_rejected_after_build(self) -> None:
+        Path(self.dist_cli).write_text("", encoding="utf-8")
+        code, output = self.invoke([self.process(0)])
+        self.assertEqual(code, 2)
+        self.assertIn("build failed", output["followup_message"])
+        self.assertIn("dist_cli_bytes=0", output["followup_message"])
+
+    def test_empty_verifier_output_rebuilds_once_then_passes(self) -> None:
+        value, _ = self.receipt("PASS")
+        validation = {
+            "valid": True,
+            "receiptId": value["receiptId"],
+            "verdict": "PASS",
+            "payloadSha256": "a" * 64,
+        }
+        code, output = self.invoke(
+            [
+                self.process(0),  # initial build
+                self.process(0, "", ""),  # empty verifier output (truncated cli race)
+                self.process(0),  # rebuild after empty output
+                self.process(0, json.dumps(value)),
+                self.process(0, json.dumps(validation)),
+            ]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(output, {})
+
+    def test_empty_verifier_output_reports_exit_and_cli_bytes(self) -> None:
+        code, output = self.invoke(
+            [
+                self.process(0),
+                self.process(0, "", ""),
+                self.process(0),
+                self.process(0, "", ""),
+            ]
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("returned empty output", output["followup_message"])
+        self.assertIn("exit=0", output["followup_message"])
+        self.assertIn("dist_cli_bytes=", output["followup_message"])
 
 
 if __name__ == "__main__":

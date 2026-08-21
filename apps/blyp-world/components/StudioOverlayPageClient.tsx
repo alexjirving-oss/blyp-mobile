@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { StudioProgramOverlays } from "@/components/StudioProgramOverlays";
+import { GiftCinemaLayer } from "@/components/GiftCinemaLayer";
 import { getDb } from "@/lib/firebase";
 import {
   DEFAULT_OVERLAY_POSITIONS,
@@ -163,6 +164,7 @@ export function StudioOverlayPageClient() {
   return (
     <div className="tls-overlay-source">
       <div className="tls-overlay-source-stage">
+        <GiftCinemaLayer cue={feed.giftCinema} />
         <StudioProgramOverlays
           overlayState={feed.overlays}
           overlayPositions={overlayPositions}

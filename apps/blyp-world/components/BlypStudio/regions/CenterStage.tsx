@@ -141,7 +141,7 @@ export function CenterStage() {
 
   return (
     <section className="blyp-studio-region blyp-studio-stage">
-      <div className="relative flex aspect-video w-full max-h-full flex-col overflow-hidden rounded-xl border border-dashed border-[rgba(0,210,190,0.35)] bg-black">
+      <div className="relative flex aspect-video w-full max-h-full flex-col overflow-hidden rounded-xl border border-dashed border-[var(--blyp-line)] bg-black">
         {activeMode !== "GRID9" ? (
           <div className="relative min-h-0 flex-1">
             <video
@@ -157,7 +157,8 @@ export function CenterStage() {
               </div>
             )}
             <div className="pointer-events-none absolute bottom-2 left-2 rounded border border-[rgba(232,230,240,0.2)] bg-black/60 px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--blyp-muted)]">
-              Director · {layoutPreset} · {layoutOrientation}
+              {layoutOrientation === "portrait" ? "Phone" : "PC/tablet"} ·{" "}
+              {layoutPreset} · one stream
             </div>
           </div>
         ) : (
@@ -353,7 +354,7 @@ function SlotAvatar({
       className={`flex h-full w-full flex-col items-center justify-center gap-1 bg-[rgba(16,16,22,0.85)] ${large ? "text-base" : "text-[11px]"}`}
     >
       <span
-        className={`flex items-center justify-center rounded-full border border-[rgba(0,210,190,0.35)] bg-[rgba(0,210,190,0.12)] font-semibold text-[var(--blyp-teal)] ${large ? "h-14 w-14 text-lg" : "h-8 w-8 text-[10px]"}`}
+        className={`flex items-center justify-center rounded-full border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] font-semibold text-[var(--blyp-fog)] ${large ? "h-14 w-14 text-lg" : "h-8 w-8 text-[10px]"}`}
       >
         {slot.avatarLabel ?? "?"}
       </span>

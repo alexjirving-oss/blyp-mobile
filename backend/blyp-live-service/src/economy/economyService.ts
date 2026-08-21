@@ -2695,6 +2695,21 @@ export async function convertGemsToCoins(
       });
       remaining = 0n;
     }
+
+    if (remaining > 0n) {
+      // Wallet claimed pending that has no matching PENDING ledger rows.
+      // Abort so lazy getWallet settle cannot resurrect unconsumed rows later.
+      throw new EconomyError(
+        'INTERNAL',
+        500,
+        'Pending gem ledger shortfall during convert',
+        {
+          remaining: Number(remaining),
+          requested: Number(amount),
+          convertRefId,
+        },
+      );
+    }
   };
 
   try {

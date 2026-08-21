@@ -86,6 +86,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // economyFetch may force-refresh Cognito after a live-service 401 and
+  // persist a new idToken — keep React session in sync so header/wallet
+  // polls do not keep sending the dead JWT.
+  useEffect(() => {
+    const onSession = (ev: Event) => {
+      const next = (ev as CustomEvent<BlypSession | null>).detail;
+      setSession(next);
+      if (!next?.idToken) {
+        setMe(null);
+        setFirebaseReady(false);
+      }
+    };
+    window.addEventListener("blyp:session", onSession);
+    return () => window.removeEventListener("blyp:session", onSession);
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     const next = await signInWithPassword(email, password);
     const { firebaseReady: ready, me: profile } = await bridgeAndProfile(next);

@@ -83,7 +83,7 @@ export const STUDIO_FEATURE_MATRIX: StudioMatrixPillar[] = [
         id: "gift-alerts",
         label: "Custom gift alerts → video/SFX/GIF overlays",
         status: "PARTIAL",
-        note: "SFX map + feed flash + soundboard; no custom video/GIF asset library per gift SKU",
+        note: "Cinema MP4 layer per gift SKU (Mad Scientist + lions + hero clips) + SFX map; no custom host-uploaded GIF library",
       },
       {
         id: "granular-tts",

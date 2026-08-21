@@ -140,7 +140,7 @@ function CleanSlotFace({
       className={`flex h-full flex-col items-center justify-center gap-1 ${large ? "text-sm" : "text-[10px]"}`}
     >
       <span
-        className={`flex items-center justify-center rounded-full border border-[rgba(0,240,255,0.45)] bg-[rgba(0,240,255,0.12)] font-semibold text-[#00f0ff] ${large ? "h-12 w-12" : "h-7 w-7"}`}
+        className={`flex items-center justify-center rounded-full border border-[var(--blyp-line)] bg-[var(--blyp-ink-elevated)] font-semibold text-[var(--blyp-fog)] ${large ? "h-12 w-12" : "h-7 w-7"}`}
       >
         {slot.avatarLabel ?? "?"}
       </span>

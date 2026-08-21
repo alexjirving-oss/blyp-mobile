@@ -39,6 +39,16 @@ import { battlesEnabled, battlesDisabledPayload } from '../battles/battlesFlags'
 
 const router = Router();
 
+/** Map invite/accept/host-invite coded errors; never leak Dynamo ConditionalCheck as 500. */
+function guestInviteHttpStatus(err: any): number {
+  const code = err?.code;
+  if (code === 'FORBIDDEN') return 403;
+  if (code === 'HOST_CANNOT_BE_GUEST') return 400;
+  if (code === 'PANEL_FULL' || code === 'GUEST_SESSION_ACTIVE') return 409;
+  if (err?.name === 'ConditionalCheckFailedException') return 409;
+  return 500;
+}
+
 router.use(cognitoJwtMiddleware);
 
 function resolveLiveSessionId(body: any): string {
@@ -403,7 +413,10 @@ router.post('/live/guest/request', async (req: AuthedRequest, res) => {
     res.json({ ok: true });
   } catch (err: any) {
     const code = err?.code;
-    const status = code === 'GUEST_SESSION_ACTIVE' ? 409 : 500;
+    const status =
+      code === 'GUEST_SESSION_ACTIVE' ? 409
+      : code === 'HOST_CANNOT_BE_GUEST' ? 400
+      : 500;
     res.status(status).json({ error: 'Failed to request guest slot', code: code || 'UNKNOWN_ERROR', detail: err?.message });
   }
 });
@@ -581,8 +594,8 @@ router.post('/live/guest/invite', async (req: AuthedRequest, res) => {
       slotIndex,
     });
   } catch (err: any) {
-    const status = err?.code === 'FORBIDDEN' ? 403 : err?.code === 'PANEL_FULL' ? 409 : 500;
-    res.status(status).json({ error: 'Failed to invite guest', code: err?.code, detail: err.message });
+    const code = err?.code || (err?.name === 'ConditionalCheckFailedException' ? 'GUEST_STATE_CONFLICT' : undefined);
+    res.status(guestInviteHttpStatus(err)).json({ error: 'Failed to invite guest', code, detail: err.message });
   }
 });
 
@@ -609,8 +622,8 @@ router.post('/live/guest/accept', async (req: AuthedRequest, res) => {
       slotIndex,
     });
   } catch (err: any) {
-    const status = err?.code === 'FORBIDDEN' ? 403 : err?.code === 'PANEL_FULL' ? 409 : 500;
-    res.status(status).json({ error: 'Failed to invite guest', code: err?.code, detail: err.message });
+    const code = err?.code || (err?.name === 'ConditionalCheckFailedException' ? 'GUEST_STATE_CONFLICT' : undefined);
+    res.status(guestInviteHttpStatus(err)).json({ error: 'Failed to invite guest', code, detail: err.message });
   }
 });
 
@@ -682,9 +695,8 @@ router.post('/live/guest/host-invite', async (req: AuthedRequest, res) => {
     const result = await hostInviteGuest(sessionId, userId, guestUserId);
     res.json({ ok: true, slotIndex: result.slotIndex });
   } catch (err: any) {
-    const code = err?.code;
-    const status = code === 'FORBIDDEN' ? 403 : code === 'PANEL_FULL' ? 409 : 500;
-    res.status(status).json({ error: 'Failed to invite guest', code, detail: err.message });
+    const code = err?.code || (err?.name === 'ConditionalCheckFailedException' ? 'GUEST_STATE_CONFLICT' : undefined);
+    res.status(guestInviteHttpStatus(err)).json({ error: 'Failed to invite guest', code, detail: err.message });
   }
 });
 

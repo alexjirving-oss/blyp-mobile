@@ -1,41 +1,33 @@
 /**
  * Blyp Design System — Color Tokens
  *
- * Single source of truth for every colour in the app.
- * Import COLORS (or individual groups) instead of hardcoding hex values.
- *
- * Palette rationale:
- *   - Chrome/page use deep slate-blue for a luxury dark look
- *   - Card surfaces use translucent white for subtle glass layering
- *   - Brand accent is the existing purple→pink gradient (sparingly)
- *   - Text uses cool-neutral greys for readability
+ * Flat token set mirroring designSystem/palettes.ts (darkScheme).
+ * Prefer `useTheme()` from '../ThemeProvider' for reactive colours.
+ * Keep in sync with darkScheme (warm night: charcoal + coral sparingly).
  */
 
-// NOTE: Prefer `useTheme()` from '../ThemeProvider' for reactive light/dark
-// colours. This flat token set mirrors the DARK scheme for any legacy/static
-// importers and is kept in sync with designSystem/palettes.ts (darkScheme).
 export const COLORS = {
-    // ── Chrome + backgrounds (editorial near-black) ───────
-    chrome: '#0A0A0C',                 // app chrome / header bg
-    page: '#0A0A0C',                   // page / screen background
-    surface: '#141418',                // raised surface for cards on dark bg
-    card: '#121216',                   // card surface
-    border: 'rgba(255,255,255,0.08)',  // subtle border
-    divider: 'rgba(255,255,255,0.06)', // list dividers
+    // ── Chrome + backgrounds (warm charcoal) ──────────────
+    chrome: '#12141A',                 // app chrome / header bg
+    page: '#12141A',                   // page / screen background
+    surface: '#1A1C24',                // raised surface for cards on dark bg
+    card: '#16181F',                   // card surface
+    border: 'rgba(236,234,240,0.12)',  // subtle border
+    divider: 'rgba(236,234,240,0.08)', // list dividers
 
-    // ── Text (neutral zinc ramp) ─────────────────────────
-    textPrimary: '#F5F5F7',
-    textSecondary: '#A1A1AA',
-    textMuted: '#71717A',
-    textDisabled: '#52525B',
+    // ── Text (warm fog / muted) ───────────────────────────
+    textPrimary: '#ECEAF0',
+    textSecondary: '#9A97A6',
+    textMuted: '#9A97A6',
+    textDisabled: '#6B6878',
 
-    // ── Brand accent (Mercedes-AMG PETRONAS teal) ───────
-    brandA: '#00D2BE',
-    brandB: '#00D2BE',
-    brandC: '#00A89E',
+    // ── Brand accent (coral — sparingly) ──────────────────
+    brandA: '#FF4D6D',
+    brandB: '#FF4D6D',
+    brandC: '#E83D5C',
 
-    // ── Electric secondary accent (cyan highlight) ────────
-    electric: '#67E8F9',
+    // ── Secondary (warm taupe; demoted off neon cyan) ─────
+    electric: '#C4B5A5',
 
     // ── Status ────────────────────────────────────────────
     success: '#34D399',

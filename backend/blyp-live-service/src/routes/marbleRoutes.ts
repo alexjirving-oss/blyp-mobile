@@ -20,21 +20,22 @@ import {
 } from '../games/marble/marbleRoomService';
 
 const router = Router();
-router.use(cognitoJwtMiddleware);
 
 function marbleEnabled(): boolean {
   return /^(1|true|yes|on)$/i.test(String(process.env.LIVE_MARBLE_RACE_ENABLED || '').trim());
 }
 
-// Scope to marble paths only — do not block sibling `/api` routers (frenemies).
+function isMarblePath(req: { path?: string }): boolean {
+  return String(req.path || '').startsWith('/live-game/marble');
+}
+
+// Scope kill-switch + Cognito to marble paths only — do not block sibling `/api` routers.
 router.use((req, res, next) => {
-  if (!req.path.startsWith('/live-game/marble')) {
-    return next();
-  }
+  if (!isMarblePath(req)) return next();
   if (!marbleEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }
-  next();
+  return cognitoJwtMiddleware(req as AuthedRequest, res, next);
 });
 
 const startSchema = z.object({

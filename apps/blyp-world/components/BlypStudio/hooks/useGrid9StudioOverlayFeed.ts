@@ -23,6 +23,7 @@ import {
   formatSessionTimer,
   type OverlayFeedSnapshot,
 } from "@/lib/studioOverlayFeed";
+import { makeGiftCinemaCue, type GiftCinemaCue } from "@/lib/giftCinemaClips";
 import {
   loadSpotifyQueue,
   subscribeStudioSpotifyPlayback,
@@ -32,6 +33,8 @@ import {
 import { MUSIC_BEDS, studioAudio } from "../audio/StudioAudioEngine";
 import {
   overlayPosition,
+  type LayoutOrientation,
+  type LayoutPreset,
   type OverlayInstance,
   type OverlayKind,
 } from "../overlays/catalog";
@@ -41,6 +44,20 @@ import { useStudioState } from "../store/StudioStateContext";
 const OVERLAY_REMOTE_DEBOUNCE_MS = 800;
 const OVERLAY_REMOTE_MAX_WAIT_MS = 2500;
 const GOAL_TARGET = 10_000;
+
+type AspectOverlayMaps = Record<LayoutOrientation, OverlayPositions>;
+type AspectLayouts = Record<LayoutOrientation, LayoutPreset>;
+
+function emptyAspectMaps(): AspectOverlayMaps {
+  return {
+    portrait: { ...DEFAULT_OVERLAY_POSITIONS },
+    landscape: { ...DEFAULT_OVERLAY_POSITIONS },
+  };
+}
+
+function emptyAspectLayouts(): AspectLayouts {
+  return { portrait: "solo", landscape: "solo" };
+}
 
 function overlayOn(overlays: OverlayInstance[], kind: OverlayKind): boolean {
   return overlays.some((o) => o.kind === kind && o.enabled);
@@ -142,11 +159,14 @@ export function useGrid9StudioOverlayFeed(): void {
   >([]);
   const [timerLabel, setTimerLabel] = useState("00:00:00");
   const [liveStartedAt, setLiveStartedAt] = useState<number | null>(null);
+  const [giftCinemaCue, setGiftCinemaCue] = useState<GiftCinemaCue | null>(null);
 
   const overlayFeedSnapRef = useRef<OverlayFeedSnapshot | null>(null);
   const overlayRemoteDebounceRef = useRef<number | null>(null);
   const overlayRemoteMaxWaitRef = useRef<number | null>(null);
   const overlayRemoteSessionRef = useRef<string | null>(null);
+  const aspectMapsRef = useRef<AspectOverlayMaps>(emptyAspectMaps());
+  const aspectLayoutsRef = useRef<AspectLayouts>(emptyAspectLayouts());
   const topGiftersRef = useRef<Record<string, { coins: number; name: string }>>(
     {},
   );
@@ -281,6 +301,11 @@ export function useGrid9StudioOverlayFeed(): void {
           name: name || cur.name,
         };
         publishBoard();
+        const cinema = makeGiftCinemaCue(
+          String(payload.giftId || ""),
+          payload.giftEventId,
+        );
+        if (cinema) setGiftCinemaCue(cinema);
       },
     ).then((unsub) => {
       if (cancelled) unsub();
@@ -365,8 +390,13 @@ export function useGrid9StudioOverlayFeed(): void {
       JSON.stringify({
         overlays: overlayState,
         maps: overlayPositions,
+        aspect: layoutOrientation,
+        layout: layoutPreset,
         chat: chatLines,
         giftsLabel,
+        giftCinema: giftCinemaCue
+          ? `${giftCinemaCue.giftEventId}:${giftCinemaCue.giftId}`
+          : "",
         goalPct,
         goalTarget: GOAL_TARGET,
         jukeboxNow,
@@ -384,8 +414,11 @@ export function useGrid9StudioOverlayFeed(): void {
     [
       overlayState,
       overlayPositions,
+      layoutOrientation,
+      layoutPreset,
       chatLines,
       giftsLabel,
+      giftCinemaCue,
       goalPct,
       jukeboxNow,
       jukeboxArt,
@@ -451,17 +484,23 @@ export function useGrid9StudioOverlayFeed(): void {
       overlayFeedSnapRef.current = null;
       return;
     }
+    // Bind active aspect only; always publish both maps + both layout ids.
+    aspectMapsRef.current[layoutOrientation] = overlayPositions;
+    aspectLayoutsRef.current[layoutOrientation] = layoutPreset;
+    const maps = aspectMapsRef.current;
+    const layouts = aspectLayoutsRef.current;
     const snap: OverlayFeedSnapshot = {
       v: 1,
       overlays: overlayState,
-      positions: overlayPositions,
-      positionsPortrait: overlayPositions,
-      positionsLandscape: overlayPositions,
-      layoutPortrait: layoutOrientation === "portrait" ? layoutPreset : undefined,
-      layoutLandscape:
-        layoutOrientation === "landscape" ? layoutPreset : undefined,
+      // Legacy single map = active aspect (not always portrait).
+      positions: maps[layoutOrientation],
+      positionsPortrait: maps.portrait,
+      positionsLandscape: maps.landscape,
+      layoutPortrait: layouts.portrait,
+      layoutLandscape: layouts.landscape,
       chatLines,
       giftsLabel,
+      giftCinema: giftCinemaCue,
       goalPct,
       goalLabel,
       jukeboxNow,
@@ -491,6 +530,7 @@ export function useGrid9StudioOverlayFeed(): void {
     layoutPreset,
     chatLines,
     giftsLabel,
+    giftCinemaCue,
     goalPct,
     goalLabel,
     jukeboxNow,

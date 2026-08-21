@@ -1,4 +1,4 @@
-import { isNativePublishVideoTrack } from "@/lib/studioDeskMedia";
+import { isNativePublishVideoTrack, mixDeskAudioTracks } from "@/lib/studioDeskMedia";
 
 /**
  * IVS Real-Time host publish for desktop Chrome/Edge.
@@ -42,11 +42,10 @@ type VideoTrackWithHint = MediaStreamTrack & {
 };
 
 /**
- * Phone IVS RT subscriber is built for native host ~600kbps / 15fps.
- * 1800/30 + default web simulcast layer-ramps: stall then jump on the phone.
- * Encoder ceiling only — do not applyConstraints on the camera track.
+ * Product HD encode ceiling. Bitrate stays 900 — 2500 killed audio.
+ * Encoder only — do not applyConstraints on the camera track.
  */
-const PUBLISH_MAX_FPS = 24;
+const PUBLISH_MAX_FPS = 30;
 
 /** Target encode ceiling — surfaced in LIVE Studio health strip. */
 export const PUBLISH_MAX_BITRATE_KBPS = 900;
@@ -133,7 +132,9 @@ export async function startIvsWebHostPublish(opts: {
     opts.videoEl.playsInline = true;
     void opts.videoEl.play().catch(() => undefined);
   }
-  const audioTrack = media.getAudioTracks()[0];
+  const audioTracks = media
+    .getAudioTracks()
+    .filter((t) => t.readyState === "live");
   const videoTrack =
     media.getVideoTracks().find(isNativePublishVideoTrack) ??
     media.getVideoTracks()[0];
@@ -145,9 +146,16 @@ export async function startIvsWebHostPublish(opts: {
     if (ownsMedia) media.getTracks().forEach((t) => t.stop());
     throw new Error("Stage video must be the camera or screen — not a canvas");
   }
-  // IVS Real-Time requires an audio track; publish silence if capture had none.
-  let publishAudio = audioTrack;
+  // IVS Real-Time requires one audio LocalStageStream. If capture has mic +
+  // tab/display audio, mix them — publishing [0] alone drops YouTube sound.
+  let publishAudio = audioTracks[0];
   let silentAudio: MediaStreamTrack | null = null;
+  let deskAudioMixStop: (() => void) | null = null;
+  if (audioTracks.length > 1) {
+    const mixed = mixDeskAudioTracks(audioTracks);
+    publishAudio = mixed.track;
+    deskAudioMixStop = mixed.stop;
+  }
   if (!publishAudio) {
     let ctx: AudioContext;
     try {
@@ -349,6 +357,7 @@ export async function startIvsWebHostPublish(opts: {
         /* best-effort */
       }
       silentAudio?.stop();
+      deskAudioMixStop?.();
       guestVideo.clear();
       guestAudioEls.forEach((el) => {
         el.pause();

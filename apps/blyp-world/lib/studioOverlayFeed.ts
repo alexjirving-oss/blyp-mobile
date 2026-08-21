@@ -6,6 +6,7 @@ import {
   type OverlayState,
   type StudioOverlayId,
 } from "@/lib/studioDualView";
+import type { GiftCinemaCue } from "@/lib/giftCinemaClips";
 
 export type OverlayFeedEvent = {
   id: string;
@@ -19,6 +20,8 @@ export type OverlayFeedSnapshot = {
   positions: OverlayPositions;
   chatLines: { name: string; text: string }[];
   giftsLabel: string;
+  /** Latest cinema gift cue for watch / OBS receivers (not a sticky poster). */
+  giftCinema?: GiftCinemaCue | null;
   goalPct: number;
   goalLabel: string;
   jukeboxNow: string;
@@ -56,6 +59,7 @@ export const DEFAULT_OVERLAY_FEED: OverlayFeedSnapshot = {
   positions: { ...DEFAULT_OVERLAY_POSITIONS },
   chatLines: [],
   giftsLabel: "Gift alerts",
+  giftCinema: null,
   goalPct: 0,
   goalLabel: "Stream goal",
   jukeboxNow: "Queue empty",
@@ -130,6 +134,23 @@ export function readOverlayFeed(): OverlayFeedSnapshot {
   }
 }
 
+function normalizeGiftCinemaCue(
+  raw: GiftCinemaCue | null | undefined | unknown,
+): GiftCinemaCue | null {
+  if (!raw || typeof raw !== "object") return null;
+  const c = raw as Partial<GiftCinemaCue>;
+  const giftId = typeof c.giftId === "string" ? c.giftId.trim() : "";
+  if (!giftId) return null;
+  return {
+    giftId,
+    giftEventId:
+      typeof c.giftEventId === "string" && c.giftEventId.trim()
+        ? c.giftEventId.trim()
+        : `feed_${giftId}`,
+    at: typeof c.at === "number" ? c.at : 0,
+  };
+}
+
 export function normalizeFeed(
   parsed: Partial<OverlayFeedSnapshot> | null | undefined,
 ): OverlayFeedSnapshot {
@@ -151,6 +172,7 @@ export function normalizeFeed(
     chatLines: Array.isArray(parsed?.chatLines) ? parsed!.chatLines!.slice(0, 8) : [],
     giftsLabel:
       typeof parsed?.giftsLabel === "string" ? parsed.giftsLabel : "Gift alerts",
+    giftCinema: normalizeGiftCinemaCue(parsed?.giftCinema),
     goalPct:
       typeof parsed?.goalPct === "number"
         ? Math.min(100, Math.max(0, parsed.goalPct))

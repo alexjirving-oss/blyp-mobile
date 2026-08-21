@@ -1004,7 +1004,7 @@ router.post('/withdraw/request', async (req: AuthedRequest, res) => {
   }
 });
 
-/** Convert cleared gems → spendable COIN at ceil(gems * 1.15). Independent of withdraw rails. */
+/** Convert earned gems (available+pending) → spendable COIN at ceil(gems * 1.15). Independent of withdraw rails. */
 router.post('/wallet/convert-gems', async (req: AuthedRequest, res) => {
   try {
     const userId = req.user?.sub;

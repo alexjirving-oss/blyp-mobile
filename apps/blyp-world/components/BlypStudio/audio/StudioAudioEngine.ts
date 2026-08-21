@@ -4,6 +4,7 @@
  * Fail-soft — missing Web Audio / autoplay never throws to the director UI.
  */
 
+import { mixDeskAudioTracks } from "@/lib/studioDeskMedia";
 import {
   planPublishAudio,
   wantPublishMix as wantMixFromInputs,
@@ -61,6 +62,11 @@ let extMusicSource: MediaElementAudioSourceNode | null = null;
 let extMusicStreamSource: MediaStreamAudioSourceNode | null = null;
 let mixDestTrackId: string | null = null;
 let tabCaptureRouting = false;
+let nativeAudioMix: {
+  ids: string;
+  track: MediaStreamTrack;
+  stop: () => void;
+} | null = null;
 const mixListeners = new Set<(wantMix: boolean) => void>();
 
 function nativeVideoTrack(videoFrom: MediaStream): MediaStreamTrack | null {
@@ -84,6 +90,36 @@ function gumAudioTracks(from: MediaStream | null | undefined): MediaStreamTrack[
       ?.getAudioTracks()
       .filter((t) => t.readyState === "live" && t.id !== mixDestTrackId) ?? []
   );
+}
+
+/** IVS publishes one audio LocalStageStream — never drop tab/display as track[1]. */
+function mixedGumAudioTrack(
+  from: MediaStream | null | undefined,
+): MediaStreamTrack | null {
+  const tracks = gumAudioTracks(from);
+  if (!tracks.length) return null;
+  if (tracks.length === 1) {
+    if (nativeAudioMix) {
+      nativeAudioMix.stop();
+      nativeAudioMix = null;
+    }
+    return tracks[0];
+  }
+  const ids = tracks
+    .map((t) => t.id)
+    .sort()
+    .join(",");
+  if (
+    nativeAudioMix &&
+    nativeAudioMix.ids === ids &&
+    nativeAudioMix.track.readyState === "live"
+  ) {
+    return nativeAudioMix.track;
+  }
+  nativeAudioMix?.stop();
+  const mixed = mixDeskAudioTracks(tracks);
+  nativeAudioMix = { ids, track: mixed.track, stop: mixed.stop };
+  return mixed.track;
 }
 
 function wantPublishMix(): boolean {
@@ -436,7 +472,7 @@ export const studioAudio = {
   },
 
   nativeAudioTrack(from: MediaStream | null | undefined): MediaStreamTrack | null {
-    return gumAudioTracks(from)[0] ?? null;
+    return mixedGumAudioTrack(from);
   },
 
   /**
@@ -451,7 +487,8 @@ export const studioAudio = {
     const video = nativeVideoTrack(videoFrom);
     if (!video) return null;
     const out = new MediaStream([video]);
-    gumAudioTracks(micFrom ?? videoFrom).forEach((t) => out.addTrack(t));
+    const audio = mixedGumAudioTrack(micFrom ?? videoFrom);
+    if (audio) out.addTrack(audio);
     return out;
   },
 
@@ -483,7 +520,8 @@ export const studioAudio = {
       mixAudio.enabled = true;
       out.addTrack(mixAudio);
     } else {
-      gum.forEach((t) => out.addTrack(t));
+      const audio = mixedGumAudioTrack(micFrom ?? videoFrom);
+      if (audio) out.addTrack(audio);
     }
     return out;
   },

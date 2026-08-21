@@ -6,15 +6,15 @@
  * Both schemes share the exact same shape (`ColorScheme`) so screens can be
  * written once and render correctly in either mode. The shape is a superset:
  * it keeps every legacy key used by the old `theme.js` / `blypTheme.ts` so
- * existing screens keep working, and adds the new "bright / punchy / 3D"
- * tokens (electric secondary accent, brand + accent gradients, glow colours,
- * page gradient stops, scrims, strong borders).
+ * existing screens keep working, and adds secondary accent / gradient / glow
+ * tokens (page gradient stops, scrims, strong borders).
  *
- * Brand language (product is dark-only in ThemeProvider):
- *   - Brand signal: Mercedes-AMG PETRONAS teal `#00D2BE`
- *   - Secondary accent: electric aqua/cyan `#67E8F9`
- *   - Page chrome: editorial near-black `#0A0A0C` (never mixed grey/black roots)
- *   - Raised surfaces: `#141418` / cards `#121216`
+ * Brand language (product is dark-only in ThemeProvider) — warm night, aligned
+ * to blyp.world `:root` (`apps/blyp-world/app/globals.css`):
+ *   - Brand signal: coral `#FF4D6D` (CTA / LIVE / active chrome — sparingly)
+ *   - Secondary: warm taupe `#C4B5A5` (demoted off neon cyan)
+ *   - Page chrome: warm charcoal `#12141A`
+ *   - Raised surfaces: `#1A1C24` / cards `#16181F`
  */
 
 export interface ColorScheme {
@@ -58,7 +58,7 @@ export interface ColorScheme {
   gradientEnd: string;
   brandGradient: [string, string, string];
 
-  /** NEW secondary accent: electric cyan/aqua + its gradient */
+  /** Secondary accent (warm taupe) + soft wash — not neon cyan */
   electric: string;
   electricSoft: string;
   electricGradient: [string, string];
@@ -72,7 +72,7 @@ export interface ColorScheme {
   /** depth helpers */
   shadow: string;        // base drop-shadow colour
   glow: string;          // brand-coloured glow (CTAs)
-  glowElectric: string;  // cyan glow (highlights)
+  glowElectric: string;  // secondary warm glow (highlights)
   overlay: string;       // modal / scrim backdrop
 
   /** utility */
@@ -81,38 +81,37 @@ export interface ColorScheme {
   transparent: string;
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// "Pulse" — editorial near-black chrome + one electric signal accent.
-// Philosophy: quiet, neutral surfaces; content brings the colour; the accent
-// is a sparing "signal", never a wash. Designed dark-first for a young audience.
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Warm night — charcoal surfaces; coral is a sparing signal (CTA / LIVE / active).
+// Aligned to web `--blyp-*` in apps/blyp-world/app/globals.css.
 
-// Brand signal accent — Mercedes-AMG PETRONAS teal. Black text sits on top.
-const BRAND = '#00D2BE';
-const BRAND_DIM = '#00A89E';
-const BRAND_LIGHT = '#7FEDE2';
+const BRAND = '#FF4D6D';
+const BRAND_DIM = '#E83D5C';
+const BRAND_LIGHT = '#FF7A92';
+/** Demoted secondary (was neon cyan); matches web `--blyp-teal`. */
+const WARM_TAUPE = '#C4B5A5';
+const WARM_TAUPE_DIM = '#A89888';
 
 export const darkScheme: ColorScheme = {
-  background: '#0A0A0C',
-  bgGradient: ['#0A0A0C', '#0A0A0C', '#0A0A0C'],
-  chrome: 'rgba(10,10,12,0.82)',
-  headerBackground: '#0A0A0C',
+  background: '#12141A',
+  bgGradient: ['#12141A', '#12141A', '#12141A'],
+  chrome: 'rgba(18,20,26,0.92)',
+  headerBackground: '#12141A',
 
-  surface: '#141418',
-  surfaceAlt: '#1C1C22',
-  card: '#121216',
-  cardSurface: '#15151B',
+  surface: '#1A1C24',
+  surfaceAlt: '#22242E',
+  card: '#16181F',
+  cardSurface: '#1A1C24',
 
-  border: 'rgba(255,255,255,0.08)',
-  borderStrong: 'rgba(255,255,255,0.16)',
-  divider: 'rgba(255,255,255,0.06)',
+  border: 'rgba(236,234,240,0.12)',
+  borderStrong: 'rgba(236,234,240,0.20)',
+  divider: 'rgba(236,234,240,0.08)',
 
-  textPrimary: '#F5F5F7',
-  textSecondary: '#A1A1AA',
-  textMuted: '#71717A',
-  textDisabled: '#52525B',
-  // Black text sits on the brand accent for maximum punch + legibility.
-  onBrand: '#0A0A0C',
+  textPrimary: '#ECEAF0',
+  textSecondary: '#9A97A6',
+  textMuted: '#9A97A6',
+  textDisabled: '#6B6878',
+  // White on coral CTAs (matches web `.blyp-studio-launch`).
+  onBrand: '#FFFFFF',
 
   primary: BRAND,
   primaryDark: BRAND_DIM,
@@ -124,9 +123,9 @@ export const darkScheme: ColorScheme = {
   gradientEnd: BRAND_DIM,
   brandGradient: [BRAND, BRAND, BRAND_DIM],
 
-  electric: '#67E8F9',
-  electricSoft: 'rgba(103,232,249,0.14)',
-  electricGradient: ['#67E8F9', '#22D3EE'],
+  electric: WARM_TAUPE,
+  electricSoft: 'rgba(255,77,109,0.14)',
+  electricGradient: [WARM_TAUPE, WARM_TAUPE_DIM],
 
   success: '#34D399',
   warning: '#FBBF24',
@@ -135,7 +134,7 @@ export const darkScheme: ColorScheme = {
 
   shadow: '#000000',
   glow: BRAND,
-  glowElectric: '#67E8F9',
+  glowElectric: '#E0C090',
   overlay: 'rgba(0,0,0,0.62)',
 
   white: '#ffffff',
@@ -143,8 +142,8 @@ export const darkScheme: ColorScheme = {
   transparent: 'transparent',
 };
 
-// Light mode: readable deep teal drives accent text/icons on light surfaces.
-const BRAND_TEXT = '#007A70';
+// Light mode: coral drives accent text/icons on light surfaces.
+const BRAND_TEXT = '#D63A58';
 
 export const lightScheme: ColorScheme = {
   background: '#FAFAFA',
@@ -161,14 +160,14 @@ export const lightScheme: ColorScheme = {
   borderStrong: 'rgba(0,0,0,0.14)',
   divider: 'rgba(0,0,0,0.06)',
 
-  textPrimary: '#0A0A0C',
+  textPrimary: '#12141A',
   textSecondary: '#52525B',
   textMuted: '#71717A',
   textDisabled: '#A1A1AA',
-  onBrand: '#0A0A0C',
+  onBrand: '#FFFFFF',
 
   primary: BRAND_TEXT,
-  primaryDark: '#006058',
+  primaryDark: '#B82E48',
   primaryLight: BRAND,
   accent: BRAND_TEXT,
 
@@ -177,9 +176,9 @@ export const lightScheme: ColorScheme = {
   gradientEnd: BRAND_DIM,
   brandGradient: [BRAND, BRAND, BRAND_DIM],
 
-  electric: '#0E7490',
-  electricSoft: 'rgba(14,116,144,0.10)',
-  electricGradient: ['#22D3EE', '#0891B2'],
+  electric: '#8A7A6A',
+  electricSoft: 'rgba(255,77,109,0.10)',
+  electricGradient: [WARM_TAUPE, WARM_TAUPE_DIM],
 
   success: '#059669',
   warning: '#D97706',
@@ -188,7 +187,7 @@ export const lightScheme: ColorScheme = {
 
   shadow: '#000000',
   glow: BRAND,
-  glowElectric: '#22D3EE',
+  glowElectric: '#E0C090',
   overlay: 'rgba(0,0,0,0.42)',
 
   white: '#ffffff',
@@ -206,7 +205,7 @@ export const SCHEMES: Record<ResolvedMode, ColorScheme> = {
 
 /**
  * Build a set of 3D-friendly shadow/elevation presets for a given scheme.
- * On iOS the coloured `glow` shadows render as soft neon halos; on Android
+ * On iOS the coloured `glow` shadows render as soft brand tints; on Android
  * the monochrome `elevation` provides depth (shadow colour is approximated).
  */
 export function makeShadows(c: ColorScheme) {
@@ -243,15 +242,15 @@ export function makeShadows(c: ColorScheme) {
     glow: {
       elevation: 8,
       shadowColor: c.glow,
-      shadowOpacity: 0.28,
+      shadowOpacity: 0.22,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
     },
-    /** soft cyan tint for highlight/secondary elements */
+    /** soft warm tint for highlight/secondary elements */
     glowElectric: {
       elevation: 8,
       shadowColor: c.glowElectric,
-      shadowOpacity: 0.24,
+      shadowOpacity: 0.20,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
     },
@@ -267,4 +266,3 @@ export const SURFACE_DEPTH = {
 } as const;
 
 export type ShadowSet = ReturnType<typeof makeShadows>;
-

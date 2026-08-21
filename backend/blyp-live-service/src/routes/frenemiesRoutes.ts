@@ -31,23 +31,24 @@ import {
 } from '../games/frenemies/frenemiesRoomService';
 
 const router = Router();
-router.use(cognitoJwtMiddleware);
 
 function frenemiesEnabled(): boolean {
   const raw = String(process.env.LIVE_FRENEMIES_ENABLED ?? '1').trim();
   return !/^(0|false|no|off)$/i.test(raw);
 }
 
+function isFrenemiesPath(req: { path?: string }): boolean {
+  const path = String(req.path || '');
+  return path.startsWith('/live-game/frenemies') || path.startsWith('/live/engagement');
+}
+
+// Scope kill-switch + Cognito to Frenemies paths only — do not auth-gate sibling `/api` games.
 router.use((req, res, next) => {
-  const ours =
-    req.path.startsWith('/live-game/frenemies') || req.path.startsWith('/live/engagement');
-  if (!ours) {
-    return next();
-  }
+  if (!isFrenemiesPath(req)) return next();
   if (!frenemiesEnabled()) {
     return res.status(404).json({ error: 'DISABLED', code: 'DISABLED' });
   }
-  next();
+  return cognitoJwtMiddleware(req as AuthedRequest, res, next);
 });
 
 const sessionSchema = z.object({ sessionId: z.string().min(1) });

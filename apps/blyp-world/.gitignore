@@ -43,3 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Gift cinema MP4s copied from repo assets/ at build/dev time
+/public/gifts/cinema/*.mp4

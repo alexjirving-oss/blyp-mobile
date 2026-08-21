@@ -1,4 +1,5 @@
 import { liveServiceUrl, siteUrl } from "./env";
+import { liveServiceFetch } from "./liveServiceAuth";
 
 export type LiveHostSession = {
   sessionId: string;
@@ -31,22 +32,7 @@ async function livePost<T>(
   idToken: string,
   body?: Record<string, unknown>,
 ): Promise<T> {
-  const res = await fetch(`${liveServiceUrl}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify(body || {}),
-  });
-  const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) {
-    throw new Error(
-      pickStr(payload.error, payload.detail, payload.message) ||
-        `HTTP ${res.status}`,
-    );
-  }
-  return payload as T;
+  return liveServiceFetch<T>(path, idToken, "POST", body);
 }
 
 async function liveGet<T>(
@@ -54,38 +40,62 @@ async function liveGet<T>(
   idToken: string,
   query?: Record<string, string>,
 ): Promise<T> {
-  const qs = query ? `?${new URLSearchParams(query).toString()}` : "";
-  const res = await fetch(`${liveServiceUrl}${path}${qs}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${idToken}` },
-    cache: "no-store",
-  });
-  const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) {
-    throw new Error(
-      pickStr(payload.error, payload.detail, payload.message) ||
-        `HTTP ${res.status}`,
-    );
-  }
-  return payload as T;
+  return liveServiceFetch<T>(path, idToken, "GET", undefined, query);
 }
 
-export async function probeLiveService(): Promise<boolean> {
-  try {
-    return (await fetch(`${liveServiceUrl}/health`, { method: "GET", cache: "no-store" }))
-      .ok;
-  } catch {
-    return false;
+/** Probe result — 429/transient must not be reported as "offline". */
+export type LiveProbeResult = "ok" | "busy" | "down";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Health probe with short retries. Platform 429s (latency 0s) previously made
+ * GO LIVE throw a false "offline" toast while Cloud Run was still Ready.
+ */
+export async function probeLiveService(): Promise<LiveProbeResult> {
+  let sawBusy = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${liveServiceUrl}/health`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (res.ok) return "ok";
+      if (res.status === 429) {
+        sawBusy = true;
+        if (attempt < 2) {
+          await sleep(350 * (attempt + 1));
+          continue;
+        }
+        return "busy";
+      }
+      if (attempt < 2) {
+        await sleep(350 * (attempt + 1));
+        continue;
+      }
+      return "down";
+    } catch {
+      if (attempt < 2) {
+        await sleep(350 * (attempt + 1));
+        continue;
+      }
+      return sawBusy ? "busy" : "down";
+    }
   }
+  return sawBusy ? "busy" : "down";
 }
 
 export async function startLiveHostSession(
   idToken: string,
   title: string,
 ): Promise<LiveHostSession> {
-  if (!(await probeLiveService())) {
+  const probe = await probeLiveService();
+  if (probe === "down") {
     throw new Error("Live service is offline right now. Try again in a moment.");
   }
+  // "busy" (429 after retries): still attempt /api/live/start — service is up.
   const raw = await livePost<Record<string, unknown>>("/api/live/start", idToken, {
     title: title.trim() || "LIVE",
   });
