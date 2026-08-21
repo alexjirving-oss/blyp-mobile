@@ -45,7 +45,7 @@ function resolveWatchFraming(
 } {
   const layoutRaw =
     aspect === "portrait"
-      ? feed.layoutPortrait || "solo"
+      ? feed.layoutPortrait || "host-top-9"
       : feed.layoutLandscape || "solo";
   return {
     orientation: aspect,
