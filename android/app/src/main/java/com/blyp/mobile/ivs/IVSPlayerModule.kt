@@ -1,12 +1,12 @@
 package com.blyp.mobile.ivs
 
+import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.Surface
 import com.amazonaws.ivs.player.Player
 import com.amazonaws.ivs.player.PlayerException
-import com.amazonaws.ivs.player.PlayerView
-import com.amazonaws.ivs.player.ResizeMode
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Callback
 import com.facebook.react.bridge.LifecycleEventListener
@@ -25,9 +25,11 @@ class IVSPlayerModule(
         LiveLoudspeakerController(reactContext, "IVS_PLAYER_AUDIO")
     private var player: Player? = null
     private var currentSessionId: String? = null
+    private var listenerAttached: Boolean = false
 
     init {
         reactContext.addLifecycleEventListener(this)
+        setInstance(this)
     }
 
     override fun getName(): String = "IVSPlayerModule"
@@ -44,21 +46,17 @@ class IVSPlayerModule(
 
     override fun onHostResume() {
         loudspeakerController.forceActive("player-host-resume")
+        player?.play()
     }
 
     override fun onHostPause() {
-        // Pause playback when the app host is backgrounded.
         player?.pause()
     }
 
     override fun onHostDestroy() {
-        // Fully tear down the player when the app host is destroyed.
         mainHandler.post {
             loudspeakerController.stop("player-host-destroy")
-            player?.pause()
-            player?.release()
-            player = null
-            sharedPlayer = null
+            releasePlayer()
         }
     }
 
@@ -70,10 +68,13 @@ class IVSPlayerModule(
     ) {
         mainHandler.post {
             try {
-                // Viewers use IVS Player (HLS/low-latency playback).
-                // playbackUrl MUST be provided by the backend /api/ivs/viewer-join endpoint.
                 if (playbackUrl == null || playbackUrl.isEmpty()) {
-                    callback.invoke(errorMap("MISSING_PLAYBACK_URL", "playbackUrl is required for viewer playback (check backend /api/ivs/viewer-join response)"))
+                    callback.invoke(
+                        errorMap(
+                            "MISSING_PLAYBACK_URL",
+                            "playbackUrl is required for viewer playback",
+                        )
+                    )
                     return@post
                 }
 
@@ -81,8 +82,9 @@ class IVSPlayerModule(
                     LiveLoudspeakerController.Profile.PLAYBACK,
                     "player-before-load",
                 )
-                ensurePlayer()
                 currentSessionId = sessionId
+                ensurePlayer()
+                bindSurfaceToPlayer()
                 val uri = Uri.parse(playbackUrl)
                 player?.load(uri)
                 player?.play()
@@ -127,6 +129,7 @@ class IVSPlayerModule(
                     "player-play",
                 )
                 ensurePlayer()
+                bindSurfaceToPlayer()
                 player?.play()
                 loudspeakerController.forceActive("player-play-returned")
                 emit("IVS_PLAYER_STATE_CHANGED", Arguments.createMap().apply {
@@ -179,10 +182,8 @@ class IVSPlayerModule(
     fun stop(callback: Callback) {
         mainHandler.post {
             try {
-                player?.pause()
-                player?.release()
-                player = null
-                sharedPlayer = null
+                loudspeakerController.stop("player-stop")
+                releasePlayer()
                 emit("IVS_VIEWER_LEFT", Arguments.createMap().apply {
                     putString("sessionId", currentSessionId)
                     putString("reason", "stop")
@@ -197,10 +198,44 @@ class IVSPlayerModule(
     private fun ensurePlayer() {
         if (player != null) return
         val created = Player.Factory.create(reactApplicationContext)
-        created.addListener(playerListener)
         created.setLiveLowLatencyEnabled(true)
+        try {
+            created.setRebufferToLive(true)
+        } catch (_: Throwable) {
+            // older player builds
+        }
+        created.addListener(playerListener)
+        listenerAttached = true
         player = created
         sharedPlayer = created
+        bindSurfaceToPlayer()
+    }
+
+    private fun bindSurfaceToPlayer() {
+        val p = player ?: return
+        p.setSurface(videoSurface)
+    }
+
+    private fun releasePlayer() {
+        try {
+            player?.setSurface(null)
+        } catch (_: Exception) {
+        }
+        try {
+            if (listenerAttached) {
+                player?.removeListener(playerListener)
+            }
+        } catch (_: Exception) {
+        }
+        listenerAttached = false
+        try {
+            player?.pause()
+            player?.release()
+        } catch (_: Exception) {
+        }
+        player = null
+        sharedPlayer = null
+        currentSessionId = null
     }
 
     private val playerListener: Player.Listener = object : Player.Listener() {
@@ -212,7 +247,6 @@ class IVSPlayerModule(
                 putString("state", state.name)
                 putString("sessionId", currentSessionId)
             })
-            emitNetworkQuality()
         }
 
         override fun onError(exception: PlayerException) {
@@ -224,9 +258,7 @@ class IVSPlayerModule(
         }
 
         override fun onDurationChanged(duration: Long) {
-            emit("IVS_PLAYER_DURATION_CHANGED", Arguments.createMap().apply {
-                putDouble("duration", duration.toDouble())
-            })
+            // unused
         }
 
         override fun onVideoSizeChanged(width: Int, height: Int) {
@@ -237,7 +269,7 @@ class IVSPlayerModule(
         }
 
         override fun onCue(cue: com.amazonaws.ivs.player.Cue) {
-            // optional analytics hook
+            // unused
         }
 
         override fun onRebuffering() {
@@ -255,21 +287,11 @@ class IVSPlayerModule(
                 putString("name", quality.name)
                 putInt("bitrate", quality.bitrate)
             })
-            emitNetworkQuality()
         }
 
         override fun onVideoFirstFrame(position: Long) {
             loudspeakerController.forceActive("player-first-frame")
             emit("IVS_PLAYER_FIRST_FRAME", Arguments.createMap())
-        }
-    }
-
-    private fun emitNetworkQuality() {
-        val stats = player?.statistics
-        if (stats != null) {
-            emit("IVS_PLAYER_NETWORK_QUALITY_UPDATED", Arguments.createMap().apply {
-                putBoolean("isLocal", false)
-            })
         }
     }
 
@@ -286,14 +308,40 @@ class IVSPlayerModule(
         }
 
     companion object {
+        @Volatile
+        private var moduleInstance: IVSPlayerModule? = null
+
         @JvmStatic
         internal var sharedPlayer: Player? = null
 
+        @Volatile
+        private var videoSurface: Surface? = null
+
+        private fun setInstance(instance: IVSPlayerModule) {
+            moduleInstance = instance
+        }
+
         @JvmStatic
-        internal fun attachPlayerView(view: PlayerView) {
-            view.setControlsEnabled(false)
-            view.setCaptionsEnabled(false)
-            view.resizeMode = ResizeMode.FIT
+        fun setRenderSurface(surfaceTexture: SurfaceTexture?, @Suppress("UNUSED_PARAMETER") width: Int, @Suppress("UNUSED_PARAMETER") height: Int) {
+            val apply = Runnable {
+                try {
+                    sharedPlayer?.setSurface(null)
+                    moduleInstance?.player?.setSurface(null)
+                } catch (_: Exception) {
+                }
+                try {
+                    videoSurface?.release()
+                } catch (_: Exception) {
+                }
+                videoSurface = if (surfaceTexture != null) Surface(surfaceTexture) else null
+                moduleInstance?.bindSurfaceToPlayer()
+                    ?: sharedPlayer?.setSurface(videoSurface)
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                apply.run()
+            } else {
+                Handler(Looper.getMainLooper()).post(apply)
+            }
         }
     }
 }

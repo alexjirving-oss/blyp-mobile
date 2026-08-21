@@ -856,10 +856,9 @@ export async function joinLiveRealtime(
 }
 
 /**
- * Mass viewer join — Stage subscribe when the session has a stage.
- * HLS playbackUrl is the composition/RTMP copy; sending phones there is what
- * made Studio preview look fine while watchers stall-then-jumped.
- * App clients already fall back to joinLiveRealtime when mode !== playback.
+ * Mass viewer join — HLS program URL when the session has playback.
+ * Phone watch uses IVS Player on that URL so Stage WebRTC does not freeze
+ * the Android UI thread. Web Studio watch stays on /api/live/watch (Stage).
  */
 export async function joinLiveMass(
   sessionId: string,
@@ -877,8 +876,9 @@ export async function joinLiveMass(
     displayName: safeLiveDisplayName(displayName, viewerUserId),
   });
 
-  if (session.stageArn) {
-    return { sessionId, mode: 'realtime' };
+  const fromSession = String(session.playbackUrl || '').trim();
+  if (fromSession) {
+    return { sessionId, playbackUrl: fromSession, mode: 'playback' };
   }
 
   const firestore = await getStreamPlaybackForViewer(sessionId);

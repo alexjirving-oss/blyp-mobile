@@ -799,6 +799,8 @@ const IVSLiveStreamViewer = ({
     }
   }, [streamId, guestMode, guestSlotId, generateGuestSessionId, leaveAsGuestAndCleanup]);
 
+  const usePlayerWatch = Platform.OS === 'android' && !guestMode && !!NativeIVSPlayerView;
+
   const ivsSession = useIVSViewerSession({
     streamId: streamId || '',
     enabled: !!streamId,
@@ -806,6 +808,8 @@ const IVSLiveStreamViewer = ({
     // module; suspend auto-join until the guest session ends.
     autoJoin: !suspendViewerAutoJoin && !guestMode,
     displayName: viewerDisplayName,
+    // Android mass-watch: IVS Player (HLS) so Stage WebRTC does not freeze likes/leave.
+    preferPlayback: usePlayerWatch,
   });
 
   useEffect(() => {
@@ -1399,6 +1403,33 @@ const IVSLiveStreamViewer = ({
 
   // Real-Time surface fed by viewer session credentials
   // Keep the native views mounted once credentials exist; gate visibility by canRender
+  if (usePlayerWatch && NativeIVSPlayerView && !guestMode) {
+    return (
+      <View
+        style={[styles.container, style]}
+        onLayout={handleViewerContainerLayout}
+      >
+        <NativeIVSPlayerView style={styles.playerView} />
+        {showLoading && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.statusText}>Connecting to live...</Text>
+          </View>
+        )}
+        {showError && (
+          <View style={styles.loadingOverlay}>
+            <Text style={styles.statusText}>This live is no longer available</Text>
+          </View>
+        )}
+        {showDisconnected && (
+          <View style={styles.loadingOverlay}>
+            <Text style={styles.statusText}>This live is no longer available</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
+
   if (NativeIVSRealTimeView && hasStageCredentials && slotLayout) {
     const {
       hostStream,
@@ -2776,8 +2807,10 @@ const styles = StyleSheet.create({
     marginVertical: 1,
   },
   playerView: {
+    flex: 1,
     width: '100%',
     height: '100%',
+    backgroundColor: '#000',
   },
   realTimeView: {
     flex: 1,

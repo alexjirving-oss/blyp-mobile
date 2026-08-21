@@ -29,6 +29,13 @@ import {
 
 const { IVSBroadcastModule, IVSPlayerModule } = NativeModules;
 
+function ivsClientLog(...args: unknown[]) {
+  if (__DEV__) {
+    // eslint-disable-next-line no-console
+    console.log(...args);
+  }
+}
+
 type EventSubscription = {
   remove: () => void;
 };
@@ -92,14 +99,14 @@ export class IVSNativeClient implements LiveStreamingClient {
       const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
       const streamingBackend = process.env.EXPO_PUBLIC_STREAMING_BACKEND;
 
-      console.log('[IVS_NATIVE][CONFIG]', {
+      ivsClientLog('[IVS_NATIVE][CONFIG]', {
         apiBaseUrl: apiBaseUrl || '❌ undefined',
         streamingBackend: streamingBackend || '❌ undefined',
         hasBroadcastModule: !!IVSBroadcastModule,
         hasPlayerModule: !!IVSPlayerModule,
       });
     } catch (e) {
-      console.log('[IVS_NATIVE][CONFIG] unable to read config', e);
+      ivsClientLog('[IVS_NATIVE][CONFIG] unable to read config', e);
     }
   }
 
@@ -193,7 +200,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Local participant joined (host or guest)
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_HOST_LOCAL_JOINED', (data: any) => {
-        console.log('[IVS_CLIENT] Local broadcast joined:', data);
+        ivsClientLog('[IVS_CLIENT] Local broadcast joined:', data);
         this.reassertLiveLoudspeaker('local-participant-joined');
         const participantId = data.participantId || data.sessionId || 'local';
         const role = data.role || 'host';
@@ -221,7 +228,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Local participant left (host or guest)
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_HOST_LOCAL_LEFT', (data: any) => {
-        console.log('[IVS_CLIENT] Local broadcast left:', data);
+        ivsClientLog('[IVS_CLIENT] Local broadcast left:', data);
         const participantId = data.participantId || 'local';
 
         this.participants.delete(participantId);
@@ -237,7 +244,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Remote participant joined (guest joining a host's stage)
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_PARTICIPANT_JOINED', (data: any) => {
-        console.log('[IVS_CLIENT] Remote participant joined:', data);
+        ivsClientLog('[IVS_CLIENT] Remote participant joined:', data);
         if (this.isHostOrGuestActive) {
           this.reassertLiveLoudspeaker('remote-participant-joined');
           // Fold often flips to earpiece after peer connect — keep reasserting.
@@ -272,7 +279,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Remote participant updated (mute/camera state change)
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_PARTICIPANT_UPDATED', (data: any) => {
-        console.log('[IVS_CLIENT] Remote participant updated:', data);
+        ivsClientLog('[IVS_CLIENT] Remote participant updated:', data);
         const participantId = data.participantId;
         const participant = this.participants.get(participantId);
 
@@ -307,7 +314,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Remote participant left
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_REMOTE_PARTICIPANT_LEFT', (data: any) => {
-        console.log('[IVS_CLIENT] Remote participant left:', data);
+        ivsClientLog('[IVS_CLIENT] Remote participant left:', data);
         const participantId = data.participantId;
 
         this.participants.delete(participantId);
@@ -341,7 +348,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Network quality updated
     this.broadcastSubscriptions.push(
       this.broadcastEventEmitter.addListener('IVS_NETWORK_QUALITY_UPDATED', (data: any) => {
-        console.log('[IVS_CLIENT] Network quality:', data);
+        ivsClientLog('[IVS_CLIENT] Network quality:', data);
         const quality = (data.quality as NetworkQuality) || NetworkQuality.UNKNOWN;
         this.networkQuality = quality;
 
@@ -357,7 +364,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       this.broadcastEventEmitter.addListener('IVS_LOCAL_TRACK_UPDATE', (data: any) => {
         const videoEnabled = !!data.videoEnabled;
         const audioEnabled = !!data.audioEnabled;
-        console.log('[IVS_CLIENT] Local track update:', { videoEnabled, audioEnabled });
+        ivsClientLog('[IVS_CLIENT] Local track update:', { videoEnabled, audioEnabled });
         this.localMediaState = { videoEnabled, audioEnabled };
         this.emit('localMediaState', this.localMediaState);
       })
@@ -476,7 +483,7 @@ export class IVSNativeClient implements LiveStreamingClient {
     // Network quality updated (viewer)
     this.playerSubscriptions.push(
       this.playerEventEmitter.addListener('IVS_PLAYER_NETWORK_QUALITY_UPDATED', (data: any) => {
-        console.log('[IVS_CLIENT] Player network quality:', data);
+        ivsClientLog('[IVS_CLIENT] Player network quality:', data);
         const quality = (data.quality as NetworkQuality) || this.inferNetworkQualityFromMetrics(data);
         this.networkQuality = quality;
 
@@ -493,7 +500,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       throw new Error('IVSBroadcastModule not available on this platform');
     }
 
-    console.log('[IVS_CLIENT][START_HOST_SESSION]', {
+    ivsClientLog('[IVS_CLIENT][START_HOST_SESSION]', {
       stageArn: params.stageArn,
       tokenLength: params.token.length,
       sessionId: params.sessionId,
@@ -519,7 +526,7 @@ export class IVSNativeClient implements LiveStreamingClient {
             });
             reject(new Error(error.message || 'Failed to start host session'));
           } else {
-            console.log('[IVS_CLIENT][HOST_SESSION_STARTED]', {
+            ivsClientLog('[IVS_CLIENT][HOST_SESSION_STARTED]', {
               sessionId: params.sessionId,
             });
             this.isHostOrGuestActive = true;
@@ -536,7 +543,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       throw new Error('IVSBroadcastModule not available');
     }
 
-    console.log('[IVS_CLIENT] Stopping host session');
+    ivsClientLog('[IVS_CLIENT] Stopping host session');
     this.isHostOrGuestActive = false;
     this.setActiveAudioPath(null);
     this.participants.clear();
@@ -549,7 +556,7 @@ export class IVSNativeClient implements LiveStreamingClient {
           console.error('[IVS_CLIENT] Host stop failed:', error);
           reject(new Error(error.message || 'Failed to stop host session'));
         } else {
-          console.log('[IVS_CLIENT] Host session stopped');
+          ivsClientLog('[IVS_CLIENT] Host session stopped');
           resolve();
         }
       });
@@ -579,7 +586,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       throw new Error('IVSBroadcastModule not available');
     }
 
-    console.log('[IVS_CLIENT] Starting guest session', {
+    ivsClientLog('[IVS_CLIENT] Starting guest session', {
       sessionId: params.sessionId,
       stageArn: params.stageArn,
       tokenLength: params.token?.length,
@@ -601,7 +608,7 @@ export class IVSNativeClient implements LiveStreamingClient {
             console.error('[IVS_CLIENT] Guest start failed:', error);
             reject(new Error(error.message || 'Failed to start guest session'));
           } else {
-            console.log('[IVS_CLIENT][GUEST_SESSION_STARTED]', { sessionId: params.sessionId });
+            ivsClientLog('[IVS_CLIENT][GUEST_SESSION_STARTED]', { sessionId: params.sessionId });
             this.isHostOrGuestActive = true;
             this.reassertLiveLoudspeaker('guest-start-callback');
             resolve();
@@ -619,7 +626,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       throw new Error('IVSBroadcastModule not available');
     }
 
-    console.log('[IVS_CLIENT] Stopping guest session');
+    ivsClientLog('[IVS_CLIENT] Stopping guest session');
     this.isHostOrGuestActive = false;
     this.setActiveAudioPath(null);
     this.participants.clear();
@@ -632,7 +639,7 @@ export class IVSNativeClient implements LiveStreamingClient {
           console.error('[IVS_CLIENT] Guest stop failed:', error);
           reject(new Error(error.message || 'Failed to stop guest session'));
         } else {
-          console.log('[IVS_CLIENT] Guest session stopped');
+          ivsClientLog('[IVS_CLIENT] Guest session stopped');
           resolve();
         }
       });
@@ -644,7 +651,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       throw new Error('IVSBroadcastModule not available on this platform');
     }
 
-    console.log('[IVS_CLIENT] Joining as viewer via IVS Real-Time stage:', {
+    ivsClientLog('[IVS_CLIENT] Joining as viewer via IVS Real-Time stage:', {
       stageArn: params.stageArn,
       tokenLength: params.token?.length,
       sessionId: params.sessionId,
@@ -666,7 +673,7 @@ export class IVSNativeClient implements LiveStreamingClient {
             console.error('[IVS_CLIENT] Viewer join failed:', error);
             reject(new Error(error.message || 'Failed to join as viewer'));
           } else {
-            console.log('[IVS_CLIENT] Viewer session joined as read-only participant');
+            ivsClientLog('[IVS_CLIENT] Viewer session joined as read-only participant');
             this.isViewerActive = true;
             this.reassertLiveLoudspeaker('stage-viewer-join-callback');
             resolve();
@@ -678,7 +685,7 @@ export class IVSNativeClient implements LiveStreamingClient {
 
   /**
    * Join as a viewer using IVS Player (HLS/low-latency playback).
-   * Opt-in only — phone watch of a Studio host must use joinAsViewer (Real-Time).
+   * Android Studio watch uses this so Stage WebRTC does not freeze the UI thread.
    */
   async joinAsViewerPlayback(params: ViewerPlaybackParams): Promise<void> {
     if (!IVSPlayerModule) {
@@ -689,7 +696,7 @@ export class IVSNativeClient implements LiveStreamingClient {
       throw new Error('playbackUrl is required for viewer playback');
     }
 
-    console.log('[IVS_CLIENT] Joining as viewer via IVS Player (playback):', {
+    ivsClientLog('[IVS_CLIENT] Joining as viewer via IVS Player (playback):', {
       sessionId: params.sessionId,
       playbackUrlLength: params.playbackUrl.length,
     });
@@ -706,7 +713,7 @@ export class IVSNativeClient implements LiveStreamingClient {
             console.error('[IVS_CLIENT] Viewer playback join failed:', error);
             reject(new Error(error.message || 'Failed to join as viewer'));
           } else {
-            console.log('[IVS_CLIENT] Viewer playback session joined');
+            ivsClientLog('[IVS_CLIENT] Viewer playback session joined');
             this.isViewerActive = true;
             this.reassertLiveLoudspeaker('player-viewer-join-callback');
             resolve();
@@ -751,7 +758,7 @@ export class IVSNativeClient implements LiveStreamingClient {
   }
 
   async leaveAsViewer(): Promise<void> {
-    console.log('[IVS_CLIENT] Leaving viewer session');
+    ivsClientLog('[IVS_CLIENT] Leaving viewer session');
     const audioPath = this.activeAudioPath;
     this.isViewerActive = false;
     this.setActiveAudioPath(null);
@@ -763,7 +770,7 @@ export class IVSNativeClient implements LiveStreamingClient {
           console.error('[IVS_CLIENT] Viewer leave failed:', error);
           reject(new Error(error.message || 'Failed to leave viewer session'));
         } else {
-          console.log('[IVS_CLIENT] Viewer session left');
+          ivsClientLog('[IVS_CLIENT] Viewer session left');
           resolve();
         }
       };

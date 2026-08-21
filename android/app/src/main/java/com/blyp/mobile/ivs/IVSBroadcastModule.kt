@@ -1126,6 +1126,7 @@ class IVSBroadcastModule(
     }
 
     private fun emitNetworkQuality(quality: QualityStats.NetworkQuality?, isLocal: Boolean) {
+        if (sessionMode == SessionMode.VIEWER) return
         val mapped = when (quality) {
             QualityStats.NetworkQuality.EXCELLENT -> "EXCELLENT"
             QualityStats.NetworkQuality.GOOD -> "GOOD"
@@ -2192,6 +2193,11 @@ class IVSBroadcastModule(
     }
 
     private fun attachStreamListeners(participant: ParticipantInfo, streams: List<StageStream>) {
+        if (sessionMode == SessionMode.VIEWER) {
+            // Viewer stats ticks (RTC maps + quality emits) hop to JS on every
+            // interval and stall likes/leave. Host/guest still attach below.
+            return
+        }
         streams.forEach { stream ->
             val key = streamKey(participant, stream)
             stream.setListener(object : StageStream.Listener {

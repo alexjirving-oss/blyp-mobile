@@ -2,8 +2,9 @@
  * IVS Viewer Session Hook
  * 
  * React hook for managing IVS streaming session from viewer perspective.
- * Viewers join as Real-Time stage participants (subscribe-only, no publish).
- * This provides low-latency viewing by receiving live video/audio from the stage.
+ * Viewers join via IVS Player (HLS) on Android watch-only, or as Real-Time
+ * stage subscribers when publishing / on iOS. Stage-on-phone watch starved
+ * the UI thread (slideshow frames, stalled likes/leave).
  * 
  * Handles viewer lifecycle, token fetching, participant tracking, and network quality monitoring.
  */
@@ -16,7 +17,7 @@ import {
   StreamParticipant,
 } from '../../../streaming/LiveStreamingClient';
 import { getIVSNativeClient } from '../../../streaming/IVSNativeClient';
-import { joinLiveRealtime, joinLiveMass } from '../../../api/ivsLiveApi';
+import { joinLiveRealtime, joinLiveMass, getLiveProgram } from '../../../api/ivsLiveApi';
 import { useIVSMultiGuestRegistry, StreamEntry } from './useIVSMultiGuestRegistry';
 import { MAX_STAGE_PUBLISHERS } from '../multiGuestLayout';
 
@@ -46,7 +47,7 @@ type UseIVSViewerSessionArgs = {
   streamId: string;
   enabled: boolean;
   autoJoin?: boolean;
-  /** Prefer HLS/IVS Player playback when the backend provides a playbackUrl. Never default for Studio watch. */
+  /** Prefer HLS/IVS Player when a program playbackUrl exists. Android Studio watch uses this so Stage WebRTC does not freeze the UI thread. */
   preferPlayback?: boolean;
   /** This viewer's display name, sent on join so chat shows "Alex joined". */
   displayName?: string;
@@ -219,37 +220,44 @@ export function useIVSViewerSession(args: UseIVSViewerSessionArgs): UseIVSViewer
         return;
       }
 
-      let usedPlayback = false;
-
       if (preferPlayback) {
+        let playbackUrl: string | undefined;
         try {
-          const mass = await joinLiveMass(streamId, displayName);
-          if (mass?.mode === 'playback' && mass.playbackUrl) {
-            devLog('[IVS_VIEWER][JOIN_PLAYBACK]', { streamId, playbackUrlLength: mass.playbackUrl.length });
-            await client.joinAsViewerPlayback({
-              sessionId: streamId,
-              playbackUrl: mass.playbackUrl,
-            });
-            // Loudspeaker is best-effort — never abort a successful player join.
-            try {
-              await client.forceLiveLoudspeaker('viewer-hook-player-joined');
-            } catch (routeErr) {
-              console.warn('[IVS_VIEWER][LOUDSPEAKER_SOFT_FAIL]', routeErr);
-            }
-            setViewerTransport('playback');
-            usedPlayback = true;
-            markJoined();
-            setConnectionState('connected');
-            setRemoteVideoAdded(true);
-            setFirstFrameSeen(true);
-            devLog('[IVS_VIEWER][JOIN_PLAYBACK_COMPLETED]', { streamId });
-          }
-        } catch (massErr) {
-          console.warn('[IVS_VIEWER][JOIN_PLAYBACK_FALLBACK]', massErr);
+          const program = await getLiveProgram(streamId);
+          const fromProgram = String(program?.playbackUrl || '').trim();
+          if (fromProgram) playbackUrl = fromProgram;
+        } catch (progErr) {
+          console.warn('[IVS_VIEWER][PROGRAM_LOOKUP_FAILED]', progErr);
         }
-      }
-
-      if (usedPlayback) {
+        if (!playbackUrl) {
+          try {
+            const mass = await joinLiveMass(streamId, displayName);
+            if (mass?.mode === 'playback' && mass.playbackUrl) {
+              playbackUrl = String(mass.playbackUrl).trim() || undefined;
+            }
+          } catch (massErr) {
+            console.warn('[IVS_VIEWER][JOIN_PLAYBACK_LOOKUP_FAILED]', massErr);
+          }
+        }
+        if (!playbackUrl) {
+          throw new Error('playback_unavailable: no HLS program URL');
+        }
+        devLog('[IVS_VIEWER][JOIN_PLAYBACK]', { streamId, playbackUrlLength: playbackUrl.length });
+        await client.joinAsViewerPlayback({
+          sessionId: streamId,
+          playbackUrl,
+        });
+        try {
+          await client.forceLiveLoudspeaker('viewer-hook-player-joined');
+        } catch (routeErr) {
+          console.warn('[IVS_VIEWER][LOUDSPEAKER_SOFT_FAIL]', routeErr);
+        }
+        setViewerTransport('playback');
+        markJoined();
+        setConnectionState('connected');
+        setRemoteVideoAdded(true);
+        setFirstFrameSeen(true);
+        devLog('[IVS_VIEWER][JOIN_PLAYBACK_COMPLETED]', { streamId });
         return;
       }
 

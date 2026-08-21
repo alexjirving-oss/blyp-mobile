@@ -989,7 +989,7 @@ export async function joinLiveRealtime(
 }
 
 /**
- * Join a live session in mass mode (for future HLS support).
+ * Join a live session in mass mode (HLS program URL when available).
  */
 export async function joinLiveMass(sessionId: string, displayName?: string): Promise<JoinLiveMassResponse> {
   console.log('[LIVE_API][JOIN_LIVE_MASS]', { sessionId });
@@ -998,6 +998,30 @@ export async function joinLiveMass(sessionId: string, displayName?: string): Pro
     streamId: sessionId,
     ...(displayName && displayName.trim() ? { displayName: displayName.trim() } : {}),
   });
+}
+
+/** Public program HLS URL for phone mass-watch (IVS Player). Returns null if not live. */
+export async function getLiveProgram(
+  sessionId: string,
+): Promise<{ sessionId: string; playbackUrl: string; compositionState?: string } | null> {
+  const id = String(sessionId || '').trim();
+  if (!id) return null;
+  try {
+    const json = await callLiveBackend<{
+      sessionId?: string;
+      playbackUrl?: string;
+      compositionState?: string;
+    }>(`/api/live/program/${encodeURIComponent(id)}`, 'GET');
+    const playbackUrl = String(json?.playbackUrl || '').trim();
+    if (!playbackUrl) return null;
+    return {
+      sessionId: String(json?.sessionId || id),
+      playbackUrl,
+      compositionState: json?.compositionState ? String(json.compositionState) : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
